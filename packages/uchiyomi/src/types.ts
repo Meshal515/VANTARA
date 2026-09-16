@@ -83,14 +83,17 @@ export interface ProgressUpdate {
 }
 
 export class UchiyomiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: string | undefined,
-    readonly path: string,
-  ) {
+  readonly status: number;
+  readonly code: string | undefined;
+  readonly path: string;
+
+  // حقول صريحة لا parameter properties: strip-only mode في Node لا يدعمها
+  constructor(message: string, status: number, code: string | undefined, path: string) {
     super(message);
     this.name = 'UchiyomiError';
+    this.status = status;
+    this.code = code;
+    this.path = path;
   }
 
   /** الأخطاء العابرة: تستحق إعادة محاولة، بخلاف 4xx. */

@@ -1,0 +1,1178 @@
+[
+  {
+    "id": "sw:4110737012647435874",
+    "name": "Team X (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 15
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 30
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 8
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "PNG"
+      ],
+      "bytes": 1810323
+    },
+    "probedWork": "fast break",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 3055
+  },
+  {
+    "id": "sw:1073624495230267708",
+    "name": "مانجا العاشق (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 21
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 563
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 19
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 23
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 3075297
+    },
+    "probedWork": "One Piece",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 6624
+  },
+  {
+    "id": "sw:918460697583900080",
+    "name": "مانجا ليك (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 3,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Nano machine",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3876
+  },
+  {
+    "id": "sw:7657007209499352344",
+    "name": "MangaSwat (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 330
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 14
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 25
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 446280
+    },
+    "probedWork": "Nano Machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 5612
+  },
+  {
+    "id": "sw:2482399499047903203",
+    "name": "Azora (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 18
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 332
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 40
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 3
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 562880
+    },
+    "probedWork": "Nano machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 3070
+  },
+  {
+    "id": "sw:2056490261402651047",
+    "name": "Anyone Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 1273
+  },
+  {
+    "id": "sw:8112280317896333809",
+    "name": "أريا مانجا (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 409
+  },
+  {
+    "id": "sw:8156789703798131884",
+    "name": "AriaToon (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 8
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 12
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 10
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "PNG"
+      ],
+      "bytes": 1466456
+    },
+    "probedWork": "زنوبيا",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 2752
+  },
+  {
+    "id": "sw:7487319247633385575",
+    "name": "Comic Verse (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 8
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : HTTP error 503\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "INVINCIBLE",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1192
+  },
+  {
+    "id": "sw:886527590434722171",
+    "name": "Despair Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 322
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 37
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 72
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 11986
+    },
+    "probedWork": "Nano machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 5841
+  },
+  {
+    "id": "sw:5702082694566979718",
+    "name": "شبكة كونان العربية (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 464
+  },
+  {
+    "id": "sw:7634600808243438399",
+    "name": "Dilar (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Nano Machine",
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 1031
+  },
+  {
+    "id": "sw:8617573161604126293",
+    "name": "EShadow (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 7
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "SAKAMOTO DAYS",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 4168
+  },
+  {
+    "id": "sw:917436262447415426",
+    "name": "Hijala (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 5
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 628
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 31
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 8
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 954662
+    },
+    "probedWork": "Lookism",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 9241
+  },
+  {
+    "id": "sw:4177563748162518441",
+    "name": "Hizo Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 25
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : null\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Your Eternal Lies",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 4244
+  },
+  {
+    "id": "sw:5037404094705788694",
+    "name": "Kawii Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 319
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 41
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 3
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 324326
+    },
+    "probedWork": "Nano Machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2643
+  },
+  {
+    "id": "sw:3209001028102012989",
+    "name": "Lava Scans (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 32
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 359
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 12
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 16
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 1861028
+    },
+    "probedWork": "Logging 10.000 Years into the Future",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 6577
+  },
+  {
+    "id": "sw:323105186892383931",
+    "name": "Loner Translations (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 3
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 98
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 69
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 70
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 214006
+    },
+    "probedWork": "My Dearest Self With Malice Aforethought",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1769
+  },
+  {
+    "id": "sw:7109397520501699498",
+    "name": "Manga Ai Land (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 5
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 134
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 23
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 77
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 370082
+    },
+    "probedWork": "Juujika no Rokunin",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 3720
+  },
+  {
+    "id": "sw:6058166507489091982",
+    "name": "Manga Starz (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 25
+    },
+    "search": {
+      "ok": true,
+      "count": 3,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Nano machine",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3547
+  },
+  {
+    "id": "sw:5218550345649535189",
+    "name": "Manga Tales (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 50
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "أكاديمية u.m.k",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1520
+  },
+  {
+    "id": "sw:1630897072449336068",
+    "name": "MangaCloud (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 331
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 8
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 72
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "PNG"
+      ],
+      "bytes": 696443
+    },
+    "probedWork": "Nano machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2650
+  },
+  {
+    "id": "sw:3975276517041363504",
+    "name": "MangaDar (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 578
+  },
+  {
+    "id": "sw:3568795724496898351",
+    "name": "مانجا لينك (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 0
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1073
+  },
+  {
+    "id": "sw:2589550143244611118",
+    "name": "MangaLionz (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 3,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Nano machine",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3585
+  },
+  {
+    "id": "sw:2436176998646301840",
+    "name": "MangaSpark (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 3,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Nano machine",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3042
+  },
+  {
+    "id": "sw:1011491016492324749",
+    "name": "MangaTek (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 522
+  },
+  {
+    "id": "sw:215553151312092548",
+    "name": "MangaTime (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 24
+    },
+    "search": {
+      "ok": true,
+      "count": 2,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 10
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 24
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 24
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 286670
+    },
+    "probedWork": "Nano Machine",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 4071
+  },
+  {
+    "id": "sw:743599002989616408",
+    "name": "Manhatok (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 9
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Boruto",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1146
+  },
+  {
+    "id": "sw:4966914277555229831",
+    "name": "Murim (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Unexpected JSON token at offset 0: Expected start of the object '{',"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Unexpected JSON token at offset 0: Expected start of the object '{',"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 454
+  },
+  {
+    "id": "sw:8433210273073845288",
+    "name": "NeverScans (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 30559
+  },
+  {
+    "id": "sw:1862668423724227387",
+    "name": "Oduto (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 1
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 24
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 48
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 58
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 792123
+    },
+    "probedWork": "BORUTO: Two Blue Vortex",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1346
+  },
+  {
+    "id": "sw:335499577904379512",
+    "name": "مانجا اون لاين (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 404\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 404\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 905
+  },
+  {
+    "id": "sw:5634203247016722993",
+    "name": "Orca Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 548
+  },
+  {
+    "id": "sw:3301038340499911137",
+    "name": "Rocks Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 30
+    },
+    "search": {
+      "ok": true,
+      "count": 12,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 2
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 4
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 3
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 656852
+    },
+    "probedWork": "Salty Studio",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 9215
+  },
+  {
+    "id": "sw:2142158598125421915",
+    "name": "StellarSaber (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 509
+  },
+  {
+    "id": "sw:6170348197605244575",
+    "name": "XSano Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 8
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 217
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 20
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 61
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 223210
+    },
+    "probedWork": "BE BLUES",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 2493
+  }
+]

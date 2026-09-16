@@ -3,12 +3,13 @@ export class UchiyomiError extends Error {
     status;
     code;
     path;
+    // حقول صريحة لا parameter properties: strip-only mode في Node لا يدعمها
     constructor(message, status, code, path) {
         super(message);
+        this.name = 'UchiyomiError';
         this.status = status;
         this.code = code;
         this.path = path;
-        this.name = 'UchiyomiError';
     }
     /** الأخطاء العابرة: تستحق إعادة محاولة، بخلاف 4xx. */
     get retryable() {

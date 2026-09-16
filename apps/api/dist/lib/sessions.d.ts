@@ -13,7 +13,7 @@ export interface SessionStoreOptions {
     uchiyomi: UchiyomiClient;
 }
 export declare class SessionStore {
-    private readonly options;
+    #private;
     constructor(options: SessionStoreOptions);
     /**
      * تسجيل دخول: Uchiyomi يتحقق من كلمة المرور، ثم نصك توكنًا طويل العمر باسم

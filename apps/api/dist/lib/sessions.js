@@ -2,9 +2,11 @@ import { query, queryOne } from '@vantara/db';
 import { decrypt, encrypt, newSessionId } from "./crypto.js";
 export const SESSION_COOKIE = 'vantara_session';
 export class SessionStore {
-    options;
+    // مكتوب صريحًا لا كـparameter property: `node --experimental-strip-types`
+    // لا يدعمها، وسكربت التطوير يشغّل الـTypeScript مباشرة.
+    #options;
     constructor(options) {
-        this.options = options;
+        this.#options = options;
     }
     /**
      * تسجيل دخول: Uchiyomi يتحقق من كلمة المرور، ثم نصك توكنًا طويل العمر باسم
@@ -12,9 +14,9 @@ export class SessionStore {
      * يخزّنها، ولا يحتاج دورة refresh.
      */
     async login(username, password, device) {
-        const uchiyomi = this.options.uchiyomi;
+        const uchiyomi = this.#options.uchiyomi;
         const result = await uchiyomi.login(username, password);
-        const expiresInDays = this.options.ttlDays;
+        const expiresInDays = this.#options.ttlDays;
         const minted = await uchiyomi.mintToken(result.accessToken, {
             name: `vantara${device ? ` (${device})` : ''}`,
             scopes: ['read', 'write'],
@@ -36,7 +38,7 @@ export class SessionStore {
        VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' days')::interval)`, [
             id,
             result.user.id,
-            encrypt(minted.token, this.options.key),
+            encrypt(minted.token, this.#options.key),
             minted.id,
             device ?? null,
             String(expiresInDays),
@@ -55,7 +57,7 @@ export class SessionStore {
             return undefined;
         let token;
         try {
-            token = decrypt(row.token_encrypted, this.options.key);
+            token = decrypt(row.token_encrypted, this.#options.key);
         }
         catch {
             // مفتاح مختلف أو صف معدَّل: أبطل الجلسة بدل محاولة استخدامها
