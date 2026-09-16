@@ -1,0 +1,16 @@
+# spike runtime
+spike/library/
+spike/sources/
+spike/pages/
+spike/xianscan-config/
+spike/.env
+
+# manga pages are fixtures, reproducible via spike/probes/ — not vendored
+spike/samples/
+*.jpeg
+*.jpg
+*.webp
+*.png
+
+node_modules/
+.DS_Store

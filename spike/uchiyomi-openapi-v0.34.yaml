@@ -1,0 +1,5430 @@
+# Uchiyomi API -- OpenAPI 3.1.
+#
+# Served at /api/docs (Swagger UI) and /api/docs/json. Kept honest by bff/test/openapiCoverage.test.ts, which
+# compares every registered route against this file in both directions, and docs/api.md against both.
+# Generated once from the route table and then hand-maintained: add the operation here when you add the route.
+openapi: 3.1.0
+info:
+  title: Uchiyomi API
+  version: 0.34.0
+  description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
+    use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
+    Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
+    needs an admin account). /img/* takes the yomi_img cookie, an API token as a Bearer, or the OPDS token
+    over HTTP Basic -- so a third-party client needs ONE credential for the JSON and the pictures alike;
+    /opds/* takes the OPDS token over HTTP Basic only. List endpoints answer { content: [...] };
+    errors answer a non-2xx status with { error, message }. The prose guide with worked examples is
+    docs/api.md."
+servers:
+  - url: /
+    description: This server
+tags:
+  - name: health
+    description: Liveness and readiness
+  - name: auth
+    description: Authentication, sessions, two-factor, single sign-on, first-run setup
+  - name: library
+    description: "Reading: home, series, chapters, pages, progress"
+  - name: sources
+    description: "Sources: find, browse and add series"
+  - name: personal
+    description: "Per-account data: favourites, collections, notes, tokens, trackers"
+  - name: downloads
+    description: Offline downloads
+  - name: images
+    description: Image server (cookie or OPDS Basic auth)
+  - name: opds
+    description: OPDS catalogue for external readers (HTTP Basic)
+  - name: admin
+    description: Administration (admin account and admin scope)
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: A session JWT from POST /auth/login, or a personal API token (uy_...). Admin routes need the
+        admin scope and an admin account.
+    opdsBasic:
+      type: http
+      scheme: basic
+      description: HTTP Basic where the password is the OPDS token from POST /api/opds/token.
+    imgCookie:
+      type: apiKey
+      in: cookie
+      name: yomi_img
+      description: Set at login so <img> tags can authenticate.
+  schemas:
+    ScanlatorPrefs:
+      type: object
+      description: >-
+        Release preferences: which scanlation group to take when a source lists a chapter more than once,
+        which never to take, and how long to hold a new chapter for a ranked group before the best available
+        copy is taken instead. Stored server-wide on the settings row and, optionally, per series. When both
+        exist they merge: blocked is the union, a per-series priority replaces the global list, and a null
+        per-series patienceDays inherits the global one (2 when that is null too). Names are compared
+        case-insensitively with punctuation and spaces ignored, so "Asura Scans" and "asurascans" are one
+        group. On write every field is optional: a missing list is empty and a missing patienceDays is
+        null (inherit); responses always carry all three.
+      properties:
+        priority:
+          type: array
+          maxItems: 50
+          items: { type: string, minLength: 1, maxLength: 80 }
+          description: Groups to take first, best first. A chapter only waits for one of these when the list is non-empty.
+        blocked:
+          type: array
+          maxItems: 200
+          items: { type: string, minLength: 1, maxLength: 80 }
+          description: >-
+            Groups never to take. A joint release is dropped only when every group on it is blocked, and a
+            copy that names no group is never blocked.
+        patienceDays:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 30
+          description: Days to hold a new chapter for a ranked group; 0 takes the best copy at once; null inherits.
+    SeriesSource:
+      type: object
+      description: One place a series' chapters come from. The primary is the pair the series was added with; the rest were followed later.
+      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered]
+      properties:
+        sourceId: { type: string, description: The adapter id. }
+        name: { type: string, description: The adapter's display name, or the id when the adapter is not loaded. }
+        sourceSeriesId: { type: string, description: The series' id on that source. }
+        primary: { type: boolean }
+        checkedAt: { type: [string, "null"], format: date-time, description: When the updater last listed it. }
+        chapters: { type: [integer, "null"], description: "For a follower, the distinct chapter numbers it listed then; for the primary, the merged count across every followed source after the release preferences (the same figure as the series' source.chapters)." }
+        registered: { type: boolean, description: Whether the adapter is loaded right now; a follower whose extension was removed keeps its row so it can still be unfollowed. }
+    Ghost:
+      type: object
+      description: A chapter number the sources listed at the last check that this server has no row for.
+      required: [number, title, publishedAt, scanlator, groups, sourceId, sourceName, why]
+      properties:
+        number: { type: number }
+        title: { type: [string, "null"] }
+        publishedAt: { type: [string, "null"], format: date-time }
+        scanlator: { type: [string, "null"], description: The group on the copy the release rules chose, as the source shows it. }
+        groups: { type: array, items: { type: string }, description: Every group that released any copy of the number. }
+        sourceId: { type: string, description: The adapter the chosen copy would be fetched through. }
+        sourceName: { type: string }
+        why:
+          type: string
+          enum: [missing, held, blocked, failed, floor]
+        attempts: { type: integer, description: Only when the chapter has failed at least once. }
+        reason: { type: string, description: The downloader's last error text. Admins only. }
+        waitingFor: { type: string, description: "Only when why is held, and only when a priority group survives the blocklist: the effective first-choice group (the series' own priority over the global one) the chapter is being held for, spelt as the preference names it." }
+        waitDaysLeft: { type: integer, minimum: 0, description: "Only with waitingFor: whole days until the patience window closes, counted as the sweep counts it -- from the oldest hosted copy that is not from a blocked group, under today's preferences (so 0 when the window has closed since the last check)." }
+    SkippedNumber:
+      type: object
+      required: [number, reason]
+      properties:
+        number: { type: number }
+        reason:
+          type: string
+          enum: [not_listed, blocked_group, already_here, source_unavailable, cooldown, duplicate]
+          description: >-
+            `duplicate` is a second pick for a number already picked in the same body: the first pick was
+            handled, this one was not.
+        source: { type: string, description: Present when the skipped entry was a pick, naming the copy asked for. }
+        sourceId: { type: string, description: Present when the skipped entry was a pick. }
+    Pick:
+      type: object
+      description: >-
+        One specific copy of a chapter number, as GET /api/series/{id}/versions lists it. A pick is
+        authorised by a matching entry in the number's stored copies (`not_listed` otherwise) and ignores
+        the group rules including the blocklist -- an explicit choice of one copy -- but never `already_here`.
+      required: [number, source, sourceId]
+      properties:
+        number: { type: number, minimum: 0, maximum: 1000000 }
+        source: { type: string, minLength: 1, maxLength: 200, description: The adapter id the copy is listed on. }
+        sourceId: { type: string, minLength: 1, maxLength: 200, description: The chapter id within that source. }
+    Cadence:
+      type: object
+      description: >-
+        A group's release rhythm, from the median gap between its last ten release DAYS (a day with several
+        chapters is one release day, so a group that ships two at a time is not "daily"): `daily` (at most
+        1.5 days), `weekly` (at most 9), `monthly` (at most 40), `irregular` (longer); `unknown` with fewer
+        than two distinct dated days. `quiet` when the silence since the last release exceeds three
+        intervals (never less than 14 days), or 45 days when the rhythm is unknown.
+      required: [kind, intervalDays, daysSince, quiet]
+      properties:
+        kind:
+          type: string
+          enum: [daily, weekly, monthly, irregular, unknown]
+        intervalDays: { type: [number, "null"], description: The median gap in days, one decimal; null when unknown. }
+        daysSince: { type: [integer, "null"], description: Whole days since the last dated release; null when none is dated. }
+        quiet: { type: boolean }
+    GroupStat:
+      type: object
+      description: >-
+        One scanlation group's figures for a series. Groups are merged by the same equality the release
+        rules use (case, spaces and punctuation ignored); the name is the first spelling seen on disk, else
+        the first listed. A joint release counts once for each of its groups.
+      required: [name, releases, first, last, lastReleaseAt, cadence, onDisk, chapters, langs, weeks]
+      properties:
+        name: { type: string }
+        releases: { type: integer, description: Chapters the group released -- distinct numbers across every followed source; a second copy of a number is not a second release. }
+        first: { type: [number, "null"], description: The lowest chapter number it released. }
+        last: { type: [number, "null"], description: The highest chapter number it released. }
+        lastReleaseAt: { type: [string, "null"], format: date-time }
+        cadence:
+          $ref: "#/components/schemas/Cadence"
+        onDisk: { type: integer, description: Live chapters on this server stamped with the group. }
+        chapters: { type: array, items: { type: number }, description: The numbers it released, ascending, each once. }
+        langs: { type: array, items: { type: string }, description: The languages its copies are in, sorted. }
+        weeks:
+          type: array
+          minItems: 12
+          maxItems: 12
+          items: { type: boolean }
+          description: "One flag per week for the last twelve, oldest first, newest last (index 11 is the seven days ending now): true when the group released in that week, from the same per-number release dates the cadence is judged on. A release dated ahead of the server's clock counts as this week."
+    Copy:
+      type: object
+      description: One version of a listed chapter number, as the sources list it.
+      required: [key, source, sourceName, groups, scanlator, lang, pages, publishedAt, chosen, blocked, onDisk]
+      properties:
+        key: { type: string, description: "`<source>:<sourceId>`, unique within the number." }
+        source: { type: string, description: The adapter id; with `sourceId` this is what a Pick names. }
+        sourceName: { type: string }
+        groups: { type: array, items: { type: string } }
+        scanlator: { type: [string, "null"], description: The group string as the source shows it (a joint release reads "A & B"). }
+        lang: { type: [string, "null"] }
+        pages: { type: [integer, "null"], description: 0 is an external link (not downloadable); null when the source does not say. }
+        publishedAt: { type: [string, "null"], format: date-time }
+        chosen: { type: boolean, description: The copy the release rules chose at the last check. }
+        blocked: { type: boolean, description: Every group on the copy is blocked by the effective preferences. A copy with no groups is never blocked. }
+        onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy)." }
+paths:
+  /livez:
+    get:
+      tags:
+        - health
+      summary: Is the process alive? Unconditional {ok:true}; what the container healthcheck polls.
+      operationId: getLivez
+      security: []
+      responses:
+        "200":
+          description: OK
+  /healthz:
+    get:
+      tags:
+        - health
+      summary: Is the database reachable? Runs SELECT 1; 503 when Postgres is down.
+      operationId: getHealthz
+      security: []
+      responses:
+        "200":
+          description: OK
+        "503":
+          description: Database unreachable
+  /api/setup/status:
+    get:
+      tags:
+        - auth
+      summary: Whether first-run setup has been completed.
+      operationId: getApiSetupStatus
+      security: []
+      responses:
+        "200":
+          description: OK
+  /api/setup:
+    post:
+      tags:
+        - auth
+      summary: Create the first admin account (only while no account exists).
+      operationId: postApiSetup
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                displayName:
+                  type: string
+      security: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /auth/config:
+    get:
+      tags:
+        - auth
+      summary: Login options the client should offer (registration open, OIDC configured).
+      operationId: getAuthConfig
+      security: []
+      responses:
+        "200":
+          description: OK
+  /auth/login:
+    post:
+      tags:
+        - auth
+      summary: Log in with username and password (and a TOTP code when enabled); returns a short-lived JWT and sets
+        the refresh cookie.
+      operationId: postAuthLogin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                totp:
+                  type: string
+      security: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "429":
+          description: Too many attempts
+  /auth/register:
+    post:
+      tags:
+        - auth
+      summary: Create an account, when registration is open.
+      operationId: postAuthRegister
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                displayName:
+                  type: string
+      security: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /auth/refresh:
+    post:
+      tags:
+        - auth
+      summary: Exchange the rotating refresh cookie for a new JWT.
+      operationId: postAuthRefresh
+      security: []
+      responses:
+        "200":
+          description: >-
+            A new access token, the signed-in user, and when the refresh token itself expires.
+            The installed app persists `refreshExpiresAt` so it can honour the same expiry offline
+            that this server would enforce online -- it cannot derive it, because REFRESH_TTL_DAYS is
+            an operator setting and the cookie is httpOnly.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, expiresIn, user, refreshExpiresAt]
+                properties:
+                  accessToken: { type: string }
+                  expiresIn: { type: integer, description: Access-token lifetime in seconds }
+                  user: { type: object, description: The same payload /auth/me returns }
+                  refreshExpiresAt:
+                    type: integer
+                    format: int64
+                    description: >-
+                      Refresh-token expiry, ms since the epoch. On the stale-rotation race this is the
+                      existing row's real expiry, not a fresh one -- rotating nothing must not extend it.
+        "401":
+          description: Not authenticated
+        "403":
+          description: The account has been disabled; every session was revoked
+  /auth/logout:
+    post:
+      tags:
+        - auth
+      summary: End this session and clear its cookies.
+      operationId: postAuthLogout
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /auth/logout-all:
+    post:
+      tags:
+        - auth
+      summary: Revoke every session of the calling account.
+      operationId: postAuthLogoutAll
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /auth/me:
+    get:
+      tags:
+        - auth
+      summary: "The calling account: id, username, role, permissions."
+      operationId: getAuthMe
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /auth/password:
+    post:
+      tags:
+        - auth
+      summary: Change the calling account's password.
+      operationId: postAuthPassword
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current:
+                  type: string
+                next:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /auth/sessions:
+    get:
+      tags:
+        - auth
+      summary: Active sessions of the calling account.
+      operationId: getAuthSessions
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /auth/sessions/{id}:
+    delete:
+      tags:
+        - auth
+      summary: Revoke one session.
+      operationId: deleteAuthSessionsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /auth/totp/setup:
+    post:
+      tags:
+        - auth
+      summary: "Start two-factor enrolment: returns the secret and QR payload."
+      operationId: postAuthTotpSetup
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /auth/totp/enable:
+    post:
+      tags:
+        - auth
+      summary: Confirm two-factor with a first code; returns recovery codes once.
+      operationId: postAuthTotpEnable
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /auth/totp/disable:
+    post:
+      tags:
+        - auth
+      summary: Turn two-factor off (requires a current code).
+      operationId: postAuthTotpDisable
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /auth/oidc/start:
+    get:
+      tags:
+        - auth
+      summary: "Begin single sign-on: redirects to the identity provider."
+      operationId: getAuthOidcStart
+      security: []
+      responses:
+        "302":
+          description: Redirect
+  /auth/oidc/callback:
+    get:
+      tags:
+        - auth
+      summary: "Single sign-on return leg: finishes login and redirects into the app."
+      operationId: getAuthOidcCallback
+      security: []
+      responses:
+        "302":
+          description: Redirect
+  /api/libraries:
+    get:
+      tags:
+        - library
+      summary: The libraries the caller may see; adult:true marks an 18+ one the client can reveal.
+      operationId: getApiLibraries
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/genres:
+    get:
+      tags:
+        - library
+      summary: Every genre in the caller's visible library.
+      operationId: getApiGenres
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/genres/overview:
+    get:
+      tags:
+        - library
+      summary: Genres with series counts and cover ids for tiles.
+      operationId: getApiGenresOverview
+      parameters:
+        - name: covers
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/trending:
+    get:
+      tags:
+        - library
+      summary: What the household is reading most right now.
+      operationId: getApiTrending
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/leaderboard:
+    get:
+      tags:
+        - library
+      summary: Members ranked by reading this period.
+      operationId: getApiLeaderboard
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/random:
+    get:
+      tags:
+        - library
+      summary: One random visible series id (hero art fallback).
+      operationId: getApiRandom
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/foryou:
+    get:
+      tags:
+        - library
+      summary: Recommendations built from the caller's history.
+      operationId: getApiForyou
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/featured:
+    get:
+      tags:
+        - library
+      summary: The featured rail.
+      operationId: getApiFeatured
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/refresh:
+    post:
+      tags:
+        - library
+      summary: Ask the server to refresh its cached home data.
+      operationId: postApiRefresh
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/home:
+    get:
+      tags:
+        - library
+      summary: "Everything the home screen is built from: on-deck books with progress, rails, updates."
+      operationId: getApiHome
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/series/search:
+    post:
+      tags:
+        - library
+      summary: "Search and page the library: the grid, the search page, browse-by-genre and the command palette all
+        use this."
+      description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
+        read-scoped API token may call it (the one non-GET a read token can use)."
+      operationId: postApiSeriesSearch
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                page:
+                  type: integer
+                size:
+                  type: integer
+                sort:
+                  description: >-
+                    `field,dir`. Fields: `updated` (last chapter added), `added` (series created), `title`,
+                    `author`, `unread` (your unread count), `favorites` (your starred series first, then by
+                    unread -- what "popular" means for a personal library), `random`. The per-user ones need
+                    a signed-in caller and fall back to title order without one.
+                  type: string
+                condition:
+                  type: object
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/series/{id}:
+    get:
+      tags:
+        - library
+      summary: One series with its metadata.
+      operationId: getApiSeriesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: >-
+            The series. Only the fields added in v0.31.0 are described here; the rest of the shape follows
+            Komga's series DTO (id, name, metadata, booksCount, ...).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  sources:
+                    type: array
+                    description: Where the chapters come from, primary first, then followed sources in the order they were added. Present for every viewer.
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+                  scanlatorPrefs:
+                    description: >-
+                      Admins only. The series' own release preferences, or null when it has none and the
+                      server-wide ones apply.
+                    oneOf:
+                      - $ref: "#/components/schemas/ScanlatorPrefs"
+                      - type: "null"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/updates:
+    get:
+      tags:
+        - library
+      summary: Recently added chapters, newest first.
+      operationId: getApiUpdates
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/updates/seen:
+    post:
+      tags:
+        - library
+      summary: Mark the updates feed as seen.
+      operationId: postApiUpdatesSeen
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/series/{id}/color:
+    get:
+      tags:
+        - library
+      summary: The series' dominant cover colour for ambient theming.
+      operationId: getApiSeriesIdColor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/similar:
+    get:
+      tags:
+        - library
+      summary: Series like this one.
+      operationId: getApiSeriesIdSimilar
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/books:
+    get:
+      tags:
+        - library
+      summary: The chapters of a series, in reading order, with the caller's progress.
+      operationId: getApiSeriesIdBooks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ content: [Book] }; each Book carries the provenance fields described on GET /api/books/{id}."
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/listing:
+    get:
+      tags:
+        - library
+      summary: The chapters the sources list that this server does not hold, with the reason each is absent.
+      operationId: getApiSeriesIdListing
+      description: >-
+        Read from the listing the updater persisted at the last check (the sweep, Check now), never from the
+        sources themselves, so `checkedAt` is how old the answer is. Only numbers with NO chapter row are
+        ghosts: a chapter the read-chapter cleanup deleted keeps its row (`pruned` on the Book) and is not
+        listed here. `why` is one of `missing` (not fetched yet), `held` (waiting for a preferred group),
+        `failed` (the sweep gave up after the retry cap; `attempts` says how many), `blocked` (only blocked
+        groups released it; unblock the group to fetch it), `floor` (below the series' Latest-N floor). `reason`,
+        the downloader's last error text, is present for admins only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkedAt, content]
+                properties:
+                  checkedAt:
+                    type: [string, "null"]
+                    format: date-time
+                  content:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Ghost"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/groups:
+    get:
+      tags:
+        - library
+      summary: Who translates this series, with releases, chapter range, last release, rhythm, weekly activity and how much is on this server.
+      operationId: getApiSeriesIdGroups
+      description: >-
+        From the copies persisted at the last check (every version the sources listed, not only the chosen
+        one) and the group stamps on the files, never from the sources on a page open; `checkedAt` is how
+        old the answer is. Any account that can open the series may read it. Sorted by releases descending.
+        Ranking and blocking the groups is GET /api/admin/series/{id}/scanlators, which carries these same
+        figures with the preferences.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkedAt, content]
+                properties:
+                  checkedAt:
+                    type: [string, "null"]
+                    format: date-time
+                  content:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GroupStat"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/versions:
+    get:
+      tags:
+        - library
+      summary: Every version of every listed chapter, with which copy was chosen, which is blocked, and which is on disk.
+      operationId: getApiSeriesIdVersions
+      description: >-
+        One entry per chapter number the sources listed at the last check, each with every copy they list
+        (group, language, page count, date, source) flagged `chosen`, `blocked` and `onDisk`. A `source` and
+        `sourceId` from here make a Pick for POST /api/sources/fetch or the admin refetch. A number listed
+        before v0.33.0 has an empty `copies` until its next check. Any account that can open the series may
+        read it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkedAt, content]
+                properties:
+                  checkedAt:
+                    type: [string, "null"]
+                    format: date-time
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [number, copies]
+                      properties:
+                        number: { type: number }
+                        copies:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/Copy"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}:
+    get:
+      tags:
+        - library
+      summary: One chapter with its page count and progress.
+      operationId: getApiBooksId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: >-
+            The chapter. Only the fields added in v0.31.0 and v0.32.0 are described here; the rest of the
+            shape follows Komga's book DTO (id, seriesId, number, media, metadata, readProgress, ...). The
+            same object is what every other route that returns a chapter answers with (the series' chapter
+            list, next, the home shelves).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  scanlator:
+                    type: [string, "null"]
+                    description: >-
+                      The group that released the file on disk, as the source showed it (a joint release
+                      reads "A & B"). Null for a chapter the scanner found rather than the downloader wrote,
+                      which includes everything downloaded before v0.31.0.
+                  sourceId:
+                    type: [string, "null"]
+                    description: The adapter the file was downloaded from; null when the scanner found it.
+                  pruned:
+                    type: boolean
+                    description: >-
+                      The file was deleted by the read-chapter cleanup or an admin; the row stays so progress
+                      survives; no pages behind it. The chapter is still listed and still counts as read, but
+                      the page list is empty, next/previous step over it, and the download manifest answers
+                      410.
+                  owned:
+                    type: boolean
+                    description: >-
+                      Downloaded by this server (the file sits under the download directory); only such
+                      chapters can be deleted or fetched again. False for a chapter the scanner found in the
+                      read library.
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}/pages:
+    get:
+      tags:
+        - library
+      summary: The page list of a chapter (names and cached dimensions).
+      operationId: getApiBooksIdPages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}/pages/{n}/junk:
+    put:
+      tags:
+        - library
+      summary: Mark or un-mark one page as a repeated page the reader should skip.
+      description: >-
+        A person's decision outranks the automatic detection in both directions and is never recomputed
+        away. `true` always skips (useful for a one-off advert, which by definition never repeats and so can
+        never be detected), `false` never skips, `null` hands the page back to the heuristic.
+      operationId: putApiBooksIdPagesNJunk
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                junk:
+                  type: boolean
+                  nullable: true
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Page number is not a page of this chapter
+        "401":
+          description: Not authenticated
+        "404":
+          description: No such chapter, or one the caller may not see
+  /api/offline/plan:
+    get:
+      tags:
+        - library
+      summary: What the client should keep offline for this account.
+      operationId: getApiOfflinePlan
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/books/{id}/next:
+    get:
+      tags:
+        - library
+      summary: The next and previous chapter of this one.
+      operationId: getApiBooksIdNext
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}/progress:
+    put:
+      tags:
+        - library
+      summary: Record reading progress. silent:true writes exactly what you say (even unread) and stays out of
+        history and streaks; otherwise a write can only move forward.
+      operationId: putApiBooksIdProgress
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  type: integer
+                completed:
+                  type: boolean
+                silent:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/sources:
+    get:
+      tags:
+        - sources
+      summary: Every source the caller can reach, with health status and a one-sentence note.
+      operationId: getApiSources
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: >-
+            { content: [Source] }. Only the field added in v0.33.0 is described here; the rest of the shape
+            is the registry entry (id, name, lang, latest, popular, used, status, blockedUntil, note).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                      properties:
+                        extension:
+                          description: >-
+                            For an extension source (`sw:` id): the installed extension package it came
+                            out of, so one multi-language extension's variants can be shown as one
+                            provider. `pkgName` is the APK package name as the engine reports it; when the
+                            engine did not say, `pkgName` is null and `name` is the display name with its
+                            trailing language tag (` (EN)`, ` (PT-BR)`, ` (ALL)`) stripped. Null for
+                            built-in, pack and custom-site sources.
+                          oneOf:
+                            - type: object
+                              required: [pkgName, name]
+                              properties:
+                                pkgName:
+                                  type: [string, "null"]
+                                name:
+                                  type: string
+                            - type: "null"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/search:
+    get:
+      tags:
+        - sources
+      summary: Search one source.
+      operationId: getApiSourcesSearch
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/fill/scan:
+    post:
+      tags:
+        - sources
+      summary: Find a series' missing chapters and which sources could supply them; answers with a short-lived planId.
+      operationId: postApiSourcesFillScan
+      description: >-
+        Each candidate's count, first and last describe one copy per chapter number, chosen under the
+        series' release preferences with patience off, so a fill of [n] lands one file. `following` lists
+        the source ids the series already follows (see POST /api/admin/series/{id}/sources), on the
+        too_few_chapters early answer as well.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesId:
+                  type: string
+                altTitle:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  following:
+                    type: array
+                    items: { type: string }
+                    description: Source ids the updater already merges into this series, in the order they were followed.
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/sources/fill:
+    post:
+      tags:
+        - sources
+      summary: Fetch specific missing chapter numbers from a source quoted in a plan.
+      operationId: postApiSourcesFill
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planId:
+                  type: string
+                source:
+                  type: string
+                sourceSeriesId:
+                  type: string
+                numbers:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/sources/fetch:
+    post:
+      tags:
+        - sources
+      summary: Fetch chapters the sources list but this server lacks, by number, from the last listing.
+      operationId: postApiSourcesFetch
+      description: >-
+        The listing (GET /api/series/{id}/listing) is the authorisation: only a number the sources list can
+        be asked for, and what is fetched is the copy the release rules choose now -- the listing is refreshed
+        first (a check with no downloads); a source that does not answer leaves the last listing standing.
+        A listing row from a source the series no longer follows is `source_unavailable`. A held number is
+        fetched regardless of patience; a number only blocked groups released is refused (`blocked_group`)
+        -- unblock the group and check again. A manual fetch resets the chapter's retry cap. Same permission
+        as the fill: an account with `canDownload: false` is refused by the plugin, and a source outside the
+        account's age cap answers 403. Progress is on GET /api/sources/jobs under `folder`.
+        `picks` names specific copies instead (from GET /api/series/{id}/versions): a pick is authorised by a
+        matching entry among the number's stored copies (`not_listed` otherwise; the skipped entry then
+        carries `source` and `sourceId`), its source must be followed and available, and it IGNORES the group
+        rules including the blocklist -- an explicit choice of one copy -- but never `already_here`. A number
+        named in both lists is fetched as its pick; a second pick for the same number is skipped as
+        `duplicate`. At least one of `numbers` / `picks`, at most 300 combined.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesId]
+              properties:
+                seriesId:
+                  type: string
+                numbers:
+                  type: array
+                  maxItems: 300
+                  items:
+                    type: number
+                    minimum: 0
+                    maximum: 1000000
+                picks:
+                  type: array
+                  maxItems: 300
+                  items:
+                    $ref: "#/components/schemas/Pick"
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "Started. `skipped` lists the numbers that were not fetchable and why."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, started, folder, total, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  started:
+                    type: boolean
+                  folder:
+                    type: string
+                  total:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SkippedNumber"
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running)"
+  /api/sources/search-all:
+    get:
+      tags:
+        - sources
+      summary: Search every enabled source at once.
+      operationId: getApiSourcesSearchAll
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/latest:
+    get:
+      tags:
+        - sources
+      summary: A source's newest titles, cached ten minutes per page.
+      operationId: getApiSourcesLatest
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/popular:
+    get:
+      tags:
+        - sources
+      summary: A source's own popularity ranking, when it offers one.
+      operationId: getApiSourcesPopular
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/jobs:
+    get:
+      tags:
+        - sources
+      summary: Downloads in progress and failed ones (a failed job is never swept; it carries a reason).
+      operationId: getApiSourcesJobs
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/jobs/{folder}:
+    delete:
+      tags:
+        - sources
+      summary: Dismiss a stopped job; 409 while it is still running.
+      operationId: deleteApiSourcesJobsFolder
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/discover/trending:
+    get:
+      tags:
+        - sources
+      summary: Trending titles from AniList for the Discover page.
+      operationId: getApiDiscoverTrending
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/sources/find:
+    get:
+      tags:
+        - sources
+      summary: "Find a title across enabled sources in order: returns {source, sourceId, title, ...}."
+      operationId: getApiSourcesFind
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/detail:
+    get:
+      tags:
+        - sources
+      summary: A series as one source describes it, before adding, with who scanlates it.
+      operationId: getApiSourcesDetail
+      description: >-
+        `count`, `first` and `last` describe one copy per chapter number under the server-wide release
+        preferences (what the add would land). `groups` is the who-scanlates-this panel built from the same
+        chapter list (no second source call), with `onDisk` 0 since nothing is on disk yet; `versions` is how
+        many numbers the source lists in more than one copy.
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: id
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, sourceId, title, summary, coverUrl, genres, status, count, first, last, groups, versions]
+                properties:
+                  source: { type: string }
+                  sourceId: { type: string }
+                  title: { type: string }
+                  summary: { type: string, description: "Plain text: HTML and Markdown (MangaDex describes in Markdown) are stripped, link text kept." }
+                  coverUrl: { type: [string, "null"] }
+                  genres: { type: array, items: { type: string } }
+                  status: { type: string }
+                  count: { type: integer, description: Chapter numbers, one copy each, under the server-wide preferences. }
+                  first: { type: [number, "null"] }
+                  last: { type: [number, "null"] }
+                  groups:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GroupStat"
+                  versions: { type: integer, description: Numbers the source lists in more than one copy. }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/sources/add:
+    post:
+      tags:
+        - sources
+      summary: Add a series from a source. Answers once the outcome is decided and downloads afterwards;
+        started:true means downloading now.
+      operationId: postApiSourcesAdd
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source:
+                  type: string
+                sourceId:
+                  type: string
+                chapterCount:
+                  type: integer
+                  minimum: 1
+                  description: How many chapters to take; omit for all.
+                chapterFrom:
+                  type: string
+                  enum: [oldest, newest, none]
+                  default: oldest
+                  description: >-
+                    Which end chapterCount counts from. Either way the selection is downloaded ascending.
+                    With newest, a chapter floor is set so auto-update fetches new releases only. `none`
+                    adds the series with no chapters at all: the row is created and followed, the listing
+                    is written, no download starts, and a chapter floor is set just above the newest listed
+                    number (max + 0.001, so every number listed today is below it and the next release is
+                    not; null when the source lists nothing) so auto-update follows new releases only --
+                    older chapters can be fetched from the series page. The row is stamped as checked (the
+                    add just asked the source), so `checkedAt` and the source's chapter count are set from
+                    the start; a series removed from the library and added back this way is revived under
+                    its old id. `chapterCount` is ignored, and an empty listing is not `no_chapters`.
+                autoUpdate:
+                  type: boolean
+                force:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, title, folder, chapters, started, nothing]
+                properties:
+                  ok: { type: boolean }
+                  title: { type: string }
+                  folder: { type: string }
+                  chapters: { type: integer, description: How many chapters the add will fetch; 0 when already in the library or for a `none` add. }
+                  started: { type: boolean, description: The download is running now. }
+                  nothing: { type: boolean, description: "A `none` add: the series was created and floored and nothing was fetched or queued. Tells that outcome from `already in library`, which also answers chapters 0 and started false." }
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/opds/token:
+    post:
+      tags:
+        - personal
+      summary: Issue (or rotate) the caller's OPDS token; the password is shown once.
+      operationId: postApiOpdsToken
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    get:
+      tags:
+        - personal
+      summary: Whether an OPDS token exists, when it expires, when a reader last used it, and its 18+ setting.
+      operationId: getApiOpdsToken
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    delete:
+      tags:
+        - personal
+      summary: Revoke the OPDS token; readers stop working immediately.
+      operationId: deleteApiOpdsToken
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    patch:
+      tags:
+        - personal
+      summary: Let the reader behind this token list 18+ libraries, or stop it. Per credential; the age cap still
+        applies.
+      operationId: patchApiOpdsToken
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                showAdult:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/tokens:
+    get:
+      tags:
+        - personal
+      summary: The caller's API tokens (never the secrets).
+      operationId: getApiTokens
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Create an API token; the secret is returned once. Scopes only ever restrict.
+      operationId: postApiTokens
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                expiresInDays:
+                  type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/tokens/{id}:
+    delete:
+      tags:
+        - personal
+      summary: Revoke an API token, effective on the next request.
+      operationId: deleteApiTokensId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/push/key:
+    get:
+      tags:
+        - personal
+      summary: The VAPID public key for web push, or nothing when push is off.
+      operationId: getApiPushKey
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/push/subscribe:
+    post:
+      tags:
+        - personal
+      summary: Register a browser push subscription.
+      operationId: postApiPushSubscribe
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscription:
+                  type: object
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/push/unsubscribe:
+    post:
+      tags:
+        - personal
+      summary: Remove a browser push subscription.
+      operationId: postApiPushUnsubscribe
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/favorites:
+    get:
+      tags:
+        - personal
+      summary: The caller's favourite series.
+      operationId: getApiFavorites
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Favourite a series.
+      operationId: postApiFavorites
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/favorites/{seriesId}:
+    delete:
+      tags:
+        - personal
+      summary: Unfavourite a series.
+      operationId: deleteApiFavoritesSeriesid
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/collections:
+    get:
+      tags:
+        - personal
+      summary: The caller's collections.
+      operationId: getApiCollections
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Create a collection.
+      operationId: postApiCollections
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/collections/{id}:
+    patch:
+      tags:
+        - personal
+      summary: Rename a collection.
+      operationId: patchApiCollectionsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - personal
+      summary: Delete a collection.
+      operationId: deleteApiCollectionsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    get:
+      tags:
+        - personal
+      summary: One collection and its series.
+      operationId: getApiCollectionsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/collections/{id}/items:
+    post:
+      tags:
+        - personal
+      summary: Add a series to a collection.
+      operationId: postApiCollectionsIdItems
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    put:
+      tags:
+        - personal
+      summary: Replace the order of a collection's series.
+      operationId: putApiCollectionsIdItems
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/collections/{id}/items/{seriesId}:
+    delete:
+      tags:
+        - personal
+      summary: Remove a series from a collection.
+      operationId: deleteApiCollectionsIdItemsSeriesid
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/ratings/{seriesId}:
+    put:
+      tags:
+        - personal
+      summary: Rate a series 1 to 10.
+      operationId: putApiRatingsSeriesid
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stars:
+                  type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - personal
+      summary: Remove the caller's rating.
+      operationId: deleteApiRatingsSeriesid
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/bookmarks:
+    get:
+      tags:
+        - personal
+      summary: The caller's page bookmarks.
+      operationId: getApiBookmarks
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/bookmarks/{bookId}/{page}:
+    put:
+      tags:
+        - personal
+      summary: Bookmark a page of a chapter.
+      operationId: putApiBookmarksBookidPage
+      parameters:
+        - name: bookId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - personal
+      summary: Remove a page bookmark.
+      operationId: deleteApiBookmarksBookidPage
+      parameters:
+        - name: bookId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/notes/{seriesId}:
+    get:
+      tags:
+        - personal
+      summary: The caller's notes on a series.
+      operationId: getApiNotesSeriesid
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/notes:
+    get:
+      tags:
+        - personal
+      summary: Every note the caller has written, newest first, optionally for one series.
+      operationId: getApiNotes
+      parameters:
+        - name: seriesId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Add a note to a series.
+      operationId: postApiNotes
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesId:
+                  type: string
+                text:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/notes/{id}:
+    patch:
+      tags:
+        - personal
+      summary: Edit a note.
+      operationId: patchApiNotesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - personal
+      summary: Delete a note.
+      operationId: deleteApiNotesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/history:
+    get:
+      tags:
+        - personal
+      summary: Reading history, newest first.
+      operationId: getApiHistory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/stats:
+    get:
+      tags:
+        - personal
+      summary: "Reading statistics: streaks, chapters, time."
+      operationId: getApiStats
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: Size of the daily window, clamped to 7-400. Defaults to 90.
+          schema:
+            type: integer
+            minimum: 7
+            maximum: 400
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/wrapped:
+    get:
+      tags:
+        - personal
+      summary: The year in reading.
+      operationId: getApiWrapped
+      parameters:
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/library/bulk/read:
+    post:
+      tags:
+        - personal
+      summary: Mark many series read (up to 500); writes no reading events, so a backlog does not inflate streaks.
+      operationId: postApiLibraryBulkRead
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/favorites/bulk:
+    post:
+      tags:
+        - personal
+      summary: Favourite many series at once (up to 500).
+      operationId: postApiFavoritesBulk
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/collections/{id}/items/bulk:
+    post:
+      tags:
+        - personal
+      summary: Add many series to a collection (up to 500).
+      operationId: postApiCollectionsIdItemsBulk
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/trackers:
+    get:
+      tags:
+        - personal
+      summary: Connected progress trackers and their linked series.
+      operationId: getApiTrackers
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/trackers/anilist:
+    post:
+      tags:
+        - personal
+      summary: Connect AniList with an OAuth code.
+      operationId: postApiTrackersAnilist
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/trackers/{provider}/connect:
+    post:
+      tags:
+        - personal
+      summary: Connect a tracker (AniList, MyAnimeList, Kitsu) with the provider's credential.
+      operationId: postApiTrackersProviderConnect
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                username:
+                  type: string
+                password:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/trackers/{provider}:
+    delete:
+      tags:
+        - personal
+      summary: Disconnect a tracker.
+      operationId: deleteApiTrackersProvider
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/trackers/anilist/backfill:
+    post:
+      tags:
+        - personal
+      summary: Push existing progress to AniList.
+      operationId: postApiTrackersAnilistBackfill
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /api/trackers/{provider}/resync/{seriesId}:
+    post:
+      tags:
+        - personal
+      summary: Re-send one series' progress to a tracker.
+      operationId: postApiTrackersProviderResyncSeriesid
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/settings:
+    get:
+      tags:
+        - personal
+      summary: The caller's reader and app settings.
+      operationId: getApiSettings
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    put:
+      tags:
+        - personal
+      summary: Save the caller's reader and app settings.
+      operationId: putApiSettings
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settings:
+                  type: object
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/books/{id}/download-manifest:
+    get:
+      tags:
+        - downloads
+      summary: What the client must fetch to keep a chapter offline.
+      operationId: getApiBooksIdDownloadManifest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/downloads:
+    get:
+      tags:
+        - downloads
+      summary: The caller's offline queue.
+      operationId: getApiDownloads
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - downloads
+      summary: Queue a chapter for offline use.
+      operationId: postApiDownloads
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+  /api/downloads/{bookId}:
+    delete:
+      tags:
+        - downloads
+      summary: Remove a chapter from the offline queue.
+      operationId: deleteApiDownloadsBookid
+      parameters:
+        - name: bookId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/series/{id}/thumb:
+    get:
+      tags:
+        - images
+      summary: Series cover, webp; ?w=800|1600 for the poster and hero.
+      operationId: getImgSeriesIdThumb
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/books/{id}/thumb:
+    get:
+      tags:
+        - images
+      summary: Chapter thumbnail, webp.
+      operationId: getImgBooksIdThumb
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/books/{id}/page/{n}:
+    get:
+      tags:
+        - images
+      summary: One page of a chapter (1-based).
+      operationId: getImgBooksIdPageN
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/series/{id}/backdrop:
+    get:
+      tags:
+        - images
+      summary: Blurred ambient or sharp hero backdrop for a series.
+      operationId: getImgSeriesIdBackdrop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: hero
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ar
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/lib/series/{id}/thumb:
+    get:
+      tags:
+        - images
+      summary: Owned-library series cover.
+      operationId: getImgLibSeriesIdThumb
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/lib/books/{id}/thumb:
+    get:
+      tags:
+        - images
+      summary: Owned-library chapter thumbnail.
+      operationId: getImgLibBooksIdThumb
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/lib/books/{id}/page/{n}:
+    get:
+      tags:
+        - images
+      summary: Owned-library page bytes (1-based); ?w resizes.
+      operationId: getImgLibBooksIdPageN
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/extensions/icon/{pkgName}:
+    get:
+      tags:
+        - images
+      summary: An extension's icon, proxied from the engine.
+      operationId: getImgExtensionsIconPkgname
+      parameters:
+        - name: pkgName
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/sources/icon/{id}:
+    get:
+      tags:
+        - images
+      summary: A source's icon at 64px, or a lettered tile when it has none.
+      operationId: getImgSourcesIconId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /img/sources/cover:
+    get:
+      tags:
+        - images
+      summary: A remote cover proxied same-origin; a value that is not a URL gets a placeholder rather than an error.
+      operationId: getImgSourcesCover
+      parameters:
+        - name: u
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds:
+    get:
+      tags:
+        - opds
+      summary: Root navigation feed.
+      operationId: getOpds
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/opensearch.xml:
+    get:
+      tags:
+        - opds
+      summary: OpenSearch descriptor.
+      operationId: getOpdsOpensearchXml
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/series:
+    get:
+      tags:
+        - opds
+      summary: Series listing with facets (sort, library, genre, status), paged sixty at a time.
+      operationId: getOpdsSeries
+      parameters:
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: library
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: genre
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/search:
+    get:
+      tags:
+        - opds
+      summary: The same feed as /opds/series, reached from a reader's search box.
+      operationId: getOpdsSearch
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: library
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: genre
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/series/{id}:
+    get:
+      tags:
+        - opds
+      summary: "A series' chapters: a CBZ acquisition link and an OPDS-PSE stream link per chapter."
+      operationId: getOpdsSeriesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /opds/book/{id}/page/{n}:
+    get:
+      tags:
+        - opds
+      summary: One page for OPDS-PSE readers. ZERO-based; ?maxWidth (64-2000) returns a JPEG no wider than asked.
+      operationId: getOpdsBookIdPageN
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxWidth
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /opds/book/{id}/file:
+    get:
+      tags:
+        - opds
+      summary: Download a chapter as CBZ (zipped on the fly for a loose-image folder).
+      operationId: getOpdsBookIdFile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/library/scan:
+    post:
+      tags:
+        - admin
+      summary: Scan the library folders now.
+      operationId: postApiAdminLibraryScan
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/update/{id}:
+    post:
+      tags:
+        - admin
+      summary: Check one series for new chapters now.
+      operationId: postApiAdminUpdateId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/update:
+    post:
+      tags:
+        - admin
+      summary: Check every auto-updating series for new chapters now.
+      operationId: postApiAdminUpdate
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/users:
+    get:
+      tags:
+        - admin
+      summary: All accounts with their permissions.
+      operationId: getApiAdminUsers
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: Create an account.
+      operationId: postApiAdminUsers
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                displayName:
+                  type: string
+                role:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/install-ping/preview:
+    get:
+      tags:
+        - admin
+      summary: Exactly what the opt-in install count would send, so it can be shown before consenting.
+      operationId: getApiAdminInstallPingPreview
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Returns
+        the collector url and the literal payload, produced by the same function the background job uses, so
+        the settings page cannot show something other than what is sent. Previewing does not opt in.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/settings:
+    get:
+      tags:
+        - admin
+      summary: Server settings, plus extensions_configured (whether an extension engine exists).
+      operationId: getApiAdminSettings
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The row
+        includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
+        priority, nothing blocked, two days of patience).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: >-
+            The settings row. Only the read-chapter cleanup fields are described here; the rest are the
+            snake_case columns PATCH sets (server_name, allow_registration, updater_hours, ...).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  cleanup_read:
+                    type: boolean
+                    description: Whether the opt-in read-chapter cleanup is on. Off by default.
+                  cleanup_read_days:
+                    type: integer
+                    minimum: 0
+                    maximum: 3650
+                    description: >-
+                      Days after the last reader finishes before the file goes. 0 deletes at the next run.
+                  cleanup_read_due:
+                    type: [integer, "null"]
+                    description: >-
+                      How many chapters the cleanup would delete if it ran now, at the current day setting,
+                      whether or not it is switched on -- so the number can be seen before consenting. Memoised
+                      for half a minute; null when it could not be counted.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    patch:
+      tags:
+        - admin
+      summary: "Change server settings: name, open registration, update interval, extension check interval and
+        its kill switch, the update check, the opt-in install count, the opt-in read-chapter cleanup, and the
+        server-wide scanlation-group preferences."
+      operationId: patchApiAdminSettings
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        the same row GET does, so a client can replace what it holds.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                serverName:
+                  type: string
+                allowRegistration:
+                  type: boolean
+                updaterHours:
+                  type: integer
+                extensionHours:
+                  type: integer
+                extensionAutoUpdate:
+                  type: boolean
+                updateCheck:
+                  description: Ask GitHub whether a newer release exists. Sends nothing about this install.
+                  type: boolean
+                installPing:
+                  description: >-
+                    Opt in to the anonymous install count. Turning it on mints a per-install secret; turning
+                    it off destroys it and asks the collector to forget the current month's id.
+                  type: boolean
+                scanlatorPrefs:
+                  description: >-
+                    The server-wide release preferences, replaced whole. Blocks made here apply to every
+                    series; the priority applies to a series that has no ranking of its own.
+                  $ref: "#/components/schemas/ScanlatorPrefs"
+                cleanupRead:
+                  description: >-
+                    Opt in to deleting the file of a chapter that everyone who started it has finished, once
+                    it has been finished for cleanupReadDays. Off by default. Only chapters under the
+                    download directory are ever touched; a chapter anyone is partway through is never
+                    touched; the chapter and everyone's reading progress survive the file.
+                  type: boolean
+                cleanupReadDays:
+                  description: >-
+                    Days to wait after the last reader finishes, counted from the newest progress update on
+                    the chapter. 0 means the next run deletes it; it is a grace period, not the off switch
+                    (that is cleanupRead).
+                  type: integer
+                  minimum: 0
+                  maximum: 3650
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks:
+    get:
+      tags:
+        - admin
+      summary: Scheduled tasks with last run, last result and whether one is running.
+      operationId: getApiAdminTasks
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/{id}/run:
+    post:
+      tags:
+        - admin
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions).
+        {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off.
+      operationId: postApiAdminTasksIdRun
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: >-
+            The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
+            is off; its run is subject to the same consent and the same vetoes as the hourly one.
+          schema:
+            type: string
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/audit:
+    get:
+      tags:
+        - admin
+      summary: "The audit feed: logins, changes, source actions."
+      operationId: getApiAdminAudit
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/reload:
+    post:
+      tags:
+        - admin
+      summary: Reload source packs, custom sites and extension sources.
+      operationId: postApiAdminSourcesReload
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/custom:
+    get:
+      tags:
+        - admin
+      summary: Custom sites added by URL.
+      operationId: getApiAdminSourcesCustom
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: Add a whole site by URL (engine auto-detected).
+      operationId: postApiAdminSourcesCustom
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                base:
+                  type: string
+                engine:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/custom/{id}:
+    patch:
+      tags:
+        - admin
+      summary: Change a custom site's base address, and nothing else, so its series follow it.
+      operationId: patchApiAdminSourcesCustomId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - admin
+      summary: Remove a custom site.
+      operationId: deleteApiAdminSourcesCustomId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}:
+    patch:
+      tags:
+        - admin
+      summary: Change a series' settings (auto-update, its own scanlation-group preferences).
+      operationId: patchApiAdminSeriesId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The body
+        names at least one field and no others; each named field is written on its own, so a body naming
+        one leaves the other alone. Answers { ok: true }, with autoUpdate echoed when it was sent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                autoUpdate:
+                  type: boolean
+                  description: Whether the scheduled updater keeps checking this series.
+                scanlatorPrefs:
+                  description: >-
+                    The series' own release preferences, replaced whole; null clears them so the server-wide
+                    ones apply again. The priority given here replaces the global list for this series, the
+                    blocked list is added to it, and a null patienceDays inherits.
+                  oneOf:
+                    - $ref: "#/components/schemas/ScanlatorPrefs"
+                    - type: "null"
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body, an unknown field, or a body naming nothing to change
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - admin
+      summary: Soft-delete a series (files stay; restorable).
+      operationId: deleteApiAdminSeriesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/scanlators:
+    get:
+      tags:
+        - admin
+      summary: Every scanlation group this server knows of, busiest first, for the preferences picker.
+      operationId: getApiAdminScanlators
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Names come
+        from the files on disk and from the persisted listings of every source (not from the sources
+        themselves), merged by the same group equality the release rules use; `series` is how many series the
+        group appears on. Memoised for 30 seconds.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, onDisk, listed, series]
+                      properties:
+                        name:
+                          type: string
+                        onDisk:
+                          type: integer
+                        listed:
+                          type: integer
+                        series:
+                          type: integer
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/{id}/scanlators:
+    get:
+      tags:
+        - admin
+      summary: The scanlation groups an admin can rank or block for one series, and where its preferences stand.
+      operationId: getApiAdminSeriesIdScanlators
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Groups are
+        gathered from the live files on disk (what each chapter was stamped with as it landed), from every
+        copy in the listing the updater persisted at the last check -- primary and followed sources alike,
+        never the sources themselves on a page open -- and from the names already in the effective
+        preferences, so a blocked group that has vanished from the listing stays visible to be unblocked.
+        `checkedAt` says how old the figures are.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkedAt, prefs, global, effective, groups]
+                properties:
+                  checkedAt:
+                    type: [string, "null"]
+                    format: date-time
+                    description: When the series' sources were last listed; null for a series never checked.
+                  prefs:
+                    description: The series' own preferences, or null when it has none.
+                    oneOf:
+                      - $ref: "#/components/schemas/ScanlatorPrefs"
+                      - type: "null"
+                  global:
+                    $ref: "#/components/schemas/ScanlatorPrefs"
+                  effective:
+                    type: object
+                    description: The merge the updater runs this series with.
+                    required: [priority, blocked, patienceDays]
+                    properties:
+                      priority: { type: array, items: { type: string } }
+                      blocked: { type: array, items: { type: string } }
+                      patienceDays: { type: integer }
+                  groups:
+                    type: array
+                    description: >-
+                      Sorted by onDisk + listed descending, then by name. Each entry is a GroupStat (the same
+                      figures GET /api/series/{id}/groups answers, from the same persisted copies and live
+                      files) plus `listed`, kept equal to `releases`. A name in the preferences that nothing
+                      lists or holds is a row of zeros.
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/GroupStat"
+                        - type: object
+                          required: [listed]
+                          properties:
+                            listed: { type: integer, description: Kept for clients written against the v0.31.0 shape; equals releases. }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/sources:
+    post:
+      tags:
+        - admin
+      summary: Follow another source for a series, from a candidate a fill scan found followable.
+      operationId: postApiAdminSeriesIdSources
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The
+        candidate has to come from a plan POST /api/sources/fill/scan answered for this series, and the plan
+        has to have found it followable: at least 90% of the chapter numbers already held were listed there
+        and the verdict was ok or nothing_to_fill. A bare (source, id) pair is not accepted: the plan is the
+        only place the "same series?" judgement is made. The series' own source is refused, since following
+        it would list every chapter twice. Following a source again updates its series id and coverage.
+        Once followed, the updater merges that source's chapter list with the primary's on every check.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId, source, sourceSeriesId]
+              properties:
+                planId:
+                  type: string
+                  description: From the fill scan.
+                source:
+                  type: string
+                  description: A candidate's source id in that plan.
+                sourceSeriesId:
+                  type: string
+                  description: That candidate's series id on the source.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Followed. The series' full source list, primary first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sources]
+                properties:
+                  ok: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "400":
+          description: >-
+            bad_request (malformed body, or the plan is for another series); not_in_plan (that source and
+            id were not among the plan's candidates); not_followable (the plan refused it, with reason and
+            coverage in the body).
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: >-
+            plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
+            own source); source_unavailable (the adapter is not loaded or is disabled).
+  /api/admin/series/{id}/sources/{sourceId}:
+    delete:
+      tags:
+        - admin
+      summary: Stop following a source for a series.
+      operationId: deleteApiAdminSeriesIdSourcesSourceId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
+        already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
+        fetched through it before the next check. The primary cannot be removed this way; it is not a
+        followed source.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Unfollowed. The series' remaining source list, primary first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sources]
+                properties:
+                  ok: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The series was not following that source
+  /api/admin/series/{id}/check:
+    post:
+      tags:
+        - admin
+      summary: Start a check for new chapters on one series; poll the GET.
+      operationId: postApiAdminSeriesIdCheck
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+    get:
+      tags:
+        - admin
+      summary: Progress of a running series check.
+      operationId: getApiAdminSeriesIdCheck
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        { running } while the check runs and { running: false, added, waiting?, error?, startedAt,
+        finishedAt } once it has finished; waiting is how many missing chapter numbers were held back for a
+        ranked group (omitted when none), so "0 added" next to it does not read as nothing new.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [running]
+                properties:
+                  running: { type: boolean }
+                  added: { type: integer, description: Chapters that landed in this check. }
+                  waiting: { type: integer, description: Missing numbers held for a ranked group; absent when 0. }
+                  error: { type: string }
+                  startedAt: { type: integer, format: int64 }
+                  finishedAt: { type: integer, format: int64 }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/restore:
+    post:
+      tags:
+        - admin
+      summary: Restore a soft-deleted series.
+      operationId: postApiAdminSeriesIdRestore
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/deleted:
+    get:
+      tags:
+        - admin
+      summary: Soft-deleted series.
+      operationId: getApiAdminSeriesDeleted
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/{id}/merge:
+    post:
+      tags:
+        - admin
+      summary: Merge another series into this one.
+      operationId: postApiAdminSeriesIdMerge
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fromId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/meta:
+    put:
+      tags:
+        - admin
+      summary: Override a series' metadata (title, summary, author, genres, status, age rating); survives rescans.
+      operationId: putApiAdminSeriesIdMeta
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                summary:
+                  type: string
+                author:
+                  type: string
+                genres:
+                  type: array
+                  items:
+                    type: string
+                status:
+                  type: string
+                ageRating:
+                  type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/books/{id}/meta:
+    put:
+      tags:
+        - admin
+      summary: Override a chapter's title or number.
+      operationId: putApiAdminBooksIdMeta
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                number:
+                  type: number
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/library/writable:
+    get:
+      tags:
+        - admin
+      summary: Whether the library mount is writable (file operations available).
+      operationId: getApiAdminLibraryWritable
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/{id}/delete-files:
+    post:
+      tags:
+        - admin
+      summary: Delete a series' files from disk (irreversible).
+      operationId: postApiAdminSeriesIdDeleteFiles
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/chapters/delete:
+    post:
+      tags:
+        - admin
+      summary: Delete chosen chapters' files from the download directory, keeping their rows as tombstones.
+      operationId: postApiAdminSeriesIdChaptersDelete
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Touches
+        DL_ROOT only: a chapter the scanner found in the read library is skipped (`not_owned`), on the same
+        footing as the read-chapter cleanup, and so is one somebody has a bookmark in (`bookmarked`) -- a
+        bookmark names a page inside the file. A chapter whose file AND folder are missing is skipped
+        (`unlink_failed`) rather than marked: that is the download volume not being mounted. The row survives
+        with `pruned` set so reading progress and the updater's have-set do; the cover moves to the lowest
+        live chapter. No typed confirmation -- the client confirms with the count.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookIds]
+              properties:
+                bookIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, applied, bytes, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  applied:
+                    type: integer
+                    description: Chapters whose file is gone and whose row is now a tombstone.
+                  bytes:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, not_owned, already_pruned, bookmarked, outside_root, unlink_failed]
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/refetch:
+    post:
+      tags:
+        - admin
+      summary: Download chosen chapters again, as the copy the release rules choose now, onto the same rows.
+      operationId: postApiAdminSeriesIdChaptersRefetch
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Eligible
+        only for a file this server downloaded (`not_owned` otherwise) at exactly the path the downloader
+        writes, `Chapter <n>.cbz` (`not_ours` otherwise): only that path lands back on the same row, which is
+        what keeps reading progress attached. The listing is refreshed first (a check with no downloads),
+        so the copy is the one the release rules choose now; a source that does not answer leaves the last
+        listing standing, and a listing row from a source the series no longer follows is `source_unavailable`.
+        The old file is set aside until the new one lands and put back if the download fails. A chapter the
+        cleanup deleted (`pruned`) is eligible: this is how it comes back.
+        `picks` replaces a row's file with ONE named copy (`{bookId, source, sourceId}` from GET
+        /api/series/{id}/versions) instead of the rules' choice: the row's number selects the listing row,
+        the pick the copy in it (`not_listed` when none matches). A pick ignores the group rules including
+        the blocklist -- an explicit choice. At least one of `bookIds` / `picks`, at most 300 combined; a row
+        named in both is fetched as its pick, and a second pick for the same row is skipped as `duplicate`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookIds:
+                  type: array
+                  maxItems: 300
+                  items:
+                    type: string
+                picks:
+                  type: array
+                  maxItems: 300
+                  items:
+                    type: object
+                    required: [bookId, source, sourceId]
+                    properties:
+                      bookId: { type: string }
+                      source: { type: string, minLength: 1, maxLength: 200 }
+                      sourceId: { type: string, minLength: 1, maxLength: 200 }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Started. Progress is on GET /api/sources/jobs under `folder`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, started, folder, total, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  started:
+                    type: boolean
+                  folder:
+                    type: string
+                  total:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, not_owned, not_ours, not_listed, blocked_group, source_unavailable, cooldown, duplicate]
+                        source:
+                          type: string
+                          description: "On a `duplicate` entry: the adapter of the pick that was ignored."
+                        sourceId:
+                          type: string
+                          description: "On a `duplicate` entry: the chapter id of the pick that was ignored."
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`nothing_to_fetch` (every chapter was skipped; `skipped` says why), `busy` (a download for the series is running), or `refused` (the download directory is not writable)"
+  /api/admin/series/{id}/library:
+    post:
+      tags:
+        - admin
+      summary: Move a series to another library.
+      operationId: postApiAdminSeriesIdLibrary
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                libraryId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/library:
+    post:
+      tags:
+        - admin
+      summary: Move many series to a library.
+      operationId: postApiAdminSeriesLibrary
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+                libraryId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/{id}/rename-folder:
+    post:
+      tags:
+        - admin
+      summary: Rename a series' folder on disk.
+      operationId: postApiAdminSeriesIdRenameFolder
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/libraries:
+    get:
+      tags:
+        - admin
+      summary: All libraries with paths and age ratings.
+      operationId: getApiAdminLibraries
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: Declare a library.
+      operationId: postApiAdminLibraries
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+                ageRating:
+                  type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/libraries/folders:
+    get:
+      tags:
+        - admin
+      summary: Top-level folders under the library root, for declaring a library.
+      operationId: getApiAdminLibrariesFolders
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/libraries/preview:
+    get:
+      tags:
+        - admin
+      summary: What a library declaration would contain.
+      operationId: getApiAdminLibrariesPreview
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/libraries/{id}:
+    patch:
+      tags:
+        - admin
+      summary: Rename a library or change its age rating.
+      operationId: patchApiAdminLibrariesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                ageRating:
+                  type: integer
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - admin
+      summary: Delete a library declaration (series move to the default).
+      operationId: deleteApiAdminLibrariesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/art:
+    put:
+      tags:
+        - admin
+      summary: Set a series' cover or banner (upload, URL, or a candidate).
+      operationId: putApiAdminSeriesIdArt
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cover:
+                  type: string
+                banner:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/art/overview:
+    get:
+      tags:
+        - admin
+      summary: Which series have real art and which fall back to a page.
+      operationId: getApiAdminArtOverview
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/art/candidates/{id}:
+    get:
+      tags:
+        - admin
+      summary: Cover candidates for a series from AniList and its source.
+      operationId: getApiAdminArtCandidatesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/art/backfill:
+    post:
+      tags:
+        - admin
+      summary: Fetch missing art for every series; poll the status.
+      operationId: postApiAdminArtBackfill
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/art/backfill/status:
+    get:
+      tags:
+        - admin
+      summary: Progress of the art backfill.
+      operationId: getApiAdminArtBackfillStatus
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/status:
+    get:
+      tags:
+        - admin
+      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages."
+      operationId: getApiAdminExtensionsStatus
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/sources:
+    get:
+      tags:
+        - admin
+      summary: "Sources the installed extensions provide, with which are enabled; plus a per-language overview (langs) and the hidden languages, unfiltered."
+      operationId: getApiAdminExtensionsSources
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/sources/bulk:
+    post:
+      tags:
+        - admin
+      summary: "Enable or disable many extension sources at once, by id or by language, in one statement and one reload. Languages also record the standing preference (hidden_langs) that installs respect; ids do not."
+      operationId: postApiAdminExtensionsSourcesBulk
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. At least one of ids or langs must be non-empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                ids:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: string
+                langs:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+                enabled:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: changed (rows that flipped), hiddenLangs, registered, skipped (over SUWAYOMI_MAX_SOURCES)"
+        "400":
+          description: Malformed body, neither ids nor langs given, or no extension server configured
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/sources/{id}:
+    post:
+      tags:
+        - admin
+      summary: Enable or disable one extension source.
+      operationId: postApiAdminExtensionsSourcesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/extensions/catalog:
+    get:
+      tags:
+        - admin
+      summary: "The extension catalogue: installed, updatable, and available."
+      operationId: getApiAdminExtensionsCatalog
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: installed
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: nsfw
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/update-all:
+    post:
+      tags:
+        - admin
+      summary: Re-read the repositories, then update every installed extension with a newer version. 409 while a
+        check runs.
+      operationId: postApiAdminExtensionsUpdateAll
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/extensions/refresh:
+    post:
+      tags:
+        - admin
+      summary: Re-read the extension repositories now.
+      operationId: postApiAdminExtensionsRefresh
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "502":
+          description: The extension engine did not answer
+  /api/admin/extensions/catalog/{pkgName}:
+    post:
+      tags:
+        - admin
+      summary: Install, update or uninstall an extension; its sources are enabled or removed to match, except
+        sources in a hidden language, which stay off.
+      operationId: postApiAdminExtensionsCatalogPkgname
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        The 200 body carries `sources` (how many the extension provides), `on` (switched on now) and `hidden`
+        (left off because their language is hidden; see /api/admin/extensions/sources/bulk)."
+
+      parameters:
+        - name: pkgName
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/extensions/repos:
+    get:
+      tags:
+        - admin
+      summary: The configured extension repositories.
+      operationId: getApiAdminExtensionsRepos
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "502":
+          description: The extension engine did not answer
+    post:
+      tags:
+        - admin
+      summary: Add an extension repository by index URL.
+      operationId: postApiAdminExtensionsRepos
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+        "502":
+          description: The extension engine did not answer
+    delete:
+      tags:
+        - admin
+      summary: Remove an extension repository.
+      operationId: deleteApiAdminExtensionsRepos
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/health:
+    get:
+      tags:
+        - admin
+      summary: "Library health checks: chapter gaps, short chapters, duplicates, failing sources, frozen series, the
+        solver."
+      operationId: getApiAdminHealth
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/trackers/relink:
+    post:
+      tags:
+        - admin
+      summary: Re-match every series to its tracker entries; poll the status.
+      operationId: postApiAdminTrackersRelink
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/trackers/relink/status:
+    get:
+      tags:
+        - admin
+      summary: Progress of the tracker relink.
+      operationId: getApiAdminTrackersRelinkStatus
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/import/parse:
+    post:
+      tags:
+        - admin
+      summary: Parse a Mihon/Tachiyomi backup (.tachibk) and report what it holds.
+      operationId: postApiAdminImportParse
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/import:
+    post:
+      tags:
+        - admin
+      summary: Import titles from a parsed backup; poll the status.
+      operationId: postApiAdminImport
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titles]
+              properties:
+                titles:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 500
+                autoUpdate:
+                  type: boolean
+                chapterCount:
+                  type: integer
+                  minimum: 1
+                chapterFrom:
+                  type: string
+                  enum: [oldest, newest]
+                  default: oldest
+                  description: Same meaning as on /api/sources/add, applied to every title in the list.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/import/status:
+    get:
+      tags:
+        - admin
+      summary: Progress of the backup import.
+      operationId: getApiAdminImportStatus
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources:
+    get:
+      tags:
+        - admin
+      summary: Every source with its stored health, cooldown and diagnosis.
+      operationId: getApiAdminSources
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/check:
+    post:
+      tags:
+        - admin
+      summary: "Run the source watchdog now: probe and smoke-test every source, follow verified moves. 409 while
+        running."
+      operationId: postApiAdminSourcesCheck
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/sources/{id}/test:
+    post:
+      tags:
+        - admin
+      summary: Probe one source right now, ignoring its cooldown, and diagnose it; writes no health.
+      operationId: postApiAdminSourcesIdTest
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/sources/{id}/{action}:
+    post:
+      tags:
+        - admin
+      summary: Enable, disable, or clear the block on a source.
+      operationId: postApiAdminSourcesIdAction
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/sessions:
+    get:
+      tags:
+        - admin
+      summary: Every active session across accounts.
+      operationId: getApiAdminSessions
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sessions/{id}:
+    delete:
+      tags:
+        - admin
+      summary: Revoke any session.
+      operationId: deleteApiAdminSessionsId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/stats:
+    get:
+      tags:
+        - admin
+      summary: Server-wide counts for the overview.
+      operationId: getApiAdminStats
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/users/{id}:
+    patch:
+      tags:
+        - admin
+      summary: "Change an account: role, permissions, library access, age limit, downloads."
+      operationId: patchApiAdminUsersId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                canDownload:
+                  type: boolean
+                maxAgeRating:
+                  type: integer
+                libraryIds:
+                  type: array
+                  items:
+                    type: string
+                disabled:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - admin
+      summary: Delete an account.
+      operationId: deleteApiAdminUsersId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
