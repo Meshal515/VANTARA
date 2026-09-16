@@ -15,11 +15,31 @@ export type SourceVerdict =
   | 'TEMPORARILY_UNAVAILABLE'
   | 'POLICY_BLOCKED';
 
+/** محاولة بحث واحدة باستعلام واحد. */
+export interface SearchAttempt {
+  query: string;
+  ok: boolean;
+  count?: number;
+  relevant?: boolean;
+  error?: string;
+}
+
 export interface ProbeEvidence {
   /** قائمة الأكثر شعبية ترجع عناصر ⇒ المصدر حيّ. */
   popular: { ok: boolean; count?: number; error?: string };
   /** البحث يرجع نتائج **ذات صلة** بالاستعلام، لا مجرد نتائج. */
   search: { ok: boolean; count?: number; relevant?: boolean; error?: string };
+  /**
+   * محاولات بحث متعددة.
+   *
+   * قِيس أن المصدر يستجيب لاستعلام ويرمي على آخر: Kawii Manga خدم
+   * `nano machine` ورمى على `the`، ثلاث جولات متطابقة. فحكم البحث من استعلام
+   * واحد غير صالح، وهذا الحقل يجعله من مجموعة.
+   */
+  searchAttempts?: SearchAttempt[];
+  /** الاستعلام الذي وجد العمل، والعمل نفسه: بدونهما الأعداد بلا معنى. */
+  probeQuery?: string;
+  probedWork?: string;
   chapters: { ok: boolean; count?: number; error?: string };
   /** فصل قديم وفصل حديث: الفصل الأول قد يعمل والأحدث لا. */
   pagesOldest: { ok: boolean; count?: number; error?: string };
@@ -50,6 +70,26 @@ function mentionsCloudflare(evidence: ProbeEvidence): boolean {
 }
 
 /**
+ * صلاحية البحث من كل المحاولات، لا من واحدة.
+ *
+ * `partial` هي الحالة التي كشفها القياس: Kawii Manga خدم `nano machine` ورمى
+ * على `the`، ثلاث جولات متطابقة. حكمها من استعلام واحد يقلبها بين
+ * `SUPPORTED` و`PARSER_FAILED` بحسب أي استعلام جرّبناه — وهذا عيب في الفحص
+ * لا في المصدر.
+ */
+export function searchUsability(evidence: ProbeEvidence): 'usable' | 'partial' | 'unusable' {
+  const attempts = evidence.searchAttempts;
+
+  if (attempts === undefined || attempts.length === 0) {
+    return evidence.search.ok && evidence.search.relevant === true ? 'usable' : 'unusable';
+  }
+
+  const relevant = attempts.filter((a) => a.ok && a.relevant === true).length;
+  if (relevant === 0) return 'unusable';
+  return relevant === attempts.length ? 'usable' : 'partial';
+}
+
+/**
  * الحكم من الدليل. الترتيب مقصود: Cloudflare يُشخّص قبل PARSER_FAILED لأنه
  * قابل للإصلاح بتشغيل FlareSolverr، بخلاف parser مكسور.
  */
@@ -60,8 +100,7 @@ export function verdictFrom(evidence: ProbeEvidence): SourceVerdict {
   if (!alive) return 'PARSER_FAILED';
 
   // حيّ، لكن البحث لا يُوصل إلى العمل ⇒ الاكتشاف يمر بـPOPULAR/LATEST + مطابقة عنوان
-  const searchUsable = evidence.search.ok && evidence.search.relevant === true;
-  if (!searchUsable) return 'SEARCH_BROKEN';
+  if (searchUsability(evidence) === 'unusable') return 'SEARCH_BROKEN';
 
   if (!evidence.chapters.ok) return 'PARSER_FAILED';
   if (!evidence.pagesOldest.ok || !evidence.pagesNewest.ok) return 'PARSER_FAILED';

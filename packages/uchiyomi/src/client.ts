@@ -1,5 +1,6 @@
 import {
   type AdminUser,
+  type Book,
   type Chapter,
   type GroupedResult,
   type LoginResult,
@@ -281,12 +282,25 @@ export class UchiyomiClient {
     );
   }
 
+  /**
+   * قائمة صفحات الفصل.
+   *
+   * upstream يرجع **مصفوفة مجرّدة** لا `{ content }` كبقية المسارات، وقراءتها
+   * على أنها `{ content }` تعطي صفر صفحات بصمت. نتحمّل الشكلين.
+   */
   async pages(bookId: string, token?: string): Promise<Page[]> {
-    const out = await this.#require<{ content: Page[] }>(
+    const out = await this.#require<Page[] | { content: Page[] }>(
       `/api/books/${encodeURIComponent(bookId)}/pages`,
       token !== undefined ? { token } : {},
     );
-    return out.content;
+    return Array.isArray(out) ? out : out.content;
+  }
+
+  book(bookId: string, token?: string): Promise<Book | undefined> {
+    return this.#request<Book>(`/api/books/${encodeURIComponent(bookId)}`, {
+      allow404: true,
+      ...(token !== undefined ? { token } : {}),
+    });
   }
 
   /**
@@ -317,10 +331,10 @@ export class UchiyomiClient {
     });
   }
 
-  /** عنوان صورة الصفحة. تُقدَّم عبر vantara-api لا مباشرة للمتصفح. */
-  pageImageUrl(bookId: string, index: number, maxWidth?: number): string {
+  /** عنوان صورة الصفحة. `pageNumber` 1-based. تُقدَّم عبر vantara-api. */
+  pageImageUrl(bookId: string, pageNumber: number, maxWidth?: number): string {
     const url = new URL(
-      `${this.#baseUrl}/img/books/${encodeURIComponent(bookId)}/page/${String(index)}`,
+      `${this.#baseUrl}/img/books/${encodeURIComponent(bookId)}/page/${String(pageNumber)}`,
     );
     if (maxWidth !== undefined) url.searchParams.set('maxWidth', String(maxWidth));
     return url.toString();

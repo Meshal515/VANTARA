@@ -9,7 +9,7 @@
  *   docker exec uchiyomi node /tmp/05-probe-all-arabic.js > verdicts.json
  */
 const SU = process.env.SUWAYOMI_URL || 'http://uchiyomi-suwayomi:4567';
-const QUERY = process.env.PROBE_QUERY || 'nano machine';
+const FALLBACK_QUERY = process.env.PROBE_QUERY || 'nano machine';
 const STEP_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS || 45_000);
 
 const gql = async (query, variables) => {
@@ -72,6 +72,9 @@ async function fetchList(sourceId, type, query) {
 
 async function probeSource(source) {
   const sourceId = source.id.replace(/^sw:/, '');
+  // كل مصدر واستعلامه. مصدر عربي قد لا يطابق عنوانًا لاتينيًا مركّبًا، وفحصه
+  // باستعلام واحد يصنّفه SEARCH_BROKEN وهو سليم — وهذا ما حدث في أول جولة.
+  const QUERY = source.query || FALLBACK_QUERY;
   const out = {
     id: source.id,
     name: source.name,
@@ -105,6 +108,7 @@ async function probeSource(source) {
 
   if (!candidate) return out;
   out.probedWork = candidate.title;
+  out.probeQuery = QUERY;
 
   const chapters = await step(async () => {
     const payload = await gql(

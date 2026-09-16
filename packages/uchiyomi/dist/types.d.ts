@@ -64,12 +64,33 @@ export interface Chapter {
     read?: boolean;
 }
 export interface Page {
-    index: number;
-    url: string;
+    /** 1-based. الفهرس 0 يرجع 502 من upstream. */
+    number: number;
+    fileName?: string;
+    mediaType?: string;
+    /** الأبعاد المخزّنة: تسمح بصندوق بنسبة أبعاد دقيقة ⇒ صفر قفزة تخطيط. */
+    width?: number | null;
+    height?: number | null;
+}
+export interface Book {
+    id: string;
+    seriesId: string;
+    seriesTitle?: string;
+    name?: string;
+    number?: number;
+    media?: {
+        pagesCount?: number;
+        mediaType?: string;
+        status?: string;
+    };
+    readProgress?: {
+        page?: number;
+        completed?: boolean;
+    } | null;
 }
 export interface ProgressUpdate {
-    page?: number;
-    completed?: boolean;
+    page?: number | undefined;
+    completed?: boolean | undefined;
 }
 export declare class UchiyomiError extends Error {
     readonly status: number;

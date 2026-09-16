@@ -198,9 +198,21 @@ export class UchiyomiClient {
     versions(seriesId, token) {
         return this.#require(`/api/series/${encodeURIComponent(seriesId)}/versions`, token !== undefined ? { token } : {});
     }
+    /**
+     * قائمة صفحات الفصل.
+     *
+     * upstream يرجع **مصفوفة مجرّدة** لا `{ content }` كبقية المسارات، وقراءتها
+     * على أنها `{ content }` تعطي صفر صفحات بصمت. نتحمّل الشكلين.
+     */
     async pages(bookId, token) {
         const out = await this.#require(`/api/books/${encodeURIComponent(bookId)}/pages`, token !== undefined ? { token } : {});
-        return out.content;
+        return Array.isArray(out) ? out : out.content;
+    }
+    book(bookId, token) {
+        return this.#request(`/api/books/${encodeURIComponent(bookId)}`, {
+            allow404: true,
+            ...(token !== undefined ? { token } : {}),
+        });
     }
     /**
      * التقدم يُكتب هنا وهنا فقط (D-02). التوكن إلزامي: التقدم ملك مستخدم بعينه،
@@ -226,9 +238,9 @@ export class UchiyomiClient {
             body: { rating: value },
         });
     }
-    /** عنوان صورة الصفحة. تُقدَّم عبر vantara-api لا مباشرة للمتصفح. */
-    pageImageUrl(bookId, index, maxWidth) {
-        const url = new URL(`${this.#baseUrl}/img/books/${encodeURIComponent(bookId)}/page/${String(index)}`);
+    /** عنوان صورة الصفحة. `pageNumber` 1-based. تُقدَّم عبر vantara-api. */
+    pageImageUrl(bookId, pageNumber, maxWidth) {
+        const url = new URL(`${this.#baseUrl}/img/books/${encodeURIComponent(bookId)}/page/${String(pageNumber)}`);
         if (maxWidth !== undefined)
             url.searchParams.set('maxWidth', String(maxWidth));
         return url.toString();

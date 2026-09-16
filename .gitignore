@@ -10,3 +10,7 @@ spike/samples/
 
 node_modules/
 .DS_Store
+
+# فصل اختبار القارئ: يُولَّد بـservices/translation-worker
+spike/library/
+*.cbz

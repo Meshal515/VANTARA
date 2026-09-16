@@ -1,0 +1,21 @@
+# كل نسخة هنا مُتحقَّقة من PyPI في 2026-09-16، وموثّقة في docs/UPSTREAMS.md.
+# الرسم العربي يأتي من Pillow: الويل يحمل raqm = HarfBuzz + FriBidi + libraqm.
+
+# الرسم العربي — طبقتنا
+Pillow==12.3.0
+
+# OCR: manga-ocr للياباني (يدعم النص العمودي)، PaddleOCR للكوري/الصيني/الإنجليزي،
+# Surya احتياطي وترتيب قراءة
+manga-ocr==0.1.16
+paddleocr==3.7.0
+surya-ocr==0.22.1
+
+# تنظيف النص القديم
+iopaint==1.6.0
+
+# القاعدة والوظائف
+psycopg[binary]==3.2.3
+
+# التشغيل
+httpx==0.28.1
+pydantic==2.10.6

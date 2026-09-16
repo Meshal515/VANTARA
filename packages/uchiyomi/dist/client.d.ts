@@ -1,4 +1,4 @@
-import { type AdminUser, type Chapter, type GroupedResult, type LoginResult, type Page, type ProgressUpdate, type SeriesSummary, type SourceInfo, type SourceProvider, type UchiyomiUser } from './types.ts';
+import { type AdminUser, type Book, type Chapter, type GroupedResult, type LoginResult, type Page, type ProgressUpdate, type SeriesSummary, type SourceInfo, type SourceProvider, type UchiyomiUser } from './types.ts';
 export interface UchiyomiClientOptions {
     baseUrl: string;
     /** توكن خدمة `uy_…` بنطاق. يُستخدم لكل نداء لا يتصرف بهوية مستخدم. */
@@ -64,7 +64,14 @@ export declare class UchiyomiClient {
     chapters(seriesId: string, token?: string): Promise<Chapter[]>;
     /** نسخ الفصل من مصادر مختلفة — ChapterVariant الجاهز. */
     versions(seriesId: string, token?: string): Promise<unknown>;
+    /**
+     * قائمة صفحات الفصل.
+     *
+     * upstream يرجع **مصفوفة مجرّدة** لا `{ content }` كبقية المسارات، وقراءتها
+     * على أنها `{ content }` تعطي صفر صفحات بصمت. نتحمّل الشكلين.
+     */
     pages(bookId: string, token?: string): Promise<Page[]>;
+    book(bookId: string, token?: string): Promise<Book | undefined>;
     /**
      * التقدم يُكتب هنا وهنا فقط (D-02). التوكن إلزامي: التقدم ملك مستخدم بعينه،
      * ولا يُكتب بتوكن خدمة.
@@ -73,7 +80,7 @@ export declare class UchiyomiClient {
     history(token: string): Promise<unknown>;
     stats(token: string): Promise<unknown>;
     rating(seriesId: string, token: string, value: number): Promise<unknown>;
-    /** عنوان صورة الصفحة. تُقدَّم عبر vantara-api لا مباشرة للمتصفح. */
-    pageImageUrl(bookId: string, index: number, maxWidth?: number): string;
+    /** عنوان صورة الصفحة. `pageNumber` 1-based. تُقدَّم عبر vantara-api. */
+    pageImageUrl(bookId: string, pageNumber: number, maxWidth?: number): string;
 }
 //# sourceMappingURL=client.d.ts.map

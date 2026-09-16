@@ -89,6 +89,21 @@ export async function sourceRoutes(app, ctx) {
                 types: z.array(z.string()).optional(),
                 error: z.string().optional(),
             }),
+            // محاولات متعددة: الحكم من استعلام واحد ينقلب بحسب أي استعلام جُرّب
+            searchAttempts: z
+                .array(z.object({
+                query: z.string().max(200),
+                ok: z.boolean(),
+                count: z.number().optional(),
+                relevant: z.boolean().optional(),
+                error: z.string().optional(),
+            }))
+                .max(20)
+                .optional(),
+            // بدون هذين، عدد الفصول في الدليل بلا معنى
+            probeQuery: z.string().max(200).optional(),
+            probedWork: z.string().max(400).optional(),
+            elapsedMs: z.number().int().min(0).optional(),
         });
         const parsed = probe.safeParse(request.body);
         if (!parsed.success) {
@@ -96,21 +111,55 @@ export async function sourceRoutes(app, ctx) {
         }
         const evidence = parsed.data;
         const verdict = verdictFrom(evidence);
+        // السجل أولًا: الحكم الحالي لقطة، وهذا تاريخه
+        await query(`INSERT INTO vantara_source_probes
+         (source_id, verdict, probe_query, probed_work, evidence, elapsed_ms)
+       VALUES ($1, $2::source_verdict, $3, $4, $5::jsonb, $6)`, [
+            id,
+            verdict,
+            parsed.data.probeQuery ?? null,
+            parsed.data.probedWork ?? null,
+            JSON.stringify(evidence),
+            parsed.data.elapsedMs ?? null,
+        ]);
         const row = await queryOne(
         // $2 يُستخدم في سياقَي نوع مختلفين، فالتحويل الصريح ضروري وإلا فشل الاستدلال
+        // agreeing_probes يعدّ الفحوص المتعاقبة التي وافقت الحكم، ويعود إلى 1
+        // عند أي تغيّر: SUPPORTED بواحد لقطة لا خلاصة
         `UPDATE vantara_source_verdicts
           SET verdict = $2::source_verdict,
               evidence = $3::jsonb,
+              probe_query = $4,
+              probed_work = $5,
+              agreeing_probes = CASE WHEN verdict = $2::source_verdict
+                                     THEN agreeing_probes + 1 ELSE 1 END,
               tested_at = now(),
               last_success_at = CASE WHEN $2::source_verdict = 'SUPPORTED'
                                      THEN now() ELSE last_success_at END
         WHERE source_id = $1
-        RETURNING verdict`, [id, verdict, JSON.stringify(evidence)]);
+        RETURNING verdict, agreeing_probes`, [
+            id,
+            verdict,
+            JSON.stringify(evidence),
+            parsed.data.probeQuery ?? null,
+            parsed.data.probedWork ?? null,
+        ]);
         if (!row)
             return reply.code(404).send({ error: 'not_found' });
         await query(`INSERT INTO vantara_audit_log (actor_id, action, target, detail)
        VALUES ($1, 'source.verdict', $2, $3)`, [session.userId, id, JSON.stringify({ verdict })]);
-        return reply.send({ id, verdict });
+        return reply.send({ id, verdict, agreeingProbes: row.agreeing_probes });
+    });
+    /** تاريخ فحص مصدر: لماذا حكمه ما هو، وهل تغيّر. */
+    app.get('/v1/sources/:id/probes', { preHandler: requireSession(ctx) }, async (request, reply) => {
+        const { id } = request.params;
+        const rows = await query(`SELECT verdict, probe_query AS "probeQuery", probed_work AS "probedWork",
+              elapsed_ms AS "elapsedMs", probed_at AS "probedAt"
+         FROM vantara_source_probes
+        WHERE source_id = $1
+        ORDER BY probed_at DESC
+        LIMIT 50`, [id]);
+        return reply.send({ content: rows });
     });
     /**
      * بحث VANTARA.

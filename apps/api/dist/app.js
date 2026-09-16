@@ -1,6 +1,10 @@
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify, {} from 'fastify';
 import { query } from '@vantara/db';
 import { buildContext } from "./lib/context.js";
@@ -9,6 +13,7 @@ import { presenceRoutes } from "./routes/presence.js";
 import { profileRoutes } from "./routes/profiles.js";
 import { reportRoutes } from "./routes/reports.js";
 import { socialRoutes } from "./routes/social.js";
+import { libraryRoutes } from "./routes/library.js";
 import { sourceRoutes } from "./routes/sources.js";
 export async function buildApp(config) {
     const app = Fastify({
@@ -38,7 +43,6 @@ export async function buildApp(config) {
         }
         return reply.code(status).send({ error: error.code ?? 'bad_request', message: error.message });
     });
-    app.setNotFoundHandler((_request, reply) => reply.code(404).send({ error: 'not_found' }));
     /** حياة العملية. لا يلمس القاعدة — يجيب حتى وهي ساقطة. */
     app.get('/livez', async () => ({ ok: true }));
     /**
@@ -59,6 +63,22 @@ export async function buildApp(config) {
     await socialRoutes(app, ctx);
     await sourceRoutes(app, ctx);
     await reportRoutes(app, ctx);
+    await libraryRoutes(app, ctx);
+    // الواجهة تُقدَّم من نفس الأصل: لا CORS، والكوكي same-origin بلا استثناءات
+    const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), process.env['VANTARA_WEB_ROOT'] ?? '../../web');
+    if (existsSync(join(webRoot, 'index.html'))) {
+        await app.register(fastifyStatic, { root: webRoot, index: ['index.html'] });
+        // التطبيق شاشة واحدة: أي مسار غير /v1 و/livez يُعيد الصفحة
+        app.setNotFoundHandler((request, reply) => {
+            if (request.url.startsWith('/v1/') || request.url.startsWith('/health')) {
+                return reply.code(404).send({ error: 'not_found' });
+            }
+            return reply.sendFile('index.html');
+        });
+    }
+    else {
+        app.log.warn({ webRoot }, 'web assets not found — serving API only');
+    }
     return { app, ctx };
 }
 //# sourceMappingURL=app.js.map

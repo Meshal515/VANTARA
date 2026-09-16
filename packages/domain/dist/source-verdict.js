@@ -24,6 +24,24 @@ function mentionsCloudflare(evidence) {
     return errors.some((error) => CLOUDFLARE_MARKERS.some((marker) => error.includes(marker)));
 }
 /**
+ * صلاحية البحث من كل المحاولات، لا من واحدة.
+ *
+ * `partial` هي الحالة التي كشفها القياس: Kawii Manga خدم `nano machine` ورمى
+ * على `the`، ثلاث جولات متطابقة. حكمها من استعلام واحد يقلبها بين
+ * `SUPPORTED` و`PARSER_FAILED` بحسب أي استعلام جرّبناه — وهذا عيب في الفحص
+ * لا في المصدر.
+ */
+export function searchUsability(evidence) {
+    const attempts = evidence.searchAttempts;
+    if (attempts === undefined || attempts.length === 0) {
+        return evidence.search.ok && evidence.search.relevant === true ? 'usable' : 'unusable';
+    }
+    const relevant = attempts.filter((a) => a.ok && a.relevant === true).length;
+    if (relevant === 0)
+        return 'unusable';
+    return relevant === attempts.length ? 'usable' : 'partial';
+}
+/**
  * الحكم من الدليل. الترتيب مقصود: Cloudflare يُشخّص قبل PARSER_FAILED لأنه
  * قابل للإصلاح بتشغيل FlareSolverr، بخلاف parser مكسور.
  */
@@ -34,8 +52,7 @@ export function verdictFrom(evidence) {
     if (!alive)
         return 'PARSER_FAILED';
     // حيّ، لكن البحث لا يُوصل إلى العمل ⇒ الاكتشاف يمر بـPOPULAR/LATEST + مطابقة عنوان
-    const searchUsable = evidence.search.ok && evidence.search.relevant === true;
-    if (!searchUsable)
+    if (searchUsability(evidence) === 'unusable')
         return 'SEARCH_BROKEN';
     if (!evidence.chapters.ok)
         return 'PARSER_FAILED';
