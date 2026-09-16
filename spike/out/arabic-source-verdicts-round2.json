@@ -1,0 +1,1208 @@
+[
+  {
+    "id": "sw:4110737012647435874",
+    "name": "Team X (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 24,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 253
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 12
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 52
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 2675040
+    },
+    "probedWork": "The Beginning After The End",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 4007
+  },
+  {
+    "id": "sw:1073624495230267708",
+    "name": "مانجا العاشق (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 21
+    },
+    "search": {
+      "ok": true,
+      "count": 21,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 1
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 32
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 32
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 273253
+    },
+    "probedWork": "The Amazing Digital Circus",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 13335
+  },
+  {
+    "id": "sw:918460697583900080",
+    "name": "مانجا ليك (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 10,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "The Villainous Duke s Daughter Hides Her Identity",
+    "probeQuery": "the",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3005
+  },
+  {
+    "id": "sw:7657007209499352344",
+    "name": "MangaSwat (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 20,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 36
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 24
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 16
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 290202
+    },
+    "probedWork": "The Shepherd Wizard",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 5455
+  },
+  {
+    "id": "sw:2482399499047903203",
+    "name": "Azora (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 18
+    },
+    "search": {
+      "ok": true,
+      "count": 16,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 6
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 12
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 18
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 1424486
+    },
+    "probedWork": "The Investment Method of a Wall Street Genius on Borrowed Time",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 3665
+  },
+  {
+    "id": "sw:2056490261402651047",
+    "name": "Anyone Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 1084
+  },
+  {
+    "id": "sw:8112280317896333809",
+    "name": "أريا مانجا (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 288
+  },
+  {
+    "id": "sw:8156789703798131884",
+    "name": "AriaToon (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 7,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 2
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 9
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 3
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "PNG"
+      ],
+      "bytes": 1916602
+    },
+    "probedWork": "أخي غريب My Brother Is a Stranger",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2643
+  },
+  {
+    "id": "sw:7487319247633385575",
+    "name": "Comic Verse (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 8
+    },
+    "search": {
+      "ok": true,
+      "count": 15,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 6
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 26
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 30
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 385979
+    },
+    "probedWork": "The Boogyman",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2341
+  },
+  {
+    "id": "sw:886527590434722171",
+    "name": "Despair Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 20,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 1
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 27
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 27
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 436700
+    },
+    "probedWork": "7th Time Loop: The Villainess Enjoys a Carefree Life Married to Her Worst Enemy!",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 7196
+  },
+  {
+    "id": "sw:5702082694566979718",
+    "name": "شبكة كونان العربية (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 399
+  },
+  {
+    "id": "sw:7634600808243438399",
+    "name": "Dilar (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 21,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 28
+    },
+    "pagesOldest": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapterPages) : Unsupported encryption protocol version: 12\r"
+    },
+    "pagesNewest": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapterPages) : Unsupported encryption protocol version: 12\r"
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "All Hail Lady Blanche",
+    "probeQuery": "the",
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 2399
+  },
+  {
+    "id": "sw:8617573161604126293",
+    "name": "EShadow (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 7
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "SAKAMOTO DAYS",
+    "probeQuery": "nano machine",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 3799
+  },
+  {
+    "id": "sw:917436262447415426",
+    "name": "Hijala (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 5
+    },
+    "search": {
+      "ok": true,
+      "count": 5,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 13
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 29
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 27
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 731422
+    },
+    "probedWork": "!Hand over the Money",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 7400
+  },
+  {
+    "id": "sw:4177563748162518441",
+    "name": "Hizo Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 25
+    },
+    "search": {
+      "ok": true,
+      "count": 25,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : null\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "The Law of Immutability",
+    "probeQuery": "the",
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 3303
+  },
+  {
+    "id": "sw:5037404094705788694",
+    "name": "Kawii Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 50,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 28
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 45
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 38
+    },
+    "imagesDecoded": {
+      "ok": false,
+      "error": "not an image: UNKNOWN(536572766572)",
+      "bytes": 12
+    },
+    "probedWork": "I Only Need the Duke's Child",
+    "probeQuery": "the",
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 1114
+  },
+  {
+    "id": "sw:3209001028102012989",
+    "name": "Lava Scans (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 32
+    },
+    "search": {
+      "ok": true,
+      "count": 32,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 219
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 12
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 15
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 1945638
+    },
+    "probedWork": "!?The Lord’s Coins Aren’t Decreasing",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 5238
+  },
+  {
+    "id": "sw:323105186892383931",
+    "name": "Loner Translations (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 3
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 98
+    },
+    "pagesOldest": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapterPages) : HTTP error 503\r"
+    },
+    "pagesNewest": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapterPages) : HTTP error 503\r"
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "My Dearest Self With Malice Aforethought",
+    "probeQuery": "nano machine",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 365
+  },
+  {
+    "id": "sw:7109397520501699498",
+    "name": "Manga Ai Land (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 75
+  },
+  {
+    "id": "sw:6058166507489091982",
+    "name": "Manga Starz (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 25
+    },
+    "search": {
+      "ok": true,
+      "count": 25,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "The Villainous Duke s Daughter Hides Her Identity",
+    "probeQuery": "the",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 2836
+  },
+  {
+    "id": "sw:5218550345649535189",
+    "name": "Manga Tales (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 50
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 1
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 14
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 14
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 1176766
+    },
+    "probedWork": "برجر",
+    "probeQuery": "برج",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 3538
+  },
+  {
+    "id": "sw:1630897072449336068",
+    "name": "MangaCloud (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 20
+    },
+    "search": {
+      "ok": true,
+      "count": 1020,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 61
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 11
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 22
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 2427170
+    },
+    "probedWork": "The Law of Garbage",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2850
+  },
+  {
+    "id": "sw:3975276517041363504",
+    "name": "MangaDar (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 131
+  },
+  {
+    "id": "sw:3568795724496898351",
+    "name": "مانجا لينك (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 0
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 346
+  },
+  {
+    "id": "sw:2589550143244611118",
+    "name": "MangaLionz (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 16,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "The Villainous Duke s Daughter Hides Her Identity",
+    "probeQuery": "the",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 3093
+  },
+  {
+    "id": "sw:2436176998646301840",
+    "name": "MangaSpark (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 10,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : Cloudflare bypass currently disabled\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "The Villainous Duke s Daughter Hides Her Identity",
+    "probeQuery": "the",
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 2500
+  },
+  {
+    "id": "sw:1011491016492324749",
+    "name": "MangaTek (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 128
+  },
+  {
+    "id": "sw:215553151312092548",
+    "name": "MangaTime (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 24
+    },
+    "search": {
+      "ok": true,
+      "count": 8,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 267
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 27
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 17
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 1140622
+    },
+    "probedWork": "أنا المبتدئ ذو المستوى الأقصى",
+    "probeQuery": "برج",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 2832
+  },
+  {
+    "id": "sw:743599002989616408",
+    "name": "Manhatok (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 9
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchChapters) : No chapters found\r"
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Boruto",
+    "probeQuery": "nano machine",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 1078
+  },
+  {
+    "id": "sw:4966914277555229831",
+    "name": "Murim (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Unexpected JSON token at offset 0: Expected start of the object '{',"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Unexpected JSON token at offset 0: Expected start of the object '{',"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 163
+  },
+  {
+    "id": "sw:8433210273073845288",
+    "name": "NeverScans (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 503\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 29352
+  },
+  {
+    "id": "sw:1862668423724227387",
+    "name": "Oduto (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 1
+    },
+    "search": {
+      "ok": true,
+      "count": 1,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 24
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 48
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 58
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 792123
+    },
+    "probedWork": "BORUTO: Two Blue Vortex",
+    "probeQuery": "nano machine",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 329
+  },
+  {
+    "id": "sw:335499577904379512",
+    "name": "مانجا اون لاين (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 404\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : HTTP error 404\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 947
+  },
+  {
+    "id": "sw:5634203247016722993",
+    "name": "Orca Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 10
+    },
+    "search": {
+      "ok": true,
+      "count": 20,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 1
+    },
+    "pagesOldest": {
+      "ok": false,
+      "count": 0
+    },
+    "pagesNewest": {
+      "ok": false,
+      "count": 0
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "probedWork": "Omniscient Reader Viewpoint",
+    "probeQuery": "the",
+    "verdict": "PARSER_FAILED",
+    "elapsedMs": 923
+  },
+  {
+    "id": "sw:3301038340499911137",
+    "name": "Rocks Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 30
+    },
+    "search": {
+      "ok": true,
+      "count": 12,
+      "relevant": true
+    },
+    "chapters": {
+      "ok": true,
+      "count": 26
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 30
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 47
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "WEBP"
+      ],
+      "bytes": 229116
+    },
+    "probedWork": "WISTORIA: WAND AND SWORD",
+    "probeQuery": "the",
+    "verdict": "SUPPORTED",
+    "elapsedMs": 7238
+  },
+  {
+    "id": "sw:2142158598125421915",
+    "name": "StellarSaber (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "search": {
+      "ok": false,
+      "error": "Exception while fetching data (/fetchSourceManga) : Cloudflare bypass currently disabled\r"
+    },
+    "chapters": {
+      "ok": false
+    },
+    "pagesOldest": {
+      "ok": false
+    },
+    "pagesNewest": {
+      "ok": false
+    },
+    "imagesDecoded": {
+      "ok": false
+    },
+    "verdict": "NEEDS_FLARESOLVERR",
+    "elapsedMs": 293
+  },
+  {
+    "id": "sw:6170348197605244575",
+    "name": "XSano Manga (AR)",
+    "lang": "ar",
+    "popular": {
+      "ok": true,
+      "count": 8
+    },
+    "search": {
+      "ok": true,
+      "count": 0,
+      "relevant": false
+    },
+    "chapters": {
+      "ok": true,
+      "count": 217
+    },
+    "pagesOldest": {
+      "ok": true,
+      "count": 20
+    },
+    "pagesNewest": {
+      "ok": true,
+      "count": 61
+    },
+    "imagesDecoded": {
+      "ok": true,
+      "types": [
+        "JPEG"
+      ],
+      "bytes": 223210
+    },
+    "probedWork": "BE BLUES",
+    "probeQuery": "nano machine",
+    "verdict": "SEARCH_BROKEN",
+    "elapsedMs": 745
+  }
+]

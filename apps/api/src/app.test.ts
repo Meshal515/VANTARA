@@ -19,7 +19,8 @@ const DATABASE_URL =
   process.env['DATABASE_URL'] ?? 'postgres://vantara:vantara_dev@127.0.0.1:5433/vantara';
 const UCHIYOMI_URL = process.env['UCHIYOMI_URL'] ?? 'http://127.0.0.1:8080';
 const USERNAME = process.env['TEST_USERNAME'] ?? 'mishal';
-const PASSWORD = process.env['TEST_PASSWORD'] ?? 'SpikeTest!2026';
+// لا كلمة مرور افتراضية في الكود: أي قيمة هنا تصبح سرًّا منشورًا في المستودع
+const PASSWORD = process.env['TEST_PASSWORD'];
 
 let app: FastifyInstance;
 let cookie = '';
@@ -28,6 +29,10 @@ let ready = false;
 let skipReason = '';
 
 beforeAll(async () => {
+  if (!PASSWORD) {
+    skipReason = 'TEST_PASSWORD is not set';
+    return;
+  }
   initPool({ connectionString: DATABASE_URL });
   try {
     await query('SELECT 1');
