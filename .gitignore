@@ -5,12 +5,8 @@ spike/pages/
 spike/xianscan-config/
 spike/.env
 
-# manga pages are fixtures, reproducible via spike/probes/ — not vendored
+# manga pages are reproducible fixtures via spike/probes/ — not ours to vendor
 spike/samples/
-*.jpeg
-*.jpg
-*.webp
-*.png
 
 node_modules/
 .DS_Store
