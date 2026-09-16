@@ -9,7 +9,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
+    "lint": "pnpm -r --if-present lint",
     "migrate": "pnpm --filter @vantara/db migrate",
     "dev": "pnpm --filter @vantara/api dev"
   },
