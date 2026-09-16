@@ -582,7 +582,35 @@ function startHeartbeat() {
   }, 25_000);
 }
 
+/**
+ * تسجيل الـservice worker.
+ *
+ * يحتاج HTTPS (أو localhost)، فعلى نفق Cloudflare يعمل وعلى http عبر IP لا
+ * يعمل — وهذا ليس عطلًا بل شرط المنصة. الفشل لا يمنع التطبيق من العمل.
+ */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((registration) => {
+      // نسخة جديدة جاهزة وتنتظر: فعّلها بدل إبقاء القديمة حتى تُغلق كل التبويبات
+      registration.addEventListener('updatefound', () => {
+        const next = registration.installing;
+        if (!next) return;
+        next.addEventListener('statechange', () => {
+          if (next.state === 'installed' && navigator.serviceWorker.controller) {
+            next.postMessage('skip-waiting');
+          }
+        });
+      });
+    }).catch(() => {
+      // بلا HTTPS أو مع تخزين محجوب: التطبيق يعمل، بلا إقلاع فوري فقط
+    });
+  });
+}
+
 async function boot() {
+  registerServiceWorker();
   startHeartbeat();
   try {
     const me = await api('/v1/auth/me');

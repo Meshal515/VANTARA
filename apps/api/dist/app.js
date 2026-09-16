@@ -67,7 +67,42 @@ export async function buildApp(config) {
     // الواجهة تُقدَّم من نفس الأصل: لا CORS، والكوكي same-origin بلا استثناءات
     const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), process.env['VANTARA_WEB_ROOT'] ?? '../../web');
     if (existsSync(join(webRoot, 'index.html'))) {
-        await app.register(fastifyStatic, { root: webRoot, index: ['index.html'] });
+        await app.register(fastifyStatic, {
+            root: webRoot,
+            index: ['index.html'],
+            // الإضافة تضع cache-control: max-age=0 من نفسها وتطغى على setHeaders،
+            // فنعطّلها ونتولّى كل مسار بما يناسبه
+            cacheControl: false,
+            setHeaders(reply, path) {
+                // الـservice worker لا يُكاش أبدًا: نسخة قديمة منه تُجمّد التطبيق على
+                // قشرة قديمة ولا تصل التحديثات
+                if (path.endsWith('/sw.js')) {
+                    reply.setHeader('cache-control', 'no-cache, no-store, must-revalidate');
+                    reply.setHeader('service-worker-allowed', '/');
+                    return;
+                }
+                // الصفحة نفسها تُراجَع دائمًا: هي التي تحمل أسماء بقية الملفات
+                if (path.endsWith('/index.html')) {
+                    reply.setHeader('cache-control', 'no-cache');
+                    return;
+                }
+                if (path.endsWith('.webmanifest')) {
+                    reply.setHeader('content-type', 'application/manifest+json; charset=utf-8');
+                    reply.setHeader('cache-control', 'public, max-age=3600');
+                    return;
+                }
+                // الخطوط والأيقونات ثابتة المحتوى
+                if (/\.(woff2|png|svg|ico)$/.test(path)) {
+                    reply.setHeader('cache-control', 'public, max-age=604800');
+                    return;
+                }
+                // JS وCSS بلا بصمة في أسمائها، فبلا توجيه يكاشها المتصفح تخمينًا
+                // ويخدم كودًا قديمًا. المراجعة كل مرة تكلّف 304 وتضمن الصحة.
+                if (/\.(js|css)$/.test(path)) {
+                    reply.setHeader('cache-control', 'no-cache');
+                }
+            },
+        });
         // التطبيق شاشة واحدة: أي مسار غير /v1 و/livez يُعيد الصفحة
         app.setNotFoundHandler((request, reply) => {
             if (request.url.startsWith('/v1/') || request.url.startsWith('/health')) {
