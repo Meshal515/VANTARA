@@ -212,11 +212,13 @@ export function createSync({ baseUrl }) {
 
   async function logoutDevice() {
     if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
 
   async function logoutAll() {
     if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
 
