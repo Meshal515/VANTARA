@@ -30,10 +30,12 @@ describe('B6 source and chapter contract', () => {
     expect(source).not.toHaveProperty('verdict');
   });
 
-  it('keys the web source map by the API contract id', async () => {
+  it('uses the public source id and language names in the web adapter', async () => {
     const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
     expect(web).toContain('state.sources.set(source.id, source)');
     expect(web).not.toContain('state.sources.set(source.sourceId, source)');
+    expect(web).toContain("state.sources.get(provider.source)?.language");
+    expect(web).not.toContain("state.sources.get(provider.source)?.lang");
   });
 
   it('keeps fallback and readiness polling on the backend so the client fetches once', async () => {
@@ -42,6 +44,12 @@ describe('B6 source and chapter contract', () => {
     expect(web).not.toContain('for (let attempt = 0; attempt < 3; attempt += 1)');
     expect(web).not.toContain('for (const waitMs of [400, 900, 1800])');
     expect(web).toContain('bookId = result?.bookId ?? null');
+  });
+
+  it('tracks reader chapters by CatalogueEntry.bookId rather than a nonexistent id', async () => {
+    const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
+    expect(web).toContain('catalogue.find((c) => c.bookId === id)');
+    expect(web).not.toContain('catalogue.find((c) => c.id === id)');
   });
 
   it('keeps chapter fallback in a server-side testable function', () => {
