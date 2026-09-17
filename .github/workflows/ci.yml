@@ -49,6 +49,12 @@ jobs:
             services/translation-worker/requirements.txt
             services/translation-worker/requirements-dev.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Install Noto test fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-core
+          test -f /usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf
+          test -f /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
       - name: Verify RAQM support
         run: |
           python - <<'PY'
