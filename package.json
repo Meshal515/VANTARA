@@ -9,6 +9,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:safety": "node --test tools/repository-safety.test.mjs",
     "lint": "pnpm -r --if-present lint",
     "migrate": "pnpm --filter @vantara/db migrate",
     "dev": "pnpm --filter @vantara/api dev"
