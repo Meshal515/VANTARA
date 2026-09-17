@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { query } from '@vantara/db';
 import { UchiyomiError } from '@vantara/uchiyomi';
-import { auditCoverage, buildCatalogue } from '@vantara/domain';
+import { auditCoverage, buildCatalogue, pickCopy } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 interface SeriesRow {
@@ -170,6 +170,67 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
       return reply.code(502).send({ error: 'upstream_unavailable' });
     }
   });
+
+  /**
+   * يجلب فصلًا واحدًا باختيار أفضل نسخة له.
+   *
+   * الاختيار هنا لا في العميل: قواعد الترجيح (على القرص، ثم ما اختارته قواعد
+   * الإصدار، ثم اللغة، ثم الأكثر صفحات) مُختبرة في `@vantara/domain`، وواجهة
+   * الويب جافاسكربت بلا حزم فلا تستطيع استيرادها — ونسخة ثانية منها في
+   * المتصفح تنحرف عن الأولى بهدوء.
+   *
+   * `exclude` هو ما يجعل «بدّل المصدر» يعمل: العميل يعيد النداء بمفاتيح النسخ
+   * التي فشلت، فتُختار غيرها. والمفتاح المُختار يُعاد ليعرف العميل ما يستثنيه
+   * في المحاولة القادمة.
+   */
+  app.post(
+    '/v1/series/:id/chapters/:number/fetch',
+    { preHandler: requireSession(ctx) },
+    async (request, reply) => {
+      const { id, number } = request.params as { id: string; number: string };
+      const parsed = z
+        .object({ exclude: z.array(z.string().max(300)).max(50).optional() })
+        .safeParse(request.body ?? {});
+      const target = Number(number);
+      if (!parsed.success || !Number.isFinite(target)) {
+        return reply.code(400).send({ error: 'bad_request' });
+      }
+
+      const session = sessionOf(request);
+      const versions = await ctx.uchiyomi
+        .versions(id, session.token)
+        .catch(() => ({ checkedAt: null, content: [] }));
+      const copies =
+        versions.content.find((row) => Math.round(row.number * 100) === Math.round(target * 100))
+          ?.copies ?? [];
+
+      const exclude = new Set(parsed.data.exclude ?? []);
+      const pick = pickCopy(copies, { exclude });
+
+      // بلا نسخ معروفة: الرقم وحده. upstream يختار بقواعده، وهذا أفضل من رفض
+      // الطلب عندما يكون sweep متأخرًا ولم يسجّل النسخ بعد.
+      const body = pick
+        ? { seriesId: id, picks: [{ number: target, source: pick.source, sourceId: pick.key.slice(pick.source.length + 1) }] }
+        : { seriesId: id, numbers: [target] };
+      if (!pick && exclude.size > 0 && copies.length > 0) {
+        return reply.code(409).send({ error: 'no_copies_left' });
+      }
+
+      const response = await fetch(`${base}/api/sources/fetch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(180_000),
+      });
+      const payload = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        return reply
+          .code(response.status === 404 ? 404 : 502)
+          .send({ error: 'fetch_failed', chosen: pick?.key ?? null, detail: payload });
+      }
+      return reply.send({ chosen: pick?.key ?? null, detail: payload });
+    },
+  );
 
   /**
    * الفهرس الكامل: كل رقم فصل مرة واحدة، بحالته ونسخه، مع تقرير تغطية.

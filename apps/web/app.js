@@ -940,30 +940,19 @@ async function screenSeries(id) {
 
   list.append(el('li', 'state', 'جارٍ تحميل الفصول…'));
 
-  let data;
+  let payload;
   try {
-    data = await api(`/v1/series/${encodeURIComponent(id)}`);
+    payload = await api(`/v1/series/${encodeURIComponent(id)}/chapters`);
   } catch (error) {
     list.replaceChildren(
-      el('li', 'state', error.status === 404 ? 'العمل غير موجود.' : 'تعذّر تحميل العمل.'),
+      el('li', 'state', error.status === 404 ? 'العمل غير موجود.' : 'تعذّر تحميل الفصول.'),
     );
     return;
   }
 
-  let listing = { content: [] };
-  try {
-    listing = await api(`/v1/series/${encodeURIComponent(id)}/listing`);
-  } catch {
-    // المصدر لا يعرض قائمة كاملة: الفصول المحلية تكفي
-  }
-  const byNumber = new Map();
-  for (const chapter of data.chapters ?? []) {
-    if (Number.isFinite(chapter.number)) byNumber.set(chapter.number, { ...chapter, local: true });
-  }
-  for (const entry of listing.content ?? []) {
-    if (!byNumber.has(entry.number)) byNumber.set(entry.number, { ...entry, local: false });
-  }
-  const chapters = [...byNumber.values()].sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
+  // الأحدث أولًا في القائمة، والفهرس نفسه تصاعدي للقارئ
+  const chapters = [...(payload.content ?? [])].sort((a, b) => b.number - a.number);
+  const coverage = payload.coverage ?? null;
 
   list.replaceChildren();
   if (chapters.length === 0) {
@@ -971,27 +960,65 @@ async function screenSeries(id) {
     return;
   }
 
+  // الفراغ يُقال لا يُخفى: أرقام لم يعرضها أي مصدر تُذكر صراحةً، وإلا بدا
+  // العمل ناقصًا بلا تفسير
+  if (coverage && !coverage.complete) {
+    const gap = coverage.missing.length;
+    list.append(
+      el(
+        'li',
+        'state',
+        `${coverage.first}–${coverage.last} · ${gap} فصلًا لا يعرضها أي مصدر`,
+      ),
+    );
+  }
+
   for (const chapter of chapters) {
     const item = el('li');
     const button = el('button', 'chapter');
     button.type = 'button';
-    const label = chapter.name ?? chapter.title ?? `الفصل ${chapter.number}`;
+    const label = chapter.title ?? `الفصل ${chapter.number}`;
     button.append(el('span', 'chapter__name', label));
-    const badge = el('span', 'pill', chapter.local ? (chapter.read ? 'مقروء' : 'اقرأ') : 'جلب');
+
+    // الحالة بسببها: «محجوب» و«دون الأرضية» قرارات لا أعطال، وعرضها
+    // كـ«غير موجود» يجعل النقص غامضًا
+    const STATE_LABEL = {
+      ON_DISK: chapter.read ? 'مقروء' : 'اقرأ',
+      MISSING: 'جلب',
+      HELD: 'مُنتظر',
+      BLOCKED: 'محجوب',
+      FAILED: 'أعد المحاولة',
+      BELOW_FLOOR: 'دون الأرضية',
+    };
+    const badge = el('span', 'pill', STATE_LABEL[chapter.state] ?? 'جلب');
+    if (chapter.state === 'ON_DISK') badge.className = 'pill pill--accent';
     button.append(badge);
+
+    // أكثر من مصدر ⇒ يُذكر العدد. التبديل متاح عند الفشل تلقائيًا.
+    if ((chapter.copies?.length ?? 0) > 1) {
+      button.append(el('span', 'pill', `${chapter.copies.length} مصادر`));
+    }
+
+    if (!chapter.readable) button.disabled = true;
+
     button.addEventListener('click', async () => {
       if (button.disabled) return;
       button.disabled = true;
       try {
-        let bookId = chapter.id;
-        if (!chapter.local) {
+        let bookId = chapter.bookId;
+        if (!bookId) {
           badge.textContent = 'جارٍ الجلب…';
-          await api(`/v1/series/${encodeURIComponent(id)}/fetch`, {
-            method: 'POST',
-            body: { numbers: [chapter.number] },
-          });
-          const fresh = await api(`/v1/series/${encodeURIComponent(id)}`);
-          bookId = (fresh.chapters ?? []).find((c) => c.number === chapter.number)?.id;
+          // الخادم يختار النسخة ويبدّل المصدر عند الفشل
+          await api(
+            `/v1/series/${encodeURIComponent(id)}/chapters/${chapter.number}/fetch`,
+            { method: 'POST', body: {} },
+          );
+          for (const waitMs of [400, 900, 1800]) {
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            const fresh = await api(`/v1/series/${encodeURIComponent(id)}/chapters`);
+            bookId = (fresh.content ?? []).find((row) => row.number === chapter.number)?.bookId;
+            if (bookId) break;
+          }
         }
         if (!bookId) throw new Error('missing book id');
         await go({
@@ -1080,42 +1107,68 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
   let pageObserver = null;
   let currentBookId = bookId;
 
-  const chapterLabel = (chapter) => chapter.name ?? chapter.title ?? `الفصل ${chapter.number ?? ''}`;
+  const chapterLabel = (chapter) => chapter.title ?? `الفصل ${chapter.number ?? ''}`;
 
+  /** نسخ فشل جلبها في هذه الجلسة. تُستثنى فيُجرَّب مصدر آخر. */
+  const failedCopies = new Set();
+
+  /**
+   * الفهرس من الخادم: دمج واحد مُختبر بدل دمج في كل عميل.
+   *
+   * `readable === false` تعني رقمًا لا يُفتح بأي نسخة، فيُسقط من تدفّق القراءة:
+   * القارئ المتصل لا يجوز أن يتوقف عند فصل لا يستطيع فتحه.
+   */
   const refreshCatalogue = async () => {
-    const [series, listing] = await Promise.all([
-      api(`/v1/series/${encodeURIComponent(seriesId)}`),
-      api(`/v1/series/${encodeURIComponent(seriesId)}/listing`).catch(() => ({ content: [] })),
-    ]);
-    const merged = new Map();
-    for (const chapter of series.chapters ?? []) {
-      if (Number.isFinite(chapter.number)) merged.set(chapter.number, { ...chapter, local: true });
-    }
-    for (const entry of listing.content ?? []) {
-      if (!merged.has(entry.number)) merged.set(entry.number, { ...entry, local: false });
-    }
-    catalogue = [...merged.values()]
-      .filter((c) => Number.isFinite(c.number))
-      .sort((a, b) => a.number - b.number);
-    const current = (series.chapters ?? []).find((c) => c.id === currentBookId);
-    const byId = catalogue.findIndex((c) => c.id === currentBookId);
-    const byNumber = current ? catalogue.findIndex((c) => c.number === current.number) : -1;
-    cursor = Math.max(0, byId >= 0 ? byId : byNumber >= 0 ? byNumber : 0);
+    const payload = await api(`/v1/series/${encodeURIComponent(seriesId)}/chapters`);
+    catalogue = (payload.content ?? []).filter((entry) => entry.readable);
+    const byId = catalogue.findIndex((entry) => entry.bookId === currentBookId);
+    cursor = Math.max(0, byId);
   };
 
-  const ensureLocal = async (chapter) => {
-    if (chapter.id) return chapter;
-    await api(`/v1/series/${encodeURIComponent(seriesId)}/fetch`, {
-      method: 'POST',
-      body: { numbers: [chapter.number] },
-    });
-    const fresh = await api(`/v1/series/${encodeURIComponent(seriesId)}`);
-    const local = (fresh.chapters ?? []).find((c) => c.number === chapter.number);
-    if (!local?.id) throw new Error('chapter_not_fetched');
-    const index = catalogue.findIndex((c) => c.number === chapter.number);
-    const merged = { ...chapter, ...local, local: true };
-    if (index >= 0) catalogue[index] = merged;
-    return merged;
+  /**
+   * يضمن أن الفصل على القرص وجاهز للقراءة.
+   *
+   * عند غيابه: تُختار نسخة صريحة من `copies` ويُطلب جلبها بـpick. النسخة التي
+   * تفشل تُستثنى وتُعاد المحاولة بالتالية — وهذا ما يجعل مصدرًا ساقطًا أو نسخة
+   * تالفة لا توقف القراءة، بدل أن يموت الفصل عند أول فشل.
+   *
+   * الجلب غير فوري عند upstream، فيُستفسر الفهرس مرات معدودة بتراخٍ متزايد.
+   */
+  const ensureLocal = async (entry) => {
+    if (entry.bookId) return entry;
+
+    // محاولة لكل نسخة، وثلاث على الأكثر: أبعد من ذلك انتظار لا إصلاح.
+    // الخادم يختار النسخة ويستثني ما فشل، فقواعد الترجيح تبقى في مكان واحد.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let chosen = null;
+      try {
+        const result = await api(
+          `/v1/series/${encodeURIComponent(seriesId)}/chapters/${entry.number}/fetch`,
+          { method: 'POST', body: { exclude: [...failedCopies] } },
+        );
+        chosen = result?.chosen ?? null;
+      } catch (error) {
+        // لا نسخ باقية: لا فائدة من محاولة رابعة
+        if (error.status === 409) break;
+        continue;
+      }
+
+      // الجلب غير فوري عند upstream: يُستفسر الفهرس بتراخٍ متزايد
+      for (const waitMs of [400, 900, 1800]) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        const fresh = await api(
+          `/v1/series/${encodeURIComponent(seriesId)}/chapters`,
+        ).catch(() => null);
+        const found = (fresh?.content ?? []).find((row) => row.number === entry.number);
+        if (found?.bookId) {
+          const index = catalogue.findIndex((row) => row.number === entry.number);
+          if (index >= 0) catalogue[index] = found;
+          return found;
+        }
+      }
+      if (chosen) failedCopies.add(chosen);
+    }
+    throw new Error('chapter_not_fetched');
   };
 
   const getSaver = (id) => {
@@ -1133,17 +1186,17 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
   const trackProgress = (chapter, page, total) => {
     const ratio = total > 0 ? page / total : 0;
     sync.enqueue('progress.set', {
-      chapterKey: chapter.id,
+      chapterKey: chapter.bookId,
       seriesRef: seriesId,
       page,
       ratio,
     });
-    if (ratio < 0.9 || counted.has(chapter.id)) return;
-    const activeMs = Date.now() - (enteredAt.get(chapter.id) ?? Date.now());
+    if (ratio < 0.9 || counted.has(chapter.bookId)) return;
+    const activeMs = Date.now() - (enteredAt.get(chapter.bookId) ?? Date.now());
     if (activeMs < 5000) return;
-    counted.add(chapter.id);
+    counted.add(chapter.bookId);
     sync.enqueue('chapter.complete', {
-      chapterKey: chapter.id,
+      chapterKey: chapter.bookId,
       seriesRef: seriesId,
       chapterNumber: chapter.number,
       ratio,
@@ -1196,26 +1249,26 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
 
   const appendChapter = async (rawChapter, { dividerFrom = null, restore = false } = {}) => {
     const chapter = await ensureLocal(rawChapter);
-    if (chapterNodes.has(chapter.id)) return chapter;
-    const pages = await api(`/v1/books/${encodeURIComponent(chapter.id)}/pages`);
+    if (chapterNodes.has(chapter.bookId)) return chapter;
+    const pages = await api(`/v1/books/${encodeURIComponent(chapter.bookId)}/pages`);
     const pageNumbers = (pages.content ?? []).map((p) => p.number);
     const loader = createPageLoader({
-      bookId: chapter.id,
+      bookId: chapter.bookId,
       pageNumbers,
       prefetch: 2,
       maxWidth: 1100,
       baseUrl: config.api,
     });
-    loaders.set(chapter.id, loader);
-    enteredAt.set(chapter.id, Date.now());
+    loaders.set(chapter.bookId, loader);
+    enteredAt.set(chapter.bookId, Date.now());
 
     if (dividerFrom) {
       const divider = el('div', 'divider');
       divider.append(el('div', 'divider__done', `انتهى الفصل ${dividerFrom.number ?? ''}`));
       divider.append(el('div', 'divider__next', chapterLabel(chapter)));
       flow.append(divider);
-      if (dividerFrom.id) {
-        void api(`/v1/books/${encodeURIComponent(dividerFrom.id)}/progress`, {
+      if (dividerFrom.bookId) {
+        void api(`/v1/books/${encodeURIComponent(dividerFrom.bookId)}/progress`, {
           method: 'PUT',
           body: { completed: true },
         }).catch(() => {});
@@ -1223,7 +1276,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
     }
 
     const section = el('section', 'reader-chapter');
-    section.dataset.bookId = chapter.id;
+    section.dataset.bookId = chapter.bookId;
     section.dataset.chapterTitle = chapterLabel(chapter);
     section.dataset.pageCount = String((pages.content ?? []).length);
     for (const page of pages.content ?? []) {
@@ -1234,7 +1287,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
       image.decoding = 'async';
       image.loading = 'lazy';
       image.dataset.page = String(page.number);
-      image.dataset.bookId = chapter.id;
+      image.dataset.bookId = chapter.bookId;
       image.src = loader.urlFor(page.number);
       image.addEventListener('load', () => frame.classList.remove('skeleton'), { once: true });
       image.addEventListener('error', () => frame.classList.add('reader__frame--error'), { once: true });
@@ -1242,8 +1295,10 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
       section.append(frame);
     }
     flow.append(section);
-    chapterNodes.set(chapter.id, section);
+    chapterNodes.set(chapter.bookId, section);
     watchPages();
+    // التالي يُسخَّن الآن لا عند النهاية: بلا هذا يُحسّ توقّف عند كل حدّ فصل
+    void prefetchNext();
 
     if (restore && pages.resumeAt) {
       requestAnimationFrame(() => {
@@ -1251,6 +1306,44 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
       });
     }
     return chapter;
+  };
+
+  /**
+   * يسخّن الفصل التالي قبل الوصول إليه.
+   *
+   * قائمة صفحاته وأول صورتين فقط: الهدف إخفاء زمن الشبكة عند حدّ الفصل، لا
+   * تنزيل فصل كامل لم يُطلب — وذلك يخنق اتصالًا منزليًا ويستهلك بيانات الجوال.
+   *
+   * لا يجلب من المصدر: التسخين لما هو على القرص أصلًا. الفصل غير المنزّل
+   * يُجلب عند بلوغه، وجلبه مسبقًا يعني تنزيل عمل كامل بلا طلب.
+   */
+  const prefetchNext = async () => {
+    const next = catalogue[cursor + 1];
+    if (!next?.bookId || loaders.has(next.bookId)) return;
+    try {
+      const pages = await api(`/v1/books/${encodeURIComponent(next.bookId)}/pages`);
+      const pageNumbers = (pages.content ?? []).map((page) => page.number);
+      const loader = createPageLoader({
+        bookId: next.bookId,
+        pageNumbers,
+        prefetch: 2,
+        maxWidth: 1100,
+        baseUrl: config.api,
+      });
+      loaders.set(next.bookId, loader);
+
+      // الصفحة الأولى صراحةً: `warmAfter` يسخّن ما *بعد* الرقم المُعطى، وهي
+      // بالضبط الصورة التي تظهر عند حدّ الفصل
+      const first = pageNumbers[0];
+      if (first !== undefined) {
+        const image = new Image();
+        image.decoding = 'async';
+        image.src = loader.urlFor(first);
+        loader.warmAfter(first);
+      }
+    } catch {
+      // التسخين تحسين: فشله لا يُرى، والإضافة الفعلية تعيد المحاولة
+    }
   };
 
   const setEndTrigger = () => {
@@ -1276,7 +1369,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
         try {
           const appended = await appendChapter(next, { dividerFrom: previous });
           cursor += 1;
-          currentBookId = appended.id;
+          currentBookId = appended.bookId;
           setEndTrigger();
         } catch {
           sentinel.className = 'reader__retry';
@@ -1300,19 +1393,19 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
   try {
     await refreshCatalogue();
     let start = catalogue[cursor];
-    if (!start || start.id !== bookId) {
-      const series = await api(`/v1/series/${encodeURIComponent(seriesId)}`);
-      const direct = (series.chapters ?? []).find((c) => c.id === bookId);
+    if (!start || start.bookId !== bookId) {
+      const series = await api(`/v1/series/${encodeURIComponent(seriesId)}/chapters`);
+      const direct = (series.content ?? []).find((c) => c.bookId === bookId);
       start = direct ?? start;
-      if (direct && !catalogue.some((c) => c.id === direct.id)) {
-        catalogue.push({ ...direct, local: true });
+      if (direct && !catalogue.some((c) => c.bookId === direct.bookId)) {
+        catalogue.push(direct);
         catalogue.sort((a, b) => a.number - b.number);
-        cursor = catalogue.findIndex((c) => c.id === direct.id);
+        cursor = catalogue.findIndex((c) => c.bookId === direct.bookId);
       }
     }
     if (!start) throw new Error('missing_start_chapter');
     const appended = await appendChapter(start, { restore: true });
-    currentBookId = appended.id;
+    currentBookId = appended.bookId;
     hudTitle.textContent = chapterLabel(appended);
     setEndTrigger();
   } catch {
