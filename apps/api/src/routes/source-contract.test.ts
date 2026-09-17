@@ -1,13 +1,21 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as domain from '@vantara/domain';
 import * as library from './library.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+const execFileAsync = promisify(execFile);
 
 describe('B6 source and chapter contract', () => {
+  it('keeps the browser shell syntactically valid', async () => {
+    const file = join(ROOT, 'apps/web/app.js');
+    await expect(execFileAsync(process.execPath, ['--check', file])).resolves.toBeDefined();
+  });
+
   it('exposes a stable user-facing source contract instead of raw verdict jargon', () => {
     const toPublicSource = (domain as Record<string, unknown>)['toPublicSource'];
     expect(typeof toPublicSource).toBe('function');
