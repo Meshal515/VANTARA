@@ -17,13 +17,19 @@
  */
 
 // أي تعديل على ملفات القشرة يحتاج رقمًا جديدًا هنا، وإلا خدم الـSW القديم
-const VERSION = 'vantara-shell-v1';
+const VERSION = 'vantara-shell-v2';
 
 const SHELL = [
   '/',
   '/app.js',
   '/reader.js',
   '/styles.css',
+  '/lib/sync.js',
+  '/lib/config.js',
+  '/lib/colors.js',
+  '/lib/gradient.js',
+  '/lib/coverflow.js',
+  '/screens/accounts.js',
   '/manifest.webmanifest',
   '/fonts/NotoNaskhArabic-Regular.woff2',
   '/icons/icon-192.png',
@@ -60,7 +66,9 @@ self.addEventListener('message', (event) => {
 const isShellRequest = (url) =>
   SHELL.includes(url.pathname) ||
   url.pathname.startsWith('/icons/') ||
-  url.pathname.startsWith('/fonts/');
+  url.pathname.startsWith('/fonts/') ||
+  url.pathname.startsWith('/lib/') ||
+  url.pathname.startsWith('/screens/');
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;

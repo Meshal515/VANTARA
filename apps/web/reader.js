@@ -120,11 +120,14 @@ export function zoneOf(y, height) {
  * الحد مقصود: تحميل فصل كامل مسبقًا يخنق اتصالًا منزليًا ويستهلك بيانات
  * الجوال بلا داعٍ. صفحتان أمام القارئ تكفيان لإخفاء زمن الشبكة.
  */
-export function createPageLoader({ bookId, pageNumbers, prefetch = 2, maxWidth }) {
+export function createPageLoader({ bookId, pageNumbers, prefetch = 2, maxWidth, baseUrl = '' }) {
   // الترقيم 1-based: الفهرس 0 يرجع 502 من upstream، وهذا خطأ صامت لولا القياس
+  //
+  // baseUrl مطلق داخل الـAPK: لا أصل مشترك هناك، فالمسار النسبي يشير إلى
+  // الحاوية المحلية لا إلى خادم المحتوى. فارغ في المتصفح، وهو الصحيح هناك.
   const urlFor = (pageNumber) => {
     const query = maxWidth ? `?maxWidth=${maxWidth}` : '';
-    return `/v1/img/page/${encodeURIComponent(bookId)}/${pageNumber}${query}`;
+    return `${baseUrl}/v1/img/page/${encodeURIComponent(bookId)}/${pageNumber}${query}`;
   };
 
   const warmed = new Set();
@@ -194,7 +197,7 @@ export function observePages({ container, onPageChange, threshold = 0.5 }) {
  * واحد. هذا يؤجّل، ويتجاهل الصفحة المتكررة، ويحفظ حتمًا عند إخفاء الصفحة
  * (‏`visibilitychange` هو آخر حدث نضمنه على الجوال، لا `beforeunload`).
  */
-export function createProgressSaver({ bookId, delayMs = 2_000, fetchImpl = fetch }) {
+export function createProgressSaver({ bookId, delayMs = 2_000, fetchImpl = fetch, baseUrl = '' }) {
   let timer = null;
   let pending = null;
   let lastSaved = null;
@@ -203,7 +206,7 @@ export function createProgressSaver({ bookId, delayMs = 2_000, fetchImpl = fetch
     if (page === lastSaved) return;
     lastSaved = page;
     const body = JSON.stringify({ page });
-    const url = `/v1/books/${encodeURIComponent(bookId)}/progress`;
+    const url = `${baseUrl}/v1/books/${encodeURIComponent(bookId)}/progress`;
 
     if (useBeacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
       // beacon ينجو من إغلاق التبويب، بخلاف fetch

@@ -42,8 +42,20 @@
     </style>
   </head>
   <body>
+    <!--
+      الرسم الأول يطابق البوابة التي ستُبنى بعده: شعار واسم في المنتصف على
+      أسود. أي شيء مختلف هنا يُنتج وميضًا بين الرسم الأول ورسم التطبيق.
+    -->
     <div id="root">
-      <div class="orbit"><div class="orbit__inner"><h1 class="orbit__brand">VANTARA</h1></div></div>
+      <main class="gate">
+        <section class="gate__inner">
+          <header class="gate__brand">
+            <img class="gate__mark" src="/icons/icon-512.png" alt="" width="62" height="62" />
+            <h1 class="gate__word">VANTARA</h1>
+            <p class="gate__tag">عالم واحد .. لكل القصص</p>
+          </header>
+        </section>
+      </main>
     </div>
     <script type="module" src="/app.js"></script>
   </body>
