@@ -15,9 +15,12 @@ const schema = z.object({
   /** توكن خدمة `uy_…` بنطاق read+write. النداءات باسم مستخدم تستخدم توكنه. */
   UCHIYOMI_SERVICE_TOKEN: z.string().optional(),
 
-  /** يوقّع كوكي جلسة VANTARA. 32 بايتًا على الأقل. */
+  /** يوقّع كوكي الجلسة القديمة ويشفّر توكن Uchiyomi المخزّن. 32 بايتًا على الأقل. */
   SESSION_SECRET: z.string().min(32),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(60),
+
+  /** نفس القيمة المضبوطة كـWorker secret؛ توقّع access token v2 وتتحقق منه. */
+  VANTARA_IDENTITY_SECRET: z.string().min(32),
 
   /** VANTARA يقف خلف Cloudflare Access؛ الكوكي Secure إلا في التطوير. */
   COOKIE_SECURE: z
