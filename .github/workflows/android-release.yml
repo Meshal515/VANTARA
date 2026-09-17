@@ -1,7 +1,7 @@
 name: Android release APK
 
 # الإصدار الموقّع إنتاجي فقط: لا تشغيل يدوي من فرع تجريبي. يجب أن يكون tag
-# من نوع v* ومبنيًا على commit موجود في main.
+# من نوع v* ومبنيًا على commit موجود في main واجتاز VANTARA CI.
 on:
   push:
     tags:
@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: android-release-${{ github.ref }}
@@ -35,6 +36,17 @@ jobs:
           git fetch origin main:refs/remotes/origin/main --force
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "Tag $GITHUB_REF_NAME does not point to a commit in main"; exit 1; }
+
+      - name: Verify tagged commit passed VANTARA CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          passed=$(gh run list --workflow 'VANTARA CI' --commit "$GITHUB_SHA" --status completed \
+            --limit 20 --json conclusion \
+            --jq '[.[] | select(.conclusion == "success")] | length')
+          test "$passed" -gt 0 \
+            || { echo "Tagged commit $GITHUB_SHA has no successful VANTARA CI run"; exit 1; }
 
       - uses: pnpm/action-setup@v4
         with:
@@ -69,12 +81,10 @@ jobs:
           name="${GITHUB_REF_NAME#v}"
           test -n "$name" && test "$name" != "$GITHUB_REF_NAME" \
             || { echo 'Release tag must start with v'; exit 1; }
-          # versionCode تصاعدي دائمًا: أندرويد يرفض تثبيت تحديث برقم أقل
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "VANTARA $name (code ${GITHUB_RUN_NUMBER})"
 
-      # عنوان الـWorker يُستنتج من حساب Cloudflare بدل سرّ إضافي يُنسى تحديثه
       - name: Resolve endpoint URLs
         id: urls
         env:
@@ -90,8 +100,6 @@ jobs:
               | jq -r '.result.subdomain // empty')
             if [ -n "$sub" ]; then sync="https://$WORKER_NAME.$sub.workers.dev"; fi
           fi
-          # خادم المحتوى يعرفه أصحابه وحدهم (نفق منزلي). فارغًا يُضبط من
-          # الإعدادات داخل التطبيق بلا إصدار جديد.
           echo "sync=$sync" >> "$GITHUB_OUTPUT"
           echo "api=${API_URL_VAR:-}" >> "$GITHUB_OUTPUT"
           echo "updates=https://$CF_PAGES_PROJECT.pages.dev" >> "$GITHUB_OUTPUT"
@@ -107,7 +115,6 @@ jobs:
         run: |
           set -euo pipefail
           file=apps/web/lib/config.js
-          # العلامات النصية تُستبدل هنا فقط، فلا سرّ ولا عنوان في المستودع
           python3 - "$file" <<'PY'
           import os, sys
           path = sys.argv[1]
@@ -146,8 +153,6 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon assembleRelease
 
-      # البناء الناجح لا يعني APK موقّعًا: بلا keystore ينتج Gradle ملفًا
-      # غير موقّع بهدوء، ويُرفض عند التثبيت على الهاتف
       - name: Verify the APK is actually signed
         run: |
           set -euo pipefail
@@ -158,7 +163,6 @@ jobs:
           tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$tools/apksigner" verify --verbose --print-certs "$apk" | tee /tmp/verify.txt
           grep -q 'Verifies' /tmp/verify.txt || { echo 'APK signature did not verify'; exit 1; }
-          # v2 هو ما يفرضه أندرويد 7+؛ v1 وحده يُرفض على الأجهزة الحديثة
           grep -q 'JAR signing\|v1 scheme' /tmp/verify.txt || true
           grep -qE 'v2 scheme \(APK Signature Scheme v2\): true' /tmp/verify.txt \
             || { echo 'v2 signature missing'; exit 1; }
@@ -167,7 +171,6 @@ jobs:
           cp "$apk" dist/VANTARA-release.apk
           sha256sum dist/VANTARA-release.apk | tee dist/VANTARA-release.apk.sha256
 
-      # يُنشر مع الواجهة على Pages؛ التطبيق يقرأه ليعرف أن هناك أحدث
       - name: Write version.json
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
