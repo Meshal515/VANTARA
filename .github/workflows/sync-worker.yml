@@ -1,20 +1,22 @@
 name: Deploy sync worker
 
+# هذا workflow يملك مفاتيح الإنتاج ويطبّق migrations بعيدة، لذلك لا يعمل
+# من فروع التطوير ولا يدعم التشغيل اليدوي. جميع الفروع تُفحص في ci.yml؛
+# النشر البعيد يحدث فقط عندما يصل التغيير إلى main.
 on:
   push:
     branches:
-      - '**'
+      - main
     paths:
       - 'services/sync-worker/**'
       - 'packages/domain/**'
       - '.github/workflows/sync-worker.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-worker-${{ github.ref }}
+  group: sync-worker-production
   cancel-in-progress: false
 
 env:
@@ -22,29 +24,7 @@ env:
   WORKER_DIR: services/sync-worker
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @vantara/domain build
-      - run: pnpm --filter @vantara/sync-worker typecheck
-      - run: pnpm --filter @vantara/sync-worker test
-
   deploy:
-    # الفروع التجريبية لا تلمس Worker أو D1 الحيّين. النشر والإزاحات البعيدة
-    # محصورة في main؛ الفروع الأخرى تمر فقط عبر validate أعلاه.
-    if: github.ref == 'refs/heads/main'
-    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -72,6 +52,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @vantara/domain build
+      - run: pnpm --filter @vantara/sync-worker typecheck
 
       - name: Resolve or create the D1 database
         id: d1
