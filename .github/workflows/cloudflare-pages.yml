@@ -1,16 +1,17 @@
 name: Deploy web to Cloudflare Pages
 
+# هذا workflow يحمل مفاتيح Cloudflare ويستطيع تعديل مشروع Pages، لذلك لا
+# يحصل فرع تجريبي على Preview من مفاتيح الإنتاج. الفروع تُفحص في CI فقط؛
+# النشر العام يحدث من main، والإصدار يعيد نشر main بعد تحديث version.json.
 on:
   push:
     branches:
-      - '**'
+      - main
     paths:
       - 'apps/web/**'
       - '.github/workflows/cloudflare-pages.yml'
-  # إصدار جديد ⇒ version.json يُعاد نشره، وإلا لم يعرف أي تطبيق أن هناك أحدث
   release:
     types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +25,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # حتى عند حدث release ننشر الواجهة الحالية من main، لا نسخة عشوائية
+      # من tag قديم. fetch-depth=0 مطلوب للتحقق من علاقة tag بـmain.
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify release belongs to main
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main --tags --force
+          test -n "$RELEASE_TAG" || { echo 'Missing release tag'; exit 1; }
+          git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
+          git merge-base --is-ancestor "refs/tags/$RELEASE_TAG^{commit}" origin/main \
+            || { echo "Release $RELEASE_TAG is not based on main"; exit 1; }
 
       - uses: actions/setup-node@v4
         with:
@@ -113,23 +131,19 @@ jobs:
           JSON
           cat apps/web/version.json
 
-      - name: Deploy static web
+      - name: Deploy production static web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          branch="${GITHUB_REF_NAME}"
-          if [ "$branch" != "$CF_PRODUCTION_BRANCH" ]; then
-            echo "Preview deploy for $branch"
-          else
-            echo "Production deploy for $branch"
-          fi
+          set -euo pipefail
+          echo "Production deploy from $CF_PRODUCTION_BRANCH"
           npx --yes wrangler@4 pages deploy apps/web \
             --project-name="$CF_PAGES_PROJECT" \
-            --branch="$branch"
+            --branch="$CF_PRODUCTION_BRANCH"
 
       - name: Important deployment note
         run: |
-          echo 'Frontend deployment completed.'
-          echo 'The root pages.dev hostname is production only when the deploy branch matches CF_PRODUCTION_BRANCH.'
+          echo 'Frontend production deployment completed from main.'
+          echo 'Feature branches are CI-only until an isolated preview project/token is introduced.'
           echo 'VANTARA API endpoints (/v1/*) still require the backend origin.'
