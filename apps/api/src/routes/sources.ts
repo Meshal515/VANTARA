@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { query, queryOne } from '@vantara/db';
 import {
   looksRelevant,
-  usableForReading,
-  usableForSearch,
+  toPublicSource,
   verdictFrom,
   type ProbeEvidence,
   type SourceVerdict,
@@ -53,6 +52,10 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     return reply.send({ total: sources.length, added, engine: status });
   });
 
+  /**
+   * العقد العام للمصدر صغير وثابت عمدًا. verdict/evidence تفاصيل تشغيلية تبقى
+   * في مسارات evidence/probes ولا نجبر كل عميل على فهمها.
+   */
   app.get('/v1/sources', { preHandler: requireSession(ctx) }, async (request, reply) => {
     const onlyUsable = (request.query as { usable?: string }).usable === 'true';
 
@@ -63,19 +66,15 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     );
 
     const content = rows
-      .map((row) => ({
-        id: row.source_id,
-        name: row.source_name,
-        lang: row.lang,
-        verdict: row.verdict,
-        testedAt: row.tested_at,
-        lastSuccessAt: row.last_success_at,
-        notes: row.notes,
-        usableForReading: usableForReading(row.verdict),
-        usableForSearch: usableForSearch(row.verdict),
-        hasEvidence: Object.keys(row.evidence).length > 0,
-      }))
-      .filter((row) => !onlyUsable || row.usableForReading);
+      .map((row) =>
+        toPublicSource({
+          id: row.source_id,
+          name: row.source_name,
+          lang: row.lang,
+          verdict: row.verdict,
+        }),
+      )
+      .filter((source) => !onlyUsable || source.capabilities.read);
 
     return reply.send({ content });
   });
