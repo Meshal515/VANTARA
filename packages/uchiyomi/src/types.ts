@@ -116,3 +116,54 @@ export class UchiyomiError extends Error {
     return this.status === 429 || this.status === 502 || this.status >= 503;
   }
 }
+
+/**
+ * نسخة واحدة من رقم فصل عند مصدر، من `/api/series/{id}/versions`.
+ *
+ * `pages: 0` رابط خارجي لا يُنزَّل، و`null` يعني أن المصدر لا يقول — والفرق
+ * مهم: الأول يُستبعد من الاختيار والثاني لا.
+ */
+export interface Copy {
+  /** `<source>:<sourceId>`، فريد داخل الرقم. */
+  key: string;
+  source: string;
+  sourceName: string;
+  groups: string[];
+  scanlator: string | null;
+  lang: string | null;
+  pages: number | null;
+  publishedAt: string | null;
+  chosen: boolean;
+  blocked: boolean;
+  onDisk: boolean;
+}
+
+export interface ChapterVersions {
+  checkedAt: string | null;
+  content: { number: number; copies: Copy[] }[];
+}
+
+/**
+ * رقم فصل يعرضه المصدر ولا يحمل الخادم صفًّا له، من `/api/series/{id}/listing`.
+ *
+ * `why` هو ما يفرّق بين عطل وقرار: `floor` يعني أرضية «آخر N فصلًا»
+ * و`blocked` مجموعة محجوبة، وكلاهما مقصود — بخلاف `missing` و`failed`.
+ */
+export interface Ghost {
+  number: number;
+  title: string | null;
+  publishedAt: string | null;
+  scanlator: string | null;
+  groups: string[];
+  sourceId: string;
+  sourceName: string;
+  why: 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+  attempts?: number;
+  waitingFor?: string;
+  waitDaysLeft?: number;
+}
+
+export interface SeriesListing {
+  checkedAt: string | null;
+  content: Ghost[];
+}

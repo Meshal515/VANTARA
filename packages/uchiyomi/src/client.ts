@@ -1,4 +1,6 @@
 import {
+  type ChapterVersions,
+  type SeriesListing,
   type AdminUser,
   type Book,
   type Chapter,
@@ -266,20 +268,66 @@ export class UchiyomiClient {
     });
   }
 
+  /**
+   * الفصول التي يحملها الخادم، بترتيب القراءة.
+   *
+   * غير مُصفَّح عند upstream (لا page ولا size في العقد)، فالاستجابة كاملة —
+   * وهذا مقصود: عمل بسبعمئة فصل يعيدها كلها.
+   */
   async chapters(seriesId: string, token?: string): Promise<Chapter[]> {
     const out = await this.#require<{ content: Chapter[] }>(
       `/api/series/${encodeURIComponent(seriesId)}/books`,
-      token !== undefined ? { token } : {},
+      { timeoutMs: 90_000, ...(token !== undefined ? { token } : {}) },
     );
     return out.content;
   }
 
-  /** نسخ الفصل من مصادر مختلفة — ChapterVariant الجاهز. */
-  versions(seriesId: string, token?: string): Promise<unknown> {
-    return this.#require(
-      `/api/series/${encodeURIComponent(seriesId)}/versions`,
-      token !== undefined ? { token } : {},
+  /**
+   * الأرقام التي يعرضها المصدر ولا يحملها الخادم، مع سبب غياب كل واحد.
+   *
+   * تُقرأ من آخر sweep لا من المصادر مباشرة، فـ`checkedAt` هو عمر الجواب.
+   */
+  async listing(seriesId: string, token?: string): Promise<SeriesListing> {
+    const out = await this.#require<SeriesListing>(
+      `/api/series/${encodeURIComponent(seriesId)}/listing`,
+      { timeoutMs: 90_000, ...(token !== undefined ? { token } : {}) },
     );
+    return { checkedAt: out.checkedAt ?? null, content: out.content ?? [] };
+  }
+
+  /**
+   * صفحة واحدة من المكتبة.
+   *
+   * المسار مُصفَّح (`page`/`size`) وتجاهل ذلك يعني أن المكتبة تُعرض بصفحتها
+   * الأولى فقط — نحو عشرين عملًا من آلاف. `searchLibraryAll` يستنفدها.
+   */
+  librarySearch(
+    token: string,
+    body: { query?: string; page?: number; size?: number; sort?: string } = {},
+  ): Promise<{ content?: unknown[]; totalPages?: number; last?: boolean; totalElements?: number }> {
+    return this.#require('/api/series/search', {
+      method: 'POST',
+      token,
+      body,
+      timeoutMs: 90_000,
+    });
+  }
+
+  /**
+   * نسخ كل رقم فصل من كل مصدر — ChapterVariant الجاهز.
+   *
+   * هذا هو أساس تعدّد المصادر: لكل رقم قائمة نسخ بعلامات `chosen` و`blocked`
+   * و`onDisk`، و`source`+`sourceId` من هنا يصنعان Pick لـ`/api/sources/fetch`.
+   * فمصدر ساقط لا يُخفي الفصل — تُجلب نسخة أخرى.
+   *
+   * المهلة أوسع: الاستجابة تحمل كل الأرقام بكل نسخها، وهي كبيرة لعمل طويل.
+   */
+  async versions(seriesId: string, token?: string): Promise<ChapterVersions> {
+    const out = await this.#require<ChapterVersions>(
+      `/api/series/${encodeURIComponent(seriesId)}/versions`,
+      { timeoutMs: 90_000, ...(token !== undefined ? { token } : {}) },
+    );
+    return { checkedAt: out.checkedAt ?? null, content: out.content ?? [] };
   }
 
   /**

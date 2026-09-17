@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { query } from '@vantara/db';
 import { UchiyomiError } from '@vantara/uchiyomi';
+import { auditCoverage, buildCatalogue } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 interface SeriesRow {
@@ -31,23 +32,46 @@ const ALLOWED_IMAGE_TYPES = new Set([
 export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const base = ctx.config.UCHIYOMI_URL.replace(/\/+$/, '');
 
-  /** الأعمال المتابَعة، بعد حجب المحذوف للجميع. */
+  /**
+   * كل الأعمال المتابَعة، بعد حجب المحذوف للجميع.
+   *
+   * يستنفد الصفحات. `/api/series/search` مُصفَّح (`page`/`size`) وكان يُنادى
+   * بجسم فارغ، فكانت المكتبة تُعرض بصفحتها الأولى وحدها — نحو عشرين عملًا
+   * من آلاف، بلا أي خطأ يشير إلى النقص.
+   *
+   * التوقّف على ثلاث علامات معًا (`last`، `totalPages`، صفحة أقصر من المقاس)
+   * لأن أيها يكفي، وغيابها كلها يعني حلقة لا تنتهي. والتخلّص من التكرار
+   * بالمعرّف يجعل الحلقة صحيحة سواء كان الترقيم من صفر أو من واحد.
+   */
+  const PAGE_SIZE = 200;
+  const MAX_PAGES = 80;
+
+  const allSeries = async (token: string): Promise<SeriesRow[]> => {
+    const seen = new Map<string, SeriesRow>();
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const payload = await ctx.uchiyomi.librarySearch(token, {
+        page,
+        size: PAGE_SIZE,
+        sort: 'updated,desc',
+      });
+      const rows = (payload.content ?? []) as SeriesRow[];
+      for (const row of rows) if (row?.id) seen.set(row.id, row);
+      if (rows.length < PAGE_SIZE) break;
+      if (payload.last === true) break;
+      if (payload.totalPages !== undefined && page + 1 >= payload.totalPages) break;
+    }
+    return [...seen.values()];
+  };
+
   app.get('/v1/library', { preHandler: requireSession(ctx) }, async (request, reply) => {
     const session = sessionOf(request);
 
-    const response = await fetch(`${base}/api/series/search`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!response.ok) return reply.code(502).send({ error: 'upstream_unavailable' });
-
-    const payload = (await response.json()) as { content?: SeriesRow[] };
-    const series = payload.content ?? [];
+    let series: SeriesRow[];
+    try {
+      series = await allSeries(session.token);
+    } catch {
+      return reply.code(502).send({ error: 'upstream_unavailable' });
+    }
 
     const deleted = new Set(
       (
@@ -110,22 +134,96 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
     const { id } = request.params as { id: string };
     const session = sessionOf(request);
 
-    const response = await fetch(`${base}/api/series/${encodeURIComponent(id)}/listing`, {
-      headers: { Authorization: `Bearer ${session.token}` },
-      signal: AbortSignal.timeout(90_000),
-    });
-    if (!response.ok) return reply.code(502).send({ error: 'upstream_unavailable' });
+    let listing;
+    try {
+      listing = await ctx.uchiyomi.listing(id, session.token);
+    } catch {
+      return reply.code(502).send({ error: 'upstream_unavailable' });
+    }
 
-    const payload = (await response.json()) as {
-      checkedAt?: string;
-      content?: { number: number; title?: string; publishedAt?: string; scanlator?: string | null }[];
-    };
-    const listed = payload.content ?? [];
+    // لا قطع. كان هنا `.slice(0, 400)` بعد ترتيب تنازلي، فكان عمل بسبعمئة
+    // فصل يفقد أقدم ثلاثمئة — وهذا بالضبط ما يُرى كـ«الفصول تبدأ من 300».
+    // و`why` يُمرَّر كما هو: الفراغ بسبب أرضية «آخر N فصلًا» ليس عطلًا،
+    // وإخفاء السبب يجعله غامضًا.
+    return reply.send({
+      checkedAt: listing.checkedAt,
+      content: [...listing.content].sort((a, b) => b.number - a.number),
+    });
+  });
+
+  /**
+   * نسخ كل رقم فصل من كل مصدر.
+   *
+   * هذا هو أساس تعدّد المصادر، وكان جاهزًا عند upstream وغير مستعمل: لكل رقم
+   * كل النسخ بعلامات `chosen` و`blocked` و`onDisk`، فالتبديل بين المصادر
+   * اختيار نسخة، ومصدر ساقط لا يُخفي الفصل.
+   */
+  app.get('/v1/series/:id/versions', { preHandler: requireSession(ctx) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const versions = await ctx.uchiyomi.versions(id, sessionOf(request).token);
+      return reply.send(versions);
+    } catch (err) {
+      if (err instanceof UchiyomiError && err.status === 404) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      return reply.code(502).send({ error: 'upstream_unavailable' });
+    }
+  });
+
+  /**
+   * الفهرس الكامل: كل رقم فصل مرة واحدة، بحالته ونسخه، مع تقرير تغطية.
+   *
+   * ثلاثة مسارات منفصلة كانت تُدمج في العميل، وكل عميل يدمجها بطريقته. هنا
+   * تُدمج مرة بقواعد مُختبرة (`@vantara/domain/chapters`)، ويُرفق `coverage`
+   * الذي يسمّي الأرقام الغائبة صراحةً — «أظن أنها كاملة» ليست إجابة.
+   *
+   * الأشباح والنسخ تُجلب بتساهل: sweep متأخر أو مصدر ساقط يُنقص المعلومات
+   * ولا يُفرّغ القائمة. الفصول المحمولة وحدها إلزامية.
+   */
+  app.get('/v1/series/:id/chapters', { preHandler: requireSession(ctx) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const session = sessionOf(request);
+
+    const deleted = await query<{ series_ref: string }>(
+      `SELECT series_ref FROM vantara_deleted_works
+        WHERE series_ref = $1 AND restored_at IS NULL`,
+      [id],
+    );
+    if (deleted.length > 0) return reply.code(404).send({ error: 'not_found' });
+
+    let held;
+    try {
+      held = await ctx.uchiyomi.chapters(id, session.token);
+    } catch (err) {
+      if (err instanceof UchiyomiError && err.status === 404) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      return reply.code(502).send({ error: 'upstream_unavailable' });
+    }
+
+    const [listing, versions] = await Promise.all([
+      ctx.uchiyomi.listing(id, session.token).catch(() => ({ checkedAt: null, content: [] })),
+      ctx.uchiyomi.versions(id, session.token).catch(() => ({ checkedAt: null, content: [] })),
+    ]);
+
+    const catalogue = buildCatalogue({
+      held: held
+        .filter((chapter) => Number.isFinite(chapter.number))
+        .map((chapter) => ({
+          id: chapter.id,
+          number: chapter.number as number,
+          name: chapter.name ?? null,
+          read: chapter.read ?? false,
+        })),
+      ghosts: listing.content,
+      versions: versions.content,
+    });
 
     return reply.send({
-      checkedAt: payload.checkedAt ?? null,
-      // الأحدث أولًا: هذا ما يريده القارئ المتابع
-      content: [...listed].sort((a, b) => b.number - a.number).slice(0, 400),
+      checkedAt: listing.checkedAt,
+      content: catalogue,
+      coverage: auditCoverage(catalogue),
     });
   });
 
@@ -136,8 +234,22 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
    */
   app.post('/v1/series/:id/fetch', { preHandler: requireSession(ctx) }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    // `picks` تسمّي نسخة بعينها من `/versions`، وهي ما يجعل «بدّل المصدر»
+    // ممكنًا: العقد يقول إن الاختيار الصريح يتجاوز قواعد المجموعات والحجب.
+    // والسقف 300 مجتمعة عند upstream؛ الخمسة السابقة كانت تمنع ملء فجوة
+    // طويلة في طلب واحد بلا سبب.
     const parsed = z
-      .object({ numbers: z.array(z.number()).min(1).max(5) })
+      .object({
+        numbers: z.array(z.number().min(0).max(1_000_000)).max(300).optional(),
+        picks: z
+          .array(z.object({ number: z.number(), source: z.string(), sourceId: z.string() }))
+          .max(300)
+          .optional(),
+      })
+      .refine(
+        (body) => (body.numbers?.length ?? 0) + (body.picks?.length ?? 0) > 0,
+        'numbers or picks required',
+      )
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
 
@@ -148,7 +260,11 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
         Authorization: `Bearer ${session.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ seriesId: id, numbers: parsed.data.numbers }),
+      body: JSON.stringify({
+        seriesId: id,
+        ...(parsed.data.numbers ? { numbers: parsed.data.numbers } : {}),
+        ...(parsed.data.picks ? { picks: parsed.data.picks } : {}),
+      }),
       signal: AbortSignal.timeout(180_000),
     });
 
