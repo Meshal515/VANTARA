@@ -1,16 +1,14 @@
 name: Deploy sync worker
 
-# هذا workflow يملك مفاتيح الإنتاج ويطبّق migrations بعيدة، لذلك لا يعمل
-# من فروع التطوير ولا يدعم التشغيل اليدوي. جميع الفروع تُفحص في ci.yml؛
-# النشر البعيد يحدث فقط عندما يصل التغيير إلى main.
+# Workflow إنتاجي مميّز: لا يستقبل push مباشرة ولا workflow_dispatch.
+# GitHub يشغّل workflow_run من النسخة الموجودة على default branch، وبعد نجاح
+# VANTARA CI على main فقط. لذلك كود فرع تجريبي لا يستطيع تعديل بوابة النشر ثم
+# تشغيلها بنفسه، والـD1 لا تُمس قبل أن تنجح الاختبارات.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'services/sync-worker/**'
-      - 'packages/domain/**'
-      - '.github/workflows/sync-worker.yml'
+  workflow_run:
+    workflows: ['VANTARA CI']
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -25,10 +23,14 @@ env:
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # ننشر SHA الذي اختبره CI بالضبط، لا HEAD أحدث وصل إلى main أثناء الانتظار.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: pnpm/action-setup@v4
         with:
