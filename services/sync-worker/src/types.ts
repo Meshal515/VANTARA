@@ -28,8 +28,12 @@ export interface D1Database {
 
 export interface Env {
   DB: D1Database;
-  /** تدويره يُبطل كل الجلسات فورًا. */
+  /** مؤقت فقط لمهايئ الـWorker القديم داخل secure-index؛ لا يخرج للعميل. */
   VANTARA_SESSION_SECRET: string;
+  /** يوقّع access token v2 نفسه الذي يفهمه Worker وContent API. */
+  VANTARA_IDENTITY_SECRET: string;
+  /** HMAC لبيانات pairing/device؛ D1 لا يخزن credential خامًا. */
+  VANTARA_DEVICE_PEPPER: string;
   /** أصول مسموح لها بالطلب. فاصلة بينها. */
   ALLOWED_ORIGINS?: string;
 }
