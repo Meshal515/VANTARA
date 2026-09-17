@@ -2,7 +2,7 @@ name: Deploy web to Cloudflare Pages
 
 # الإنتاج لا ينشر مباشرة من push. نشر main يحدث فقط بعد نجاح VANTARA CI؛
 # workflow_run يُقرأ من default branch ويملك الأسرار بعد أن ينتهي CI غير المميّز.
-# حدث release مسموح لتحديث version.json، لكن tag يجب أن يكون من main.
+# حدث release مسموح لتحديث version.json، لكن tag وmain يجب أن يكونا من مسار مختبر.
 on:
   workflow_run:
     workflows: ['VANTARA CI']
@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CF_PAGES_PROJECT: vantara
@@ -29,7 +30,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # في مسار CI ننشر SHA الذي اختُبر بالضبط. في release نأخذ main الحالي؛
-      # التحقق التالي يضمن أن release نفسه مبني على main.
+      # التحقق التالي يضمن أن release نفسه مبني على main وأن main الحالي اجتاز CI.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
@@ -46,6 +47,19 @@ jobs:
           git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
           git merge-base --is-ancestor "refs/tags/$RELEASE_TAG^{commit}" origin/main \
             || { echo "Release $RELEASE_TAG is not based on main"; exit 1; }
+
+      - name: Verify main commit passed VANTARA CI
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MAIN_SHA=$(git rev-parse origin/main)
+          passed=$(gh run list --workflow 'VANTARA CI' --commit "$MAIN_SHA" --status completed \
+            --limit 20 --json conclusion \
+            --jq '[.[] | select(.conclusion == "success")] | length')
+          test "$passed" -gt 0 \
+            || { echo "main commit $MAIN_SHA has no successful VANTARA CI run"; exit 1; }
 
       - uses: actions/setup-node@v4
         with:
