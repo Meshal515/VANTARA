@@ -1,14 +1,11 @@
 name: Android release APK
 
+# الإصدار الموقّع إنتاجي فقط: لا تشغيل يدوي من فرع تجريبي. يجب أن يكون tag
+# من نوع v* ومبنيًا على commit موجود في main.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'versionName (e.g. 1.0.0). Defaults to 0.<run_number>.0'
-        required: false
 
 permissions:
   contents: write
@@ -27,6 +24,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # هذا الفحص يسبق أي قراءة لمفاتيح التوقيع أو Cloudflare. Tag أُنشئ على
+      # commit تجريبي لا يحق له إنتاج APK موقّع حتى لو طابق v*.
+      - name: Verify tagged commit belongs to main
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main --force
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "Tag $GITHUB_REF_NAME does not point to a commit in main"; exit 1; }
 
       - uses: pnpm/action-setup@v4
         with:
@@ -58,13 +66,9 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = 'tag' ]; then
-            name="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            name="${{ inputs.version }}"
-          else
-            name="0.${GITHUB_RUN_NUMBER}.0"
-          fi
+          name="${GITHUB_REF_NAME#v}"
+          test -n "$name" && test "$name" != "$GITHUB_REF_NAME" \
+            || { echo 'Release tag must start with v'; exit 1; }
           # versionCode تصاعدي دائمًا: أندرويد يرفض تثبيت تحديث برقم أقل
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
@@ -192,7 +196,6 @@ jobs:
           retention-days: 90
 
       - name: Attach to the GitHub release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
