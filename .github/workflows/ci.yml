@@ -29,9 +29,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # البناء قبل الفحص: `services/sync-worker` و`apps/api` يستوردان
+      # `@vantara/domain` عبر declarations مُولَّدة، فبلا بناء أولًا يُفحص
+      # المشروع على مخرجات قديمة — أو لا شيء — ويمرّ ما لا يجب أن يمرّ.
+      - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm build
 
   translation-worker:
     runs-on: ubuntu-latest
