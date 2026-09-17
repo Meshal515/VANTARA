@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChapterCopy } from '@vantara/domain';
-import { fetchChapterWithFallback } from './chapter-fallback.ts';
+import * as library from '../routes/library.ts';
 
 const first: ChapterCopy = {
   key: 'source-a:chapter-a',
@@ -14,8 +14,25 @@ const second: ChapterCopy = {
   pages: 18,
 };
 
+type FallbackOptions = {
+  copies: ChapterCopy[];
+  fetchCopy: (copy: ChapterCopy | null) => Promise<unknown>;
+  verifyAvailable: (copy: ChapterCopy | null) => Promise<boolean>;
+};
+type FallbackResult = { chosen: string | null; attempts: number };
+type FallbackFn = (options: FallbackOptions) => Promise<FallbackResult>;
+
+function fallbackFn(): FallbackFn | null {
+  const candidate = (library as Record<string, unknown>)['fetchChapterWithFallback'];
+  return typeof candidate === 'function' ? (candidate as FallbackFn) : null;
+}
+
 describe('fetchChapterWithFallback', () => {
   it('automatically tries the next copy when the preferred source throws', async () => {
+    const fetchChapterWithFallback = fallbackFn();
+    expect(fetchChapterWithFallback).not.toBeNull();
+    if (!fetchChapterWithFallback) return;
+
     const attempts: string[] = [];
     const result = await fetchChapterWithFallback({
       copies: [first, second],
@@ -33,6 +50,10 @@ describe('fetchChapterWithFallback', () => {
   });
 
   it('moves on when a fetch call succeeds but the requested chapter never appears', async () => {
+    const fetchChapterWithFallback = fallbackFn();
+    expect(fetchChapterWithFallback).not.toBeNull();
+    if (!fetchChapterWithFallback) return;
+
     const attempts: string[] = [];
     const result = await fetchChapterWithFallback({
       copies: [first, second],
@@ -48,6 +69,10 @@ describe('fetchChapterWithFallback', () => {
   });
 
   it('uses upstream automatic selection once when no copy metadata exists', async () => {
+    const fetchChapterWithFallback = fallbackFn();
+    expect(fetchChapterWithFallback).not.toBeNull();
+    if (!fetchChapterWithFallback) return;
+
     let calls = 0;
     const result = await fetchChapterWithFallback({
       copies: [],
@@ -65,6 +90,10 @@ describe('fetchChapterWithFallback', () => {
   });
 
   it('fails with a stable user-facing code only after every known copy is exhausted', async () => {
+    const fetchChapterWithFallback = fallbackFn();
+    expect(fetchChapterWithFallback).not.toBeNull();
+    if (!fetchChapterWithFallback) return;
+
     await expect(
       fetchChapterWithFallback({
         copies: [first, second],
