@@ -156,6 +156,92 @@ async function main() {
     `page=${progressRow?.page}`,
   );
 
+  // ─── ملكية التقدم: المرآة صندوق صادر يُقرّ، لا حقيقة ثانية ───
+  check(
+    'صف المرآة يصل معلَّمًا بأن المالك لم يستلمه',
+    progressRow?.owner_synced === 0,
+    `owner_synced=${progressRow?.owner_synced}`,
+  );
+
+  const pendingBefore = await call('/v1/progress/pending', {}, token);
+  const pendingRow = (pendingBefore.json?.content ?? []).find((row) => row.chapterKey === CHAPTER);
+  check(
+    'الصندوق الصادر يسمّي مالك التقدم',
+    pendingBefore.json?.owner === 'UCHIYOMI',
+    `owner=${pendingBefore.json?.owner}`,
+  );
+  check('الصف المعلّق يظهر في الصندوق', pendingRow?.page === 30, `page=${pendingRow?.page}`);
+
+  // إقرار متأخر بصفحة أقل: لا يجوز أن يُسكت صفًّا تجاوزها
+  await call(
+    '/v1/ops',
+    {
+      method: 'POST',
+      body: {
+        ops: [
+          {
+            opId: '__verify__-confirm-stale',
+            kind: 'progress.confirm',
+            payload: { chapterKey: CHAPTER, page: 12 },
+          },
+        ],
+      },
+    },
+    token,
+  );
+  const afterStaleConfirm = await call('/v1/progress/pending', {}, token);
+  check(
+    'إقرار بصفحة أقل لا يُخرج الصف من الصندوق',
+    (afterStaleConfirm.json?.content ?? []).some((row) => row.chapterKey === CHAPTER),
+  );
+
+  await call(
+    '/v1/ops',
+    {
+      method: 'POST',
+      body: {
+        ops: [
+          {
+            opId: '__verify__-confirm-30',
+            kind: 'progress.confirm',
+            payload: { chapterKey: CHAPTER, page: 30 },
+          },
+        ],
+      },
+    },
+    token,
+  );
+  const afterConfirm = await call('/v1/progress/pending', {}, token);
+  check(
+    'إقرار المالك يُخرج الصف من الصندوق',
+    !(afterConfirm.json?.content ?? []).some((row) => row.chapterKey === CHAPTER),
+  );
+
+  // تقدم جديد أعلى يعيد الصف معلّقًا: المالك لم يرَ القيمة الجديدة
+  await call(
+    '/v1/ops',
+    {
+      method: 'POST',
+      body: {
+        ops: [
+          {
+            opId: '__verify__-progress-41',
+            kind: 'progress.set',
+            payload: { chapterKey: CHAPTER, seriesRef: SERIES, page: 41, ratio: 0.95 },
+          },
+        ],
+      },
+    },
+    token,
+  );
+  const afterAdvance = await call('/v1/progress/pending', {}, token);
+  check(
+    'تقدم أعلى بعد الإقرار يعود للصندوق',
+    (afterAdvance.json?.content ?? []).some(
+      (row) => row.chapterKey === CHAPTER && row.page === 41,
+    ),
+  );
+
   // ─── فتح لثانية ليس قراءة ───
   const tooShort = await call(
     '/v1/ops',
@@ -215,6 +301,60 @@ async function main() {
   );
   const presence = await call('/v1/presence', {}, token);
   check('قائمة الحضور تُقرأ', presence.status === 200 && Array.isArray(presence.json?.content));
+  const reading = (presence.json?.content ?? []).find((row) => row.userId === USER_ID);
+  check('ما يُقرأ يُبثّ وهو ظاهر', reading?.seriesTitle === 'verify', `series=${reading?.seriesTitle}`);
+
+  // ─── الإخفاء يُقرأ من مالك الحضور نفسه ───
+  //
+  // كان يعيش في مخزن آخر (`vantara_user_gates`) على مسار لا يستهلكه التطبيق،
+  // فإخفاء مُفعَّل لم يكن يُطبَّق على المسار الذي يقرأه الأصدقاء فعلًا.
+  await call(
+    '/v1/ops',
+    {
+      method: 'POST',
+      body: {
+        ops: [
+          {
+            opId: `__verify__-incognito-on-${Date.now()}`,
+            kind: 'settings.patch',
+            payload: { fields: { incognitoUntil: Date.now() + 60_000 } },
+          },
+        ],
+      },
+    },
+    token,
+  );
+  const hidden = await call('/v1/presence', {}, token);
+  const redacted = (hidden.json?.content ?? []).find((row) => row.userId === USER_ID);
+  check('الإخفاء يحجب العمل ويُبقي الوجود', redacted?.seriesTitle === null && redacted?.incognito === true);
+  check('الإخفاء يمنع حالة «يقرأ»', redacted?.status !== 'READING', `status=${redacted?.status}`);
+  const hiddenAccounts = await call('/v1/accounts');
+  check(
+    'شاشة اختيار الحساب تحترم نفس الإخفاء',
+    (hiddenAccounts.json?.content ?? []).find((row) => row.userId === USER_ID)?.status !== 'READING',
+  );
+
+  await call(
+    '/v1/ops',
+    {
+      method: 'POST',
+      body: {
+        ops: [
+          {
+            opId: `__verify__-incognito-off-${Date.now()}`,
+            kind: 'settings.patch',
+            payload: { fields: { incognitoUntil: 0 } },
+          },
+        ],
+      },
+    },
+    token,
+  );
+  const restored = await call('/v1/presence', {}, token);
+  check(
+    'إلغاء الإخفاء يعيد البثّ',
+    (restored.json?.content ?? []).find((row) => row.userId === USER_ID)?.incognito === false,
+  );
 
   // ─── الهوية الداخلية لا تتغير ───
   await call(

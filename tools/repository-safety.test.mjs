@@ -5,6 +5,47 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 
+/**
+ * B4 — تجميد ملكية البيانات.
+ *
+ * الجدول المتقاعد موجود فيزيائيًا حتى يُسقطه باتش الـmigrations، فلا شيء يمنع
+ * كودًا جديدًا من الكتابة فيه وإعادة خلق مالك ثانٍ بهدوء. هذا الحرس يقرأ قائمة
+ * المتقاعد من `packages/domain/src/ownership.ts` نفسها — لا نسخة ثانية منها —
+ * ويفشل عند أول إشارة SQL إليها.
+ */
+
+/**
+ * الاستثناءات المعلنة — ملفّا طبقة الهوية وحدهما.
+ *
+ * تهيئة الجلسة تُدرج صفّ بروفايل وبوابة فارغين، و`/v1/auth/accounts` يقرأ
+ * البروفايل لقائمة حسابات لا يستهلكها العميل (المستهلك الحقيقي هو `/v1/accounts`
+ * عند الـWorker). الملفان قيد إعادة بناء في باتش الهوية الموحدة، فتعديلهما من
+ * هنا تعارض مقصود ممنوع. مسجّل كـhandoff، ولا يجوز أن تطول هذه القائمة.
+ */
+const RETIRED_TABLE_EXCEPTIONS = Object.freeze({
+  'apps/api/src/lib/sessions.ts': ['vantara_profiles', 'vantara_user_gates'],
+  'apps/api/src/routes/auth.ts': ['vantara_profiles'],
+});
+
+function retiredTablesFromMatrix() {
+  const source = read('packages/domain/src/ownership.ts');
+  const tables = new Set();
+  // retired: { POSTGRES: ['a', 'b'] }
+  for (const block of source.matchAll(/retired:\s*\{([^}]*)\}/g)) {
+    for (const name of block[1].matchAll(/'([a-z0-9_]+)'/g)) tables.add(name[1]);
+  }
+  return [...tables];
+}
+
+function sqlReferences(source, table) {
+  // الكتابة والقراءة معًا: قراءة جدول متقاعد مسار حقيقة ثانية أيضًا
+  const pattern = new RegExp(
+    String.raw`(INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+${table}\b`,
+    'i',
+  );
+  return pattern.test(source);
+}
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function read(path) {
@@ -68,6 +109,87 @@ test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   assert.doesNotMatch(workflow, /GITHUB_REF_NAME[^\n]*CF_PRODUCTION_BRANCH|branch="\$\{GITHUB_REF_NAME\}"/m, 'Pages deploy must not derive its deployment branch from an arbitrary pushed branch');
   assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Pages release verification needs read access to Actions results');
   assertCommitHasSuccessfulCi(workflow, '$MAIN_SHA', 'Pages release path');
+});
+
+test('no code writes or reads a retired table', () => {
+  const retired = retiredTablesFromMatrix();
+  assert.ok(
+    retired.length >= 8,
+    `ownership matrix parse failed — expected the retired Postgres tables, got ${JSON.stringify(retired)}`,
+  );
+
+  const sources = trackedFiles().filter(
+    (path) =>
+      /^(apps|services|packages|tools|infra)\//.test(path) &&
+      /\.(ts|mts|mjs|js|sql)$/.test(path) &&
+      // مخطط PostgreSQL ينشئ الجداول، والمصفوفة تسمّيها، والحرس نفسه يذكرها
+      !path.startsWith('packages/db/migrations/') &&
+      path !== 'packages/domain/src/ownership.ts' &&
+      path !== 'tools/repository-safety.test.mjs',
+  );
+
+  const offenders = [];
+  for (const path of sources) {
+    const source = read(path);
+    for (const table of retired) {
+      if (!sqlReferences(source, table)) continue;
+      if ((RETIRED_TABLE_EXCEPTIONS[path] ?? []).includes(table)) continue;
+      offenders.push(`${path} → ${table}`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `retired tables must have no live SQL path:\n${offenders.join('\n')}`,
+  );
+});
+
+test('the ownership document matches the executable matrix', () => {
+  // الوثيقة تتعفّن بهدوء إذا لم يُقارنها شيء بالكود. المصفوفة هي الحقيقة،
+  // والوثيقة شرحها — فاختلافهما خطأ، وليس مسألة تحديث لاحق.
+  const code = read('packages/domain/src/ownership.ts');
+  const inCode = new Map();
+  for (const entry of code.matchAll(
+    /key:\s*'([a-z0-9_.]+)',\s*\n\s*owner:\s*'([A-Z0-9]+)',\s*\n\s*mirrors:\s*\[([^\]]*)\]/g,
+  )) {
+    const mirrors = [...entry[3].matchAll(/'([A-Z0-9]+)'/g)].map((m) => m[1]);
+    inCode.set(entry[1], { owner: entry[2], mirrors });
+  }
+  assert.ok(inCode.size >= 15, `matrix parse failed — found ${inCode.size} domains`);
+
+  const doc = read('docs/VANTARA_DATA_OWNERSHIP.md');
+  const inDoc = new Map();
+  for (const row of doc.matchAll(/^\|\s*`([a-z0-9_.]+)`\s*\|\s*([A-Z0-9]+)\s*\|\s*([^|]*)\|/gm)) {
+    const mirrors = row[3].trim() === '—' ? [] : row[3].trim().split(/[,\s]+/).filter(Boolean);
+    inDoc.set(row[1], { owner: row[2], mirrors });
+  }
+
+  assert.deepEqual(
+    [...inDoc.keys()].sort(),
+    [...inCode.keys()].sort(),
+    'the document and the matrix must list the same data domains',
+  );
+  for (const [key, spec] of inCode) {
+    assert.deepEqual(inDoc.get(key), spec, `ownership of ${key} differs between doc and code`);
+  }
+});
+
+test('the retired-table exception list stays at the declared identity handoff', () => {
+  assert.deepEqual(
+    Object.keys(RETIRED_TABLE_EXCEPTIONS).sort(),
+    ['apps/api/src/lib/sessions.ts', 'apps/api/src/routes/auth.ts'],
+    'a new exception means a second owner came back — declare it in the office first',
+  );
+
+  // التهيئة إدراج فقط: لا منطق يقرأ البوابة من المخزن المتقاعد
+  const sessions = read('apps/api/src/lib/sessions.ts');
+  assert.match(sessions, /INSERT INTO vantara_user_gates/);
+  assert.doesNotMatch(sessions, /(SELECT[^;]*FROM|UPDATE|DELETE\s+FROM)\s+vantara_user_gates/i);
+
+  // ولا يكتب مسار الحسابات في المتقاعد، يقرأ فقط
+  const auth = read('apps/api/src/routes/auth.ts');
+  assert.doesNotMatch(auth, /(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+vantara_profiles/i);
 });
 
 test('signed Android release workflow is tag-only, main-only, and CI-verified', () => {

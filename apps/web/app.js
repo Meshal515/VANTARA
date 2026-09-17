@@ -1172,7 +1172,18 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
   };
 
   const getSaver = (id) => {
-    if (!savers.has(id)) savers.set(id, createProgressSaver({ bookId: id, baseUrl: config.api }));
+    if (!savers.has(id)) {
+      savers.set(
+        id,
+        createProgressSaver({
+          bookId: id,
+          baseUrl: config.api,
+          // الإقرار بعد قبول المالك فقط: بلا هذا تبقى كل صفوف المرآة معلّقة
+          // فيصرّفها الإقلاع القادم بلا داعٍ، ومع الوقت يصير الصندوق بلا معنى
+          onSaved: (page) => sync.enqueue('progress.confirm', { chapterKey: id, page }),
+        }),
+      );
+    }
     return savers.get(id);
   };
 
@@ -1573,6 +1584,60 @@ async function screenSettings() {
   mount(wrap);
 }
 
+// ─────────────────── تصريف صندوق تقدم القراءة ───────────────────
+
+/** أكثر ما يُصرَّف في إقلاع واحد. الباقي يُصرَّف في الإقلاع القادم. */
+const DRAIN_LIMIT = 25;
+
+/**
+ * يدفع التقدم الذي لم يستلمه مالكه بعد.
+ *
+ * مالك التقدم هو Uchiyomi، ومرآته في D1 صندوق صادر. كتابة القارئ تصل المرآة
+ * أولًا لأنها عملية طابور، ثم تُكتب عند المالك؛ فإذا فشلت الثانية — شبكة، أو
+ * الـAPI ساقط، أو جلسة محتوى منتهية — بقي التقدم في المرآة بلا إقرار. بلا هذا
+ * التصريف يفتح القارئ الفصل من الصفحة الأولى بينما الصفحة 30 محفوظة عندنا،
+ * والإحصائيات تقول إن الفصل قُرئ.
+ *
+ * الدفع لا يُرجع المالك للخلف أبدًا: نقرأ قيمته أولًا ولا نكتب إلا ما هو أعلى
+ * منها — نفس قاعدة `reconcileProgress` في طبقة المجال.
+ */
+async function drainProgressOutbox() {
+  const pending = await sync.pendingProgress().catch(() => null);
+  const rows = (pending?.content ?? []).slice(0, DRAIN_LIMIT);
+
+  for (const row of rows) {
+    if (!row?.chapterKey) continue;
+    const key = encodeURIComponent(row.chapterKey);
+    const mirrorPage = Number(row.page ?? 0);
+
+    const owner = await api(`/v1/books/${key}/progress`).catch((error) => error);
+    if (owner instanceof Error) {
+      // 404 يعني أن المالك لا يعرف هذا الفصل أصلًا — حُذف أو تغيّر معرّفه. إبقاؤه
+      // معلّقًا إلى الأبد يعني طلبًا ضائعًا في كل إقلاع بلا أمل، فنُخرجه من
+      // الصندوق بقيمته كما هي. غير ذلك عطل مؤقت: يبقى معلّقًا ويُعاد لاحقًا.
+      if (owner.status === 404) sync.enqueue('progress.confirm', { chapterKey: row.chapterKey, page: mirrorPage });
+      continue;
+    }
+    const ownerPage = Number(owner.page ?? 0);
+
+    if (mirrorPage > ownerPage) {
+      const written = await api(`/v1/books/${key}/progress`, {
+        method: 'PUT',
+        body: { page: mirrorPage },
+      })
+        .then(() => true)
+        .catch(() => false);
+      if (!written) continue;
+    }
+
+    // الإقرار بأعلى القيمتين: إن كان المالك أبعد فهو المرجع، والمرآة تتبعه
+    sync.enqueue('progress.confirm', {
+      chapterKey: row.chapterKey,
+      page: Math.max(mirrorPage, ownerPage),
+    });
+  }
+}
+
 // ───────────────────────────── التحديث ─────────────────────────────
 
 /**
@@ -1645,6 +1710,8 @@ async function boot() {
     void sync.pull();
     void refreshPresence();
     void offerUpdate();
+    // بعد السحب: الصندوق قد يحمل تقدمًا كتبه جهاز آخر ولم يصل مالكه
+    void drainProgressOutbox();
     return;
   }
   await go({ name: 'gate' });

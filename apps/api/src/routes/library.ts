@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { query } from '@vantara/db';
 import { UchiyomiError } from '@vantara/uchiyomi';
-import { auditCoverage, buildCatalogue, pickCopy } from '@vantara/domain';
+import { auditCoverage, buildCatalogue, ownerOf, pickCopy } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 interface SeriesRow {
@@ -362,6 +362,25 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
       pagesCount: book?.media?.pagesCount ?? pages.length,
       resumeAt: book?.readProgress?.page ?? null,
       completed: book?.readProgress?.completed ?? false,
+    });
+  });
+
+  /**
+   * تقدم المالك لفصل واحد.
+   *
+   * يلزم لتصريف صندوق التقدم الصادر: العميل يحتاج قيمة المالك ليعرف هل مرآته
+   * متقدمة فعلًا قبل أن يكتب. بلا مسار خفيف كهذا كان البديل جلب كل صفحات الفصل
+   * لقراءة رقم واحد. لا نسخة ثانية هنا — تمريرة قراءة من المالك.
+   */
+  app.get('/v1/books/:id/progress', { preHandler: requireSession(ctx) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const session = sessionOf(request);
+    const book = await ctx.uchiyomi.book(id, session.token).catch(() => undefined);
+    if (!book) return reply.code(404).send({ error: 'not_found' });
+    return reply.send({
+      owner: ownerOf('reading.progress'),
+      page: book.readProgress?.page ?? 0,
+      completed: book.readProgress?.completed ?? false,
     });
   });
 

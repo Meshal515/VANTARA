@@ -190,254 +190,69 @@ describe('auth', () => {
   });
 });
 
-describe('profiles', () => {
-  it('applies a patch and clears a field on explicit null', async () => {
+describe('data ownership freeze', () => {
+  /**
+   * الاجتماعي كان له مسار ثانٍ كامل على هذا الـAPI فوق جداول PostgreSQL،
+   * بينما التطبيق يقرأ ويكتب في D1. مالكان لنفس الحقيقة يعني تعليقًا يُكتب هنا
+   * ولا يظهر لأحد، وبروفايلًا يُعدَّل هنا ولا يراه أي جهاز. هذه الاختبارات
+   * تحرس التقاعد: عودة أي مسار منها تعني عودة المالك الثاني.
+   */
+  const retired: [string, string][] = [
+    ['PATCH', '/v1/profiles/me'],
+    ['GET', '/v1/profiles'],
+    ['PUT', '/v1/profiles/me/adult'],
+    ['POST', '/v1/presence/beat'],
+    ['GET', '/v1/presence'],
+    ['POST', '/v1/presence/leave'],
+    ['PUT', '/v1/presence/incognito'],
+    ['POST', '/v1/comments'],
+    ['GET', '/v1/comments/test:spoiler'],
+    ['POST', '/v1/recommendations'],
+    ['GET', '/v1/recommendations/inbox'],
+    ['GET', '/v1/activity'],
+    ['GET', '/v1/read-together/test:nano'],
+    ['GET', '/v1/stats/me'],
+    ['PUT', '/v1/ratings/test:nano'],
+  ];
+
+  for (const [method, url] of retired) {
+    it(`no longer serves ${method} ${url}`, async () => {
+      if (skipUnlessSession()) return;
+      const res = await app.inject({
+        method: method as 'GET',
+        url,
+        headers: { cookie },
+        ...(method === 'GET' ? {} : { payload: {} }),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  }
+
+  it('keeps the owner write path for library membership registered', async () => {
     if (skipUnlessSession()) return;
-
-    const set = await app.inject({
-      method: 'PATCH',
-      url: '/v1/profiles/me',
-      headers: { cookie },
-      payload: { bio: 'يقرأ Nano Machine', accent: '#22d3ee', favoriteRefs: ['a', 'b'] },
-    });
-    expect(set.statusCode).toBe(200);
-    expect(set.json()).toMatchObject({
-      bio: 'يقرأ Nano Machine',
-      accent: '#22d3ee',
-      favoriteRefs: ['a', 'b'],
-    });
-
-    const cleared = await app.inject({
-      method: 'PATCH',
-      url: '/v1/profiles/me',
-      headers: { cookie },
-      payload: { bio: null },
-    });
-    // المسح صريح، والحقول غير المرسلة تبقى كما هي
-    expect(cleared.json()).toMatchObject({ bio: null, accent: '#22d3ee' });
-  });
-
-  it('rejects a fifth favorite and a malformed accent', async () => {
-    if (skipUnlessSession()) return;
-    const tooMany = await app.inject({
-      method: 'PATCH',
-      url: '/v1/profiles/me',
-      headers: { cookie },
-      payload: { favoriteRefs: ['a', 'b', 'c', 'd', 'e'] },
-    });
-    expect(tooMany.statusCode).toBe(400);
-
-    const badAccent = await app.inject({
-      method: 'PATCH',
-      url: '/v1/profiles/me',
-      headers: { cookie },
-      payload: { accent: 'teal' },
-    });
-    expect(badAccent.statusCode).toBe(400);
-  });
-
-  it('rejects duplicate favorites', async () => {
-    if (skipUnlessSession()) return;
+    // كان معرَّفًا وغير مسجَّل: الإضافة من البحث كانت ترجع 404 دائمًا. الجسم
+    // الناقص يجب أن يُرفض بـ400، لا أن يغيب المسار نفسه.
     const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/profiles/me',
+      method: 'POST',
+      url: '/v1/library/source',
       headers: { cookie },
-      payload: { favoriteRefs: ['same', 'same'] },
+      payload: {},
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'duplicate_favorites' });
-  });
-});
-
-describe('presence and reading time', () => {
-  it('opens a session on the first beat without crediting time', async () => {
-    if (skipUnlessSession()) return;
-    await query(`DELETE FROM vantara_reading_sessions WHERE series_ref = 'test:nano'`);
-
-    const first = await app.inject({
-      method: 'POST',
-      url: '/v1/presence/beat',
-      headers: { cookie },
-      payload: { visible: true, interactions: 3, seriesRef: 'test:nano', chapterRef: '184' },
-    });
-    expect(first.statusCode).toBe(200);
-    // لا فترة سابقة تُقاس، فلا وقت يُحتسب
-    expect(first.json()).toMatchObject({ creditedMs: 0 });
   });
 
-  it('does not credit a hidden tab', async () => {
+  it('keeps the operational routes this store still owns', async () => {
     if (skipUnlessSession()) return;
-    const res = await app.inject({
+    const reports = await app.inject({ method: 'GET', url: '/v1/reports', headers: { cookie } });
+    expect(reports.statusCode).toBe(200);
+    const split = await app.inject({
       method: 'POST',
-      url: '/v1/presence/beat',
+      url: '/v1/merges/99999999/split',
       headers: { cookie },
-      payload: { visible: false, interactions: 5, seriesRef: 'test:nano', chapterRef: '184' },
+      payload: {},
     });
-    expect(res.json()).toMatchObject({ creditedMs: 0 });
-  });
-
-  it('does not credit a visible tab with no interaction', async () => {
-    if (skipUnlessSession()) return;
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/presence/beat',
-      headers: { cookie },
-      payload: { visible: true, interactions: 0, seriesRef: 'test:nano', chapterRef: '184' },
-    });
-    expect(res.json()).toMatchObject({ creditedMs: 0 });
-  });
-
-  it('credits a real beat and keeps one open session per chapter', async () => {
-    if (skipUnlessSession()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/presence/beat',
-      headers: { cookie },
-      payload: {
-        visible: true,
-        interactions: 4,
-        seriesRef: 'test:nano',
-        chapterRef: '184',
-        progress: 0.63,
-        pagesSeen: 12,
-      },
-    });
-    expect(res.json().creditedMs).toBeGreaterThan(0);
-
-    const open = await query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM vantara_reading_sessions
-        WHERE series_ref = 'test:nano' AND ended_at IS NULL`,
-    );
-    expect(open[0]?.n).toBe('1');
-  });
-
-  it('lists presence and hides the work while incognito', async () => {
-    if (skipUnlessSession()) return;
-
-    const visible = await app.inject({ method: 'GET', url: '/v1/presence', headers: { cookie } });
-    expect(visible.statusCode).toBe(200);
-    const mine = visible.json().content.find((p: { username: string }) => p.username === USERNAME);
-    expect(mine.seriesTitle ?? mine.status).toBeDefined();
-
-    await app.inject({
-      method: 'PUT',
-      url: '/v1/presence/incognito',
-      headers: { cookie },
-      payload: { minutes: 30 },
-    });
-
-    const hidden = await app.inject({ method: 'GET', url: '/v1/presence', headers: { cookie } });
-    const redacted = hidden.json().content.find((p: { username: string }) => p.username === USERNAME);
-    // الوجود يبقى، وما يُقرأ يُحجب
-    expect(redacted.seriesTitle).toBeUndefined();
-    expect(redacted.chapterLabel).toBeUndefined();
-    expect(redacted.status).not.toBe('READING');
-
-    await app.inject({
-      method: 'PUT',
-      url: '/v1/presence/incognito',
-      headers: { cookie },
-      payload: { minutes: 0 },
-    });
-  });
-});
-
-describe('comments and spoilers', () => {
-  it('masks a comment past the reader progress and reveals it after', async () => {
-    if (skipUnlessSession()) return;
-    await query(`DELETE FROM vantara_comments WHERE series_ref = 'test:spoiler'`);
-
-    const created = await app.inject({
-      method: 'POST',
-      url: '/v1/comments',
-      headers: { cookie },
-      payload: { seriesRef: 'test:spoiler', body: 'مات في الفصل 200', spoilerAfter: 200 },
-    });
-    expect(created.statusCode).toBe(201);
-
-    const behind = await app.inject({
-      method: 'GET',
-      url: '/v1/comments/test:spoiler?progress=180',
-      headers: { cookie },
-    });
-    const masked = behind.json().content[0];
-    expect(masked.masked).toBe(true);
-    // النص لا يُرسل للمحجوب، فلا يكفي إخفاؤه في الواجهة
-    expect(masked.body).toBeUndefined();
-
-    const ahead = await app.inject({
-      method: 'GET',
-      url: '/v1/comments/test:spoiler?progress=205',
-      headers: { cookie },
-    });
-    expect(ahead.json().content[0]).toMatchObject({ masked: false, body: 'مات في الفصل 200' });
-  });
-
-  it('refuses a reply that points at another series', async () => {
-    if (skipUnlessSession()) return;
-    const parent = await app.inject({
-      method: 'POST',
-      url: '/v1/comments',
-      headers: { cookie },
-      payload: { seriesRef: 'test:spoiler', body: 'أصل' },
-    });
-    const parentId = Number(parent.json().id);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/comments',
-      headers: { cookie },
-      payload: { seriesRef: 'test:other', body: 'رد معلّق', parentId },
-    });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'parent_series_mismatch' });
-  });
-});
-
-describe('recommendations', () => {
-  it('refuses sending to yourself and to an unknown user', async () => {
-    if (skipUnlessSession()) return;
-
-    const self = await app.inject({
-      method: 'POST',
-      url: '/v1/recommendations',
-      headers: { cookie },
-      payload: { seriesRef: 'test:nano', to: USERNAME },
-    });
-    expect(self.statusCode).toBe(400);
-
-    const nobody = await app.inject({
-      method: 'POST',
-      url: '/v1/recommendations',
-      headers: { cookie },
-      payload: { seriesRef: 'test:nano', to: 'ghost' },
-    });
-    expect(nobody.statusCode).toBe(404);
-  });
-
-  it('sends to everyone and keeps it out of the sender inbox', async () => {
-    if (skipUnlessSession()) return;
-    await query(`DELETE FROM vantara_recommendations WHERE series_ref = 'test:everyone'`);
-
-    const sent = await app.inject({
-      method: 'POST',
-      url: '/v1/recommendations',
-      headers: { cookie },
-      payload: { seriesRef: 'test:everyone', to: 'all', message: 'اقروه' },
-    });
-    expect(sent.statusCode).toBe(201);
-
-    const inbox = await app.inject({
-      method: 'GET',
-      url: '/v1/recommendations/inbox',
-      headers: { cookie },
-    });
-    const own = inbox
-      .json()
-      .content.filter((r: { seriesRef: string }) => r.seriesRef === 'test:everyone');
-    expect(own).toHaveLength(0);
+    // 404 لأن اللقطة غير موجودة، أو 403 لغير المشرف — المهم أن المسار موجود
+    expect([403, 404]).toContain(split.statusCode);
   });
 });
 
@@ -572,6 +387,10 @@ describe('deleted works', () => {
       payload: { seriesRef: 'test:doomed', seriesTitle: 'Doomed', confirmTitle: 'Doomed' },
     });
     expect(right.statusCode).toBe(201);
+    // اللقطة تعدّ ما يملكه هذا المخزن فقط. عدّ التعليقات والتوصيات من جداول
+    // PostgreSQL المتقاعدة كان سيكتب صفرًا بينما عند المالك عشرات.
+    expect(right.json().snapshot).toMatchObject({ socialOwner: 'D1' });
+    expect(right.json().snapshot).not.toHaveProperty('comments');
   });
 
   it('restores and reports what it carried', async () => {

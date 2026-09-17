@@ -9,13 +9,23 @@ import type { AppContext } from '../lib/context.ts';
  */
 export const QUEUES = {
   sessionPurge: 'session.purge',
-  presenceSweep: 'presence.sweep',
   sourceProbe: 'source.probe',
   sourceSync: 'source.sync',
   translationChapter: 'translation.chapter',
   translationPage: 'translation.page',
   reportDiagnose: 'report.diagnose',
   backupRun: 'backup.run',
+} as const;
+
+/**
+ * أسماء طوابير متقاعدة.
+ *
+ * تبقى معروفة بالاسم لأن جدولتها محفوظة في القاعدة: بلا إلغائها صريحًا تبقى
+ * تنتج مهامًا بلا مستهلك. ليست في `QUEUES` كي لا يُنشأ لها worker من جديد.
+ */
+const RETIRED_QUEUES = {
+  /** B4: الحضور انتقل إلى D1، وحالته تُشتق عند القراءة. */
+  presenceSweep: 'presence.sweep',
 } as const;
 
 export interface JobRunner {
@@ -49,28 +59,14 @@ export async function startJobs(ctx: AppContext): Promise<JobRunner> {
   });
 
   /**
-   * إغلاق جلسات القراءة المنسية.
+   * مكنسة الحضور حُذفت في B4: الحضور يملكه D1، وحالته تُشتق من `beat_at` عند
+   * القراءة، فلا يوجد صفّ «عالق» يحتاج إغلاقًا.
    *
-   * القارئ الذي يغلق التبويب لا يرسل `/leave`. بلا هذه المكنسة تبقى جلسته
-   * مفتوحة، فيمنع الفهرس الفريد فتح جلسة جديدة لنفس الفصل.
+   * الجدول الزمني في pg-boss مخزّن في القاعدة لا في الكود: حذف الـworker وحده
+   * كان سيُبقي الجدولة تنتج مهامًا لا مستهلك لها، فتتراكم صفوفًا إلى الأبد.
    */
-  await boss.work(QUEUES.presenceSweep, async () => {
-    const closed = await query<{ id: string }>(
-      `UPDATE vantara_reading_sessions
-          SET ended_at = last_beat_at
-        WHERE ended_at IS NULL
-          AND last_beat_at < now() - interval '5 minutes'
-        RETURNING id`,
-    );
-    await query(
-      `UPDATE vantara_presence SET status = 'OFFLINE', series_ref = NULL, series_title = NULL,
-              chapter_ref = NULL, chapter_label = NULL, progress = NULL
-        WHERE status <> 'OFFLINE' AND updated_at < now() - interval '5 minutes'`,
-    );
-    if (closed.length > 0) {
-      console.log(`[jobs] closed ${String(closed.length)} stale reading sessions`);
-    }
-  });
+  await boss.unschedule(RETIRED_QUEUES.presenceSweep).catch(() => {});
+  await boss.deleteQueue(RETIRED_QUEUES.presenceSweep).catch(() => {});
 
   /** مزامنة سجل المصادر مع Uchiyomi. الأحكام لا تُلمس — فقط التسجيل. */
   await boss.work(QUEUES.sourceSync, async () => {
@@ -87,8 +83,7 @@ export async function startJobs(ctx: AppContext): Promise<JobRunner> {
     console.log(`[jobs] synced ${String(sources.length)} sources`);
   });
 
-  // كل خمس دقائق: مكنسة الحضور. كل ليلة: تنظيف الجلسات ومزامنة المصادر.
-  await boss.schedule(QUEUES.presenceSweep, '*/5 * * * *');
+  // كل ليلة: تنظيف الجلسات ومزامنة المصادر.
   await boss.schedule(QUEUES.sessionPurge, '17 3 * * *');
   await boss.schedule(QUEUES.sourceSync, '43 4 * * *');
 

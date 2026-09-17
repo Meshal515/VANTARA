@@ -18,7 +18,9 @@ import {
   mergeFields,
   mergeProgress,
   needsFullResync,
+  ownerOf,
   readStats,
+  redactForViewers,
   statusFor,
   stripImmutable,
 } from '@vantara/domain';
@@ -85,6 +87,18 @@ async function currentRev(env: Env): Promise<number> {
   return row?.rev ?? 0;
 }
 
+/** `incognitoUntil` من إعدادات المالك نفسه. قيمة فاسدة تعني «ليس مخفيًا». */
+function incognitoUntilFrom(raw: unknown): number {
+  if (typeof raw !== 'string' || raw === '') return 0;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const until = parsed['incognitoUntil'];
+    return typeof until === 'number' && Number.isFinite(until) ? until : 0;
+  } catch {
+    return 0;
+  }
+}
+
 // ───────────────────────────── الحسابات ─────────────────────────────
 
 interface AccountRow {
@@ -96,6 +110,7 @@ interface AccountRow {
   accent: string | null;
   status: string;
   beat_at: number;
+  settings_data: string | null;
 }
 
 /**
@@ -108,10 +123,11 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT a.user_id, a.username,
             p.display_name, p.avatar_key, p.banner_key, p.accent,
-            pr.status, pr.beat_at
+            pr.status, pr.beat_at, s.data AS settings_data
        FROM accounts a
        LEFT JOIN profiles p USING (user_id)
        LEFT JOIN presence pr USING (user_id)
+       LEFT JOIN settings s USING (user_id)
       ORDER BY a.created_at, a.username`,
   ).all<AccountRow>();
 
@@ -119,7 +135,16 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
     protocol: SYNC_PROTOCOL,
     content: results.map((row) => {
       const ago = now - (row.beat_at ?? 0);
-      const status = statusFor(ago, { reading: row.status === 'READING' });
+      // نفس قاعدة الحجب المستخدمة في مسار الحضور: حالتان مختلفتان لنفس
+      // المستخدم على شاشتين تعني أن الإخفاء يعمل في مكان ولا يعمل في آخر
+      const { status } = redactForViewers(
+        {
+          userId: row.user_id,
+          username: row.username,
+          status: statusFor(ago, { reading: row.status === 'READING' }),
+        },
+        { incognito: incognitoUntilFrom(row.settings_data) > now },
+      );
       return {
         userId: row.user_id,
         username: row.username,
@@ -168,7 +193,9 @@ const DELTA_TABLES = [
   ['accounts', 'user_id, username, created_at, rev'],
   ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
-  ['progress', 'user_id, chapter_key, series_ref, page, ratio, updated_at, rev'],
+  // `owner_synced` يسافر مع الصف: العميل يجب أن يعرف أن هذه القيمة لم يرها
+  // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
+  ['progress', 'user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced'],
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
@@ -285,15 +312,47 @@ function statementsFor(
       return [
         db
           .prepare(
-            `INSERT INTO progress (user_id, chapter_key, series_ref, page, ratio, updated_at, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            // `owner_synced = 0`: هذه الكتابة صادرة حتى يُقرّها مالك التقدم.
+            // القيمة المدموجة قد تتغير بـMAX هنا، فالإقرار القديم لا يصلح لها —
+            // وإلا اعتُبر تقدم لم يره المالك مؤكَّدًا فسقط بلا دفع.
+            `INSERT INTO progress
+               (user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0)
              ON CONFLICT (user_id, chapter_key) DO UPDATE SET
                page = MAX(progress.page, excluded.page),
                ratio = MAX(progress.ratio, excluded.ratio),
                updated_at = excluded.updated_at,
-               rev = excluded.rev`,
+               rev = excluded.rev,
+               owner_synced = CASE
+                 WHEN MAX(progress.page, excluded.page) = progress.page
+                  AND MAX(progress.ratio, excluded.ratio) = progress.ratio
+                 THEN progress.owner_synced ELSE 0 END`,
           )
           .bind(userId, chapterKey, seriesRef, normalized.page, normalized.ratio, now, rev),
+      ];
+    }
+
+    /**
+     * إقرار المالك.
+     *
+     * يُرسل بعد نجاح الكتابة عند مالك التقدم. الشرط `page <= ?` يمنع إقرارًا
+     * متأخرًا من تثبيت قيمة تجاوزها الجهاز بعد إرسال الإقرار: إقرار الصفحة 12
+     * لا يجوز أن يُسكت صفًّا صار 30.
+     *
+     * الصفحة وحدها في الشرط: المالك يحفظ الصفحة و`completed` ولا يعرف نسبة
+     * داخل الصفحة، فمطالبته بإقرار نسبة لا يملكها تعني صندوقًا لا يُصرَّف أبدًا.
+     */
+    case 'progress.confirm': {
+      const chapterKey = asString(p['chapterKey'], 200);
+      const page = asNumber(p['page']);
+      if (!chapterKey || page === null) return null;
+      return [
+        db
+          .prepare(
+            `UPDATE progress SET owner_synced = 1, rev = ?
+              WHERE user_id = ? AND chapter_key = ? AND page <= ?`,
+          )
+          .bind(rev, userId, chapterKey, Math.max(0, Math.floor(page))),
       ];
     }
 
@@ -735,37 +794,93 @@ async function handlePresenceBeat(
   return json({ ok: true });
 }
 
+/**
+ * الحضور كما يراه الآخرون.
+ *
+ * الإخفاء يُقرأ من `settings` في نفس المخزن الذي يملك الحضور. كان يعيش في
+ * `vantara_user_gates` على مسار آخر: مخزن يملك الحضور ومخزن يملك خصوصيته يعني
+ * أن إخفاءً مُفعَّلًا لا يُطبَّق على المسار الذي يستهلكه التطبيق فعلًا.
+ */
 async function handlePresenceList(env: Env, now: number): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT pr.user_id, a.username, p.display_name, p.avatar_key,
             pr.status, pr.screen, pr.series_ref, pr.series_title,
-            pr.chapter_ref, pr.chapter_label, pr.chapter_number, pr.beat_at
+            pr.chapter_ref, pr.chapter_label, pr.chapter_number, pr.beat_at,
+            s.data AS settings_data
        FROM presence pr
        JOIN accounts a USING (user_id)
-       LEFT JOIN profiles p USING (user_id)`,
+       LEFT JOIN profiles p USING (user_id)
+       LEFT JOIN settings s USING (user_id)`,
   ).all<Record<string, unknown>>();
 
   return json({
     content: results.map((row) => {
       const beatAt = Number(row['beat_at'] ?? 0);
-      const status = statusFor(now - beatAt, { reading: row['status'] === 'READING' });
-      const reading = status === 'READING';
+      const live = statusFor(now - beatAt, { reading: row['status'] === 'READING' });
+      const incognito = incognitoUntilFrom(row['settings_data']) > now;
+      // قاعدة الحجب من دالة المجال وحدها: الوجود يبقى وما يُقرأ يُحجب
+      const visible = redactForViewers(
+        {
+          userId: String(row['user_id']),
+          username: String(row['username']),
+          status: live,
+          ...(row['series_title'] !== null ? { seriesTitle: String(row['series_title']) } : {}),
+          ...(row['chapter_label'] !== null ? { chapterLabel: String(row['chapter_label']) } : {}),
+        },
+        { incognito },
+      );
+      // العمل والفصل يُعرضان فقط وهو يقرأ فعلًا: آخر فصل قرأه قبل ساعة ليس
+      // «يقرأ الآن»، وعرضه هكذا يكذب على الأصدقاء
+      const reading = visible.status === 'READING' && !incognito;
       return {
-        userId: row['user_id'],
-        username: row['username'],
+        userId: visible.userId,
+        username: visible.username,
         displayName: row['display_name'] ?? row['username'],
         avatarKey: row['avatar_key'],
-        status,
-        screen: row['screen'],
-        // العمل والفصل يُعرضان فقط وهو يقرأ فعلًا: آخر فصل قرأه قبل ساعة ليس
-        // «يقرأ الآن»، وعرضه هكذا يكذب على الأصدقاء
+        status: visible.status,
+        screen: incognito ? null : row['screen'],
         seriesRef: reading ? row['series_ref'] : null,
-        seriesTitle: reading ? row['series_title'] : null,
-        chapterLabel: reading ? row['chapter_label'] : null,
+        seriesTitle: reading ? (visible.seriesTitle ?? null) : null,
+        chapterLabel: reading ? (visible.chapterLabel ?? null) : null,
         chapterNumber: reading ? row['chapter_number'] : null,
+        incognito,
         lastSeenAt: beatAt || null,
       };
     }),
+  });
+}
+
+// ───────────────────── صندوق تقدم القراءة الصادر ─────────────────────
+
+/**
+ * ما لم يستلمه مالك التقدم بعد.
+ *
+ * بلا هذا المسار يبقى الصندوق مزخرفًا: صفوف تُكتب هنا ولا تُصرَّف أبدًا، فتقدم
+ * كتابته فشلت عند المالك يضيع صامتًا بينما نسخته محفوظة عندنا. العميل يقرأه
+ * عند الإقلاع، يدفع كل صف إلى المالك، ثم يرسل `progress.confirm`.
+ *
+ * السقف مقصود: التصريف عمل خلفية عند الإقلاع، لا مزامنة كاملة.
+ */
+async function handlePendingProgress(env: Env, userId: string): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT chapter_key, series_ref, page, ratio, updated_at
+       FROM progress
+      WHERE user_id = ? AND owner_synced = 0
+      ORDER BY updated_at
+      LIMIT 200`,
+  )
+    .bind(userId)
+    .all<Record<string, unknown>>();
+
+  return json({
+    owner: ownerOf('reading.progress'),
+    content: results.map((row) => ({
+      chapterKey: row['chapter_key'],
+      seriesRef: row['series_ref'],
+      page: Number(row['page'] ?? 0),
+      ratio: Number(row['ratio'] ?? 0),
+      updatedAt: Number(row['updated_at'] ?? 0),
+    })),
   });
 }
 
@@ -838,6 +953,9 @@ export default {
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'GET') response = await handlePresenceList(env, now);
+      else if (path === '/v1/progress/pending' && request.method === 'GET') {
+        response = await handlePendingProgress(env, userId);
+      }
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
       }

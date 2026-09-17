@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { query, queryOne } from '@vantara/db';
-import { containsSecret, scrubDiagnostics } from '@vantara/domain';
+import { containsSecret, ownerOf, scrubDiagnostics } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 const KINDS = [
@@ -203,27 +203,20 @@ export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promi
       return reply.code(400).send({ error: 'confirmation_mismatch' });
     }
 
-    // snapshot لبيانات VANTARA المرتبطة، بما يكفي لتقرير أثر الحذف
+    // snapshot لما يملكه هذا المخزن فقط.
+    //
+    // كان يعدّ التعليقات والتوصيات وجلسات القراءة من جداول PostgreSQL. بعد
+    // تجميد الملكية (B4) صار مالك الاجتماعي هو D1، وتلك الجداول متقاعدة — فعدّها
+    // من هنا كان سيكتب «0 تعليق متأثر» بينما عند المالك اثنا عشر. الأثر
+    // الاجتماعي يُقرأ من مالكه، و`socialOwner` يقول للمشغّل أين يقرأه.
     const snapshot = {
-      comments: (
+      reports: (
         await queryOne<{ n: string }>(
-          `SELECT count(*)::text AS n FROM vantara_comments
-            WHERE series_ref = $1 AND deleted_at IS NULL`,
+          `SELECT count(*)::text AS n FROM vantara_reports WHERE series_ref = $1`,
           [input.seriesRef],
         )
       )?.n,
-      recommendations: (
-        await queryOne<{ n: string }>(
-          `SELECT count(*)::text AS n FROM vantara_recommendations WHERE series_ref = $1`,
-          [input.seriesRef],
-        )
-      )?.n,
-      sessions: (
-        await queryOne<{ n: string }>(
-          `SELECT count(*)::text AS n FROM vantara_reading_sessions WHERE series_ref = $1`,
-          [input.seriesRef],
-        )
-      )?.n,
+      socialOwner: ownerOf('social.comments'),
     };
 
     await query(

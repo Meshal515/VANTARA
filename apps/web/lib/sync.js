@@ -266,6 +266,17 @@ export function createSync({ baseUrl }) {
     }
   }
 
+  /**
+   * صفوف التقدم التي لم يستلمها مالكها بعد.
+   *
+   * تُقرأ من الخادم لا من المرآة المحلية: الصندوق قد يحمل ما كتبه جهاز آخر
+   * وفشلت كتابته عند المالك، وهذا الجهاز هو من يستطيع تصريفه الآن.
+   */
+  async function pendingProgress() {
+    if (!token) return null;
+    return await request('/v1/progress/pending');
+  }
+
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
   /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
@@ -299,6 +310,7 @@ export function createSync({ baseUrl }) {
     beat,
     presence,
     stats,
+    pendingProgress,
     rows,
     row,
     onChange(listener) {

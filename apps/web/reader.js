@@ -197,7 +197,14 @@ export function observePages({ container, onPageChange, threshold = 0.5 }) {
  * واحد. هذا يؤجّل، ويتجاهل الصفحة المتكررة، ويحفظ حتمًا عند إخفاء الصفحة
  * (‏`visibilitychange` هو آخر حدث نضمنه على الجوال، لا `beforeunload`).
  */
-export function createProgressSaver({ bookId, delayMs = 2_000, fetchImpl = fetch, baseUrl = '' }) {
+export function createProgressSaver({
+  bookId,
+  delayMs = 2_000,
+  fetchImpl = fetch,
+  baseUrl = '',
+  /** يُنادى بالصفحة فقط بعد أن يقبلها مالك التقدم فعلًا. */
+  onSaved = null,
+}) {
   let timer = null;
   let pending = null;
   let lastSaved = null;
@@ -209,17 +216,25 @@ export function createProgressSaver({ bookId, delayMs = 2_000, fetchImpl = fetch
     const url = `${baseUrl}/v1/books/${encodeURIComponent(bookId)}/progress`;
 
     if (useBeacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      // beacon ينجو من إغلاق التبويب، بخلاف fetch
+      // beacon ينجو من إغلاق التبويب، بخلاف fetch. لا جواب منه، فلا إقرار:
+      // الصف يبقى في الصندوق ويُصرَّف عند الإقلاع القادم
       navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
       return;
     }
     try {
-      await fetchImpl(url, {
+      const response = await fetchImpl(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body,
         keepalive: true,
       });
+      // fetch لا يرمي على 401/502. اعتبار ذلك نجاحًا كان يعلّم التقدم «وصل
+      // المالك» وهو لم يصل، فيضيع بلا إعادة محاولة ويعود القارئ للصفحة الأولى.
+      if (!response?.ok) {
+        lastSaved = null;
+        return;
+      }
+      onSaved?.(page);
     } catch {
       // فقدان حفظ تقدم ليس سببًا لإزعاج القارئ؛ النبضة التالية تصلحه
       lastSaved = null;

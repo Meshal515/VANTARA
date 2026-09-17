@@ -9,11 +9,10 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
+import { adminRoutes } from './routes/admin.ts';
 import { authRoutes } from './routes/auth.ts';
-import { presenceRoutes } from './routes/presence.ts';
-import { profileRoutes } from './routes/profiles.ts';
+import { catalogRoutes } from './routes/catalog.ts';
 import { reportRoutes } from './routes/reports.ts';
-import { socialRoutes } from './routes/social.ts';
 import { libraryRoutes } from './routes/library.ts';
 import { sourceRoutes } from './routes/sources.ts';
 
@@ -74,11 +73,12 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
 
   await authRoutes(app, ctx);
-  await profileRoutes(app, ctx);
-  await presenceRoutes(app, ctx);
-  await socialRoutes(app, ctx);
   await sourceRoutes(app, ctx);
   await reportRoutes(app, ctx);
+  await adminRoutes(app, ctx);
+  // كان معرَّفًا وغير مسجَّل: إضافة عمل من البحث كانت تفشل بـ404 بينما مالك
+  // المكتبة هو Uchiyomi وهذا مساره الوحيد للكتابة عنده
+  await catalogRoutes(app, ctx);
   await libraryRoutes(app, ctx);
 
   // الواجهة تُقدَّم من نفس الأصل: لا CORS، والكوكي same-origin بلا استثناءات
