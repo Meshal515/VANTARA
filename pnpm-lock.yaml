@@ -69,6 +69,12 @@ importers:
 
   packages/uchiyomi: {}
 
+  services/sync-worker:
+    dependencies:
+      '@vantara/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':

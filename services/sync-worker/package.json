@@ -1,0 +1,14 @@
+{
+  "name": "@vantara/sync-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@vantara/domain": "workspace:*"
+  }
+}

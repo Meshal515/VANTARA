@@ -1,0 +1,21 @@
+name = "vantara-sync"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# لا observability مدفوعة ولا cron: الخطة المجانية تكفي ثلاثة مستخدمين
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vantara"
+# يُستبدل عند النشر بمعرّف القاعدة الفعلي (انظر .github/workflows/sync-worker.yml).
+# تثبيته في المستودع يعني أن أي fork ينشر على قاعدة غيره.
+database_id = "__D1_DATABASE_ID__"
+
+[observability]
+enabled = true
+
+# VANTARA_SESSION_SECRET لا يُكتب هنا. يُضبط بـ`wrangler secret put`،
+# ولا يدخل المستودع ولا الـAPK.
+[vars]
+ALLOWED_ORIGINS = "https://vantara.pages.dev"

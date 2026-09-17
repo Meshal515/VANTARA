@@ -1,0 +1,132 @@
+name: Deploy sync worker
+
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'services/sync-worker/**'
+      - 'packages/domain/**'
+      - '.github/workflows/sync-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # نشران متوازيان على نفس القاعدة يطبّقان الهجرات معًا
+  group: sync-worker
+  cancel-in-progress: false
+
+env:
+  D1_NAME: vantara
+  WORKER_DIR: services/sync-worker
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VANTARA_SESSION_SECRET: ${{ secrets.VANTARA_SESSION_SECRET }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"  || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$VANTARA_SESSION_SECRET" || { echo 'Missing VANTARA_SESSION_SECRET'; exit 1; }
+
+      # الـWorker يستورد @vantara/domain، فالـdist يجب أن يوجد قبل التحزيم
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vantara/domain build
+
+      - name: Resolve or create the D1 database
+        id: d1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database"
+          id=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base?name=$D1_NAME" \
+                | jq -r --arg n "$D1_NAME" '.result[]? | select(.name == $n) | .uuid' | head -1)
+          if [ -z "$id" ]; then
+            echo "Creating D1 database $D1_NAME"
+            id=$(curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                   -H 'Content-Type: application/json' "$base" \
+                   --data "{\"name\":\"$D1_NAME\"}" | jq -r '.result.uuid')
+          fi
+          test -n "$id" && test "$id" != 'null' || { echo 'Could not resolve D1 id'; exit 1; }
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "D1 $D1_NAME -> $id"
+
+      - name: Pin the database id into wrangler.toml
+        working-directory: ${{ env.WORKER_DIR }}
+        run: |
+          set -euo pipefail
+          sed -i "s|__D1_DATABASE_ID__|${{ steps.d1.outputs.id }}|" wrangler.toml
+          grep -q '__D1_DATABASE_ID__' wrangler.toml && { echo 'placeholder not replaced'; exit 1; }
+          grep database_id wrangler.toml
+
+      # قبل النشر: مخطط ناقص مع كود جديد يعني 500 على كل طلب
+      - name: Apply D1 migrations
+        working-directory: ${{ env.WORKER_DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 d1 migrations apply "$D1_NAME" --remote
+
+      - name: Deploy
+        id: deploy
+        working-directory: ${{ env.WORKER_DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+
+      # بعد النشر لا قبله: `secret put` على عامل غير موجود يطلب تأكيدًا
+      # تفاعليًا فيفشل في CI. السرّ يسري فورًا بلا إعادة نشر.
+      - name: Store the session secret
+        working-directory: ${{ env.WORKER_DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VANTARA_SESSION_SECRET: ${{ secrets.VANTARA_SESSION_SECRET }}
+        run: printf '%s' "$VANTARA_SESSION_SECRET" | npx --yes wrangler@4 secret put VANTARA_SESSION_SECRET
+
+      # النشر الناجح لا يعني عاملًا سليمًا: مخطط ناقص يظهر هنا فقط
+      - name: Smoke test /health
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | jq -r '.result.subdomain')
+          url="https://vantara-sync.$sub.workers.dev"
+          echo "Worker at $url"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS "$url/health" -o /tmp/health.json; then break; fi
+            echo "health not ready yet (attempt $attempt)"; sleep 5
+          done
+          cat /tmp/health.json
+          jq -e '.ok == true' /tmp/health.json > /dev/null
+          jq -e '.rev >= 0' /tmp/health.json > /dev/null
+          # الهجرات طُبّقت فعلًا: الحسابات الثلاثة موجودة وقابلة للقراءة
+          curl -fsS "$url/v1/accounts" | jq -e '.content | length == 3' > /dev/null
+          echo 'Three accounts present.'
+          echo "VANTARA_SYNC_URL=$url" >> "$GITHUB_STEP_SUMMARY"
