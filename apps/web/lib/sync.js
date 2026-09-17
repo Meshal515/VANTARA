@@ -1,7 +1,7 @@
 /**
  * عميل المزامنة.
  *
- * النموذج: الواجهة تقرأ من مرآة محلية دائمًا، والشبكة تحدّث المرآة في
+ * النموذج: الواجهة تقرأ من مرآة محلية دائمًا، والشبكة تُصحّح المرآة في
  * الخلفية. لا شاشة تحميل عند كل مزامنة، ولا انتظار لـCloudflare قبل أول رسم.
  *
  * ثلاث قواعد تحمي التجربة:
@@ -23,6 +23,8 @@ const USER_KEY = 'vantara.user';
 const CURSOR_KEY = 'vantara.cursor';
 const QUEUE_KEY = 'vantara.queue';
 const MIRROR_KEY = 'vantara.mirror';
+const DEVICE_ID_KEY = 'vantara.device.id';
+const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
 
 /** سقف الطابور. تجاوزه يعني انقطاعًا طويلًا جدًا، وأقدم عملية تُسقط أولًا. */
 const MAX_QUEUE = 500;
@@ -63,6 +65,32 @@ function writeJson(key, value) {
   }
 }
 
+function randomSecret(bytes = 32) {
+  const value = new Uint8Array(bytes);
+  crypto.getRandomValues(value);
+  let binary = '';
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * إثبات الجهاز يُنشأ مرة واحدة ويبقى محليًا. الـWorker لا يخزّن القيمة نفسها،
+ * بل HMAC لها فقط. حذفه من التخزين يعني أن الجهاز يحتاج pairing جديدًا.
+ */
+function deviceProof() {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  let deviceCredential = localStorage.getItem(DEVICE_CREDENTIAL_KEY);
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+  if (!deviceCredential) {
+    deviceCredential = randomSecret();
+    localStorage.setItem(DEVICE_CREDENTIAL_KEY, deviceCredential);
+  }
+  return { deviceId, deviceCredential };
+}
+
 export function createSync({ baseUrl }) {
   const listeners = new Set();
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
@@ -86,7 +114,24 @@ export function createSync({ baseUrl }) {
   const persistMirror = () => writeJson(MIRROR_KEY, mirror);
   const persistQueue = () => writeJson(QUEUE_KEY, queue);
 
-  async function request(path, options = {}) {
+  async function sessionPayload(userId) {
+    const response = await fetch(`${baseUrl}/v1/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, ...deviceProof() }),
+    });
+    if (!response.ok) throw new Error(`http_${response.status}`);
+    return response.json();
+  }
+
+  function persistSession(payload) {
+    token = payload.token;
+    user = payload.user;
+    localStorage.setItem(TOKEN_KEY, token);
+    writeJson(USER_KEY, user);
+  }
+
+  async function request(path, options = {}, allowRefresh = true) {
     const headers = { ...(options.headers ?? {}) };
     if (token) headers.authorization = `Bearer ${token}`;
     if (options.body) headers['content-type'] = 'application/json';
@@ -96,7 +141,14 @@ export function createSync({ baseUrl }) {
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     if (response.status === 401) {
-      // السرّ دُوّر أو التوكن انتهى: الجلسة تُطوى ويُعاد المستخدم للاختيار
+      if (allowRefresh && user?.userId) {
+        try {
+          persistSession(await sessionPayload(user.userId));
+          return request(path, options, false);
+        } catch {
+          // revoke أو credential مفقود: هنا فقط نعود لشاشة الاختيار/pairing.
+        }
+      }
       token = null;
       localStorage.removeItem(TOKEN_KEY);
       emit(['session']);
@@ -108,31 +160,43 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── الجلسة ─────────────────────────
 
+  async function pairDevice(pairingToken) {
+    const response = await fetch(`${baseUrl}/v1/device/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingToken, ...deviceProof() }),
+    });
+    if (!response.ok) throw new Error(`pair_${response.status}`);
+    return response.json();
+  }
+
+  /** رابط Owner من نوع `?pair=...` يُستهلك مرة واحدة بلا form أو PIN. */
+  async function consumePairingFromUrl() {
+    if (typeof location === 'undefined') return;
+    const url = new URL(location.href);
+    const pairingToken = url.searchParams.get('pair');
+    if (!pairingToken) return;
+    await pairDevice(pairingToken);
+    url.searchParams.delete('pair');
+    if (typeof history !== 'undefined') {
+      history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+  }
+
   /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب قبل أي جلسة. */
   async function accounts() {
+    await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
     return (await response.json()).content ?? [];
   }
 
-  /** اختيار الحساب هو الدخول. لا كلمة مرور ولا خطوة تحقق. */
+  /** اختيار الحساب هو الدخول. لا كلمة مرور ولا PIN ولا form. */
   async function signIn(userId) {
-    const response = await fetch(`${baseUrl}/v1/session`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId }),
-    });
-    if (!response.ok) throw new Error(`http_${response.status}`);
-    const payload = await response.json();
-    // يُقرأ قبل الكتابة: المقارنة بعدها تتساوى دائمًا
     const previousId = user?.userId ?? null;
-    token = payload.token;
-    user = payload.user;
-    // حساب مختلف على نفس الجهاز: المرآة والـcursor يُبنيان من الصفر، وإلا
-    // ظهرت مكتبة المستخدم السابق لهذا. نفس الحساب يحفظ مرآته فيفتح فورًا.
+    const payload = await sessionPayload(userId);
+    persistSession(payload);
     if (previousId && previousId !== user.userId) reset();
-    localStorage.setItem(TOKEN_KEY, token);
-    writeJson(USER_KEY, user);
     emit(['session']);
     return user;
   }
@@ -146,6 +210,16 @@ export function createSync({ baseUrl }) {
     emit(['session']);
   }
 
+  async function logoutDevice() {
+    if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    signOut();
+  }
+
+  async function logoutAll() {
+    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    signOut();
+  }
+
   function reset() {
     cursor = 0;
     mirror = {};
@@ -157,12 +231,6 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── السحب ─────────────────────────
 
-  /**
-   * يسحب الفروقات ويطبّقها.
-   *
-   * التطبيق أولًا ثم الـcursor: العكس يفقد دفعة عند سقوط الشبكة. و`more`
-   * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
-   */
   async function pull() {
     if (!token || pulling) return;
     pulling = true;
@@ -172,7 +240,6 @@ export function createSync({ baseUrl }) {
         if (!payload) break;
 
         if (payload.reset) {
-          // عدّاد الخادم رجع (استعادة نسخة احتياطية): نُعيد البناء لا نتوقف
           reset();
           continue;
         }
@@ -199,16 +266,9 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── الكتابة ─────────────────────────
 
-  /**
-   * يسجّل عملية ويرسلها.
-   *
-   * الـop_id يُولَّد مرة واحدة هنا ويبقى ثابتًا عبر كل إعادة إرسال — هذا ما
-   * يمنع احتساب الفصل مرتين بعد انقطاع.
-   */
   function enqueue(kind, payload = {}) {
     const op = { opId: crypto.randomUUID(), kind, payload };
     queue.push(op);
-    // الأقدم يُسقط أولًا: طابور ممتلئ يعني انقطاعًا طويلًا، وأحدث نية أهم
     if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
     persistQueue();
     void push();
@@ -223,12 +283,10 @@ export function createSync({ baseUrl }) {
         const batch = queue.slice(0, 100);
         const payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
         const settled = new Set([...(payload?.applied ?? []), ...(payload?.skipped ?? [])]);
-        // يُزال المؤكَّد فقط. ما لم يُذكر يبقى في الطابور لدورة قادمة.
         queue = queue.filter((op) => !settled.has(op.opId));
         persistQueue();
         if (settled.size === 0) break;
       }
-      // الكتابة تُنتج revs جديدة: نسحبها فورًا حتى يرى الجهاز أثر كتابته
       await pull();
     } catch {
       // الشبكة ساقطة: الطابور محفوظ، والدورة القادمة تُعيد المحاولة
@@ -268,7 +326,6 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
-  /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
   function rows(table, predicate) {
     const bucket = mirror[table];
     if (!bucket) return [];
@@ -291,8 +348,11 @@ export function createSync({ baseUrl }) {
       return queue.length;
     },
     accounts,
+    pairDevice,
     signIn,
     signOut,
+    logoutDevice,
+    logoutAll,
     pull,
     push,
     enqueue,
