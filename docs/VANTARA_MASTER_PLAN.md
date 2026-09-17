@@ -51,7 +51,7 @@
 | BE-P0-01 | ⬜ | نظاما Login منفصلان: Worker يعرف المستخدم وContent API لا يعرفه | الدخول ينجح ظاهريًا ثم المكتبة/الفصول تفشل | B2 |
 | BE-P0-02 | ⬜ | `/v1/session` في Sync Worker يصدر Session بمجرد اختيار userId بلا إثبات جهاز موثوق | من يعرف Worker URL يستطيع انتحال أحد الحسابات الثلاثة | B2 |
 | BE-P0-03 | ⬜ | افتراض أن Worker URL سري بينما يُحقن في الواجهة/التطبيق | ينسف الافتراض الأمني الحالي | B2 |
-| BE-P0-04 | 🟡 | Pages/APK origin لا يطابق نموذج Content API الحالي المعتمد على same-origin/Cookie | طلبات API الخارجية تفشل أو تصبح هشة | B3 |
+| BE-P0-04 | ⬜ | Pages/APK origin لا يطابق نموذج Content API الحالي المعتمد على same-origin/Cookie | طلبات API الخارجية تفشل أو تصبح هشة | B3 |
 | BE-P0-05 | ⬜ | Cookie `SameSite=Lax` ليس نموذجًا مناسبًا لـAPK `https://localhost` → API خارجي | جلسة المحتوى لا تنتقل بصورة موثوقة | B3 |
 | BE-P0-06 | ⬜ | صور القارئ محمية بجلسة API بينما `<img>` لا يحمل Bearer token | صور الفصول قد تفشل على APK | B3 |
 | BE-P0-07 | ⬜ | حفظ التقدم في مسار مختلف عن بقية عميل API وقد ينسى credentials/auth | تقدم القراءة قد لا يُحفظ | B3/B4 |
@@ -61,7 +61,7 @@
 | BE-P0-11 | ⬜ | Docker/API يفترض same-origin static serving، لكن صورة الإنتاج لا تحمل `apps/web` | تناقض بين المعمارية الفعلية وما يفترضه السيرفر | B3 |
 | BE-P0-12 | ⬜ | لا يوجد عقد هوية موحد يفهمه Worker وContent API | أساس أغلب أعطال التكامل | B2 |
 
-**ملاحظة BE-P0-10 الحالية:** تم تنفيذ Gate في workflow بحيث deploy إلى Worker/D1 الحيين محصور في `main`، وأضيف validate للفروع. لكن CI الحالي للفرع أحمر بسبب اختبار CORS جديد يشير إلى implementation لم يُضف بعد؛ لذلك الحالة **🧪 وليست ✅**.
+**ملاحظة BE-P0-10:** إصلاح B0 على فرع الإصلاح يمنع النشر المباشر من feature branch: Worker/D1 لا يعملان إلا عبر `workflow_run` بعد نجاح `VANTARA CI` على `main`، ويُنشر SHA الذي اختبره CI نفسه. الفروع القديمة التي كانت تحمل Workflows مميّزة جُمّدت كذلك. تبقى الحالة 🧪 حتى تُدمج البوابة الآمنة في الفرع الافتراضي بدل إعلان حماية إنتاج غير مفعلة على `main`.
 
 ---
 
@@ -69,7 +69,7 @@
 
 | ID | الحالة | المشكلة | الأثر | Patch |
 |---|---|---|---|---|
-| BE-P1-01 | ⬜ | Pages production branch = `main` بينما التطوير الفعلي كان على فرع أحدث | Preview حديث وProduction قديم | B0 |
+| BE-P1-01 | 🧪 | Pages production branch = `main` بينما التطوير الفعلي كان على فرع أحدث | Preview حديث وProduction قديم | B0 |
 | BE-P1-02 | ⬜ | API يرجع `source.id` والواجهة تستخدم `source.sourceId` | ترتيب المصادر واللغة/fallback يتشوه | B6 |
 | BE-P1-03 | ⬜ | Library route في الواجهة يرجع Home بدل شاشة مكتبة حقيقية | وظيفة ظاهرة لكنها غير موجودة | B7/F4 |
 | BE-P1-04 | ⬜ | Explore route يرجع Home بدل شاشة مستقلة | استكشاف غير مكتمل | B7/F4 |
@@ -96,11 +96,11 @@
 
 | ID | الحالة | المشكلة | الأثر | Patch |
 |---|---|---|---|---|
-| BE-P2-01 | ⬜ | `.env` متتبع في Git ولا يوجد root ignore مناسب | خطر Secrets لاحقًا | B0 |
-| BE-P2-02 | ⬜ | `__pycache__/*.pyc` متتبع | Repository hygiene سيئ | B0 |
+| BE-P2-01 | 🧪 | `.env` متتبع في Git ولا يوجد root ignore مناسب | خطر Secrets لاحقًا | B0 |
+| BE-P2-02 | 🧪 | `__pycache__/*.pyc` متتبع | Repository hygiene سيئ | B0 |
 | BE-P2-03 | ⬜ | بعض صور الخدمات الاختيارية تستخدم `latest` رغم سياسة pinning | ترقيات صامتة | B1/B12 |
 | BE-P2-04 | ⬜ | README يقول إن التنفيذ لم يبدأ رغم وجود نظام كامل | وثائق مضللة | B12 |
-| BE-P2-05 | ⬜ | لا توجد آلية نهائية تمنع رجوع الملفات الممنوعة إلى Git | regression hygiene | B0 |
+| BE-P2-05 | 🧪 | لا توجد آلية نهائية تمنع رجوع الملفات الممنوعة إلى Git | regression hygiene | B0 |
 
 ---
 
@@ -115,6 +115,10 @@
 | INV-03 | ⬜ | مراجعة CSP النهائية بين Pages/API وعدم الاكتفاء بأن API عطّل CSP لأنه لا يقدم الواجهة |
 | INV-04 | ⬜ | مراجعة session revoke في Uchiyomi: هل VANTARA revoke يلغي upstream token فعلًا أم يتركه صالحًا |
 | INV-05 | ⬜ | مراجعة limits/timeouts والـrate limits لمسارات القراءة والصور والبحث تحت حمل واقعي + هامش كبير |
+
+### قيد خارجي مؤكد في B0
+
+`OPS-EXT-01` — GitHub repository rulesets/branch protection لهذا المستودع الخاص غير متاحة على الخطة الحالية. استدعاء GitHub Rules API أعاد `403` مع طلب **GitHub Pro أو جعل المستودع عامًا**. لذلك لا ندّعي وجود حماية منصة تمنع صاحب الصلاحية من direct push إلى `main`. نعوّض داخل المستودع ببوابات نشر لا تعمل إلا بعد CI ناجح، لكن هذا القيد يبقى موثقًا ولا يُخفى.
 
 ---
 
@@ -151,12 +155,44 @@
 
 **بوابة النجاح:** feature branch لا يستطيع تنفيذ migration أو deploy على D1/Worker الإنتاجي؛ Pages production branch واضح؛ الملفات الحساسة/المؤقتة غير متتبعة؛ CI يثبت ذلك.
 
-**الحالة:** 🟡 قيد العمل.
+**الحالة:** 🧪 **التنفيذ والاختبارات على فرع الإصلاح مكتملة؛ التفعيل على الفرع الافتراضي ينتظر قرار التكامل.**
 
-**العمل الموجود حاليًا:**
-- 🧪 Gate لنشر Sync Worker على `main` فقط موجود في commit `966b99d`.
-- 🧪 أضيف command لاختبارات sync-worker في commit `c4b7ae9`.
-- 🧪 أضيف failing CORS regression test في commit `1a5d412`، لكنه يشير إلى `cors.ts` غير الموجود بعد، وبالتالي الفرع أحمر عمدًا/حاليًا ولا يجوز إعلان B0 منتهيًا.
+### ما نُفذ
+
+- أزيل `.env` من Git، وبقي `.env.example` فقط كقالب موثق.
+- أضيفت قواعد `.gitignore` لـ`.env` و`.env.*` مع استثناء `.env.example`، ولـ`__pycache__` و`*.py[cod]`.
+- أزيلت ملفات Python cache المتتبعة من المستودع.
+- أضيف `tools/repository-safety.test.mjs` وأُدخل في CI قبل بقية الخطوات.
+- Sync Worker/D1 الإنتاجي أصبح `workflow_run` فقط بعد نجاح `VANTARA CI` على `main`، ويعمل على `head_sha` المختبر نفسه؛ لا `push` مباشر ولا `workflow_dispatch` إنتاجي.
+- Cloudflare Pages الإنتاجي يتبع نفس البوابة، مع `CF_PRODUCTION_BRANCH=main` صراحة، ومسار release يتحقق من CI قبل لمس Cloudflare.
+- Android signed release أصبح tag-only؛ الـtag يجب أن يكون على commit داخل `main` واجتاز `VANTARA CI` قبل قراءة مفاتيح التوقيع.
+- جُمّدت Workflows النشر المميّزة في الفروع القديمة بدل ترك أبواب جانبية:
+  - `chatgpt/release-current`: Pages freeze commit `1e387da1`.
+  - `chatgpt/source-audit-deploy`: Pages freeze commit `249f0eec`.
+  - `claude/dreamy-faraday-w9rtsp`: Pages `1567a647`، Worker/D1 `47aca43b`، Android release `f91b368e`.
+
+### Red → Green
+
+اختبار سلامة المستودع أُضيف أولًا وهو يفشل على الحالة القديمة بسبب `.env`، Python caches، ومسارات النشر غير المحمية. بعد الإصلاح صار أخضر. ثم شُدد الاختبار مرتين ليكشف مساري release في Pages وAndroid، وفشلا قبل إضافة تحقق CI ثم عادا للأخضر.
+
+### الدليل الحالي
+
+- **آخر CI كامل قبل تحديث هذا السجل:** run `35259017442` على SHA `df274e3c206330a274fb519bd63d295db6999a0e` = `success`.
+- Job `node`: Repository safety invariants + install + lint + build + typecheck + tests = كلها `success`.
+- Job `translation-worker`: deps + fonts + RAQM + `pytest -q` = كلها `success`.
+- قائمة runs لفرع الإصلاح لا تحتوي Worker/Pages production deploy على SHA B0؛ أي أن اختبار/تعديل feature branch لم يشغّل الإنتاج.
+- بعد تجميد فرع Claude القديم، أحدث pushes للتجميد شغلت CI فقط؛ سجلات Deploy الظاهرة لذلك الفرع تاريخية على SHAs أقدم وليست ناتجة عن freeze commits.
+- مقارنة قاعدة الكود الفعلية التي بدأ منها B0 (`5ecbcf79...`) مع SHA B0 أظهرت أن التغييرات محصورة في workflows/hygiene/tests/plan، لا منطق تطبيق جديد.
+
+### بوابة التكامل الباقية
+
+`main` أقدم من قاعدة الكود التي بُني عليها B0. مقارنة `main` بفرع الإصلاح أظهرت أن فرع الإصلاح أمامه **38 commit** تشمل أصلًا Android/Web/Sync/API وتغييرات سابقة ليست من B0. لذلك **لا يجوز دمج B0 إلى main تحت وصف "باتش أمان صغير"**؛ هذا سيكون ترقية قاعدة التطبيق الحالية كاملة. قرار التكامل منفصل وصريح.
+
+كذلك لا توجد GitHub Rulesets متاحة للمستودع الخاص على الخطة الحالية (`OPS-EXT-01`). هذا لا يلغي بوابات CI داخل الكود، لكنه يمنع الادعاء أن direct push إلى `main` محظور من GitHub نفسه.
+
+### ما لا يدخل B0
+
+اختبار/تنفيذ CORS نُقل بالكامل إلى **B3**. لا يوجد failing CORS test متروك في B0، ولا نصلح Transport ضمن Safety Gate.
 
 ---
 
@@ -210,7 +246,7 @@
 
 **بوابة النجاح:** APK حقيقي يفتح مكتبة، فصل، كل الصور، ويحفظ progress بدون Cookie assumptions مخفية.
 
-**الحالة:** 🟡 لأن failing CORS test موجود، لكن implementation لم يبدأ.
+**الحالة:** ⬜. يبدأ Red→Green الخاص بـCORS/Transport داخل B3 نفسه، وليس داخل B0.
 
 ---
 
@@ -473,6 +509,23 @@ Final status: ✅
 
 إذا فشل أحد البنود، تبقى الحالة 🧪 أو 🔁.
 
+### B0 — سجل التحقق الحالي
+
+```text
+Fix branch: fix/stability-sweep-20260917
+Base code SHA: 5ecbcf79c96aa66d67f2278a1c8aa8158512d6b7
+Verified implementation SHA before this documentation commit: df274e3c206330a274fb519bd63d295db6999a0e
+Regression test: tools/repository-safety.test.mjs (Red→Green مثبت)
+Targeted tests: pnpm test:safety = success داخل CI
+Full CI: run 35259017442 = success (node + translation-worker)
+Deploy-safe verification: no Worker/Pages production run on B0 feature SHA; legacy deployment workflows frozen
+Runtime/TinyFish verification: غير منطبق على B0؛ لا نغيّر user runtime flow
+PostHog/log verification: غير منطبق على B0
+Follow-up: عدة commits لاحقة أعادت تشغيل safety/full CI؛ بقي أخضر حتى SHA أعلاه
+Integration: PENDING — main متأخر 38 commit عن هذا الفرع؛ لا دمج صامت
+Final status: 🧪 حتى قرار التكامل والتحقق بعده
+```
+
 ---
 
 # 9. Mandatory Final Repository Sweep — شرط الإنهاء النهائي
@@ -515,4 +568,4 @@ Final status: ✅
 
 # 10. Current Next Step
 
-**التالي مباشرة:** إكمال B0 دون توسيع النطاق: إصلاح failing CORS regression test بالطريقة الصحيحة، جعل CI أخضر مع بقاء deploy الإنتاجي محميًا، ثم تنظيف `.env/__pycache__` وتثبيت production branch policy. بعدها تحديث حالات هذا الملف وإجراء تعقيب B0 قبل بدء B1.
+**التالي مباشرة:** تشغيل CI جديد على commit توثيق B0، ثم مراجعة diff النهائية نسبةً إلى قاعدة الكود `5ecbcf79...`. إذا بقيت خضراء ومحصورة في B0، يصبح تنفيذ B0 جاهزًا لقرار التكامل. بعد قرار التكامل والتحقق من النتيجة، يبدأ B1. **CORS/Transport يبدأ فقط في B3.**
