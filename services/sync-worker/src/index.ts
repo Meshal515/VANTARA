@@ -297,6 +297,9 @@ function statementsFor(
       ];
     }
 
+    // العمليتان التاليتان تراكميتان (+1 و+ms)، فهما وحدهما غير معرّفتين
+    // بطبيعتهما. الحرس `NOT EXISTS` يجعل إعادة التسليم بلا أثر داخل نفس
+    // الدفعة الذرّية التي تحجز op_id — انظر handleOps.
     case 'chapter.complete': {
       const chapterKey = asString(p['chapterKey'], 200);
       const seriesRef = asString(p['seriesRef'], 200);
@@ -311,13 +314,14 @@ function statementsFor(
           .prepare(
             `INSERT INTO chapter_reads
                (user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev)
-             VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+             SELECT ?, ?, ?, ?, 1, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, chapter_key) DO UPDATE SET
                read_count = chapter_reads.read_count + 1,
                last_read_at = excluded.last_read_at,
                rev = excluded.rev`,
           )
-          .bind(userId, chapterKey, seriesRef, asNumber(p['chapterNumber']), now, now, rev),
+          .bind(userId, chapterKey, seriesRef, asNumber(p['chapterNumber']), now, now, rev, op.opId),
       ];
     }
 
@@ -329,12 +333,13 @@ function statementsFor(
         db
           .prepare(
             `INSERT INTO usage_daily (user_id, day, active_ms, rev)
-             VALUES (?, ?, ?, ?)
+             SELECT ?, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, day) DO UPDATE SET
                active_ms = usage_daily.active_ms + excluded.active_ms,
                rev = excluded.rev`,
           )
-          .bind(userId, day, ms, rev),
+          .bind(userId, day, ms, rev, op.opId),
       ];
     }
 
@@ -621,10 +626,10 @@ const MAX_OPS_PER_REQUEST = 200;
 /**
  * تطبيق دفعة كتابة.
  *
- * كل عملية معرّفة بـop_id: `INSERT OR IGNORE` في applied_ops يكشف المُعاد
- * تسليمه، فإعادة المحاولة بعد انقطاع الشبكة لا تحتسب فصلًا مرتين ولا ترسل
- * ترشيحًا مرتين. الإجابة تُعيد المطبَّق والمتجاهل معًا حتى يُفرّغ العميل طابوره
- * بثقة.
+ * كل عملية معرّفة بـop_id في applied_ops، فإعادة المحاولة بعد انقطاع الشبكة
+ * لا تحتسب فصلًا مرتين ولا ترسل ترشيحًا مرتين.
+ *
+ * والأهم من الحجز نفسه أنه ذرّي مع الأثر: انظر التعليق قبل الدفعة أدناه.
  */
 async function handleOps(request: Request, env: Env, userId: string, now: number): Promise<Response> {
   const body = (await request.json().catch(() => null)) as { ops?: unknown } | null;
@@ -647,42 +652,46 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
 
   const rev = await allocateRev(env);
-  const applied: string[] = [];
-  const skipped: string[] = [];
 
-  // الحجز أولًا وفي دفعة واحدة: من يفوز بالإدراج يملك حق التطبيق. عملية
-  // وصلت مرتين بالتوازي تُطبَّق مرة.
-  const claims = await env.DB.batch<{ op_id: string }>(
-    ops.map((op) =>
-      env.DB.prepare(
-        'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
-      ).bind(op.opId, userId, op.kind, rev, now),
-    ),
-  );
+  // دمج الحقول يحتاج قراءة قبل الكتابة فلا يدخل الدفعة الذرّية. يُنفَّذ أولًا،
+  // وإعادة تنفيذه بلا ضرر: نفس القيم الواردة تُكتب مرة أخرى فحسب.
+  for (const op of ops) {
+    if (FIELD_MERGE_KINDS.has(op.kind)) await applyFieldMerge(op, userId, rev, env);
+  }
 
-  const fresh: IncomingOp[] = [];
-  ops.forEach((op, index) => {
-    if ((claims[index]?.meta.changes ?? 0) > 0) fresh.push(op);
-    else skipped.push(op.opId);
-  });
-
+  // الأثر ثم الحجز، في دفعة واحدة.
+  //
+  // الترتيب هو كل شيء. الحجز في دفعة منفصلة قبل الأثر يعني أن فشل دفعة الأثر
+  // يترك op_id محجوزًا بلا كتابة: إعادة محاولة العميل تُتجاهل، والكتابة تُفقد
+  // بصمت — وهذا أسوأ عيب ممكن في المزامنة.
+  //
+  // D1 تنفّذ batch كمعاملة واحدة، فالأثر والحجز يثبتان معًا أو لا شيء منهما.
+  // والأثر يسبق الحجز حتى يرى حرس `NOT EXISTS` في العمليات التراكمية حالة
+  // ما قبل هذا الطلب: إعادة تسليم تجد op_id موجودًا من طلب سابق فلا تحتسب
+  // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
   const statements: D1PreparedStatement[] = [];
-  for (const op of fresh) {
+  for (const op of ops) {
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
     const built = statementsFor(op, userId, rev, now, env);
     if (built) statements.push(...built);
-    applied.push(op.opId);
   }
-
-  if (statements.length > 0) await env.DB.batch(statements);
-  // دمج الحقول يحتاج قراءة قبل الكتابة، فلا يدخل الدفعة الذرّية
-  for (const op of fresh) {
-    if (!FIELD_MERGE_KINDS.has(op.kind)) continue;
-    await applyFieldMerge(op, userId, rev, env);
-    applied.push(op.opId);
+  for (const op of ops) {
+    statements.push(
+      env.DB.prepare(
+        'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+      ).bind(op.opId, userId, op.kind, rev, now),
+    );
   }
+  await env.DB.batch(statements);
 
-  return json({ applied, skipped, cursor: rev, serverRev: await currentRev(env) });
+  // كلها مستقرّة الآن: العميل يُفرّغ طابوره. التمييز بين «طُبّقت» و«كانت
+  // مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
+  return json({
+    applied: ops.map((op) => op.opId),
+    skipped: [],
+    cursor: rev,
+    serverRev: await currentRev(env),
+  });
 }
 
 // ───────────────────────────── الحضور ─────────────────────────────
