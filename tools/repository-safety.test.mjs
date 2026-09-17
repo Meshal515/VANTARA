@@ -33,6 +33,12 @@ function assertCiGatedProductionWorkflow(path) {
   assert.doesNotMatch(workflow, /workflow_dispatch\s*:/m, `${path} must not allow a feature-branch copy to be manually dispatched with production secrets`);
 }
 
+function assertCommitHasSuccessfulCi(workflow, commitExpression, label) {
+  assert.match(workflow, /gh run list --workflow ['"]VANTARA CI['"]/m, `${label} must inspect VANTARA CI runs before privileged release work`);
+  assert.match(workflow, new RegExp(`--commit ['"]?${commitExpression.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]?`), `${label} must verify CI for the exact commit being released`);
+  assert.match(workflow, /select\(\.conclusion == ['"]success['"]\)/m, `${label} must require a successful CI conclusion`);
+}
+
 test('tracked repository contains no local env files or Python caches', () => {
   const tracked = trackedFiles();
   const forbidden = tracked.filter(
@@ -60,11 +66,15 @@ test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   assert.match(workflow, /^\s*CF_PRODUCTION_BRANCH:\s*main\s*$/m, 'Pages production branch must be explicit');
   assert.match(workflow, /--branch="\$CF_PRODUCTION_BRANCH"/m, 'Pages deploy must always identify the production branch explicitly');
   assert.doesNotMatch(workflow, /GITHUB_REF_NAME[^\n]*CF_PRODUCTION_BRANCH|branch="\$\{GITHUB_REF_NAME\}"/m, 'Pages deploy must not derive its deployment branch from an arbitrary pushed branch');
+  assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Pages release verification needs read access to Actions results');
+  assertCommitHasSuccessfulCi(workflow, '$MAIN_SHA', 'Pages release path');
 });
 
-test('signed Android release workflow is tag-only and rejects tags outside main', () => {
+test('signed Android release workflow is tag-only, main-only, and CI-verified', () => {
   const workflow = read('.github/workflows/android-release.yml');
   assert.match(workflow, /push:\s*\n\s+tags:\s*\n\s+- ['"]v\*['"]/m, 'Android release must be tag-triggered');
   assert.doesNotMatch(workflow, /workflow_dispatch\s*:/m, 'signed release must not be manually dispatchable from a feature branch');
   assert.match(workflow, /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/m, 'release must prove its tagged commit belongs to main before reading signing secrets');
+  assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Android release verification needs read access to Actions results');
+  assertCommitHasSuccessfulCi(workflow, '$GITHUB_SHA', 'Android release path');
 });
