@@ -1,15 +1,13 @@
 name: Deploy web to Cloudflare Pages
 
-# هذا workflow يحمل مفاتيح Cloudflare ويستطيع تعديل مشروع Pages، لذلك لا
-# يحصل فرع تجريبي على Preview من مفاتيح الإنتاج. الفروع تُفحص في CI فقط؛
-# النشر العام يحدث من main، والإصدار يعيد نشر main بعد تحديث version.json.
+# الإنتاج لا ينشر مباشرة من push. نشر main يحدث فقط بعد نجاح VANTARA CI؛
+# workflow_run يُقرأ من default branch ويملك الأسرار بعد أن ينتهي CI غير المميّز.
+# حدث release مسموح لتحديث version.json، لكن tag يجب أن يكون من main.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/web/**'
-      - '.github/workflows/cloudflare-pages.yml'
+  workflow_run:
+    workflows: ['VANTARA CI']
+    types: [completed]
+    branches: [main]
   release:
     types: [published]
 
@@ -22,14 +20,19 @@ env:
 
 jobs:
   deploy:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main') ||
+      github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # حتى عند حدث release ننشر الواجهة الحالية من main، لا نسخة عشوائية
-      # من tag قديم. fetch-depth=0 مطلوب للتحقق من علاقة tag بـmain.
+      # في مسار CI ننشر SHA الذي اختُبر بالضبط. في release نأخذ main الحالي؛
+      # التحقق التالي يضمن أن release نفسه مبني على main.
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
           fetch-depth: 0
 
       - name: Verify release belongs to main
@@ -144,6 +147,6 @@ jobs:
 
       - name: Important deployment note
         run: |
-          echo 'Frontend production deployment completed from main.'
+          echo 'Frontend production deployment completed from a CI-approved main commit.'
           echo 'Feature branches are CI-only until an isolated preview project/token is introduced.'
           echo 'VANTARA API endpoints (/v1/*) still require the backend origin.'
