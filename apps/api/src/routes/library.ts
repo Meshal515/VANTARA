@@ -2,7 +2,12 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { query } from '@vantara/db';
 import { UchiyomiError } from '@vantara/uchiyomi';
-import { auditCoverage, buildCatalogue, pickCopy } from '@vantara/domain';
+import {
+  auditCoverage,
+  buildCatalogue,
+  pickCopy,
+  type ChapterCopy,
+} from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 interface SeriesRow {
@@ -15,6 +20,72 @@ interface SeriesRow {
   source?: string | null;
   color?: string | null;
   metadata?: { summary?: string; status?: string; genres?: string[] } | null;
+}
+
+interface ChapterFallbackOptions {
+  copies: readonly ChapterCopy[];
+  fetchCopy: (copy: ChapterCopy | null) => Promise<unknown>;
+  verifyAvailable: (copy: ChapterCopy | null) => Promise<boolean>;
+}
+
+interface ChapterFallbackResult {
+  chosen: string | null;
+  attempts: number;
+}
+
+class ChapterUnavailableError extends Error {
+  readonly code = 'chapter_unavailable';
+  readonly attempts: number;
+
+  constructor(attempts: number) {
+    super('chapter_unavailable');
+    this.name = 'ChapterUnavailableError';
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * يجرب نسخ الفصل داخل الخادم حتى تثبت إتاحة واحدة فعلًا.
+ *
+ * نجاح `/api/sources/fetch` وحده ليس نجاح قراءة: upstream قد يقبل المهمة ثم
+ * لا ينتج فصلًا. لذلك لا ننتقل للنسخة التالية إلا بعد `verifyAvailable`، ولا
+ * نعيد نجاحًا للعميل إلا عندما يصبح الفصل قابلًا للفتح.
+ */
+export async function fetchChapterWithFallback(
+  options: ChapterFallbackOptions,
+): Promise<ChapterFallbackResult> {
+  let attempts = 0;
+
+  // لا metadata: دع upstream يجرب اختياره التلقائي مرة واحدة فقط.
+  if (options.copies.length === 0) {
+    attempts = 1;
+    try {
+      await options.fetchCopy(null);
+      if (await options.verifyAvailable(null)) return { chosen: null, attempts };
+    } catch {
+      // الخطأ النهائي موحّد أدناه؛ التفاصيل التقنية لا تتسرب للواجهة.
+    }
+    throw new ChapterUnavailableError(attempts);
+  }
+
+  const exclude = new Set<string>();
+  while (exclude.size < options.copies.length) {
+    const copy = pickCopy(options.copies, { exclude });
+    if (!copy) break;
+    exclude.add(copy.key);
+    attempts += 1;
+
+    try {
+      await options.fetchCopy(copy);
+      if (await options.verifyAvailable(copy)) {
+        return { chosen: copy.key, attempts };
+      }
+    } catch {
+      // المصدر/النسخة فشلت: جرّب التالية داخل نفس الطلب.
+    }
+  }
+
+  throw new ChapterUnavailableError(attempts);
 }
 
 /** الصور تُقدَّم عبر VANTARA لا مباشرة: المتصفح يحمل كوكي مبهمًا، والتوكن عندنا. */
@@ -172,22 +243,14 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
   });
 
   /**
-   * يجلب فصلًا واحدًا باختيار أفضل نسخة له.
-   *
-   * الاختيار هنا لا في العميل: قواعد الترجيح (على القرص، ثم ما اختارته قواعد
-   * الإصدار، ثم اللغة، ثم الأكثر صفحات) مُختبرة في `@vantara/domain`، وواجهة
-   * الويب جافاسكربت بلا حزم فلا تستطيع استيرادها — ونسخة ثانية منها في
-   * المتصفح تنحرف عن الأولى بهدوء.
-   *
-   * `exclude` هو ما يجعل «بدّل المصدر» يعمل: العميل يعيد النداء بمفاتيح النسخ
-   * التي فشلت، فتُختار غيرها. والمفتاح المُختار يُعاد ليعرف العميل ما يستثنيه
-   * في المحاولة القادمة.
+   * يجلب فصلًا واحدًا، ويبدّل المصادر داخل الخادم حتى تصبح نسخة متاحة فعلًا.
    */
   app.post(
     '/v1/series/:id/chapters/:number/fetch',
     { preHandler: requireSession(ctx) },
     async (request, reply) => {
       const { id, number } = request.params as { id: string; number: string };
+      // `exclude` القديم يُقبل للتوافق فقط؛ قرار الـfallback لم يعد عند العميل.
       const parsed = z
         .object({ exclude: z.array(z.string().max(300)).max(50).optional() })
         .safeParse(request.body ?? {});
@@ -204,31 +267,70 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
         versions.content.find((row) => Math.round(row.number * 100) === Math.round(target * 100))
           ?.copies ?? [];
 
-      const exclude = new Set(parsed.data.exclude ?? []);
-      const pick = pickCopy(copies, { exclude });
+      let resolvedBookId: string | null = null;
+      const verifyAvailable = async (): Promise<boolean> => {
+        // upstream يصف الجلب كعملية قد تتأخر؛ الانتظار هنا جزء من عقد الخادم
+        // بدل أن يكرره كل عميل بقواعد مختلفة.
+        for (const waitMs of [400, 900, 1_800]) {
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          const held = await ctx.uchiyomi.chapters(id, session.token).catch(() => []);
+          const found = held.find(
+            (chapter) =>
+              Number.isFinite(chapter.number) &&
+              Math.round((chapter.number as number) * 100) === Math.round(target * 100),
+          );
+          if (found?.id) {
+            resolvedBookId = found.id;
+            return true;
+          }
+        }
+        return false;
+      };
 
-      // بلا نسخ معروفة: الرقم وحده. upstream يختار بقواعده، وهذا أفضل من رفض
-      // الطلب عندما يكون sweep متأخرًا ولم يسجّل النسخ بعد.
-      const body = pick
-        ? { seriesId: id, picks: [{ number: target, source: pick.source, sourceId: pick.key.slice(pick.source.length + 1) }] }
-        : { seriesId: id, numbers: [target] };
-      if (!pick && exclude.size > 0 && copies.length > 0) {
-        return reply.code(409).send({ error: 'no_copies_left' });
-      }
+      try {
+        const result = await fetchChapterWithFallback({
+          copies,
+          fetchCopy: async (copy) => {
+            const body = copy
+              ? {
+                  seriesId: id,
+                  picks: [
+                    {
+                      number: target,
+                      source: copy.source,
+                      sourceId: copy.key.slice(copy.source.length + 1),
+                    },
+                  ],
+                }
+              : { seriesId: id, numbers: [target] };
 
-      const response = await fetch(`${base}/api/sources/fetch`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(180_000),
-      });
-      const payload = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        return reply
-          .code(response.status === 404 ? 404 : 502)
-          .send({ error: 'fetch_failed', chosen: pick?.key ?? null, detail: payload });
+            const response = await fetch(`${base}/api/sources/fetch`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${session.token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(180_000),
+            });
+            if (!response.ok) throw new Error(`upstream_fetch_${String(response.status)}`);
+          },
+          verifyAvailable: async () => verifyAvailable(),
+        });
+
+        return reply.send({
+          chosen: result.chosen,
+          attempts: result.attempts,
+          bookId: resolvedBookId,
+        });
+      } catch (error) {
+        if (error instanceof ChapterUnavailableError) {
+          return reply
+            .code(503)
+            .send({ error: error.code, attempts: error.attempts });
+        }
+        throw error;
       }
-      return reply.send({ chosen: pick?.key ?? null, detail: payload });
     },
   );
 
