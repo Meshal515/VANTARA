@@ -21,10 +21,15 @@ function isForbiddenEnv(path) {
   return base.startsWith('.env') && !base.endsWith('.example');
 }
 
-function assertMainOnlyCloudflareWorkflow(path) {
+function assertCiGatedProductionWorkflow(path) {
   const workflow = read(path);
-  assert.match(workflow, /push:\s*\n\s+branches:\s*\n\s+- main\b/m, `${path} must deploy from main only`);
-  assert.doesNotMatch(workflow, /branches:\s*\n\s+- ['"]?\*\*['"]?/m, `${path} must not run privileged deploys from every branch`);
+  assert.match(workflow, /workflow_run\s*:/m, `${path} must be triggered by completed CI, not directly by a branch push`);
+  assert.match(workflow, /workflows:\s*\[['"]VANTARA CI['"]\]/m, `${path} must depend on the VANTARA CI workflow`);
+  assert.match(workflow, /types:\s*\[completed\]/m, `${path} must wait for CI completion`);
+  assert.match(workflow, /workflow_run\.conclusion\s*==\s*['"]success['"]/m, `${path} must require successful CI`);
+  assert.match(workflow, /workflow_run\.head_branch\s*==\s*['"]main['"]/m, `${path} must only deploy a main CI run`);
+  assert.match(workflow, /workflow_run\.head_sha/m, `${path} must deploy the exact commit that CI tested`);
+  assert.doesNotMatch(workflow, /^\s*push\s*:/m, `${path} must not deploy directly on push`);
   assert.doesNotMatch(workflow, /workflow_dispatch\s*:/m, `${path} must not allow a feature-branch copy to be manually dispatched with production secrets`);
 }
 
@@ -45,13 +50,13 @@ test('root ignore rules prevent local env and Python cache files from returning'
   assert.match(ignore, /^\*\*\/__pycache__\/$/m, 'root .gitignore must ignore Python cache directories');
 });
 
-test('sync worker production workflow cannot run from a feature branch', () => {
-  assertMainOnlyCloudflareWorkflow('.github/workflows/sync-worker.yml');
+test('sync worker production deploy is CI-gated and main-only', () => {
+  assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
-test('Cloudflare Pages production workflow cannot run from a feature branch', () => {
+test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   const workflow = read('.github/workflows/cloudflare-pages.yml');
-  assertMainOnlyCloudflareWorkflow('.github/workflows/cloudflare-pages.yml');
+  assertCiGatedProductionWorkflow('.github/workflows/cloudflare-pages.yml');
   assert.match(workflow, /^\s*CF_PRODUCTION_BRANCH:\s*main\s*$/m, 'Pages production branch must be explicit');
   assert.match(workflow, /--branch="\$CF_PRODUCTION_BRANCH"/m, 'Pages deploy must always identify the production branch explicitly');
   assert.doesNotMatch(workflow, /GITHUB_REF_NAME[^\n]*CF_PRODUCTION_BRANCH|branch="\$\{GITHUB_REF_NAME\}"/m, 'Pages deploy must not derive its deployment branch from an arbitrary pushed branch');
