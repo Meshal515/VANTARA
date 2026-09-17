@@ -40,7 +40,7 @@ function base64UrlDecode(value: string): Uint8Array | null {
   }
 }
 
-async function hmacKey(secret: string): Promise<CryptoKey> {
+async function hmacKey(secret: string) {
   return crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
@@ -77,10 +77,6 @@ function parseClaims(bytes: Uint8Array): WireClaims | null {
   }
 }
 
-/**
- * يصدر access token قصير العمر يحمل هوية VANTARA والجهاز الموثوق.
- * لا يحمل أي upstream credential ولا كلمة مرور.
- */
 export async function mintIdentityToken(
   input: IdentityTokenInput,
   secret: string,
@@ -106,7 +102,6 @@ export async function mintIdentityToken(
   return `${payloadPart}.${base64UrlEncode(signature)}`;
 }
 
-/** يتحقق من التوقيع والنسخة والعمر ويعيد claims موحّدة أو null. */
 export async function verifyIdentityToken(
   token: string,
   secret: string,
