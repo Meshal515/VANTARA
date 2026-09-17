@@ -3,8 +3,16 @@
 # بناء على مرحلتين: التبعيات الكاملة للبناء، ثم تبعيات الإنتاج وحدها مع dist.
 # النتيجة لا تحمل TypeScript ولا vitest ولا مصدرًا.
 
-FROM node:22-alpine AS build
+# قابل للتجاوز: Docker Hub يحدّ المعدّل على عناوين IP مشتركة، و429 يوقف البناء.
+# مرآة بديلة: --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:22-alpine
+ARG NODE_IMAGE=node:22-alpine
+
+FROM ${NODE_IMAGE} AS build
 WORKDIR /repo
+
+# بدونه يرفض `pnpm install --prod` مسح node_modules بلا TTY ويفشل البناء:
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+ENV CI=true
 
 RUN corepack enable
 
@@ -23,7 +31,7 @@ RUN pnpm -r build
 # تبعيات الإنتاج وحدها، في شجرة نظيفة تُنسخ كما هي
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-FROM node:22-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
