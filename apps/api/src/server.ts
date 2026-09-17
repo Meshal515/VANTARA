@@ -1,9 +1,16 @@
 import { closePool, initPool } from '@vantara/db';
+import { migrate } from '@vantara/db/migrate';
 import { buildApp } from './app.ts';
 import { loadConfig } from './lib/config.ts';
 import { startJobs, type JobRunner } from './jobs/index.ts';
 
 const config = loadConfig();
+
+// الـschema جزء من الجهوزية، لا خطوة تشغيل يدوية. إذا فشلت migration لا نفتح
+// المنفذ أصلًا؛ تشغيل API فوق schema ناقص أسوأ من فشل واضح عند الإقلاع.
+await migrate(config.DATABASE_URL, {
+  log: (message) => console.info(`[migration] ${message}`),
+});
 initPool({ connectionString: config.DATABASE_URL });
 
 const { app, ctx } = await buildApp(config);
