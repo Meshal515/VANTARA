@@ -17,7 +17,7 @@ permissions:
 
 env:
   CF_PAGES_PROJECT: vantara
-  CF_PRODUCTION_BRANCH: claude/dreamy-faraday-w9rtsp
+  CF_PRODUCTION_BRANCH: main
 
 jobs:
   deploy:

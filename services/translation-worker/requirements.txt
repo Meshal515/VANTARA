@@ -10,12 +10,10 @@ Pillow==12.3.0
 manga-ocr==0.1.16
 paddleocr==3.7.0
 
-# ملاحظة: surya-ocr 0.22.1 يفرض Pillow<11، ويتعارض مباشرة مع Pillow 12.3
-# الذي نعتمد عليه للرسم العربي. لذلك Surya ليس في نفس البيئة؛ إن احتجناه لاحقًا
-# يعمل كخدمة/بيئة منفصلة بدل كسر renderer العربي.
-
-# تنظيف النص القديم
-iopaint==1.6.0
+# ملاحظة: Surya وIOPaint لا يعيشان في نفس بيئة الرسم العربي الحالية بسبب قيود Pillow.
+# IOPaint 1.6.0 يفرض Pillow==9.5.0، بينما manga-ocr يحتاج Pillow>=10
+# وVANTARA يعتمد Pillow 12.3.0 للرسم العربي/RAQM. لذلك inpainting معزول في
+# requirements-inpaint.txt إلى أن يعمل كخدمة/حاوية مستقلة.
 
 # القاعدة والوظائف
 psycopg[binary]==3.2.3
