@@ -27,6 +27,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Repository safety invariants
+        run: pnpm test:safety
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       # البناء قبل الفحص: `services/sync-worker` و`apps/api` يستوردان
