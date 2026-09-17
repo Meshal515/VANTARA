@@ -43,4 +43,28 @@ describe('B1 clean-install invariants', () => {
     expect(compose).toMatch(/uchiyomi:[\s\S]*?healthcheck:/);
     expect(compose).toContain('uchiyomi: { condition: service_healthy }');
   });
+
+  it('pins optional service images to exact versions instead of floating tags', async () => {
+    const compose = await text('infra/docker-compose.yml');
+    expect(compose).toContain('cloudflare/cloudflared:2026.9.1');
+    expect(compose).toContain('louislam/uptime-kuma:2.5.5');
+    expect(compose).toContain('binwiederhier/ntfy:v2.28.0');
+    expect(compose).toContain('restic/restic:0.19.1');
+    expect(compose).not.toMatch(/(?:latest|uptime-kuma:1)(?:[}\s'"\n]|$)/);
+  });
+
+  it('backs up PostgreSQL logically instead of snapshotting its live data directory', async () => {
+    const compose = await text('infra/docker-compose.yml');
+    const backup = await text('infra/backup-postgres.sh');
+    const restore = await text('infra/restore-postgres.sh');
+
+    expect(compose).not.toContain('postgres_data:/source/postgres:ro');
+    expect(compose).toContain('db-backup:');
+    expect(backup).toContain('pg_dump');
+    expect(backup).toContain('vantara.dump');
+    expect(backup).toContain('uchiyomi.dump');
+    expect(restore).toContain('pg_restore');
+    expect(restore).toContain('vantara.dump');
+    expect(restore).toContain('uchiyomi.dump');
+  });
 });
