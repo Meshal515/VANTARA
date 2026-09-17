@@ -36,6 +36,14 @@ describe('B6 source and chapter contract', () => {
     expect(web).not.toContain('state.sources.set(source.sourceId, source)');
   });
 
+  it('keeps fallback and readiness polling on the backend so the client fetches once', async () => {
+    const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
+    expect(web).not.toContain('const failedCopies = new Set()');
+    expect(web).not.toContain('for (let attempt = 0; attempt < 3; attempt += 1)');
+    expect(web).not.toContain('for (const waitMs of [400, 900, 1800])');
+    expect(web).toContain('bookId = result?.bookId ?? null');
+  });
+
   it('keeps chapter fallback in a server-side testable function', () => {
     const fetchChapterWithFallback = (library as Record<string, unknown>)[
       'fetchChapterWithFallback'
