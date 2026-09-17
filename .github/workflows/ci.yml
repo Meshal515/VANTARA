@@ -50,7 +50,8 @@ jobs:
             services/translation-worker/requirements-dev.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Verify RAQM support
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
           from PIL import features
           assert features.check('raqm'), 'Pillow was installed without RAQM; Arabic typesetting would be unsafe'
           print('RAQM OK')
