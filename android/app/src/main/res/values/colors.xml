@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ألوان النظام حول الـWebView.
+
+  ليست تجميلًا: السمة الافتراضية في قالب Capacitor فاتحة، فتظهر خلفية بيضاء
+  في اللحظة بين ظهور النافذة وأول رسم للصفحة، وعلى شاشة سوداء بالكامل يبدو
+  ذلك كوميض أبيض في كل فتح.
+-->
+<resources>
+    <color name="colorPrimary">#000000</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="colorAccent">#8B3FEF</color>
+    <color name="vantaraBlack">#000000</color>
+</resources>

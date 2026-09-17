@@ -17,7 +17,7 @@
  */
 
 // أي تعديل على ملفات القشرة يحتاج رقمًا جديدًا هنا، وإلا خدم الـSW القديم
-const VERSION = 'vantara-shell-v2';
+const VERSION = 'vantara-shell-v3';
 
 const SHELL = [
   '/',
@@ -25,6 +25,8 @@ const SHELL = [
   '/reader.js',
   '/styles.css',
   '/lib/sync.js',
+  '/lib/update.js',
+  '/lib/icons.js',
   '/lib/config.js',
   '/lib/colors.js',
   '/lib/gradient.js',

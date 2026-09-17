@@ -7,6 +7,9 @@ on:
     paths:
       - 'apps/web/**'
       - '.github/workflows/cloudflare-pages.yml'
+  # إصدار جديد ⇒ version.json يُعاد نشره، وإلا لم يعرف أي تطبيق أن هناك أحدث
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -66,6 +69,49 @@ jobs:
             cat /tmp/cf-project.json
             exit 1
           fi
+
+      # الواجهة في المتصفح تحتاج عنوان الـWorker أيضًا: بلا هذا تُظهر
+      # «عنوان المزامنة غير مضبوط». يُستنتج من الحساب لا من سرّ إضافي.
+      - name: Bake the sync endpoint into the web bundle
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          API_URL_VAR: ${{ vars.VANTARA_API_URL }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | jq -r '.result.subdomain // empty')
+          sync=''
+          if [ -n "$sub" ]; then sync="https://vantara-sync.$sub.workers.dev"; fi
+          SYNC_URL="$sync" API_URL="${API_URL_VAR:-}" python3 - <<'PY'
+          import os
+          path = 'apps/web/lib/config.js'
+          text = open(path, encoding='utf-8').read()
+          text = text.replace('__VANTARA_SYNC_URL__', os.environ['SYNC_URL'])
+          text = text.replace('__VANTARA_API_URL__', os.environ['API_URL'])
+          open(path, 'w', encoding='utf-8').write(text)
+          PY
+          echo "sync=$sync"
+
+      # نسخة التطبيق المنشورة، من آخر GitHub Release: مصدر واحد للحقيقة، ولا
+      # ملف يُثبَّت في المستودع ثم ينسى أحد تحديثه.
+      - name: Publish version.json for the in-app update check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo '')
+          version="${tag#v}"
+          if [ -z "$version" ]; then
+            echo 'No release yet; publishing 0.0.0 so the check is a no-op.'
+            version='0.0.0'
+          fi
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/VANTARA-release.apk"
+          cat > apps/web/version.json <<JSON
+          { "version": "${version}", "url": "${url}", "notes": "" }
+          JSON
+          cat apps/web/version.json
 
       - name: Deploy static web
         env:

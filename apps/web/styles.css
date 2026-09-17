@@ -583,3 +583,21 @@ h1, h2, h3, p { margin: 0; }
     transition-duration: .001ms !important;
   }
 }
+
+/* ───────────────────────────── شريط التحديث ───────────────────────────── */
+
+/* غير حاجب وفوق كل شيء: التطبيق يعمل، والتحديث اختيار */
+.update {
+  position: fixed; z-index: 100;
+  inset-inline: 12px;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0) + 12px);
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--accent-line); border-radius: var(--r-md);
+  background: rgba(14, 10, 24, .96); backdrop-filter: blur(16px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .5);
+  animation: rise .26s cubic-bezier(.22, .61, .36, 1);
+}
+.update__text { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; }
+.update .btn { text-decoration: none; }
+.update__later { color: var(--muted); font-size: 13px; }

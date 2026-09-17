@@ -27,7 +27,12 @@ const OVERRIDE_KEY = 'vantara.endpoints';
 const BAKED = {
   sync: '__VANTARA_SYNC_URL__',
   api: '__VANTARA_API_URL__',
+  /** من يجيب «هل هناك نسخة أحدث؟». تُنشر مع الواجهة على Pages. */
+  updates: '__VANTARA_UPDATES_URL__',
 };
+
+/** نسخة هذا البناء. يُستبدل عند بناء الـAPK. */
+const BAKED_VERSION = '__VANTARA_VERSION__';
 
 function unreplaced(value) {
   return !value || value.startsWith('__VANTARA_');
@@ -50,7 +55,13 @@ export function endpoints() {
   return {
     sync: trimSlash(override.sync || (unreplaced(BAKED.sync) ? '' : BAKED.sync)),
     api: trimSlash(override.api || (unreplaced(BAKED.api) ? '' : BAKED.api)),
+    updates: trimSlash(override.updates || (unreplaced(BAKED.updates) ? '' : BAKED.updates)),
   };
+}
+
+/** نسخة التطبيق العاملة، أو null في المتصفح حيث لا معنى للتحديث. */
+export function appVersion() {
+  return unreplaced(BAKED_VERSION) ? null : BAKED_VERSION;
 }
 
 export function setEndpoints(next) {

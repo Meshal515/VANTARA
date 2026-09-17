@@ -14,9 +14,10 @@
 
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
-import { endpoints, syncConfigured } from './lib/config.js';
+import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
 import { icon } from './lib/icons.js';
+import { checkForUpdate, dismissUpdate } from './lib/update.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const el = (tag, className, text) => {
@@ -1361,6 +1362,7 @@ async function go(route) {
           startHeartbeat();
           void sync.pull();
           await go({ name: 'home' });
+          void offerUpdate();
         },
       });
       state.teardown = teardown;
@@ -1395,10 +1397,120 @@ async function go(route) {
     case 'downloads':
       return screenPlaceholder('التنزيلات', 'لا تنزيلات بعد.');
     case 'settings':
-      return screenPlaceholder('الإعدادات', 'قريبًا.');
+      return screenSettings();
     default:
       return screenHome();
   }
+}
+
+
+/**
+ * الإعدادات.
+ *
+ * وجودها ليس تكميليًا: خادم المحتوى نفق منزلي وعنوانه يتغيّر، وبلا تعديله من
+ * هنا يحتاج كل تغيير عنوان إصدار APK جديدًا وتثبيتًا على ثلاثة أجهزة.
+ */
+async function screenSettings() {
+  state.screen = 'SETTINGS';
+  const wrap = el('main', 'page');
+  wrap.append(topbar({ title: 'الإعدادات', back: () => go({ name: 'home' }) }));
+  const body = el('div', 'page__body');
+
+  const current = endpoints();
+  const form = el('form', 'form');
+
+  const rows = [
+    ['sync', 'خادم المزامنة (Cloudflare)', current.sync],
+    ['api', 'خادم المحتوى (المكتبة والفصول)', current.api],
+  ];
+  const inputs = new Map();
+  for (const [key, label, value] of rows) {
+    const row = el('label', 'form__row');
+    row.append(el('span', 'form__label', label));
+    const input = el('input', 'form__input');
+    input.value = value ?? '';
+    input.placeholder = 'https://…';
+    input.dir = 'ltr';
+    row.append(input);
+    inputs.set(key, input);
+    form.append(row);
+  }
+
+  const save = el('button', 'btn', 'حفظ وإعادة التشغيل');
+  save.type = 'submit';
+  const note = el('p', 'form__note');
+  form.append(save, note);
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setEndpoints({ sync: inputs.get('sync').value.trim(), api: inputs.get('api').value.trim() });
+    note.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
+    // العنوانان يُقرآن مرة عند الإقلاع، فالتغيير يحتاج إعادة تحميل
+    setTimeout(() => window.location.reload(), 400);
+  });
+  body.append(form);
+
+  const facts = el('div', 'list');
+  const version = appVersion();
+  const lines = [
+    ['النسخة', version ?? 'متصفح'],
+    ['كتابات معلّقة', String(sync.pendingWrites)],
+    ['الحساب', sync.user?.username ?? '—'],
+  ];
+  for (const [label, value] of lines) {
+    const row = el('div', 'list__row');
+    row.append(el('span', null, label), el('span', 'pill', value));
+    facts.append(row);
+  }
+  body.append(facts);
+
+  const force = el('button', 'btn btn--ghost', 'مزامنة الآن');
+  force.type = 'button';
+  force.addEventListener('click', async () => {
+    force.disabled = true;
+    await sync.push();
+    await sync.pull();
+    await refreshPresence();
+    force.disabled = false;
+    force.textContent = 'تمّت المزامنة';
+  });
+  body.append(force);
+
+  wrap.append(body, bottomNav('home'));
+  mount(wrap);
+}
+
+// ───────────────────────────── التحديث ─────────────────────────────
+
+/**
+ * شريط «نسخة جديدة».
+ *
+ * غير حاجب: التطبيق يعمل، والتحديث اختيار. الحجب يعني أن نسخة قديمة على جوّال
+ * أحدهم توقفه تمامًا عن القراءة.
+ */
+async function offerUpdate() {
+  const update = await checkForUpdate();
+  if (!update) return;
+
+  const bar = el('div', 'update');
+  const text = el('div', 'update__text', `VANTARA ${update.version} متوفر`);
+  bar.append(text);
+
+  if (update.url) {
+    const get = el('a', 'btn btn--small', 'تحديث');
+    get.href = update.url;
+    get.rel = 'noopener';
+    bar.append(get);
+  }
+
+  const later = el('button', 'update__later', 'لاحقًا');
+  later.type = 'button';
+  later.addEventListener('click', () => {
+    dismissUpdate(update.version);
+    bar.remove();
+  });
+  bar.append(later);
+  document.body.append(bar);
 }
 
 // ───────────────────────────── الإقلاع ─────────────────────────────
@@ -1439,6 +1551,7 @@ async function boot() {
     await go({ name: 'home' });
     void sync.pull();
     void refreshPresence();
+    void offerUpdate();
     return;
   }
   await go({ name: 'gate' });

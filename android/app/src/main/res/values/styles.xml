@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      السمة الأساسية سوداء لا فاتحة.
+
+      قالب Capacitor يأتي بـ`Theme.AppCompat.Light.DarkActionBar`. على تطبيق
+      كل شاشاته سوداء، تلك السمة تُظهر نافذة بيضاء قبل أول رسم للصفحة، فيُرى
+      وميض أبيض في كل فتح — وهو أول ما يلاحظه المستخدم وأسوأ انطباع أول.
+    -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/vantaraBlack</item>
+        <item name="android:navigationBarColor">@color/vantaraBlack</item>
+        <item name="android:statusBarColor">@color/vantaraBlack</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/vantaraBlack</item>
+    </style>
+
+    <!-- شاشة الإقلاع: أسود صامت. الشعار يأتي مع أول رسم للصفحة بعد ~300ms،
+         فصورة إقلاع منفصلة تُضيف انتقالًا مرئيًا بلا فائدة. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/vantaraBlack</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:background">@color/vantaraBlack</item>
+    </style>
+</resources>
