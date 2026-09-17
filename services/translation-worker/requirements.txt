@@ -1,14 +1,18 @@
-# كل نسخة هنا مُتحقَّقة من PyPI في 2026-09-16، وموثّقة في docs/UPSTREAMS.md.
-# الرسم العربي يأتي من Pillow: الويل يحمل raqm = HarfBuzz + FriBidi + libraqm.
+# VANTARA translation worker — production dependencies.
+# الرسم العربي يأتي من Pillow/RAQM: الويل الرسمي يحمل HarfBuzz + FriBidi + libraqm.
 
-# الرسم العربي — طبقتنا
+# الرسم العربي — طبقتنا. هذه النسخة اختُبرت فعليًا في الـspike.
 Pillow==12.3.0
 
-# OCR: manga-ocr للياباني (يدعم النص العمودي)، PaddleOCR للكوري/الصيني/الإنجليزي،
-# Surya احتياطي وترتيب قراءة
+# OCR الأساسي:
+# - manga-ocr للياباني (والنص العمودي)
+# - PaddleOCR للكوري/الصيني/الإنجليزي
 manga-ocr==0.1.16
 paddleocr==3.7.0
-surya-ocr==0.22.1
+
+# ملاحظة: surya-ocr 0.22.1 يفرض Pillow<11، ويتعارض مباشرة مع Pillow 12.3
+# الذي نعتمد عليه للرسم العربي. لذلك Surya ليس في نفس البيئة؛ إن احتجناه لاحقًا
+# يعمل كخدمة/بيئة منفصلة بدل كسر renderer العربي.
 
 # تنظيف النص القديم
 iopaint==1.6.0
