@@ -38,8 +38,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Android SDK مثبّت أصلًا على الـrunner؛ هذا يضبط المسارات ويقبل التراخيص
-      - uses: android-actions/setup-android@v3
+      # لا `setup-android`: أسقطتُه لأنه فشل فعلًا على هذا الـrunner —
+      # يحاول تثبيت حزمة `tools` القديمة وقد حُذفت من مستودع SDK
+      # (`Failed to find package 'tools'`). وrunner أوبونتو يحمل الـSDK
+      # أصلًا في `/usr/local/lib/android/sdk` وتراخيصه مقبولة، فـAGP يجده
+      # من `ANDROID_HOME` بلا أي خطوة.
+      - name: Show the SDK the runner already has
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" || true
 
       - uses: gradle/actions/setup-gradle@v4
 
