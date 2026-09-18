@@ -47,9 +47,9 @@ VANTARA كان يخزّن نفس المعنى في مخزنين:
 | `stats.reading` | D1 | — | `chapter_reads`, `usage_daily` |
 | `social.profile` | D1 | — | `profiles` |
 | `social.presence` | D1 | — | `presence` |
-| `social.activity` | D1 | — | `activity` |
+| `social.activity` | D1 | — | `activity`, `activity_receipts` |
 | `social.comments` | D1 | — | `comments`, `reactions` |
-| `social.recommendations` | D1 | — | `recommendations` |
+| `social.recommendations` | D1 | — | `recommendations`, `recommendation_recipients` |
 | `social.notifications` | D1 | — | `notifications` |
 | `social.settings` | D1 | — | `settings` |
 | `collections.membership` | D1 | — | `collections` |

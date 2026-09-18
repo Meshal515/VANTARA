@@ -278,6 +278,214 @@ describe('library and recommendations carry the same descriptor', () => {
   });
 });
 
+
+describe('B8 recommendation recipient state', () => {
+  it('creates one actionable recipient row and one social event for a targeted recommendation', () => {
+    const out = translate('recommendation.send', {
+      seriesRef: 's1',
+      toId: 'ngm',
+      message: 'شوفه',
+    });
+
+    const recipients = out.filter((entry) => entry.sql.includes('INSERT INTO recommendation_recipients'));
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]?.values).toEqual(['op-1', 'ngm', 'PENDING', REV]);
+
+    const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+    expect(activity).toBeDefined();
+    expect(activity?.values).toEqual(
+      expect.arrayContaining(['op-1:activity', 'dahmi', 'RECOMMENDATION', 's1', 'ngm', 'vantara://series/s1']),
+    );
+  });
+
+  it('creates independent recipient rows for every non-sender on a broadcast recommendation', () => {
+    const out = translate('recommendation.send', { seriesRef: 's1', message: 'للجميع' });
+    const recipients = out
+      .filter((entry) => entry.sql.includes('INSERT INTO recommendation_recipients'))
+      .map((entry) => entry.values[1]);
+
+    expect(recipients).toEqual(['mansour', 'ngm']);
+  });
+
+  it('reject changes only the current recipient state and has no collection or library side effect', () => {
+    const out = translate('recommendation.respond', {
+      recommendationId: 'r1',
+      state: 'REJECTED',
+    });
+
+    const response = out.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'));
+    expect(response).toBeDefined();
+    expect(response?.sql).toContain('recommendation_id = ? AND user_id = ?');
+    expect(response?.values).toContain('r1');
+    expect(response?.values).toContain('dahmi');
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO collections'))).toBe(false);
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
+  });
+
+  it('accept + WATCH_LATER derives the work from the recommendation, not client input', () => {
+    const out = translate('recommendation.respond', {
+      recommendationId: 'r1',
+      state: 'ACCEPTED',
+      intent: 'WATCH_LATER',
+      // عميل معطوب/عدائي لا يختار عملًا آخر عبر الرد على توصية r1.
+      seriesRef: 'evil-client-ref',
+      seriesTitle: 'Fake',
+    });
+
+    const response = out.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'));
+    expect(response).toBeDefined();
+    expect(response?.values).toContain('WATCH_LATER');
+
+    const collection = out.find((entry) => entry.sql.includes('INSERT INTO collections'));
+    expect(collection).toBeDefined();
+    expect(collection?.sql).toContain('JOIN recommendations');
+    expect(collection?.sql).toContain('recommendation_id');
+    expect(collection?.values).toContain('read_later');
+    expect(collection?.values).not.toContain('evil-client-ref');
+  });
+
+  it('accept + ADD_TO_LIBRARY records intent but does not invent a D1 library write', () => {
+    const out = translate('recommendation.respond', {
+      recommendationId: 'r1',
+      state: 'ACCEPTED',
+      intent: 'ADD_TO_LIBRARY',
+      seriesRef: 's1',
+    });
+
+    expect(out.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'))?.values).toContain(
+      'ADD_TO_LIBRARY',
+    );
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
+  });
+
+  it('keeps acceptance separate from the later intent choice', () => {
+    const accepted = translate('recommendation.respond', {
+      recommendationId: 'r1',
+      state: 'ACCEPTED',
+    });
+    const response = accepted.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'));
+    expect(response).toBeDefined();
+    expect(response?.values).toContain('ACCEPTED');
+    expect(accepted.some((entry) => entry.sql.includes('INSERT INTO collections'))).toBe(false);
+    expect(accepted.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
+  });
+
+  it('refuses malformed reject/intent combinations', () => {
+    expect(
+      translate('recommendation.respond', {
+        recommendationId: 'r1',
+        state: 'REJECTED',
+        intent: 'WATCH_NOW',
+      }),
+    ).toEqual([]);
+    expect(
+      translate('recommendation.respond', {
+        recommendationId: 'r1',
+        state: 'ACCEPTED',
+        intent: 'MAYBE',
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe('B8 server-derived activity', () => {
+  it('derives rating activity from rating.set instead of requiring activity.add', () => {
+    const out = translate('rating.set', { seriesRef: 's1', score: 9 });
+    const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+    expect(activity).toBeDefined();
+    expect(activity?.values).toEqual(
+      expect.arrayContaining(['op-1:activity', 'dahmi', 'RATED_WORK', 's1', 'vantara://series/s1']),
+    );
+  });
+
+  it('derives comment activity with a canonical comment deep link', () => {
+    const out = translate('comment.add', {
+      seriesRef: 'lookism',
+      chapterRef: 'ch500',
+      body: 'قوي',
+    });
+    const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+    expect(activity).toBeDefined();
+    expect(activity?.values).toContain('vantara://series/lookism/comment/op-1');
+  });
+
+  it('notifies a parent comment author on a reply, excluding self', () => {
+    const ctx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { parent1: { authorId: 'ngm', seriesRef: 's1' } },
+    } as unknown as OpContext;
+    const out = translate(
+      'comment.add',
+      { seriesRef: 's1', parentId: 'parent1', body: 'رد' },
+      { ctx },
+    );
+
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification?.values).toContain('COMMENT_REPLY');
+    expect(notification?.values).toContain('ngm');
+
+    const selfCtx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { parent1: { authorId: 'dahmi', seriesRef: 's1' } },
+    } as unknown as OpContext;
+    const self = translate(
+      'comment.add',
+      { seriesRef: 's1', parentId: 'parent1', body: 'رد' },
+      { ctx: selfCtx },
+    );
+    expect(
+      self.some(
+        (entry) =>
+          entry.sql.includes('INSERT INTO notifications') && entry.values.includes('COMMENT_REPLY'),
+      ),
+    ).toBe(false);
+  });
+
+  it('derives reaction activity and notifies the comment author, excluding self', () => {
+    const ctx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { c1: { authorId: 'mansour', seriesRef: 'lookism' } },
+    } as unknown as OpContext;
+    const out = translate('reaction.set', { commentId: 'c1', emoji: '🔥', active: true }, { ctx });
+
+    const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+    expect(activity).toBeDefined();
+    expect(activity?.values).toContain('vantara://series/lookism/comment/c1');
+
+    const notification = out.find(
+      (entry) =>
+        entry.sql.includes('INSERT INTO notifications') && entry.values.includes('REACTION'),
+    );
+    expect(notification?.values).toContain('mansour');
+  });
+
+  it('creates one pending receipt row for each other account on a social event', () => {
+    const out = translate('rating.set', { seriesRef: 's1', score: 9 });
+    const receipts = out
+      .filter((entry) => entry.sql.includes('INSERT INTO activity_receipts'))
+      .map((entry) => entry.values[1]);
+    expect(receipts).toEqual(['mansour', 'ngm']);
+  });
+});
+
+describe('B8 delivery and seen receipts', () => {
+  it('marks delivery only for the current viewer and does not rewrite an existing timestamp', () => {
+    const [statement] = translate('activity.delivered', { eventId: 'event-1' }, { userId: 'ngm' });
+    expect(statement?.sql).toContain('COALESCE(delivered_at');
+    expect(statement?.sql).toContain('event_id = ? AND user_id = ?');
+    expect(statement?.values).toContain('event-1');
+    expect(statement?.values).toContain('ngm');
+  });
+
+  it('seen implies delivered and neither timestamp moves backwards', () => {
+    const [statement] = translate('activity.seen', { eventId: 'event-1' }, { userId: 'ngm' });
+    expect(statement?.sql).toContain('COALESCE(delivered_at');
+    expect(statement?.sql).toContain('COALESCE(seen_at');
+    expect(statement?.values).toContain('event-1');
+    expect(statement?.values).toContain('ngm');
+  });
+});
+
 describe('unknown ops', () => {
   it('produces nothing rather than throwing', () => {
     // الرفض بخطأ يوقف طابور العميل عند عملية واحدة إلى الأبد

@@ -207,6 +207,35 @@ test('the ownership document matches the executable matrix', () => {
   }
 });
 
+test('B8 social migration defines recipient state and per-viewer receipts', () => {
+  const migrationPath = 'services/sync-worker/migrations/0008_social_receipts_and_recommendation_states.sql';
+  assert.ok(
+    trackedFiles().includes(migrationPath),
+    `${migrationPath} must exist; B2 already owns migration 0007`,
+  );
+  const migration = read(migrationPath);
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS recommendation_recipients/i);
+  assert.match(migration, /PRIMARY KEY\s*\(recommendation_id,\s*user_id\)/i);
+  assert.match(migration, /state\s+TEXT\s+NOT NULL(?:\s+DEFAULT\s+'PENDING')?\s+CHECK\s*\(state IN \('PENDING', 'ACCEPTED', 'REJECTED'\)\)/i);
+  assert.match(migration, /intent\s+TEXT\s+CHECK\s*\(\s*intent IS NULL OR\s*intent IN \('WATCH_NOW', 'WATCH_LATER', 'ADD_TO_LIBRARY'\)\s*\)/i);
+  assert.doesNotMatch(
+    migration,
+    /state\s*=\s*'ACCEPTED'\s+AND\s+intent\s+IS\s+NOT\s+NULL/i,
+    'acceptance must be storable before the recipient chooses an intent',
+  );
+  assert.match(migration, /REFERENCES recommendations\s*\(id\)/i);
+  assert.match(migration, /REFERENCES accounts\s*\(user_id\)/i);
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS activity_receipts/i);
+  assert.match(migration, /PRIMARY KEY\s*\(event_id,\s*user_id\)/i);
+  assert.match(migration, /ALTER TABLE activity ADD COLUMN target_user_id TEXT/i);
+  assert.match(migration, /ALTER TABLE activity ADD COLUMN link TEXT/i);
+
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS recommendation_recipients_user/i);
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS activity_receipts_user/i);
+});
+
 test('the client and the domain agree on the notification kinds', () => {
   // الواجهة JS خالص بلا bundler فلا تستورد حزمة المجال، فقائمة الأنواع مكرّرة.
   // التكرار مقبول إن كان مكشوفًا: نوع يُضاف في مكان وينسى في الآخر يعني إشعارًا

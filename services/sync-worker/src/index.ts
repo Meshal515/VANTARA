@@ -22,6 +22,9 @@ import {
   needsFullResync,
   notificationId,
   notificationTargets,
+  isRecommendationState,
+  isRecommendationIntent,
+  socialLinkFor,
   ownerOf,
   readStats,
   redactForViewers,
@@ -212,10 +215,12 @@ const DELTA_TABLES = [
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler_after, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
   ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev'],
+  ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
   ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev'],
-  ['activity', 'id, actor_id, verb, series_ref, payload, created_at, rev'],
+  ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev'],
+  ['activity_receipts', 'event_id, user_id, delivered_at, seen_at, rev'],
   ['settings', 'user_id, data, rev'],
 ] as const;
 
@@ -306,6 +311,8 @@ function asNumber(value: unknown): number | null {
  */
 export interface OpContext {
   accounts: readonly string[];
+  /** metadata only for comments referenced by reply/reaction ops in this request */
+  comments?: Readonly<Record<string, { authorId: string; seriesRef: string }>>;
 }
 
 /**
@@ -349,6 +356,63 @@ function notificationStatements(
         input.rev,
       ),
   );
+}
+
+function socialActivityStatements(
+  db: Env['DB'],
+  input: {
+    opId: string;
+    actorId: string;
+    verb: string;
+    accounts: readonly string[];
+    seriesRef?: string | null;
+    targetUserId?: string | null;
+    link?: string | null;
+    payload?: Record<string, unknown>;
+    now: number;
+    rev: number;
+  },
+): D1PreparedStatement[] {
+  const eventId = `${input.opId}:activity`;
+  const statements: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `INSERT INTO activity
+           (id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO NOTHING`,
+      )
+      .bind(
+        eventId,
+        input.actorId,
+        input.verb,
+        input.seriesRef ?? null,
+        input.targetUserId ?? null,
+        input.link ?? null,
+        JSON.stringify(input.payload ?? {}),
+        input.now,
+        input.rev,
+      ),
+  ];
+
+  const viewers = notificationTargets({
+    accounts: input.accounts,
+    actorId: input.actorId,
+  });
+  for (const viewer of viewers) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO activity_receipts
+             (event_id, user_id, delivered_at, seen_at, rev)
+           VALUES (?, ?, NULL, NULL, ?)
+           ON CONFLICT (event_id, user_id) DO NOTHING`,
+        )
+        .bind(eventId, viewer, input.rev),
+    );
+  }
+
+  return statements;
 }
 
 /**
@@ -633,6 +697,17 @@ export function statementsFor(
                score = excluded.score, updated_at = excluded.updated_at, rev = excluded.rev`,
           )
           .bind(userId, seriesRef, score, now, rev),
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'RATED_WORK',
+          accounts: ctx.accounts,
+          seriesRef,
+          link: socialLinkFor({ kind: 'work', seriesRef }),
+          payload: { score },
+          now,
+          rev,
+        }),
       ];
     }
 
@@ -640,8 +715,10 @@ export function statementsFor(
       const seriesRef = asString(p['seriesRef'], 200);
       const body = asString(p['body'], 4000);
       if (!seriesRef || !body) return null;
-      // المعرّف هو op_id: الإدراج المكرر يصطدم بالمفتاح فيكون بلا أثر
-      return [
+      const parentId = asString(p['parentId'], 80);
+      const parent = parentId ? ctx.comments?.[parentId] : undefined;
+      const link = socialLinkFor({ kind: 'comment', seriesRef, commentId: op.opId });
+      const statements: D1PreparedStatement[] = [
         db
           .prepare(
             `INSERT INTO comments
@@ -654,20 +731,56 @@ export function statementsFor(
             userId,
             seriesRef,
             asString(p['chapterRef'], 200),
-            asString(p['parentId'], 80),
+            parentId,
             body,
             asNumber(p['spoilerAfter']),
             now,
             rev,
           ),
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'COMMENTED',
+          accounts: ctx.accounts,
+          seriesRef,
+          targetUserId: parent && parent.authorId !== userId ? parent.authorId : null,
+          link,
+          payload: {
+            commentId: op.opId,
+            chapterRef: asString(p['chapterRef'], 200),
+            parentId,
+          },
+          now,
+          rev,
+        }),
       ];
+
+      if (parent && parent.authorId !== userId) {
+        statements.push(
+          ...notificationStatements(db, {
+            opId: op.opId,
+            kind: 'COMMENT_REPLY',
+            recipients: [parent.authorId],
+            actorId: userId,
+            seriesRef,
+            body,
+            link,
+            now,
+            rev,
+          }),
+        );
+      }
+
+      return statements;
     }
 
     case 'reaction.set': {
       const commentId = asString(p['commentId'], 80);
       const emoji = asString(p['emoji'], 16);
       if (!commentId || !emoji) return null;
-      return [
+      const comment = ctx.comments?.[commentId];
+      const active = p['active'] === false ? 0 : 1;
+      const statements: D1PreparedStatement[] = [
         db
           .prepare(
             `INSERT INTO reactions (comment_id, user_id, emoji, active, rev)
@@ -675,15 +788,61 @@ export function statementsFor(
              ON CONFLICT (comment_id, user_id, emoji) DO UPDATE SET
                active = excluded.active, rev = excluded.rev`,
           )
-          .bind(commentId, userId, emoji, p['active'] === false ? 0 : 1, rev),
+          .bind(commentId, userId, emoji, active, rev),
       ];
+
+      if (comment) {
+        const link = socialLinkFor({
+          kind: 'reaction',
+          seriesRef: comment.seriesRef,
+          commentId,
+        });
+        statements.push(
+          ...socialActivityStatements(db, {
+            opId: op.opId,
+            actorId: userId,
+            verb: 'REACTED',
+            accounts: ctx.accounts,
+            seriesRef: comment.seriesRef,
+            targetUserId: comment.authorId !== userId ? comment.authorId : null,
+            link,
+            payload: { commentId, emoji, active: active === 1 },
+            now,
+            rev,
+          }),
+        );
+        if (comment.authorId !== userId && active === 1) {
+          statements.push(
+            ...notificationStatements(db, {
+              opId: op.opId,
+              kind: 'REACTION',
+              recipients: [comment.authorId],
+              actorId: userId,
+              seriesRef: comment.seriesRef,
+              body: emoji,
+              link,
+              now,
+              rev,
+            }),
+          );
+        }
+      }
+
+      return statements;
     }
 
     case 'recommendation.send': {
       const seriesRef = asString(p['seriesRef'], 200);
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
-      const statements = [
+      const recipients = notificationTargets({
+        accounts: ctx.accounts,
+        actorId: userId,
+        to: toId,
+      });
+      if (recipients.length === 0) return null;
+      const link = socialLinkFor({ kind: 'recommendation', seriesRef });
+      const statements: D1PreparedStatement[] = [
         ...workStatements(db, {
           seriesRef,
           title: asString(p['seriesTitle'], 300),
@@ -710,27 +869,146 @@ export function statementsFor(
             rev,
           ),
       ];
-      // توصية «للجميع» (`toId` فارغ) كانت لا تُنشئ إشعارًا لأحد: تُسجَّل في
-      // جدول التوصيات ولا يعرف بها أحد. المستلمون يُحسبون من الحسابات، والفاعل
-      // مستثنى، والرابط العميق يفتح العمل نفسه.
+
+      for (const recipient of recipients) {
+        statements.push(
+          db
+            .prepare(
+              `INSERT INTO recommendation_recipients
+                 (recommendation_id, user_id, state, intent, responded_at, rev)
+               VALUES (?, ?, ?, NULL, NULL, ?)
+               ON CONFLICT (recommendation_id, user_id) DO NOTHING`,
+            )
+            .bind(op.opId, recipient, 'PENDING', rev),
+        );
+      }
+
       statements.push(
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'RECOMMENDATION',
+          accounts: ctx.accounts,
+          seriesRef,
+          targetUserId: toId,
+          link,
+          payload: { message: asString(p['message'], 500) },
+          now,
+          rev,
+        }),
         ...notificationStatements(db, {
           opId: op.opId,
           kind: 'RECOMMENDATION',
-          recipients: notificationTargets({
-            accounts: ctx.accounts,
-            actorId: userId,
-            to: toId,
-          }),
+          recipients,
           actorId: userId,
           seriesRef,
           body: asString(p['message'], 500),
-          link: `vantara://series/${encodeURIComponent(seriesRef)}`,
+          link,
           now,
           rev,
         }),
       );
       return statements;
+    }
+
+    case 'recommendation.respond': {
+      const recommendationId = asString(p['recommendationId'], 80);
+      const state = asString(p['state'], 20);
+      const intent = asString(p['intent'], 32);
+      if (!recommendationId || !state || !isRecommendationState(state) || state === 'PENDING') {
+        return null;
+      }
+      if (intent && !isRecommendationIntent(intent)) return null;
+      if (state === 'REJECTED' && intent) return null;
+
+      const statements: D1PreparedStatement[] = [
+        db
+          .prepare(
+            `UPDATE recommendation_recipients
+                SET state = ?,
+                    intent = CASE WHEN ? IS NULL THEN intent ELSE ? END,
+                    responded_at = COALESCE(responded_at, ?),
+                    rev = ?
+              WHERE recommendation_id = ? AND user_id = ?
+                AND (state = 'PENDING' OR (state = 'ACCEPTED' AND ? = 'ACCEPTED'))
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          )
+          .bind(
+            state,
+            intent,
+            intent,
+            now,
+            rev,
+            recommendationId,
+            userId,
+            state,
+            op.opId,
+          ),
+      ];
+
+      if (state === 'ACCEPTED' && intent === 'WATCH_LATER') {
+        statements.push(
+          db
+            .prepare(
+              `INSERT INTO collections (user_id, kind, series_ref, member, position, updated_at, rev)
+               SELECT ?, ?, r.series_ref, 1, NULL, ?, ?
+                 FROM recommendation_recipients rr
+                 JOIN recommendations r ON r.id = rr.recommendation_id
+                WHERE rr.recommendation_id = ?
+                  AND rr.user_id = ?
+                  AND rr.state = 'ACCEPTED'
+                  AND rr.intent = 'WATCH_LATER'
+                  AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
+               ON CONFLICT (user_id, kind, series_ref) DO UPDATE SET
+                 member = 1,
+                 updated_at = excluded.updated_at,
+                 rev = excluded.rev`,
+            )
+            .bind(
+              userId,
+              'read_later',
+              now,
+              rev,
+              recommendationId,
+              userId,
+              op.opId,
+            ),
+        );
+      }
+
+      return statements;
+    }
+
+    case 'activity.delivered': {
+      const eventId = asString(p['eventId'], 100);
+      if (!eventId) return null;
+      return [
+        db
+          .prepare(
+            `UPDATE activity_receipts
+                SET delivered_at = COALESCE(delivered_at, ?), rev = ?
+              WHERE event_id = ? AND user_id = ?
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          )
+          .bind(now, rev, eventId, userId, op.opId),
+      ];
+    }
+
+    case 'activity.seen': {
+      const eventId = asString(p['eventId'], 100);
+      if (!eventId) return null;
+      return [
+        db
+          .prepare(
+            `UPDATE activity_receipts
+                SET delivered_at = COALESCE(delivered_at, ?),
+                    seen_at = COALESCE(seen_at, ?),
+                    rev = ?
+              WHERE event_id = ? AND user_id = ?
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          )
+          .bind(now, now, rev, eventId, userId, op.opId),
+      ];
     }
 
     /**
@@ -804,11 +1082,111 @@ export function statementsFor(
 const FIELD_MERGE_KINDS = new Set(['profile.patch', 'settings.patch']);
 
 /** العمليات التي تحتاج قائمة الحسابات (بثّ لكل المستلمين). */
-const ACCOUNT_AWARE_KINDS = new Set(['recommendation.send']);
+const ACCOUNT_AWARE_KINDS = new Set([
+  'recommendation.send',
+  'rating.set',
+  'comment.add',
+  'reaction.set',
+]);
 
 async function allAccountIds(env: Env): Promise<string[]> {
   const { results } = await env.DB.prepare('SELECT user_id FROM accounts').all<{ user_id: string }>();
   return results.map((row) => row.user_id);
+}
+
+/**
+ * يجمع metadata خارجية تحتاجها ترجمة العمليات قبل بناء الدفعة الذرّية.
+ *
+ * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
+ * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
+ */
+export async function validateRecommendationResponses(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  if (ids.length === 0) return null;
+
+  const rows = new Map<string, string | null>();
+  const CHUNK = 90;
+  for (let offset = 0; offset < ids.length; offset += CHUNK) {
+    const chunk = ids.slice(offset, offset + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const { results } = await env.DB.prepare(
+      `SELECT r.id, rr.user_id AS recipient_user_id
+         FROM recommendations r
+         LEFT JOIN recommendation_recipients rr
+           ON rr.recommendation_id = r.id
+          AND rr.user_id = ?
+        WHERE r.id IN (${placeholders})`,
+    )
+      .bind(userId, ...chunk)
+      .all<{ id: string; recipient_user_id: string | null }>();
+
+    for (const row of results) rows.set(row.id, row.recipient_user_id);
+  }
+
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id) continue;
+    if (!rows.has(id)) return { status: 404, error: 'recommendation_not_found' };
+    if (rows.get(id) !== userId) return { status: 403, error: 'forbidden' };
+  }
+
+  return null;
+}
+
+export async function loadOpContext(
+  ops: readonly IncomingOp[],
+  env: Env,
+): Promise<OpContext> {
+  const needsAccounts = ops.some((op) => ACCOUNT_AWARE_KINDS.has(op.kind));
+  const accounts = needsAccounts ? await allAccountIds(env) : [];
+
+  const commentIds = new Set<string>();
+  for (const op of ops) {
+    if (op.kind === 'reaction.set') {
+      const id = asString(op.payload['commentId'], 80);
+      if (id) commentIds.add(id);
+    } else if (op.kind === 'comment.add') {
+      const id = asString(op.payload['parentId'], 80);
+      if (id) commentIds.add(id);
+    }
+  }
+
+  if (commentIds.size === 0) return { accounts };
+
+  const comments: Record<string, { authorId: string; seriesRef: string }> = {};
+  const ids = [...commentIds];
+  const CHUNK = 90;
+
+  for (let offset = 0; offset < ids.length; offset += CHUNK) {
+    const chunk = ids.slice(offset, offset + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const { results } = await env.DB.prepare(
+      `SELECT id, author_id, series_ref FROM comments WHERE id IN (${placeholders})`,
+    )
+      .bind(...chunk)
+      .all<{ id: string; author_id: string; series_ref: string }>();
+
+    for (const row of results) {
+      comments[row.id] = { authorId: row.author_id, seriesRef: row.series_ref };
+    }
+  }
+
+  return { accounts, comments };
 }
 
 const PROFILE_COLUMNS: Record<string, string> = {
@@ -910,6 +1288,11 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   );
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
 
+  const authorizationError = await validateRecommendationResponses(ops, userId, env);
+  if (authorizationError) {
+    return json({ error: authorizationError.error }, { status: authorizationError.status });
+  }
+
   const rev = await allocateRev(env);
 
   // دمج الحقول يحتاج قراءة قبل الكتابة فلا يدخل الدفعة الذرّية. يُنفَّذ أولًا،
@@ -930,8 +1313,7 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
   // قائمة الحسابات تُقرأ مرة واحدة وفقط إن احتاجتها عملية: توصية «للجميع»
   // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
-  const needsAccounts = ops.some((op) => ACCOUNT_AWARE_KINDS.has(op.kind));
-  const ctx: OpContext = { accounts: needsAccounts ? await allAccountIds(env) : [] };
+  const ctx = await loadOpContext(ops, env);
 
   const statements: D1PreparedStatement[] = [];
   for (const op of ops) {

@@ -104,9 +104,9 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     key: 'social.activity',
     owner: 'D1',
     mirrors: [],
-    tables: { D1: ['activity'] },
+    tables: { D1: ['activity', 'activity_receipts'] },
     retired: { POSTGRES: ['vantara_activity_events'] },
-    why: 'الأحداث الخفيفة تُبث للأصدقاء عبر سجل الفروقات نفسه.',
+    why: 'الأحداث الخفيفة تُبث للأصدقاء عبر سجل الفروقات نفسه، وactivity_receipts يحمل إيصال كل مشاهد للحالة delivered/seen بلا حالة عامة مزيفة.',
   },
   {
     key: 'social.comments',
@@ -120,9 +120,9 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     key: 'social.recommendations',
     owner: 'D1',
     mirrors: [],
-    tables: { D1: ['recommendations'] },
+    tables: { D1: ['recommendations', 'recommendation_recipients'] },
     retired: { POSTGRES: ['vantara_recommendations'] },
-    why: 'التوصية تُنشئ إشعارًا في نفس المخزن وفي نفس الدفعة الذرّية.',
+    why: 'التوصية كيان مشترك في recommendations، وحالة كل مستلم مستقلة في recommendation_recipients؛ الإشعار يُنشأ في نفس المخزن والدفعة الذرّية.',
   },
   {
     key: 'social.notifications',
