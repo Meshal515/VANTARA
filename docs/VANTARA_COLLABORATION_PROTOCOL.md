@@ -221,13 +221,31 @@ Claude لا يعتمد على عبارة ChatGPT: "تم الإصلاح".
 
 ## 10. لوحة العمل الحالية
 
-| Patch | الحالة | المالك | المراجع الإلزامي | ملاحظة |
-|---|---|---|---|---|
-| B0 | `PEER_REVIEW / INTEGRATION PENDING` | ChatGPT | Claude | التنفيذ مختبر؛ التكامل مع الفرع الأساسي لم يُغلق بعد |
-| B1 | `CLAIMED` | ChatGPT | Claude | اختيار ChatGPT الحالي: Clean Install / DB Bootstrap / Migrations |
-| Next independent backend patch | `READY` | **Claude يختاره بنفسه** | ChatGPT | Claude يقرأ الخطة والاعتمادات ثم يسجل اختياره بدل أن يختاره ChatGPT عنه |
+الملكية صارت **باتشات كاملة** لا اختيارًا بعد كل باتش. المصدر الحيّ هو
+`OWNER OFFICE — Issue #1`؛ هذا الجدول ملخّصه.
 
-**مهم:** Claude ليس ملزمًا بـB2 إذا وجد Patch آخر `READY` وأكثر استقلالًا؛ هو يختار بنفسه بعد قراءة الخطة، ثم يسجل Claim قبل التنفيذ.
+| الباتشات | المالك | المراجع الإلزامي |
+|---|---|---|
+| B1, B2, B6, B8, B10, B12 · F0, F2, F4, F6, F8, F10, F12 | ChatGPT | Claude |
+| B3, B4, B5, B7, B9, B11 · F1, F3, F5, F7, F9, F11, F13 | Claude | ChatGPT |
+| F14 — Release Candidate | `FLOATING` | يُحدَّد بعد B12 |
+
+### الحالة الحالية
+
+| Patch | الحالة | المالك | ملاحظة |
+|---|---|---|---|
+| B0 | `PEER_REVIEW / INTEGRATION PENDING` | ChatGPT | التنفيذ مختبر؛ التكامل مع الفرع الأساسي لم يُغلق بعد |
+| B1 | `IMPLEMENTING` | ChatGPT | Clean Install / DB Bootstrap / Migrations |
+| B2 | `IMPLEMENTING` | ChatGPT | Unified Identity & Session |
+| B6 | `IMPLEMENTING` | ChatGPT | Source Engine & Chapter Contract |
+| B4 | `READY_FOR_PEER_REVIEW` | Claude | `e96add5` · CI أخضر · ينتظر ChatGPT |
+| B5 | `READY_FOR_PEER_REVIEW` | Claude | `60e0e11` · CI أخضر · ينتظر ChatGPT |
+| B9 | `READY_FOR_PEER_REVIEW` | Claude | `35bfb1b` · ينتظر ChatGPT |
+| B3 | `BLOCKED` | Claude | على عقد الهوية من B2 |
+| B7 | `BLOCKED` | Claude | تعارض مع B6 الجاري في `routes/library.ts` |
+
+**قاعدة الموجة:** كل طرف يُغلق ثلاثة باتشات إلى `READY_FOR_PEER_REVIEW` قبل أن
+ينتقل، ولا أحد يضع ✅ على شغله.
 
 ---
 
