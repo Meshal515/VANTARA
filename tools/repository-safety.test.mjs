@@ -651,3 +651,26 @@ test('every XML the Android builds depend on actually parses', () => {
     );
   }
 });
+
+test('the spike pins published artifact urls instead of building them', () => {
+  // أول تشغيل حقيقي سقط على الخمسة بـ404: الفهرس ينشر الـAPK والـJAR تحت
+  // **وسمَي إصدار مختلفين**، وبناءُ رابط الـAPK من وسم الـJAR يطلب ملفًا
+  // لا وجود له. وما ينشره المصدر يُنسخ، ولا يُعاد تركيبه من قاعدة نستنبطها.
+  const sources = read('spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/Sources.kt');
+
+  assert.doesNotMatch(
+    sources,
+    /apkUrl = "\$/,
+    'apkUrl must be a full literal url, never interpolated from a base',
+  );
+  const urls = [...sources.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(urls.length, 5, 'all five sources must carry an apk url');
+  for (const url of urls) {
+    assert.match(url, /^https:\/\/github\.com\/keiyoushi\/extensions\/releases\/download\//, url);
+    assert.match(url, /\.apk$/, `${url} must point at an apk, not a jar`);
+  }
+
+  // وكل مصدر ببصمته: تحميل من ملف يتخلّى عن تحقّق التوقيع، فالبصمة هي الضمانة
+  const hashes = [...sources.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
+  assert.equal(hashes.length, 5, 'every pinned artifact needs its sha256');
+});

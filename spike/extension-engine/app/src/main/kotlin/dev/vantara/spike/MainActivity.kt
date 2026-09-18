@@ -82,7 +82,9 @@ class MainActivity : AppCompatActivity() {
                 runCatching {
                     network.client.newCall(Request.Builder().url(spec.apkUrl).build())
                         .execute().use { res ->
-                            require(res.isSuccessful) { "HTTP ${res.code}" }
+                            // الرابط في الرسالة: 404 بلا رابط لا يقول أي
+                            // رابط سقط، وقد سقط أول تشغيل على هذا بالضبط.
+                            require(res.isSuccessful) { "HTTP ${res.code} ← ${spec.apkUrl}" }
                             res.body.bytes()
                         }
                 }
