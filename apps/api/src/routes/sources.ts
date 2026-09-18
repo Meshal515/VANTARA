@@ -21,6 +21,19 @@ interface VerdictRow {
   notes: string | null;
 }
 
+const SEARCH_LANGUAGE_RANK: Record<string, number> = { ar: 0, en: 1 };
+
+export function rankProvidersByLanguage<T extends { source: string }>(
+  providers: readonly T[],
+  sourceLanguages: ReadonlyMap<string, string | null>,
+): T[] {
+  const rank = (provider: T): number => {
+    const language = sourceLanguages.get(provider.source);
+    return language ? (SEARCH_LANGUAGE_RANK[language] ?? 2) : 3;
+  };
+  return [...providers].sort((a, b) => rank(a) - rank(b));
+}
+
 export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   /**
    * مزامنة سجل المصادر مع ما يراه Uchiyomi.
@@ -232,8 +245,8 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     const grouped = await ctx.uchiyomi.searchAll(q, sessionOf(request).token);
 
     const [searchable, deleted, blocked] = await Promise.all([
-      query<{ source_id: string }>(
-        `SELECT source_id FROM vantara_source_verdicts WHERE verdict = 'SUPPORTED'`,
+      query<{ source_id: string; lang: string | null }>(
+        `SELECT source_id, lang FROM vantara_source_verdicts WHERE verdict = 'SUPPORTED'`,
       ),
       query<{ series_ref: string }>(
         `SELECT series_ref FROM vantara_deleted_works WHERE restored_at IS NULL`,
@@ -245,6 +258,7 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     ]);
 
     const allowedSources = new Set(searchable.map((r) => r.source_id));
+    const sourceLanguages = new Map(searchable.map((r) => [r.source_id, r.lang] as const));
     const deletedRefs = new Set(deleted.map((r) => r.series_ref));
     const blockedSources = new Set(
       blocked.map((r) => r.source_id).filter((v): v is string => v !== null),
@@ -259,17 +273,27 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     const content = grouped
       .map((group) => ({
         ...group,
-        providers: group.providers.filter(
-          (provider) =>
-            !blockedSources.has(provider.source) &&
-            (!filterSources || allowedSources.has(provider.source)),
+        providers: rankProvidersByLanguage(
+          group.providers.filter(
+            (provider) =>
+              !blockedSources.has(provider.source) &&
+              (!filterSources || allowedSources.has(provider.source)),
+          ),
+          sourceLanguages,
         ),
       }))
       .filter(
         (group) =>
           group.providers.length > 0 &&
           !group.providers.some((p) => deletedRefs.has(p.sourceId) || blockedSeries.has(p.sourceId)),
-      );
+      )
+      .sort((a, b) => {
+        const languageRank = (sourceId: string | undefined): number => {
+          const language = sourceId ? sourceLanguages.get(sourceId) : null;
+          return language ? (SEARCH_LANGUAGE_RANK[language] ?? 2) : 3;
+        };
+        return languageRank(a.providers[0]?.source) - languageRank(b.providers[0]?.source);
+      });
 
     return reply.send({
       content,
