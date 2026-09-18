@@ -55,6 +55,16 @@ export interface GroupedResult {
   inLibrary: boolean;
 }
 
+export interface SeriesSource {
+  /** Adapter id, e.g. the source registered in Uchiyomi. */
+  sourceId: string;
+  /** This series' id inside that adapter/source. */
+  sourceSeriesId: string;
+  name?: string;
+  primary?: boolean;
+  registered?: boolean;
+}
+
 export interface SeriesSummary {
   id: string;
   title: string;
@@ -62,6 +72,8 @@ export interface SeriesSummary {
   coverUrl?: string | null;
   genres?: string[];
   status?: string;
+  /** Exact source identities attached to the canonical Uchiyomi series. */
+  sources?: SeriesSource[];
 }
 
 export interface Chapter {
