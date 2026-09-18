@@ -3,6 +3,7 @@ import { hashDeviceSecret } from './secure-index.ts';
 
 async function provisioningModule() {
   try {
+    // @ts-expect-error -- RED state: the provisioning module is deliberately absent until this test fails.
     return await import('../tools/create-pairing-token.mjs');
   } catch (error) {
     expect.fail(`pairing token provisioning tool is missing: ${String(error)}`);
