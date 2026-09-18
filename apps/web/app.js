@@ -14,6 +14,7 @@
 
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
+import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
 import { icon } from './lib/icons.js';
@@ -51,28 +52,9 @@ function mount(node) {
   root.replaceChildren(node);
 }
 
-/** خادم المحتوى. مطلق داخل الـAPK، ونفس الأصل في المتصفح. */
-async function api(path, options = {}) {
-  const response = await fetch(`${config.api}${path}`, {
-    credentials: config.api ? 'include' : 'same-origin',
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  if (response.status === 204) return null;
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    const error = new Error(payload?.error ?? `HTTP ${response.status}`);
-    error.status = response.status;
-    error.code = payload?.error;
-    throw error;
-  }
-  return payload;
+/** خادم المحتوى. Bearer على الـAPK، والكوكي يبقى fallback للويب. */
+function api(path, options = {}) {
+  return requestContent({ baseUrl: config.api, sync, path, options });
 }
 
 // ───────────────────────────── الحضور ووقت الاستخدام ─────────────────────────────
