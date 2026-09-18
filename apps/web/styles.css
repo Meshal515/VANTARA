@@ -99,6 +99,8 @@ h1, h2, h3, p { margin: 0; }
   font-size: 11px; font-weight: 700; white-space: nowrap;
 }
 .pill--accent { background: var(--accent-soft); color: #c4a5ff; }
+/* حالة مزامنة غير سليمة: تُقرأ كتحذير لا كمعلومة عادية */
+.pill--warn { background: rgba(240, 160, 60, 0.16); color: #f0a03c; }
 
 .avatar {
   flex: 0 0 auto; display: block;

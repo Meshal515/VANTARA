@@ -7,6 +7,7 @@ export default defineConfig({
     sequence: { concurrent: false },
     testTimeout: 60_000,
     hookTimeout: 90_000,
-    include: ['**/src/**/*.test.ts'],
+    // الواجهة JS خالص بلا bundler، فاختباراتها بامتداد .js وخارج src
+    include: ['**/src/**/*.test.ts', 'apps/web/**/*.test.js'],
   },
 });

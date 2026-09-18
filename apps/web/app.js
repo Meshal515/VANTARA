@@ -688,6 +688,16 @@ function formatDuration(ms) {
   return `${hours}س ${minutes % 60}د`;
 }
 
+/** «قبل قليل / قبل 4د / قبل 3س / قبل يومين» — لا طابع زمني خام في الواجهة. */
+function relativeTime(at) {
+  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
+  if (seconds < 45) return 'قبل قليل';
+  if (seconds < 3600) return `قبل ${Math.round(seconds / 60)}د`;
+  if (seconds < 86_400) return `قبل ${Math.round(seconds / 3600)}س`;
+  const days = Math.round(seconds / 86_400);
+  return days === 1 ? 'أمس' : `قبل ${days} يوم`;
+}
+
 async function screenFriend(userId) {
   const person = state.presence.find((entry) => entry.userId === userId);
   const profile = sync.row('profiles', userId);
@@ -1556,23 +1566,57 @@ async function screenSettings() {
 
   const facts = el('div', 'list');
   const version = appVersion();
+  // حالة المزامنة أول سطر: «كتابات معلّقة: 12» وحدها لا تقول هل هي في الطريق
+  // أم عالقة أم غير محفوظة أصلًا، وهذا الفرق هو كل ما يهمّ المستخدم
+  const state = sync.health();
   const lines = [
+    ['المزامنة', state.message],
+    ['كتابات معلّقة', String(state.pending)],
+    ...(state.quarantined > 0 ? [['عمليات معزولة', String(state.quarantined)]] : []),
+    ['آخر كتابة وصلت', state.lastSuccessAt ? relativeTime(state.lastSuccessAt) : '—'],
+    ['آخر سحب', state.lastSyncAt ? relativeTime(state.lastSyncAt) : '—'],
     ['النسخة', version ?? 'متصفح'],
-    ['كتابات معلّقة', String(sync.pendingWrites)],
     ['الحساب', sync.user?.username ?? '—'],
   ];
   for (const [label, value] of lines) {
     const row = el('div', 'list__row');
-    row.append(el('span', null, label), el('span', 'pill', value));
+    const pill = el('span', 'pill', value);
+    if (label === 'المزامنة' && state.state !== 'ok' && state.state !== 'syncing') {
+      pill.classList.add('pill--warn');
+    }
+    row.append(el('span', null, label), pill);
     facts.append(row);
   }
   body.append(facts);
+
+  if (state.quarantined > 0) {
+    const retry = el('button', 'btn btn--ghost', 'إعادة محاولة المعزولات');
+    retry.type = 'button';
+    retry.addEventListener('click', () => {
+      const count = sync.retryQuarantined();
+      retry.disabled = true;
+      retry.textContent = `أُعيدت ${count} عملية للطابور`;
+    });
+    body.append(retry);
+  }
+
+  const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
+  rebuild.type = 'button';
+  rebuild.addEventListener('click', async () => {
+    rebuild.disabled = true;
+    rebuild.textContent = 'جارٍ إعادة البناء…';
+    // الطابور لا يُمسّ: الكتابات غير المرسلة ليست جزءًا من المرآة
+    await sync.resync();
+    await go({ name: 'settings' });
+  });
+  body.append(rebuild);
 
   const force = el('button', 'btn btn--ghost', 'مزامنة الآن');
   force.type = 'button';
   force.addEventListener('click', async () => {
     force.disabled = true;
-    await sync.push();
+    // ضغطة المستخدم تتجاوز التراجع الأُسّي: هو يعرف أن الشبكة عادت
+    await sync.push({ force: true });
     await sync.pull();
     await refreshPresence();
     force.disabled = false;
