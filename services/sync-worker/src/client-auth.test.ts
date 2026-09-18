@@ -37,6 +37,12 @@ beforeEach(() => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url.endsWith('/v1/device/pair')) {
+        return new Response(JSON.stringify({ paired: true, accounts: 3 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       if (url.endsWith('/v1/device/logout') || url.endsWith('/v1/device/logout-all')) {
         return new Response(null, { status: 204 });
       }
@@ -50,6 +56,22 @@ afterEach(() => {
 });
 
 describe('B2 browser trusted-device lifecycle', () => {
+  it('consumes a pairing token from a native deep-link URL', async () => {
+    const sync = createSync({ baseUrl: 'https://sync.example' });
+    const pairingToken = 'owner-pairing-token-0000000000001';
+
+    await sync.consumePairingUrl(`vantara://pair?pair=${pairingToken}`);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const pairCall = calls.find(([input]) => String(input).endsWith('/v1/device/pair'));
+    expect(pairCall).toBeDefined();
+    const options = pairCall?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>;
+    expect(body['pairingToken']).toBe(pairingToken);
+    expect(typeof body['deviceId']).toBe('string');
+    expect(typeof body['deviceCredential']).toBe('string');
+  });
+
   it('deletes the local device credential after logout-device', async () => {
     const sync = createSync({ baseUrl: 'https://sync.example' });
     await sync.signIn('user-1');
