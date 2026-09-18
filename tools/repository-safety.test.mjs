@@ -60,6 +60,26 @@ test('sync worker production deploy is CI-gated and main-only', () => {
   assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
+test('sync worker production deploy provisions every runtime authentication secret', () => {
+  const workflow = read('.github/workflows/sync-worker.yml');
+  for (const secret of [
+    'VANTARA_SESSION_SECRET',
+    'VANTARA_IDENTITY_SECRET',
+    'VANTARA_DEVICE_PEPPER',
+  ]) {
+    assert.match(
+      workflow,
+      new RegExp(`\\${{ secrets\\.${secret} }}`),
+      `sync-worker deploy must read GitHub secret ${secret}`,
+    );
+    assert.match(
+      workflow,
+      new RegExp(`secret put ${secret}`),
+      `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
+    );
+  }
+});
+
 test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   const workflow = read('.github/workflows/cloudflare-pages.yml');
   assertCiGatedProductionWorkflow('.github/workflows/cloudflare-pages.yml');
