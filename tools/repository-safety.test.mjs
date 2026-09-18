@@ -556,3 +556,50 @@ test('a spoiler comment never leaks into a surface with no reveal control', () =
     'the spoiler flag must be read strictly, not by truthiness',
   );
 });
+
+test('every table the server sends is mirrored by the client', () => {
+  // حلقة السحب تتخطّى أي جدول بلا مفتاح (`if (!keyOf) continue`) ثم يعبر
+  // المؤشر فوقه: الصفوف لا تتأخر، بل تضيع للأبد. وقد سقطت ثلاثة جداول من
+  // خريطة العميل — `works` و`recommendation_recipients` و`activity_receipts` —
+  // فكان الخادم يرسلها والعميل يلقيها بلا أثر ولا خطأ.
+  const worker = read('services/sync-worker/src/index.ts');
+  const deltaBlock = worker.slice(
+    worker.indexOf('const DELTA_TABLES'),
+    worker.indexOf('] as const', worker.indexOf('const DELTA_TABLES')),
+  );
+  const sent = [...deltaBlock.matchAll(/^\s*\['([a-z_]+)'/gm)].map((match) => match[1]);
+
+  const client = read('apps/web/lib/sync.js');
+  const keysBlock = client.slice(
+    client.indexOf('const KEYS'),
+    client.indexOf('};', client.indexOf('const KEYS')),
+  );
+  const mirrored = new Set([...keysBlock.matchAll(/^\s{2}([a-z_]+):/gm)].map((match) => match[1]));
+
+  assert.ok(sent.length > 10, 'the delta table list must have been parsed');
+  for (const table of sent) {
+    assert.ok(
+      mirrored.has(table),
+      `the server sends ${table} but the client mirror has no key for it, so its rows are dropped`,
+    );
+  }
+});
+
+test('a sync that stopped at the round cap does not report itself as done', () => {
+  // `pending` طابور الكتابة وحده، فكانت الحالة `ok` ورسالتها «مُزامَن» بينما
+  // القراءة متأخرة بآلاف الصفوف.
+  const client = read('apps/web/lib/sync.js');
+  assert.match(client, /backlog = true/, 'an early exit must raise the backlog flag');
+  assert.match(
+    client,
+    /setTimeout\(\(\) => void pull\(\), 0\)/,
+    'a capped pull must resume at once instead of waiting for the next cycle',
+  );
+
+  const health = read('apps/web/lib/queue.js');
+  assert.match(
+    health,
+    /if \(backlog\) \{[\s\S]*?state: 'syncing'/,
+    'health must not say synced while a read backlog is pending',
+  );
+});

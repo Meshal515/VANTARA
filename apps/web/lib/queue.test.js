@@ -236,6 +236,18 @@ describe('syncHealth', () => {
     expect(syncHealth({ pending: 0 }).state).toBe('ok');
   });
 
+  it('never says synced while a read backlog is still pending', () => {
+    // `pending` طابور الكتابة وحده. والسحب يخرج عند سقف الجولات وقد بقي
+    // `more: true`، فكان الجهاز يقول «مُزامَن» وهو خلف بآلاف الصفوف.
+    const health = syncHealth({ pending: 0, backlog: true });
+    expect(health.state).toBe('syncing');
+    expect(health.state).not.toBe('ok');
+  });
+
+  it('says synced once the backlog is drained', () => {
+    expect(syncHealth({ pending: 0, backlog: false }).state).toBe('ok');
+  });
+
   it('reports syncing while writes are in flight', () => {
     expect(syncHealth({ pending: 3, lastSuccessAt: Date.now() }).state).toBe('syncing');
   });

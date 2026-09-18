@@ -215,13 +215,15 @@ export function syncHealth({
   lastSuccessAt = 0,
   /** آخر سحب ناجح. نجاحه لا يعني أن الكتابة وصلت. */
   lastSyncAt = 0,
+  /** خرج السحب وقد بقي `more`: القراءة ناقصة وإن كانت الكتابة كلها وصلت. */
+  backlog = false,
   lastError = null,
   online = true,
   durable = true,
   overflowing = false,
   now = Date.now(),
 }) {
-  const base = { pending, quarantined, lastError, lastSuccessAt, lastSyncAt };
+  const base = { pending, quarantined, lastError, lastSuccessAt, lastSyncAt, backlog };
 
   if (!durable) {
     return { ...base, state: 'degraded', message: 'تعذّر حفظ الكتابات على الجهاز' };
@@ -240,6 +242,11 @@ export function syncHealth({
   }
   if (pending > 0) {
     return { ...base, state: 'syncing', message: `${pending} كتابة قيد الإرسال` };
+  }
+  // كل الكتابات وصلت، لكن القراءة لم تُستنزف بعد. «مُزامَن» هنا كذبة:
+  // الجهاز يعرف أن عنده متأخّرًا ولا يقوله.
+  if (backlog) {
+    return { ...base, state: 'syncing', message: 'يجلب ما فاتك' };
   }
   return { ...base, state: 'ok', message: 'مُزامَن' };
 }

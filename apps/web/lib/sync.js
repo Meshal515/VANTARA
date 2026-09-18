@@ -48,6 +48,17 @@ const MAX_QUEUE = 500;
 /** سقف سجل المعزولات. أبعد من ذلك تشخيصٌ لا يقرأه أحد. */
 const MAX_QUARANTINE = 100;
 
+/**
+ * سقف جولات السحب في نداء واحد.
+ *
+ * الخادم يقطع الدفعة عند 500 صفّ لكل جدول، فالمتأخر الكبير يحتاج جولات. والسقف
+ * يمنع نداءً واحدًا من الاستمرار إلى الأبد على شبكة بطيئة.
+ *
+ * لكن الخروج عند السقف **ليس** مزامنة تامّة: تُرفع `backlog` فتقول الحالة
+ * الحقيقة، ويُعاد السحب فورًا بدل انتظار الدورة التالية.
+ */
+const MAX_PULL_ROUNDS = 20;
+
 /** الجداول التي تصل في الفروقات، ومفتاح كل صف. */
 const KEYS = {
   accounts: (row) => row.user_id,
@@ -59,10 +70,17 @@ const KEYS = {
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
   ratings: (row) => `${row.user_id}/${row.series_ref}`,
   comments: (row) => row.id,
+  // وصف العمل: عنوانه وغلافه. بلا مفتاح هنا كانت صفوفه تُلقى ويعبر المؤشر
+  // فوقها، فتعرض شاشة المكتبة معرّفًا خامًا ولا تعود الصفوف أبدًا.
+  works: (row) => row.series_ref,
   reactions: (row) => `${row.comment_id}/${row.user_id}/${row.emoji}`,
   recommendations: (row) => row.id,
+  // حالة كل مستلم مستقلة (§19): بلا هذا لا يظهر «منصور قبل · NGM رفض»
+  recommendation_recipients: (row) => `${row.recommendation_id}/${row.user_id}`,
   notifications: (row) => row.id,
   activity: (row) => row.id,
+  // إيصالات المشاهدة (§13–§15): بلا هذا لا تُعرف من شاهد شيئًا
+  activity_receipts: (row) => `${row.event_id}/${row.user_id}`,
   settings: (row) => row.user_id,
 };
 
@@ -135,6 +153,9 @@ export function createSync({ baseUrl }) {
    */
   let lastSuccessAt = Number(localStorage.getItem('vantara.lastPush') ?? '0') || 0;
   let lastSyncAt = Number(localStorage.getItem('vantara.lastSync') ?? '0') || 0;
+  // خرج السحب عند سقف الجولات وقد بقي `more`: القراءة ناقصة، والحالة يجب أن
+  // تقولها. بلا هذا يعرض الجهاز «مُزامَن» وهو خلف بآلاف الصفوف.
+  let backlog = false;
   let lastError = null;
   /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
   let durable = true;
@@ -426,7 +447,7 @@ export function createSync({ baseUrl }) {
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
-      for (let round = 0; round < 20; round += 1) {
+      for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
         const payload = await request(`/v1/sync?since=${cursor}`);
         if (!payload) break;
 
@@ -452,7 +473,17 @@ export function createSync({ baseUrl }) {
         if (touched.length > 0) emit(touched);
         lastSyncAt = Date.now();
         localStorage.setItem('vantara.lastSync', String(lastSyncAt));
-        if (!payload.more) break;
+        if (!payload.more) {
+          backlog = false;
+          break;
+        }
+        // الجولة الأخيرة وما زال هناك مزيد: نخرج بالسقف، لكن لا نُعلنها
+        // مزامنة تامّة، ونعود فورًا بدل انتظار الدورة التالية.
+        if (round === MAX_PULL_ROUNDS - 1) {
+          backlog = true;
+          emit(['sync']);
+          setTimeout(() => void pull(), 0);
+        }
       }
       lastError = null;
     } catch (error) {
@@ -604,6 +635,7 @@ export function createSync({ baseUrl }) {
   function health() {
     return syncHealth({
       lastSyncAt,
+      backlog,
       pending: queue.length,
       quarantined: quarantine.length,
       lastSuccessAt,
