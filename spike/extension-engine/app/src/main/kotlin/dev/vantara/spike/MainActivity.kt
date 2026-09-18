@@ -121,6 +121,10 @@ class MainActivity : AppCompatActivity() {
                 "${if (step.ok) "✓" else "✗"} ${step.name} — ${step.detail} (${step.millis}ms)",
                 bad = !step.ok,
             )
+            // الدليل ثم الفرضية، ولا حكم. التصنيف لقارئ التقرير لا للكود:
+            // موقعٌ يردّ 200 لا يُبرّئ المحرك ولا يُجرّمه.
+            step.live?.let { line("   ${it.describe()}") }
+            step.hypothesis?.let { line("   ${it}") }
         }
         report.imageUrl?.let { line("   الصورة: ${it.take(90)}") }
 

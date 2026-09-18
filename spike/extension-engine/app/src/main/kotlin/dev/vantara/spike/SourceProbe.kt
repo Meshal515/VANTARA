@@ -11,12 +11,24 @@ import okhttp3.Request
 /**
  * السلسلة الخمس لمصدر واحد، ثم قياس الكتالوج.
  *
- * كل خطوة تُسجَّل وحدها بنتيجتها ووقتها. فحين يسقط مصدر، نعرف **أين** سقط
- * بلا تخمين — وهذا هو الفرق بين «المصدر خربان» و«المحرك خربان».
+ * كل خطوة تُسجَّل باسمها ووقتها ودليلها. **ولا تُصنَّف تلقائيًّا.**
  *
- * وخطّ الأساس محسوم قبل أي تشغيل: المصادر الخمسة كلها أعطت HTTP 200 بمحتوى
- * عربي حقيقي لـ`curl` وحده بلا كوكي ولا WebView في 2026‑09‑18. فسقوطٌ في
- * `search` **ليس** عطل مصدر — هو عطل محرك حتى يُثبت العكس.
+ * وهذا تصحيح مقصود لمنهج أسبق كان يقول: `NoClassDefFoundError` يعني
+ * محرّكًا، و`IOException` يعني مصدرًا، وأن موقعًا يرجع 200 لـ`curl` يجعل
+ * سقوط البحث عطلَ محرّك. وثلاثتها أقوى من الدليل:
+ *
+ *  - **200 يثبت أن الموقع حيّ، لا أن عقده لم يتغيّر.** الموقع قد يخدم
+ *    صفحة سليمة بترميز HTML جديد يكسر selectors الإضافة، فيسقط التحليل
+ *    والموقع بريء والمحرك بريء — والمتغيّر هو الموقع.
+ *  - **`IOException` قد يكون من عندنا**: اعتراض مُعدٌّ خطأً، أو `cookieJar`
+ *    ناقص، أو ترويسة مفقودة. الاستثناء يقول «فشل نقل»، لا «الموقع مذنب».
+ *  - **و`NoClassDefFoundError` قرينة قوية على المحرك، لا برهان**: قد يكون
+ *    من صنفٍ اختياري تطلبه الإضافة ولا نوفّره، وهو نقص مستضيف بحقّ — لكن
+ *    اسم الصنف هو ما يفصل، لا نوع الاستثناء.
+ *
+ * فالمسبار يجمع الدليل: نوع الاستثناء واسمه، **وفحصًا حيًّا للموقع في نفس
+ * اللحظة** لا خطَّ أساسٍ من الأمس. ثم يعرض **فرضية موسومة كفرضية**،
+ * والتصنيف يبقى لقارئ التقرير.
  */
 class SourceProbe(private val http: OkHttpClient) {
 
@@ -25,7 +37,32 @@ class SourceProbe(private val http: OkHttpClient) {
         val ok: Boolean,
         val detail: String,
         val millis: Long,
+        /** نوع الاستثناء واسمه عند الفشل. فارغ عند النجاح. */
+        val exceptionType: String? = null,
+        /**
+         * فحص مستقل للموقع **لحظةَ الفشل**.
+         *
+         * هذا هو الفرق بين دليل وحكم: خطّ أساسٍ قديم لا يقول شيئًا عن
+         * الآن، وموقعٌ كان حيًّا أمس قد يكون ساقطًا أو متغيّرًا اليوم.
+         */
+        val live: LiveCheck? = null,
+        /** فرضية موسومة، لا حكم. */
+        val hypothesis: String? = null,
     )
+
+    /** ما رآه طلبٌ خامّ للموقع في نفس اللحظة، بلا الإضافة. */
+    data class LiveCheck(
+        val url: String,
+        val status: Int?,
+        val bytes: Int?,
+        val contentType: String?,
+        val error: String?,
+    ) {
+        fun describe(): String = when {
+            error != null -> "الموقع: تعذّر الوصول ($error)"
+            else -> "الموقع: HTTP $status · ${bytes ?: 0} بايت · ${contentType ?: "?"}"
+        }
+    }
 
     data class CatalogueReach(
         /** عدد الأعمال الفريدة التي كُشفت فعلًا. */
@@ -49,10 +86,11 @@ class SourceProbe(private val http: OkHttpClient) {
         val failedAt: String? get() = steps.firstOrNull { !it.ok }?.name
     }
 
-    private inline fun <T> step(
+    private suspend fun <T> step(
         name: String,
         into: MutableList<Step>,
-        block: () -> T,
+        baseUrl: String?,
+        block: suspend () -> T,
     ): T? {
         val started = System.currentTimeMillis()
         return try {
@@ -60,12 +98,72 @@ class SourceProbe(private val http: OkHttpClient) {
             into += Step(name, true, describe(value), System.currentTimeMillis() - started)
             value
         } catch (t: Throwable) {
-            // الرسالة وحدها لا تكفي للتشخيص: نوع الاستثناء هو ما يفرّق
-            // NoClassDefFoundError (المحرك) عن IOException (المصدر).
-            val kind = t.javaClass.simpleName
+            val kind = t.javaClass.name
             val msg = t.message?.take(300) ?: "(no message)"
-            into += Step(name, false, "$kind: $msg", System.currentTimeMillis() - started)
+            // الدليل يُجمع **الآن**: الموقع لحظةَ الفشل، لا أمس
+            val live = baseUrl?.let { liveCheck(it) }
+            into += Step(
+                name = name,
+                ok = false,
+                detail = "$kind: $msg",
+                millis = System.currentTimeMillis() - started,
+                exceptionType = kind,
+                live = live,
+                hypothesis = hypothesise(t, live),
+            )
             null
+        }
+    }
+
+    /**
+     * طلب خامّ للموقع، بلا الإضافة وبلا عميلها.
+     *
+     * غرضه واحد: هل الموقع نفسه يردّ الآن؟ ولا يقول أكثر من ذلك — وتحديدًا
+     * **لا يقول** إن عقد الصفحة لم يتغيّر.
+     */
+    private fun liveCheck(baseUrl: String): LiveCheck = try {
+        val request = Request.Builder().url(baseUrl)
+            .header("user-agent", RAW_UA)
+            .build()
+        http.newCall(request).execute().use { res ->
+            val body = res.body.bytes()
+            LiveCheck(baseUrl, res.code, body.size, res.header("content-type"), null)
+        }
+    } catch (t: Throwable) {
+        LiveCheck(baseUrl, null, null, null, "${t.javaClass.simpleName}: ${t.message?.take(120)}")
+    }
+
+    /**
+     * فرضية، وتُقرأ كفرضية.
+     *
+     * لا تُستعمل للحكم ولا تُغلق التشخيص؛ تقول للقارئ من أين يبدأ. وكل
+     * فرضية تحمل سببها، فمن يخالفها يخالف سببًا لا نبرة.
+     */
+    private fun hypothesise(t: Throwable, live: LiveCheck?): String {
+        val name = t.javaClass.name
+        val missing = (t as? NoClassDefFoundError)?.message?.take(120)
+
+        return when {
+            // صنف مفقود يسمّي نفسه: القرينة هنا في **الاسم** لا في النوع
+            t is NoClassDefFoundError || t is ClassNotFoundException ->
+                "فرضية: نقصٌ في سطح المستضيف — الصنف الغائب «$missing». " +
+                    "تُحقَّق بالبحث عنه في `eu/kanade/tachiyomi/` وفي الاعتماديات."
+            t is LinkageError ->
+                "فرضية: تعارض إصدارات في اعتمادية (OkHttp/serialization). " +
+                    "تُحقَّق من `resolutionStrategy` ومن شجرة الاعتماديات."
+            live?.error != null ->
+                "فرضية: الموقع لا يردّ الآن. تُحقَّق بإعادة المحاولة لاحقًا، " +
+                    "ولا تُنسب إلى المحرك قبل ذلك."
+            live != null && live.status !in 200..299 ->
+                "فرضية: الموقع ردّ HTTP ${live.status}. قد يكون حجبًا أو " +
+                    "تغييرَ مسار — ولا يزال محتملًا أن ترويسةً عندنا هي السبب."
+            live != null ->
+                "فرضية **غير محسومة**: الموقع يردّ ${live.status} الآن، فالعطل " +
+                    "إمّا تغيّرُ عقدِ الصفحة (selectors) أو إعدادٌ في محرّكنا " +
+                    "(ترويسة، كوكي، اعتراض). الدليل لا يفصل بينهما، " +
+                    "ويُفصل بمقارنة صفحة الموقع بما تتوقّعه الإضافة."
+            else ->
+                "فرضية: غير محسومة — لا فحص حيّ متاح لهذه الخطوة."
         }
     }
 
@@ -79,9 +177,13 @@ class SourceProbe(private val http: OkHttpClient) {
 
     suspend fun run(label: String, source: CatalogueSource): Report {
         val steps = mutableListOf<Step>()
+        // `baseUrl` من المصدر نفسه لا من بياننا: الإضافة قد تكون هاجرت إلى
+        // مرآة أخرى (`baseUrl { mirrors(...) }`)، فالفحص الحيّ يجب أن يضرب
+        // ما تضربه الإضافة فعلًا.
+        val base = (source as? HttpSource)?.baseUrl
 
         // ١) البحث
-        val found = step("search", steps) {
+        val found = step("search", steps, base) {
             val page = source.getSearchManga(1, queryFor(label), FilterList())
             require(page.mangas.isNotEmpty()) { "search returned zero results" }
             page.mangas
@@ -92,12 +194,12 @@ class SourceProbe(private val http: OkHttpClient) {
             ?: return Report(label, steps, null, null, null)
 
         // ٢) تفاصيل العمل
-        val details = step("details", steps) {
+        val details = step("details", steps, base) {
             source.getMangaUpdate(first, fetchDetails = true, fetchChapters = false).manga
         } ?: first
 
         // ٣) الفصول
-        val chapters = step("chapters", steps) {
+        val chapters = step("chapters", steps, base) {
             val list = source.getMangaUpdate(details, fetchDetails = false, fetchChapters = true)
                 .chapters
             require(list.isNotEmpty()) { "chapter list is empty" }
@@ -108,7 +210,7 @@ class SourceProbe(private val http: OkHttpClient) {
         if (chapter == null) return Report(label, steps, null, null, null)
 
         // ٤) الصفحات
-        val pages = step("pages", steps) {
+        val pages = step("pages", steps, base) {
             val list = source.getPageList(chapter)
             require(list.isNotEmpty()) { "page list is empty" }
             list
@@ -119,7 +221,7 @@ class SourceProbe(private val http: OkHttpClient) {
         var imageBytes: Int? = null
         val page = pages?.firstOrNull()
         if (page != null) {
-            step("image", steps) {
+            step("image", steps, base) {
                 val asHttp = source as? HttpSource
                 // المصدر قد يعطي الرابط في الصفحة، أو يشتقه بطلب ثانٍ
                 val url = page.imageUrl
@@ -199,6 +301,11 @@ class SourceProbe(private val http: OkHttpClient) {
         SPIKE_SOURCES.firstOrNull { it.label == label }?.query ?: "مانجا"
 
     private companion object {
+        /** ترويسة الفحص الخامّ: نفس ما استُعمل في خطّ الأساس، فالمقارنة عادلة. */
+        const val RAW_UA =
+            "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
+
         /**
          * سقف الصفحات.
          *
