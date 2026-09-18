@@ -1094,6 +1094,53 @@ async function allAccountIds(env: Env): Promise<string[]> {
   return results.map((row) => row.user_id);
 }
 
+/**
+ * يجمع metadata خارجية تحتاجها ترجمة العمليات قبل بناء الدفعة الذرّية.
+ *
+ * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
+ * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
+ */
+export async function loadOpContext(
+  ops: readonly IncomingOp[],
+  env: Env,
+): Promise<OpContext> {
+  const needsAccounts = ops.some((op) => ACCOUNT_AWARE_KINDS.has(op.kind));
+  const accounts = needsAccounts ? await allAccountIds(env) : [];
+
+  const commentIds = new Set<string>();
+  for (const op of ops) {
+    if (op.kind === 'reaction.set') {
+      const id = asString(op.payload['commentId'], 80);
+      if (id) commentIds.add(id);
+    } else if (op.kind === 'comment.add') {
+      const id = asString(op.payload['parentId'], 80);
+      if (id) commentIds.add(id);
+    }
+  }
+
+  if (commentIds.size === 0) return { accounts };
+
+  const comments: Record<string, { authorId: string; seriesRef: string }> = {};
+  const ids = [...commentIds];
+  const CHUNK = 90;
+
+  for (let offset = 0; offset < ids.length; offset += CHUNK) {
+    const chunk = ids.slice(offset, offset + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const { results } = await env.DB.prepare(
+      `SELECT id, author_id, series_ref FROM comments WHERE id IN (${placeholders})`,
+    )
+      .bind(...chunk)
+      .all<{ id: string; author_id: string; series_ref: string }>();
+
+    for (const row of results) {
+      comments[row.id] = { authorId: row.author_id, seriesRef: row.series_ref };
+    }
+  }
+
+  return { accounts, comments };
+}
+
 const PROFILE_COLUMNS: Record<string, string> = {
   displayName: 'display_name',
   avatarKey: 'avatar_key',
@@ -1213,8 +1260,7 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
   // قائمة الحسابات تُقرأ مرة واحدة وفقط إن احتاجتها عملية: توصية «للجميع»
   // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
-  const needsAccounts = ops.some((op) => ACCOUNT_AWARE_KINDS.has(op.kind));
-  const ctx: OpContext = { accounts: needsAccounts ? await allAccountIds(env) : [] };
+  const ctx = await loadOpContext(ops, env);
 
   const statements: D1PreparedStatement[] = [];
   for (const op of ops) {
