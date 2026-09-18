@@ -130,6 +130,11 @@ describe('ownership matrix', () => {
     });
   });
 
+  it('assigns B8 social receipt tables to their existing D1 domains', () => {
+    expect(ownerOfTable('D1', 'recommendation_recipients')?.key).toBe('social.recommendations');
+    expect(ownerOfTable('D1', 'activity_receipts')?.key).toBe('social.activity');
+  });
+
   it('lists the retired Postgres social tables so nothing writes them again', () => {
     const retired = retiredTables('POSTGRES');
     expect(retired).toEqual(
