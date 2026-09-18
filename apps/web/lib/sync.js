@@ -190,6 +190,34 @@ export function createSync({ baseUrl }) {
     }
   }
 
+  /**
+   * جسر Capacitor محقون بدل import npm داخل الويب الساكن.
+   *
+   * cold start يصل عبر getLaunchUrl، والروابط أثناء عمل التطبيق عبر appUrlOpen.
+   * الروابط التي لا تحمل `pair` تمر بلا أثر وتبقى لبقية router.
+   */
+  async function attachNativeLinkBridge(appPlugin) {
+    if (
+      !appPlugin ||
+      typeof appPlugin.getLaunchUrl !== 'function' ||
+      typeof appPlugin.addListener !== 'function'
+    ) {
+      return null;
+    }
+
+    const launched = await appPlugin.getLaunchUrl();
+    if (typeof launched?.url === 'string') {
+      await consumePairingUrl(launched.url);
+    }
+
+    return appPlugin.addListener('appUrlOpen', (event) => {
+      if (typeof event?.url !== 'string') return;
+      void consumePairingUrl(event.url).catch((error) => {
+        console.error('VANTARA native pairing link failed', error);
+      });
+    });
+  }
+
   /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب قبل أي جلسة. */
   async function accounts() {
     await consumePairingFromUrl();
@@ -359,6 +387,7 @@ export function createSync({ baseUrl }) {
     accounts,
     pairDevice,
     consumePairingUrl,
+    attachNativeLinkBridge,
     signIn,
     signOut,
     logoutDevice,
