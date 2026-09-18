@@ -1,13 +1,16 @@
-// إصدار OkHttp في مكان واحد: التوحيد أدناه والاعتماديات تقرأ منه، فلا
-// يفترقان بالسهو.
-val OKHTTP = "5.3.2"
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     // الإضافات تُصرَّف بـkotlinx.serialization، ومولّداتها تحتاج وقت التشغيل
     id("org.jetbrains.kotlin.plugin.serialization")
 }
+
+// إصدار OkHttp في مكان واحد: التوحيد أدناه والاعتماديات تقرأ منه، فلا
+// يفترقان بالسهو.
+//
+// ويُصرَّح **بعد** `plugins`: الـKotlin DSL يمنع أي تصريح قبل كتلة
+// الإضافات، ووجوده فوقها كان سيُسقط اللفّة التالية.
+val okhttpVersion = "5.3.2"
 
 android {
     namespace = "dev.vantara.spike"
@@ -64,7 +67,7 @@ android {
 configurations.all {
     resolutionStrategy.eachDependency {
         if (requested.group == "com.squareup.okhttp3") {
-            useVersion(OKHTTP)
+            useVersion(okhttpVersion)
         }
     }
 }
@@ -79,10 +82,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     // الشبكة. الإصدارات مثبَّتة بقصد: الإضافات مبنيّة على هذه الخطوط.
-    implementation("com.squareup.okhttp3:okhttp:$OKHTTP")
+    implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
     // `okhttp3.JavaNetCookieJar` يسكن هذه القطعة لا في okhttp نفسه
-    implementation("com.squareup.okhttp3:okhttp-urlconnection:$OKHTTP")
-    implementation("com.squareup.okhttp3:okhttp-brotli:$OKHTTP")
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:$okhttpVersion")
+    implementation("com.squareup.okhttp3:okhttp-brotli:$okhttpVersion")
     implementation("com.squareup.okio:okio:3.16.4")
 
     // Jsoup: خط 1.x الذي تُصرَّف عليه keiyoushi
