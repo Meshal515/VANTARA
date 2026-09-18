@@ -103,6 +103,9 @@ dependencies {
     // `okhttp3.JavaNetCookieJar` يسكن هذه القطعة لا في okhttp نفسه
     implementation("com.squareup.okhttp3:okhttp-urlconnection:$okhttpVersion")
     implementation("com.squareup.okhttp3:okhttp-brotli:$okhttpVersion")
+    // Keiyoushi's exact common host surface includes okhttp-zstd. Azora proved
+    // this is runtime-required: NoClassDefFoundError okhttp3/zstd/Zstd.
+    implementation("com.squareup.okhttp3:okhttp-zstd:$okhttpVersion")
     implementation("com.squareup.okio:okio:3.16.4")
 
     // Jsoup: خط 1.x الذي تُصرَّف عليه keiyoushi
