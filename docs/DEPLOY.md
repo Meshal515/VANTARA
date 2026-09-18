@@ -79,16 +79,33 @@ curl -s -X POST localhost:8080/api/tokens -H "Authorization: Bearer $S" \
 
 ## 3. المصادر
 
+> ⚠️ **الرابط تغيّر، والقديم لم يمت بهدوء.** كان هنا
+> `index.min.json`، وهو اليوم **ليس كتالوجًا**: فُحص فعليًا ووُجد فيه عنصران
+> فقط — «Outdated App» و«Update to Mihon 0.20.1+». فمن يتبع الخطوة القديمة
+> يحصل على إضافتين وهميتين و**صفر مصدر عربي**، بلا رسالة خطأ واحدة.
+>
+> Keiyoushi انتقل إلى متجر بصيغة Protobuf: `index.pb`.
+
 ```bash
 A="Authorization: Bearer <uy_token>"
 
 curl -X POST -H "$A" -H 'Content-Type: application/json' \
   localhost:8080/api/admin/extensions/repos \
-  -d '{"url":"https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"}'
+  -d '{"url":"https://github.com/keiyoushi/extensions/raw/repo/index.pb"}'
 
 curl -X POST -H "$A" localhost:8080/api/admin/extensions/refresh
 curl -H "$A" "localhost:8080/api/admin/extensions/catalog?lang=ar" | jq -r '.content[].pkgName'
 ```
+
+**افحص العدد، لا تفترضه.** السطر الأخير يجب أن يطبع عشرات الحزم العربية.
+
+| ما يظهر | ما يعنيه |
+|---|---|
+| عشرات الحزم | المتجر مقروء — أكمل |
+| **صفر أو عنصران** | Uchiyomi/Suwayomi المثبّتان عندنا لا يفهمان `index.pb` بعد. **ليس عيبًا في VANTARA**: الحل ترقية الـupstream (والـdigests مثبّتة عندنا، فالترقية قرار واعٍ يُحدَّث في `docs/UPSTREAMS.md`) |
+
+وهذا الفحص ليس تزيينًا: صيغة المتجر تغيّرت في 2026، وكتالوج صامت يبدو تمامًا
+كمكتبة فارغة.
 
 ثبّت ما تريد، ثم **افحص قبل أن تثق**:
 
