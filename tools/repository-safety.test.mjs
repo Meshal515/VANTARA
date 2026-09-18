@@ -315,3 +315,19 @@ test('the app shell is served from cache before the network', () => {
     'the navigate handler must read the cache before it reaches for the network',
   );
 });
+
+test('a build with no endpoint baked still offers a way in', () => {
+  // كانت شاشة «عنوان المزامنة غير مضبوط» طريقًا مسدودًا: الإعدادات لا تُفتح
+  // إلا من داخل تطبيق لم يُقلع. فأي APK بلا عناوين مخبوزة يصل ميتًا، وكل
+  // تغيير لعنوان النفق يفرض إعادة بناء وتثبيت على ثلاثة أجهزة.
+  const app = read('apps/web/app.js');
+  const start = app.indexOf('if (!syncConfigured())');
+  assert.ok(start > 0, 'boot must still handle a missing sync endpoint');
+
+  const branch = app.slice(start, start + 1200);
+  assert.match(
+    branch,
+    /go\(\{\s*name:\s*'settings'\s*\}\)/,
+    'the unconfigured screen must lead to settings, not dead-end on a message',
+  );
+});

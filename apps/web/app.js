@@ -1592,7 +1592,9 @@ async function go(route) {
 async function screenSettings() {
   state.screen = 'SETTINGS';
   const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'الإعدادات', back: () => go({ name: 'home' }) }));
+  // الرجوع يعيد تشغيل منطق الإقلاع لا يقفز للرئيسية: قد لا يكون هناك عنوان
+  // مضبوط أصلًا ولا جلسة، فالرئيسية حينها شاشة مكسورة لا وجهة
+  wrap.append(topbar({ title: 'الإعدادات', back: () => void boot() }));
   const body = el('div', 'page__body');
 
   const current = endpoints();
@@ -1880,15 +1882,21 @@ setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
   if (!syncConfigured()) {
-    // بلا عنوان مزامنة لا حسابات ولا أصدقاء. الرسالة صريحة بدل شاشة فارغة.
+    // بلا عنوان مزامنة لا حسابات ولا أصدقاء.
+    //
+    // وكانت هذه الشاشة **طريقًا مسدودًا**: رسالة بلا مخرج، والإعدادات لا
+    // تُفتح إلا من داخل التطبيق الذي لم يُقلع. فأي بناء بلا عناوين مخبوزة
+    // يصل المستخدم ميتًا، وكل تغيير لعنوان النفق يفرض إعادة بناء وتثبيت.
     mount(
       (() => {
         const wrap = el('main', 'gate');
         const inner = el('section', 'gate__inner');
         inner.append(el('h1', 'gate__word', 'VANTARA'));
-        inner.append(
-          el('p', 'gate__message gate__message--error', 'عنوان المزامنة غير مضبوط في هذه النسخة.'),
-        );
+        inner.append(el('p', 'gate__message', 'اضبط عنوان الخادم لتبدأ.'));
+        const open = el('button', 'btn', 'فتح الإعدادات');
+        open.type = 'button';
+        open.addEventListener('click', () => void go({ name: 'settings' }));
+        inner.append(open);
         wrap.append(inner);
         return wrap;
       })(),
