@@ -109,6 +109,84 @@ describe('B2 browser trusted-device lifecycle', () => {
     });
   });
 
+  it('does not let a consumed cold-start pairing link block APK startup', async () => {
+    const sync = createSync({ baseUrl: 'https://sync.example' });
+    let onUrlOpen: ((event: { url: string }) => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/device/pair')) {
+        return new Response(JSON.stringify({ error: 'pairing_invalid' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/v1/accounts')) {
+        return new Response(JSON.stringify({ content: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const appPlugin = {
+      getLaunchUrl: vi.fn(async () => ({ url: 'vantara://pair?pair=already-consumed-token-00001' })),
+      addListener: vi.fn(async (_eventName: string, listener: (event: { url: string }) => void) => {
+        onUrlOpen = listener;
+        return { remove: vi.fn(async () => {}) };
+      }),
+    };
+
+    await expect(sync.attachNativeLinkBridge(appPlugin)).resolves.toBeDefined();
+    expect(onUrlOpen).toBeTypeOf('function');
+  });
+
+  it('removes a failed web pairing parameter and still loads the account gate', async () => {
+    const sync = createSync({ baseUrl: 'https://sync.example' });
+    const replaceState = vi.fn();
+
+    vi.stubGlobal('location', { href: 'https://vantara.example/?pair=already-consumed-token-00001' });
+    vi.stubGlobal('history', { replaceState });
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/device/pair')) {
+        return new Response(JSON.stringify({ error: 'pairing_invalid' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/v1/accounts')) {
+        return new Response(JSON.stringify({ content: [{ userId: 'user-1' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    await expect(sync.accounts()).resolves.toEqual([{ userId: 'user-1' }]);
+    expect(replaceState).toHaveBeenCalledWith({}, '', '/');
+  });
+
+  it('does not send a newly generated device credential if local persistence throws', async () => {
+    const sync = createSync({ baseUrl: 'https://sync.example' });
+    const originalSetItem = storage.setItem.bind(storage);
+    const setSpy = vi.spyOn(storage, 'setItem').mockImplementation((key: string, value: string) => {
+      if (key === 'vantara.device.credential') {
+        const error = new Error('QuotaExceededError');
+        error.name = 'QuotaExceededError';
+        throw error;
+      }
+      originalSetItem(key, value);
+    });
+
+    await expect(sync.signIn('user-1')).rejects.toThrow('QuotaExceededError');
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith('/v1/session'))).toBe(false);
+
+    setSpy.mockRestore();
+  });
+
   it('deletes the local device credential after logout-device', async () => {
     const sync = createSync({ baseUrl: 'https://sync.example' });
     await sync.signIn('user-1');
