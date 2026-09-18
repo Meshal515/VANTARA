@@ -17,8 +17,11 @@
  */
 
 // أي تعديل على ملفات القشرة يحتاج رقمًا جديدًا هنا، وإلا خدم الـSW القديم
-const VERSION = 'vantara-shell-v3';
+const VERSION = 'vantara-shell-v4';
 
+// كل ملف هنا يجب أن يكون مخزَّنًا **قبل** أول رسم. وحارس في
+// `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
+// هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
 const SHELL = [
   '/',
   '/app.js',
@@ -31,6 +34,12 @@ const SHELL = [
   '/lib/colors.js',
   '/lib/gradient.js',
   '/lib/coverflow.js',
+  '/lib/content-api.js',
+  '/lib/notifications.js',
+  '/lib/queue.js',
+  '/lib/tasks.js',
+  '/lib/netpolicy.js',
+  '/lib/toast.js',
   '/screens/accounts.js',
   '/manifest.webmanifest',
   '/fonts/NotoNaskhArabic-Regular.woff2',
@@ -83,16 +92,34 @@ self.addEventListener('fetch', (event) => {
   // كل ما هو مصادَق عليه يمر إلى الشبكة ولا يُلمس
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/health')) return;
 
-  // التنقّل: الشبكة أولًا حتى تصل أي نسخة جديدة من الصفحة، والقشرة عند الفشل
+  // التنقّل: **الكاش أولًا**.
+  //
+  // كان هذا المسار شبكة أولًا ليصل التحديث فورًا، وثمنه أن كل إقلاع بارد
+  // ينتظر الشبكة قبل أول بكسل — على شبكة جوال متذبذبة تعني شاشة بيضاء
+  // ثوانيَ، وهي أول ما يحكم به المستخدم على التطبيق.
+  //
+  // ولا نفقد التحديث: النسخة الجديدة تُجلب في الخلفية وتُخزَّن للمرة القادمة،
+  // و`lib/update.js` يسأل عن `version.json` ويعرض «حدّث الآن» — فآلية
+  // التحديث موجودة أصلًا ولا تحتاج أن يدفع الإقلاع ثمنها.
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
-        try {
-          return await fetch(request);
-        } catch {
-          const cache = await caches.open(VERSION);
-          return (await cache.match('/')) ?? Response.error();
+        const cache = await caches.open(VERSION);
+        const cached = await cache.match('/');
+
+        const fromNetwork = fetch(request)
+          .then((response) => {
+            if (response.ok) void cache.put('/', response.clone());
+            return response;
+          })
+          .catch(() => undefined);
+
+        if (cached) {
+          event.waitUntil(fromNetwork);
+          return cached;
         }
+        // أول زيارة في حياة الجهاز: لا قشرة مخزَّنة بعد، فالشبكة هي الطريق
+        return (await fromNetwork) ?? Response.error();
       })(),
     );
     return;

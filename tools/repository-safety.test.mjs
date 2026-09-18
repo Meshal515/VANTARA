@@ -275,3 +275,43 @@ test('signed Android release workflow is tag-only, main-only, and CI-verified', 
   assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Android release verification needs read access to Actions results');
   assertCommitHasSuccessfulCi(workflow, '$GITHUB_SHA', 'Android release path');
 });
+
+test('every module the app imports at boot is precached by the service worker', () => {
+  // وحدة يستوردها `app.js` ثابتًا وليست في `SHELL` تعني أن أول إقلاع بعد
+  // تحديث يذهب للشبكة ليجلبها، وأن الإقلاع دون اتصال قد يفشل كليًا — وهذا
+  // بالضبط ما وجدته مراجعة B13: أربع وحدات ناقصة.
+  const worker = read('apps/web/sw.js');
+  const shell = new Set([...worker.matchAll(/^\s*'(\/[^']+)',$/gm)].map((match) => match[1]));
+
+  const roots = ['apps/web/app.js', 'apps/web/reader.js', 'apps/web/screens/accounts.js'];
+  const missing = [];
+
+  for (const root of roots) {
+    const source = read(root);
+    const dir = root.slice(0, root.lastIndexOf('/'));
+    // المسار كما يراه المتصفح: `apps/web` هو جذر الموقع لا جزء من العنوان
+    const webDir = dir === 'apps/web' ? '' : `${dir.slice('apps/web/'.length)}/`;
+    for (const match of source.matchAll(/^import[^'"]*['"](\.[^'"]+)['"]/gm)) {
+      const specifier = match[1];
+      const resolved = new URL(specifier, `https://x/${webDir}`).pathname;
+      if (!shell.has(resolved)) missing.push(`${root} → ${resolved}`);
+    }
+  }
+
+  assert.deepEqual(missing, [], `modules imported but not precached:\n${missing.join('\n')}`);
+});
+
+test('the app shell is served from cache before the network', () => {
+  // شبكة أولًا على مستند التنقّل تعني شاشة بيضاء بطول زمن الشبكة عند كل
+  // إقلاع بارد. والتحديث لا يضيع: `lib/update.js` يعرضه صراحةً.
+  const worker = read('apps/web/sw.js');
+  const navigate = worker.slice(worker.indexOf("request.mode === 'navigate'"));
+  const cacheAt = navigate.indexOf('cache.match');
+  const fetchAt = navigate.indexOf('fetch(request)');
+
+  assert.ok(cacheAt > 0, 'the navigate handler must consult the cache');
+  assert.ok(
+    cacheAt < fetchAt,
+    'the navigate handler must read the cache before it reaches for the network',
+  );
+});
