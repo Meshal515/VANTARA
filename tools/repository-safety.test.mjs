@@ -199,8 +199,8 @@ test('B8 social migration defines recipient state and per-viewer receipts', () =
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS recommendation_recipients/i);
   assert.match(migration, /PRIMARY KEY\s*\(recommendation_id,\s*user_id\)/i);
-  assert.match(migration, /state\s+TEXT\s+NOT NULL[^\n]*CHECK\s*\(state IN \('PENDING', 'ACCEPTED', 'REJECTED'\)\)/i);
-  assert.match(migration, /intent\s+TEXT[^\n]*CHECK\s*\(intent IS NULL OR intent IN \('WATCH_NOW', 'WATCH_LATER', 'ADD_TO_LIBRARY'\)\)/i);
+  assert.match(migration, /state\s+TEXT\s+NOT NULL(?:\s+DEFAULT\s+'PENDING')?\s+CHECK\s*\(state IN \('PENDING', 'ACCEPTED', 'REJECTED'\)\)/i);
+  assert.match(migration, /intent\s+TEXT\s+CHECK\s*\(\s*intent IS NULL OR\s*intent IN \('WATCH_NOW', 'WATCH_LATER', 'ADD_TO_LIBRARY'\)\s*\)/i);
   assert.match(migration, /REFERENCES recommendations\s*\(id\)/i);
   assert.match(migration, /REFERENCES accounts\s*\(user_id\)/i);
 
