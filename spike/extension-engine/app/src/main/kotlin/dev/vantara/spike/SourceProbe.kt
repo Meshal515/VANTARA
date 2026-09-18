@@ -195,13 +195,24 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // ٢) تفاصيل العمل
         val details = step("details", steps, base) {
-            source.getMangaUpdate(first, fetchDetails = true, fetchChapters = false).manga
+            // الوسيط الثاني هو الفصول **المعروفة سلفًا**، وهي فارغة في أول
+            // استعلام. حذفُه كان خطأً عندي لا في العقد.
+            source.getMangaUpdate(
+                manga = first,
+                chapters = emptyList(),
+                fetchDetails = true,
+                fetchChapters = false,
+            ).manga
         } ?: first
 
         // ٣) الفصول
         val chapters = step("chapters", steps, base) {
-            val list = source.getMangaUpdate(details, fetchDetails = false, fetchChapters = true)
-                .chapters
+            val list = source.getMangaUpdate(
+                manga = details,
+                chapters = emptyList(),
+                fetchDetails = false,
+                fetchChapters = true,
+            ).chapters
             require(list.isNotEmpty()) { "chapter list is empty" }
             list
         }

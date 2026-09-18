@@ -11,7 +11,7 @@
  */
 package eu.kanade.tachiyomi.source
 
-import com.manhwa.engine.awaitSingle
+import dev.vantara.spike.awaitSingle
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page

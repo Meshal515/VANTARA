@@ -16,7 +16,7 @@
  */
 package eu.kanade.tachiyomi.source.online
 
-import com.manhwa.engine.awaitSingle
+import dev.vantara.spike.awaitSingle
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.asObservableSuccess
