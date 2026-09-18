@@ -34,6 +34,42 @@ export function rankProvidersByLanguage<T extends { source: string }>(
   return [...providers].sort((a, b) => rank(a) - rank(b));
 }
 
+
+/**
+ * هوية عمل داخل مصدر. لا تُخلط مع Uchiyomi series id:
+ * provider.sourceId هو source-specific series id، بينما *_ref عند VANTARA هو
+ * canonical Uchiyomi series id.
+ */
+export function sourceIdentity(source: string, sourceSeriesId: string): string {
+  return JSON.stringify([source, sourceSeriesId]);
+}
+
+interface SeriesWithSources {
+  sources?: readonly { sourceId: string; sourceSeriesId: string }[];
+}
+
+/**
+ * يحوّل canonical Uchiyomi series refs إلى الهويات الدقيقة التي قد تظهر بها
+ * نفس السلسلة في search-all عبر المصادر.
+ */
+export async function sourceKeysForSeriesRefs(
+  seriesRefs: Iterable<string>,
+  loadSeries: (seriesRef: string) => Promise<SeriesWithSources | undefined>,
+): Promise<Set<string>> {
+  const refs = [...new Set(seriesRefs)].filter(Boolean);
+  if (refs.length === 0) return new Set();
+
+  const rows = await Promise.all(refs.map((ref) => loadSeries(ref)));
+  const keys = new Set<string>();
+  for (const series of rows) {
+    for (const source of series?.sources ?? []) {
+      if (!source.sourceId || !source.sourceSeriesId) continue;
+      keys.add(sourceIdentity(source.sourceId, source.sourceSeriesId));
+    }
+  }
+  return keys;
+}
+
 export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   /**
    * مزامنة سجل المصادر مع ما يراه Uchiyomi.
@@ -242,7 +278,8 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
 
     const q = parsed.data.q;
-    const grouped = await ctx.uchiyomi.searchAll(q, sessionOf(request).token);
+    const session = sessionOf(request);
+    const grouped = await ctx.uchiyomi.searchAll(q, session.token);
 
     const [searchable, deleted, blocked] = await Promise.all([
       query<{ source_id: string; lang: string | null }>(
@@ -259,12 +296,21 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
 
     const allowedSources = new Set(searchable.map((r) => r.source_id));
     const sourceLanguages = new Map(searchable.map((r) => [r.source_id, r.lang] as const));
-    const deletedRefs = new Set(deleted.map((r) => r.series_ref));
     const blockedSources = new Set(
       blocked.map((r) => r.source_id).filter((v): v is string => v !== null),
     );
-    const blockedSeries = new Set(
-      blocked.map((r) => r.series_ref).filter((v): v is string => v !== null),
+    const hiddenSeriesRefs = new Set([
+      ...deleted.map((r) => r.series_ref),
+      ...blocked.map((r) => r.series_ref).filter((v): v is string => v !== null),
+    ]);
+
+    // *_ref هو canonical Uchiyomi id، أما provider.sourceId فهو id داخل المصدر.
+    // نحل canonical series إلى كل هويات مصادره قبل المقارنة، بدل مقارنة namespace
+    // مختلفين لا يمكن أن يتساويا إلا صدفة.
+    const policyToken = ctx.config.UCHIYOMI_SERVICE_TOKEN ?? session.token;
+    const blockedSeriesSourceKeys = await sourceKeysForSeriesRefs(
+      hiddenSeriesRefs,
+      (seriesRef) => ctx.uchiyomi.series(seriesRef, policyToken),
     );
 
     // سجل فارغ ⇒ لا نحجب شيئًا: تشغيل أول بلا sync يجب أن يبحث لا أن يصمت
@@ -285,7 +331,9 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
       .filter(
         (group) =>
           group.providers.length > 0 &&
-          !group.providers.some((p) => deletedRefs.has(p.sourceId) || blockedSeries.has(p.sourceId)),
+          !group.providers.some((provider) =>
+            blockedSeriesSourceKeys.has(sourceIdentity(provider.source, provider.sourceId)),
+          ),
       )
       .sort((a, b) => {
         const languageRank = (sourceId: string | undefined): number => {
