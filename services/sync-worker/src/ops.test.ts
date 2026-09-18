@@ -441,6 +441,30 @@ describe('B8 server-derived activity', () => {
     ).toBe(false);
   });
 
+  it('routes top.set through the same collection path as favourites', () => {
+    // «أفضل 5» (§9) مجموعةٌ مرتَّبة، لا جدولٌ ثالث: نفس الموضع ونفس
+    // `collection.reorder` ونفس وصف العمل. نظامٌ موازٍ يعني شاشتين تختلفان.
+    const out = translate('top.set', {
+      seriesRef: 'src:test:vagabond',
+      seriesTitle: 'فاجابوند',
+      position: 0,
+    });
+
+    const collection = out.find((entry) => entry.sql.includes('INSERT INTO collections'));
+    expect(collection?.values).toContain('top');
+    expect(collection?.values).toContain('src:test:vagabond');
+    // الوصف يرافق العضوية، وإلا عرضت الشاشة معرّفًا خامًا
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO works'))).toBe(true);
+  });
+
+  it('removes a work from the top list without touching favourites', () => {
+    const out = translate('top.set', { seriesRef: 'src:test:x', member: false });
+    const collection = out.find((entry) => entry.sql.includes('INSERT INTO collections'));
+    expect(collection?.values).toContain('top');
+    expect(collection?.values).toContain(0);
+    expect(collection?.values).not.toContain('favorite');
+  });
+
   it('stores the spoiler flag its author set, and nothing else as a spoiler', () => {
     const marked = translate('comment.add', {
       seriesRef: 'lookism',

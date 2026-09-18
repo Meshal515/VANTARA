@@ -652,10 +652,14 @@ export function statementsFor(
     }
 
     case 'favorite.set':
-    case 'readLater.set': {
+    case 'readLater.set':
+    case 'top.set': {
       const seriesRef = asString(p['seriesRef'], 200);
       if (!seriesRef) return null;
-      const kind = op.kind === 'favorite.set' ? 'favorite' : 'read_later';
+      // `top.set` هي «أفضل 5» (§9). تمرّ بنفس مسار المجموعات بقصد: نفس
+      // الموضع ونفس `collection.reorder` ونفس وصف العمل — لا نظام موازٍ.
+      const kind =
+        op.kind === 'favorite.set' ? 'favorite' : op.kind === 'top.set' ? 'top' : 'read_later';
       // نوع المجموعة من طبقة المجال: قائمة مغلقة، فلا يخلق عميل قديم نوعًا
       // ثالثًا لا تعرفه أي شاشة
       if (!isCollectionKind(kind)) return null;

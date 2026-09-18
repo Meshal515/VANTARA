@@ -29,10 +29,13 @@ const work = (over = {}) => ({
 });
 
 describe('collection kinds', () => {
-  it('knows the two kinds and nothing else', () => {
-    expect(COLLECTION_KINDS).toEqual(['favorite', 'read_later']);
+  it('knows the three kinds and nothing else', () => {
+    // `top` هي «أفضل 5» (§9): مجموعة مرتَّبة كالمفضلة، لا جدولٌ ثالث
+    expect(COLLECTION_KINDS).toEqual(['favorite', 'read_later', 'top']);
     expect(isCollectionKind('favorite')).toBe(true);
     expect(isCollectionKind('read_later')).toBe(true);
+    expect(isCollectionKind('top')).toBe(true);
+    // القائمة مغلقة: عميل قديم أو حمولة مشوَّهة لا تخلق نوعًا رابعًا
     expect(isCollectionKind('watchlist')).toBe(false);
   });
 

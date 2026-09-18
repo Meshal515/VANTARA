@@ -19,7 +19,9 @@
  *    بينهما يجعل القائمة ترقص عند كل مزامنة.
  */
 
-export const COLLECTION_KINDS = ['favorite', 'read_later'] as const;
+// `top` هي «أفضل 5» (§9): مجموعة مرتَّبة كالمفضلة، لا جدولٌ ثالث ولا حقل
+// في البروفايل. السقف في العرض (`topWorks`) لا في التخزين.
+export const COLLECTION_KINDS = ['favorite', 'read_later', 'top'] as const;
 
 export type CollectionKind = (typeof COLLECTION_KINDS)[number];
 
