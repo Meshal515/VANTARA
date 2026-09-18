@@ -24,7 +24,9 @@ $compose config >/dev/null
 $compose up -d postgres
 
 attempt=0
-until $compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+# لا تستخدم socket هنا: docker-entrypoint يشغّل temporary server على socket أثناء init
+# ثم يطفئه. TCP لا يصبح جاهزًا إلا مع السيرفر النهائي الذي ستستخدمه بقية الخدمات.
+until $compose exec -T postgres pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 30 ]; then
     $compose logs postgres >&2 || true
