@@ -559,23 +559,15 @@ async function screenHome() {
 
 // ───────────────────────────── البحث ─────────────────────────────
 
-const LANG_RANK = { ar: 0, en: 1 };
-
 async function loadSourceMap() {
   if (state.sources.size > 0) return state.sources;
   try {
     const { content = [] } = await api('/v1/sources');
-    for (const source of content) state.sources.set(source.sourceId, source);
+    for (const source of content) state.sources.set(source.id, source);
   } catch {
     // بلا خريطة مصادر: الترتيب يفقد تفضيل العربي ويبقى البحث عاملًا
   }
   return state.sources;
-}
-
-function providerRank(provider) {
-  const lang =
-    state.sources.get(provider.source)?.lang ?? state.sources.get(provider.sourceId)?.lang ?? '';
-  return LANG_RANK[lang] ?? 2;
 }
 
 function normalizeTitle(value) {
@@ -587,16 +579,7 @@ async function renderSearch(host, q) {
   try {
     await loadSourceMap();
     const result = await api(`/v1/search?q=${encodeURIComponent(q)}`);
-    const groups = [...(result.content ?? [])]
-      .map((group) => ({
-        ...group,
-        providers: [...(group.providers ?? [])].sort((a, b) => providerRank(a) - providerRank(b)),
-      }))
-      .sort((a, b) => {
-        const arA = a.providers.some((p) => providerRank(p) === 0) ? 0 : 1;
-        const arB = b.providers.some((p) => providerRank(p) === 0) ? 0 : 1;
-        return arA - arB;
-      });
+    const groups = [...(result.content ?? [])];
 
     host.replaceChildren();
     if (groups.length === 0) {
@@ -613,8 +596,8 @@ async function renderSearch(host, q) {
 
       const providers = el('div', 'result__providers');
       for (const provider of group.providers.slice(0, 8)) {
-        const source = state.sources.get(provider.source) ?? state.sources.get(provider.sourceId);
-        const lang = source?.lang ?? '';
+        const source = state.sources.get(provider.source);
+        const lang = source?.language ?? '';
         const row = el('button', 'provider');
         row.type = 'button';
         const label = el('span', null, provider.name || source?.name || 'مصدر');
@@ -1003,7 +986,7 @@ async function screenSeries(id) {
       el(
         'li',
         'state',
-        `${coverage.first}–${coverage.last} · ${gap} فصلًا لا يعرضها أي مصدر`,
+        `${coverage.first}–${coverage.last} · ${gap} فصلًا غير متاح حاليًا`,
       ),
     );
   }
@@ -1015,24 +998,11 @@ async function screenSeries(id) {
     const label = chapter.title ?? `الفصل ${chapter.number}`;
     button.append(el('span', 'chapter__name', label));
 
-    // الحالة بسببها: «محجوب» و«دون الأرضية» قرارات لا أعطال، وعرضها
-    // كـ«غير موجود» يجعل النقص غامضًا
-    const STATE_LABEL = {
-      ON_DISK: chapter.read ? 'مقروء' : 'اقرأ',
-      MISSING: 'جلب',
-      HELD: 'مُنتظر',
-      BLOCKED: 'محجوب',
-      FAILED: 'أعد المحاولة',
-      BELOW_FLOOR: 'دون الأرضية',
-    };
-    const badge = el('span', 'pill', STATE_LABEL[chapter.state] ?? 'جلب');
-    if (chapter.state === 'ON_DISK') badge.className = 'pill pill--accent';
+    // المستخدم يرى قرارًا بسيطًا فقط؛ سبب المصدر والفشل يبقى داخل الخادم.
+    const actionLabel = chapter.read ? 'مقروء' : chapter.readable ? 'اقرأ' : 'غير متاح';
+    const badge = el('span', 'pill', actionLabel);
+    if (chapter.bookId) badge.className = 'pill pill--accent';
     button.append(badge);
-
-    // أكثر من مصدر ⇒ يُذكر العدد. التبديل متاح عند الفشل تلقائيًا.
-    if ((chapter.copies?.length ?? 0) > 1) {
-      button.append(el('span', 'pill', `${chapter.copies.length} مصادر`));
-    }
 
     if (!chapter.readable) button.disabled = true;
 
@@ -1042,18 +1012,13 @@ async function screenSeries(id) {
       try {
         let bookId = chapter.bookId;
         if (!bookId) {
-          badge.textContent = 'جارٍ الجلب…';
-          // الخادم يختار النسخة ويبدّل المصدر عند الفشل
-          await api(
+          badge.textContent = 'جارٍ التجهيز…';
+          // fallback والتحقق من الجاهزية كلاهما داخل الخادم؛ العميل يطلب مرة واحدة.
+          const result = await api(
             `/v1/series/${encodeURIComponent(id)}/chapters/${chapter.number}/fetch`,
             { method: 'POST', body: {} },
           );
-          for (const waitMs of [400, 900, 1800]) {
-            await new Promise((resolve) => setTimeout(resolve, waitMs));
-            const fresh = await api(`/v1/series/${encodeURIComponent(id)}/chapters`);
-            bookId = (fresh.content ?? []).find((row) => row.number === chapter.number)?.bookId;
-            if (bookId) break;
-          }
+          bookId = result?.bookId ?? null;
         }
         if (!bookId) throw new Error('missing book id');
         await go({
@@ -1144,9 +1109,6 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
 
   const chapterLabel = (chapter) => chapter.title ?? `الفصل ${chapter.number ?? ''}`;
 
-  /** نسخ فشل جلبها في هذه الجلسة. تُستثنى فيُجرَّب مصدر آخر. */
-  const failedCopies = new Set();
-
   /**
    * الفهرس من الخادم: دمج واحد مُختبر بدل دمج في كل عميل.
    *
@@ -1161,49 +1123,23 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
   };
 
   /**
-   * يضمن أن الفصل على القرص وجاهز للقراءة.
-   *
-   * عند غيابه: تُختار نسخة صريحة من `copies` ويُطلب جلبها بـpick. النسخة التي
-   * تفشل تُستثنى وتُعاد المحاولة بالتالية — وهذا ما يجعل مصدرًا ساقطًا أو نسخة
-   * تالفة لا توقف القراءة، بدل أن يموت الفصل عند أول فشل.
-   *
-   * الجلب غير فوري عند upstream، فيُستفسر الفهرس مرات معدودة بتراخٍ متزايد.
+   * يضمن أن الفصل على القرص وجاهز للقراءة. إذا لم يكن محليًا يطلبه مرة واحدة؛
+   * الخادم وحده يجرّب النسخ البديلة وينتظر حتى يثبت وجود bookId قابل للفتح.
    */
   const ensureLocal = async (entry) => {
     if (entry.bookId) return entry;
 
-    // محاولة لكل نسخة، وثلاث على الأكثر: أبعد من ذلك انتظار لا إصلاح.
-    // الخادم يختار النسخة ويستثني ما فشل، فقواعد الترجيح تبقى في مكان واحد.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      let chosen = null;
-      try {
-        const result = await api(
-          `/v1/series/${encodeURIComponent(seriesId)}/chapters/${entry.number}/fetch`,
-          { method: 'POST', body: { exclude: [...failedCopies] } },
-        );
-        chosen = result?.chosen ?? null;
-      } catch (error) {
-        // لا نسخ باقية: لا فائدة من محاولة رابعة
-        if (error.status === 409) break;
-        continue;
-      }
+    const result = await api(
+      `/v1/series/${encodeURIComponent(seriesId)}/chapters/${entry.number}/fetch`,
+      { method: 'POST', body: {} },
+    );
+    const fetchedBookId = result?.bookId ?? null;
+    if (!fetchedBookId) throw new Error('chapter_not_fetched');
 
-      // الجلب غير فوري عند upstream: يُستفسر الفهرس بتراخٍ متزايد
-      for (const waitMs of [400, 900, 1800]) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-        const fresh = await api(
-          `/v1/series/${encodeURIComponent(seriesId)}/chapters`,
-        ).catch(() => null);
-        const found = (fresh?.content ?? []).find((row) => row.number === entry.number);
-        if (found?.bookId) {
-          const index = catalogue.findIndex((row) => row.number === entry.number);
-          if (index >= 0) catalogue[index] = found;
-          return found;
-        }
-      }
-      if (chosen) failedCopies.add(chosen);
-    }
-    throw new Error('chapter_not_fetched');
+    const found = { ...entry, bookId: fetchedBookId, state: 'ON_DISK', readable: true };
+    const index = catalogue.findIndex((row) => row.number === entry.number);
+    if (index >= 0) catalogue[index] = found;
+    return found;
   };
 
   const getSaver = (id) => {
@@ -1278,7 +1214,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
         if (section?.dataset.chapterTitle) hudTitle.textContent = section.dataset.chapterTitle;
         hudPage.textContent = `${page}`;
 
-        const chapter = catalogue.find((c) => c.id === id);
+        const chapter = catalogue.find((c) => c.bookId === id);
         if (chapter) {
           state.reading = {
             seriesId,

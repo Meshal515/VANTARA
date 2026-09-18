@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { query, queryOne } from '@vantara/db';
 import {
   looksRelevant,
-  usableForReading,
-  usableForSearch,
+  toPublicSource,
   verdictFrom,
   type ProbeEvidence,
   type SourceVerdict,
@@ -20,6 +19,76 @@ interface VerdictRow {
   tested_at: Date | null;
   last_success_at: Date | null;
   notes: string | null;
+}
+
+const SEARCH_LANGUAGE_RANK: Record<string, number> = { ar: 0, en: 1 };
+
+export function rankProvidersByLanguage<T extends { source: string }>(
+  providers: readonly T[],
+  sourceLanguages: ReadonlyMap<string, string | null>,
+): T[] {
+  const rank = (provider: T): number => {
+    const language = sourceLanguages.get(provider.source);
+    return language ? (SEARCH_LANGUAGE_RANK[language] ?? 2) : 3;
+  };
+  return [...providers].sort((a, b) => rank(a) - rank(b));
+}
+
+
+/**
+ * هوية عمل داخل مصدر. لا تُخلط مع Uchiyomi series id:
+ * provider.sourceId هو source-specific series id، بينما *_ref عند VANTARA هو
+ * canonical Uchiyomi series id.
+ */
+export function sourceIdentity(source: string, sourceSeriesId: string): string {
+  return JSON.stringify([source, sourceSeriesId]);
+}
+
+interface SeriesWithSources {
+  sources?: readonly { sourceId: string; sourceSeriesId: string }[];
+}
+
+/**
+ * يحوّل canonical Uchiyomi series refs إلى الهويات الدقيقة التي قد تظهر بها
+ * نفس السلسلة في search-all عبر المصادر.
+ */
+export async function sourceKeysForSeriesRefs(
+  seriesRefs: Iterable<string>,
+  loadSeries: (seriesRef: string) => Promise<SeriesWithSources | undefined>,
+): Promise<Set<string>> {
+  const refs = [...new Set(seriesRefs)].filter(Boolean);
+  if (refs.length === 0) return new Set();
+
+  const rows = await Promise.all(refs.map((ref) => loadSeries(ref)));
+  const keys = new Set<string>();
+  for (const series of rows) {
+    for (const source of series?.sources ?? []) {
+      if (!source.sourceId || !source.sourceSeriesId) continue;
+      keys.add(sourceIdentity(source.sourceId, source.sourceSeriesId));
+    }
+  }
+  return keys;
+}
+
+
+interface SourceRegistryRow {
+  source_id: string;
+  lang: string | null;
+  verdict: SourceVerdict;
+}
+
+export function sourceSearchPolicy(rows: readonly SourceRegistryRow[]): {
+  filterSources: boolean;
+  allowedSources: Set<string>;
+  sourceLanguages: Map<string, string | null>;
+} {
+  const supported = rows.filter((row) => row.verdict === 'SUPPORTED');
+  return {
+    // فقط السجل الفيزيائي الفارغ يعني أول تشغيل بلا sync.
+    filterSources: rows.length > 0,
+    allowedSources: new Set(supported.map((row) => row.source_id)),
+    sourceLanguages: new Map(supported.map((row) => [row.source_id, row.lang] as const)),
+  };
 }
 
 export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
@@ -53,6 +122,10 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     return reply.send({ total: sources.length, added, engine: status });
   });
 
+  /**
+   * العقد العام للمصدر صغير وثابت عمدًا. verdict/evidence تفاصيل تشغيلية تبقى
+   * في مسارات evidence/probes ولا نجبر كل عميل على فهمها.
+   */
   app.get('/v1/sources', { preHandler: requireSession(ctx) }, async (request, reply) => {
     const onlyUsable = (request.query as { usable?: string }).usable === 'true';
 
@@ -63,19 +136,15 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     );
 
     const content = rows
-      .map((row) => ({
-        id: row.source_id,
-        name: row.source_name,
-        lang: row.lang,
-        verdict: row.verdict,
-        testedAt: row.tested_at,
-        lastSuccessAt: row.last_success_at,
-        notes: row.notes,
-        usableForReading: usableForReading(row.verdict),
-        usableForSearch: usableForSearch(row.verdict),
-        hasEvidence: Object.keys(row.evidence).length > 0,
-      }))
-      .filter((row) => !onlyUsable || row.usableForReading);
+      .map((row) =>
+        toPublicSource({
+          id: row.source_id,
+          name: row.source_name,
+          lang: row.lang,
+          verdict: row.verdict,
+        }),
+      )
+      .filter((source) => !onlyUsable || source.capabilities.read);
 
     return reply.send({ content });
   });
@@ -230,11 +299,12 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
 
     const q = parsed.data.q;
-    const grouped = await ctx.uchiyomi.searchAll(q, sessionOf(request).token);
+    const session = sessionOf(request);
+    const grouped = await ctx.uchiyomi.searchAll(q, session.token);
 
     const [searchable, deleted, blocked] = await Promise.all([
-      query<{ source_id: string }>(
-        `SELECT source_id FROM vantara_source_verdicts WHERE verdict = 'SUPPORTED'`,
+      query<SourceRegistryRow>(
+        `SELECT source_id, lang, verdict FROM vantara_source_verdicts`,
       ),
       query<{ series_ref: string }>(
         `SELECT series_ref FROM vantara_deleted_works WHERE restored_at IS NULL`,
@@ -245,32 +315,52 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
       ),
     ]);
 
-    const allowedSources = new Set(searchable.map((r) => r.source_id));
-    const deletedRefs = new Set(deleted.map((r) => r.series_ref));
+    const { filterSources, allowedSources, sourceLanguages } = sourceSearchPolicy(searchable);
     const blockedSources = new Set(
       blocked.map((r) => r.source_id).filter((v): v is string => v !== null),
     );
-    const blockedSeries = new Set(
-      blocked.map((r) => r.series_ref).filter((v): v is string => v !== null),
+    const hiddenSeriesRefs = new Set([
+      ...deleted.map((r) => r.series_ref),
+      ...blocked.map((r) => r.series_ref).filter((v): v is string => v !== null),
+    ]);
+
+    // *_ref هو canonical Uchiyomi id، أما provider.sourceId فهو id داخل المصدر.
+    // نحل canonical series إلى كل هويات مصادره قبل المقارنة، بدل مقارنة namespace
+    // مختلفين لا يمكن أن يتساويا إلا صدفة.
+    const policyToken = ctx.config.UCHIYOMI_SERVICE_TOKEN ?? session.token;
+    const blockedSeriesSourceKeys = await sourceKeysForSeriesRefs(
+      hiddenSeriesRefs,
+      (seriesRef) => ctx.uchiyomi.series(seriesRef, policyToken),
     );
 
-    // سجل فارغ ⇒ لا نحجب شيئًا: تشغيل أول بلا sync يجب أن يبحث لا أن يصمت
-    const filterSources = allowedSources.size > 0;
+    // سجل verdicts الفارغ فقط هو bootstrap mode؛ سجل موجود بلا SUPPORTED يحجب الجميع.
 
     const content = grouped
       .map((group) => ({
         ...group,
-        providers: group.providers.filter(
-          (provider) =>
-            !blockedSources.has(provider.source) &&
-            (!filterSources || allowedSources.has(provider.source)),
+        providers: rankProvidersByLanguage(
+          group.providers.filter(
+            (provider) =>
+              !blockedSources.has(provider.source) &&
+              (!filterSources || allowedSources.has(provider.source)),
+          ),
+          sourceLanguages,
         ),
       }))
       .filter(
         (group) =>
           group.providers.length > 0 &&
-          !group.providers.some((p) => deletedRefs.has(p.sourceId) || blockedSeries.has(p.sourceId)),
-      );
+          !group.providers.some((provider) =>
+            blockedSeriesSourceKeys.has(sourceIdentity(provider.source, provider.sourceId)),
+          ),
+      )
+      .sort((a, b) => {
+        const languageRank = (sourceId: string | undefined): number => {
+          const language = sourceId ? sourceLanguages.get(sourceId) : null;
+          return language ? (SEARCH_LANGUAGE_RANK[language] ?? 2) : 3;
+        };
+        return languageRank(a.providers[0]?.source) - languageRank(b.providers[0]?.source);
+      });
 
     return reply.send({
       content,

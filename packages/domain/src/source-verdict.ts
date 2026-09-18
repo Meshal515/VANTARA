@@ -119,6 +119,62 @@ export function usableForSearch(verdict: SourceVerdict): boolean {
   return verdict === 'SUPPORTED';
 }
 
+export type PublicSourceHealth = 'healthy' | 'limited' | 'checking' | 'unavailable' | 'blocked';
+
+export interface PublicSourceContract {
+  id: string;
+  name: string;
+  language: string | null;
+  health: PublicSourceHealth;
+  capabilities: {
+    search: boolean;
+    read: boolean;
+  };
+}
+
+/**
+ * العقد الذي تراه الواجهة. التشخيص الداخلي يبقى في evidence/probes ولا يتسرب
+ * إلى كل Card/صف فصل.
+ */
+export function toPublicSource(input: {
+  id: string;
+  name: string;
+  lang?: string | null;
+  verdict: SourceVerdict;
+}): PublicSourceContract {
+  let health: PublicSourceHealth;
+  switch (input.verdict) {
+    case 'SUPPORTED':
+      health = 'healthy';
+      break;
+    case 'SEARCH_BROKEN':
+      health = 'limited';
+      break;
+    case 'REGISTERED_NOT_TESTED':
+      health = 'checking';
+      break;
+    case 'POLICY_BLOCKED':
+      health = 'blocked';
+      break;
+    case 'NEEDS_FLARESOLVERR':
+    case 'TEMPORARILY_UNAVAILABLE':
+    case 'PARSER_FAILED':
+      health = 'unavailable';
+      break;
+  }
+
+  return {
+    id: input.id,
+    name: input.name,
+    language: input.lang ?? null,
+    health,
+    capabilities: {
+      search: usableForSearch(input.verdict),
+      read: usableForReading(input.verdict),
+    },
+  };
+}
+
 /**
  * هل يُعدّ البحث ذا صلة؟
  *
