@@ -921,9 +921,6 @@ export function statementsFor(
       if (intent && !isRecommendationIntent(intent)) return null;
       if (state === 'REJECTED' && intent) return null;
 
-      const seriesRef = asString(p['seriesRef'], 200);
-      if (intent === 'WATCH_LATER' && !seriesRef) return null;
-
       const statements: D1PreparedStatement[] = [
         db
           .prepare(
@@ -949,27 +946,33 @@ export function statementsFor(
           ),
       ];
 
-      if (state === 'ACCEPTED' && intent === 'WATCH_LATER' && seriesRef) {
+      if (state === 'ACCEPTED' && intent === 'WATCH_LATER') {
         statements.push(
-          ...workStatements(db, {
-            seriesRef,
-            title: asString(p['seriesTitle'], 300),
-            coverUrl: asString(p['coverUrl'], 600),
-            sourceId: asString(p['sourceId'], 120),
-            now,
-            rev,
-          }),
           db
             .prepare(
               `INSERT INTO collections (user_id, kind, series_ref, member, position, updated_at, rev)
-               SELECT ?, 'read_later', ?, 1, NULL, ?, ?
-                WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
+               SELECT ?, ?, r.series_ref, 1, NULL, ?, ?
+                 FROM recommendation_recipients rr
+                 JOIN recommendations r ON r.id = rr.recommendation_id
+                WHERE rr.recommendation_id = ?
+                  AND rr.user_id = ?
+                  AND rr.state = 'ACCEPTED'
+                  AND rr.intent = 'WATCH_LATER'
+                  AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
                ON CONFLICT (user_id, kind, series_ref) DO UPDATE SET
                  member = 1,
                  updated_at = excluded.updated_at,
                  rev = excluded.rev`,
             )
-            .bind(userId, seriesRef, now, rev, op.opId),
+            .bind(
+              userId,
+              'read_later',
+              now,
+              rev,
+              recommendationId,
+              userId,
+              op.opId,
+            ),
         );
       }
 
