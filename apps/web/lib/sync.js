@@ -302,10 +302,19 @@ export function createSync({ baseUrl }) {
   async function consumePairingFromUrl() {
     if (typeof location === 'undefined') return;
     const url = new URL(location.href);
-    if (!(await consumePairingUrl(url.href))) return;
-    url.searchParams.delete('pair');
-    if (typeof history !== 'undefined') {
-      history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    if (!url.searchParams.has('pair')) return;
+
+    try {
+      await consumePairingUrl(url.href);
+    } catch {
+      // رمز مستهلك/منتهي لا يعني أن الخادم ساقط. نكمل إلى قائمة الحسابات؛
+      // إن كان الجهاز غير موثوق فعلًا فمحاولة الدخول نفسها ستطلب pairing جديدًا.
+    } finally {
+      // لا نترك ?pair= معطوبًا في العنوان وإلا يعيد كل reload نفس الفشل.
+      url.searchParams.delete('pair');
+      if (typeof history !== 'undefined') {
+        history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      }
     }
   }
 
@@ -318,17 +327,24 @@ export function createSync({ baseUrl }) {
       return null;
     }
 
-    const launched = await appPlugin.getLaunchUrl();
-    if (typeof launched?.url === 'string') {
-      await consumePairingUrl(launched.url);
-    }
-
-    return appPlugin.addListener('appUrlOpen', (event) => {
+    // سجّل المستمع أولًا كي لا نفقد رابطًا يصل أثناء الإقلاع.
+    const listener = await appPlugin.addListener('appUrlOpen', (event) => {
       if (typeof event?.url !== 'string') return;
-      void consumePairingUrl(event.url).catch((error) => {
-        console.error('VANTARA native pairing link failed', error);
+      void consumePairingUrl(event.url).catch(() => {
+        // رابط قديم/منتهي لا يقتل التطبيق. الدخول سيكشف إن كان الجهاز يحتاج pairing جديدًا.
       });
     });
+
+    try {
+      const launched = await appPlugin.getLaunchUrl();
+      if (typeof launched?.url === 'string') {
+        await consumePairingUrl(launched.url);
+      }
+    } catch {
+      // cold-start pairing مساعد للإقلاع، وليس شرطًا لبناء واجهة التطبيق.
+    }
+
+    return listener;
   }
 
   /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب بعد pairing إن وُجد. */
