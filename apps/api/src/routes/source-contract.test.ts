@@ -43,7 +43,8 @@ describe('B6 source and chapter contract', () => {
     const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
     expect(web).toContain('state.sources.set(source.id, source)');
     expect(web).not.toContain('state.sources.set(source.sourceId, source)');
-    expect(web).toContain("state.sources.get(provider.source)?.language");
+    expect(web).toContain('state.sources.get(provider.source)');
+    expect(web).toContain("const lang = source?.language ?? ''");
     expect(web).not.toMatch(/state\.sources\.get\(provider\.source\)\?\.lang(?!uage)/);
   });
 
