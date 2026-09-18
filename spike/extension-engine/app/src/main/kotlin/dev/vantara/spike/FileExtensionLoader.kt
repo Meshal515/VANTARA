@@ -156,7 +156,12 @@ class FileExtensionLoader(private val context: Context) {
         val explicit = meta.get(METADATA_LIB)
         when (explicit) {
             is Double -> return explicit
-            is Float -> return explicit.toDouble()
+            // Android يخزّن tachiyomix.extensionLib كـ Float في هذه الإضافات.
+            // تحويل Float مباشرةً إلى Double يكشف خطأ التمثيل الثنائي:
+            // 1.4f -> 1.399999976158142 و 1.6f -> 1.600000023841858،
+            // فيرفضهما فحص النطاق رغم أنهما 1.4/1.6 فعلًا.
+            // Float.toString() يعيد التمثيل العشري المقصود ثم نقرأه Double.
+            is Float -> return explicit.toString().toDoubleOrNull()
             is String -> explicit.toDoubleOrNull()?.let { return it }
         }
         return null
