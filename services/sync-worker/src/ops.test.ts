@@ -356,13 +356,19 @@ describe('B8 recommendation recipient state', () => {
     expect(out.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
   });
 
-  it('refuses malformed accept/reject combinations', () => {
-    expect(
-      translate('recommendation.respond', {
-        recommendationId: 'r1',
-        state: 'ACCEPTED',
-      }),
-    ).toEqual([]);
+  it('keeps acceptance separate from the later intent choice', () => {
+    const accepted = translate('recommendation.respond', {
+      recommendationId: 'r1',
+      state: 'ACCEPTED',
+    });
+    const response = accepted.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'));
+    expect(response).toBeDefined();
+    expect(response?.values).toContain('ACCEPTED');
+    expect(accepted.some((entry) => entry.sql.includes('INSERT INTO collections'))).toBe(false);
+    expect(accepted.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
+  });
+
+  it('refuses malformed reject/intent combinations', () => {
     expect(
       translate('recommendation.respond', {
         recommendationId: 'r1',
