@@ -465,3 +465,35 @@ test('the server never acknowledges a write it did not apply', () => {
     'the client half of the contract must keep quarantining unsettled ops',
   );
 });
+
+test('a capped sync page can never strand rows behind the cursor', () => {
+  // السقف يُطبَّق لكل جدول والمؤشر واحد مشترك. حساب المؤشر من أعلى rev في
+  // الدفعة يسحبه فوق ما لم يُسلَّم من جدول مقطوع، فتُتخطّى صفوفه للأبد
+  // والعميل يسمع «أنت محدَّث» وهو ناقص. أُثبت على D1 حقيقية: ضاعت 100 من 600.
+  const worker = read('services/sync-worker/src/index.ts');
+  assert.match(
+    worker,
+    /nextDeltaCursor\(pages,/,
+    'the sync handler must derive its cursor from the per-table pages',
+  );
+  assert.doesNotMatch(
+    worker,
+    /cursor:\s*truncated\s*\?\s*maxRev/,
+    'the cursor must never be the highest rev across all tables',
+  );
+
+  const rule = read('packages/domain/src/sync.ts');
+  assert.match(
+    rule,
+    /for \(const page of capped\) if \(page\.maxRev < safe\) safe = page\.maxRev/,
+    'the safe cursor is the earliest capped table, not the furthest',
+  );
+
+  // صفحة كاملة على rev واحد لا يمكن تجاوزها بـ`rev >`: تقدّمٌ يفقد، وثباتٌ
+  // يعلّق العميل في حلقة. الجدول يُستنزف عند ذلك الـrev مرة واحدة.
+  assert.match(
+    worker,
+    /WHERE rev = \? ORDER BY rev/,
+    'a page whose rows share one rev must be drained at that rev',
+  );
+});

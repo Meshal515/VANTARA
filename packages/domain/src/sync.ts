@@ -77,6 +77,46 @@ export function needsFullResync(clientCursor: number, serverRev: number): boolea
   return clientCursor > serverRev;
 }
 
+/** صفحة جدول واحد في دفعة الفروقات. */
+export interface DeltaPage {
+  /** بلغت الصفحة السقف، فبقي في الجدول ما لم يُسلَّم. */
+  truncated: boolean;
+  /** أعلى rev سُلِّم فعلًا من هذا الجدول. */
+  maxRev: number;
+}
+
+/**
+ * المؤشر بعد دفعة فروقات.
+ *
+ * السقف يُطبَّق **لكل جدول**، والمؤشر رقمٌ **واحد** مشترك بينها. فأعلى rev في
+ * الدفعة كلها ليس مؤشرًا آمنًا: جدولٌ بعيدٌ يسحبه فوق ما لم يُسلَّم من جدول
+ * مقطوع، فتُتخطّى صفوفه في الجولة التالية (`rev > cursor`) ولا تُسلَّم أبدًا —
+ * والعميل يسمع «أنت محدَّث» وهو ناقص. حدث هذا فعلًا على D1 حقيقية: 600 صفّ
+ * نشاط، وُسلِّم 500، وضاعت 100 بلا أثر.
+ *
+ * فالأمان هو **أصغر** ما بلغه جدولٌ مقطوع. والجداول غير المقطوعة استُنزفت
+ * فوق المؤشر القديم، فإعادة تسليم بعض صفوفها في الجولة التالية بلا ضرر:
+ * الكتابة عند العميل upsert.
+ */
+export function nextDeltaCursor(
+  pages: readonly DeltaPage[],
+  { cursor, serverRev }: { cursor: number; serverRev: number },
+): { cursor: number; more: boolean } {
+  const capped = pages.filter((page) => page.truncated);
+
+  if (capped.length === 0) {
+    // لا قطع: كل شيء فوق المؤشر سُلِّم، فيلحق المؤشر عدّاد الخادم حتى لا
+    // يُعاد سحب ما لا جديد فيه.
+    let max = cursor;
+    for (const page of pages) if (page.maxRev > max) max = page.maxRev;
+    return { cursor: Math.max(max, serverRev), more: false };
+  }
+
+  let safe = Infinity;
+  for (const page of capped) if (page.maxRev < safe) safe = page.maxRev;
+  return { cursor: Math.max(cursor, safe), more: true };
+}
+
 // ───────────────────────────── العمليات ─────────────────────────────
 
 export type OpKind =

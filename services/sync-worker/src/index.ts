@@ -20,6 +20,8 @@ import {
   collectionView,
   isCollectionKind,
   needsFullResync,
+  nextDeltaCursor,
+  type DeltaPage,
   notificationId,
   notificationTargets,
   isRecommendationState,
@@ -251,28 +253,53 @@ async function handleSync(url: URL, env: Env): Promise<Response> {
   const results = await env.DB.batch<Record<string, unknown>>(statements);
 
   const changes: Record<string, unknown[]> = {};
-  let maxRev = cursor;
-  let truncated = false;
-  results.forEach((result, index) => {
+  const pages: DeltaPage[] = [];
+  for (const [index, result] of results.entries()) {
     const entry = DELTA_TABLES[index];
-    if (!entry) return;
-    const rows = result.results ?? [];
-    changes[entry[0]] = rows;
-    if (rows.length >= PAGE_SIZE) truncated = true;
+    if (!entry) continue;
+    const [table, columns] = entry;
+    let rows = result.results ?? [];
+    let truncated = rows.length >= PAGE_SIZE;
+
+    // صفحة كاملة على rev واحد لا يمكن تجاوزها بـ`rev > cursor`: تقديم المؤشر
+    // إلى ذلك الـrev يتخطّى بقية صفوفه، وتركه يعيد نفس الصفحة إلى الأبد.
+    // وهي حالة واقعية: الطلب الواحد يأخذ rev واحدًا، ودفعة من 200 عملية
+    // ذات بثٍّ (توصية «للجميع») تكتب أكثر من ذلك في جدول واحد. فنستنزف
+    // ذلك الـrev كاملًا مرة واحدة — وهو محدود بكتابة طلب واحد.
+    if (truncated) {
+      const first = Number(rows[0]?.['rev'] ?? 0);
+      const last = Number(rows[rows.length - 1]?.['rev'] ?? 0);
+      if (first === last) {
+        const full = await env.DB.prepare(
+          `SELECT ${columns} FROM ${table} WHERE rev = ? ORDER BY rev`,
+        )
+          .bind(first)
+          .all<Record<string, unknown>>();
+        rows = full.results ?? rows;
+        // الجدول مُستنزَف حتى `first`، وقد يبقى ما هو أعلى منه
+        truncated = true;
+      }
+    }
+
+    changes[table] = rows;
+    let maxRev = cursor;
     for (const row of rows) {
       const rev = Number(row['rev'] ?? 0);
       if (rev > maxRev) maxRev = rev;
     }
-  });
+    pages.push({ truncated, maxRev });
+  }
 
-  // دفعة مقطوعة: لا نُقدّم الـcursor إلى serverRev، وإلا فُقد ما بعد السقف.
-  // العميل يعيد الطلب فورًا بالـcursor الجديد حتى يعود truncated=false.
+  // المؤشر بعد قطعٍ هو أصغر ما بلغه جدولٌ مقطوع، لا أعلى rev في الدفعة:
+  // السقف لكل جدول والمؤشر واحد. `nextDeltaCursor` تحمل القاعدة واختبارها.
+  const next = nextDeltaCursor(pages, { cursor, serverRev });
+
   return json({
     protocol: SYNC_PROTOCOL,
     reset: false,
-    cursor: truncated ? maxRev : Math.max(maxRev, serverRev),
+    cursor: next.cursor,
     serverRev,
-    more: truncated,
+    more: next.more,
     changes,
   });
 }
