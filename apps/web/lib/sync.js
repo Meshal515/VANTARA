@@ -1,7 +1,7 @@
 /**
  * عميل المزامنة.
  *
- * النموذج: الواجهة تقرأ من مرآة محلية دائمًا، والشبكة تُصحّح المرآة في
+ * النموذج: الواجهة تقرأ من مرآة محلية دائمًا، والشبكة تحدّث المرآة في
  * الخلفية. لا شاشة تحميل عند كل مزامنة، ولا انتظار لـCloudflare قبل أول رسم.
  *
  * ثلاث قواعد تحمي التجربة:
@@ -18,16 +18,35 @@
  *    للأعلى، وهذا وحده كفيل بأن يجعل التطبيق يبدو معطوبًا.
  */
 
+import {
+  classifyFailure,
+  compactQueue,
+  nextAttemptDelay,
+  shouldQuarantine,
+  syncHealth,
+  trimQueue,
+} from './queue.js';
+
 const TOKEN_KEY = 'vantara.token';
 const USER_KEY = 'vantara.user';
 const CURSOR_KEY = 'vantara.cursor';
 const QUEUE_KEY = 'vantara.queue';
 const MIRROR_KEY = 'vantara.mirror';
+const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
 
-/** سقف الطابور. تجاوزه يعني انقطاعًا طويلًا جدًا، وأقدم عملية تُسقط أولًا. */
+/**
+ * سقف الطابور.
+ *
+ * تجاوزه يعني انقطاعًا طويلًا جدًا. الإسقاط ليس «الأقدم أولًا»: `trimQueue`
+ * يضغط أولًا ثم يُسقط أقدم عمليات **الحالة** فقط، ولا يمسّ عملية تراكمية —
+ * فصل قُرئ لا يُستعاد، أما موضع قراءة قديم فتصححه أول كتابة قادمة.
+ */
 const MAX_QUEUE = 500;
+
+/** سقف سجل المعزولات. أبعد من ذلك تشخيصٌ لا يقرأه أحد. */
+const MAX_QUARANTINE = 100;
 
 /** الجداول التي تصل في الفروقات، ومفتاح كل صف. */
 const KEYS = {
@@ -74,8 +93,7 @@ function randomSecret(bytes = 32) {
 }
 
 /**
- * إثبات الجهاز يُنشأ مرة واحدة ويبقى محليًا. الـWorker لا يخزّن القيمة نفسها،
- * بل HMAC لها فقط. حذفه من التخزين يعني أن الجهاز يحتاج pairing جديدًا.
+ * إثبات الجهاز يُنشأ مرة واحدة ويبقى محليًا. الـWorker يخزّن HMAC فقط.
  */
 function deviceProof() {
   let deviceId = localStorage.getItem(DEVICE_ID_KEY);
@@ -98,8 +116,29 @@ export function createSync({ baseUrl }) {
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
+  let quarantine = readJson(QUARANTINE_KEY, []);
   let pulling = false;
   let pushing = false;
+
+  /** محاولات متتالية لكل عملية، بمفتاح op_id. لا تُحفظ: العدّ لكل جلسة. */
+  const attemptsOf = new Map();
+  /** لا نرسل قبل هذا الوقت: تراجع أُسّي بعد فشل مؤقت. */
+  let nextPushAt = 0;
+  let pushTimer = null;
+  /** طلب إرسال وصل أثناء إرسال جارٍ: يُنفَّذ بعده لا يُلغى. */
+  let pushAgain = false;
+  /**
+   * آخر **كتابة** وصلت الخادم.
+   *
+   * منفصل عن آخر سحب بقصد: السحب ينجح بينما الكتابة معلّقة، فلو خلطناهما لبقيت
+   * الصحة تقول «مزامَن» وطابور الكتابة عالق منذ ساعة.
+   */
+  let lastSuccessAt = Number(localStorage.getItem('vantara.lastPush') ?? '0') || 0;
+  let lastSyncAt = Number(localStorage.getItem('vantara.lastSync') ?? '0') || 0;
+  let lastError = null;
+  /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
+  let durable = true;
+  let overflowing = false;
 
   const emit = (tables) => {
     for (const listener of listeners) {
@@ -112,7 +151,57 @@ export function createSync({ baseUrl }) {
   };
 
   const persistMirror = () => writeJson(MIRROR_KEY, mirror);
-  const persistQueue = () => writeJson(QUEUE_KEY, queue);
+
+  /**
+   * يحفظ الطابور، ويقاتل على المساحة قبل أن يستسلم.
+   *
+   * `localStorage` يرفض الكتابة عند الامتلاء. تجاهل الرفض — وهو ما كان يحدث —
+   * يعني طابورًا يبدو محفوظًا ويضيع عند إغلاق التطبيق. المرآة مشتقة من الخادم
+   * وتُسحب من جديد، فهي أول ما يُفرَّغ لإفساح المكان لكتابة لا يملكها غيرنا.
+   */
+  const persistQueue = () => {
+    if (writeJson(QUEUE_KEY, queue)) {
+      durable = true;
+      return true;
+    }
+    mirror = {};
+    try {
+      localStorage.removeItem(MIRROR_KEY);
+    } catch {
+      // لا شيء نفعله: نحاول الحفظ على أي حال
+    }
+    durable = writeJson(QUEUE_KEY, queue);
+    if (durable) {
+      // المرآة فُرِّغت: تُعاد من الخادم، والشاشة تُرقَّع بعدها
+      cursor = 0;
+      localStorage.setItem(CURSOR_KEY, '0');
+      void pull();
+    }
+    return durable;
+  };
+
+  const persistQuarantine = () => writeJson(QUARANTINE_KEY, quarantine);
+
+  /** ينسى عدّ المحاولات لعمليات لم تبقَ في الطابور (ضُغطت أو استقرّت). */
+  const pruneAttempts = () => {
+    const alive = new Set(queue.map((entry) => entry.opId));
+    for (const key of [...attemptsOf.keys()]) if (!alive.has(key)) attemptsOf.delete(key);
+  };
+
+  /**
+   * يعزل عملية لا أمل في نجاحها.
+   *
+   * بلا عزل تبقى في رأس الطابور إلى الأبد: كل دورة تحاولها، ولا تنجح، وتُحتسب
+   * ككتابة معلّقة فتبدو المزامنة متأخرة دائمًا بلا سبب ظاهر.
+   */
+  const quarantineOp = (op, status, reason) => {
+    quarantine.push({ op, status, reason, at: Date.now() });
+    if (quarantine.length > MAX_QUARANTINE) quarantine = quarantine.slice(-MAX_QUARANTINE);
+    queue = queue.filter((entry) => entry.opId !== op.opId);
+    attemptsOf.delete(op.opId);
+    persistQuarantine();
+    persistQueue();
+  };
 
   async function sessionPayload(userId) {
     const response = await fetch(`${baseUrl}/v1/session`, {
@@ -120,7 +209,11 @@ export function createSync({ baseUrl }) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId, ...deviceProof() }),
     });
-    if (!response.ok) throw new Error(`http_${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`http_${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   }
 
@@ -140,21 +233,29 @@ export function createSync({ baseUrl }) {
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+
     if (response.status === 401) {
       if (allowRefresh && user?.userId) {
         try {
           persistSession(await sessionPayload(user.userId));
           return request(path, options, false);
         } catch {
-          // revoke أو credential مفقود: هنا فقط نعود لشاشة الاختيار/pairing.
+          // جهاز revoked أو credential مفقود: نطوي الجلسة ونبقي الكتابات.
         }
       }
       token = null;
       localStorage.removeItem(TOKEN_KEY);
       emit(['session']);
-      throw new Error('unauthorized');
+      const error = new Error('unauthorized');
+      error.status = 401;
+      throw error;
     }
-    if (!response.ok) throw new Error(`http_${response.status}`);
+
+    if (!response.ok) {
+      const error = new Error(`http_${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     return response.status === 204 ? null : response.json();
   }
 
@@ -170,7 +271,6 @@ export function createSync({ baseUrl }) {
     return response.json();
   }
 
-  /** يستهلك pairing من أي URL موثوق وصل من الويب أو الجسر الأصلي. */
   async function consumePairingUrl(value) {
     const url = new URL(value);
     const pairingToken = url.searchParams.get('pair');
@@ -179,7 +279,6 @@ export function createSync({ baseUrl }) {
     return true;
   }
 
-  /** رابط Owner على الويب من نوع `?pair=...` يُستهلك مرة واحدة بلا form أو PIN. */
   async function consumePairingFromUrl() {
     if (typeof location === 'undefined') return;
     const url = new URL(location.href);
@@ -190,12 +289,6 @@ export function createSync({ baseUrl }) {
     }
   }
 
-  /**
-   * جسر Capacitor محقون بدل import npm داخل الويب الساكن.
-   *
-   * cold start يصل عبر getLaunchUrl، والروابط أثناء عمل التطبيق عبر appUrlOpen.
-   * الروابط التي لا تحمل `pair` تمر بلا أثر وتبقى لبقية router.
-   */
   async function attachNativeLinkBridge(appPlugin) {
     if (
       !appPlugin ||
@@ -218,7 +311,7 @@ export function createSync({ baseUrl }) {
     });
   }
 
-  /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب قبل أي جلسة. */
+  /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب بعد pairing إن وُجد. */
   async function accounts() {
     await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
@@ -226,12 +319,12 @@ export function createSync({ baseUrl }) {
     return (await response.json()).content ?? [];
   }
 
-  /** اختيار الحساب هو الدخول. لا كلمة مرور ولا PIN ولا form. */
+  /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
   async function signIn(userId) {
     const previousId = user?.userId ?? null;
     const payload = await sessionPayload(userId);
     persistSession(payload);
-    if (previousId && previousId !== user.userId) reset();
+    if (previousId && previousId !== user.userId) resetAll();
     emit(['session']);
     return user;
   }
@@ -241,7 +334,7 @@ export function createSync({ baseUrl }) {
     user = null;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    reset();
+    resetAll();
     emit(['session']);
   }
 
@@ -257,27 +350,54 @@ export function createSync({ baseUrl }) {
     signOut();
   }
 
-  function reset() {
+  /**
+   * يعيد بناء المرآة من الصفر بلا لمس الطابور.
+   *
+   * كان `reset` واحدًا يمسح الطابور أيضًا، ويُنادى عند `reset: true` من الخادم
+   * (استعادة D1 من نسخة احتياطية). أي أن استعادةً على الخادم كانت تمسح كتابات
+   * المستخدم غير المرسلة — فقدٌ صامت لا علاقة له بسبب الاستعادة.
+   */
+  function resyncMirror() {
     cursor = 0;
     mirror = {};
-    queue = [];
     localStorage.setItem(CURSOR_KEY, '0');
     persistMirror();
+  }
+
+  /** تبديل حساب أو خروج: كل شيء يُمسح، الطابور معه — ملك الحساب السابق. */
+  function resetAll() {
+    resyncMirror();
+    queue = [];
+    quarantine = [];
+    attemptsOf.clear();
+    nextPushAt = 0;
+    overflowing = false;
     persistQueue();
+    persistQuarantine();
   }
 
   // ───────────────────────── السحب ─────────────────────────
 
+  /**
+   * يسحب الفروقات ويطبّقها.
+   *
+   * التطبيق أولًا ثم الـcursor: العكس يفقد دفعة عند سقوط الشبكة. و`more`
+   * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
+   */
   async function pull() {
     if (!token || pulling) return;
     pulling = true;
     try {
+      // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
+      // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < 20; round += 1) {
         const payload = await request(`/v1/sync?since=${cursor}`);
         if (!payload) break;
 
         if (payload.reset) {
-          reset();
+          // عدّاد الخادم رجع (استعادة نسخة احتياطية): نُعيد بناء المرآة، ولا
+          // نمسّ الطابور — كتاباتنا غير المرسلة ليست جزءًا مما استُعيد
+          resyncMirror();
           continue;
         }
 
@@ -294,8 +414,14 @@ export function createSync({ baseUrl }) {
         cursor = Number(payload.cursor ?? cursor) || cursor;
         localStorage.setItem(CURSOR_KEY, String(cursor));
         if (touched.length > 0) emit(touched);
+        lastSyncAt = Date.now();
+        localStorage.setItem('vantara.lastSync', String(lastSyncAt));
         if (!payload.more) break;
       }
+      lastError = null;
+    } catch (error) {
+      lastError = { status: error?.status ?? 0, at: Date.now() };
+      emit(['sync']);
     } finally {
       pulling = false;
     }
@@ -303,33 +429,154 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── الكتابة ─────────────────────────
 
+  /**
+   * يسجّل عملية ويرسلها.
+   *
+   * الـop_id يُولَّد مرة واحدة هنا ويبقى ثابتًا عبر كل إعادة إرسال — هذا ما
+   * يمنع احتساب الفصل مرتين بعد انقطاع.
+   */
   function enqueue(kind, payload = {}) {
     const op = { opId: crypto.randomUUID(), kind, payload };
     queue.push(op);
-    if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
+    if (queue.length > MAX_QUEUE) {
+      const trimmed = trimQueue(queue, MAX_QUEUE);
+      queue = trimmed.ops;
+      overflowing = trimmed.overflowing;
+      pruneAttempts();
+    }
     persistQueue();
-    void push();
+    schedulePush();
     return op.opId;
   }
 
-  async function push() {
-    if (!token || pushing || queue.length === 0) return;
+  /**
+   * يجمّع الكتابات المتلاحقة في إرسال واحد.
+   *
+   * التمرير يولّد عمليات تقدم كثيرة متتالية. الإرسال عند كل واحدة كان يُفرغ
+   * الطابور عملية بعملية فلا يجد الضغط شيئًا يضغطه: ثلاثة طلبات مكان طلب،
+   * وثلاث كتابات عند الخادم مكان أعلاها.
+   */
+  const ENQUEUE_DEBOUNCE_MS = 400;
+
+  function schedulePush() {
+    if (pushTimer !== null) return;
+    pushTimer = setTimeout(() => {
+      pushTimer = null;
+      void push();
+    }, ENQUEUE_DEBOUNCE_MS);
+  }
+
+  /**
+   * يرسل الطابور.
+   *
+   * `force` يتجاوز التراجع: عودة الاتصال أو ضغط المستخدم على «مزامنة الآن»
+   * سببان يستحقان محاولة فورية، بينما الدورة الزمنية تحترم التراجع.
+   */
+  async function push({ force = false } = {}) {
+    if (!token || queue.length === 0) return;
+    if (pushing) {
+      // طلب أثناء إرسال جارٍ لا يُهمل: الدفعة الحالية قد لا تحمل آخر عملية
+      pushAgain = true;
+      return;
+    }
+    if (!force && Date.now() < nextPushAt) return;
+    if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
     pushing = true;
     try {
+      // لا شيء في الطريق الآن، فالضغط آمن: يقلّص الطلبات بعد انقطاع طويل
+      const compacted = compactQueue(queue);
+      if (compacted.length !== queue.length) {
+        queue = compacted;
+        pruneAttempts();
+        persistQueue();
+      }
+
       while (queue.length > 0) {
         const batch = queue.slice(0, 100);
-        const payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
+        let payload;
+        try {
+          payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
+        } catch (error) {
+          const status = error?.status ?? 0;
+          lastError = { status, at: Date.now() };
+          const verdict = classifyFailure(status);
+          // الجلسة انتهت: الكتابات سليمة وتنتظر جلسة جديدة، فلا عزل ولا تراجع
+          if (verdict === 'auth') return;
+
+          for (const op of batch) {
+            const attempts = (attemptsOf.get(op.opId) ?? 0) + 1;
+            attemptsOf.set(op.opId, attempts);
+            if (shouldQuarantine({ attempts, status })) quarantineOp(op, status, verdict);
+          }
+          const worst = Math.max(...batch.map((op) => attemptsOf.get(op.opId) ?? 1));
+          nextPushAt = Date.now() + nextAttemptDelay(worst);
+          emit(['sync']);
+          return;
+        }
+
         const settled = new Set([...(payload?.applied ?? []), ...(payload?.skipped ?? [])]);
+        // استجابة ناجحة لا تذكر عملية تعني أن الخادم رفضها عند التحليل — لا
+        // تصلح بإعادة الإرسال. تُعزل حالًا بدل أن تُحاول إلى الأبد.
+        for (const op of batch) {
+          if (!settled.has(op.opId)) quarantineOp(op, 422, 'not_settled');
+        }
         queue = queue.filter((op) => !settled.has(op.opId));
+        pruneAttempts();
         persistQueue();
+
+        lastSuccessAt = Date.now();
+        localStorage.setItem('vantara.lastPush', String(lastSuccessAt));
+        lastError = null;
+        nextPushAt = 0;
+        overflowing = false;
         if (settled.size === 0) break;
       }
+      // الكتابة تُنتج revs جديدة: نسحبها فورًا حتى يرى الجهاز أثر كتابته
       await pull();
-    } catch {
-      // الشبكة ساقطة: الطابور محفوظ، والدورة القادمة تُعيد المحاولة
+      emit(['sync']);
     } finally {
       pushing = false;
+      if (pushAgain) {
+        pushAgain = false;
+        schedulePush();
+      }
     }
+  }
+
+  /**
+   * يعيد المعزولات إلى الطابور.
+   *
+   * قرار المستخدم لا قرارنا: بعض العزل سببه عطل زائل (نسخة خادم قديمة لا تعرف
+   * نوع العملية) وتستحق محاولة ثانية بعد التحديث.
+   */
+  function retryQuarantined() {
+    if (quarantine.length === 0) return 0;
+    const revived = quarantine.map((entry) => entry.op).filter(Boolean);
+    // الإعادة قد تتجاوز السقف: نفس قاعدة التقليم تُطبَّق، فلا تُسقط الإعادة
+    // عملية تراكمية كانت في الطابور
+    const trimmed = trimQueue(queue.concat(revived), MAX_QUEUE);
+    queue = trimmed.ops;
+    overflowing = trimmed.overflowing;
+    quarantine = [];
+    persistQuarantine();
+    persistQueue();
+    void push({ force: true });
+    return revived.length;
+  }
+
+  function health() {
+    return syncHealth({
+      lastSyncAt,
+      pending: queue.length,
+      quarantined: quarantine.length,
+      lastSuccessAt,
+      lastError,
+      online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+      durable,
+      overflowing,
+      now: Date.now(),
+    });
   }
 
   // ───────────────────────── الحضور ─────────────────────────
@@ -361,8 +608,20 @@ export function createSync({ baseUrl }) {
     }
   }
 
+  /**
+   * صفوف التقدم التي لم يستلمها مالكها بعد.
+   *
+   * تُقرأ من الخادم لا من المرآة المحلية: الصندوق قد يحمل ما كتبه جهاز آخر
+   * وفشلت كتابته عند المالك، وهذا الجهاز هو من يستطيع تصريفه الآن.
+   */
+  async function pendingProgress() {
+    if (!token) return null;
+    return await request('/v1/progress/pending');
+  }
+
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
+  /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
   function rows(table, predicate) {
     const bucket = mirror[table];
     if (!bucket) return [];
@@ -372,6 +631,25 @@ export function createSync({ baseUrl }) {
 
   function row(table, key) {
     return mirror[table]?.[key] ?? null;
+  }
+
+  /**
+   * عودة الاتصال محاولة فورية.
+   *
+   * الدورة الزمنية كل 15 ثانية مع تراجع أُسّي قد تُبقي كتابة تنتظر دقائق بعد
+   * عودة الشبكة فعلًا. حدث `online` يعرف اللحظة بالضبط، فنتجاوز التراجع مرة.
+   */
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      nextPushAt = 0;
+      void push({ force: true });
+      void pull();
+    });
+    window.addEventListener('offline', () => emit(['sync']));
+    // الخروج من التطبيق: آخر فرصة لإرسال ما تراكم قبل أن يُجمَّد التبويب
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') void push({ force: true });
+    });
   }
 
   return {
@@ -398,6 +676,24 @@ export function createSync({ baseUrl }) {
     beat,
     presence,
     stats,
+    pendingProgress,
+    health,
+    retryQuarantined,
+    /**
+     * إعادة بناء المرآة من الخادم.
+     *
+     * مخرج صريح حين تبدو البيانات المحلية غريبة: يمسح المرآة والـcursor ولا
+     * يمسّ الطابور. بلا مسار كهذا كان الحل الوحيد تسجيل خروج ودخول — وذلك
+     * يمسح كتابات غير مرسلة.
+     */
+    async resync() {
+      resyncMirror();
+      emit(['sync']);
+      await pull();
+    },
+    get quarantined() {
+      return quarantine.length;
+    },
     rows,
     row,
     onChange(listener) {
