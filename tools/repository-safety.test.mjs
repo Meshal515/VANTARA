@@ -78,3 +78,30 @@ test('signed Android release workflow is tag-only, main-only, and CI-verified', 
   assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Android release verification needs read access to Actions results');
   assertCommitHasSuccessfulCi(workflow, '$GITHUB_SHA', 'Android release path');
 });
+
+
+test('Android pairing links are wired from Capacitor into the trusted-device client', () => {
+  const pkg = JSON.parse(read('package.json'));
+  assert.match(
+    String(pkg.dependencies?.['@capacitor/app'] ?? ''),
+    /^\^?6\./,
+    'Capacitor 6 builds must install the matching @capacitor/app native plugin',
+  );
+
+  const app = read('apps/web/app.js');
+  assert.match(
+    app,
+    /attachNativeLinkBridge\s*\(/,
+    'the web shell must attach the native URL bridge',
+  );
+  assert.match(
+    app,
+    /Capacitor\?\.Plugins\?\.App|Capacitor\.Plugins\.App/,
+    'the bridge must receive Capacitor\'s native App plugin without a browser bare import',
+  );
+  assert.match(
+    app,
+    /await\s+nativeLinksReady/,
+    'boot must wait for a cold-start pairing link before rendering the account gate',
+  );
+});
