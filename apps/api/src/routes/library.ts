@@ -26,7 +26,21 @@ interface ChapterFallbackOptions {
   copies: readonly ChapterCopy[];
   fetchCopy: (copy: ChapterCopy | null) => Promise<unknown>;
   verifyAvailable: (copy: ChapterCopy | null) => Promise<boolean>;
+  /** أقصى زمن للمحاولات مجتمعة. انظر `CHAPTER_FALLBACK_BUDGET_MS`. */
+  budgetMs?: number;
+  /** للاختبار: ساعة قابلة للتحكم بدل انتظار حقيقي. */
+  now?: () => number;
 }
+
+/**
+ * ميزانية الجلب كاملةً، لا لكل نسخة.
+ *
+ * VANTARA خلف Cloudflare Tunnel، وCloudflare يقطع الطلب عند **100 ثانية**
+ * (‏524). فبلا سقف هنا، عملٌ بخمس نسخ مكسورة يعني طلبًا يعيش دقائق: القارئ
+ * يرى خطأ شبكة غامضًا بدل `chapter_unavailable` الواضح، والخادم يواصل الطحن
+ * لأحد انصرف. السقف دون الـ100 بهامش يكفي لإرسال جواب مفهوم.
+ */
+const CHAPTER_FALLBACK_BUDGET_MS = 75_000;
 
 interface ChapterFallbackResult {
   chosen: string | null;
@@ -55,6 +69,10 @@ export async function fetchChapterWithFallback(
   options: ChapterFallbackOptions,
 ): Promise<ChapterFallbackResult> {
   let attempts = 0;
+  const now = options.now ?? Date.now;
+  const budgetMs = options.budgetMs ?? CHAPTER_FALLBACK_BUDGET_MS;
+  const startedAt = now();
+  const spent = () => now() - startedAt;
 
   // لا metadata: دع upstream يجرب اختياره التلقائي مرة واحدة فقط.
   if (options.copies.length === 0) {
@@ -70,6 +88,10 @@ export async function fetchChapterWithFallback(
 
   const exclude = new Set<string>();
   while (exclude.size < options.copies.length) {
+    // الميزانية تُفحص **قبل** بدء محاولة، لا بعدها: محاولة تبدأ بثانية متبقية
+    // تنتهي بعد انقطاع العميل، فتكلّف المصدر عملًا لا يقرأه أحد.
+    if (attempts > 0 && spent() >= budgetMs) break;
+
     const copy = pickCopy(options.copies, { exclude });
     if (!copy) break;
     exclude.add(copy.key);
@@ -267,6 +289,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
         versions.content.find((row) => Math.round(row.number * 100) === Math.round(target * 100))
           ?.copies ?? [];
 
+      const deadline = Date.now() + CHAPTER_FALLBACK_BUDGET_MS;
       let resolvedBookId: string | null = null;
       const verifyAvailable = async (): Promise<boolean> => {
         // upstream يصف الجلب كعملية قد تتأخر؛ الانتظار هنا جزء من عقد الخادم
@@ -304,6 +327,9 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
                 }
               : { seriesId: id, numbers: [target] };
 
+            // مهلة النداء الواحد = ما تبقّى من الميزانية، لا 180 ثانية ثابتة:
+            // مهلة أطول من عمر الطلب نفسه تعني انتظارًا لجواب لن يُقرأ.
+            const remaining = Math.max(1_000, deadline - Date.now());
             const response = await fetch(`${base}/api/sources/fetch`, {
               method: 'POST',
               headers: {
@@ -311,7 +337,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify(body),
-              signal: AbortSignal.timeout(180_000),
+              signal: AbortSignal.timeout(remaining),
             });
             if (!response.ok) throw new Error(`upstream_fetch_${String(response.status)}`);
           },
