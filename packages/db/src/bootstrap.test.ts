@@ -53,6 +53,20 @@ describe('B1 clean-install invariants', () => {
     expect(compose).not.toMatch(/(?:latest|uptime-kuma:1)(?:[}\s'"\n]|$)/);
   });
 
+  it('keeps the runbook aligned with logical dumps and includes report attachments', async () => {
+    const compose = await text('infra/docker-compose.yml');
+    const deploy = await text('docs/DEPLOY.md');
+
+    // B1 moved PostgreSQL backup from a live data-directory snapshot to pg_dump.
+    // The operator runbook must not keep pointing restic at the removed mount.
+    expect(deploy).not.toContain('restic backup /source/postgres');
+    expect(deploy).toContain('/scripts/backup-postgres.sh');
+    expect(deploy).toContain('restic backup /backups/postgres /source/api-uploads');
+
+    // Report attachments are non-regenerable user data and DEPLOY promises they are covered.
+    expect(compose).toContain('api_uploads:/source/api-uploads:ro');
+  });
+
   it('backs up PostgreSQL logically instead of snapshotting its live data directory', async () => {
     const compose = await text('infra/docker-compose.yml');
     const backup = await text('infra/backup-postgres.sh');
