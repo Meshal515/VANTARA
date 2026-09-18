@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as domain from '@vantara/domain';
 import * as library from './library.ts';
+import * as sources from './sources.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 const execFileAsync = promisify(execFile);
@@ -43,7 +44,49 @@ describe('B6 source and chapter contract', () => {
     expect(web).toContain('state.sources.set(source.id, source)');
     expect(web).not.toContain('state.sources.set(source.sourceId, source)');
     expect(web).toContain("state.sources.get(provider.source)?.language");
-    expect(web).not.toContain("state.sources.get(provider.source)?.lang");
+    expect(web).not.toMatch(/state\.sources\.get\(provider\.source\)\?\.lang(?!uage)/);
+  });
+
+  it('ranks search providers on the backend so clients do not reimplement source preference', async () => {
+    const rankProvidersByLanguage = (sources as Record<string, unknown>)['rankProvidersByLanguage'];
+    expect(typeof rankProvidersByLanguage).toBe('function');
+    if (typeof rankProvidersByLanguage !== 'function') return;
+
+    const rank = rankProvidersByLanguage as (
+      providers: Array<{ source: string; sourceId: string }>,
+      sourceLanguages: ReadonlyMap<string, string | null>,
+    ) => Array<{ source: string; sourceId: string }>;
+
+    const ranked = rank(
+      [
+        { source: 'jp', sourceId: '1' },
+        { source: 'en', sourceId: '2' },
+        { source: 'ar', sourceId: '3' },
+      ],
+      new Map([
+        ['jp', 'ja'],
+        ['en', 'en'],
+        ['ar', 'ar'],
+      ]),
+    );
+
+    expect(ranked.map((provider) => provider.source)).toEqual(['ar', 'en', 'jp']);
+
+    const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
+    expect(web).not.toContain('const LANG_RANK');
+    expect(web).not.toContain('function providerRank');
+    expect(web).not.toContain('providerRank(a) - providerRank(b)');
+  });
+
+  it('does not expose source/fallback diagnostics as chapter UI states', async () => {
+    const web = await readFile(join(ROOT, 'apps/web/app.js'), 'utf8');
+    expect(web).not.toContain("BLOCKED: 'محجوب'");
+    expect(web).not.toContain("HELD: 'مُنتظر'");
+    expect(web).not.toContain("BELOW_FLOOR: 'دون الأرضية'");
+    expect(web).not.toContain('${chapter.copies.length} مصادر');
+    expect(web).not.toContain('لا يعرضها أي مصدر');
+    expect(web).toContain("'غير متاح'");
+    expect(web).toContain('غير متاح حاليًا');
   });
 
   it('keeps fallback and readiness polling on the backend so the client fetches once', async () => {
