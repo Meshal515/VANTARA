@@ -72,6 +72,43 @@ describe('B2 browser trusted-device lifecycle', () => {
     expect(typeof body['deviceCredential']).toBe('string');
   });
 
+  it('consumes pairing links on APK cold start and while the app is already open', async () => {
+    const sync = createSync({ baseUrl: 'https://sync.example' });
+    let onUrlOpen: ((event: { url: string }) => void) | undefined;
+    const appPlugin = {
+      getLaunchUrl: vi.fn(async () => ({ url: 'vantara://pair?pair=cold-start-pairing-token-00001' })),
+      addListener: vi.fn(async (eventName: string, listener: (event: { url: string }) => void) => {
+        expect(eventName).toBe('appUrlOpen');
+        onUrlOpen = listener;
+        return { remove: vi.fn(async () => {}) };
+      }),
+    };
+
+    await sync.attachNativeLinkBridge(appPlugin);
+
+    expect(appPlugin.getLaunchUrl).toHaveBeenCalledOnce();
+    expect(appPlugin.addListener).toHaveBeenCalledOnce();
+    let pairCalls = vi.mocked(fetch).mock.calls.filter(([input]) =>
+      String(input).endsWith('/v1/device/pair'),
+    );
+    expect(pairCalls).toHaveLength(1);
+    expect(JSON.parse(String((pairCalls[0]?.[1] as RequestInit | undefined)?.body))).toMatchObject({
+      pairingToken: 'cold-start-pairing-token-00001',
+    });
+
+    expect(onUrlOpen).toBeTypeOf('function');
+    onUrlOpen?.({ url: 'vantara://pair?pair=warm-start-pairing-token-00001' });
+    await vi.waitFor(() => {
+      pairCalls = vi.mocked(fetch).mock.calls.filter(([input]) =>
+        String(input).endsWith('/v1/device/pair'),
+      );
+      expect(pairCalls).toHaveLength(2);
+    });
+    expect(JSON.parse(String((pairCalls[1]?.[1] as RequestInit | undefined)?.body))).toMatchObject({
+      pairingToken: 'warm-start-pairing-token-00001',
+    });
+  });
+
   it('deletes the local device credential after logout-device', async () => {
     const sync = createSync({ baseUrl: 'https://sync.example' });
     await sync.signIn('user-1');
