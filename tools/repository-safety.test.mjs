@@ -119,7 +119,7 @@ test('Android pairing links are wired from Capacitor into the trusted-device cli
   );
   assert.match(
     app,
-    /await\s+nativeLinksReady/,
-    'boot must wait for a cold-start pairing link before rendering the account gate',
+    /await\s+nativeLinksReady\.catch\s*\(/,
+    'boot must await native pairing without letting a stale link block startup',
   );
 });
