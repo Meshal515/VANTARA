@@ -67,14 +67,12 @@ test('sync worker production deploy provisions every runtime authentication secr
     'VANTARA_IDENTITY_SECRET',
     'VANTARA_DEVICE_PEPPER',
   ]) {
-    assert.match(
-      workflow,
-      new RegExp(`\\${{ secrets\\.${secret} }}`),
+    assert.ok(
+      workflow.includes('${{ secrets.' + secret + ' }}'),
       `sync-worker deploy must read GitHub secret ${secret}`,
     );
-    assert.match(
-      workflow,
-      new RegExp(`secret put ${secret}`),
+    assert.ok(
+      workflow.includes(`secret put ${secret}`),
       `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
     );
   }
