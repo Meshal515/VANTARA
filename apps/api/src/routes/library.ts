@@ -4,6 +4,7 @@ import { query } from '@vantara/db';
 import { UchiyomiError } from '@vantara/uchiyomi';
 import { auditCoverage, buildCatalogue, ownerOf, pickCopy } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
+import { maxWidthSuffix, streamUpstreamImage } from '../lib/images.ts';
 
 interface SeriesRow {
   id: string;
@@ -20,14 +21,6 @@ interface SeriesRow {
 /** الصور تُقدَّم عبر VANTARA لا مباشرة: المتصفح يحمل كوكي مبهمًا، والتوكن عندنا. */
 const IMAGE_KINDS = ['series-thumb', 'series-backdrop', 'book-thumb', 'page'] as const;
 type ImageKind = (typeof IMAGE_KINDS)[number];
-
-const ALLOWED_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/avif',
-  'image/gif',
-]);
 
 export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const base = ctx.config.UCHIYOMI_URL.replace(/\/+$/, '');
@@ -398,42 +391,16 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
   });
 
   /**
-   * بروكسي الصور.
+   * بروكسي الصور بجلسة المستخدم.
    *
-   * يلزم لأن المتصفح يحمل كوكي VANTARA المبهم فقط، وصور Uchiyomi تحتاج توكنه.
-   * ولأن التوكن يبقى عند الخادم، لا يمكن أن يُقرأ من الصفحة.
-   *
-   * لا يُعاد إلا ما يُثبت أنه صورة: مصدر يرجع صفحة تحدٍّ بترويسة HTML كان
-   * سيصل للقارئ كصورة مكسورة بلا تفسير.
+   * النقل نفسه في `lib/images.ts` لأن المسار الموقَّع (`/v1/media/page/*`)
+   * يشاركه: الفرق بينهما من يُصرَّح له، لا كيف تُنقل البايتات.
    */
   const streamImage = async (
     reply: FastifyReply,
     token: string,
     path: string,
-  ): Promise<FastifyReply> => {
-    const upstream = await fetch(`${base}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!upstream.ok || !upstream.body) {
-      return reply.code(upstream.status === 404 ? 404 : 502).send({ error: 'image_unavailable' });
-    }
-
-    const type = (upstream.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? '';
-    if (!ALLOWED_IMAGE_TYPES.has(type)) {
-      return reply.code(502).send({ error: 'not_an_image', contentType: type });
-    }
-
-    const length = upstream.headers.get('content-length');
-    if (length !== null) void reply.header('content-length', length);
-
-    return reply
-      .header('content-type', type)
-      // الصفحة لا تتغير لنفس المعرّف؛ الكاش الخاص يجعل التمرير للخلف فوريًا
-      .header('cache-control', 'private, max-age=86400, immutable')
-      .send(upstream.body);
-  };
+  ): Promise<FastifyReply> => streamUpstreamImage({ reply, base, token, path });
 
   app.get('/v1/img/:kind/:id', { preHandler: requireSession(ctx) }, async (request, reply) => {
     const { kind, id } = request.params as { kind: string; id: string };
@@ -443,15 +410,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
 
     const session = sessionOf(request);
     const encoded = encodeURIComponent(id);
-    const maxWidth = z.coerce
-      .number()
-      .int()
-      .min(64)
-      .max(4096)
-      .optional()
-      .catch(undefined)
-      .parse((request.query as { maxWidth?: string }).maxWidth);
-    const suffix = maxWidth !== undefined ? `?maxWidth=${String(maxWidth)}` : '';
+    const suffix = maxWidthSuffix((request.query as { maxWidth?: string }).maxWidth);
 
     const paths: Record<ImageKind, string> = {
       'series-thumb': `/img/series/${encoded}/thumb`,
@@ -470,16 +429,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: AppContext): Prom
     if (!index.success) return reply.code(400).send({ error: 'bad_request' });
 
     const session = sessionOf(request);
-    const maxWidth = z.coerce
-      .number()
-      .int()
-      .min(64)
-      .max(4096)
-      .optional()
-      .catch(undefined)
-      .parse((request.query as { maxWidth?: string }).maxWidth);
-
-    const suffix = maxWidth !== undefined ? `?maxWidth=${String(maxWidth)}` : '';
+    const suffix = maxWidthSuffix((request.query as { maxWidth?: string }).maxWidth);
     return streamImage(
       reply,
       session.token,

@@ -1295,6 +1295,37 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
     for (const image of flow.querySelectorAll('.reader__image')) pageObserver.observe(image);
   };
 
+  /**
+   * صورة فشلت: جرّب رابطًا مختلفًا مرة واحدة قبل إعلان الخطأ.
+   *
+   * الصور تُحمَّل بـ`lazy`، فصفحات فصل طويل تُطلب بعد دقائق من بناء الفصل —
+   * وقد انتهى رابطها الموقَّع. الفشل هنا ليس خطأ شبكة ولا جلسة ساقطة: تجديد
+   * واحد يكفيه. وإن لم يتغيّر الرابط فالعلّة في الصفحة نفسها لا في التوقيع.
+   */
+  const retryImage = async (image, loader, frame) => {
+    if (image.dataset.retried === '1') {
+      frame.classList.add('reader__frame--error');
+      return;
+    }
+    image.dataset.retried = '1';
+
+    const before = image.src;
+    await loader.renew();
+    const next = loader.urlFor(Number(image.dataset.page));
+    if (!next || new URL(next, location.href).href === before) {
+      frame.classList.add('reader__frame--error');
+      return;
+    }
+
+    image.addEventListener('load', () => frame.classList.remove('skeleton'), { once: true });
+    image.addEventListener(
+      'error',
+      () => frame.classList.add('reader__frame--error'),
+      { once: true },
+    );
+    image.src = next;
+  };
+
   const appendChapter = async (rawChapter, { dividerFrom = null, restore = false } = {}) => {
     const chapter = await ensureLocal(rawChapter);
     if (chapterNodes.has(chapter.bookId)) return chapter;
@@ -1309,6 +1340,9 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
     });
     loaders.set(chapter.bookId, loader);
     enteredAt.set(chapter.bookId, Date.now());
+    // التوقيع قبل بناء الصور: `<img src>` لا يحمل ترويسة، وكوكي الجلسة لا يعبر
+    // الأصول — فمسار الصور المحمي بجلسة يرجع 401 لكل صفحة على الـAPK
+    await loader.prepare();
 
     if (dividerFrom) {
       const divider = el('div', 'divider');
@@ -1338,7 +1372,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
       image.dataset.bookId = chapter.bookId;
       image.src = loader.urlFor(page.number);
       image.addEventListener('load', () => frame.classList.remove('skeleton'), { once: true });
-      image.addEventListener('error', () => frame.classList.add('reader__frame--error'), { once: true });
+      image.addEventListener('error', () => void retryImage(image, loader, frame), { once: true });
       frame.append(image);
       section.append(frame);
     }
@@ -1379,6 +1413,8 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
         baseUrl: config.api,
       });
       loaders.set(next.bookId, loader);
+      // التسخين برابط موقَّع أيضًا: صورة تُسخَّن برابط 401 تُكاش كفشل
+      await loader.prepare();
 
       // الصفحة الأولى صراحةً: `warmAfter` يسخّن ما *بعد* الرقم المُعطى، وهي
       // بالضبط الصورة التي تظهر عند حدّ الفصل

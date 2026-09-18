@@ -120,20 +120,110 @@ export function zoneOf(y, height) {
  * الحد مقصود: تحميل فصل كامل مسبقًا يخنق اتصالًا منزليًا ويستهلك بيانات
  * الجوال بلا داعٍ. صفحتان أمام القارئ تكفيان لإخفاء زمن الشبكة.
  */
-export function createPageLoader({ bookId, pageNumbers, prefetch = 2, maxWidth, baseUrl = '' }) {
+export function createPageLoader({
+  bookId,
+  pageNumbers,
+  prefetch = 2,
+  maxWidth,
+  baseUrl = '',
+  fetchImpl = fetch,
+}) {
   // الترقيم 1-based: الفهرس 0 يرجع 502 من upstream، وهذا خطأ صامت لولا القياس
   //
   // baseUrl مطلق داخل الـAPK: لا أصل مشترك هناك، فالمسار النسبي يشير إلى
   // الحاوية المحلية لا إلى خادم المحتوى. فارغ في المتصفح، وهو الصحيح هناك.
+  const query = maxWidth ? `?maxWidth=${maxWidth}` : '';
+
+  /** مسار الكوكي: يعمل في المتصفح (أصل مشترك)، ولا يعمل على الـAPK. */
+  const cookieUrlFor = (pageNumber) =>
+    `${baseUrl}/v1/img/page/${encodeURIComponent(bookId)}/${pageNumber}${query}`;
+
+  /** page → رابط موقَّع، أو `null` حتى يُوقَّع (أو إن تعذّر التوقيع). */
+  let signed = null;
+  let expiresAt = 0;
+  let minting = null;
+
+  // هامش قبل الانتهاء: رابط يبقى ثانية واحدة لا يكفي لصورة تبدأ الآن
+  const RENEW_MARGIN_MS = 30_000;
+  // سقف الخادم للتوقيع في نداء واحد (`MAX_PAGES_PER_MINT`)
+  const MINT_CHUNK = 300;
+  const fresh = () => signed !== null && Date.now() < expiresAt - RENEW_MARGIN_MS;
+
+  /**
+   * يوقّع روابط صفحات الفصل.
+   *
+   * نداء واحد للفصل كله لا نداء لكل صفحة: ثلاثون صفحة تعني ثلاثين توقيعًا،
+   * وهي نفس الجلسة ونفس اللحظة.
+   *
+   * وفشله ليس فشل القارئ: نسقط إلى مسار الكوكي. هذا يعمل في المتصفح، ولا يعمل
+   * على الـAPK — والفرق ظاهر في السجل لا مخفيًّا في صورة مكسورة.
+   */
+  const mint = async () => {
+    if (minting) return minting;
+    minting = (async () => {
+      try {
+        const map = new Map();
+        let nearest = Infinity;
+
+        // الخادم يرفض فصلًا أطول من سقفه في نداء واحد. الرفض يعني السقوط إلى
+        // مسار الكوكي — وهو لا يعمل على الـAPK، أي فصلًا مكسورًا لعملٍ فصوله
+        // طويلة. فيُجزَّأ الطلب بدل أن يُرفض.
+        for (let at = 0; at < pageNumbers.length; at += MINT_CHUNK) {
+          const chunk = pageNumbers.slice(at, at + MINT_CHUNK);
+          const response = await fetchImpl(`${baseUrl}/v1/media/pages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bookId, pages: chunk }),
+            credentials: baseUrl ? 'include' : 'same-origin',
+          });
+          if (!response?.ok) return false;
+          const body = await response.json();
+          for (const entry of body?.content ?? []) map.set(entry.page, entry.url);
+          nearest = Math.min(nearest, Number(body?.expiresAt ?? 0));
+        }
+
+        if (map.size === 0 || !Number.isFinite(nearest)) return false;
+        signed = map;
+        expiresAt = nearest;
+        return true;
+      } catch {
+        return false;
+      } finally {
+        minting = null;
+      }
+    })();
+    return minting;
+  };
+
   const urlFor = (pageNumber) => {
-    const query = maxWidth ? `?maxWidth=${maxWidth}` : '';
-    return `${baseUrl}/v1/img/page/${encodeURIComponent(bookId)}/${pageNumber}${query}`;
+    if (fresh()) {
+      const path = signed.get(pageNumber);
+      if (path) return `${baseUrl}${path}`;
+    }
+    return cookieUrlFor(pageNumber);
   };
 
   const warmed = new Set();
 
   return {
     urlFor,
+    /** هل الروابط موقَّعة الآن؟ يجيب عن «لماذا فشلت الصورة» بلا تخمين. */
+    get signing() {
+      return fresh();
+    },
+    /** يوقّع قبل بناء الصفحات. لا يرمي: القارئ يُفتح على كل حال. */
+    prepare: mint,
+    /**
+     * يجدّد التوقيع ويقول إن تغيّر شيء.
+     *
+     * يلزم لأن الصور تُحمَّل بـ`lazy`: فصل طويل يُقرأ ببطء يصل إلى صفحاته
+     * الأخيرة بعد انتهاء الروابط، فترجع 401 وتظهر مكسورة رغم أن الجلسة سليمة.
+     */
+    async renew() {
+      if (fresh()) return true;
+      signed = null;
+      return mint();
+    },
     /** يسخّن الصفحات التالية بلا أن يحجب أي شيء. */
     warmAfter(pageNumber) {
       const at = pageNumbers.indexOf(pageNumber);

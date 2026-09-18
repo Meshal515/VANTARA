@@ -70,6 +70,7 @@ const KEPT: [string, string][] = [
   ['GET', '/v1/reports'],
   ['GET', '/v1/deleted-works'],
   ['POST', '/v1/merges/1/split'],
+  ['POST', '/v1/media/pages'],
 ];
 
 describe('route surface after the data ownership freeze', () => {
@@ -91,6 +92,15 @@ describe('route surface after the data ownership freeze', () => {
   it('serves liveness without a session', async () => {
     const res = await app.inject({ method: 'GET', url: '/livez' });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('keeps the signed page path reachable with no credential', async () => {
+    // هذا المسار **يجب** أن يعمل بلا جلسة: `<img src>` لا يحمل ترويسة، والكوكي
+    // لا يعبر الأصول. غيابه أو حراسته بجلسة = فصل مكسور على الـAPK.
+    const res = await app.inject({ method: 'GET', url: '/v1/media/page/x/1' });
+    // 401 signature_required لا 401 unauthorized: الرفض عن التوقيع لا عن الجلسة
+    expect(res.statusCode).toBe(401);
+    expect(res.json<{ error: string }>().error).toBe('signature_required');
   });
 
   it('keeps the account list public for the picker', async () => {

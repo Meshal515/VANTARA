@@ -16,6 +16,7 @@ import { catalogRoutes } from './routes/catalog.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { libraryRoutes } from './routes/library.ts';
+import { mediaRoutes } from './routes/media.ts';
 import { sourceRoutes } from './routes/sources.ts';
 
 export interface BuiltApp {
@@ -86,6 +87,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   await catalogRoutes(app, ctx);
   // عقد الشاشة للمكتبة والاستكشاف: صفحة واحدة لكل نداء، منفصل عن مسار التدقيق
   await discoveryRoutes(app, ctx);
+  // صور القارئ برابط موقَّع: `<img src>` لا يحمل ترويسة، والكوكي لا يعبر الأصول
+  await mediaRoutes(app, ctx);
   await libraryRoutes(app, ctx);
 
   // الواجهة تُقدَّم من نفس الأصل هنا أيضًا (الويب)، لكن الـAPK أصل آخر —

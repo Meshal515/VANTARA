@@ -134,9 +134,14 @@ services:
       PORT: '3100'
       DATABASE_URL: postgres://${POSTGRES_USER:-vantara}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vantara}
       UCHIYOMI_URL: http://uchiyomi:3000
+      # توكن الخدمة (docs/DEPLOY.md § 2). بلا هذا يرجع مسار الصور الموقَّع
+      # ‏503 ويسقط القارئ إلى مسار الكوكي — وهو لا يعمل على الـAPK.
+      UCHIYOMI_SERVICE_TOKEN: ${UCHIYOMI_SERVICE_TOKEN:-}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (openssl rand -base64 48)}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-60}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # أصول الـAPK مدمجة في القائمة البيضاء؛ هذا لنطاق Pages وحده
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       UPLOAD_DIR: /data/uploads
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
