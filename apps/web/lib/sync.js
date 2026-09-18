@@ -224,6 +224,25 @@ export function createSync({ baseUrl }) {
     writeJson(USER_KEY, user);
   }
 
+  async function refreshSession() {
+    if (!user?.userId) {
+      const error = new Error('unauthorized');
+      error.status = 401;
+      throw error;
+    }
+    try {
+      const payload = await sessionPayload(user.userId);
+      persistSession(payload);
+      emit(['session']);
+      return payload;
+    } catch (error) {
+      token = null;
+      localStorage.removeItem(TOKEN_KEY);
+      emit(['session']);
+      throw error;
+    }
+  }
+
   async function request(path, options = {}, allowRefresh = true) {
     const headers = { ...(options.headers ?? {}) };
     if (token) headers.authorization = `Bearer ${token}`;
@@ -237,15 +256,16 @@ export function createSync({ baseUrl }) {
     if (response.status === 401) {
       if (allowRefresh && user?.userId) {
         try {
-          persistSession(await sessionPayload(user.userId));
+          await refreshSession();
           return request(path, options, false);
         } catch {
-          // جهاز revoked أو credential مفقود: نطوي الجلسة ونبقي الكتابات.
+          // جهاز revoked أو credential مفقود: refreshSession طوى الجلسة.
         }
+      } else {
+        token = null;
+        localStorage.removeItem(TOKEN_KEY);
+        emit(['session']);
       }
-      token = null;
-      localStorage.removeItem(TOKEN_KEY);
-      emit(['session']);
       const error = new Error('unauthorized');
       error.status = 401;
       throw error;
@@ -659,6 +679,9 @@ export function createSync({ baseUrl }) {
     get signedIn() {
       return Boolean(token);
     },
+    get authorizationHeader() {
+      return token ? `Bearer ${token}` : null;
+    },
     get pendingWrites() {
       return queue.length;
     },
@@ -666,6 +689,7 @@ export function createSync({ baseUrl }) {
     pairDevice,
     consumePairingUrl,
     attachNativeLinkBridge,
+    refreshSession,
     signIn,
     signOut,
     logoutDevice,
