@@ -603,3 +603,28 @@ test('a sync that stopped at the round cap does not report itself as done', () =
     'health must not say synced while a read backlog is pending',
   );
 });
+
+test('the settings screen does not crash before it renders', () => {
+  // `screenSettings` كانت تكتب `state.screen` في أول سطر ثم تُعلن
+  // `const state = sync.health()` في نفس الجسم. الاسم محجوز للجسم كله من
+  // بدايته (TDZ)، فالسطر الأول يرمي `Cannot access 'state' before
+  // initialization` — والشاشة لا تُفتح أبدًا.
+  //
+  // وهذا يقتل الدخول على APK جديد: بلا عنوان مخبوز، الإعدادات هي الطريق
+  // الوحيد لضبط الخادمين.
+  const app = read('apps/web/app.js');
+  const start = app.indexOf('async function screenSettings()');
+  assert.ok(start > 0, 'the settings screen must exist');
+  const body = app.slice(start, app.indexOf('\n}\n', start));
+
+  assert.doesNotMatch(
+    body,
+    /^\s*(?:const|let) state\b/m,
+    'the settings screen must not shadow the app state object',
+  );
+  assert.match(
+    body,
+    /const health = sync\.health\(\)/,
+    'sync health must be read into its own name',
+  );
+});

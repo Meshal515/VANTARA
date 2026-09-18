@@ -17,7 +17,7 @@
  */
 
 // أي تعديل على ملفات القشرة يحتاج رقمًا جديدًا هنا، وإلا خدم الـSW القديم
-const VERSION = 'vantara-shell-v4';
+const VERSION = 'vantara-shell-v5';
 
 // كل ملف هنا يجب أن يكون مخزَّنًا **قبل** أول رسم. وحارس في
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
@@ -40,6 +40,7 @@ const SHELL = [
   '/lib/tasks.js',
   '/lib/netpolicy.js',
   '/lib/toast.js',
+  '/lib/report.js',
   '/screens/accounts.js',
   '/manifest.webmanifest',
   '/fonts/NotoNaskhArabic-Regular.woff2',

@@ -20,6 +20,7 @@ import { screenAccounts } from './screens/accounts.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
+import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
@@ -1574,20 +1575,20 @@ async function screenSettings() {
   const version = appVersion();
   // حالة المزامنة أول سطر: «كتابات معلّقة: 12» وحدها لا تقول هل هي في الطريق
   // أم عالقة أم غير محفوظة أصلًا، وهذا الفرق هو كل ما يهمّ المستخدم
-  const state = sync.health();
+  const health = sync.health();
   const lines = [
-    ['المزامنة', state.message],
-    ['كتابات معلّقة', String(state.pending)],
-    ...(state.quarantined > 0 ? [['عمليات معزولة', String(state.quarantined)]] : []),
-    ['آخر كتابة وصلت', state.lastSuccessAt ? relativeTime(state.lastSuccessAt) : '—'],
-    ['آخر سحب', state.lastSyncAt ? relativeTime(state.lastSyncAt) : '—'],
+    ['المزامنة', health.message],
+    ['كتابات معلّقة', String(health.pending)],
+    ...(health.quarantined > 0 ? [['عمليات معزولة', String(health.quarantined)]] : []),
+    ['آخر كتابة وصلت', health.lastSuccessAt ? relativeTime(health.lastSuccessAt) : '—'],
+    ['آخر سحب', health.lastSyncAt ? relativeTime(health.lastSyncAt) : '—'],
     ['النسخة', version ?? 'متصفح'],
     ['الحساب', sync.user?.username ?? '—'],
   ];
   for (const [label, value] of lines) {
     const row = el('div', 'list__row');
     const pill = el('span', 'pill', value);
-    if (label === 'المزامنة' && state.state !== 'ok' && state.state !== 'syncing') {
+    if (label === 'المزامنة' && health.state !== 'ok' && health.state !== 'syncing') {
       pill.classList.add('pill--warn');
     }
     row.append(el('span', null, label), pill);
@@ -1595,7 +1596,7 @@ async function screenSettings() {
   }
   body.append(facts);
 
-  if (state.quarantined > 0) {
+  if (health.quarantined > 0) {
     const retry = el('button', 'btn btn--ghost', 'إعادة محاولة المعزولات');
     retry.type = 'button';
     retry.addEventListener('click', () => {
@@ -1671,6 +1672,76 @@ async function screenSettings() {
     force.textContent = 'تمّت المزامنة';
   });
   body.append(force);
+
+  // ── أبلغ عن مشكلة ──
+  //
+  // بيته هنا بقصد: هذه الشاشة تعرض أصلًا نفس حقائق التشخيص التي يحملها
+  // البلاغ، فمن يرى «المزامنة عالقة» يبلّغ من مكانه بلا شرحٍ يكتبه.
+  //
+  // وما يُرفق **قائمة سماح** في `clientSnapshot`: لا توكن، ولا اعتماد جهاز،
+  // ولا رابطًا بمعاملاته — رابط الصفحة موقَّع ويفتحها بلا جلسة.
+  const problem = el('section', 'settings__block');
+  problem.append(el('h2', 'settings__title', 'أبلغ عن مشكلة'));
+  problem.append(
+    el('p', 'settings__hint', 'يُرفق حالة التطبيق وحدها: لا توكنات ولا روابط موقَّعة.'),
+  );
+
+  const problemForm = el('form', 'form');
+  const kindRow = el('label', 'form__row');
+  kindRow.append(el('span', 'form__label', 'نوع المشكلة'));
+  const kindSelect = el('select', 'form__input');
+  for (const kind of REPORT_KINDS) {
+    const option = el('option', null, REPORT_KIND_LABELS[kind] ?? kind);
+    option.value = kind;
+    kindSelect.append(option);
+  }
+  kindRow.append(kindSelect);
+
+  const noteRow = el('label', 'form__row');
+  noteRow.append(el('span', 'form__label', 'وش صار؟ (اختياري)'));
+  const noteInput = el('textarea', 'form__input');
+  noteInput.rows = 3;
+  noteInput.maxLength = 2000;
+  noteRow.append(noteInput);
+
+  const send = el('button', 'btn btn--ghost', 'إرسال البلاغ');
+  send.type = 'submit';
+  problemForm.append(kindRow, noteRow, send);
+
+  problemForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    send.disabled = true;
+    send.textContent = 'جارٍ الإرسال…';
+    try {
+      await submitReport({
+        api,
+        kind: kindSelect.value,
+        description: noteInput.value.trim(),
+        context: {
+          appVersion: version,
+          screen: 'settings',
+          health: state,
+          lastError: health.lastError,
+          online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+          viewport: `${window.innerWidth}x${window.innerHeight}`,
+          endpoint: current.api,
+        },
+      });
+      send.textContent = 'وصل البلاغ ✅';
+      noteInput.value = '';
+    } catch (error) {
+      // الفشل يُقال: بلاغٌ يبدو مُرسلًا ولم يصل أسوأ من زرٍّ لا يعمل
+      send.disabled = false;
+      send.textContent = 'إرسال البلاغ';
+      showToast(
+        error?.status === 0 || error?.code === 'unknown_kind'
+          ? 'تعذّر الإرسال. حاول بعد قليل.'
+          : `تعذّر الإرسال (${error?.code ?? error?.status ?? 'خطأ'})`,
+      );
+    }
+  });
+  problem.append(problemForm);
+  body.append(problem);
 
   wrap.append(body, bottomNav('home'));
   mount(wrap);

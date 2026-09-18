@@ -27,6 +27,19 @@ export const REPORT_KINDS = [
   'OTHER',
 ];
 
+/** التسمية العربية لكل نوع. الرمز للخادم والتسمية للمستخدم. */
+export const REPORT_KIND_LABELS = {
+  CHAPTER_WONT_OPEN: 'الفصل لا يفتح',
+  MISSING_PAGE: 'صفحة ناقصة',
+  WRONG_ORDER: 'ترتيب الصفحات خطأ',
+  WRONG_CHAPTER: 'الفصل خطأ',
+  BAD_TRANSLATION: 'ترجمة سيئة',
+  DUPLICATE_WORK: 'العمل مكرر',
+  WRONG_CHAPTER_NUMBER: 'رقم الفصل خطأ',
+  LOW_QUALITY: 'جودة الصور ضعيفة',
+  OTHER: 'شيء ثاني',
+};
+
 /** المسار بلا معاملات: التوقيع لا يفيد التشخيص، وإرساله يفيد من يسرقه. */
 function pathOnly(value) {
   if (typeof value !== 'string' || value === '') return null;
