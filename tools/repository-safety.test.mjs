@@ -190,9 +190,12 @@ test('the ownership document matches the executable matrix', () => {
 });
 
 test('B8 social migration defines recipient state and per-viewer receipts', () => {
-  const migration = read(
-    'services/sync-worker/migrations/0008_social_receipts_and_recommendation_states.sql',
+  const migrationPath = 'services/sync-worker/migrations/0008_social_receipts_and_recommendation_states.sql';
+  assert.ok(
+    trackedFiles().includes(migrationPath),
+    `${migrationPath} must exist; B2 already owns migration 0007`,
   );
+  const migration = read(migrationPath);
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS recommendation_recipients/i);
   assert.match(migration, /PRIMARY KEY\s*\(recommendation_id,\s*user_id\)/i);
