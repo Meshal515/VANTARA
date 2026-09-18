@@ -184,6 +184,23 @@ describe('chapter ordering', () => {
 });
 
 describe('diagnostics scrubbing', () => {
+  it('redacts the signature out of a signed page URL', () => {
+    // بلاغ «صفحة ناقصة» يحمل رابط الصفحة بطبيعته. ورابطنا الموقَّع هو
+    // `?t=<hmac>`: مفتاحه `t` ليس محظورًا، وقيمته سداسية بلا نقاط فلا
+    // يمسكها نمط JWT. فكانت قدرةُ فتح الصفحة تُخزَّن في جدول البلاغات.
+    const signed =
+      '/v1/media/page/src%3Atest%3Ax/7?t=9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c2b1a0';
+    const scrubbed = scrubDiagnostics({ lastImage: signed }) as { lastImage: string };
+    expect(scrubbed.lastImage).not.toContain('9f8e7d6c5b4a');
+    expect(scrubbed.lastImage).toContain('/v1/media/page/');
+  });
+
+  it('flags a leftover page signature as a secret', () => {
+    expect(
+      containsSecret({ url: '/v1/media/page/x/1?t=deadbeefdeadbeefdeadbeefdeadbeef1234' }),
+    ).toBe(true);
+  });
+
   it('drops forbidden keys and redacts secrets inside free text', () => {
     const scrubbed = scrubDiagnostics({
       appVersion: '0.1.0',

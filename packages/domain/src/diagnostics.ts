@@ -5,23 +5,31 @@
  * ما يُخزَّن لا يحمل كوكيز ولا توكنات ولا ترويسات مصادقة، حتى لو أرسلها العميل.
  */
 
+const REDACTED = '[redacted]';
+
 const FORBIDDEN_KEY = /(cookie|authorization|auth|token|secret|password|passwd|session|bearer|jwt|apikey|api[-_]?key|credential|set-cookie)/i;
 
 /** توكنات Uchiyomi `uy_…`، JWT، وسلاسل Bearer داخل النصوص. */
-const SECRET_IN_TEXT: readonly RegExp[] = [
-  /\buy_[A-Za-z0-9._-]{8,}/g,
-  /\beyJ[A-Za-z0-9._-]{16,}/g,
-  /\bBearer\s+[A-Za-z0-9._-]{8,}/gi,
-  /\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g,
+const SECRET_IN_TEXT: readonly [RegExp, string][] = [
+  [/\buy_[A-Za-z0-9._-]{8,}/g, REDACTED],
+  [/\beyJ[A-Za-z0-9._-]{16,}/g, REDACTED],
+  [/\bBearer\s+[A-Za-z0-9._-]{8,}/gi, REDACTED],
+  [/\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g, REDACTED],
+  // توقيع رابط الصفحة: `?t=<hmac>`.
+  //
+  // هذا الرابط يفتح الصفحة بلا جلسة ولا ترويسة — هذا قصده. ومفتاحه `t` لا
+  // يُشبه سرًّا، وقيمته سداسية بلا نقاط فلا يمسكها نمط JWT. وبلاغ «صفحة
+  // ناقصة» يحمل رابط الصفحة بطبيعته، فكانت قدرةُ الفتح تُخزَّن في جدول
+  // البلاغات. القيمة وحدها تُشطب ويبقى المفتاح والمسار، وهو ما يفيد التشخيص.
+  [/([?&](?:t|sig|signature|token)=)[A-Za-z0-9._%-]{16,}/gi, `$1${REDACTED}`],
 ];
 
-const REDACTED = '[redacted]';
 const MAX_DEPTH = 6;
 const MAX_STRING = 4_000;
 
 function scrubString(value: string): string {
   let out = value;
-  for (const pattern of SECRET_IN_TEXT) out = out.replace(pattern, REDACTED);
+  for (const [pattern, replacement] of SECRET_IN_TEXT) out = out.replace(pattern, replacement);
   return out.length > MAX_STRING ? `${out.slice(0, MAX_STRING)}…` : out;
 }
 
@@ -57,7 +65,7 @@ export function containsSecret(value: unknown): boolean {
   const walk = (node: unknown, depth: number): boolean => {
     if (depth > MAX_DEPTH) return false;
     if (typeof node === 'string') {
-      return SECRET_IN_TEXT.some((pattern) => {
+      return SECRET_IN_TEXT.some(([pattern]) => {
         pattern.lastIndex = 0;
         return pattern.test(node);
       });
