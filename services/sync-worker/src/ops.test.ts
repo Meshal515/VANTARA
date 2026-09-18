@@ -322,14 +322,14 @@ describe('B8 recommendation recipient state', () => {
     expect(out.some((entry) => entry.sql.includes('INSERT INTO library'))).toBe(false);
   });
 
-  it('accept + WATCH_LATER uses the existing read-later collection contract', () => {
+  it('accept + WATCH_LATER derives the work from the recommendation, not client input', () => {
     const out = translate('recommendation.respond', {
       recommendationId: 'r1',
       state: 'ACCEPTED',
       intent: 'WATCH_LATER',
-      seriesRef: 's1',
-      seriesTitle: 'Lookism',
-      coverUrl: 'cover',
+      // عميل معطوب/عدائي لا يختار عملًا آخر عبر الرد على توصية r1.
+      seriesRef: 'evil-client-ref',
+      seriesTitle: 'Fake',
     });
 
     const response = out.find((entry) => entry.sql.includes('UPDATE recommendation_recipients'));
@@ -338,8 +338,10 @@ describe('B8 recommendation recipient state', () => {
 
     const collection = out.find((entry) => entry.sql.includes('INSERT INTO collections'));
     expect(collection).toBeDefined();
+    expect(collection?.sql).toContain('JOIN recommendations');
+    expect(collection?.sql).toContain('recommendation_id');
     expect(collection?.values).toContain('read_later');
-    expect(collection?.values).toContain('s1');
+    expect(collection?.values).not.toContain('evil-client-ref');
   });
 
   it('accept + ADD_TO_LIBRARY records intent but does not invent a D1 library write', () => {
