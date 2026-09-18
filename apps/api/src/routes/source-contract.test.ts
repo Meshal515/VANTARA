@@ -104,6 +104,31 @@ describe('B6 source and chapter contract', () => {
     expect(web).not.toContain('catalogue.find((c) => c.id === id)');
   });
 
+  it('distinguishes an empty source registry from a populated registry with zero SUPPORTED sources', () => {
+    const sourceSearchPolicy = (sources as Record<string, unknown>)['sourceSearchPolicy'];
+    expect(typeof sourceSearchPolicy).toBe('function');
+    if (typeof sourceSearchPolicy !== 'function') return;
+
+    const empty = (sourceSearchPolicy as Function)([]);
+    expect(empty.filterSources).toBe(false);
+    expect([...empty.allowedSources]).toEqual([]);
+
+    const unverifiedOnly = (sourceSearchPolicy as Function)([
+      { source_id: 'unverified-ar', lang: 'ar', verdict: 'REGISTERED_NOT_TESTED' },
+      { source_id: 'broken-en', lang: 'en', verdict: 'PARSER_FAILED' },
+    ]);
+    expect(unverifiedOnly.filterSources).toBe(true);
+    expect([...unverifiedOnly.allowedSources]).toEqual([]);
+
+    const withSupported = (sourceSearchPolicy as Function)([
+      { source_id: 'ok-ar', lang: 'ar', verdict: 'SUPPORTED' },
+      { source_id: 'broken-en', lang: 'en', verdict: 'PARSER_FAILED' },
+    ]);
+    expect(withSupported.filterSources).toBe(true);
+    expect([...withSupported.allowedSources]).toEqual(['ok-ar']);
+    expect(withSupported.sourceLanguages.get('ok-ar')).toBe('ar');
+  });
+
   it('maps VANTARA series refs to exact source identities before search policy filtering', async () => {
     const sourceIdentity = (sources as Record<string, unknown>)['sourceIdentity'];
     const sourceKeysForSeriesRefs = (sources as Record<string, unknown>)['sourceKeysForSeriesRefs'];
