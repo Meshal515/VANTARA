@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- الشبكة وحدها. لا صلاحية QUERY_ALL_PACKAGES: نحن لا نمسح الحزم
+         المثبَّتة كما يفعل Mihon، بل نحمّل من ملفنا الخاص. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="VANTARA Spike"
+        <!-- مسموح في هذا الـspike وحده: كثير من شبكات توصيل صور الفصول
+             لا يزال على http، ومنعه هنا يُنتج **فشلًا كاذبًا** يُقرأ كعطل
+             محرك. وفي الإنتاج يعود إلى false مع استثناءات صريحة. -->
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

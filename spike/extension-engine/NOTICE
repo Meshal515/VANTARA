@@ -1,0 +1,76 @@
+VANTARA — Local Extension Engine Spike
+Copyright 2026 VANTARA
+
+This spike bundles third-party code under the Apache License 2.0.
+
+
+═══════════════════════════════════════════════════════════════════════
+1. Mihon / Tachiyomi extension API surface  —  Apache License 2.0
+═══════════════════════════════════════════════════════════════════════
+
+Everything under:
+
+    app/src/main/kotlin/eu/kanade/tachiyomi/
+
+is the host-side extension API that Keiyoushi/Mihon extensions are compiled
+against (`compileOnly`) and therefore do not ship themselves. It originates
+from Mihon (https://github.com/mihonapp/mihon), licensed under the Apache
+License, Version 2.0, and was obtained here via Kagari
+(https://github.com/mogheess/kagari), also Apache License 2.0, which had
+already adapted it for a non-Mihon host.
+
+Adapted for VANTARA. Class and package names are deliberately unchanged:
+extensions link against these exact fully-qualified names, so renaming them
+would break every extension.
+
+    Copyright 2015 Javier Tomás
+    Copyright (c) 2024 The Mihon Open Source Project
+    Copyright (c) Kagari contributors
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+═══════════════════════════════════════════════════════════════════════
+2. What is NOT taken from anywhere
+═══════════════════════════════════════════════════════════════════════
+
+Everything under `app/src/main/kotlin/dev/vantara/spike/` is original
+VANTARA code. In particular `FileExtensionLoader.kt` — loading an extension
+from a file in app-private storage rather than from an installed package —
+was written from the public, documented behaviour of `DexClassLoader`,
+`PackageManager.getPackageArchiveInfo` and the Android 14 read-only
+requirement for dynamically loaded code.
+
+**No code was taken from TsukiMix** (https://github.com/UsagiApp/TsukiMix).
+TsukiMix is licensed **GPL-3.0**, which is copyleft: copying from it would
+place all of VANTARA under GPL-3.0. It was read as prior art only, and the
+techniques it demonstrates are facts about the DEX format and the Android
+platform, not its expression.
+
+**No code was taken from dion-runtime** (https://github.com/bldng1337/dion-runtime).
+That repository publishes **no license at all** — neither a LICENSE file,
+nor a license field in its manifests, nor a statement in its docs — which
+means all rights are reserved and it cannot lawfully be reused.
+
+`ExtensionSignatureVerifier` concepts were informed by Otaku-Reader
+(https://github.com/HeartlessVeteran2/Otaku-Reader), Apache License 2.0.
+
+
+═══════════════════════════════════════════════════════════════════════
+3. Extensions themselves are not bundled
+═══════════════════════════════════════════════════════════════════════
+
+No Keiyoushi extension binary is committed to this repository. The spike
+downloads extension APKs at runtime from the Keiyoushi extension repository
+and verifies each one against a pinned SHA-256 before loading it. The
+extensions remain the work of their own authors under their own terms.

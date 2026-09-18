@@ -1,0 +1,77 @@
+name: Spike — local extension engine (debug APK)
+
+# Spike معزول تمامًا:
+#
+#  - لا يلمس `android-release.yml` ولا قشرة Capacitor في `android/`.
+#  - **debug فقط**: لا توقيع، فلا يقرأ سرًّا واحدًا — لا keystore ولا Cloudflare.
+#  - يُشغَّل يدويًّا، أو عند تغيير ملفات الـspike وحدها.
+#
+# غرضه واحد: إخراج APK قابل للتثبيت يدويًّا لإثبات أو نفي المحرك المحلي.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'spike/extension-engine/**'
+      - '.github/workflows/spike-extension-engine.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: spike/extension-engine
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Android SDK مثبّت أصلًا على الـrunner؛ هذا يضبط المسارات ويقبل التراخيص
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # لا نشحن gradle-wrapper.jar في المستودع: ملف ثنائي في Git يُراجع
+      # بالثقة لا بالقراءة. الـrunner يولّده من نسخة Gradle المثبّتة.
+      - name: Generate the Gradle wrapper
+        run: gradle wrapper --gradle-version 8.11.1 --no-daemon
+
+      - name: Build the debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      # الفشل هو المعلومة هنا بقدر النجاح: لو لم يُصرَّف، نريد السبب كاملًا
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo '::group::Gradle build report'
+          find . -name '*.txt' -path '*reports*' -exec sh -c 'echo "── $1"; cat "$1"' _ {} \; || true
+          echo '::endgroup::'
+
+      - name: Locate the APK
+        id: apk
+        run: |
+          set -euo pipefail
+          path=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          test -n "$path" || { echo 'no apk produced'; exit 1; }
+          echo "path=spike/extension-engine/$path" >> "$GITHUB_OUTPUT"
+          ls -la "$path"
+          echo "sha256: $(sha256sum "$path" | cut -d' ' -f1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vantara-spike-engine-debug
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14

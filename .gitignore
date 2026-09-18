@@ -51,3 +51,10 @@ android/capacitor-cordova-android-plugins/
 dist/
 *.jks
 *.keystore
+
+# مخرجات بناء الـspike
+spike/**/build/
+spike/**/.gradle/
+spike/**/gradlew
+spike/**/gradlew.bat
+spike/**/gradle/wrapper/gradle-wrapper.jar
