@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
@@ -496,4 +496,33 @@ test('a capped sync page can never strand rows behind the cursor', () => {
     /WHERE rev = \? ORDER BY rev/,
     'a page whose rows share one rev must be drained at that rev',
   );
+});
+
+test('every growing sync table has the index its delta query needs', () => {
+  // `/v1/sync` يشغّل `WHERE rev > ? ORDER BY rev` على كل جدول فروقات. وبلا
+  // فهرس على `rev` يجيب المحرّك `SCAN` كاملًا + `TEMP B-TREE` للترتيب، في
+  // كل مزامنة لا في الأولى. سقط جدولا B8 من هذا لأن الأقدم كلها أخذت
+  // فهرسها؛ هذا الحارس يمنع الباتش القادم من تكرارها.
+  const worker = read('services/sync-worker/src/index.ts');
+  const block = worker.slice(
+    worker.indexOf('const DELTA_TABLES'),
+    worker.indexOf('] as const', worker.indexOf('const DELTA_TABLES')),
+  );
+  const tables = [...block.matchAll(/^\s*\['([a-z_]+)'/gm)].map((match) => match[1]);
+  assert.ok(tables.length > 10, 'the delta table list must have been parsed');
+
+  const migrations = readdirSync(resolve(ROOT, 'services/sync-worker/migrations'))
+    .filter((name) => name.endsWith('.sql'))
+    .map((name) => read(`services/sync-worker/migrations/${name}`))
+    .join('\n');
+
+  // `accounts` مستثنى بقصد: ثلاثة صفوف ثابتة بحكم §2، فالفهرس كلفة بلا مقابل
+  for (const table of tables.filter((name) => name !== 'accounts')) {
+    const indexed = new RegExp(`CREATE INDEX[^;]*ON\\s+${table}\\s*\\([^)]*\\brev\\b`, 'i');
+    assert.match(
+      migrations,
+      indexed,
+      `${table} is pulled by every sync and needs an index on rev`,
+    );
+  }
 });
