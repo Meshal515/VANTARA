@@ -6,11 +6,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- `usesCleartextTraffic` مسموح في هذا الـspike وحده: كثير من شبكات
+         توصيل صور الفصول لا يزال على http، ومنعه هنا يُنتج **فشلًا كاذبًا**
+         يُقرأ كعطل محرك وهو ليس منه. وفي الإنتاج يعود إلى false مع
+         استثناءات صريحة لما يحتاجه.
+
+         والتعليق فوق الوسم لا داخله: تعليقٌ بين خصائص وسمٍ XML غير صالح،
+         ويسقط دامجُ الـmanifest عليه — وهذا ما حدث فعلًا في اللفّة الثالثة. -->
     <application
         android:label="VANTARA Spike"
-        <!-- مسموح في هذا الـspike وحده: كثير من شبكات توصيل صور الفصول
-             لا يزال على http، ومنعه هنا يُنتج **فشلًا كاذبًا** يُقرأ كعطل
-             محرك. وفي الإنتاج يعود إلى false مع استثناءات صريحة. -->
         android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">

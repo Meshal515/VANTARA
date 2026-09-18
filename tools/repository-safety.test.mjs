@@ -628,3 +628,26 @@ test('the settings screen does not crash before it renders', () => {
     'sync health must be read into its own name',
   );
 });
+
+test('every XML the Android builds depend on actually parses', () => {
+  // دامج الـmanifest يسقط على XML غير صالح، والسقوط يأتي من CI بعد دقائق
+  // ومع أثرٍ طويل لا يسمّي الملف. وقد حدث فعلًا: تعليقٌ وُضع **بين خصائص**
+  // وسم `<application>` — وهذا غير صالح، والتعليق الصحيح يكون فوق الوسم.
+  //
+  // الفحص هنا محلي وفوري، فلا تُصرف لفّة CI على غلطةٍ يكشفها محلّل XML.
+  const targets = [
+    ...trackedFiles().filter((path) => path.startsWith('spike/') && path.endsWith('.xml')),
+    ...trackedFiles().filter((path) => path.startsWith('android/') && path.endsWith('.xml')),
+  ];
+
+  for (const path of targets) {
+    const source = read(path);
+    // تعليق داخل وسم: `<` ثم اسم ثم خصائص ثم `<!--` قبل أن يُغلق الوسم
+    const insideTag = /<[A-Za-z][^>]*?<!--/s;
+    assert.doesNotMatch(
+      source,
+      insideTag,
+      `${path} puts an XML comment inside a tag, which the manifest merger rejects`,
+    );
+  }
+});
