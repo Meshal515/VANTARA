@@ -251,3 +251,81 @@ describe('push', () => {
     expect(Number(storage.getItem('vantara.lastPush'))).toBeGreaterThan(0);
   });
 });
+
+/**
+ * سطح الهوية الذي يستهلكه خادم المحتوى.
+ *
+ * `lib/content-api.js` يقرأ الترويسة من هنا ويطلب التجديد من هنا. لو كان
+ * السطح قيمةً تُقرأ مرة واحدة لأُرسلت ترويسة حسابٍ سابق بعد تبديل الحساب،
+ * ولو غاب التجديد لسجّل التطبيق خروجًا في وجه القارئ في منتصف فصل.
+ */
+describe('the identity seam the content api reads', () => {
+  it('exposes the header only while signed in', async () => {
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({})) });
+    expect(sync.authorizationHeader).toBe('Bearer token-1');
+
+    sync.signOut();
+    expect(sync.authorizationHeader).toBeNull();
+    expect(sync.signedIn).toBe(false);
+  });
+
+  it('follows the token when it is rotated, rather than freezing at boot', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).includes('/v1/session')) {
+        return jsonResponse({ token: 'token-2', user: SIGNED_IN });
+      }
+      return jsonResponse({ reset: false, cursor: 0, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    expect(sync.authorizationHeader).toBe('Bearer token-1');
+
+    await sync.refreshSession();
+    expect(sync.authorizationHeader).toBe('Bearer token-2');
+  });
+
+  it('refreshes the same account without asking the reader for anything', async () => {
+    // اختيار الحساب هو الدخول: التجديد لا يعرض شاشة ولا يطلب سرًّا
+    const bodies = [];
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (String(url).includes('/v1/session')) {
+        bodies.push(JSON.parse(options.body));
+        return jsonResponse({ token: 'token-2', user: SIGNED_IN });
+      }
+      return jsonResponse({ reset: false, cursor: 0, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+
+    expect(await sync.refreshSession()).toBe(true);
+    expect(bodies).toEqual([{ userId: 'u1' }]);
+  });
+
+  it('keeps the mirror when refreshing, since the account did not change', async () => {
+    // مسح المرآة عند كل تجديد يعني شاشة فارغة كل خمس عشرة دقيقة
+    storage.setItem('vantara.cursor', '42');
+    const fetchImpl = vi.fn(async (url) =>
+      String(url).includes('/v1/session')
+        ? jsonResponse({ token: 'token-2', user: SIGNED_IN })
+        : jsonResponse({ reset: false, cursor: 42, changes: {} }),
+    );
+    const sync = await loadSync({ storage, fetchImpl });
+
+    await sync.refreshSession();
+    expect(storage.getItem('vantara.cursor')).toBe('42');
+  });
+
+  it('says no instead of throwing when there is no account to refresh', async () => {
+    storage.removeItem('vantara.user');
+    storage.removeItem('vantara.token');
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({})) });
+    expect(await sync.refreshSession()).toBe(false);
+  });
+
+  it('survives a refresh that fails on the network', async () => {
+    // القارئ لا يرى استثناءً؛ يرى 401 الأصلي من نداء المحتوى
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    expect(await sync.refreshSession()).toBe(false);
+  });
+});

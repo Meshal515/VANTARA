@@ -127,6 +127,8 @@ export function createPageLoader({
   maxWidth,
   baseUrl = '',
   fetchImpl = fetch,
+  /** ترويسة الهوية عند الإرسال. دالة لا قيمة: التوكن عمره خمس عشرة دقيقة. */
+  authorization = null,
 }) {
   // الترقيم 1-based: الفهرس 0 يرجع 502 من upstream، وهذا خطأ صامت لولا القياس
   //
@@ -170,9 +172,16 @@ export function createPageLoader({
         // طويلة. فيُجزَّأ الطلب بدل أن يُرفض.
         for (let at = 0; at < pageNumbers.length; at += MINT_CHUNK) {
           const chunk = pageNumbers.slice(at, at + MINT_CHUNK);
+          // التوقيع نداء JSON بجلسة: على الـAPK لا كوكي عبر الأصول، فالهوية
+          // في الترويسة. بلا هذا كان التوقيع نفسه يرجع 401 — أي أن إصلاح
+          // الصور يفشل عند بابه.
+          const identity = authorization?.() ?? null;
           const response = await fetchImpl(`${baseUrl}/v1/media/pages`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(identity ? { authorization: identity } : {}),
+            },
             body: JSON.stringify({ bookId, pages: chunk }),
             credentials: baseUrl ? 'include' : 'same-origin',
           });
@@ -294,6 +303,8 @@ export function createProgressSaver({
   baseUrl = '',
   /** يُنادى بالصفحة فقط بعد أن يقبلها مالك التقدم فعلًا. */
   onSaved = null,
+  /** ترويسة الهوية عند الإرسال. دالة لا قيمة: التوكن قصير العمر. */
+  authorization = null,
 }) {
   let timer = null;
   let pending = null;
@@ -307,14 +318,22 @@ export function createProgressSaver({
 
     if (useBeacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
       // beacon ينجو من إغلاق التبويب، بخلاف fetch. لا جواب منه، فلا إقرار:
-      // الصف يبقى في الصندوق ويُصرَّف عند الإقلاع القادم
+      // الصف يبقى في الصندوق ويُصرَّف عند الإقلاع القادم.
+      //
+      // ولا ترويسة معه — الـAPI لا يسمح بذلك. فعلى الـAPK قد يرجع 401 بلا أن
+      // نعلم، ولذلك بقاء الصف في الصندوق ليس تفصيلًا: هو ما يجعل هذه الحالة
+      // خسارة مؤجّلة لا خسارة نهائية.
       navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
       return;
     }
     try {
+      const identity = authorization?.() ?? null;
       const response = await fetchImpl(url, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(identity ? { authorization: identity } : {}),
+        },
         body,
         keepalive: true,
         // الاعتماد يجب أن يُرسل صراحةً عبر الأصول: `fetch` الافتراضي

@@ -14,6 +14,7 @@
 
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
+import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
 import { icon } from './lib/icons.js';
@@ -57,28 +58,25 @@ function mount(node) {
 }
 
 /** خادم المحتوى. مطلق داخل الـAPK، ونفس الأصل في المتصفح. */
+/**
+ * كل نداء JSON لخادم المحتوى يمرّ من هنا.
+ *
+ * النقل في `lib/content-api.js`: الهوية في ترويسة `Authorization` لا في كوكي
+ * عبر الأصول، وتجديد واحد عند 401. كان هذا النداء يعتمد على الكوكي وحده،
+ * فعلى الـAPK يرجع 401 صامتًا لكل شيء.
+ */
 async function api(path, options = {}) {
-  const response = await fetch(`${config.api}${path}`, {
-    credentials: config.api ? 'include' : 'same-origin',
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  if (response.status === 204) return null;
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    const error = new Error(payload?.error ?? `HTTP ${response.status}`);
-    error.status = response.status;
-    error.code = payload?.error;
-    throw error;
-  }
-  return payload;
+  return requestContent({ baseUrl: config.api, sync, path, options });
 }
+
+/**
+ * ترويسة الهوية للمسارات التي لا تمرّ من `api()`.
+ *
+ * حفظ التقدم وتوقيع الصور يحتاجان `keepalive` وشكلًا خاصًّا، فيتجاوزان النداء
+ * المشترك — ويفقدان معه الهوية. تُمرَّر كدالة لا كقيمة: التوكن عمره خمس عشرة
+ * دقيقة، فقيمة مُحتجزة عند الإقلاع تصبح منتهية بلا أن يلاحظ أحد.
+ */
+const identityHeader = () => sync.authorizationHeader ?? null;
 
 // ───────────────────────────── الحضور ووقت الاستخدام ─────────────────────────────
 
@@ -1215,6 +1213,8 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
         createProgressSaver({
           bookId: id,
           baseUrl: config.api,
+          // هذا المسار يتجاوز `api()`، فالهوية تُمرَّر إليه صراحةً
+          authorization: identityHeader,
           // الإقرار بعد قبول المالك فقط: بلا هذا تبقى كل صفوف المرآة معلّقة
           // فيصرّفها الإقلاع القادم بلا داعٍ، ومع الوقت يصير الصندوق بلا معنى
           onSaved: (page) => sync.enqueue('progress.confirm', { chapterKey: id, page }),
@@ -1337,6 +1337,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
       prefetch: 2,
       maxWidth: 1100,
       baseUrl: config.api,
+      authorization: identityHeader,
     });
     loaders.set(chapter.bookId, loader);
     enteredAt.set(chapter.bookId, Date.now());
@@ -1411,6 +1412,7 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
         prefetch: 2,
         maxWidth: 1100,
         baseUrl: config.api,
+        authorization: identityHeader,
       });
       loaders.set(next.bookId, loader);
       // التسخين برابط موقَّع أيضًا: صورة تُسخَّن برابط 401 تُكاش كفشل

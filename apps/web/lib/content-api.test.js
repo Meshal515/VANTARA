@@ -87,4 +87,90 @@ describe('Content API bearer transport', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   });
+
+  /**
+   * ما فوق العقد: الحالات التي تجعل هذا النقل صالحًا للويب أيضًا، لا للـAPK
+   * وحده. الويب ما زال يعمل بالكوكي، فالنقل الذي يفترض وجود توكن يكسره.
+   */
+
+  it('still works with no identity at all, on the cookie path', async () => {
+    const fetchMock = vi.fn(async () => response({ content: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await requestContent({ sync: { signedIn: false }, path: '/v1/library' });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('/v1/library');
+    expect(options.headers.authorization).toBeUndefined();
+    expect(options.credentials).toBe('include');
+    vi.unstubAllGlobals();
+  });
+
+  it('does not retry a 401 when there is nothing to refresh', async () => {
+    // بلا هذا كان النداء يُرسل مرتين لكل زائر غير مسجَّل
+    const fetchMock = vi.fn(async () => response({ error: 'unauthorized' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      requestContent({ sync: { signedIn: false }, path: '/v1/library' }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the 401 when the refresh itself fails', async () => {
+    // فشل التجديد ليس الخطأ الذي يهمّ المُنادي: الأصل أن الطلب رجع 401
+    const fetchMock = vi.fn(async () => response({ error: 'unauthorized' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+    const sync = {
+      authorizationHeader: 'Bearer dead',
+      signedIn: true,
+      refreshSession: vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    };
+
+    await expect(requestContent({ sync, path: '/v1/library' })).rejects.toMatchObject({
+      status: 401,
+      code: 'unauthorized',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null for a 204 instead of throwing on an empty body', async () => {
+    // `PUT /progress` يرجع 204: محاولة قراءة JSON منه كانت ترمي
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      requestContent({ sync: {}, path: '/v1/books/x/progress', options: { method: 'PUT' } }),
+    ).resolves.toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('carries the server error code so callers can branch on it', async () => {
+    // `ensureLocal` يتوقف عند 409 ويعيد المحاولة على غيره
+    const fetchMock = vi.fn(async () => response({ error: 'no_copies_left' }, 409));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(requestContent({ sync: {}, path: '/v1/x' })).rejects.toMatchObject({
+      status: 409,
+      code: 'no_copies_left',
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('does not send a body or a content-type on a GET', async () => {
+    const fetchMock = vi.fn(async () => response({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await requestContent({ sync: {}, path: '/v1/library', options: { method: 'GET' } });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.body).toBeUndefined();
+    expect(options.headers['content-type']).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
 });

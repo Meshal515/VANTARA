@@ -235,6 +235,32 @@ export function createSync({ baseUrl }) {
     return user;
   }
 
+  /**
+   * يُصدر توكنًا جديدًا للحساب نفسه.
+   *
+   * توكن الهوية قصير العمر (خمس عشرة دقيقة في عقد B2)، والقارئ يبقى مفتوحًا
+   * أطول من ذلك بكثير. فبلا تجديد، نداء واحد بعد انتهائه يُسجّل خروجًا في وجه
+   * القارئ في منتصف فصل.
+   *
+   * وهذا ليس دخولًا جديدًا: اختيار الحساب **هو** الدخول في VANTARA، فإعادة
+   * إصدار توكن لحساب معروف على هذا الجهاز لا تطلب من المستخدم شيئًا — ولا
+   * كلمة مرور ولا رقمًا سريًّا، ولا حتى شاشة.
+   *
+   * ما تحته يتغيّر في B2 (إثبات الجهاز بدل معرّف الحساب)، وهذا السطح هو
+   * الفاصل: من يستهلكه — `lib/content-api.js` — لا يتغيّر معه.
+   */
+  async function refreshSession() {
+    const known = user?.userId ?? null;
+    if (!known) return false;
+    try {
+      await signIn(known);
+      return true;
+    } catch {
+      // الفشل ليس خطأً يُرمى للمُنادي: هو رجع 401 أصلًا، وهذا ما يراه
+      return false;
+    }
+  }
+
   function signOut() {
     token = null;
     user = null;
@@ -553,6 +579,18 @@ export function createSync({ baseUrl }) {
     get signedIn() {
       return Boolean(token);
     },
+    /**
+     * ترويسة الهوية لخادم المحتوى.
+     *
+     * getter لا قيمة: التوكن يُدوَّر (تجديد، أو تبديل حساب)، وقيمة تُقرأ مرة
+     * واحدة تبقى بعده — فتُرسل ترويسة لحساب سابق أو لجلسة منتهية.
+     *
+     * شكل التوكن ملك B2؛ هذا هو المكان الذي يُقرأ منه، لا أكثر.
+     */
+    get authorizationHeader() {
+      return token ? `Bearer ${token}` : null;
+    },
+    refreshSession,
     get pendingWrites() {
       return queue.length;
     },

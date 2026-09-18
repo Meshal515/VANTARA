@@ -34,6 +34,40 @@ describe('createProgressSaver', () => {
     expect(fetchImpl.mock.calls[0][1]).toMatchObject({ credentials: 'same-origin' });
   });
 
+  it('carries the identity header, since it bypasses the shared client', async () => {
+    // على الـAPK لا كوكي عبر الأصول: بلا الترويسة يرجع 401 والتقدم لا يُحفظ
+    const fetchImpl = vi.fn(async () => ok());
+    const saver = createProgressSaver({
+      bookId: 'b1',
+      baseUrl: 'https://api.example.com',
+      fetchImpl,
+      delayMs: 0,
+      authorization: () => 'Bearer identity-1',
+    });
+    saver.update(12);
+    saver.flush();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer identity-1');
+  });
+
+  it('reads the identity at send time, not at construction', async () => {
+    // التوكن عمره خمس عشرة دقيقة، والقارئ يبقى مفتوحًا أطول من ذلك
+    let header = 'Bearer old';
+    const fetchImpl = vi.fn(async () => ok());
+    const saver = createProgressSaver({
+      bookId: 'b1',
+      baseUrl: 'https://api.example.com',
+      fetchImpl,
+      delayMs: 0,
+      authorization: () => header,
+    });
+    header = 'Bearer fresh';
+    saver.update(3);
+    saver.flush();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer fresh');
+  });
+
   it('confirms only what the owner accepted', async () => {
     const saved = [];
     const fetchImpl = vi.fn(async () => ({ ok: false, status: 401 }));
@@ -117,6 +151,36 @@ describe('createPageLoader', () => {
     expect(fetchImpl.mock.calls[0][0]).toBe(`${BASE}/v1/media/pages`);
     // الكوكي هو ما يُصرِّح بالتوقيع، وهو نداء JSON لا `<img>` — فيُرسل صراحةً
     expect(fetchImpl.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
+  });
+
+  it('signs with the identity header, or the fix fails at its own door', async () => {
+    // التوقيع نفسه نداء JSON بجلسة: بلا ترويسة يرجع 401 على الـAPK، فلا
+    // روابط موقَّعة أصلًا — وإصلاح الصور يسقط عند أول خطوة
+    const fetchImpl = vi.fn(async () => minted([1]));
+    const loader = createPageLoader({
+      bookId: 'b1',
+      pageNumbers: [1],
+      baseUrl: BASE,
+      fetchImpl,
+      authorization: () => 'Bearer identity-1',
+    });
+
+    await loader.prepare();
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer identity-1');
+  });
+
+  it('omits the header when there is no identity, keeping the cookie path intact', async () => {
+    const fetchImpl = vi.fn(async () => minted([1]));
+    const loader = createPageLoader({
+      bookId: 'b1',
+      pageNumbers: [1],
+      baseUrl: BASE,
+      fetchImpl,
+      authorization: () => null,
+    });
+
+    await loader.prepare();
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBeUndefined();
   });
 
   it('uses the signed url once signed', async () => {
