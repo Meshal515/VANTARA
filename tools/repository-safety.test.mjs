@@ -223,6 +223,33 @@ test('nothing reaches for an operating-system push channel', () => {
   assert.deepEqual(offenders, [], `in-app notifications only:\n${offenders.join('\n')}`);
 });
 
+test('every failure scenario has a status and deferred ones say what they need', () => {
+  // مصفوفة الفشل تفقد قيمتها إذا احتوت صفًّا بلا حالة أو تأجيلًا بلا سبب:
+  // «سنغطيه لاحقًا» ليس تغطية ولا تأجيلًا معلنًا.
+  const doc = read('docs/VANTARA_FAILURE_MATRIX.md');
+  const rows = [...doc.matchAll(/^\|\s*(\d+)\s*\|([^|]+)\|\s*`(COVERED|DEFERRED)`\s*\|([^|]*)\|/gm)];
+  assert.ok(rows.length >= 15, `failure matrix parse failed — found ${rows.length} rows`);
+
+  const malformed = [...doc.matchAll(/^\|\s*(\d+)\s*\|([^|]+)\|\s*([^|`]+)\|/gm)].map(
+    (row) => row[1],
+  );
+  assert.deepEqual(malformed, [], `every scenario needs a COVERED/DEFERRED status: ${malformed}`);
+
+  for (const [, number, , status, evidence] of rows) {
+    assert.ok(
+      evidence.trim().length > 20,
+      `scenario ${number} (${status}) needs real evidence, not a placeholder`,
+    );
+    if (status === 'DEFERRED') {
+      assert.match(
+        evidence,
+        /يحتاج|ملك|مكتوب/,
+        `deferred scenario ${number} must say what it needs or who owns it`,
+      );
+    }
+  }
+});
+
 test('the retired-table exception list stays at the declared identity handoff', () => {
   assert.deepEqual(
     Object.keys(RETIRED_TABLE_EXCEPTIONS).sort(),
