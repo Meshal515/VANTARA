@@ -79,16 +79,26 @@ curl -s -X POST localhost:8080/api/tokens -H "Authorization: Bearer $S" \
 
 ## 3. المصادر
 
-> ⚠️ **الرابط تغيّر، والقديم لم يمت بهدوء.** كان هنا
-> `index.min.json`، وهو اليوم **ليس كتالوجًا**: فُحص فعليًا ووُجد فيه عنصران
-> فقط — «Outdated App» و«Update to Mihon 0.20.1+». فمن يتبع الخطوة القديمة
-> يحصل على إضافتين وهميتين و**صفر مصدر عربي**، بلا رسالة خطأ واحدة.
+> ⚠️ **ثلاث صيغ للمتجر، وواحدة فقط تناسب نسختك.** فُحصت الثلاث فعلًا من
+> المصدر (2026‑09‑18):
 >
-> Keiyoushi انتقل إلى متجر بصيغة Protobuf: `index.pb`.
+> | الملف | الحجم | ما فيه | الحكم |
+> |---|---|---|---|
+> | `index.min.json` | **765 بايت** | مدخلان وهميان: «Outdated App» و«Update to Mihon 0.20.1+» | ☠️ **شاهد قبر.** يُقرأ بنجاح ويعطي **صفر مصدر عربي** بلا رسالة خطأ |
+> | `index.json` | **1.4 MB** | 1396 إضافة بالصيغة **المتشعّبة** الجديدة (`extensionList.extensions`) | ⚠️ محلّل Suwayomi القديم يتوقع مصفوفة مسطّحة، فقد لا يفهمها |
+> | `index.pb` | 108 KB | Protobuf، وهو ما يستعمله Mihon اليوم | ✅ الصيغة الحالية — **وتحتاج Suwayomi حديثًا** |
+>
+> **فالخلاصة: لا صيغة تُنقذ نسخة قديمة.** الترقية ليست تحسينًا اختياريًّا،
+> هي شرط رؤية أي مصدر. وترقيةُ Suwayomi مطلوبة لسببٍ ثانٍ أيضًا: تثبيت
+> الـJAR مباشرة (`Suwayomi-Server#2182`، مدموج 13 يوليو 2026) يُسقط مسار
+> `dex2jar` الهشّ — وهو سبب أعطال موثّقة (`#2178` انهيار على minSdk 26،
+> `#602` أصول مفقودة).
 
 ```bash
 A="Authorization: Bearer <uy_token>"
 
+# `index.pb` هي الصيغة الحالية. إن رجع صفرًا، فالنسخة قديمة — رقِّها،
+# ولا تجرّب `index.min.json` فهو شاهد قبر لا كتالوج.
 curl -X POST -H "$A" -H 'Content-Type: application/json' \
   localhost:8080/api/admin/extensions/repos \
   -d '{"url":"https://github.com/keiyoushi/extensions/raw/repo/index.pb"}'
@@ -97,12 +107,33 @@ curl -X POST -H "$A" localhost:8080/api/admin/extensions/refresh
 curl -H "$A" "localhost:8080/api/admin/extensions/catalog?lang=ar" | jq -r '.content[].pkgName'
 ```
 
-**افحص العدد، لا تفترضه.** السطر الأخير يجب أن يطبع عشرات الحزم العربية.
+**افحص العدد، لا تفترضه.** الفهرس يحمل **75 إضافة فيها مصدر عربي**
+(43 `SAFE` · 10 `MIXED` · 22 `NSFW`) — عددٌ مقروء من `index.json` نفسه، لا
+تقديرًا. فالسطر الأخير يجب أن يطبع عشرات الحزم.
 
 | ما يظهر | ما يعنيه |
 |---|---|
 | عشرات الحزم | المتجر مقروء — أكمل |
-| **صفر أو عنصران** | Uchiyomi/Suwayomi المثبّتان عندنا لا يفهمان `index.pb` بعد. **ليس عيبًا في VANTARA**: الحل ترقية الـupstream (والـdigests مثبّتة عندنا، فالترقية قرار واعٍ يُحدَّث في `docs/UPSTREAMS.md`) |
+| **صفر** | النسخة لا تفهم `index.pb`. **ليس عيبًا في VANTARA**: رقِّ الـupstream (والـdigests مثبّتة عندنا، فالترقية قرار واعٍ يُحدَّث في `docs/UPSTREAMS.md`). ولا تنزل إلى `index.min.json` ظنًّا أنه أبسط: هو من يعطي «عنصرين» |
+| **عنصران** | أنت على `index.min.json`. عُد إلى `index.pb` |
+
+### المصادر الخمسة الأولى، بأرقامها
+
+مُتحقَّق منها من الفهرس ومن الشبكة في 2026‑09‑18. كلها `SAFE`، وكلها تنشر
+`jarUrl` و`apkUrl`:
+
+| المصدر | الحزمة | lib | الدومين | فحص الشبكة |
+|---|---|---|---|---|
+| Mangalek | `eu.kanade.tachiyomi.extension.ar.mangalek` | 1.4 | `mangalik.net` | 200 · 173 KB |
+| MangaSpark | `…ar.mangaspark` | 1.4 | `sparkmanga.net` | 200 · 122 KB |
+| Azora | `…ar.azora` | 1.6 | `azorafly.com` | 200 · 984 KB |
+| MangaSwat | `…ar.mangaswat` | 1.6 | `meshmanga.com` | 200 · 70 KB |
+| Team X | `…ar.teamx` | 1.6 | `olympustaff.com` | 200 · 307 KB |
+
+وفحص الشبكة كان بـ`curl` وحده بترويسة أندرويد، **بلا كوكي وبلا WebView**.
+و`teamx` و`mangaspark` تحملان سكربت `challenge-platform` من Cloudflare،
+لكنهما أعطيا الصفحة العربية كاملة (146 و131 رابط عمل) — **فهو ليس تحدّيًا
+يحجب**، وسقوطُهما لاحقًا يُشخَّص كعطل محرّك لا كعطل مصدر.
 
 وهذا الفحص ليس تزيينًا: صيغة المتجر تغيّرت في 2026، وكتالوج صامت يبدو تمامًا
 كمكتبة فارغة.
