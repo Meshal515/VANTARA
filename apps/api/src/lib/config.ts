@@ -25,6 +25,15 @@ const schema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  /**
+   * أصول مسموح لها بالطلب، مفصولة بفاصلة.
+   *
+   * تُضاف إلى الأصول المعروفة (`https://localhost` للـAPK وما شابه). هنا يوضع
+   * نطاق Pages الإنتاجي. القائمة بيضاء بقصد: `*` مع اعتماد يرفضه المتصفح،
+   * ويعني أن أي صفحة تستطيع قراءة مكتبة المستخدم.
+   */
+  ALLOWED_ORIGINS: z.string().optional(),
+
   UPLOAD_DIR: z.string().default('/data/uploads'),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(8 * 1024 * 1024),
 

@@ -9,6 +9,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
+import { registerCors } from './lib/cors.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { authRoutes } from './routes/auth.ts';
 import { catalogRoutes } from './routes/catalog.ts';
@@ -38,6 +39,9 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     contentSecurityPolicy: false,
   });
   await app.register(cookie, { secret: config.SESSION_SECRET });
+  // الواجهة على الـAPK تعمل من `https://localhost`، فكل نداء cross-origin.
+  // بلا هذا يفشل كل شيء عند الـpreflight ويبدو للمستخدم انقطاع شبكة.
+  registerCors(app, config);
   await app.register(rateLimit, {
     global: false,
     max: 300,
@@ -84,7 +88,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   await discoveryRoutes(app, ctx);
   await libraryRoutes(app, ctx);
 
-  // الواجهة تُقدَّم من نفس الأصل: لا CORS، والكوكي same-origin بلا استثناءات
+  // الواجهة تُقدَّم من نفس الأصل هنا أيضًا (الويب)، لكن الـAPK أصل آخر —
+  // ولذلك CORS مُسجَّل أعلاه بقائمة بيضاء
   const webRoot = resolve(
     dirname(fileURLToPath(import.meta.url)),
     process.env['VANTARA_WEB_ROOT'] ?? '../../web',

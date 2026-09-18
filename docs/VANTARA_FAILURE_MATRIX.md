@@ -31,6 +31,7 @@
 | 15 | إعادة تشغيل PostgreSQL فعليًا (pool reconnect) | `DEFERRED` | يحتاج PostgreSQL حقيقيًا: `docker compose restart postgres` ثم طلب مباشرة بعده. مسجَّل لـB11 بعد أن تتوفر البيئة، أو لـB12 داخل بوابة E2E |
 | 16 | إعادة تشغيل Uchiyomi فعليًا | `DEFERRED` | يحتاج نسخة Uchiyomi حيّة. `spike/uchiyomi-openapi-v0.34.yaml` هو العقد المستخدم في المحاكاة، والحقيقي لم يُشغَّل من هذه البيئة |
 | 17 | مصدر أول يسقط ومصدر ثانٍ ينجح | `DEFERRED` | ملك **B6** (`apps/api/src/lib/chapter-fallback.test.ts` على فرعه). لا أكتب تغطية ثانية لنفس المنطق في ملف يملكه باتش قيد التنفيذ |
+| 19 | صور القارئ على الـAPK (الكوكي عبر الأصول) | `DEFERRED` | الآلية مبنية ومختبرة (`packages/domain/src/media-token.ts`)، وربطها بمسار الصور **يحتاج** عقد الهوية من B2 ومسارات الصور من B6. مسجَّل في `VANTARA_TRANSPORT.md` |
 | 18 | فحوص D1 الحقيقية (الصندوق الصادر، الإخفاء، الإشعارات) | `DEFERRED` | `services/sync-worker/verify.mjs` مكتوب وجاهز، ويحتاج Worker منشورًا وD1 حقيقية. لم يُشغَّل، ولا أدّعي أنه شُغّل |
 
 ---

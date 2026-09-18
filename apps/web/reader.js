@@ -227,6 +227,11 @@ export function createProgressSaver({
         headers: { 'Content-Type': 'application/json' },
         body,
         keepalive: true,
+        // الاعتماد يجب أن يُرسل صراحةً عبر الأصول: `fetch` الافتراضي
+        // `same-origin`، وهذا المسار يتجاوز عميل الـAPI المشترك. فعلى الـAPK
+        // (`https://localhost` → خادم آخر) كان يذهب بلا اعتماد فيرجع 401 —
+        // وحفظ التقدم لا ينجح أبدًا بلا خطأ ظاهر للقارئ.
+        credentials: baseUrl ? 'include' : 'same-origin',
       });
       // fetch لا يرمي على 401/502. اعتبار ذلك نجاحًا كان يعلّم التقدم «وصل
       // المالك» وهو لم يصل، فيضيع بلا إعادة محاولة ويعود القارئ للصفحة الأولى.
