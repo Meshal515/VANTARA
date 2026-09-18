@@ -99,7 +99,7 @@ class SourceProbe(private val http: OkHttpClient) {
             value
         } catch (t: Throwable) {
             val kind = t.javaClass.name
-            val msg = t.message?.take(300) ?: "(no message)"
+            val msg = diagnostic(t)
             // الدليل يُجمع **الآن**: الموقع لحظةَ الفشل، لا أمس
             val live = baseUrl?.let { liveCheck(it) }
             into += Step(
@@ -167,6 +167,18 @@ class SourceProbe(private val http: OkHttpClient) {
         }
     }
 
+    private fun diagnostic(t: Throwable): String {
+        val chain = generateSequence(t) { it.cause }
+            .take(4)
+            .joinToString(" <- ") { x ->
+                val m = x.message?.replace("\n", " ")?.take(180) ?: "(no message)"
+                "${x.javaClass.name}: $m"
+            }
+        val frames = t.stackTrace.take(6)
+            .joinToString(" | ") { f -> "${f.className}.${f.methodName}:${f.lineNumber}" }
+        return "$chain\nstack: $frames"
+    }
+
     private fun describe(value: Any?): String = when (value) {
         null -> "null"
         is Collection<*> -> "${value.size} عنصرًا"
@@ -204,7 +216,12 @@ class SourceProbe(private val http: OkHttpClient) {
                 chapters = emptyList(),
                 fetchDetails = true,
                 fetchChapters = false,
-            ).manga
+            ).manga.apply {
+                // Details parsers commonly return a partial SManga without url.
+                // The host already knows the canonical url from search and must
+                // carry it forward before asking for chapters.
+                url = first.url
+            }
         } ?: first
 
         // ٣) الفصول
