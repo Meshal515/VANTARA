@@ -426,3 +426,42 @@ test('Android pairing links are wired from Capacitor into the trusted-device cli
     'boot must await native pairing without letting a stale link block startup',
   );
 });
+
+test('local worker secrets and local D1 state can never be committed', () => {
+  // `wrangler dev` يحتاج `.dev.vars`، وفيه نفس الأسرار الثلاثة التي يمنع
+  // نشرها. بلا سطر في `.gitignore` يظهر الملف كملف جديد فيسحبه أي
+  // `git add -A` إلى المستودع. وحالة D1 المحلية قاعدة كاملة، ومنها
+  // توكنات الأجهزة المقترنة.
+  const ignore = read('.gitignore');
+  assert.match(ignore, /^\.dev\.vars$/m, '.gitignore must ignore wrangler local secrets');
+  assert.match(ignore, /\.wrangler\//, '.gitignore must ignore local D1 state');
+});
+
+test('the server never acknowledges a write it did not apply', () => {
+  // العميل يعزل ما لا تذكره الاستجابة، لكنه يُفرّغ طابوره من كل ما تُقرّه.
+  // فإقرار عملية بلا جملة = ضياع صامت: APK أحدث من الـWorker المنشور يرسل
+  // `kind` مجهولًا، فيُقَرّ ولا يُكتب ولا يُعاد أبدًا.
+  const worker = read('services/sync-worker/src/index.ts');
+  assert.match(
+    worker,
+    /unapplied\.add\(op\.opId\)/,
+    'ops that build no statement must be collected, not acknowledged',
+  );
+  assert.match(
+    worker,
+    /applied:\s*applied\.map/,
+    'the response must list only the ops that produced statements',
+  );
+  assert.match(
+    worker,
+    /if\s*\(statements\.length\s*>\s*0\)\s*await\s+env\.DB\.batch/,
+    'an all-unknown batch must not call D1 with an empty batch, which throws',
+  );
+
+  const queue = read('apps/web/lib/sync.js');
+  assert.match(
+    queue,
+    /quarantineOp\(op,\s*422,\s*'not_settled'\)/,
+    'the client half of the contract must keep quarantining unsettled ops',
+  );
+});

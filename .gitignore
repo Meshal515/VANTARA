@@ -3,6 +3,15 @@
 .env.*
 !.env.example
 
+# أسرار wrangler المحلية وحالة D1 المحلية.
+#
+# `.dev.vars` يحمل نفس الأسرار الثلاثة التي يمنع نشرها: بلا هذا السطر يظهر
+# الملف كـ`??` فيسحبه أي `git add -A` إلى المستودع. وحالة D1 المحلية قاعدة
+# بيانات كاملة، ومنها توكنات الأجهزة المقترنة.
+.dev.vars
+.dev.vars.*
+**/.wrangler/
+
 # spike runtime
 spike/library/
 spike/sources/

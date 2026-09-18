@@ -1315,25 +1315,44 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
   const ctx = await loadOpContext(ops, env);
 
+  // عملية لم تُنتج جملة واحدة لا تُقَرّ ولا يُحجز لها op_id.
+  //
+  // `statementsFor` ترجع `null` على كل ما لا تعرفه: `kind` غير منشور بعد،
+  // أو حمولة بلا مفتاحها المطلوب. إقرارها يعني أن العميل يُفرّغ طابوره
+  // والكتابة لم تحدث ولن تحدث — وهو الضياع الصامت نفسه الذي يحرس منه
+  // ترتيب «الأثر ثم الحجز» أعلاه، داخلًا من الباب الآخر.
+  //
+  // وهذا ليس فرضًا نظريًّا: ثلاثة أجهزة أندرويد تُحدَّث في أوقات مختلفة،
+  // فAPK أحدث من الـWorker المنشور يرسل `kind` لا يعرفه الخادم.
+  //
+  // وطابور B5 عند العميل يعرف هذا العقد أصلًا: ما لا تذكره الاستجابة في
+  // `applied` ولا `skipped` يُعزل حالًا (`not_settled`) فيظهر للمستخدم بدل
+  // أن يُعاد إلى الأبد أو يُنسى. فلا حقل جديد هنا: الإسقاط هو الإشارة.
   const statements: D1PreparedStatement[] = [];
+  const unapplied = new Set<string>();
   for (const op of ops) {
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
     const built = statementsFor(op, userId, rev, now, env, ctx);
-    if (built) statements.push(...built);
+    if (built && built.length > 0) statements.push(...built);
+    else unapplied.add(op.opId);
   }
-  for (const op of ops) {
+  const applied = ops.filter((op) => !unapplied.has(op.opId));
+  for (const op of applied) {
     statements.push(
       env.DB.prepare(
         'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
       ).bind(op.opId, userId, op.kind, rev, now),
     );
   }
-  await env.DB.batch(statements);
+  // D1 ترفض دفعة فارغة (`No SQL statements detected`). دفعة كل عملياتها
+  // مجهولة تنتهي هنا بلا جملة واحدة، فالنداء يرمي ويصير الردّ 500 — أي
+  // «أعد المحاولة» عند العميل، على عمليات لن تُطبَّق أبدًا.
+  if (statements.length > 0) await env.DB.batch(statements);
 
-  // كلها مستقرّة الآن: العميل يُفرّغ طابوره. التمييز بين «طُبّقت» و«كانت
-  // مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
+  // المُقَرّة مستقرّة الآن: العميل يُفرّغ طابوره منها. التمييز بين «طُبّقت»
+  // و«كانت مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
   return json({
-    applied: ops.map((op) => op.opId),
+    applied: applied.map((op) => op.opId),
     skipped: [],
     cursor: rev,
     serverRev: await currentRev(env),
