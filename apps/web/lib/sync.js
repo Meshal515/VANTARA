@@ -170,13 +170,20 @@ export function createSync({ baseUrl }) {
     return response.json();
   }
 
-  /** رابط Owner من نوع `?pair=...` يُستهلك مرة واحدة بلا form أو PIN. */
+  /** يستهلك pairing من أي URL موثوق وصل من الويب أو الجسر الأصلي. */
+  async function consumePairingUrl(value) {
+    const url = new URL(value);
+    const pairingToken = url.searchParams.get('pair');
+    if (!pairingToken) return false;
+    await pairDevice(pairingToken);
+    return true;
+  }
+
+  /** رابط Owner على الويب من نوع `?pair=...` يُستهلك مرة واحدة بلا form أو PIN. */
   async function consumePairingFromUrl() {
     if (typeof location === 'undefined') return;
     const url = new URL(location.href);
-    const pairingToken = url.searchParams.get('pair');
-    if (!pairingToken) return;
-    await pairDevice(pairingToken);
+    if (!(await consumePairingUrl(url.href))) return;
     url.searchParams.delete('pair');
     if (typeof history !== 'undefined') {
       history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
@@ -351,6 +358,7 @@ export function createSync({ baseUrl }) {
     },
     accounts,
     pairDevice,
+    consumePairingUrl,
     signIn,
     signOut,
     logoutDevice,
