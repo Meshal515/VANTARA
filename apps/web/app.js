@@ -30,6 +30,9 @@ const el = (tag, className, text) => {
 const root = $('#root');
 const config = endpoints();
 const sync = createSync({ baseUrl: config.sync });
+// Capacitor injects native plugins before user JS. On normal web this is
+// undefined, so the bridge is a no-op without requiring a browser npm import.
+const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
 
 const state = {
   route: { name: 'gate' },
@@ -1621,6 +1624,9 @@ setInterval(() => void sync.pull(), 60_000);
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
+  // Pair a clean APK before the account gate can issue /v1/session.
+  await nativeLinksReady;
+
   if (!syncConfigured()) {
     // بلا عنوان مزامنة لا حسابات ولا أصدقاء. الرسالة صريحة بدل شاشة فارغة.
     mount(
