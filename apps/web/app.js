@@ -1607,7 +1607,8 @@ setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
   // Pair a clean APK before the account gate can issue /v1/session.
-  await nativeLinksReady;
+  // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
+  await nativeLinksReady.catch(() => {});
 
   if (!syncConfigured()) {
     // بلا عنوان مزامنة لا حسابات ولا أصدقاء. الرسالة صريحة بدل شاشة فارغة.
