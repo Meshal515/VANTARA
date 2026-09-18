@@ -18,6 +18,8 @@ import {
   mergeFields,
   mergeProgress,
   needsFullResync,
+  notificationId,
+  notificationTargets,
   ownerOf,
   readStats,
   redactForViewers,
@@ -203,7 +205,9 @@ const DELTA_TABLES = [
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler_after, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
   ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev'],
-  ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, created_at, rev'],
+  // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
+  // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
+  ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev'],
   ['activity', 'id, actor_id, verb, series_ref, payload, created_at, rev'],
   ['settings', 'user_id, data, rev'],
 ] as const;
@@ -287,12 +291,66 @@ function asNumber(value: unknown): number | null {
  * `null` تعني عملية غير صالحة: تُسجّل كمطبَّقة ولا تُنفّذ. الرفض بخطأ يجعل
  * طابور العميل يتوقف عند عملية فاسدة إلى الأبد، وهذا يجمّد المزامنة كلها.
  */
-function statementsFor(
+/**
+ * ما يحتاجه تحويل العملية من حالة خارجية.
+ *
+ * `accounts` يلزم لتوصية «للجميع»: المستلمون ليسوا في الحمولة. يُقرأ مرة واحدة
+ * لكل طلب وفقط عند وجود عملية تحتاجه، لا مرة لكل عملية.
+ */
+export interface OpContext {
+  accounts: readonly string[];
+}
+
+/**
+ * ينتج إشعارًا لكل مستلم.
+ *
+ * هذا هو المُنتِج العام: أي نظام يريد إشعارًا (توصيات، ردود، تفاعلات) يستدعيه
+ * ولا يكتب في جدول الإشعارات بنفسه. مفتاح الصف مشتق من `op_id` والمستلم، فإعادة
+ * تسليم العملية لا تُنتج إشعارًا ثانيًا لنفس الحدث.
+ */
+function notificationStatements(
+  db: Env['DB'],
+  input: {
+    opId: string;
+    kind: string;
+    recipients: readonly string[];
+    actorId: string;
+    seriesRef?: string | null;
+    body?: string | null;
+    link?: string | null;
+    now: number;
+    rev: number;
+  },
+): D1PreparedStatement[] {
+  return input.recipients.map((recipient) =>
+    db
+      .prepare(
+        `INSERT INTO notifications
+           (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+         ON CONFLICT (id) DO NOTHING`,
+      )
+      .bind(
+        notificationId(input.opId, recipient),
+        recipient,
+        input.kind,
+        input.actorId,
+        input.seriesRef ?? null,
+        input.body ?? null,
+        input.link ?? null,
+        input.now,
+        input.rev,
+      ),
+  );
+}
+
+export function statementsFor(
   op: IncomingOp,
   userId: string,
   rev: number,
   now: number,
   env: Env,
+  ctx: OpContext = { accounts: [] },
 ): D1PreparedStatement[] | null {
   const db = env.DB;
   const p = op.payload;
@@ -547,36 +605,65 @@ function statementsFor(
             rev,
           ),
       ];
-      // الإشعار يحمل الرابط العميق إلى العمل نفسه
-      if (toId) {
-        statements.push(
-          db
-            .prepare(
-              `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, link, read, created_at, rev)
-               VALUES (?, ?, 'RECOMMENDATION', ?, ?, ?, ?, 0, ?, ?)
-               ON CONFLICT (id) DO NOTHING`,
-            )
-            .bind(
-              `${op.opId}-n`,
-              toId,
-              userId,
-              seriesRef,
-              asString(p['message'], 500),
-              `vantara://series/${encodeURIComponent(seriesRef)}`,
-              now,
-              rev,
-            ),
-        );
-      }
+      // توصية «للجميع» (`toId` فارغ) كانت لا تُنشئ إشعارًا لأحد: تُسجَّل في
+      // جدول التوصيات ولا يعرف بها أحد. المستلمون يُحسبون من الحسابات، والفاعل
+      // مستثنى، والرابط العميق يفتح العمل نفسه.
+      statements.push(
+        ...notificationStatements(db, {
+          opId: op.opId,
+          kind: 'RECOMMENDATION',
+          recipients: notificationTargets({
+            accounts: ctx.accounts,
+            actorId: userId,
+            to: toId,
+          }),
+          actorId: userId,
+          seriesRef,
+          body: asString(p['message'], 500),
+          link: `vantara://series/${encodeURIComponent(seriesRef)}`,
+          now,
+          rev,
+        }),
+      );
       return statements;
     }
 
+    /**
+     * فتح الإشعار.
+     *
+     * القراءة تعني العرض ضمنًا، فتُكتب `seen` معها: بلا ذلك يبقى صفٌّ مقروء
+     * بلا «عُرض»، ومزامنة جهاز آخر تراه «وصل الآن» فتُظهر تنبيهه من جديد.
+     * ولا تُنقص أبدًا: `MAX` يحمي من إقرار متأخر يرجع بالحالة للخلف.
+     */
     case 'notification.read': {
       const id = asString(p['id'], 80);
       if (!id) return null;
       return [
         db
-          .prepare('UPDATE notifications SET read = 1, rev = ? WHERE id = ? AND user_id = ?')
+          .prepare(
+            `UPDATE notifications SET read = 1, seen = 1, rev = ?
+              WHERE id = ? AND user_id = ?`,
+          )
+          .bind(rev, id, userId),
+      ];
+    }
+
+    /**
+     * عُرض التنبيه الجانبي، أو فُتح الصندوق.
+     *
+     * منفصل عن القراءة بقصد: العرض ليس قراءة. بلا هذه العملية يتكرر التنبيه
+     * عند كل مزامنة، أو نضطر لاعتبار العرض قراءةً فيختفي غير المقروء بلا أن
+     * يفتحه أحد. `MAX` كي لا يُرجع `seen` متأخرٌ صفًّا صار مقروءًا.
+     */
+    case 'notification.seen': {
+      const id = asString(p['id'], 80);
+      if (!id) return null;
+      return [
+        db
+          .prepare(
+            `UPDATE notifications SET seen = 1, rev = ?
+              WHERE id = ? AND user_id = ? AND seen = 0`,
+          )
           .bind(rev, id, userId),
       ];
     }
@@ -610,6 +697,14 @@ function statementsFor(
 
 /** التعديلات التي تحتاج قراءة قبل الكتابة: rev لكل حقل مخزّن كـJSON. */
 const FIELD_MERGE_KINDS = new Set(['profile.patch', 'settings.patch']);
+
+/** العمليات التي تحتاج قائمة الحسابات (بثّ لكل المستلمين). */
+const ACCOUNT_AWARE_KINDS = new Set(['recommendation.send']);
+
+async function allAccountIds(env: Env): Promise<string[]> {
+  const { results } = await env.DB.prepare('SELECT user_id FROM accounts').all<{ user_id: string }>();
+  return results.map((row) => row.user_id);
+}
 
 const PROFILE_COLUMNS: Record<string, string> = {
   displayName: 'display_name',
@@ -728,10 +823,15 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // والأثر يسبق الحجز حتى يرى حرس `NOT EXISTS` في العمليات التراكمية حالة
   // ما قبل هذا الطلب: إعادة تسليم تجد op_id موجودًا من طلب سابق فلا تحتسب
   // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
+  // قائمة الحسابات تُقرأ مرة واحدة وفقط إن احتاجتها عملية: توصية «للجميع»
+  // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
+  const needsAccounts = ops.some((op) => ACCOUNT_AWARE_KINDS.has(op.kind));
+  const ctx: OpContext = { accounts: needsAccounts ? await allAccountIds(env) : [] };
+
   const statements: D1PreparedStatement[] = [];
   for (const op of ops) {
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
-    const built = statementsFor(op, userId, rev, now, env);
+    const built = statementsFor(op, userId, rev, now, env, ctx);
     if (built) statements.push(...built);
   }
   for (const op of ops) {

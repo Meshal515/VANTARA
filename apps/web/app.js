@@ -18,6 +18,14 @@ import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/confi
 import { screenAccounts } from './screens/accounts.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
+import { showToast } from './lib/toast.js';
+import {
+  NOTIFICATION_LABELS,
+  popupPatch,
+  popupSettings,
+  toastable,
+  unreadCount,
+} from './lib/notifications.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const el = (tag, className, text) => {
@@ -203,7 +211,7 @@ function topbar({ title = 'VANTARA', back = null } = {}) {
   bell.append(icon('bell'));
   bell.setAttribute('aria-label', 'الإشعارات');
   bell.addEventListener('click', () => void go({ name: 'notifications' }));
-  const unread = sync.rows('notifications', (row) => row.user_id === sync.user?.userId && !row.read).length;
+  const unread = unreadCount(sync.rows('notifications', (row) => row.user_id === sync.user?.userId));
   if (unread > 0) bell.append(el('span', 'topbar__dot'));
   actions.append(bell);
 
@@ -799,13 +807,19 @@ async function screenNotifications() {
     for (const row of rows) {
       const item = el('button', `list__row${row.read ? '' : ' list__row--unread'}`);
       item.type = 'button';
-      item.append(el('span', null, row.body ?? row.kind));
+      const text = el('span', null, row.body ?? NOTIFICATION_LABELS[row.kind] ?? row.kind);
+      item.append(text);
+      if (!row.read) item.append(el('span', 'pill pill--accent', 'جديد'));
       item.addEventListener('click', () => {
         if (!row.read) sync.enqueue('notification.read', { id: row.id });
         // الرابط العميق يفتح المكان الصحيح لا الرئيسية
         if (row.series_ref) void go({ name: 'series', id: row.series_ref });
       });
       list.append(item);
+    }
+    // فتح الصندوق = عُرض، لا مقروء: التنبيه لا يتكرر والعنصر يبقى غير مقروء
+    for (const row of rows) {
+      if (!row.seen && !row.read) sync.enqueue('notification.seen', { id: row.id });
     }
   };
   paint();
@@ -1600,6 +1614,48 @@ async function screenSettings() {
     body.append(retry);
   }
 
+  // ── التنبيهات المنبثقة داخل التطبيق ──
+  //
+  // المفاتيح تتحكم في **المنبثق** وحده. الإشعار يبقى يصل الصندوق: من أطفأ
+  // التنبيهات يريد ألا يُقطع عليه، لا أن يخسر توصية صديقه.
+  const notifications = el('section', 'settings__block');
+  notifications.append(el('h2', 'settings__title', 'التنبيهات داخل التطبيق'));
+  notifications.append(
+    el('p', 'settings__hint', 'الإطفاء يمنع التنبيه المنبثق فقط. الإشعارات تبقى في الصندوق.'),
+  );
+
+  const popups = popupSettings(sync.row('settings', sync.user?.userId));
+  const applyPopups = (next) => {
+    // شكل واحد للإعداد: `popupPatch` هو من يكتبه، فلا ينشأ شكلان
+    sync.enqueue('settings.patch', { fields: popupPatch(next) });
+  };
+
+  const toggleRow = (label, checked, onChange) => {
+    const row = el('label', 'switch');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = checked;
+    box.addEventListener('change', () => onChange(box.checked));
+    row.append(box, el('span', null, label));
+    return row;
+  };
+
+  notifications.append(
+    toggleRow('إظهار التنبيهات المنبثقة', popups.enabled, (enabled) => {
+      applyPopups({ ...popups, enabled });
+      void go({ name: 'settings' });
+    }),
+  );
+
+  for (const [kind, label] of Object.entries(NOTIFICATION_LABELS)) {
+    notifications.append(
+      toggleRow(label, popups.kinds[kind] !== false, (on) => {
+        applyPopups({ ...popups, kinds: { ...popups.kinds, [kind]: on } });
+      }),
+    );
+  }
+  body.append(notifications);
+
   const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
   rebuild.type = 'button';
   rebuild.addEventListener('click', async () => {
@@ -1722,9 +1778,51 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
 }
 
+/**
+ * التنبيهات الجانبية للإشعارات الواصلة.
+ *
+ * الصندوق يستلم دائمًا؛ هذا المنبثق وحده. `notification.seen` يُرسل بعد العرض
+ * فلا يتكرر التنبيه عند كل مزامنة، والعرض لا يُحتسب قراءة: العنصر يبقى غير
+ * مقروء في الصندوق حتى يفتحه المستخدم.
+ */
+/** ما عُرض في هذه الجلسة. الحالة في D1 تتأخر دورة مزامنة، فلا نعيد العرض. */
+const toastedIds = new Set();
+
+function toastNewNotifications() {
+  const viewerId = sync.user?.userId;
+  if (!viewerId) return;
+  const settings = popupSettings(sync.row('settings', viewerId));
+  const rows = toastable(
+    sync.rows('notifications', (row) => row.user_id === viewerId),
+    { viewerId, settings },
+  );
+
+  for (const row of rows) {
+    // `notification.seen` كتابة تمرّ بالطابور: بين العرض ووصول `seen` في
+    // السحب التالي قد تصل فروقات أخرى، فبلا هذا الحرس يظهر نفس التنبيه مرتين
+    if (toastedIds.has(row.id)) continue;
+    toastedIds.add(row.id);
+    const actor = sync.row('profiles', row.actor_id)?.display_name ?? 'صديق';
+    const title =
+      row.kind === 'RECOMMENDATION' ? `${actor} أوصى بعمل` : NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    showToast({
+      title,
+      body: row.body ?? '',
+      onOpen: () => {
+        sync.enqueue('notification.read', { id: row.id });
+        if (row.series_ref) void go({ name: 'series', id: row.series_ref });
+        else void go({ name: 'notifications' });
+      },
+    });
+    // عُرض: لا يعود يظهر، ويبقى غير مقروء
+    sync.enqueue('notification.seen', { id: row.id });
+  }
+}
+
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
+  if (tables.includes('notifications')) toastNewNotifications();
 });
 setInterval(() => void sync.pull(), 60_000);
 setInterval(() => void sync.push(), 15_000);

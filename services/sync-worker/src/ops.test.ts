@@ -1,0 +1,202 @@
+/**
+ * ترجمة العمليات إلى SQL، بـD1 مُسجِّلة.
+ *
+ * دوال المجال مُختبرة في `@vantara/domain`، لكن ما يصل قاعدة المستخدمين هو
+ * **هذه** الجُمل: عمودٌ ناقص، أو حرسٌ في `WHERE` مكتوب بالعكس، أو إشعارٌ لا
+ * يُنشأ لأحد — كلها تمرّ من اختبارات الدوال النقية بلا أن تُلمس. الـD1 هنا
+ * تسجّل الجملة وقيَمها بلا تنفيذ: هذا يثبت العقد لا السلوك النهائي، والسلوك
+ * النهائي يبقى على `verify.mjs` أمام D1 حقيقية.
+ */
+import { describe, expect, it } from 'vitest';
+import { statementsFor, type OpContext } from './index.ts';
+import type { D1PreparedStatement, Env } from './types.ts';
+
+interface Recorded {
+  sql: string;
+  values: unknown[];
+}
+
+/** D1 مُسجِّلة: تحفظ كل جملة وقيَمها ولا تنفّذ شيئًا. */
+function recorder(): { env: Env; statements: Recorded[] } {
+  const statements: Recorded[] = [];
+  const prepare = (sql: string): D1PreparedStatement => {
+    const entry: Recorded = { sql, values: [] };
+    statements.push(entry);
+    const statement: D1PreparedStatement = {
+      bind(...values: unknown[]) {
+        entry.values = values;
+        return statement;
+      },
+      first: async () => null,
+      all: async () => ({ results: [], success: true, meta: {} }),
+      run: async () => ({ results: [], success: true, meta: {} }),
+    };
+    return statement;
+  };
+
+  const env = {
+    DB: {
+      prepare,
+      batch: async () => [],
+      exec: async () => ({ count: 0, duration: 0 }),
+    },
+    VANTARA_SESSION_SECRET: 'test-secret',
+  } as unknown as Env;
+
+  return { env, statements };
+}
+
+const NOW = 1_700_000_000_000;
+const REV = 42;
+const ACCOUNTS: OpContext = { accounts: ['dahmi', 'mansour', 'ngm'] };
+
+function translate(
+  kind: string,
+  payload: Record<string, unknown>,
+  { userId = 'dahmi', opId = 'op-1', ctx = ACCOUNTS } = {},
+): Recorded[] {
+  const { env, statements } = recorder();
+  const built = statementsFor({ opId, kind, payload }, userId, REV, NOW, env, ctx);
+  // الجُمل التي بُنيت فعلًا، لا كل ما لمسه `prepare`
+  return built === null ? [] : statements.slice(0, built.length);
+}
+
+describe('recommendation.send', () => {
+  it('notifies the one named recipient', () => {
+    const out = translate('recommendation.send', { seriesRef: 's1', toId: 'ngm', message: 'اقرأه' });
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification).toBeDefined();
+    expect(notification?.values).toContain('ngm');
+    expect(out.filter((entry) => entry.sql.includes('INSERT INTO notifications'))).toHaveLength(1);
+  });
+
+  it('notifies everyone but the sender when it is for all', () => {
+    // العيب: `toId` فارغ كان لا يُنشئ إشعارًا لأحد. التوصية تُسجَّل ولا يعرف بها أحد.
+    const out = translate('recommendation.send', { seriesRef: 's1', message: 'للجميع' });
+    const notifications = out.filter((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notifications).toHaveLength(2);
+    const recipients = notifications.map((entry) => entry.values[1]);
+    expect(recipients).toEqual(['mansour', 'ngm']);
+    expect(recipients).not.toContain('dahmi');
+  });
+
+  it('derives a stable notification id per recipient so a retry cannot duplicate', () => {
+    const first = translate('recommendation.send', { seriesRef: 's1' }, { opId: 'op-9' });
+    const again = translate('recommendation.send', { seriesRef: 's1' }, { opId: 'op-9' });
+    const ids = (rows: Recorded[]) =>
+      rows.filter((entry) => entry.sql.includes('INSERT INTO notifications')).map((entry) => entry.values[0]);
+    expect(ids(first)).toEqual(['op-9:mansour', 'op-9:ngm']);
+    expect(ids(again)).toEqual(ids(first));
+  });
+
+  it('writes a fresh notification as unread and unseen', () => {
+    const out = translate('recommendation.send', { seriesRef: 's1', toId: 'ngm' });
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification?.sql).toContain('read, seen');
+    expect(notification?.sql).toMatch(/VALUES \(\?, \?, \?, \?, \?, \?, \?, 0, 0, \?, \?\)/);
+    expect(notification?.sql).toContain('ON CONFLICT (id) DO NOTHING');
+  });
+
+  it('carries a deep link to the work itself', () => {
+    const out = translate('recommendation.send', { seriesRef: 'a/b c', toId: 'ngm' });
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification?.values).toContain('vantara://series/a%2Fb%20c');
+  });
+
+  it('refuses an op with no work', () => {
+    expect(translate('recommendation.send', { toId: 'ngm' })).toEqual([]);
+  });
+});
+
+describe('notification state ops', () => {
+  it('marks seen without touching read', () => {
+    const [statement] = translate('notification.seen', { id: 'n1' });
+    expect(statement?.sql).toContain('SET seen = 1');
+    expect(statement?.sql).not.toContain('read = 1');
+    // الحرس: لا يكتب فوق صفّ عُرض سابقًا فيرفع rev بلا داعٍ
+    expect(statement?.sql).toContain('seen = 0');
+    expect(statement?.values).toEqual([REV, 'n1', 'dahmi']);
+  });
+
+  it('marks read as seen too', () => {
+    const [statement] = translate('notification.read', { id: 'n1' });
+    expect(statement?.sql).toContain('read = 1, seen = 1');
+  });
+
+  it('scopes both to the owner of the notification', () => {
+    for (const kind of ['notification.read', 'notification.seen']) {
+      const [statement] = translate(kind, { id: 'n1' }, { userId: 'ngm' });
+      expect(statement?.sql).toContain('user_id = ?');
+      expect(statement?.values).toContain('ngm');
+    }
+  });
+
+  it('refuses an op with no id', () => {
+    expect(translate('notification.seen', {})).toEqual([]);
+    expect(translate('notification.read', {})).toEqual([]);
+  });
+});
+
+describe('progress ops', () => {
+  it('writes the mirror as not yet confirmed by the owner', () => {
+    const [statement] = translate('progress.set', {
+      chapterKey: 'c1',
+      seriesRef: 's1',
+      page: 30,
+      ratio: 0.9,
+    });
+    expect(statement?.sql).toContain('owner_synced');
+    expect(statement?.sql).toMatch(/VALUES \(\?, \?, \?, \?, \?, \?, \?, 0\)/);
+    // الدمج بـMAX: جهاز قديم لا يُرجع التقدم للخلف
+    expect(statement?.sql).toContain('MAX(progress.page, excluded.page)');
+  });
+
+  it('clears the confirmation only when the merged value actually moved', () => {
+    const [statement] = translate('progress.set', { chapterKey: 'c1', seriesRef: 's1', page: 1, ratio: 0 });
+    expect(statement?.sql).toContain('THEN progress.owner_synced ELSE 0 END');
+  });
+
+  it('guards the confirmation against a row that moved on', () => {
+    const [statement] = translate('progress.confirm', { chapterKey: 'c1', page: 12 });
+    expect(statement?.sql).toContain('owner_synced = 1');
+    expect(statement?.sql).toContain('page <= ?');
+    expect(statement?.values).toEqual([REV, 'dahmi', 'c1', 12]);
+  });
+
+  it('refuses a confirmation with no page', () => {
+    expect(translate('progress.confirm', { chapterKey: 'c1' })).toEqual([]);
+  });
+});
+
+describe('cumulative ops', () => {
+  it('guards a chapter read against double counting inside the claim batch', () => {
+    const [statement] = translate('chapter.complete', {
+      chapterKey: 'c1',
+      seriesRef: 's1',
+      chapterNumber: 1,
+      ratio: 1,
+      activeMs: 9_000,
+    });
+    expect(statement?.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)');
+    expect(statement?.sql).toContain('read_count = chapter_reads.read_count + 1');
+  });
+
+  it('refuses a one-second open as a read', () => {
+    expect(
+      translate('chapter.complete', { chapterKey: 'c1', seriesRef: 's1', ratio: 1, activeMs: 400 }),
+    ).toEqual([]);
+  });
+
+  it('adds usage time and guards it the same way', () => {
+    const [statement] = translate('usage.add', { activeMs: 60_000, day: '2026-09-18' });
+    expect(statement?.sql).toContain('active_ms = usage_daily.active_ms + excluded.active_ms');
+    expect(statement?.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)');
+  });
+});
+
+describe('unknown ops', () => {
+  it('produces nothing rather than throwing', () => {
+    // الرفض بخطأ يوقف طابور العميل عند عملية واحدة إلى الأبد
+    expect(translate('something.new', { anything: true })).toEqual([]);
+  });
+});

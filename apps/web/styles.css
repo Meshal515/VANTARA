@@ -603,3 +603,52 @@ h1, h2, h3, p { margin: 0; }
 .update__text { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; }
 .update .btn { text-decoration: none; }
 .update__later { color: var(--muted); font-size: 13px; }
+
+/* ───────────────────────── التنبيهات الجانبية ───────────────────────── */
+
+/* أعلى الشاشة وفي الجانب: غير حاجب، ولا يغطي القارئ ولا شريط التنقل.
+   `pointer-events: none` على الحاوية كي لا تسرق نقرة من الشاشة تحتها. */
+.toasts {
+  position: fixed; z-index: 120;
+  top: calc(env(safe-area-inset-top, 0) + 10px);
+  inset-inline-start: 12px;
+  display: grid; gap: 8px;
+  max-width: min(360px, calc(100% - 24px));
+  pointer-events: none;
+}
+
+.toast {
+  display: grid; gap: 2px;
+  padding: 10px 13px;
+  border: 1px solid var(--accent-line); border-radius: var(--r-md);
+  background: rgba(14, 10, 24, .96); backdrop-filter: blur(16px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .45);
+  color: var(--text); text-align: start;
+  /* يبدأ مخفيًا ومنزاحًا، والصنف `--in` يدخله في إطار لاحق */
+  opacity: 0; transform: translateY(-8px);
+  transition: opacity .22s ease, transform .22s cubic-bezier(.22, .61, .36, 1);
+  pointer-events: auto;
+}
+.toast--in { opacity: 1; transform: none; }
+.toast--out { opacity: 0; transform: translateY(-8px); }
+.toast__title { font-size: 13px; font-weight: 800; }
+.toast__body {
+  font-size: 12px; color: var(--text-dim);
+  /* سطران كحد أقصى: التنبيه إشارة لا رسالة */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ───────────────────────── كتلة إعدادات ───────────────────────── */
+
+.settings__block { display: grid; gap: 8px; margin-top: 18px; }
+.settings__title { font-size: 15px; font-weight: 800; }
+.settings__hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+.switch {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 14px; cursor: pointer;
+}
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }

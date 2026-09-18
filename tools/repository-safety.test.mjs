@@ -37,6 +37,20 @@ function retiredTablesFromMatrix() {
   return [...tables];
 }
 
+/**
+ * يسقط التعليقات قبل الفحص.
+ *
+ * الحرس يفحص الكود لا النثر: تعليق يقول «لا FCM ولا Firebase» هو تمامًا ما
+ * نريده مكتوبًا، وكان يُسقط الفحص على نفسه.
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    .replace(/^\s*--[^\n]*/gm, ' ')
+    .replace(/^\s*<!--[\s\S]*?-->/gm, ' ');
+}
+
 function sqlReferences(source, table) {
   // الكتابة والقراءة معًا: قراءة جدول متقاعد مسار حقيقة ثانية أيضًا
   const pattern = new RegExp(
@@ -173,6 +187,40 @@ test('the ownership document matches the executable matrix', () => {
   for (const [key, spec] of inCode) {
     assert.deepEqual(inDoc.get(key), spec, `ownership of ${key} differs between doc and code`);
   }
+});
+
+test('the client and the domain agree on the notification kinds', () => {
+  // الواجهة JS خالص بلا bundler فلا تستورد حزمة المجال، فقائمة الأنواع مكرّرة.
+  // التكرار مقبول إن كان مكشوفًا: نوع يُضاف في مكان وينسى في الآخر يعني إشعارًا
+  // لا يستطيع المستخدم إطفاؤه، أو مفتاحًا لا يتحكم بشيء.
+  const domain = read('packages/domain/src/notifications.ts');
+  const block = domain.match(/export const NOTIFICATION_KINDS = \[([^\]]*)\]/);
+  assert.ok(block, 'could not find NOTIFICATION_KINDS in the domain');
+  const inDomain = [...block[1].matchAll(/'([A-Z_]+)'/g)].map((entry) => entry[1]).sort();
+  assert.ok(inDomain.length >= 4, `domain kinds parse failed: ${JSON.stringify(inDomain)}`);
+
+  const client = read('apps/web/lib/notifications.js');
+  const labels = client.match(/export const NOTIFICATION_LABELS = \{([^}]*)\}/);
+  assert.ok(labels, 'could not find NOTIFICATION_LABELS in the client');
+  const inClient = [...labels[1].matchAll(/([A-Z_]+):/g)].map((entry) => entry[1]).sort();
+
+  assert.deepEqual(inClient, inDomain, 'notification kinds differ between the client and the domain');
+});
+
+test('nothing reaches for an operating-system push channel', () => {
+  // B9 صريح: لا Firebase ولا FCM ولا إذن إشعارات ولا تنبيه والتطبيق مغلق.
+  // الحرس على المستودع لا على الوثيقة: إضافة SDK لاحقًا تُسقط CI لا تمرّ بهدوء.
+  const forbidden = /firebase|firebase-messaging|\bFCM\b|onesignal|Notification\.requestPermission|new Notification\(|showNotification\(|PushManager|pushManager/i;
+  const offenders = trackedFiles()
+    .filter(
+      (path) =>
+        /^(apps|services|packages|android|tools)\//.test(path) &&
+        /\.(ts|tsx|mts|mjs|js|json|gradle|xml|kt|java)$/.test(path) &&
+        path !== 'tools/repository-safety.test.mjs',
+    )
+    .filter((path) => forbidden.test(stripComments(read(path))));
+
+  assert.deepEqual(offenders, [], `in-app notifications only:\n${offenders.join('\n')}`);
 });
 
 test('the retired-table exception list stays at the declared identity handoff', () => {
