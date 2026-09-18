@@ -167,6 +167,49 @@ describe('retry and backoff', () => {
   });
 });
 
+describe('B2 auth + B5 queue integration', () => {
+  it('refreshes an expired session and resends the same queued write without quarantine', async () => {
+    let opsCalls = 0;
+    let sessionCalls = 0;
+    const authHeaders = [];
+
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      const value = String(url);
+      if (value.includes('/v1/session')) {
+        sessionCalls += 1;
+        const body = JSON.parse(String(options.body));
+        expect(body.userId).toBe('u1');
+        expect(typeof body.deviceId).toBe('string');
+        expect(typeof body.deviceCredential).toBe('string');
+        return jsonResponse({ token: 'token-2', user: SIGNED_IN });
+      }
+      if (value.includes('/v1/ops')) {
+        opsCalls += 1;
+        authHeaders.push(options.headers?.authorization);
+        if (opsCalls === 1) return jsonResponse({ error: 'expired' }, 401);
+        const ops = JSON.parse(String(options.body)).ops;
+        return jsonResponse({ applied: ops.map((entry) => entry.opId), skipped: [], cursor: 2 });
+      }
+      if (value.includes('/v1/sync')) {
+        return jsonResponse({ reset: false, cursor: 2, changes: {} });
+      }
+      throw new Error(`unexpected fetch: ${value}`);
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    sync.enqueue('usage.add', { activeMs: 1000 });
+    await sync.push({ force: true });
+
+    expect(sessionCalls).toBe(1);
+    expect(opsCalls).toBe(2);
+    expect(authHeaders).toEqual(['Bearer token-1', 'Bearer token-2']);
+    expect(sync.pendingWrites).toBe(0);
+    expect(sync.quarantined).toBe(0);
+    expect(sync.signedIn).toBe(true);
+    expect(storage.getItem('vantara.token')).toBe('token-2');
+  });
+});
+
 describe('quarantine', () => {
   it('quarantines an op the server rejects outright', async () => {
     const fetchImpl = vi.fn(async (url) => {
