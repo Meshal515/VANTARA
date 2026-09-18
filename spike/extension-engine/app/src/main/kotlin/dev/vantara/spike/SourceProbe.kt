@@ -180,7 +180,9 @@ class SourceProbe(private val http: OkHttpClient) {
         // `baseUrl` من المصدر نفسه لا من بياننا: الإضافة قد تكون هاجرت إلى
         // مرآة أخرى (`baseUrl { mirrors(...) }`)، فالفحص الحيّ يجب أن يضرب
         // ما تضربه الإضافة فعلًا.
-        val base = (source as? HttpSource)?.baseUrl
+        // بعض الإضافات تحسب baseUrl عبر تفضيلات/اعتماديات عند أول وصول.
+        // فشل getter نفسه لا يجوز أن يهرب خارج المسبار ويسقط التطبيق.
+        val base = runCatching { (source as? HttpSource)?.baseUrl }.getOrNull()
 
         // ١) البحث
         val found = step("search", steps, base) {
