@@ -97,7 +97,19 @@ class MainActivity : AppCompatActivity() {
             line("✓ download — ${apk.size} بايت")
 
             // ٢) التحقق والتحميل من ملف
-            when (val loaded = withContext(Dispatchers.IO) { loader.load(spec, apk) }) {
+            // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله.
+            // الـPoC التشخيصي يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
+            val loaded = try {
+                withContext(Dispatchers.IO) { loader.load(spec, apk) }
+            } catch (t: Throwable) {
+                line(
+                    "✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
+                    bad = true,
+                )
+                continue
+            }
+
+            when (loaded) {
                 is FileExtensionLoader.Result.Fail -> {
                     line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
                     loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
@@ -108,7 +120,15 @@ class MainActivity : AppCompatActivity() {
                     line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
 
                     val source = sources.first()
-                    val report = withContext(Dispatchers.IO) { probe.run(spec.label, source) }
+                    val report = try {
+                        withContext(Dispatchers.IO) { probe.run(spec.label, source) }
+                    } catch (t: Throwable) {
+                        line(
+                            "✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
+                            bad = true,
+                        )
+                        continue
+                    }
                     render(report)
                 }
             }
