@@ -253,6 +253,9 @@ services:
       RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
     volumes:
       - backups:/backups
+      # مرفقات البلاغات بيانات مستخدم غير قابلة لإعادة البناء، فتدخل snapshot.
+      # قراءة فقط هنا: خدمة النسخ لا تحتاج حق تعديل الملفات الأصلية.
+      - api_uploads:/source/api-uploads:ro
     networks: [vantara]
     profiles: [backup]
 
