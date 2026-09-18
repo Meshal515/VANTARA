@@ -649,6 +649,7 @@ async function renderSearch(host, q) {
               sync.enqueue('library.add', {
                 seriesRef: match.id,
                 seriesTitle: match.title,
+                coverUrl: match.coverUrl ?? null,
                 sourceId: provider.sourceId,
               });
               sync.enqueue('activity.add', {
@@ -934,10 +935,22 @@ async function screenSeries(id) {
   const meta = el('div', 'work__meta');
   meta.append(el('h1', 'work__title', known?.title ?? '—'));
   const actions = el('div', 'work__actions');
+  // الوصف يرافق كل عضوية: بلا العنوان والغلاف تعرض شاشة المفضلة معرّفًا خامًا،
+  // لأن `collections` تحمل المرجع وحده
+  //
+  // `coverUrl` هو رابط المصدر إن وُجد، لا رابط البروكسي عندنا: `coverFor` يبني
+  // رابط البروكسي من `config.api`، وتخزينه في D1 يخبز عنوان الـAPI في بيانات
+  // مُزامَنة — فتُكسَر كل الأغلفة عند تغيير العنوان. المرجع يكفي لبنائه وقت العرض.
+  const descriptor = () => ({
+    seriesRef: id,
+    seriesTitle: known?.title ?? null,
+    coverUrl: known?.coverUrl ?? null,
+  });
+
   const follow = el('button', 'btn', 'متابعة');
   follow.type = 'button';
   follow.addEventListener('click', () => {
-    sync.enqueue('favorite.set', { seriesRef: id, member: true });
+    sync.enqueue('favorite.set', { ...descriptor(), member: true });
     sync.enqueue('activity.add', { verb: 'FAVORITED', seriesRef: id });
     follow.textContent = 'في المفضلة';
     follow.disabled = true;
@@ -948,7 +961,7 @@ async function screenSeries(id) {
   const later = el('button', 'btn btn--ghost', 'أقرأ لاحقًا');
   later.type = 'button';
   later.addEventListener('click', () => {
-    sync.enqueue('readLater.set', { seriesRef: id, member: true });
+    sync.enqueue('readLater.set', { ...descriptor(), member: true });
     later.textContent = 'محفوظ';
     later.disabled = true;
   });

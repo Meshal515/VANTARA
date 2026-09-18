@@ -56,9 +56,9 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     key: 'library.membership',
     owner: 'UCHIYOMI',
     mirrors: ['D1'],
-    tables: { D1: ['library'] },
+    tables: { D1: ['library', 'works'] },
     retired: {},
-    why: 'الإضافة والمتابعة والتحديث التلقائي تحدث عند Uchiyomi. جدول library في D1 مرآة اجتماعية فقط: ليُرى عند الأصدقاء وعلى جهاز ثانٍ، ولا يُقرأ كمصدر للمكتبة.',
+    why: 'الإضافة والمتابعة والتحديث التلقائي تحدث عند Uchiyomi. جدولا library وworks في D1 مرآة اجتماعية فقط: `works` هو وصف العمل الواحد (عنوان وغلاف) لتعرضه المفضلة والتوصيات والإشعارات بدل تخزينه في كل جدول، ولا يُقرأ أيٌّ منهما كمصدر للمكتبة.',
   },
   {
     key: 'reading.progress',

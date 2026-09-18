@@ -194,6 +194,90 @@ describe('cumulative ops', () => {
   });
 });
 
+describe('collections', () => {
+  it('records the work descriptor beside the membership', () => {
+    // العيب: `favorite.set` كان يحمل المعرّف وحده، فلا عنوان ولا غلاف في أي
+    // مكان لعمل يُضاف للمفضلة من صفحته — والشاشة تعرض معرّفًا خامًا
+    const out = translate('favorite.set', {
+      seriesRef: 's1',
+      seriesTitle: 'Nano Machine',
+      coverUrl: 'cover-1',
+      sourceId: 'src',
+    });
+    const work = out.find((entry) => entry.sql.includes('INSERT INTO works'));
+    expect(work).toBeDefined();
+    expect(work?.values).toEqual(['s1', 'Nano Machine', 'cover-1', 'src', NOW, REV]);
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO collections'))).toBe(true);
+  });
+
+  it('writes no descriptor when the op carries none', () => {
+    const out = translate('readLater.set', { seriesRef: 's1' });
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO works'))).toBe(false);
+    expect(out).toHaveLength(1);
+  });
+
+  it('never lets an empty descriptor erase what we already know', () => {
+    const out = translate('favorite.set', { seriesRef: 's1', seriesTitle: 'عنوان' });
+    const work = out.find((entry) => entry.sql.includes('INSERT INTO works'));
+    expect(work?.sql).toContain('COALESCE(excluded.title, works.title)');
+    expect(work?.sql).toContain('COALESCE(excluded.cover_url, works.cover_url)');
+  });
+
+  it('keeps the chosen position when a work is re-added', () => {
+    const out = translate('favorite.set', { seriesRef: 's1' });
+    expect(out[0]?.sql).toContain('COALESCE(excluded.position, collections.position)');
+  });
+
+  it('separates the two collection kinds', () => {
+    const favorite = translate('favorite.set', { seriesRef: 's1' });
+    const later = translate('readLater.set', { seriesRef: 's1' });
+    expect(favorite[0]?.values).toContain('favorite');
+    expect(later[0]?.values).toContain('read_later');
+  });
+
+  it('reorders a whole list in one op', () => {
+    // ترتيب كامل لا حركة عنصر: حركتان من جهازين تتشابكان
+    const out = translate('collection.reorder', {
+      kind: 'favorite',
+      order: ['c', 'a', 'b'],
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((entry) => entry.values)).toEqual([
+      [0, NOW, REV, 'dahmi', 'favorite', 'c'],
+      [1, NOW, REV, 'dahmi', 'favorite', 'a'],
+      [2, NOW, REV, 'dahmi', 'favorite', 'b'],
+    ]);
+    for (const entry of out) expect(entry.sql).toContain('WHERE user_id = ? AND kind = ? AND series_ref = ?');
+  });
+
+  it('refuses a reorder with an unknown kind or an empty list', () => {
+    expect(translate('collection.reorder', { kind: 'watchlist', order: ['a'] })).toEqual([]);
+    expect(translate('collection.reorder', { kind: 'favorite', order: [] })).toEqual([]);
+    expect(translate('collection.reorder', { kind: 'favorite' })).toEqual([]);
+  });
+});
+
+describe('library and recommendations carry the same descriptor', () => {
+  it('records it on a library add', () => {
+    const out = translate('library.add', {
+      seriesRef: 's1',
+      seriesTitle: 'Nano Machine',
+      coverUrl: 'c',
+      sourceId: 'src',
+    });
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO works'))).toBe(true);
+  });
+
+  it('records it on a recommendation', () => {
+    const out = translate('recommendation.send', {
+      seriesRef: 's1',
+      toId: 'ngm',
+      seriesTitle: 'Nano Machine',
+    });
+    expect(out.some((entry) => entry.sql.includes('INSERT INTO works'))).toBe(true);
+  });
+});
+
 describe('unknown ops', () => {
   it('produces nothing rather than throwing', () => {
     // الرفض بخطأ يوقف طابور العميل عند عملية واحدة إلى الأبد

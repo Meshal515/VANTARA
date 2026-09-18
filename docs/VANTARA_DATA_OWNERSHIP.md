@@ -41,7 +41,7 @@ VANTARA كان يخزّن نفس المعنى في مخزنين:
 | النوع | المالك | مرايا مسموحة | الجداول الحيّة |
 |---|---|---|---|
 | `content.catalogue` | UCHIYOMI | — | — |
-| `library.membership` | UCHIYOMI | D1 | `library` (D1، مرآة) |
+| `library.membership` | UCHIYOMI | D1 | `library`, `works` (D1، مرآة) |
 | `reading.progress` | UCHIYOMI | D1 | `progress` (D1، صندوق صادر) |
 | `reading.ratings` | D1 | — | `ratings` |
 | `stats.reading` | D1 | — | `chapter_reads`, `usage_daily` |
@@ -121,6 +121,23 @@ Patch B2. جداولها تعيش اليوم في PostgreSQL، وملكيتها 
 ويُطبَّق بنفس دالة المجال `redactForViewers` على مسار الحضور **وعلى شاشة اختيار
 الحساب** — حالتان مختلفتان لنفس المستخدم على شاشتين كانت تعني إخفاءً يعمل في
 مكان ولا يعمل في آخر.
+
+---
+
+## 5.1 وصف العمل — لماذا جدول واحد (B7)
+
+العنوان والغلاف كانا مخزَّنين في `library` وفي `recommendations` وداخل
+`activity.payload`، وغائبين تمامًا عن `collections`. النتيجة: عمل يُضاف للمفضلة
+من صفحته لا يملك عنوانًا في أي مكان، فشاشة المفضلة تعرض معرّفًا خامًا.
+
+`works` هو الوصف الواحد: `series_ref → title, cover_url, source_id`. بلا
+`user_id` بقصد — الأصدقاء الثلاثة يرون نفس الأعمال. وهو **مرآة**: مالك هوية
+العمل يبقى Uchiyomi، والصفّ يُكتب فقط كأثر جانبي لعملية تشير إلى العمل
+(`favorite.set`, `readLater.set`, `library.add`, `recommendation.send`)، والقيمة
+الفارغة لا تمحو قيمة قائمة (`COALESCE`).
+
+و`cover_url` يحمل رابط المصدر لا رابط البروكسي عندنا: تخزين رابط مبني على
+`VANTARA_API_URL` كان سيكسر كل الأغلفة عند تغيير العنوان.
 
 ---
 

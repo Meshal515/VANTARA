@@ -17,6 +17,8 @@ import {
   isCompletedRead,
   mergeFields,
   mergeProgress,
+  collectionView,
+  isCollectionKind,
   needsFullResync,
   notificationId,
   notificationTargets,
@@ -26,6 +28,8 @@ import {
   statusFor,
   stripImmutable,
 } from '@vantara/domain';
+
+import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
 import { bearerFrom, mintToken, verifyToken } from './session.ts';
@@ -201,6 +205,9 @@ const DELTA_TABLES = [
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
+  // وصف العمل مرة واحدة لكل عمل لا لكل مستخدم: الأصدقاء الثلاثة يرون نفس
+  // الأعمال، وبلا هذا الجدول تعرض شاشة المفضلة معرّفًا خامًا
+  ['works', 'series_ref, title, cover_url, source_id, updated_at, rev'],
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler_after, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
@@ -344,6 +351,48 @@ function notificationStatements(
   );
 }
 
+/**
+ * يسجّل وصف العمل إن حملته العملية.
+ *
+ * كل عملية تشير إلى عمل تمرّ من هنا: العضوية والتوصية والإضافة للمكتبة. الوصف
+ * الفارغ لا يكتب شيئًا، والقيمة الفارغة لا تمحو قيمة قائمة — `COALESCE` يمنع
+ * مصدرًا يرجع بلا غلاف من محو غلاف وصلنا من مصدر آخر (نفس قاعدة `mergeWork`).
+ */
+function workStatements(
+  db: Env['DB'],
+  input: {
+    seriesRef: string;
+    title?: string | null;
+    coverUrl?: string | null;
+    sourceId?: string | null;
+    now: number;
+    rev: number;
+  },
+): D1PreparedStatement[] {
+  if (!input.title && !input.coverUrl && !input.sourceId) return [];
+  return [
+    db
+      .prepare(
+        `INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (series_ref) DO UPDATE SET
+           title = COALESCE(excluded.title, works.title),
+           cover_url = COALESCE(excluded.cover_url, works.cover_url),
+           source_id = COALESCE(excluded.source_id, works.source_id),
+           updated_at = MAX(works.updated_at, excluded.updated_at),
+           rev = excluded.rev`,
+      )
+      .bind(
+        input.seriesRef,
+        input.title ?? null,
+        input.coverUrl ?? null,
+        input.sourceId ?? null,
+        input.now,
+        input.rev,
+      ),
+  ];
+}
+
 export function statementsFor(
   op: IncomingOp,
   userId: string,
@@ -464,6 +513,14 @@ export function statementsFor(
       const seriesRef = asString(p['seriesRef'], 200);
       if (!seriesRef) return null;
       return [
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          sourceId: asString(p['sourceId'], 120),
+          now,
+          rev,
+        }),
         db
           .prepare(
             `INSERT INTO library (user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev)
@@ -506,20 +563,61 @@ export function statementsFor(
       const seriesRef = asString(p['seriesRef'], 200);
       if (!seriesRef) return null;
       const kind = op.kind === 'favorite.set' ? 'favorite' : 'read_later';
+      // نوع المجموعة من طبقة المجال: قائمة مغلقة، فلا يخلق عميل قديم نوعًا
+      // ثالثًا لا تعرفه أي شاشة
+      if (!isCollectionKind(kind)) return null;
       const member = p['member'] === false ? 0 : 1;
       return [
+        // الوصف يرافق العضوية: بلا هذا لا يوجد عنوان ولا غلاف لعمل أُضيف
+        // للمفضلة من صفحته، فتعرض الشاشة معرّفًا خامًا
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          sourceId: asString(p['sourceId'], 120),
+          now,
+          rev,
+        }),
         db
           .prepare(
             `INSERT INTO collections (user_id, kind, series_ref, member, position, updated_at, rev)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (user_id, kind, series_ref) DO UPDATE SET
                member = excluded.member,
-               position = excluded.position,
+               -- الموضع لا يُمحى بعملية لا تحمله: إعادة الإضافة لا تفقد الترتيب
+               position = COALESCE(excluded.position, collections.position),
                updated_at = excluded.updated_at,
                rev = excluded.rev`,
           )
           .bind(userId, kind, seriesRef, member, asNumber(p['position']), now, rev),
       ];
+    }
+
+    /**
+     * ترتيب المجموعة.
+     *
+     * الترتيب الكامل يصل مرة واحدة (`order: [seriesRef, ...]`) لا حركة عنصر:
+     * حركتان من جهازين تتشابكان، أما ترتيب كامل فآخر واحد يفوز ويبقى مفهومًا.
+     */
+    case 'collection.reorder': {
+      const kind = asString(p['kind'], 20);
+      const order = Array.isArray(p['order']) ? p['order'] : null;
+      if (!kind || !isCollectionKind(kind) || !order) return null;
+      // السقف 100 لا 500: كل مرجع جملة `UPDATE` في نفس الدفعة الذرّية، ودفعة
+      // بخمس مئة جملة تقترب من حدود D1 فتفشل كلها. قائمة أطول تُرتَّب على دفعات.
+      const refs = order
+        .map((value) => asString(value, 200))
+        .filter((value): value is string => value !== null)
+        .slice(0, 100);
+      if (refs.length === 0) return null;
+      return refs.map((seriesRef, position) =>
+        db
+          .prepare(
+            `UPDATE collections SET position = ?, updated_at = ?, rev = ?
+              WHERE user_id = ? AND kind = ? AND series_ref = ?`,
+          )
+          .bind(position, now, rev, userId, kind, seriesRef),
+      );
     }
 
     case 'rating.set': {
@@ -586,6 +684,13 @@ export function statementsFor(
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
       const statements = [
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          now,
+          rev,
+        }),
         db
           .prepare(
             `INSERT INTO recommendations
@@ -950,6 +1055,50 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
   });
 }
 
+// ───────────────────────── المجموعات ─────────────────────────
+
+/**
+ * المفضلة أو أقرأ لاحقًا، مُثرية وجاهزة للعرض.
+ *
+ * سجل الفروقات يوصل الصفوف للعميل، وهذا المسار يعطي **نفس** القائمة محسوبة
+ * على الخادم: مفيد للتحقق، ولجهاز بمرآة فارغة، ولئلا يكون ترتيب القائمة
+ * مُعادًا في كل شاشة. القاعدة واحدة — `collectionView` من طبقة المجال.
+ */
+async function handleCollection(
+  url: URL,
+  env: Env,
+  userId: string,
+): Promise<Response> {
+  const kind = url.searchParams.get('kind') ?? 'favorite';
+  if (!isCollectionKind(kind)) return json({ error: 'unknown_kind' }, { status: 400 });
+
+  const [rows, works] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT kind, series_ref, member, position, updated_at
+         FROM collections WHERE user_id = ? AND kind = ?`,
+    ).bind(userId, kind),
+    env.DB.prepare(
+      `SELECT w.series_ref, w.title, w.cover_url, w.source_id, w.updated_at
+         FROM works w
+         JOIN collections c ON c.series_ref = w.series_ref
+        WHERE c.user_id = ? AND c.kind = ?`,
+    ).bind(userId, kind),
+  ]);
+
+  const items = collectionView({
+    rows: (rows?.results ?? []) as unknown as CollectionRow[],
+    works: (works?.results ?? []) as unknown as WorkDescriptor[],
+    kind,
+  });
+
+  return json({
+    kind,
+    content: items,
+    // النقص يُقال لا يُخمَّن: عمل بلا وصف تعرفه الشاشة فتطلبه بدل أن ترسم فراغًا
+    needsDescriptor: items.filter((item) => item.needsDescriptor).map((item) => item.seriesRef),
+  });
+}
+
 // ───────────────────── صندوق تقدم القراءة الصادر ─────────────────────
 
 /**
@@ -1053,6 +1202,9 @@ export default {
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'GET') response = await handlePresenceList(env, now);
+      else if (path === '/v1/collections' && request.method === 'GET') {
+        response = await handleCollection(url, env, userId);
+      }
       else if (path === '/v1/progress/pending' && request.method === 'GET') {
         response = await handlePendingProgress(env, userId);
       }

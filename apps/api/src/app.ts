@@ -12,6 +12,7 @@ import { buildContext, type AppContext } from './lib/context.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { authRoutes } from './routes/auth.ts';
 import { catalogRoutes } from './routes/catalog.ts';
+import { discoveryRoutes } from './routes/discovery.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { libraryRoutes } from './routes/library.ts';
 import { sourceRoutes } from './routes/sources.ts';
@@ -79,6 +80,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   // كان معرَّفًا وغير مسجَّل: إضافة عمل من البحث كانت تفشل بـ404 بينما مالك
   // المكتبة هو Uchiyomi وهذا مساره الوحيد للكتابة عنده
   await catalogRoutes(app, ctx);
+  // عقد الشاشة للمكتبة والاستكشاف: صفحة واحدة لكل نداء، منفصل عن مسار التدقيق
+  await discoveryRoutes(app, ctx);
   await libraryRoutes(app, ctx);
 
   // الواجهة تُقدَّم من نفس الأصل: لا CORS، والكوكي same-origin بلا استثناءات

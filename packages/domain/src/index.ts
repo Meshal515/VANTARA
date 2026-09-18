@@ -1,5 +1,7 @@
 export * from './presence.ts';
 export * from './ownership.ts';
+export * from './downloads.ts';
+export * from './collections.ts';
 export * from './notifications.ts';
 export * from './source-verdict.ts';
 export * from './diagnostics.ts';
