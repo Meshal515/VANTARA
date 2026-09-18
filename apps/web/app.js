@@ -39,6 +39,9 @@ const el = (tag, className, text) => {
 const root = $('#root');
 const config = endpoints();
 const sync = createSync({ baseUrl: config.sync });
+// Capacitor injects native plugins before user JS. On normal web this is
+// undefined, so the bridge is a no-op without requiring a browser npm import.
+const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
 
 const state = {
   route: { name: 'gate' },
@@ -57,13 +60,13 @@ function mount(node) {
   root.replaceChildren(node);
 }
 
-/** خادم المحتوى. مطلق داخل الـAPK، ونفس الأصل في المتصفح. */
 /**
  * كل نداء JSON لخادم المحتوى يمرّ من هنا.
  *
  * النقل في `lib/content-api.js`: الهوية في ترويسة `Authorization` لا في كوكي
- * عبر الأصول، وتجديد واحد عند 401. كان هذا النداء يعتمد على الكوكي وحده،
- * فعلى الـAPK يرجع 401 صامتًا لكل شيء.
+ * عبر الأصول، وتجديد واحد عند 401. والكوكي يبقى fallback للويب حيث الأصل
+ * مشترك. كان هذا النداء يعتمد على الكوكي وحده، فعلى الـAPK يرجع 401 صامتًا
+ * لكل شيء.
  */
 async function api(path, options = {}) {
   return requestContent({ baseUrl: config.api, sync, path, options });
@@ -1817,6 +1820,10 @@ setInterval(() => void sync.pull(), 60_000);
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
+  // Pair a clean APK before the account gate can issue /v1/session.
+  // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
+  await nativeLinksReady.catch(() => {});
+
   if (!syncConfigured()) {
     // بلا عنوان مزامنة لا حسابات ولا أصدقاء.
     //

@@ -20,6 +20,8 @@ beforeAll(async () => {
     DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unused',
     UCHIYOMI_URL: 'http://127.0.0.1:1',
     SESSION_SECRET: 'test-secret-that-is-at-least-32-chars-long',
+    // B2 جعله إلزاميًّا: الـContent API لا يتحقق من توكن الهوية بلا سرّه
+    VANTARA_IDENTITY_SECRET: 'test-identity-secret-at-least-32-chars-x',
     COOKIE_SECURE: 'false',
     LOG_LEVEL: 'error',
   });

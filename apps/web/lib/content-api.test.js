@@ -102,7 +102,20 @@ describe('Content API bearer transport', () => {
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('/v1/library');
     expect(options.headers.authorization).toBeUndefined();
-    expect(options.credentials).toBe('include');
+    // بلا `baseUrl` نحن على نفس الأصل (الويب): `same-origin` هو الصحيح هناك،
+    // و`include` يُرسل حيث لا حاجة. كان تأكيدي يفرض `include` دائمًا — والعقد
+    // المدموج أدقّ: الاعتماد يُوسَّع عند عبور الأصل فقط.
+    expect(options.credentials).toBe('same-origin');
+    vi.unstubAllGlobals();
+  });
+
+  it('widens credentials only when the api lives on another origin', async () => {
+    const fetchMock = vi.fn(async () => response({ content: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await requestContent({ baseUrl: 'https://api.example', sync: {}, path: '/v1/library' });
+
+    expect(fetchMock.mock.calls[0][1].credentials).toBe('include');
     vi.unstubAllGlobals();
   });
 
@@ -119,8 +132,12 @@ describe('Content API bearer transport', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reports the 401 when the refresh itself fails', async () => {
-    // فشل التجديد ليس الخطأ الذي يهمّ المُنادي: الأصل أن الطلب رجع 401
+  it('reports the 401 when the refresh itself fails, without a pointless retry', async () => {
+    // فشل التجديد ليس الخطأ الذي يهمّ المُنادي: الأصل أن الطلب رجع 401.
+    //
+    // وكان تأكيدي يتوقّع محاولة ثانية. العقد المدموج لا يعيد المحاولة، وهو
+    // أصحّ: التجديد فشل ⇒ التوكن لم يتغيّر ⇒ إعادة نفس الطلب بنفس الترويسة
+    // نداءٌ يُعرف فشله قبل إرساله.
     const fetchMock = vi.fn(async () => response({ error: 'unauthorized' }, 401));
     vi.stubGlobal('fetch', fetchMock);
     const sync = {
@@ -135,7 +152,8 @@ describe('Content API bearer transport', () => {
       status: 401,
       code: 'unauthorized',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sync.refreshSession).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 

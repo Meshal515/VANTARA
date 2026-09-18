@@ -115,6 +115,24 @@ test('sync worker production deploy is CI-gated and main-only', () => {
   assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
+test('sync worker production deploy provisions every runtime authentication secret', () => {
+  const workflow = read('.github/workflows/sync-worker.yml');
+  for (const secret of [
+    'VANTARA_SESSION_SECRET',
+    'VANTARA_IDENTITY_SECRET',
+    'VANTARA_DEVICE_PEPPER',
+  ]) {
+    assert.ok(
+      workflow.includes('${{ secrets.' + secret + ' }}'),
+      `sync-worker deploy must read GitHub secret ${secret}`,
+    );
+    assert.ok(
+      workflow.includes(`secret put ${secret}`),
+      `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
+    );
+  }
+});
+
 test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   const workflow = read('.github/workflows/cloudflare-pages.yml');
   assertCiGatedProductionWorkflow('.github/workflows/cloudflare-pages.yml');
@@ -352,4 +370,30 @@ test('database restore is atomic, so a half-applied restore cannot report succes
       'each restore must stop at the first error instead of continuing past it',
     );
   }
+});
+
+test('Android pairing links are wired from Capacitor into the trusted-device client', () => {
+  const pkg = JSON.parse(read('package.json'));
+  assert.match(
+    String(pkg.dependencies?.['@capacitor/app'] ?? ''),
+    /^\^?6\./,
+    'Capacitor 6 builds must install the matching @capacitor/app native plugin',
+  );
+
+  const app = read('apps/web/app.js');
+  assert.match(
+    app,
+    /attachNativeLinkBridge\s*\(/,
+    'the web shell must attach the native URL bridge',
+  );
+  assert.match(
+    app,
+    /Capacitor\?\.Plugins\?\.App|Capacitor\.Plugins\.App/,
+    'the bridge must receive Capacitor\'s native App plugin without a browser bare import',
+  );
+  assert.match(
+    app,
+    /await\s+nativeLinksReady\.catch\s*\(/,
+    'boot must await native pairing without letting a stale link block startup',
+  );
 });

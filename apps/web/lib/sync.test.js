@@ -167,6 +167,49 @@ describe('retry and backoff', () => {
   });
 });
 
+describe('B2 auth + B5 queue integration', () => {
+  it('refreshes an expired session and resends the same queued write without quarantine', async () => {
+    let opsCalls = 0;
+    let sessionCalls = 0;
+    const authHeaders = [];
+
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      const value = String(url);
+      if (value.includes('/v1/session')) {
+        sessionCalls += 1;
+        const body = JSON.parse(String(options.body));
+        expect(body.userId).toBe('u1');
+        expect(typeof body.deviceId).toBe('string');
+        expect(typeof body.deviceCredential).toBe('string');
+        return jsonResponse({ token: 'token-2', user: SIGNED_IN });
+      }
+      if (value.includes('/v1/ops')) {
+        opsCalls += 1;
+        authHeaders.push(options.headers?.authorization);
+        if (opsCalls === 1) return jsonResponse({ error: 'expired' }, 401);
+        const ops = JSON.parse(String(options.body)).ops;
+        return jsonResponse({ applied: ops.map((entry) => entry.opId), skipped: [], cursor: 2 });
+      }
+      if (value.includes('/v1/sync')) {
+        return jsonResponse({ reset: false, cursor: 2, changes: {} });
+      }
+      throw new Error(`unexpected fetch: ${value}`);
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    sync.enqueue('usage.add', { activeMs: 1000 });
+    await sync.push({ force: true });
+
+    expect(sessionCalls).toBe(1);
+    expect(opsCalls).toBe(2);
+    expect(authHeaders).toEqual(['Bearer token-1', 'Bearer token-2']);
+    expect(sync.pendingWrites).toBe(0);
+    expect(sync.quarantined).toBe(0);
+    expect(sync.signedIn).toBe(true);
+    expect(storage.getItem('vantara.token')).toBe('token-2');
+  });
+});
+
 describe('quarantine', () => {
   it('quarantines an op the server rejects outright', async () => {
     const fetchImpl = vi.fn(async (url) => {
@@ -258,6 +301,9 @@ describe('push', () => {
  * `lib/content-api.js` يقرأ الترويسة من هنا ويطلب التجديد من هنا. لو كان
  * السطح قيمةً تُقرأ مرة واحدة لأُرسلت ترويسة حسابٍ سابق بعد تبديل الحساب،
  * ولو غاب التجديد لسجّل التطبيق خروجًا في وجه القارئ في منتصف فصل.
+ *
+ * كُتبت في B3 على `signIn`، وأُعيد توجيهها هنا إلى عقد B2: التجديد يمرّ بإثبات
+ * الجهاز. النية لم تتغيّر — التأكيد وحده تبع التنفيذ الأصحّ.
  */
 describe('the identity seam the content api reads', () => {
   it('exposes the header only while signed in', async () => {
@@ -270,12 +316,11 @@ describe('the identity seam the content api reads', () => {
   });
 
   it('follows the token when it is rotated, rather than freezing at boot', async () => {
-    const fetchImpl = vi.fn(async (url) => {
-      if (String(url).includes('/v1/session')) {
-        return jsonResponse({ token: 'token-2', user: SIGNED_IN });
-      }
-      return jsonResponse({ reset: false, cursor: 0, changes: {} });
-    });
+    const fetchImpl = vi.fn(async (url) =>
+      String(url).includes('/v1/session')
+        ? jsonResponse({ token: 'token-2', user: SIGNED_IN })
+        : jsonResponse({ reset: false, cursor: 0, changes: {} }),
+    );
     const sync = await loadSync({ storage, fetchImpl });
     expect(sync.authorizationHeader).toBe('Bearer token-1');
 
@@ -283,8 +328,9 @@ describe('the identity seam the content api reads', () => {
     expect(sync.authorizationHeader).toBe('Bearer token-2');
   });
 
-  it('refreshes the same account without asking the reader for anything', async () => {
-    // اختيار الحساب هو الدخول: التجديد لا يعرض شاشة ولا يطلب سرًّا
+  it('refreshes through device proof, and asks the reader for nothing', async () => {
+    // اختيار الحساب هو الدخول: التجديد لا يعرض شاشة ولا يطلب سرًّا — لكنه
+    // **يثبت الجهاز**، وهذا ما يمنع من يعرف عنوان الـWorker من انتحال حساب
     const bodies = [];
     const fetchImpl = vi.fn(async (url, options) => {
       if (String(url).includes('/v1/session')) {
@@ -295,8 +341,11 @@ describe('the identity seam the content api reads', () => {
     });
     const sync = await loadSync({ storage, fetchImpl });
 
-    expect(await sync.refreshSession()).toBe(true);
-    expect(bodies).toEqual([{ userId: 'u1' }]);
+    await expect(sync.refreshSession()).resolves.toMatchObject({ token: 'token-2' });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].userId).toBe('u1');
+    expect(typeof bodies[0].deviceId).toBe('string');
+    expect(typeof bodies[0].deviceCredential).toBe('string');
   });
 
   it('keeps the mirror when refreshing, since the account did not change', async () => {
@@ -313,19 +362,24 @@ describe('the identity seam the content api reads', () => {
     expect(storage.getItem('vantara.cursor')).toBe('42');
   });
 
-  it('says no instead of throwing when there is no account to refresh', async () => {
+  it('refuses with 401 when there is no account to refresh', async () => {
+    // لا يتظاهر بالنجاح: عقد B2 يرمي، و`content-api` يلتقط ويُبلّغ 401 الأصلي.
+    // كان عقدي يرجع `false` بهدوء — وهو أسوأ، لأن الصامت يمرّ بلا معالجة.
     storage.removeItem('vantara.user');
     storage.removeItem('vantara.token');
     const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({})) });
-    expect(await sync.refreshSession()).toBe(false);
+    await expect(sync.refreshSession()).rejects.toMatchObject({ status: 401 });
   });
 
-  it('survives a refresh that fails on the network', async () => {
-    // القارئ لا يرى استثناءً؛ يرى 401 الأصلي من نداء المحتوى
+  it('folds the session when the refresh fails on the network', async () => {
+    // هذا ما كان ناقصًا في عقدي: تجديد فاشل يجب أن يُنهي دعوى «مسجَّل الدخول»،
+    // وإلا بقيت الواجهة تعرض حسابًا لا توكن له وتفشل كل نداء بلا تفسير
     const fetchImpl = vi.fn(async () => {
       throw new Error('offline');
     });
     const sync = await loadSync({ storage, fetchImpl });
-    expect(await sync.refreshSession()).toBe(false);
+    await expect(sync.refreshSession()).rejects.toThrow('offline');
+    expect(sync.signedIn).toBe(false);
+    expect(sync.authorizationHeader).toBeNull();
   });
 });

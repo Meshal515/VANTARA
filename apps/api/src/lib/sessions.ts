@@ -1,4 +1,5 @@
 import { query, queryOne } from '@vantara/db';
+import { identityIdForUsername } from '@vantara/domain';
 import type { UchiyomiClient } from '@vantara/uchiyomi';
 import { decrypt, encrypt, newSessionId } from './crypto.ts';
 
@@ -6,6 +7,9 @@ export const SESSION_COOKIE = 'vantara_session';
 
 export interface Session {
   id: string;
+  /** هوية VANTARA الموحدة، عند الدخول عبر access token v2. */
+  identityId?: string;
+  /** معرّف Uchiyomi الداخلي، يبقى للتوافق مع جداول المحتوى حتى B4. */
   userId: string;
   username: string;
   /** توكن Uchiyomi بعد فكّ التشفير. لا يُسجَّل ولا يُعاد إلى العميل. */
@@ -19,6 +23,13 @@ interface SessionRow {
   username: string;
 }
 
+interface IdentityLinkRow {
+  vantara_identity_id: string;
+  uchiyomi_user_id: string;
+  token_encrypted: string;
+  username: string;
+}
+
 export interface SessionStoreOptions {
   key: Buffer;
   ttlDays: number;
@@ -26,8 +37,6 @@ export interface SessionStoreOptions {
 }
 
 export class SessionStore {
-  // مكتوب صريحًا لا كـparameter property: `node --experimental-strip-types`
-  // لا يدعمها، وسكربت التطوير يشغّل الـTypeScript مباشرة.
   readonly #options: SessionStoreOptions;
 
   constructor(options: SessionStoreOptions) {
@@ -35,9 +44,9 @@ export class SessionStore {
   }
 
   /**
-   * تسجيل دخول: Uchiyomi يتحقق من كلمة المرور، ثم نصك توكنًا طويل العمر باسم
-   * المستخدم ونخزّنه مشفّرًا. VANTARA لا يرى كلمة المرور بعد هذه اللحظة ولا
-   * يخزّنها، ولا يحتاج دورة refresh.
+   * Legacy/owner linking path. كلمة المرور لا تدخل شاشة الحساب اليومية. عند
+   * نجاح الربط نحفظ توكن Uchiyomi مشفّرًا تحت VANTARA identity الثابتة حتى
+   * يستطيع access token v2 فتح المحتوى من دون Login ثانٍ.
    */
   async login(username: string, password: string, device?: string): Promise<Session> {
     const uchiyomi = this.#options.uchiyomi;
@@ -50,7 +59,6 @@ export class SessionStore {
       expiresInDays,
     });
 
-    // الظل الخفيف للمستخدم: اسمه فقط، لتعليق بياناتنا الاجتماعية على معرّفه
     await query(
       `INSERT INTO vantara_users (uchiyomi_user_id, username)
             VALUES ($1, $2)
@@ -70,22 +78,39 @@ export class SessionStore {
       [result.user.id],
     );
 
+    const encrypted = encrypt(minted.token, this.#options.key);
+    const identityId = identityIdForUsername(result.user.username);
+    if (identityId) {
+      await query(
+        `INSERT INTO vantara_identity_links
+           (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
+         VALUES ($1, $2, $3, $4, NULL)
+         ON CONFLICT (vantara_identity_id) DO UPDATE SET
+           uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
+           token_encrypted = EXCLUDED.token_encrypted,
+           token_id = EXCLUDED.token_id,
+           linked_at = now(),
+           last_used_at = now(),
+           revoked_at = NULL`,
+        [identityId, result.user.id, encrypted, minted.id],
+      );
+    }
+
     const id = newSessionId();
     await query(
       `INSERT INTO vantara_sessions
          (id, uchiyomi_user_id, token_encrypted, token_id, device, expires_at)
        VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' days')::interval)`,
-      [
-        id,
-        result.user.id,
-        encrypt(minted.token, this.#options.key),
-        minted.id,
-        device ?? null,
-        String(expiresInDays),
-      ],
+      [id, result.user.id, encrypted, minted.id, device ?? null, String(expiresInDays)],
     );
 
-    return { id, userId: result.user.id, username: result.user.username, token: minted.token };
+    return {
+      id,
+      ...(identityId ? { identityId } : {}),
+      userId: result.user.id,
+      username: result.user.username,
+      token: minted.token,
+    };
   }
 
   /** يُرجع undefined للجلسة المنتهية أو المُبطلة أو غير الموجودة — بلا تمييز. */
@@ -105,12 +130,52 @@ export class SessionStore {
     try {
       token = decrypt(row.token_encrypted, this.#options.key);
     } catch {
-      // مفتاح مختلف أو صف معدَّل: أبطل الجلسة بدل محاولة استخدامها
       await this.revoke(sessionId);
       return undefined;
     }
 
     return { id: row.id, userId: row.uchiyomi_user_id, username: row.username, token };
+  }
+
+  /**
+   * يحول VANTARA identity الموقعة إلى جلسة محتوى؛ التوكن الحقيقي يبقى على
+   * الخادم. deviceId يدخل id التشخيصي فقط، والـWorker هو من يثبت الجهاز.
+   */
+  async resolveIdentity(identityId: string, deviceId: string): Promise<Session | undefined> {
+    const row = await queryOne<IdentityLinkRow>(
+      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, u.username
+         FROM vantara_identity_links l
+         JOIN vantara_users u USING (uchiyomi_user_id)
+        WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
+      [identityId],
+    );
+    if (!row) return undefined;
+
+    let token: string;
+    try {
+      token = decrypt(row.token_encrypted, this.#options.key);
+    } catch {
+      await query(
+        `UPDATE vantara_identity_links SET revoked_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+        [identityId],
+      );
+      return undefined;
+    }
+
+    void query(
+      `UPDATE vantara_identity_links SET last_used_at = now()
+        WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+      [identityId],
+    ).catch(() => {});
+
+    return {
+      id: `identity:${identityId}:${deviceId}`,
+      identityId: row.vantara_identity_id,
+      userId: row.uchiyomi_user_id,
+      username: row.username,
+      token,
+    };
   }
 
   /** لمسة خفيفة لآخر استخدام. لا تُنتظر في مسار الطلب. */

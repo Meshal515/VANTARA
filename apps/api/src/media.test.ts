@@ -49,6 +49,8 @@ const configFor = (serviceToken: string | undefined) =>
     DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unused',
     UCHIYOMI_URL: 'http://uchiyomi.internal:3000',
     SESSION_SECRET: SECRET,
+    // B2 جعله إلزاميًّا: الـContent API لا يتحقق من توكن الهوية بلا سرّه
+    VANTARA_IDENTITY_SECRET: 'test-identity-secret-at-least-32-chars-x',
     COOKIE_SECURE: 'false',
     LOG_LEVEL: 'error',
     ...(serviceToken !== undefined ? { UCHIYOMI_SERVICE_TOKEN: serviceToken } : {}),

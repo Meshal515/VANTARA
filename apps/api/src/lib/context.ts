@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { verifyIdentityToken } from '@vantara/domain';
 import { UchiyomiClient } from '@vantara/uchiyomi';
 import type { Config } from './config.ts';
 import { deriveKey } from './crypto.ts';
@@ -33,14 +34,33 @@ declare module 'fastify' {
   }
 }
 
+function bearerFrom(request: FastifyRequest): string | null {
+  const header = request.headers.authorization;
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match?.[1] ?? null;
+}
+
 /**
- * يرفض الطلب بـ401 إذا لم تكن هناك جلسة صالحة.
- *
- * الرسالة واحدة في كل الحالات — كوكي مفقود، منتهي، مُبطل، أو معدَّل — حتى لا
- * يفرّق المهاجم بين "لا توجد جلسة" و"جلسة انتهت".
+ * B2 يقبل نفس access token v2 الذي يصدره Sync Worker. الكوكي القديم يبقى
+ * fallback مؤقتًا حتى B3 كي لا نكسر النقل الحالي أثناء تغيير الهوية.
  */
 export function requireSession(ctx: AppContext) {
   return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const bearer = bearerFrom(request);
+    if (bearer) {
+      const claims = await verifyIdentityToken(bearer, ctx.config.VANTARA_IDENTITY_SECRET);
+      if (claims) {
+        const session = await ctx.sessions.resolveIdentity(claims.userId, claims.deviceId);
+        if (session) {
+          request.session = session;
+          return;
+        }
+      }
+      await reply.code(401).send({ error: 'unauthorized' });
+      return;
+    }
+
     const cookie = request.cookies[SESSION_COOKIE];
     if (!cookie) {
       await reply.code(401).send({ error: 'unauthorized' });
@@ -55,7 +75,6 @@ export function requireSession(ctx: AppContext) {
     }
 
     request.session = session;
-    // اللمسة لا تعيق الطلب؛ فشلها لا يُسقِطه
     void ctx.sessions.touch(session.id).catch(() => {});
   };
 }

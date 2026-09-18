@@ -33,6 +33,8 @@ const CURSOR_KEY = 'vantara.cursor';
 const QUEUE_KEY = 'vantara.queue';
 const MIRROR_KEY = 'vantara.mirror';
 const QUARANTINE_KEY = 'vantara.quarantine';
+const DEVICE_ID_KEY = 'vantara.device.id';
+const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
 
 /**
  * سقف الطابور.
@@ -80,6 +82,31 @@ function writeJson(key, value) {
   } catch {
     return false;
   }
+}
+
+function randomSecret(bytes = 32) {
+  const value = new Uint8Array(bytes);
+  crypto.getRandomValues(value);
+  let binary = '';
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * إثبات الجهاز يُنشأ مرة واحدة ويبقى محليًا. الـWorker يخزّن HMAC فقط.
+ */
+function deviceProof() {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  let deviceCredential = localStorage.getItem(DEVICE_CREDENTIAL_KEY);
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+  if (!deviceCredential) {
+    deviceCredential = randomSecret();
+    localStorage.setItem(DEVICE_CREDENTIAL_KEY, deviceCredential);
+  }
+  return { deviceId, deviceCredential };
 }
 
 export function createSync({ baseUrl }) {
@@ -176,7 +203,47 @@ export function createSync({ baseUrl }) {
     persistQueue();
   };
 
-  async function request(path, options = {}) {
+  async function sessionPayload(userId) {
+    const response = await fetch(`${baseUrl}/v1/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, ...deviceProof() }),
+    });
+    if (!response.ok) {
+      const error = new Error(`http_${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  function persistSession(payload) {
+    token = payload.token;
+    user = payload.user;
+    localStorage.setItem(TOKEN_KEY, token);
+    writeJson(USER_KEY, user);
+  }
+
+  async function refreshSession() {
+    if (!user?.userId) {
+      const error = new Error('unauthorized');
+      error.status = 401;
+      throw error;
+    }
+    try {
+      const payload = await sessionPayload(user.userId);
+      persistSession(payload);
+      emit(['session']);
+      return payload;
+    } catch (error) {
+      token = null;
+      localStorage.removeItem(TOKEN_KEY);
+      emit(['session']);
+      throw error;
+    }
+  }
+
+  async function request(path, options = {}, allowRefresh = true) {
     const headers = { ...(options.headers ?? {}) };
     if (token) headers.authorization = `Bearer ${token}`;
     if (options.body) headers['content-type'] = 'application/json';
@@ -185,18 +252,26 @@ export function createSync({ baseUrl }) {
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+
     if (response.status === 401) {
-      // السرّ دُوّر أو التوكن انتهى: الجلسة تُطوى ويُعاد المستخدم للاختيار
-      token = null;
-      localStorage.removeItem(TOKEN_KEY);
-      emit(['session']);
+      if (allowRefresh && user?.userId) {
+        try {
+          await refreshSession();
+          return request(path, options, false);
+        } catch {
+          // جهاز revoked أو credential مفقود: refreshSession طوى الجلسة.
+        }
+      } else {
+        token = null;
+        localStorage.removeItem(TOKEN_KEY);
+        emit(['session']);
+      }
       const error = new Error('unauthorized');
       error.status = 401;
       throw error;
     }
+
     if (!response.ok) {
-      // الحالة تُحمل مع الخطأ: قرار إعادة المحاولة أو العزل يعتمد عليها،
-      // ورسالة نصية وحدها كانت تجعل كل فشل يبدو متشابهًا
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
       throw error;
@@ -206,59 +281,88 @@ export function createSync({ baseUrl }) {
 
   // ───────────────────────── الجلسة ─────────────────────────
 
-  /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب قبل أي جلسة. */
+  async function pairDevice(pairingToken) {
+    const response = await fetch(`${baseUrl}/v1/device/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingToken, ...deviceProof() }),
+    });
+    if (!response.ok) throw new Error(`pair_${response.status}`);
+    return response.json();
+  }
+
+  async function consumePairingUrl(value) {
+    const url = new URL(value);
+    const pairingToken = url.searchParams.get('pair');
+    if (!pairingToken) return false;
+    await pairDevice(pairingToken);
+    return true;
+  }
+
+  async function consumePairingFromUrl() {
+    if (typeof location === 'undefined') return;
+    const url = new URL(location.href);
+    if (!url.searchParams.has('pair')) return;
+
+    try {
+      await consumePairingUrl(url.href);
+    } catch {
+      // رمز مستهلك/منتهي لا يعني أن الخادم ساقط. نكمل إلى قائمة الحسابات؛
+      // إن كان الجهاز غير موثوق فعلًا فمحاولة الدخول نفسها ستطلب pairing جديدًا.
+    } finally {
+      // لا نترك ?pair= معطوبًا في العنوان وإلا يعيد كل reload نفس الفشل.
+      url.searchParams.delete('pair');
+      if (typeof history !== 'undefined') {
+        history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
+  }
+
+  async function attachNativeLinkBridge(appPlugin) {
+    if (
+      !appPlugin ||
+      typeof appPlugin.getLaunchUrl !== 'function' ||
+      typeof appPlugin.addListener !== 'function'
+    ) {
+      return null;
+    }
+
+    // سجّل المستمع أولًا كي لا نفقد رابطًا يصل أثناء الإقلاع.
+    const listener = await appPlugin.addListener('appUrlOpen', (event) => {
+      if (typeof event?.url !== 'string') return;
+      void consumePairingUrl(event.url).catch(() => {
+        // رابط قديم/منتهي لا يقتل التطبيق. الدخول سيكشف إن كان الجهاز يحتاج pairing جديدًا.
+      });
+    });
+
+    try {
+      const launched = await appPlugin.getLaunchUrl();
+      if (typeof launched?.url === 'string') {
+        await consumePairingUrl(launched.url);
+      }
+    } catch {
+      // cold-start pairing مساعد للإقلاع، وليس شرطًا لبناء واجهة التطبيق.
+    }
+
+    return listener;
+  }
+
+  /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب بعد pairing إن وُجد. */
   async function accounts() {
+    await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
     return (await response.json()).content ?? [];
   }
 
-  /** اختيار الحساب هو الدخول. لا كلمة مرور ولا خطوة تحقق. */
+  /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
   async function signIn(userId) {
-    const response = await fetch(`${baseUrl}/v1/session`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId }),
-    });
-    if (!response.ok) throw new Error(`http_${response.status}`);
-    const payload = await response.json();
-    // يُقرأ قبل الكتابة: المقارنة بعدها تتساوى دائمًا
     const previousId = user?.userId ?? null;
-    token = payload.token;
-    user = payload.user;
-    // حساب مختلف على نفس الجهاز: المرآة والـcursor يُبنيان من الصفر، وإلا
-    // ظهرت مكتبة المستخدم السابق لهذا. نفس الحساب يحفظ مرآته فيفتح فورًا.
+    const payload = await sessionPayload(userId);
+    persistSession(payload);
     if (previousId && previousId !== user.userId) resetAll();
-    localStorage.setItem(TOKEN_KEY, token);
-    writeJson(USER_KEY, user);
     emit(['session']);
     return user;
-  }
-
-  /**
-   * يُصدر توكنًا جديدًا للحساب نفسه.
-   *
-   * توكن الهوية قصير العمر (خمس عشرة دقيقة في عقد B2)، والقارئ يبقى مفتوحًا
-   * أطول من ذلك بكثير. فبلا تجديد، نداء واحد بعد انتهائه يُسجّل خروجًا في وجه
-   * القارئ في منتصف فصل.
-   *
-   * وهذا ليس دخولًا جديدًا: اختيار الحساب **هو** الدخول في VANTARA، فإعادة
-   * إصدار توكن لحساب معروف على هذا الجهاز لا تطلب من المستخدم شيئًا — ولا
-   * كلمة مرور ولا رقمًا سريًّا، ولا حتى شاشة.
-   *
-   * ما تحته يتغيّر في B2 (إثبات الجهاز بدل معرّف الحساب)، وهذا السطح هو
-   * الفاصل: من يستهلكه — `lib/content-api.js` — لا يتغيّر معه.
-   */
-  async function refreshSession() {
-    const known = user?.userId ?? null;
-    if (!known) return false;
-    try {
-      await signIn(known);
-      return true;
-    } catch {
-      // الفشل ليس خطأً يُرمى للمُنادي: هو رجع 401 أصلًا، وهذا ما يراه
-      return false;
-    }
   }
 
   function signOut() {
@@ -268,6 +372,18 @@ export function createSync({ baseUrl }) {
     localStorage.removeItem(USER_KEY);
     resetAll();
     emit(['session']);
+  }
+
+  async function logoutDevice() {
+    if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
+    signOut();
+  }
+
+  async function logoutAll() {
+    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
+    signOut();
   }
 
   /**
@@ -579,24 +695,21 @@ export function createSync({ baseUrl }) {
     get signedIn() {
       return Boolean(token);
     },
-    /**
-     * ترويسة الهوية لخادم المحتوى.
-     *
-     * getter لا قيمة: التوكن يُدوَّر (تجديد، أو تبديل حساب)، وقيمة تُقرأ مرة
-     * واحدة تبقى بعده — فتُرسل ترويسة لحساب سابق أو لجلسة منتهية.
-     *
-     * شكل التوكن ملك B2؛ هذا هو المكان الذي يُقرأ منه، لا أكثر.
-     */
     get authorizationHeader() {
       return token ? `Bearer ${token}` : null;
     },
-    refreshSession,
     get pendingWrites() {
       return queue.length;
     },
     accounts,
+    pairDevice,
+    consumePairingUrl,
+    attachNativeLinkBridge,
+    refreshSession,
     signIn,
     signOut,
+    logoutDevice,
+    logoutAll,
     pull,
     push,
     enqueue,

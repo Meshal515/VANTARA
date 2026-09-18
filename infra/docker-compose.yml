@@ -114,11 +114,7 @@ services:
   flaresolverr:
     <<: *restart
     image: ghcr.io/flaresolverr/flaresolverr@sha256:c80ae007ce2ccdcd217a12426e4f039ef763ff90738c808d38810c3e59323767
-    # Chrome يكتب ذاكرته المشتركة هنا، وافتراضي Docker 64MB يقتل chromedriver
-    # في منتصف التحدي — ويظهر من جهة التطبيق كأن الموقع يحجبنا
     shm_size: 1gb
-    # موثّق upstream: تسرّب حتى 2.5GB في 62 يومًا، والمتسرّب يفشل بلا أن يسقط.
-    # السقف + restart يحوّل التسرّب إلى إعادة تشغيل تلقائية.
     mem_limit: 2g
     environment:
       LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-warning}
@@ -149,6 +145,7 @@ services:
       # ‏503 ويسقط القارئ إلى مسار الكوكي — وهو لا يعمل على الـAPK.
       UCHIYOMI_SERVICE_TOKEN: ${UCHIYOMI_SERVICE_TOKEN:-}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (openssl rand -base64 48)}
+      VANTARA_IDENTITY_SECRET: ${VANTARA_IDENTITY_SECRET:?set VANTARA_IDENTITY_SECRET (openssl rand -base64 48)}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-60}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # أصول الـAPK مدمجة في القائمة البيضاء؛ هذا لنطاق Pages وحده
@@ -167,7 +164,6 @@ services:
     expose: ['3100']
 
   # ───────────────────────── الترجمة العربية ─────────────────────────
-  # الكشف وOCR وinpainting من محرك جاهز؛ الرسم العربي من طبقتنا (D-04).
   translation-worker:
     <<: *restart
     build:
@@ -180,7 +176,6 @@ services:
       UCHIYOMI_URL: http://uchiyomi:3000
       ARABIC_FONT: /fonts/NotoNaskhArabic-Regular.ttf
       LATIN_FONT: /fonts/NotoSans-Regular.ttf
-      # يرفض الإقلاع بلا raqm بدل أن ينتج عربية معكوسة
       REQUIRE_RAQM: 'true'
       TRANSLATION_CONCURRENCY: ${TRANSLATION_CONCURRENCY:-1}
     volumes:

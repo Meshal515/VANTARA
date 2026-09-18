@@ -1,25 +1,14 @@
 /**
- * جلسة بلا كلمة مرور.
+ * Legacy sync-handler token.
  *
- * VANTARA تطبيق خاص بين ثلاثة أشخاص، واختيار الحساب **هو** تسجيل الدخول. لا
- * كلمة مرور ولا PIN ولا إدخال معرّف. الجلسة تُنشأ خلف الكواليس فور اللمس.
- *
- * ما يعنيه ذلك صراحة: من يعرف عنوان الـWorker يستطيع أن يصكّ جلسة لأي من
- * الحسابات الثلاثة. هذا اختيار مقصود لا سهو — الاحتكاك الصفري كان المطلوب،
- * والمكشوف هو نشاط قراءة ثلاثة أصدقاء. ما يحدّه:
- *
- *   - لا إنشاء حسابات: المعرّفات الثلاثة في قاعدة البيانات هي كل ما يُقبل.
- *   - العنوان غير منشور في أي مكان عام.
- *   - تدوير VANTARA_SESSION_SECRET يُبطل كل التوكنات فورًا.
- *
- * ولا سرّ داخل الـAPK: التوقيع يحدث هنا بمفتاح لا يملكه العميل، والعميل يحمل
- * التوكن الناتج فقط.
+ * B2 no longer exposes this format to clients: `secure-index.ts` verifies the
+ * trusted-device VANTARA identity token first, then mints this short token only
+ * for the duration of delegation into the old sync handlers. B3 removes this
+ * adapter when transport/auth cleanup reaches the handlers themselves.
  */
 
 const encoder = new TextEncoder();
-
-/** سنة: نحن نزيل الاحتكاك، وإعادة الدخول كل أسبوع احتكاك. */
-const TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const TOKEN_TTL_MS = 15 * 60 * 1000;
 
 interface TokenPayload {
   uid: string;
@@ -43,7 +32,7 @@ function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-async function keyFor(secret: string): Promise<CryptoKey> {
+async function keyFor(secret: string) {
   return crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
@@ -60,12 +49,7 @@ export async function mintToken(userId: string, secret: string, now = Date.now()
   return `${body}.${base64urlEncode(new Uint8Array(signature))}`;
 }
 
-/**
- * يعيد الـuser_id أو null.
- *
- * التحقق بـcrypto.subtle.verify لا بمقارنة نصية: المقارنة النصية تُسرّب طول
- * البادئة المطابقة زمنيًا.
- */
+/** يعيد الـuser_id أو null بعد التحقق من التوقيع والعمر. */
 export async function verifyToken(
   token: string,
   secret: string,
