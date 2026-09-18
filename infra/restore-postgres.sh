@@ -22,7 +22,18 @@ for dump in "$vantara_dump" "$uchiyomi_dump"; do
   pg_restore --list "$dump" >/dev/null
 done
 
-pg_restore --clean --if-exists --no-owner --no-acl --dbname="$primary_db" "$vantara_dump"
-pg_restore --clean --if-exists --no-owner --no-acl --dbname="$uchiyomi_db" "$uchiyomi_dump"
+# ‏`--single-transaction` و`--exit-on-error` ليسا تزيينًا:
+#
+# افتراض `pg_restore` هو **المواصلة بعد الخطأ** («exit on error, default is to
+# continue» في `--help`)، ثم طباعة عدد الأخطاء في النهاية. ومع `--clean` هذا
+# يعني أن استعادة تتعثّر في منتصفها تكون قد **أسقطت** الجداول القديمة وبنت
+# نصف الجديدة، ثم يطبع السطر الأخير «Restore completed» — نجاح كاذب على مسار
+# التعافي من كارثة، وهو أسوأ مكان يحدث فيه.
+#
+# داخل transaction واحدة: إمّا تُستعاد القاعدة كاملة، أو تبقى كما كانت.
+pg_restore --single-transaction --exit-on-error --clean --if-exists \
+  --no-owner --no-acl --dbname="$primary_db" "$vantara_dump"
+pg_restore --single-transaction --exit-on-error --clean --if-exists \
+  --no-owner --no-acl --dbname="$uchiyomi_db" "$uchiyomi_dump"
 
 echo 'Restore completed for VANTARA and Uchiyomi databases.'

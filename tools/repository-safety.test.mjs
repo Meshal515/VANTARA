@@ -78,3 +78,25 @@ test('signed Android release workflow is tag-only, main-only, and CI-verified', 
   assert.match(workflow, /^\s*actions:\s*read\s*$/m, 'Android release verification needs read access to Actions results');
   assertCommitHasSuccessfulCi(workflow, '$GITHUB_SHA', 'Android release path');
 });
+
+test('database restore is atomic, so a half-applied restore cannot report success', () => {
+  // ‏`pg_restore` الافتراضي: «exit on error, default is to continue». ومع
+  // ‏`--clean` هذا يعني استعادة متعثّرة أسقطت القديم وبنت نصف الجديد، ثم
+  // طبعت «Restore completed» — نجاح كاذب على مسار التعافي من كارثة.
+  const script = read('infra/restore-postgres.sh');
+  const restores = script.match(/pg_restore[^\n]*(?:\\\n[^\n]*)*--dbname/g) ?? [];
+  assert.ok(restores.length >= 2, 'restore script must restore both databases');
+
+  for (const invocation of restores) {
+    assert.match(
+      invocation,
+      /--single-transaction/,
+      'each restore must run in one transaction: either the database comes back whole, or it is untouched',
+    );
+    assert.match(
+      invocation,
+      /--exit-on-error/,
+      'each restore must stop at the first error instead of continuing past it',
+    );
+  }
+});
