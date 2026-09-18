@@ -30,7 +30,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vantara} -d ${POSTGRES_DB:-vantara}']
+      # الـentrypoint الرسمي يشغّل Postgres مؤقتًا على Unix socket فقط أثناء init.
+      # TCP يثبت أن السيرفر النهائي اشتغل، فلا تبدأ الخدمات في نافذة shutdown.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-vantara} -d ${POSTGRES_DB:-vantara}']
       interval: 10s
       timeout: 5s
       retries: 10
