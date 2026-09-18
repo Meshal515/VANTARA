@@ -70,6 +70,27 @@ export async function sourceKeysForSeriesRefs(
   return keys;
 }
 
+
+interface SourceRegistryRow {
+  source_id: string;
+  lang: string | null;
+  verdict: SourceVerdict;
+}
+
+export function sourceSearchPolicy(rows: readonly SourceRegistryRow[]): {
+  filterSources: boolean;
+  allowedSources: Set<string>;
+  sourceLanguages: Map<string, string | null>;
+} {
+  const supported = rows.filter((row) => row.verdict === 'SUPPORTED');
+  return {
+    // فقط السجل الفيزيائي الفارغ يعني أول تشغيل بلا sync.
+    filterSources: rows.length > 0,
+    allowedSources: new Set(supported.map((row) => row.source_id)),
+    sourceLanguages: new Map(supported.map((row) => [row.source_id, row.lang] as const)),
+  };
+}
+
 export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   /**
    * مزامنة سجل المصادر مع ما يراه Uchiyomi.
@@ -282,8 +303,8 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
     const grouped = await ctx.uchiyomi.searchAll(q, session.token);
 
     const [searchable, deleted, blocked] = await Promise.all([
-      query<{ source_id: string; lang: string | null }>(
-        `SELECT source_id, lang FROM vantara_source_verdicts WHERE verdict = 'SUPPORTED'`,
+      query<SourceRegistryRow>(
+        `SELECT source_id, lang, verdict FROM vantara_source_verdicts`,
       ),
       query<{ series_ref: string }>(
         `SELECT series_ref FROM vantara_deleted_works WHERE restored_at IS NULL`,
@@ -294,8 +315,7 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
       ),
     ]);
 
-    const allowedSources = new Set(searchable.map((r) => r.source_id));
-    const sourceLanguages = new Map(searchable.map((r) => [r.source_id, r.lang] as const));
+    const { filterSources, allowedSources, sourceLanguages } = sourceSearchPolicy(searchable);
     const blockedSources = new Set(
       blocked.map((r) => r.source_id).filter((v): v is string => v !== null),
     );
@@ -313,8 +333,7 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext): Promi
       (seriesRef) => ctx.uchiyomi.series(seriesRef, policyToken),
     );
 
-    // سجل فارغ ⇒ لا نحجب شيئًا: تشغيل أول بلا sync يجب أن يبحث لا أن يصمت
-    const filterSources = allowedSources.size > 0;
+    // سجل verdicts الفارغ فقط هو bootstrap mode؛ سجل موجود بلا SUPPORTED يحجب الجميع.
 
     const content = grouped
       .map((group) => ({
