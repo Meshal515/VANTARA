@@ -526,3 +526,33 @@ test('every growing sync table has the index its delta query needs', () => {
     );
   }
 });
+
+test('a spoiler comment never leaks into a surface with no reveal control', () => {
+  // الحرق يدويّ من الكاتب (§27)، والقارئ يكشفه بنفسه. أما الإشعار وسجل
+  // النشاط فلا زرّ كشف فيهما، فالحرق يقع هناك بمجرد العرض. وكان الإشعار
+  // يحمل نصّ التعليق كاملًا: ردٌّ فيه حرق يصل صاحبه بنصّه.
+  const worker = read('services/sync-worker/src/index.ts');
+  assert.match(
+    worker,
+    /body: fanoutBody\(\{ body, spoiler \}\)/,
+    'the reply notification must pass the body through the fan-out filter',
+  );
+  assert.doesNotMatch(
+    worker,
+    /spoiler_after/,
+    'the progress-based spoiler model is gone and must not come back',
+  );
+
+  const rule = read('packages/domain/src/spoilers.ts');
+  assert.match(
+    rule,
+    /return comment\.spoiler \? null : comment\.body/,
+    'a spoiler body must resolve to nothing for notifications and activity',
+  );
+  // `'true'` نصٌّ لا علامة: قبولُه يجعل الحرق يُفعَّل بالخطأ أو يُلتفّ عليه
+  assert.match(
+    rule,
+    /value === 1 \|\| value === true/,
+    'the spoiler flag must be read strictly, not by truthiness',
+  );
+});

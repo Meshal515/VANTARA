@@ -4,7 +4,6 @@ import {
   compareChapters,
   containsSecret,
   creditForBeat,
-  isVisible,
   looksRelevant,
   redactForViewers,
   scrubDiagnostics,
@@ -181,25 +180,6 @@ describe('chapter ordering', () => {
       'numbered:10.1',
       'epilogue:-',
     ]);
-  });
-});
-
-describe('spoiler masking', () => {
-  it('hides a comment the reader has not reached', () => {
-    expect(isVisible({ number: 200 }, { number: 180 })).toBe(false);
-  });
-
-  it('reveals it once the reader is level or past', () => {
-    expect(isVisible({ number: 200 }, { number: 200 })).toBe(true);
-    expect(isVisible({ number: 200 }, { number: 205 })).toBe(true);
-  });
-
-  it('always shows a comment tied to no chapter', () => {
-    expect(isVisible(undefined, undefined)).toBe(true);
-  });
-
-  it('hides everything tied to a chapter from a reader who has not started', () => {
-    expect(isVisible({ number: 1 }, undefined)).toBe(false);
   });
 });
 

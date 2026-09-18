@@ -27,6 +27,8 @@ import {
   isRecommendationState,
   isRecommendationIntent,
   socialLinkFor,
+  isSpoiler,
+  fanoutBody,
   ownerOf,
   readStats,
   redactForViewers,
@@ -214,7 +216,7 @@ const DELTA_TABLES = [
   // الأعمال، وبلا هذا الجدول تعرض شاشة المفضلة معرّفًا خامًا
   ['works', 'series_ref, title, cover_url, source_id, updated_at, rev'],
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
-  ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler_after, created_at, deleted, rev'],
+  ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
   ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
@@ -745,11 +747,13 @@ export function statementsFor(
       const parentId = asString(p['parentId'], 80);
       const parent = parentId ? ctx.comments?.[parentId] : undefined;
       const link = socialLinkFor({ kind: 'comment', seriesRef, commentId: op.opId });
+      // الحرق قرار الكاتب وحده، ويُقرأ صريحًا: أي شيء غير `true` ليس حرقًا
+      const spoiler = isSpoiler(p['spoiler']);
       const statements: D1PreparedStatement[] = [
         db
           .prepare(
             `INSERT INTO comments
-               (id, author_id, series_ref, chapter_ref, parent_id, body, spoiler_after, created_at, deleted, rev)
+               (id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
@@ -760,7 +764,7 @@ export function statementsFor(
             asString(p['chapterRef'], 200),
             parentId,
             body,
-            asNumber(p['spoilerAfter']),
+            spoiler ? 1 : 0,
             now,
             rev,
           ),
@@ -790,7 +794,9 @@ export function statementsFor(
             recipients: [parent.authorId],
             actorId: userId,
             seriesRef,
-            body,
+            // الإشعار لا زرّ كشف فيه، فلا يحمل نصّ تعليق محروق أبدًا: صفّ
+            // الإشعار يُكتب بلا نصٍّ من أصله، لا يُخفى في الواجهة
+            body: fanoutBody({ body, spoiler }),
             link,
             now,
             rev,

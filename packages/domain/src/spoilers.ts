@@ -1,77 +1,57 @@
 /**
- * حجب التعليقات حسب تقدم القارئ.
+ * الحرق اليدوي.
  *
- * أرقام الفصول في هذا العالم ليست أعدادًا عشرية بسيطة: يوجد 0 وPrologue و1.5
- * و10.1 وSpecial وSide Story وExtra وEpilogue. الترتيب هنا يتعامل مع ذلك بدل
- * أن يفترض float.
+ * الحرق يقرّره **كاتب التعليق** بزرٍّ صريح، لا تقدّمُ القارئ داخل VANTARA.
+ * والسبب أن عدّادنا لا يعرف الحقيقة: الواحد قد يكون أنهى العمل كله في موقع
+ * أو تطبيق آخر قبل أن ينتقل إلينا، فالربط بتقدّمنا يحجب عنه ما قرأه، ويكشف
+ * لغيره ما لم يقرأه. والقرار يُعطى لمن يعرف وحده: الكاتب.
+ *
+ * والقارئ يكشفه بنفسه («إظهار الحرق»)، فالحجاب **رضائي** لا حاجز صلاحية:
+ * من يضغط مخوَّلٌ أصلًا لرؤية النصّ. ولهذا يسافر النصّ مع التعليق، فيعمل
+ * الكشف بلا شبكة — وهو ما يحتاجه القارئ في الطائرة أو بلا تغطية.
+ *
+ * أما السطوح التي **لا زرّ كشف فيها** — الإشعار وسجل النشاط — فلا يجوز أن
+ * تحمل النصّ أبدًا: هناك لا أحد يوافق على شيء، والحرق يقع بمجرد العرض. وهذا
+ * حجبٌ على الخادم لا في الواجهة: النصّ لا يُكتب في صفّ الإشعار من أصله.
  */
 
-export interface ChapterOrder {
-  /** الرقم إن كان للفصل رقم. */
-  number?: number;
-  /** فصول خارج الترقيم: Prologue قبل الكل، Epilogue بعده. */
-  kind?: 'prologue' | 'numbered' | 'special' | 'side' | 'extra' | 'epilogue';
-}
-
-const KIND_RANK: Record<NonNullable<ChapterOrder['kind']>, number> = {
-  prologue: -1,
-  numbered: 0,
-  // الخاصة والجانبية والإضافية لا تقع في سلسلة القصة، فتُرتَّب بعد رقمها
-  special: 0.5,
-  side: 0.5,
-  extra: 0.5,
-  epilogue: 1,
-};
-
-/**
- * مفتاح ترتيب مركّب: [الرقم، رتبة النوع].
- * Prologue بلا رقم يسبق الفصل 0؛ Epilogue بلا رقم يلي الجميع.
- */
-export function orderKey(chapter: ChapterOrder): [number, number] {
-  const kind = chapter.kind ?? 'numbered';
-  if (chapter.number === undefined) {
-    if (kind === 'prologue') return [Number.NEGATIVE_INFINITY, 0];
-    if (kind === 'epilogue') return [Number.POSITIVE_INFINITY, 0];
-    return [Number.POSITIVE_INFINITY, KIND_RANK[kind]];
-  }
-  return [chapter.number, KIND_RANK[kind]];
-}
-
-export function compareChapters(a: ChapterOrder, b: ChapterOrder): number {
-  const [an, ak] = orderKey(a);
-  const [bn, bk] = orderKey(b);
-  if (an !== bn) return an < bn ? -1 : 1;
-  return ak - bk;
+export interface SpoilerComment {
+  body: string;
+  spoiler: boolean;
 }
 
 /**
- * هل يُعرض تعليق مربوط بفصل لقارئ وصل إلى فصل معيّن؟
+ * هل هذا التعليق محروق؟
  *
- * `undefined` للتقدم يعني "لم يبدأ" ⇒ يُحجب كل ما هو مربوط بفصل.
- * التعليق غير المربوط بفصل (`after` غير معرّف) يُعرض دائمًا.
+ * SQLite لا تعرف boolean فالصفّ يرجع 0 أو 1، والحمولة من العميل قد تأتي
+ * بأي شيء. ما لا يكون `1` أو `true` صريحًا فليس حرقًا — ولا يُقبل نصٌّ مثل
+ * `'true'`، وإلا صار الحرق يُفعَّل بالخطأ أو يُلتفّ عليه بنوعٍ آخر.
  */
-export function isVisible(
-  after: ChapterOrder | undefined,
-  readerProgress: ChapterOrder | undefined,
-): boolean {
-  if (after === undefined) return true;
-  if (readerProgress === undefined) return false;
-  return compareChapters(readerProgress, after) >= 0;
+export function isSpoiler(value: unknown): boolean {
+  return value === 1 || value === true;
 }
 
-export interface MaskedComment<T> {
-  comment: T;
-  masked: boolean;
+/**
+ * النصّ الذي يجوز أن يحمله إشعار أو حدث نشاط.
+ *
+ * `null` لتعليق محروق: الإشعار يصف الحدث («علّق على …») ولا ينقل ما فيه.
+ */
+export function fanoutBody(comment: SpoilerComment): string | null {
+  return comment.spoiler ? null : comment.body;
 }
 
-/** يبقي التعليق في القائمة لكن يعلّمه محجوبًا — الواجهة تعرض "اضغط لكشف". */
-export function maskSpoilers<T>(
-  comments: readonly T[],
-  spoilerOf: (comment: T) => ChapterOrder | undefined,
-  readerProgress: ChapterOrder | undefined,
-): MaskedComment<T>[] {
-  return comments.map((comment) => ({
-    comment,
-    masked: !isVisible(spoilerOf(comment), readerProgress),
-  }));
+/**
+ * هل يُعرض التعليق محجوبًا لهذا القارئ الآن؟
+ *
+ * الكشف اختيار محلّي لكل جهاز، فلا يُزامَن ولا يُخزَّن على الخادم: ما يوافق
+ * عليه أحدهم على جواله لا يُلزم غيره، ولا يُلزمه على جهازٍ ثانٍ.
+ */
+export function commentVeiled({
+  spoiler,
+  revealed,
+}: {
+  spoiler: boolean;
+  revealed: boolean;
+}): boolean {
+  return spoiler && !revealed;
 }

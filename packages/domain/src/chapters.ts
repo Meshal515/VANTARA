@@ -337,3 +337,32 @@ export function resumePoint(entries: readonly CatalogueEntry[]): CatalogueEntry 
   const unread = readable.find((entry) => entry.read !== true);
   return unread ?? readable[readable.length - 1]!;
 }
+
+// ─────────────────────── ترتيب الفصول ───────────────────────
+//
+// كان هذا في `spoilers.ts` لأن الحجب القديم احتاج مقارنة فصلين. وقد أُسقط
+// ذلك النموذج (الحرق صار يدويًّا من الكاتب)، والترتيب نفسه يبقى: §25 «اقرأوا
+// سوا» تحتاج صفَّ فصولٍ مرتَّبًا، والمقدّمة والخاتمة والأرقام العشرية لها
+// موضعها الصحيح هنا لا في وحدة الحرق.
+
+export interface ChapterOrder {
+  number?: number;
+  kind?: 'prologue' | 'numbered' | 'special' | 'epilogue';
+}
+
+/** المقدّمة قبل كل شيء والخاتمة بعده، وبينهما الرقم — والخاص بعد نظيره. */
+export function orderKey(chapter: ChapterOrder): [number, number] {
+  if (chapter.kind === 'prologue') return [-1, 0];
+  if (chapter.kind === 'epilogue') return [1, 0];
+  return [0, chapter.number ?? 0];
+}
+
+export function compareChapters(a: ChapterOrder, b: ChapterOrder): number {
+  const [groupA, numberA] = orderKey(a);
+  const [groupB, numberB] = orderKey(b);
+  if (groupA !== groupB) return groupA - groupB;
+  if (numberA !== numberB) return numberA - numberB;
+  // فصلان بنفس الرقم: الخاص بعد المرقَّم
+  const rank = (kind?: string) => (kind === 'special' ? 1 : 0);
+  return rank(a.kind) - rank(b.kind);
+}

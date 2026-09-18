@@ -441,6 +441,71 @@ describe('B8 server-derived activity', () => {
     ).toBe(false);
   });
 
+  it('stores the spoiler flag its author set, and nothing else as a spoiler', () => {
+    const marked = translate('comment.add', {
+      seriesRef: 'lookism',
+      body: 'مات في الفصل 500',
+      spoiler: true,
+    });
+    const insert = marked.find((entry) => entry.sql.includes('INSERT INTO comments'));
+    expect(insert?.values).toContain(1);
+
+    // حمولة مشوَّهة لا تصنع حرقًا ولا تُسقطه: `'true'` نصٌّ لا علامة
+    const stray = translate('comment.add', {
+      seriesRef: 'lookism',
+      body: 'عادي',
+      spoiler: 'true',
+    });
+    const plain = stray.find((entry) => entry.sql.includes('INSERT INTO comments'));
+    expect(plain?.values).toContain(0);
+  });
+
+  it('never puts a spoiler body inside the reply notification', () => {
+    // الإشعار لا زرّ كشف فيه: النصّ هناك يحرق بمجرد العرض. فالصفّ يُكتب بلا
+    // نصٍّ من أصله — لا يُخفى في الواجهة.
+    const ctx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { parent1: { authorId: 'ngm', seriesRef: 's1' } },
+    } as unknown as OpContext;
+    const out = translate(
+      'comment.add',
+      { seriesRef: 's1', parentId: 'parent1', body: 'مات في الفصل 500', spoiler: true },
+      { ctx },
+    );
+
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification?.values).toContain('COMMENT_REPLY');
+    expect(notification?.values).not.toContain('مات في الفصل 500');
+    expect(notification?.values).toContain(null);
+  });
+
+  it('still carries an ordinary reply body into the notification', () => {
+    // الحجب للمحروق وحده: حجبُ كل شيء يُفرّغ الإشعارات من معناها
+    const ctx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { parent1: { authorId: 'ngm', seriesRef: 's1' } },
+    } as unknown as OpContext;
+    const out = translate(
+      'comment.add',
+      { seriesRef: 's1', parentId: 'parent1', body: 'ردّ عادي' },
+      { ctx },
+    );
+
+    const notification = out.find((entry) => entry.sql.includes('INSERT INTO notifications'));
+    expect(notification?.values).toContain('ردّ عادي');
+  });
+
+  it('keeps the comment activity free of the comment text', () => {
+    // سجل النشاط سطحٌ آخر بلا كشف: يحمل المعرّف لا النصّ، محروقًا كان أو لا
+    const out = translate('comment.add', {
+      seriesRef: 'lookism',
+      body: 'مات في الفصل 500',
+      spoiler: true,
+    });
+    const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+    expect(JSON.stringify(activity?.values)).not.toContain('مات في الفصل 500');
+  });
+
   it('derives reaction activity and notifies the comment author, excluding self', () => {
     const ctx = {
       accounts: ['dahmi', 'mansour', 'ngm'],
