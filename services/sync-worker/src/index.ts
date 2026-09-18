@@ -1100,6 +1100,54 @@ async function allAccountIds(env: Env): Promise<string[]> {
  * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
  * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
  */
+export async function validateRecommendationResponses(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  if (ids.length === 0) return null;
+
+  const rows = new Map<string, string | null>();
+  const CHUNK = 90;
+  for (let offset = 0; offset < ids.length; offset += CHUNK) {
+    const chunk = ids.slice(offset, offset + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const { results } = await env.DB.prepare(
+      `SELECT r.id, rr.user_id AS recipient_user_id
+         FROM recommendations r
+         LEFT JOIN recommendation_recipients rr
+           ON rr.recommendation_id = r.id
+          AND rr.user_id = ?
+        WHERE r.id IN (${placeholders})`,
+    )
+      .bind(userId, ...chunk)
+      .all<{ id: string; recipient_user_id: string | null }>();
+
+    for (const row of results) rows.set(row.id, row.recipient_user_id);
+  }
+
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id) continue;
+    if (!rows.has(id)) return { status: 404, error: 'recommendation_not_found' };
+    if (rows.get(id) !== userId) return { status: 403, error: 'forbidden' };
+  }
+
+  return null;
+}
+
 export async function loadOpContext(
   ops: readonly IncomingOp[],
   env: Env,
@@ -1239,6 +1287,11 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
       .filter((op): op is IncomingOp => op !== null),
   );
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
+
+  const authorizationError = await validateRecommendationResponses(ops, userId, env);
+  if (authorizationError) {
+    return json({ error: authorizationError.error }, { status: authorizationError.status });
+  }
 
   const rev = await allocateRev(env);
 
