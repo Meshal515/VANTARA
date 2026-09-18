@@ -119,6 +119,17 @@ describe('ownership matrix', () => {
     expect(ownerOfTable('POSTGRES', 'vantara_comments')).toBeNull();
   });
 
+  it('assigns B8 social receipt tables to the existing D1 social domains', () => {
+    expect(ownerOfTable('D1', 'recommendation_recipients')).toEqual({
+      key: 'social.recommendations',
+      owner: 'D1',
+    });
+    expect(ownerOfTable('D1', 'activity_receipts')).toEqual({
+      key: 'social.activity',
+      owner: 'D1',
+    });
+  });
+
   it('lists the retired Postgres social tables so nothing writes them again', () => {
     const retired = retiredTables('POSTGRES');
     expect(retired).toEqual(
