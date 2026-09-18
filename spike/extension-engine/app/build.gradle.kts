@@ -45,11 +45,28 @@ android {
     }
 
     packaging {
+        // ثماني اعتماديات تشحن كلٌّ نسختها من ملفات META-INF نفسها، ودامج
+        // الموارد يرفض التكرار:
+        //
+        //   DuplicateRelativeFileException: 3 files found with path
+        //   'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
+        //
+        // وهذه بيانات وصفية لـOSGi والتراخيص، لا يقرؤها التطبيق ولا الإضافة
+        // في زمن التشغيل. فإسقاطها إسقاطُ تكرار لا إسقاطُ وظيفة.
+        //
+        // ولا أستعمل `pickFirst` هنا: «خذ أولها» يُخفي تعارضًا حقيقيًّا لو
+        // وقع يومًا في ملفٍ يهمّ، بينما `excludes` يقول صراحة ما أُسقط.
         resources.excludes += setOf(
             "META-INF/*.kotlin_module",
+            "META-INF/versions/**/OSGI-INF/**",
+            "META-INF/OSGI-INF/**",
             "META-INF/DEPENDENCIES",
             "META-INF/LICENSE*",
             "META-INF/NOTICE*",
+            "META-INF/INDEX.LIST",
+            "META-INF/*.SF",
+            "META-INF/*.DSA",
+            "META-INF/*.RSA",
         )
     }
 }
