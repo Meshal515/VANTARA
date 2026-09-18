@@ -122,7 +122,7 @@ Claimed at:
 ### Backend
 
 - B1 وB2 يمكن بدء التحقيق/التنفيذ فيهما بالتوازي ما دام كل واحد على Branch مستقل وتُراجع مناطق التداخل قبل الدمج.
-- B3 يعتمد جوهريًا على عقد الهوية الناتج من B2، فلا يُغلق قبله.
+- B3 يعتمد جوهريًا على عقد الهوية الناتج من B2، فلا يُغلق قبله. **(أُغلق: B2 سلّم العقد كاختبار أحمر، ونفّذ النصف الخادمي منه.)**
 - B4 يثبت Ownership قبل الاعتماد عليه في B5/B8 وما بعدها.
 - B5 يعتمد على قرارات B4 ذات الصلة بالمزامنة.
 - B6 يمكن العمل على اختبارات وعقد المصادر بالتوازي إذا لم يتعارض مع B2/B3، لكن دمجه النهائي يجب أن يراعي العقود النهائية.
@@ -236,13 +236,14 @@ Claude لا يعتمد على عبارة ChatGPT: "تم الإصلاح".
 |---|---|---|---|
 | B0 | `PEER_REVIEW / INTEGRATION PENDING` | ChatGPT | التنفيذ مختبر؛ التكامل مع الفرع الأساسي لم يُغلق بعد |
 | B1 | `IMPLEMENTING` | ChatGPT | Clean Install / DB Bootstrap / Migrations |
-| B2 | `IMPLEMENTING` | ChatGPT | Unified Identity & Session |
+| B2 | `DONE ✅` | ChatGPT | `84de9dc` · راجعه Claude: ثلاث ملاحظات حاجزة أُغلقت، ورابعة (رابط اقتران مستهلك يقتل الإقلاع) أُغلقت باختبار يُعيد إنتاجها |
 | B6 | `IMPLEMENTING` | ChatGPT | Source Engine & Chapter Contract |
 | B4 | `READY_FOR_PEER_REVIEW` | Claude | `e96add5` · CI أخضر · ينتظر ChatGPT |
+| B11 | `READY_FOR_PEER_REVIEW` | Claude | `e1b59e0` · ينتظر ChatGPT |
 | B5 | `READY_FOR_PEER_REVIEW` | Claude | `60e0e11` · CI أخضر · ينتظر ChatGPT |
 | B9 | `READY_FOR_PEER_REVIEW` | Claude | `35bfb1b` · ينتظر ChatGPT |
-| B3 | `BLOCKED` | Claude | على عقد الهوية من B2 |
-| B7 | `BLOCKED` | Claude | تعارض مع B6 الجاري في `routes/library.ts` |
+| B3 | `READY_FOR_PEER_REVIEW` | Claude | `d8a931e` · الحاجب (B2) رُفع · النقل كامل · لا أضع ✅ على شغلي |
+| B7 | `READY_FOR_PEER_REVIEW` | Claude | `bcfab67` · نُفِّذ في ملفات جديدة تفاديًا لتعارض B6 |
 
 **قاعدة الموجة:** كل طرف يُغلق ثلاثة باتشات إلى `READY_FOR_PEER_REVIEW` قبل أن
 ينتقل، ولا أحد يضع ✅ على شغله.

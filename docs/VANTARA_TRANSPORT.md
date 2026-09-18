@@ -1,6 +1,6 @@
 # VANTARA — Transport Contract (Pages/APK ↔ Content API)
 
-> **الحالة:** مخرج Patch **B3**، ومكتمل: CORS، وBearer لنداء JSON، وصور القارئ
+> **الحالة:** مخرج Patch **B3**، ومنفَّذ بالكامل: CORS، وBearer لنداء JSON، وصور القارئ
 > برابط موقَّع، وحفظ التقدم بالاعتماد. النصف الخادمي من Bearer (قبوله في
 > `requireSession`) نفّذه B2، والعقد بينهما اختبارٌ أحمر كُتب قبل التنفيذ.
 
