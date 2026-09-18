@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS recommendation_recipients (
   CHECK (
     (state = 'PENDING' AND intent IS NULL AND responded_at IS NULL) OR
     (state = 'REJECTED' AND intent IS NULL AND responded_at IS NOT NULL) OR
-    (state = 'ACCEPTED' AND intent IS NOT NULL AND responded_at IS NOT NULL)
+    (state = 'ACCEPTED' AND responded_at IS NOT NULL)
   )
 );
 
