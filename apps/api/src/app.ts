@@ -63,19 +63,26 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   app.get('/livez', async () => ({ ok: true }));
 
   /**
-   * الجهوزية الحقيقية: القاعدة وUchiyomi.
-   * يرجع 503 إذا سقط أحدهما، فـUptime Kuma يرى العطل لا يخمّنه.
+   * الجهوزية الحقيقية: اتصال Postgres + VANTARA schema + Uchiyomi.
+   * SELECT 1 وحده كان يعطي أخضر حتى لو migrations لم تعمل أصلًا.
    */
   app.get('/healthz', async (_request, reply) => {
-    const [db, upstream] = await Promise.all([
-      query('SELECT 1').then(
-        () => true,
-        () => false,
+    const [database, upstream] = await Promise.all([
+      query<{ schema: boolean }>(
+        "SELECT to_regclass('public.vantara_users') IS NOT NULL AS schema",
+      ).then(
+        (rows) => ({ db: true, schema: rows[0]?.schema === true }),
+        () => ({ db: false, schema: false }),
       ),
       ctx.uchiyomi.healthy(),
     ]);
-    const ok = db && upstream;
-    return reply.code(ok ? 200 : 503).send({ ok, db, uchiyomi: upstream });
+    const ok = database.db && database.schema && upstream;
+    return reply.code(ok ? 200 : 503).send({
+      ok,
+      db: database.db,
+      schema: database.schema,
+      uchiyomi: upstream,
+    });
   });
 
   await authRoutes(app, ctx);

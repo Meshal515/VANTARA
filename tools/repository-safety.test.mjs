@@ -331,3 +331,25 @@ test('a build with no endpoint baked still offers a way in', () => {
     'the unconfigured screen must lead to settings, not dead-end on a message',
   );
 });
+
+test('database restore is atomic, so a half-applied restore cannot report success', () => {
+  // ‏`pg_restore` الافتراضي: «exit on error, default is to continue». ومع
+  // ‏`--clean` هذا يعني استعادة متعثّرة أسقطت القديم وبنت نصف الجديد، ثم
+  // طبعت «Restore completed» — نجاح كاذب على مسار التعافي من كارثة.
+  const script = read('infra/restore-postgres.sh');
+  const restores = script.match(/pg_restore[^\n]*(?:\\\n[^\n]*)*--dbname/g) ?? [];
+  assert.ok(restores.length >= 2, 'restore script must restore both databases');
+
+  for (const invocation of restores) {
+    assert.match(
+      invocation,
+      /--single-transaction/,
+      'each restore must run in one transaction: either the database comes back whole, or it is untouched',
+    );
+    assert.match(
+      invocation,
+      /--exit-on-error/,
+      'each restore must stop at the first error instead of continuing past it',
+    );
+  }
+});

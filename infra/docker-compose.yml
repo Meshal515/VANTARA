@@ -1,13 +1,13 @@
 # VANTARA — المكدّس الكامل.
 #
-# كل صورة مثبّتة بـdigest لا بوسم: `latest` ليس تثبيتًا، وترقية صامتة في
+# كل صورة مثبّتة بإصدار أو digest؛ `latest` ليس تثبيتًا، وترقية صامتة في
 # منتصف الشهر هي آخر ما نحتاجه.
 #
 #   cp .env.example .env    # واضبط SESSION_SECRET وPOSTGRES_PASSWORD
 #   docker compose -f infra/docker-compose.yml up -d
 #
-# الـdigests مُتحقَّقة في docs/UPSTREAMS.md. عند الترقية: اسحب، خُذ الـdigest
-# الجديد، حدّث هنا وهناك معًا.
+# الـdigests والإصدارات مُتحقَّقة في docs/UPSTREAMS.md. عند الترقية: حدّث
+# المرجع عمدًا وشغّل اختبارات الإقلاع قبل اعتماده.
 
 name: vantara
 
@@ -25,10 +25,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-vantara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-vantara}
+      UCHIYOMI_DB: ${UCHIYOMI_DB:-uchiyomi}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vantara} -d ${POSTGRES_DB:-vantara}']
+      # الـentrypoint الرسمي يشغّل Postgres مؤقتًا على Unix socket فقط أثناء init.
+      # TCP يثبت أن السيرفر النهائي اشتغل، فلا تبدأ الخدمات في نافذة shutdown.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-vantara} -d ${POSTGRES_DB:-vantara}']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -66,6 +70,13 @@ services:
       - uchiyomi_config:/config
       - uchiyomi_cache:/cache
       - uchiyomi_backups:/backups
+    healthcheck:
+      # Uchiyomi نفسه Node service، فلا نعتمد على وجود curl/wget داخل الصورة.
+      test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3000/livez\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
     networks: [vantara]
     expose: ['3000']
 
@@ -128,7 +139,7 @@ services:
       dockerfile: infra/api.Dockerfile
     depends_on:
       postgres: { condition: service_healthy }
-      uchiyomi: { condition: service_started }
+      uchiyomi: { condition: service_healthy }
     environment:
       NODE_ENV: production
       PORT: '3100'
@@ -181,19 +192,19 @@ services:
   # ────────────────────────────── الوصول ──────────────────────────────
   cloudflared:
     <<: *restart
-    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.9.1}
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN}
     depends_on:
-      api: { condition: service_started }
+      api: { condition: service_healthy }
     networks: [vantara]
     profiles: [public]
 
   # ───────────────────────────── اختيارية ─────────────────────────────
   uptime-kuma:
     <<: *restart
-    image: ${UPTIME_KUMA_IMAGE:-louislam/uptime-kuma:1}
+    image: ${UPTIME_KUMA_IMAGE:-louislam/uptime-kuma:2.5.5}
     volumes:
       - kuma_data:/app/data
     networks: [vantara]
@@ -202,7 +213,7 @@ services:
 
   ntfy:
     <<: *restart
-    image: ${NTFY_IMAGE:-binwiederhier/ntfy:latest}
+    image: ${NTFY_IMAGE:-binwiederhier/ntfy:v2.28.0}
     command: serve
     environment:
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://localhost:8090}
@@ -213,10 +224,33 @@ services:
     ports: ['${NTFY_PORT:-8090}:80']
     profiles: [monitoring]
 
-  # نسخ احتياطي مشفّر. يغطي القاعدة وglossary والبروفايلات فقط —
-  # لا كاش الصور ولا الترجمات: فصل webtoon واحد ≈ 20 MB مقاسًا.
+  # نسخ منطقي لقاعدتي VANTARA وUchiyomi. لا ننسخ data directory وهي حيّة؛
+  # pg_dump يعطي snapshot متسق ويمكن التحقق منه بـpg_restore --list.
+  db-backup:
+    image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: ${POSTGRES_USER:-vantara}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-vantara}
+      UCHIYOMI_DB: ${UCHIYOMI_DB:-uchiyomi}
+      BACKUP_DIR: /backups/postgres
+    entrypoint: ['/bin/sh', '-c']
+    command: ['echo "run: docker compose run --rm db-backup sh /scripts/backup-postgres.sh" && sleep infinity']
+    volumes:
+      - backups:/backups
+      - ./backup-postgres.sh:/scripts/backup-postgres.sh:ro
+      - ./restore-postgres.sh:/scripts/restore-postgres.sh:ro
+    networks: [vantara]
+    profiles: [backup]
+
+  # Restic يشفّر مجلد النسخ المنطقية وما يلزم من ملفات التشغيل؛ لا يقرأ
+  # postgres_data مباشرة.
   backup:
-    image: ${RESTIC_IMAGE:-restic/restic:latest}
+    image: ${RESTIC_IMAGE:-restic/restic:0.19.1}
     entrypoint: ['/bin/sh', '-c']
     command: ['echo "run: docker compose run --rm backup \"restic ...\"" && sleep infinity']
     environment:
@@ -224,7 +258,9 @@ services:
       RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
     volumes:
       - backups:/backups
-      - postgres_data:/source/postgres:ro
+      # مرفقات البلاغات بيانات مستخدم غير قابلة لإعادة البناء، فتدخل snapshot.
+      # قراءة فقط هنا: خدمة النسخ لا تحتاج حق تعديل الملفات الأصلية.
+      - api_uploads:/source/api-uploads:ro
     networks: [vantara]
     profiles: [backup]
 

@@ -188,16 +188,25 @@ docker compose -f infra/docker-compose.yml --profile monitoring up -d
 
 ## 7. النسخ الاحتياطي
 
+PostgreSQL لا يُنسخ من مجلد البيانات وهو حي. أولًا أنشئ dump منطقيًا متحققًا
+لقاعدتي **VANTARA وUchiyomi**، ثم اجعل Restic يشفّر الـdumps مع مرفقات البلاغات:
+
 ```bash
+docker compose -f infra/docker-compose.yml --profile backup run --rm --entrypoint sh db-backup \
+  /scripts/backup-postgres.sh
+
 docker compose -f infra/docker-compose.yml --profile backup run --rm backup \
-  "restic backup /source/postgres"
+  "restic backup /backups/postgres /source/api-uploads"
 ```
 
-يغطي: القاعدة، glossary، البروفايلات، مرفقات البلاغات.
-**لا يغطي:** كاش الصور ولا الترجمات — فصل webtoon واحد ≈ 20 MB مقاسًا، و10 GB
-المجانية في R2 تنتهي عند ~500 فصل.
+يغطي: قاعدتي VANTARA وUchiyomi (ومنها التقدم/المكتبة والـglossary والبروفايلات)
++ **مرفقات البلاغات** في `api_uploads`.
 
-**اختبر الاستعادة مرة واحدة على الأقل.** نسخة احتياطية غير مُجرَّبة ليست نسخة.
+**لا يغطي:** مكتبة الملفات الخارجية `LIBRARY_PATH`، تنزيلات/كاش Uchiyomi،
+كاش الصور، ولا الترجمات. هذه إما قابلة لإعادة الجلب أو تحتاج سياسة تخزين مستقلة.
+
+استعادة القاعدتين نفسها مُختبرة في CI عبر `infra/restore-postgres.sh`. لا تعتبر
+snapshot Restic صالحة حتى تختبر أيضًا استعادة المرفقات على بيئة غير إنتاجية.
 
 ---
 

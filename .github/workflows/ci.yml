@@ -29,6 +29,8 @@ jobs:
           cache: pnpm
       - name: Repository safety invariants
         run: pnpm test:safety
+      - name: B1 clean database bootstrap + backup/restore
+        run: sh infra/test-db-bootstrap.sh
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       # البناء قبل الفحص: `services/sync-worker` و`apps/api` يستوردان

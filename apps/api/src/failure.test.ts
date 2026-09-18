@@ -12,8 +12,13 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@vantara/db', () => ({
-  query: vi.fn(async () => {
+  query: vi.fn(async (sql: string) => {
     if (dbDown) throw new Error('connection terminated unexpectedly');
+    // فحص الجهوزية يسأل عن وجود الجدول، لا عن صفوف سياسة الحذف. خلطهما كان
+    // يجعل `/healthz` يقرأ قائمة فارغة كـ«لا مخطّط» فيرجع 503 دائمًا.
+    if (typeof sql === 'string' && sql.includes('to_regclass')) {
+      return schemaPresent ? [{ schema: true }] : [{ schema: false }];
+    }
     return dbRows;
   }),
   queryOne: vi.fn(async () => {
@@ -27,6 +32,13 @@ vi.mock('@vantara/db', () => ({
 
 let dbDown = false;
 let dbRows: { series_ref: string }[] = [];
+/**
+ * هل يرى `/healthz` مخطّطًا مطبَّقًا؟
+ *
+ * B1 أضاف هذا الفحص لأن `SELECT 1` وحده كان يعطي أخضر فوق قاعدة بلا جداول —
+ * أي أن الـAPI يُعلن جهوزيته وهو عاجز عن خدمة أي مسار.
+ */
+let schemaPresent = true;
 let upstreamDown = false;
 let upstreamHealthy = true;
 
@@ -87,6 +99,7 @@ afterAll(async () => {
 function healthy() {
   dbDown = false;
   dbRows = [];
+  schemaPresent = true;
   upstreamDown = false;
   upstreamHealthy = true;
 }
@@ -96,7 +109,17 @@ describe('readiness tells the truth about each dependency', () => {
     healthy();
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ok: true, db: true, uchiyomi: true });
+    expect(res.json()).toMatchObject({ ok: true, db: true, schema: true, uchiyomi: true });
+  });
+
+  it('refuses readiness when the database is up but the schema never ran', async () => {
+    // الحالة التي أدخلها B1: اتصال ناجح فوق قاعدة فارغة. `SELECT 1` يمرّ،
+    // وكل مسار حقيقي يفشل — فإعلان الجهوزية هنا كذبٌ يخدع المراقبة نفسها.
+    healthy();
+    schemaPresent = false;
+    const res = await app.inject({ method: 'GET', url: '/healthz' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ ok: false, db: true, schema: false });
   });
 
   it('answers 503 and names which side is down', async () => {
