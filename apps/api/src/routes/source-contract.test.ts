@@ -104,6 +104,42 @@ describe('B6 source and chapter contract', () => {
     expect(web).not.toContain('catalogue.find((c) => c.id === id)');
   });
 
+  it('maps VANTARA series refs to exact source identities before search policy filtering', async () => {
+    const sourceIdentity = (sources as Record<string, unknown>)['sourceIdentity'];
+    const sourceKeysForSeriesRefs = (sources as Record<string, unknown>)['sourceKeysForSeriesRefs'];
+    expect(typeof sourceIdentity).toBe('function');
+    expect(typeof sourceKeysForSeriesRefs).toBe('function');
+    if (typeof sourceIdentity !== 'function' || typeof sourceKeysForSeriesRefs !== 'function') return;
+
+    const loadSeries = async (seriesRef: string) => {
+      expect(seriesRef).toBe('uchiyomi-series-42');
+      return {
+        id: seriesRef,
+        title: 'Nano Machine',
+        sources: [
+          { sourceId: 'src-a', sourceSeriesId: 'provider-work-99' },
+          { sourceId: 'src-b', sourceSeriesId: 'provider-work-7' },
+        ],
+      };
+    };
+
+    const keys = await (sourceKeysForSeriesRefs as Function)(
+      ['uchiyomi-series-42'],
+      loadSeries,
+    );
+
+    expect(keys.has((sourceIdentity as Function)('src-a', 'provider-work-99'))).toBe(true);
+    expect(keys.has((sourceIdentity as Function)('src-b', 'provider-work-7'))).toBe(true);
+    expect(keys.has((sourceIdentity as Function)('src-a', 'uchiyomi-series-42'))).toBe(false);
+  });
+
+  it('does not compare Uchiyomi series_ref directly with provider.sourceId', async () => {
+    const route = await readFile(join(ROOT, 'apps/api/src/routes/sources.ts'), 'utf8');
+    expect(route).not.toContain('deletedRefs.has(p.sourceId)');
+    expect(route).not.toContain('blockedSeries.has(p.sourceId)');
+    expect(route).toContain('blockedSeriesSourceKeys');
+  });
+
   it('keeps chapter fallback in a server-side testable function', () => {
     const fetchChapterWithFallback = (library as Record<string, unknown>)[
       'fetchChapterWithFallback'
