@@ -701,11 +701,28 @@ test('no spike probe step can run without a deadline or an announcement', () => 
     'a real cancellation must propagate; only our own timeout may be swallowed',
   );
 
-  // قياس الكتالوج يمشي حتى أربعين صفحة، فيحتاج سقفًا زمنيًّا مستقلًّا
+  // والعدّ الكامل يمشي حتى يقول المصدر «لا مزيد»: المالك طلب كل الأعمال،
+  // وسقفُ الأربعين صفحة كان يقطع عند ٤٠٠ ويُعلن أنه لم يُثبت النهاية.
+  // فالحاجز الباقي حاجزُ أمانٍ بعيد لا سقفُ سياسة، ويُعلَن إن بُلغ.
+  const fullCap = probe.match(/const val FULL_PAGE_CAP = ([\d_]+)/);
+  assert.ok(fullCap, 'the full crawl needs an explicit safety ceiling');
+  assert.ok(
+    Number(fullCap[1].replaceAll('_', '')) >= 1000,
+    'the safety ceiling must be far beyond any real catalogue, not a 40-page cap',
+  );
   assert.match(
     probe,
-    /const val CATALOGUE_BUDGET_MS = [\d_]+L/,
-    'the catalogue walk needs its own time budget',
+    /const val FULL_BUDGET_MS = /,
+    'the full crawl needs its own time budget',
+  );
+  // والعيّنة تبقى عيّنة، ولا تُعرض كإحصاء
+  assert.match(probe, /const val SAMPLE_PAGE_CAP = /, 'the chain check samples, it does not count');
+
+  // طرفا قائمة الفصول: العدد وحده لا يقول إن كانت كاملة
+  assert.match(
+    probe,
+    /val chapterSpan: String\?/,
+    'the report must carry the newest and oldest chapter, not only a count',
   );
 
   // والشاشة لا تُنهي تشغيلًا بلا خبر ولا تترك الزر ميتًا

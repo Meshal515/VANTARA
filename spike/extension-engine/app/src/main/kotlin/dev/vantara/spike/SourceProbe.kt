@@ -101,6 +101,17 @@ class SourceProbe(private val http: OkHttpClient) {
          * البايتات يجعل ما يُرى هو نفسه ما أُثبت.
          */
         val imageData: ByteArray?,
+        /**
+         * مدى قائمة الفصول: عددها، وأحدثها، وأقدمها.
+         *
+         * العدد وحده لا يقول هل القائمة كاملة. مصدرٌ ردّ ٩٩٧ فصلًا لعملٍ
+         * يُعرف أنه تجاوز الألف قد يكون أرشيفه ناقصًا، أو قد يكون رقّم
+         * فصولًا بكسور، أو قد تكون قائمته مُصفّحة ولم نأخذ إلا أولها.
+         * وطرفا القائمة يفصلان بين هذه الاحتمالات في سطر واحد، بلا تخمين.
+         */
+        val chapterSpan: String?,
+        /** الفصل الذي جاءت منه الصورة المعروضة، لا فصلٌ مجهول. */
+        val imageFromChapter: String?,
         val reach: CatalogueReach?,
     ) {
         val passed: Boolean get() = steps.all { it.ok } && (imageBytes ?: 0) > 0
@@ -295,7 +306,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // بلا نتيجة بحث لا معنى لبقية السلسلة: نتوقف ونقول أين
         val first = found?.firstOrNull()
-            ?: return Report(label, base, steps, null, null, null, null)
+            ?: return Report(label, base, steps, null, null, null, null, null, null)
 
         // ٢) تفاصيل العمل
         val details = step("details", steps, base) {
@@ -326,8 +337,17 @@ class SourceProbe(private val http: OkHttpClient) {
             list
         }
 
+        // طرفا القائمة لا عددُها وحده. «٩٩٧ فصلًا» لا يقول هل القائمة كاملة
+        // أم مقطوعة؛ أما أحدثُ فصل وأقدمُه فيقولان المدى، ومنه يُعرف إن كان
+        // النقص في أرشيف المصدر أو في قراءتنا نحن.
+        val chapterSpan = chapters?.takeIf { it.isNotEmpty() }?.let { list ->
+            "الأحدث «${list.first().name.take(48)}» · الأقدم «${list.last().name.take(48)}»"
+        }
+
         val chapter = chapters?.firstOrNull()
-        if (chapter == null) return Report(label, base, steps, null, null, null, null)
+        if (chapter == null) {
+            return Report(label, base, steps, null, null, null, chapterSpan, null, null)
+        }
 
         // ٤) الصفحات
         val pages = step("pages", steps, base) {
@@ -366,15 +386,34 @@ class SourceProbe(private val http: OkHttpClient) {
             }
         }
 
-        // ٦) قياس الكتالوج — لا يُحسب إلا إذا مرّت السلسلة
+        // ٦) عيّنة كتالوج فقط: هل `getPopularManga` يعمل أصلًا؟
+        //
+        // الإحصاء الكامل **ليس هنا**. مصدرٌ بآلاف الأعمال يحتاج مئات الصفحات
+        // ودقائق طويلة، ووضعُ ذلك داخل فحص السلسلة كان يجعل أربعة مصادر
+        // تنتظر خلف واحد. فالعدّ الحقيقي صار زرًّا مستقلًّا يمشي حتى يقول
+        // المصدرُ نفسه: لا مزيد.
         val reach = if (steps.all { it.ok }) {
-            announce("catalogue")
-            measureCatalogue(source)
+            walkCatalogue(source, SAMPLE_PAGE_CAP, SAMPLE_BUDGET_MS) { p, n ->
+                announce("عيّنة الكتالوج · صفحة $p · $n عملًا")
+            }
         } else {
             null
         }
-        return Report(label, base, steps, imageUrl, imageBytes, imageData, reach)
+        return Report(label, base, steps, imageUrl, imageBytes, imageData, chapterSpan, chapter.name, reach)
     }
+
+    /**
+     * الإحصاء الكامل: يمشي حتى **يقول المصدر** لا مزيد.
+     *
+     * المالك طلب «كل أعمال المصدر من أول لآخر عمل»، وسقف الأربعين صفحة كان
+     * يقطع العدّ عند ٤٠٠ ويُعلن صراحة أنه لم يُثبت النهاية. فلا سقف هنا إلا
+     * حاجزُ أمانٍ بعيد، وكلُّ توقُّفٍ يُسمّى بسببه حتى لا يُقرأ رقمٌ ناقص
+     * كأنه النهاية.
+     */
+    suspend fun crawlCatalogue(
+        source: CatalogueSource,
+        onProgress: suspend (Int, Int) -> Unit,
+    ): CatalogueReach = walkCatalogue(source, FULL_PAGE_CAP, FULL_BUDGET_MS, onProgress)
 
     /**
      * كم عملًا يستطيع هذا المصدر كشفه فعلًا؟
@@ -386,7 +425,12 @@ class SourceProbe(private val http: OkHttpClient) {
      *  - `repeat`            — الصفحة الجديدة لم تُضف عملًا واحدًا: حلقة
      *  - `page-cap`          — بلغنا سقفنا، فلم نُثبت النهاية ونقولها صريحة
      */
-    private suspend fun measureCatalogue(source: CatalogueSource): CatalogueReach {
+    private suspend fun walkCatalogue(
+        source: CatalogueSource,
+        pageCap: Int,
+        budgetMs: Long,
+        onProgress: suspend (Int, Int) -> Unit,
+    ): CatalogueReach {
         val seen = LinkedHashSet<String>()
         // عدّاد صريح لِما جُلب بنجاح. اشتقاقه من رقم الصفحة عند الخروج كان
         // يخطئ باثنتين في اتجاهين متعاكسين: صفحةٌ سقطت تُحسب مجلوبة، وصفحةُ
@@ -395,9 +439,9 @@ class SourceProbe(private val http: OkHttpClient) {
         var page = 1
         var stoppedBecause = "page-cap"
         var reachedEnd = false
-        val deadline = System.currentTimeMillis() + CATALOGUE_BUDGET_MS
+        val deadline = System.currentTimeMillis() + budgetMs
 
-        while (page <= PAGE_CAP) {
+        while (page <= pageCap) {
             // ميزانية زمنية للقياس كله: أربعون صفحة على مصدر بطيء تبتلع
             // التشغيل وتترك المصادر الباقية بلا اختبار، والعدد الناقص
             // يُعلَن سببه فلا يُقرأ كأنه نهاية الكتالوج.
@@ -405,7 +449,7 @@ class SourceProbe(private val http: OkHttpClient) {
                 stoppedBecause = "time-budget"
                 break
             }
-            announce("catalogue p$page")
+            onProgress(page, seen.size)
             val result = try {
                 withTimeout(STEP_TIMEOUT_MS) { source.getPopularManga(page) }
             } catch (t: Throwable) {
@@ -450,12 +494,21 @@ class SourceProbe(private val http: OkHttpClient) {
                 "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
 
         /**
-         * سقف الصفحات.
-         *
-         * مصدر بلا نهاية يستنزف البطارية والبيانات ولا يُثبت شيئًا. والسقف
-         * يُعلن في التقرير، فلا يُقرأ رقمٌ ناقص كأنه نهاية الكتالوج.
+         * عيّنة فحص السلسلة: تثبت أن `getPopularManga` يعمل، ولا تدّعي عدًّا.
          */
-        const val PAGE_CAP = 40
+        const val SAMPLE_PAGE_CAP = 3
+        const val SAMPLE_BUDGET_MS = 60_000L
+
+        /**
+         * حاجز الأمان للإحصاء الكامل، لا سقفَ سياسة.
+         *
+         * الغرض أن يتوقّف العدّ عند `end-of-catalogue` — أي عند قول المصدر
+         * نفسه — لا عند رقمٍ اخترتُه أنا. وهذا الحاجز موجود لئلّا يدور
+         * الزحف أبدًا على مصدرٍ يقول `hasNextPage = true` إلى ما لا نهاية،
+         * وإذا بُلغ فإنه يُعلَن سببًا للتوقّف ولا يُقدَّم كنهاية.
+         */
+        const val FULL_PAGE_CAP = 5_000
+        const val FULL_BUDGET_MS = 45L * 60L * 1000L
 
         /**
          * مهلة الخطوة الواحدة.
@@ -464,9 +517,6 @@ class SourceProbe(private val http: OkHttpClient) {
          * مشروعًا، وأضيق من أن تُجمّد الشاشة بلا خبر.
          */
         const val STEP_TIMEOUT_MS = 150_000L
-
-        /** ميزانية قياس الكتالوج كاملًا لمصدر واحد. */
-        const val CATALOGUE_BUDGET_MS = 180_000L
 
         /** الفحص الحيّ يجري داخل معالج الفشل، فيُقطع أسرع من النداء العادي. */
         const val LIVE_CHECK_TIMEOUT_S = 20L

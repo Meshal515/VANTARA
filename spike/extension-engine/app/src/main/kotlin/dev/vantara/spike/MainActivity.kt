@@ -62,8 +62,16 @@ class MainActivity : AppCompatActivity() {
             text = "شغّل الخمسة"
             setOnClickListener { it.isEnabled = false; runAll(this) }
         }
+        // العدّ الكامل منفصل بقصد: مصدرٌ بآلاف الأعمال يحتاج مئات الصفحات
+        // ودقائق طويلة، ودمجُه في فحص السلسلة كان يجعل أربعة مصادر تنتظر
+        // خلف واحد — والمالك يريد الاثنين، كلًّا في وقته.
+        val crawl = Button(this).apply {
+            text = "احصِ كل الأعمال (يطول)"
+            setOnClickListener { it.isEnabled = false; crawlAll(this) }
+        }
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(run)
+        root.addView(crawl)
         root.addView(ScrollView(this).apply { addView(log) })
         setContentView(root)
 
@@ -71,117 +79,120 @@ class MainActivity : AppCompatActivity() {
         line("بلا Suwayomi · بلا سيرفر · بلا تثبيت إضافات يدويًّا")
     }
 
-    private fun runAll(button: Button) = lifecycleScope.launch {
-        val loader = FileExtensionLoader(this@MainActivity)
-        val probe = SourceProbe(network.client)
-
-        // سطر حيّ واحد يُعاد استعماله: يقول ما ننتظره الآن، لا ما مضى.
-        // بلا هذا السطر كانت الشاشة تقف عند آخر نجاح دقائقَ كاملة بلا حرف،
-        // فتُقرأ كأن التطبيق مات — وهو يعمل.
-        val status = TextView(this@MainActivity).apply {
+    /**
+     * شريط الحالة الحيّ: سطر واحد يقول ما ننتظره الآن، لا ما مضى.
+     *
+     * بلا هذا السطر كانت الشاشة تقف عند آخر نجاح دقائقَ كاملة بلا حرف،
+     * فتُقرأ كأن التطبيق مات — وهو يعمل.
+     */
+    private fun statusLine(): (String?) -> Unit {
+        val view = TextView(this).apply {
             textSize = 13f
             gravity = Gravity.START
             textDirection = View.TEXT_DIRECTION_LOCALE
             setTextColor(0xFF8899AA.toInt())
         }
-        log.addView(status)
-        fun waiting(what: String?) {
-            status.text = if (what == null) "" else "⟳ $what — جارٍ…"
+        log.addView(view)
+        return { what -> view.text = if (what == null) "" else "⟳ $what — جارٍ…" }
+    }
+
+    /**
+     * من بيانٍ مثبَّت إلى مصدرٍ حيّ: كاش موثَّق ببصمته، وإلا تنزيل، ثم تحميل
+     * من ملف. يطبع كل خطوة، ويرجع `null` بدل أن يرمي — فالزرّان يمشيان على
+     * هذا المسار نفسه ولا يجوز أن يُسقِط أحدَهما مصدرٌ واحد.
+     */
+    private suspend fun obtainSource(
+        spec: SourceSpec,
+        loader: FileExtensionLoader,
+        waiting: (String?) -> Unit,
+    ): CatalogueSource? {
+        line("")
+        line("═══ ${spec.label} ═══", bold = true)
+        line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
+
+        // النسخة المحلية الموثّقة أولًا: انقطاع DNS عن github.com لا يجب أن
+        // يعطّل مصدرًا سبق تنزيله والتحقق من بصمته.
+        waiting("${spec.label} · تنزيل")
+        val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
+        val apk = if (cached != null) {
+            line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
+            cached
+        } else {
+            val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
+                runCatching {
+                    var lastIo: IOException? = null
+                    repeat(3) { attempt ->
+                        try {
+                            return@runCatching network.client
+                                .newCall(Request.Builder().url(spec.apkUrl).build())
+                                .execute().use { res ->
+                                    require(res.isSuccessful) {
+                                        "HTTP ${res.code} ← ${spec.apkUrl}"
+                                    }
+                                    res.body.bytes()
+                                }
+                        } catch (io: IOException) {
+                            lastIo = io
+                            if (attempt < 2) Thread.sleep(800L * (attempt + 1))
+                        }
+                    }
+                    throw lastIo ?: IOException("download failed without an I/O cause")
+                }
+            }
+            downloaded.getOrElse {
+                line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
+                return null
+            }.also { line("✓ download — ${it.size} بايت") }
         }
+
+        // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله: التشخيص
+        // يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
+        waiting("${spec.label} · تحميل من ملف")
+        val loaded = try {
+            withContext(Dispatchers.IO) { loader.load(spec, apk) }
+        } catch (t: Throwable) {
+            line("✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
+            return null
+        }
+
+        return when (loaded) {
+            is FileExtensionLoader.Result.Fail -> {
+                line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
+                loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
+                null
+            }
+            is FileExtensionLoader.Result.Ok -> {
+                val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
+                line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
+                // حزمةٌ حُمّلت بلا مصدرٍ قابل للتصفّح ليست حالة مستحيلة،
+                // و`first()` عليها ترمي خارج كل حراسة.
+                val first = sources.firstOrNull()
+                if (first == null) line("✗ load — الحزمة بلا CatalogueSource", bad = true)
+                first
+            }
+        }
+    }
+
+    /** فحص السلسلة: بحث ⇐ تفاصيل ⇐ فصول ⇐ صفحات ⇐ صورة، لكل المصادر. */
+    private fun runAll(button: Button) = lifecycleScope.launch {
+        val loader = FileExtensionLoader(this@MainActivity)
+        val probe = SourceProbe(network.client)
+        val waiting = statusLine()
 
         try {
             for (spec in SPIKE_SOURCES) {
-                waiting("${spec.label} · تنزيل")
-                line("")
-                line("═══ ${spec.label} ═══", bold = true)
-                line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
-
-                // ١) نستعمل النسخة المحلية الموثّقة أولًا. هذا مهم عمليًا:
-                // انقطاع DNS عن github.com لا يجب أن يعطّل مصدرًا سبق تنزيله والتحقق منه.
-                val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
-                val apk = if (cached != null) {
-                    line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
-                    cached
-                } else {
-                    val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
-                        runCatching {
-                            var lastIo: IOException? = null
-                            repeat(3) { attempt ->
-                                try {
-                                    return@runCatching network.client
-                                        .newCall(Request.Builder().url(spec.apkUrl).build())
-                                        .execute().use { res ->
-                                            require(res.isSuccessful) {
-                                                "HTTP ${res.code} ← ${spec.apkUrl}"
-                                            }
-                                            res.body.bytes()
-                                        }
-                                } catch (io: IOException) {
-                                    lastIo = io
-                                    if (attempt < 2) Thread.sleep(800L * (attempt + 1))
-                                }
-                            }
-                            throw lastIo ?: IOException("download failed without an I/O cause")
+                val source = obtainSource(spec, loader, waiting) ?: continue
+                val report = try {
+                    withContext(Dispatchers.IO) {
+                        probe.run(spec.label, source) { stepName ->
+                            withContext(Dispatchers.Main) { waiting("${spec.label} · $stepName") }
                         }
                     }
-
-                    downloaded.getOrElse {
-                        line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                        continue
-                    }.also { line("✓ download — ${it.size} بايت") }
-                }
-
-                // ٢) التحقق والتحميل من ملف
-                // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله.
-                // الـPoC التشخيصي يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
-                waiting("${spec.label} · تحميل من ملف")
-                val loaded = try {
-                    withContext(Dispatchers.IO) { loader.load(spec, apk) }
                 } catch (t: Throwable) {
-                    line(
-                        "✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
-                        bad = true,
-                    )
+                    line("✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
                     continue
                 }
-
-                when (loaded) {
-                    is FileExtensionLoader.Result.Fail -> {
-                        line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
-                        loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
-                        continue
-                    }
-                    is FileExtensionLoader.Result.Ok -> {
-                        val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-                        line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
-
-                        // حزمةٌ حُمّلت بلا مصدرٍ واحد قابل للتصفّح ليست حالة
-                        // مستحيلة: `first()` عليها ترمي، والرمية خارج أي حراسة
-                        // كانت ستُنهي التشغيل كله بلا سطر.
-                        val source = sources.firstOrNull()
-                        if (source == null) {
-                            line("✗ load — الحزمة بلا CatalogueSource", bad = true)
-                            continue
-                        }
-
-                        val report = try {
-                            withContext(Dispatchers.IO) {
-                                probe.run(spec.label, source) { stepName ->
-                                    withContext(Dispatchers.Main) {
-                                        waiting("${spec.label} · $stepName")
-                                    }
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            line(
-                                "✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
-                                bad = true,
-                            )
-                            continue
-                        }
-                        render(report)
-                    }
-                }
+                render(report)
             }
         } finally {
             // ينتهي التشغيل دائمًا بخبر، ويعود الزر دائمًا صالحًا — حتى إذا
@@ -190,6 +201,56 @@ class MainActivity : AppCompatActivity() {
             waiting(null)
             line("")
             line("انتهى.", bold = true)
+            button.isEnabled = true
+        }
+    }
+
+    /**
+     * الإحصاء الكامل: كم عملًا يكشفه كل مصدر **حتى نهايته**؟
+     *
+     * لا سقف صفحات هنا. يمشي حتى يقول المصدر `hasNextPage = false`، وعندها
+     * وحدها تُعلن النهاية مُثبَتة. وكل توقّف آخر — تكرار، أو خطأ، أو حاجز
+     * أمان — يُسمّى بسببه، فلا يُقرأ رقمٌ ناقص كأنه الكتالوج كله.
+     */
+    private fun crawlAll(button: Button) = lifecycleScope.launch {
+        val loader = FileExtensionLoader(this@MainActivity)
+        val probe = SourceProbe(network.client)
+        val waiting = statusLine()
+
+        line("")
+        line("── إحصاء كامل: نمشي حتى يقول المصدر «لا مزيد» ──", bold = true)
+
+        try {
+            for (spec in SPIKE_SOURCES) {
+                val source = obtainSource(spec, loader, waiting) ?: continue
+                val started = System.currentTimeMillis()
+                val reach = try {
+                    withContext(Dispatchers.IO) {
+                        probe.crawlCatalogue(source) { page, found ->
+                            withContext(Dispatchers.Main) {
+                                waiting("${spec.label} · صفحة $page · $found عملًا")
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    line("✗ crawl-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
+                    continue
+                }
+                val seconds = (System.currentTimeMillis() - started) / 1000
+                line("أعمال فريدة: ${reach.uniqueWorks} · صفحات: ${reach.pagesFetched} · ${seconds}ث")
+                line(
+                    if (reach.reachedEnd) {
+                        "✓ بلغنا نهاية الكتالوج — المصدر قال لا مزيد"
+                    } else {
+                        "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
+                    },
+                    bad = !reach.reachedEnd,
+                )
+            }
+        } finally {
+            waiting(null)
+            line("")
+            line("انتهى الإحصاء.", bold = true)
             button.isEnabled = true
         }
     }
@@ -206,6 +267,9 @@ class MainActivity : AppCompatActivity() {
             step.hypothesis?.let { line("   ${it}") }
         }
         report.baseUrl?.let { line("   المضيف: $it") }
+        // العدد وحده لا يقول إن كانت القائمة كاملة؛ طرفاها يقولان المدى
+        report.chapterSpan?.let { line("   الفصول: $it") }
+        report.imageFromChapter?.let { line("   الصورة من فصل: ${it.take(60)}") }
         report.imageUrl?.let { line("   الصورة: ${it.take(90)}") }
 
         // الصورة على الشاشة: `BitmapFactory` ترفض ما ليس صورة، فهي الحَكَم.
@@ -235,17 +299,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // عيّنة، وتُسمّى عيّنة. الرقم هنا يثبت أن التصفّح يعمل ولا يدّعي عدًّا،
+        // فلا يُعرض بحُمرة «لم نُثبت النهاية»: نهايةُ الكتالوج ليست سؤال هذا
+        // الزر أصلًا، وجوابها عند «احصِ كل الأعمال».
         report.reach?.let { reach ->
-            line("── الكتالوج ──", bold = true)
-            line("أعمال فريدة: ${reach.uniqueWorks} · صفحات: ${reach.pagesFetched}")
-            line(
-                if (reach.reachedEnd) {
-                    "✓ بلغنا نهاية الكتالوج (${reach.stoppedBecause})"
-                } else {
-                    "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
-                },
-                bad = !reach.reachedEnd,
-            )
+            val more = if (reach.reachedEnd) " — وهذا كل ما عنده" else " · للعدّ الكامل: «احصِ كل الأعمال»"
+            line("   عيّنة تصفّح: ${reach.uniqueWorks} عملًا في ${reach.pagesFetched} صفحات$more")
         }
     }
 
