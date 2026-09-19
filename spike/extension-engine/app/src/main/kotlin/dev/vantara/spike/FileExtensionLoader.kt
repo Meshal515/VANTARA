@@ -60,6 +60,19 @@ class FileExtensionLoader(private val context: Context) {
         File(context.codeCacheDir, "ext-opt").apply { mkdirs() }
     }
 
+    /**
+     * يرجع APK المحلي فقط إذا بقيت بايتاته مطابقة للبصمة المثبّتة.
+     * بذلك لا نعتمد على GitHub في كل تشغيل، ولا نثق بملف cache لمجرد وجوده.
+     */
+    fun readVerifiedCache(spec: SourceSpec): ByteArray? {
+        val apk = File(dir, "${spec.pkg}.apk")
+        if (!apk.isFile) return null
+        val bytes = runCatching { apk.readBytes() }.getOrNull() ?: return null
+        return bytes.takeIf {
+            spec.sha256.equals(sha256(it), ignoreCase = true)
+        }
+    }
+
     fun load(spec: SourceSpec, apkBytes: ByteArray): Result {
         // ١) البصمة قبل أي شيء: لا نكتب بايتًا لم نتحقق منه في مكان نُحمّل منه
         val actual = sha256(apkBytes)
