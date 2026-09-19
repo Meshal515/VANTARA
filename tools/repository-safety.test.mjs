@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -346,6 +347,41 @@ test('every module the app imports at boot is precached by the service worker', 
   }
 
   assert.deepEqual(missing, [], `modules imported but not precached:\n${missing.join('\n')}`);
+});
+
+test('the service worker cache name changes whenever the shell changes', () => {
+  // أغلى عطل في هذا المشروع لم يكن في الكود بل في وصوله: القشرة تُخدم من
+  // الكاش قبل الشبكة، واسم الكاش كان رقمًا يُرفع باليد. نُسي مرة، فبقي APK
+  // جديد يعرض جافاسكربت النسخة السابقة — كودٌ صحيح داخل الحزمة لا يصل
+  // الشاشة، وعطلٌ «لم يُصلَح» وهو مُصلَح.
+  //
+  // فالاسم صار مشتقًّا من بصمة المحتوى، وهذا الحارس يمنع البصمة من التعفّن.
+  const worker = read('apps/web/sw.js');
+  const shell = [...worker.matchAll(/^\s*'(\/[^']+)',$/gm)].map((match) => match[1]);
+  assert.ok(shell.length > 0, 'the shell list must be readable');
+
+  const declared = worker.match(/^const SHELL_DIGEST = '([^']+)';$/m)?.[1];
+  assert.ok(declared, 'sw.js must declare SHELL_DIGEST');
+  assert.match(
+    worker,
+    /^const VERSION = `vantara-shell-\$\{SHELL_DIGEST\.slice\(0, 16\)\}`;$/m,
+    'the cache name must be derived from SHELL_DIGEST, never written by hand',
+  );
+
+  const hash = createHash('sha256');
+  for (const path of shell) {
+    // `/` هو المستند نفسه؛ وبقية المسارات كما يراها المتصفح من جذر `apps/web`
+    hash.update(path);
+    hash.update(readFileSync(resolve(ROOT, 'apps/web', path === '/' ? 'index.html' : path.slice(1))));
+  }
+  const actual = hash.digest('hex');
+
+  assert.equal(
+    declared,
+    actual,
+    `a shell file changed but the service worker would keep serving the old one.\n` +
+      `Set SHELL_DIGEST in apps/web/sw.js to:\n\n  ${actual}\n`,
+  );
 });
 
 test('the app shell is served from cache before the network', () => {
