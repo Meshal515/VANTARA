@@ -192,6 +192,11 @@ describe('cumulative ops', () => {
     expect(statement?.sql).toContain('active_ms = usage_daily.active_ms + excluded.active_ms');
     expect(statement?.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)');
   });
+
+  it('rejects a malformed usage day instead of poisoning weekly totals', () => {
+    expect(translate('usage.add', { activeMs: 5_000, day: 'zzzzzzzzzz' })).toEqual([]);
+    expect(translate('usage.add', { activeMs: 5_000, day: '2026-02-31' })).toEqual([]);
+  });
 });
 
 describe('collections', () => {
@@ -254,6 +259,15 @@ describe('collections', () => {
     expect(translate('collection.reorder', { kind: 'watchlist', order: ['a'] })).toEqual([]);
     expect(translate('collection.reorder', { kind: 'favorite', order: [] })).toEqual([]);
     expect(translate('collection.reorder', { kind: 'favorite' })).toEqual([]);
+  });
+
+  it('rejects an oversized reorder instead of silently applying only its first 100 items', () => {
+    expect(
+      translate('collection.reorder', {
+        kind: 'favorite',
+        order: Array.from({ length: 101 }, (_, i) => `series:${i}`),
+      }),
+    ).toEqual([]);
   });
 });
 

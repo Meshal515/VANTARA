@@ -330,6 +330,12 @@ function asNumber(value: unknown): number | null {
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 }
 
+function isIsoDay(value: string): boolean {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+  const at = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value;
+}
+
 /**
  * يترجم عملية واحدة إلى جُمل D1.
  *
@@ -591,7 +597,11 @@ export function statementsFor(
     case 'usage.add': {
       const ms = clampUsageCredit(asNumber(p['activeMs']) ?? 0);
       if (ms <= 0) return null;
-      const day = asString(p['day'], 10) ?? new Date(now).toISOString().slice(0, 10);
+      const suppliedDay = p['day'];
+      const day = suppliedDay == null
+        ? new Date(now).toISOString().slice(0, 10)
+        : asString(suppliedDay, 10);
+      if (!day || !isIsoDay(day)) return null;
       return [
         db
           .prepare(
@@ -703,13 +713,12 @@ export function statementsFor(
     case 'collection.reorder': {
       const kind = asString(p['kind'], 20);
       const order = Array.isArray(p['order']) ? p['order'] : null;
-      if (!kind || !isCollectionKind(kind) || !order) return null;
-      // السقف 100 لا 500: كل مرجع جملة `UPDATE` في نفس الدفعة الذرّية، ودفعة
-      // بخمس مئة جملة تقترب من حدود D1 فتفشل كلها. قائمة أطول تُرتَّب على دفعات.
+      if (!kind || !isCollectionKind(kind) || !order || order.length > 100) return null;
+      // السقف 100 لا 500: كل مرجع جملة `UPDATE` في نفس الدفعة الذرّية. لا
+      // نقتطع الطلب بصمت: تطبيق أول 100 ثم إقرار العملية يفقد بقية الترتيب.
       const refs = order
         .map((value) => asString(value, 200))
-        .filter((value): value is string => value !== null)
-        .slice(0, 100);
+        .filter((value): value is string => value !== null);
       if (refs.length === 0) return null;
       return refs.map((seriesRef, position) =>
         db
