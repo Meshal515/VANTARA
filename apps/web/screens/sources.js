@@ -100,14 +100,16 @@ export async function screenSources({ mount, topbar, bottomNav, go, setScreen, s
 			row.append(el('span', null, source.label));
 			row.append(el('span', 'pill', source.ready ? 'جاهز' : `lib ${source.lib}`));
 			row.addEventListener('click', () =>
-				go({ name: 'source', sourceId: source.id, label: source.label }),
+				go({ name: 'source', sourceId: source.id, label: source.label, standalone }),
 			);
 			rows.append(row);
 		}
 		loading.replaceWith(rows);
 	} catch (error) {
 		loading.replaceWith(
-			errorBox(error, () => void screenSources({ mount, topbar, bottomNav, go })),
+			errorBox(error, () =>
+				void screenSources({ mount, topbar, bottomNav, go, setScreen, standalone }),
+			),
 		);
 	}
 }
