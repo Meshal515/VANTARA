@@ -1,0 +1,97 @@
+name: Android debug APK
+
+# APK غير موقّع من أي فرع، لكل دفعة.
+#
+# غرضان:
+#
+#  1. **التحقّق.** `ci.yml` لا يصرّف أندرويد إطلاقًا، فخطأ تصريف واحد في
+#     Kotlin كان يبقى مخفيًّا إلى أن يُوسَم إصدار — وهناك يُكتشف في أسوأ
+#     وقت. هنا يظهر خلال دقائق من الدفع.
+#
+#  2. **التجربة.** إخراج APK قابل للتثبيت بلا وسم إصدار وبلا سرّ توقيع،
+#     فيُجرَّب المحرّك على جهاز حقيقي من فرع العمل نفسه.
+#
+# debug فقط: لا يقرأ keystore ولا أي سرّ، فلا يمسّ ما يحرسه سير الإصدار.
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # لا `setup-android`: يحاول تثبيت حزمة `tools` القديمة وقد حُذفت من
+      # مستودع SDK، فيفشل على هذا الـrunner. وأوبونتو يحمل الـSDK أصلًا في
+      # `/usr/local/lib/android/sdk` وتراخيصه مقبولة، فـAGP يجده من
+      # `ANDROID_HOME` بلا خطوة. (درسٌ مدفوع في سير الـspike.)
+      - name: Show the SDK the runner already has
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" || true
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: pnpm install --frozen-lockfile
+
+      # بلا هذه الخطوة يبني Gradle أصولَ ويبٍ قديمة، فتُقرأ شاشةٌ لم تتغيّر
+      # كأن التعديل لم يصل — والتشخيص يذهب إلى الكود وهو في النسخ.
+      - name: Copy web assets into the Android project
+        run: npx cap sync android
+
+      - name: Assemble the debug APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      # الفشل معلومة بقدر النجاح: نريد سببه كاملًا لا سطرًا واحدًا
+      - name: Report build failure
+        if: failure()
+        working-directory: android
+        run: |
+          echo '::group::Gradle build report'
+          find . -name '*.txt' -path '*reports*' -exec sh -c 'echo "── $1"; cat "$1"' _ {} \; || true
+          echo '::endgroup::'
+
+      - name: Locate the APK
+        id: apk
+        run: |
+          set -euo pipefail
+          path=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          test -n "$path" || { echo 'no apk produced'; exit 1; }
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          ls -la "$path"
+          echo "sha256: $(sha256sum "$path" | cut -d' ' -f1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vantara-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
