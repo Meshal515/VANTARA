@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
 import okhttp3.OkHttpClient
+import java.io.IOException
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -61,6 +62,28 @@ class NetworkHelper(context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(2, TimeUnit.MINUTES)
+        // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net
+        // for search/details then briefly returned EAI_NODATA for chapters.
+        // Retry only idempotent methods; never replay POST/PUT blindly.
+        .addInterceptor { chain ->
+            val request = chain.request()
+            if (request.method != "GET" && request.method != "HEAD") {
+                chain.proceed(request)
+            } else {
+                var last: IOException? = null
+                var response: okhttp3.Response? = null
+                repeat(3) { attempt ->
+                    try {
+                        response = chain.proceed(request)
+                        return@addInterceptor response!!
+                    } catch (io: IOException) {
+                        last = io
+                        if (attempt < 2) Thread.sleep(500L * (attempt + 1))
+                    }
+                }
+                throw last ?: IOException("GET/HEAD retry exhausted")
+            }
+        }
         .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
         .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
