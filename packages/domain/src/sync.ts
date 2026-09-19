@@ -119,8 +119,21 @@ export function nextDeltaCursor(
 
 // ───────────────────────────── العمليات ─────────────────────────────
 
+/**
+ * كل عملية يقبلها الـWorker.
+ *
+ * هذه القائمة **عقد**، لا تعدادٌ للراحة. وقد انحرفت: كان الـWorker يقبل
+ * اثنتين وعشرين وهذه تعلن أربع عشرة — فثماني عمليات يعالجها الخادم ولا
+ * يعرفها العقد، ومنها `recommendation.respond` و`activity.add` و
+ * `progress.confirm` وهي مستعملة فعلًا. والعميل جافاسكربت بلا فحص أنواع،
+ * فالانحراف لم يُسقط بناءً ولم يُرَ.
+ *
+ * وحارسٌ في `tools/repository-safety.test.mjs` يقارن هذه بما يعالجه
+ * `services/sync-worker/src/index.ts` ويفشل عند أول اختلاف.
+ */
 export type OpKind =
   | 'progress.set'
+  | 'progress.confirm'
   | 'chapter.complete'
   | 'usage.add'
   | 'profile.patch'
@@ -128,11 +141,18 @@ export type OpKind =
   | 'library.remove'
   | 'favorite.set'
   | 'readLater.set'
+  | 'collection.reorder'
+  | 'top.set'
   | 'rating.set'
   | 'comment.add'
   | 'reaction.set'
   | 'recommendation.send'
+  | 'recommendation.respond'
+  | 'activity.add'
+  | 'activity.delivered'
+  | 'activity.seen'
   | 'notification.read'
+  | 'notification.seen'
   | 'settings.patch';
 
 export interface Op {

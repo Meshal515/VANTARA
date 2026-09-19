@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
-    <cache-path name="my_cache_images" path="." />
+    <!--
+      INV-02: قالب Capacitor يشارك جذر التخزين الخارجي كاملًا
+      (`<external-path path="."/>`). ولا مستهلك له في كودنا — لا
+      `getUriForFile` ولا `ACTION_SEND` في `android/app`. فسطحٌ مفتوح بلا
+      استعمال يُضيَّق لا يُترك.
+
+      وصور الصفحات تُكتب في `cacheDir/pages` ويقرؤها `<img>` من خادم
+      Capacitor المحلي لا عبر FileProvider، فحصرُ المسار عليها لا يكسر شيئًا.
+    -->
+    <cache-path name="page_cache" path="pages/" />
 </paths>

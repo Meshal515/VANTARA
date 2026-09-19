@@ -384,6 +384,36 @@ test('the service worker cache name changes whenever the shell changes', () => {
   );
 });
 
+test('the sync contract declares every op the worker actually handles', () => {
+  // العقد في `packages/domain` هو ما يبني عليه العميل والخادم معًا. وقد
+  // انحرف بهدوء: الـWorker كان يعالج اثنتين وعشرين عملية والعقد يعلن أربع
+  // عشرة. والعميل جافاسكربت بلا فحص أنواع، فلم يسقط بناءٌ ولم يُرَ شيء —
+  // بينما `recommendation.respond` و`activity.add` و`progress.confirm`
+  // تعبر الجسر يوميًّا خارج العقد.
+  const worker = read('services/sync-worker/src/index.ts');
+  const handled = new Set([...worker.matchAll(/^\s*case '([a-zA-Z]+\.[a-zA-Z]+)':/gm)].map((m) => m[1]));
+  // `profile.patch` و`settings.patch` تُطبَّقان قبل الـswitch عبر دمج حقول
+  for (const match of worker.matchAll(/FIELD_MERGE_KINDS = new Set\(\[([^\]]+)\]/g)) {
+    for (const kind of match[1].matchAll(/'([a-zA-Z]+\.[a-zA-Z]+)'/g)) handled.add(kind[1]);
+  }
+  assert.ok(handled.size > 10, 'could not read the worker op kinds');
+
+  const contract = read('packages/domain/src/sync.ts');
+  const union = contract.slice(contract.indexOf('export type OpKind'));
+  const declared = new Set(
+    [...union.slice(0, union.indexOf(';')).matchAll(/'([a-zA-Z]+\.[a-zA-Z]+)'/g)].map((m) => m[1]),
+  );
+
+  const undeclared = [...handled].filter((kind) => !declared.has(kind)).sort();
+  const unhandled = [...declared].filter((kind) => !handled.has(kind)).sort();
+
+  assert.deepEqual(
+    { undeclared, unhandled },
+    { undeclared: [], unhandled: [] },
+    'packages/domain OpKind and the worker must describe the same set of operations',
+  );
+});
+
 test('the APK never serves its shell from a cache an update cannot clear', () => {
   // أصول الـAPK ملفاتٌ على قرص الجهاز يخدمها خادم Capacitor المحلي: قراءتها
   // فورية وهي دائمًا التي شُحنت. وتخزينها في كاش الـservice worker لا يشتري
