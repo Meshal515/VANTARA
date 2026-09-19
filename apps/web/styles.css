@@ -68,6 +68,18 @@ h1, h2, h3, p { margin: 0; }
 
 .state { padding: 26px 8px; color: var(--muted); text-align: center; font-size: 14px; }
 .state--error { color: var(--danger); }
+
+/* بطاقة توصية: غلاف صغير ونصّ، والأزرار تلتفّ على الشاشة الضيقة */
+.rec { display: flex; gap: 12px; padding: 12px 0; align-items: flex-start; }
+.rec__shot { flex: 0 0 56px; width: 56px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: var(--surface, #1a1a1a); }
+.rec__shot--blank { opacity: 0.4; }
+.rec__cover { width: 100%; height: 100%; object-fit: cover; }
+.rec__meta { flex: 1 1 auto; min-width: 0; }
+.rec__title { font-weight: 600; }
+.rec__from { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.rec__note { color: var(--text-dim); font-size: 13px; line-height: 1.6; margin: 6px 0 0; }
+.rec__state { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.rec__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 /* مصدرٌ لم يردّ: خبرٌ يُقال ولا يُصرَخ به، فالنتائج الباقية معروضة فوقه */
 .state--dim { padding: 10px 8px; font-size: 12px; opacity: 0.65; }
 
@@ -93,6 +105,8 @@ h1, h2, h3, p { margin: 0; }
 .btn:hover:not(:disabled) { filter: brightness(1.09); }
 .btn--ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
 .btn--small { min-height: 38px; padding: 0 14px; font-size: 13px; }
+/* الخيار المختار الآن — حلقة لا لون وحده، فالفرق يُرى بلا تمييز الألوان */
+.btn--on { outline: 2px solid var(--accent, #7c5cff); outline-offset: 2px; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 4px;

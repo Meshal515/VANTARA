@@ -840,6 +840,169 @@ async function screenActivity() {
   mount(wrap);
 }
 
+/** اسم المعروض من المرآة، وإلا اسم الحساب، وإلا المعرّف. */
+function nameOf(userId) {
+  const profile = sync.rows('profiles', (row) => row.user_id === userId)[0];
+  if (profile?.display_name) return profile.display_name;
+  const account = sync.rows('accounts', (row) => row.user_id === userId)[0];
+  return account?.username ?? userId;
+}
+
+/**
+ * نيّات القبول كما يقبلها العقد، ولا شيء غيرها.
+ *
+ * الـWorker يرفض نيّةً لا يعرفها، ويرفض نيّةً مع رفض. فالأزرار تُبنى من هنا
+ * لا من نصوص متفرّقة، وزرٌّ لا يقابله عقد لا يُرسم.
+ */
+const RECOMMENDATION_INTENTS = [
+  { intent: 'WATCH_NOW', label: 'أقرأه الآن' },
+  { intent: 'WATCH_LATER', label: 'لاحقًا' },
+  { intent: 'ADD_TO_LIBRARY', label: 'للمكتبة' },
+];
+
+const RECOMMENDATION_STATE_LABELS = {
+  PENDING: 'لم يردّ بعد',
+  ACCEPTED: 'قبل',
+  REJECTED: 'رفض',
+};
+
+/**
+ * التوصيات الواردة والصادرة.
+ *
+ * كانت هذه الشاشة نصًّا ثابتًا يقول «ما وصلتك توصية بعد» مهما وصل — فالعميل
+ * يرسل توصية ولا يعرض واحدة أبدًا، ولا يُصدر `recommendation.respond` قطّ.
+ * وبوابة B8 نصّها أن يقرأها المستلم ويرفضها مستقلًا عن غيره، وهو ما لم يكن
+ * ممكنًا رغم أن الخادم يدعمه كاملًا.
+ *
+ * وحالة كل مستلم مستقلة (§19): لذلك يرى المرسِل «منصور قبل · NGM رفض» في
+ * سطر واحد، ولا تُطوى الحالات في حالة واحدة للتوصية.
+ */
+async function screenRecommendations() {
+  state.screen = 'RECOMMENDATIONS';
+  const wrap = el('main', 'page');
+  wrap.append(topbar({ title: 'التوصيات', back: () => go({ name: 'home' }) }));
+  const body = el('div', 'page__body');
+  const inbox = el('div', 'list');
+  const outbox = el('div', 'list');
+  body.append(el('h2', 'rail__title', 'وصلتك'), inbox, el('h2', 'rail__title', 'أرسلتها'), outbox);
+  wrap.append(body, bottomNav('home'));
+  mount(wrap);
+
+  const meId = () => sync.user?.userId;
+
+  function respond(id, nextState, intent) {
+    sync.enqueue('recommendation.respond', {
+      recommendationId: id,
+      state: nextState,
+      // العقد يرفض نيّةً مع رفض، فلا تُرسل إلا مع قبول
+      ...(nextState === 'ACCEPTED' && intent ? { intent } : {}),
+    });
+    paint();
+  }
+
+  function card(rec, mine) {
+    const row = el('div', 'rec');
+    const shot = el('div', 'rec__shot');
+    if (rec.cover_url) {
+      const cover = el('img', 'rec__cover');
+      cover.alt = '';
+      cover.loading = 'lazy';
+      cover.src = rec.cover_url;
+      cover.addEventListener('error', () => shot.classList.add('rec__shot--blank'), { once: true });
+      shot.append(cover);
+    } else {
+      shot.classList.add('rec__shot--blank');
+    }
+
+    const meta = el('div', 'rec__meta');
+    meta.append(el('div', 'rec__title', rec.series_title || rec.series_ref || '—'));
+    if (mine) meta.append(el('div', 'rec__from', `من ${nameOf(rec.from_id)}`));
+    if (rec.message) meta.append(el('p', 'rec__note', rec.message));
+
+    const everyone = sync.rows(
+      'recommendation_recipients',
+      (r) => r.recommendation_id === rec.id,
+    );
+
+    if (mine) {
+      const me = everyone.find((r) => r.user_id === meId());
+      const answered = me?.state && me.state !== 'PENDING';
+      if (answered) {
+        const chosen = RECOMMENDATION_INTENTS.find((i) => i.intent === me.intent);
+        meta.append(
+          el(
+            'div',
+            'rec__state',
+            me.state === 'REJECTED'
+              ? 'رفضتَها'
+              : `قبلتَها${chosen ? ` · ${chosen.label}` : ''}`,
+          ),
+        );
+      }
+      // الرفض نهائي عند الخادم، فلا تُعرض أزرار بعده تَعِد بما لا يقع
+      if (me?.state !== 'REJECTED') {
+        const actions = el('div', 'rec__actions');
+        for (const option of RECOMMENDATION_INTENTS) {
+          const button = el('button', 'btn btn--small', option.label);
+          button.type = 'button';
+          if (me?.intent === option.intent) button.classList.add('btn--on');
+          button.addEventListener('click', () => respond(rec.id, 'ACCEPTED', option.intent));
+          actions.append(button);
+        }
+        if (!answered) {
+          const no = el('button', 'btn btn--ghost btn--small', 'لا، شكرًا');
+          no.type = 'button';
+          no.addEventListener('click', () => respond(rec.id, 'REJECTED'));
+          actions.append(no);
+        }
+        meta.append(actions);
+      }
+    } else {
+      // «منصور قبل · NGM رفض» — حالة كل مستلم على حدة
+      const others = everyone
+        .filter((r) => r.user_id !== meId())
+        .map((r) => `${nameOf(r.user_id)} ${RECOMMENDATION_STATE_LABELS[r.state] ?? '—'}`);
+      meta.append(el('div', 'rec__state', others.length > 0 ? others.join(' · ') : 'لا مستلمين'));
+    }
+
+    row.append(shot, meta);
+    return row;
+  }
+
+  function paint() {
+    const id = meId();
+    const all = sync.rows('recommendations');
+    const mineIds = new Set(
+      sync.rows('recommendation_recipients', (r) => r.user_id === id).map((r) => r.recommendation_id),
+    );
+
+    const received = all
+      .filter((rec) => mineIds.has(rec.id) && rec.from_id !== id)
+      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+    const sent = all
+      .filter((rec) => rec.from_id === id)
+      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+
+    inbox.replaceChildren(
+      ...(received.length > 0
+        ? received.map((rec) => card(rec, true))
+        : [el('p', 'state', 'ما وصلتك توصية بعد.')]),
+    );
+    outbox.replaceChildren(
+      ...(sent.length > 0
+        ? sent.map((rec) => card(rec, false))
+        : [el('p', 'state', 'ما أرسلت توصية بعد.')]),
+    );
+  }
+
+  paint();
+  // الردّ يمرّ بالطابور ثم يعود في الفروقات؛ بلا هذا تبقى الشاشة على حالها
+  const stop = sync.onChange((tables) => {
+    if (tables.includes('recommendations') || tables.includes('recommendation_recipients')) paint();
+  });
+  state.teardown = () => stop();
+}
+
 async function screenPlaceholder(title, note) {
   const wrap = el('main', 'page');
   wrap.append(topbar({ title, back: () => go({ name: 'home' }) }));
@@ -1552,7 +1715,7 @@ async function go(route) {
     case 'reader':
       return screenReader(route);
     case 'recommendations':
-      return screenPlaceholder('التوصيات', 'ما وصلتك توصية بعد.');
+      return screenRecommendations();
     case 'favorites':
       return screenPlaceholder('المفضلة', 'لا مفضلة بعد.');
     case 'readLater':
