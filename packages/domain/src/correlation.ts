@@ -26,12 +26,24 @@ export function isCorrelationId(value: unknown): value is string {
  * فيه يربط بلاغًا بخطأ ليس له.
  */
 export function newCorrelationId(): string {
-  const c: Crypto | undefined = (globalThis as { crypto?: Crypto }).crypto;
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID().replace(/-/g, '');
+  const source = (globalThis as { crypto?: RandomSource }).crypto;
+  if (typeof source?.randomUUID === 'function') return source.randomUUID().replace(/-/g, '');
   const bytes = new Uint8Array(16);
-  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
+  if (typeof source?.getRandomValues === 'function') source.getRandomValues(bytes);
   else throw new Error('no crypto source for a correlation id');
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * وصفٌ بنيويّ لما نحتاجه من `crypto`، لا النوع `Crypto` من DOM.
+ *
+ * `packages/domain` يُصرَّف بلا `lib.dom`: هو مشترك بين Worker وNode وعميل،
+ * ولا يجوز أن يجرّ سطح المتصفح كاملًا. والإشارة إلى `Crypto` هنا كسرت البناء
+ * فعلًا — وهو ما يجعل الوصف البنيويّ صحّةً لا ذوقًا.
+ */
+interface RandomSource {
+  randomUUID?: () => string;
+  getRandomValues?: (array: Uint8Array) => Uint8Array;
 }
 
 /**
