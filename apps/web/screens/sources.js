@@ -64,12 +64,20 @@ function mangaCard(manga, onOpen) {
 
 // ───────────────────────────── ١) المصادر ─────────────────────────────
 
-export async function screenSources({ mount, topbar, bottomNav, go, setScreen }) {
+export async function screenSources({ mount, topbar, bottomNav, go, setScreen, standalone }) {
 	setScreen?.('EXPLORE');
 	const wrap = el('main', 'page');
-	wrap.append(topbar({ title: 'المصادر', back: () => go({ name: 'home' }) }));
+	// بلا حساب لا رئيسية نرجع إليها: إعادة التحميل تعيد الإقلاع فتظهر شاشة
+	// «اضبط عنوان الخادم» كما كانت، وهو المخرج الوحيد الصادق هنا.
+	wrap.append(
+		topbar({
+			title: 'المصادر',
+			back: standalone ? () => globalThis.location.reload() : () => go({ name: 'home' }),
+		}),
+	);
 	const body = el('div', 'page__body');
-	wrap.append(body, bottomNav('explore'));
+	wrap.append(body);
+	if (!standalone) wrap.append(bottomNav('explore'));
 	mount(wrap);
 
 	// لا بديل وهمي على الويب: شاشةٌ تعرض بيانات تشبه الحقيقية تجعل
@@ -113,10 +121,10 @@ export async function screenSources({ mount, topbar, bottomNav, go, setScreen })
  * وما بعده من الذاكرة. فسطر الانتظار يقول «جارٍ فتح المصدر» في الصفحة
  * الأولى وحدها، و«جارٍ جلب المزيد» فيما بعدها.
  */
-export async function screenSource({ mount, topbar, bottomNav, go, setScreen, sourceId, label }) {
+export async function screenSource({ mount, topbar, bottomNav, go, setScreen, standalone, sourceId, label }) {
 	setScreen?.('EXPLORE');
 	const wrap = el('main', 'page');
-	wrap.append(topbar({ title: label ?? 'مصدر', back: () => go({ name: 'sources' }) }));
+	wrap.append(topbar({ title: label ?? 'مصدر', back: () => go({ name: 'sources', standalone }) }));
 	const body = el('div', 'page__body');
 
 	const form = el('form', 'search');
@@ -131,7 +139,8 @@ export async function screenSource({ mount, topbar, bottomNav, go, setScreen, so
 	const results = el('div', 'tiles');
 	const footer = el('div', 'tiles__more');
 	body.append(form, status, results, footer);
-	wrap.append(body, bottomNav('explore'));
+	wrap.append(body);
+	if (!standalone) wrap.append(bottomNav('explore'));
 	mount(wrap);
 
 	let mode = { kind: 'popular', query: '' };
@@ -156,7 +165,9 @@ export async function screenSource({ mount, topbar, bottomNav, go, setScreen, so
 			status.replaceChildren();
 			for (const manga of mangas) {
 				results.append(
-					mangaCard(manga, (chosen) => go({ name: 'extSeries', sourceId, label, manga: chosen })),
+					mangaCard(manga, (chosen) =>
+						go({ name: 'extSeries', sourceId, label, manga: chosen, standalone }),
+					),
 				);
 			}
 			if (mangas.length === 0 && page === 1) {
@@ -190,13 +201,23 @@ export async function screenSource({ mount, topbar, bottomNav, go, setScreen, so
 
 // ───────────────────────────── ٣) عمل واحد ─────────────────────────────
 
-export async function screenExtSeries({ mount, topbar, bottomNav, go, setScreen, sourceId, label, manga }) {
+export async function screenExtSeries({
+	mount,
+	topbar,
+	bottomNav,
+	go,
+	setScreen,
+	standalone,
+	sourceId,
+	label,
+	manga,
+}) {
 	setScreen?.('SERIES');
 	const wrap = el('main', 'page');
 	wrap.append(
 		topbar({
 			title: manga.title || 'عمل',
-			back: () => go({ name: 'source', sourceId, label }),
+			back: () => go({ name: 'source', sourceId, label, standalone }),
 		}),
 	);
 	const body = el('div', 'page__body');
@@ -214,7 +235,8 @@ export async function screenExtSeries({ mount, topbar, bottomNav, go, setScreen,
 	const status = el('div');
 	const list = el('ul', 'chapters');
 	body.append(head, status, list);
-	wrap.append(body, bottomNav('explore'));
+	wrap.append(body);
+	if (!standalone) wrap.append(bottomNav('explore'));
 	mount(wrap);
 
 	// التفاصيل والفصول نداءان منفصلان بقصد: الفصول هي ما جاء القارئ لأجله،
@@ -241,7 +263,7 @@ export async function screenExtSeries({ mount, topbar, bottomNav, go, setScreen,
 			row.append(el('span', 'chapter__name', chapter.name || '—'));
 			if (chapter.scanlator) row.append(el('span', 'pill', chapter.scanlator));
 			row.addEventListener('click', () =>
-				go({ name: 'extReader', sourceId, label, manga, chapter }),
+				go({ name: 'extReader', sourceId, label, manga, chapter, standalone }),
 			);
 			item.append(row);
 			list.append(item);
@@ -260,13 +282,23 @@ export async function screenExtSeries({ mount, topbar, bottomNav, go, setScreen,
 /** كم صفحة تُجلب معًا. ثلاثٌ تكفي للتمرير المتصل بلا أن تخنق شبكة الجوال. */
 const PAGE_CONCURRENCY = 3;
 
-export async function screenExtReader({ mount, topbar, go, setScreen, sourceId, label, manga, chapter }) {
+export async function screenExtReader({
+	mount,
+	topbar,
+	go,
+	setScreen,
+	standalone,
+	sourceId,
+	label,
+	manga,
+	chapter,
+}) {
 	setScreen?.('READER');
 	const wrap = el('main', 'page');
 	wrap.append(
 		topbar({
 			title: chapter.name || 'قراءة',
-			back: () => go({ name: 'extSeries', sourceId, label, manga }),
+			back: () => go({ name: 'extSeries', sourceId, label, manga, standalone }),
 		}),
 	);
 	const shell = el('div', 'reader');

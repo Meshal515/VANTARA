@@ -23,6 +23,7 @@ import {
   screenSource,
   screenSources,
 } from './screens/sources.js';
+import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
@@ -1520,14 +1521,22 @@ async function go(route) {
       return screenHome();
     // «استكشاف» هو مدخل المصادر: من هنا تُقرأ المانجا والمانهوا مباشرة من
     // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق.
+    // `standalone` يعني: دخلنا من شاشة «اضبط عنوان الخادم» بلا حساب. عندها
+    // يُخفى الشريط السفلي، فتبويباته تفتح شاشات تفترض حسابًا قائمًا.
     case 'explore':
     case 'sources':
-      return screenSources(screenDeps());
+      return screenSources({ ...screenDeps(), standalone: route.standalone });
     case 'source':
-      return screenSource({ ...screenDeps(), sourceId: route.sourceId, label: route.label });
+      return screenSource({
+        ...screenDeps(),
+        standalone: route.standalone,
+        sourceId: route.sourceId,
+        label: route.label,
+      });
     case 'extSeries':
       return screenExtSeries({
         ...screenDeps(),
+        standalone: route.standalone,
         sourceId: route.sourceId,
         label: route.label,
         manga: route.manga,
@@ -1539,6 +1548,7 @@ async function go(route) {
         label: route.label,
         manga: route.manga,
         chapter: route.chapter,
+        standalone: route.standalone,
       });
     case 'friends':
       return screenFriends();
@@ -1958,6 +1968,18 @@ async function boot() {
         open.type = 'button';
         open.addEventListener('click', () => void go({ name: 'settings' }));
         inner.append(open);
+        // القراءة من المصادر لا تحتاج خادمًا ولا حسابًا: المحرّك كله على
+        // الجهاز. وحبسُها خلف بوابة سحابية كان يجعل من لا خادم عنده عاجزًا
+        // عن فتح فصل واحد — وهو أكثر ما يُستعمل التطبيق لأجله.
+        //
+        // والمزامنة تبقى خلف عنوانها: الحسابات والأصدقاء والتقدّم لا تعمل
+        // بلا Worker، وهذا الزر لا يدّعي غير التصفّح والقراءة.
+        if (enginePresent()) {
+          const browse = el('button', 'btn btn--ghost', 'تصفّح المصادر بلا حساب');
+          browse.type = 'button';
+          browse.addEventListener('click', () => void go({ name: 'sources', standalone: true }));
+          inner.append(browse);
+        }
         wrap.append(inner);
         return wrap;
       })(),
