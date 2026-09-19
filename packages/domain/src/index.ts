@@ -14,3 +14,4 @@ export * from './identities.ts';
 export * from './social.ts';
 export * from './top-works.ts';
 export * from './read-together.ts';
+export * from './week.ts';

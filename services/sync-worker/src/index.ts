@@ -34,6 +34,8 @@ import {
   redactForViewers,
   statusFor,
   stripImmutable,
+  summariseWeek,
+  weekEnding,
 } from '@vantara/domain';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
@@ -1493,6 +1495,89 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
   });
 }
 
+// ───────────────────────── ملخص الأسبوع ─────────────────────────
+
+/**
+ * §32 — يُحسب عند الطلب لا بمهمة مجدولة.
+ *
+ * `wrangler.toml` بلا cron بقرار معلن، ومهمةٌ مجدولة تفشل بصمت أسوأ من
+ * حسابٍ يُعاد. والمدى أسبوع لثلاثة حسابات، فالاستعلامات الأربعة أرخص من
+ * جدول يُصان.
+ *
+ * والقواعد كلها في `summariseWeek` بالمجال: هنا قراءة صفوف وتمرير لا منطق.
+ *
+ * **والإخفاء يُحترم كما في الحضور:** من كان مخفيًّا الآن يُعرض عدد فصوله
+ * ويُحجب اسم عمله. قاعدة `redactForViewers` تقول إن الوجود يبقى وما يُقرأ
+ * يُحجب، وملخصٌ يسمّي عملًا أخفاه صاحبه يكسرها من باب آخر.
+ */
+async function handleWeek(env: Env, now: number): Promise<Response> {
+  const window = weekEnding(now);
+
+  const [accounts, days, reads, ratings, settings] = await Promise.all([
+    env.DB.prepare(
+      `SELECT a.user_id, a.username, p.display_name
+         FROM accounts a LEFT JOIN profiles p USING (user_id)`,
+    ).all<Record<string, unknown>>(),
+    env.DB.prepare(`SELECT user_id, day, active_ms FROM usage_daily`).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      `SELECT user_id, series_ref, chapter_key, read_count, last_read_at
+         FROM chapter_reads WHERE last_read_at >= ? AND last_read_at < ?`,
+    )
+      .bind(window.from, window.to)
+      .all<Record<string, unknown>>(),
+    env.DB.prepare(
+      `SELECT user_id, series_ref, score, updated_at
+         FROM ratings WHERE updated_at >= ? AND updated_at < ?`,
+    )
+      .bind(window.from, window.to)
+      .all<Record<string, unknown>>(),
+    env.DB.prepare(`SELECT user_id, data FROM settings`).all<Record<string, unknown>>(),
+  ]);
+
+  const summary = summariseWeek(
+    {
+      accounts: accounts.results.map((row) => ({
+        userId: String(row['user_id']),
+        displayName: String(row['display_name'] ?? row['username'] ?? ''),
+      })),
+      days: days.results.map((row) => ({
+        userId: String(row['user_id']),
+        day: String(row['day'] ?? ''),
+        activeMs: Number(row['active_ms'] ?? 0),
+      })),
+      reads: reads.results.map((row) => ({
+        userId: String(row['user_id']),
+        seriesRef: String(row['series_ref'] ?? ''),
+        chapterKey: String(row['chapter_key'] ?? ''),
+        readCount: Number(row['read_count'] ?? 1),
+        lastReadAt: Number(row['last_read_at'] ?? 0),
+      })),
+      ratings: ratings.results.map((row) => ({
+        userId: String(row['user_id']),
+        seriesRef: String(row['series_ref'] ?? ''),
+        score: Number(row['score'] ?? 0),
+        updatedAt: Number(row['updated_at'] ?? 0),
+      })),
+    },
+    window,
+  );
+
+  const hidden = new Set(
+    settings.results
+      .filter((row) => incognitoUntilFrom(row['data']) > now)
+      .map((row) => String(row['user_id'])),
+  );
+
+  return json({
+    content: {
+      ...summary,
+      people: summary.people.map((person) =>
+        hidden.has(person.userId) ? { ...person, topSeries: null, incognito: true } : person,
+      ),
+    },
+  });
+}
+
 // ───────────────────────── المجموعات ─────────────────────────
 
 /**
@@ -1643,6 +1728,7 @@ export default {
       else if (path === '/v1/collections' && request.method === 'GET') {
         response = await handleCollection(url, env, userId);
       }
+      else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, now);
       else if (path === '/v1/progress/pending' && request.method === 'GET') {
         response = await handlePendingProgress(env, userId);
       }
