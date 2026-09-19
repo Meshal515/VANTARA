@@ -274,9 +274,23 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // ١) البحث
         val found = step("search", steps, base) {
-            val page = source.getSearchManga(1, queryFor(label), FilterList())
-            require(page.mangas.isNotEmpty()) { "search returned zero results" }
-            page.mangas
+            // نبدأ باستعلام الاختبار المثبّت. لو رجع صفرًا، ما نحكم أن
+            // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
+            // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
+            // حرفيًا؛ نجاحه يثبت أن مسار البحث نفسه يعمل.
+            val preferred = queryFor(label)
+            val firstTry = source.getSearchManga(1, preferred, FilterList())
+            if (firstTry.mangas.isNotEmpty()) {
+                firstTry.mangas
+            } else {
+                val seed = source.getPopularManga(1).mangas.firstOrNull()?.title
+                    ?: error("search returned zero results and popular returned no seed title")
+                val retry = source.getSearchManga(1, seed, FilterList())
+                require(retry.mangas.isNotEmpty()) {
+                    "search returned zero results for pinned query and live title: $seed"
+                }
+                retry.mangas
+            }
         }
 
         // بلا نتيجة بحث لا معنى لبقية السلسلة: نتوقف ونقول أين
