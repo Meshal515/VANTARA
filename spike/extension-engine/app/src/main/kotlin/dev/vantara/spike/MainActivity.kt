@@ -194,7 +194,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun render(report: SourceProbe.Report) {
+    private suspend fun render(report: SourceProbe.Report) {
         for (step in report.steps) {
             line(
                 "${if (step.ok) "✓" else "✗"} ${step.name} — ${step.detail} (${step.millis}ms)",
@@ -215,22 +215,23 @@ class MainActivity : AppCompatActivity() {
         // فيردّه مضيف الصور 403، فتُعرض صورةٌ صحيحة أثبتها المسبار على أنها
         // «ليست صورة حقيقية». الحَكَم يجب أن يحكم على ما أُثبت لا على شيء آخر.
         report.imageData?.let { bytes ->
-            lifecycleScope.launch {
-                val bmp = withContext(Dispatchers.IO) {
-                    runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
-                }
-                if (bmp == null) {
-                    line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)
-                } else {
-                    log.addView(
-                        ImageView(this@MainActivity).apply {
-                            setImageBitmap(bmp)
-                            adjustViewBounds = true
-                            layoutParams = LinearLayout.LayoutParams(600, LinearLayout.LayoutParams.WRAP_CONTENT)
-                        },
-                    )
-                    line("✓ الصورة ظهرت — ${bmp.width}×${bmp.height}")
-                }
+            // ننتظر فك الصورة قبل الانتقال للمصدر التالي؛ التشغيل السابق
+            // كان يفكها في Coroutine منفصلة، فظهرت صورة المصدر السابق تحت
+            // عنوان المصدر التالي وأصبح التقرير مضللًا بصريًا.
+            val bmp = withContext(Dispatchers.Default) {
+                runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+            }
+            if (bmp == null) {
+                line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)
+            } else {
+                log.addView(
+                    ImageView(this@MainActivity).apply {
+                        setImageBitmap(bmp)
+                        adjustViewBounds = true
+                        layoutParams = LinearLayout.LayoutParams(600, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    },
+                )
+                line("✓ الصورة ظهرت — ${bmp.width}×${bmp.height}")
             }
         }
 
