@@ -9,7 +9,7 @@ export interface Session {
   id: string;
   /** هوية VANTARA الموحدة، عند الدخول عبر access token v2. */
   identityId?: string;
-  /** معرّف Uchiyomi الداخلي، يبقى للتوافق مع جداول المحتوى حتى B4. */
+  /** معرّف Uchiyomi الداخلي؛ Uchiyomi يبقى مالك المحتوى والمكتبة والتقدم. */
   userId: string;
   username: string;
   /** توكن Uchiyomi بعد فكّ التشفير. لا يُسجَّل ولا يُعاد إلى العميل. */
@@ -70,7 +70,6 @@ export class SessionStore {
        DO UPDATE SET username = EXCLUDED.username, last_seen_at = now()`,
       [result.user.id, result.user.username],
     );
-
     const encrypted = encrypt(minted.token, this.#options.key);
     const identityId = identityIdForUsername(result.user.username);
     if (identityId) {

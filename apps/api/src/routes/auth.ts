@@ -26,15 +26,12 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
    */
   app.get('/v1/auth/accounts', async (_request, reply) => {
     const rows = await query<{ username: string }>(
-      `SELECT username
-         FROM vantara_users
-        ORDER BY first_seen_at`,
+      `SELECT username FROM vantara_users ORDER BY first_seen_at`,
     );
     return reply.send({
       content: rows.map((row) => ({
         username: row.username,
-        // الملف الاجتماعي يملكه D1. هذا المسار legacy ولا يعيد إنشاء نسخة
-        // ثانية منه في PostgreSQL؛ شاشة التطبيق الفعلية تقرأ /v1/accounts.
+        // الملف الشخصي يملكه D1 بعد B4؛ Content API لا يحتفظ بنسخة ثانية.
         displayName: row.username,
         avatar: null,
       })),
