@@ -1482,7 +1482,18 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
  * فيبقى قابلًا للقراءة والاختبار وحده — وهو نفس عقد `screens/accounts.js`.
  */
 function screenDeps() {
-  return { mount, topbar, bottomNav, go };
+  return {
+    mount,
+    topbar,
+    bottomNav,
+    go,
+    // `screen` وحده يُحدَّث، ولا يُلمس `state.reading`: ذاك يحمل معرّف عمل
+    // وفصل داخل VANTARA تبني عليهما شاشةُ الصديق رابطًا، وعملُ مصدرٍ خارجي
+    // لا معرّف له عندنا. فتلفيقُ واحد يصنع رابطًا يفتح لا شيء.
+    setScreen: (name) => {
+      state.screen = name;
+    },
+  };
 }
 
 async function go(route) {

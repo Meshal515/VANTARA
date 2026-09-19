@@ -64,7 +64,8 @@ function mangaCard(manga, onOpen) {
 
 // ───────────────────────────── ١) المصادر ─────────────────────────────
 
-export async function screenSources({ mount, topbar, bottomNav, go }) {
+export async function screenSources({ mount, topbar, bottomNav, go, setScreen }) {
+	setScreen?.('EXPLORE');
 	const wrap = el('main', 'page');
 	wrap.append(topbar({ title: 'المصادر', back: () => go({ name: 'home' }) }));
 	const body = el('div', 'page__body');
@@ -112,7 +113,8 @@ export async function screenSources({ mount, topbar, bottomNav, go }) {
  * وما بعده من الذاكرة. فسطر الانتظار يقول «جارٍ فتح المصدر» في الصفحة
  * الأولى وحدها، و«جارٍ جلب المزيد» فيما بعدها.
  */
-export async function screenSource({ mount, topbar, bottomNav, go, sourceId, label }) {
+export async function screenSource({ mount, topbar, bottomNav, go, setScreen, sourceId, label }) {
+	setScreen?.('EXPLORE');
 	const wrap = el('main', 'page');
 	wrap.append(topbar({ title: label ?? 'مصدر', back: () => go({ name: 'sources' }) }));
 	const body = el('div', 'page__body');
@@ -188,7 +190,8 @@ export async function screenSource({ mount, topbar, bottomNav, go, sourceId, lab
 
 // ───────────────────────────── ٣) عمل واحد ─────────────────────────────
 
-export async function screenExtSeries({ mount, topbar, bottomNav, go, sourceId, label, manga }) {
+export async function screenExtSeries({ mount, topbar, bottomNav, go, setScreen, sourceId, label, manga }) {
+	setScreen?.('SERIES');
 	const wrap = el('main', 'page');
 	wrap.append(
 		topbar({
@@ -257,7 +260,8 @@ export async function screenExtSeries({ mount, topbar, bottomNav, go, sourceId, 
 /** كم صفحة تُجلب معًا. ثلاثٌ تكفي للتمرير المتصل بلا أن تخنق شبكة الجوال. */
 const PAGE_CONCURRENCY = 3;
 
-export async function screenExtReader({ mount, topbar, go, sourceId, label, manga, chapter }) {
+export async function screenExtReader({ mount, topbar, go, setScreen, sourceId, label, manga, chapter }) {
+	setScreen?.('READER');
 	const wrap = el('main', 'page');
 	wrap.append(
 		topbar({
