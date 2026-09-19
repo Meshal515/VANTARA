@@ -15,7 +15,6 @@ import {
   clampUsageCredit,
   dedupeOps,
   isCompletedRead,
-  mergeFields,
   mergeProgress,
   collectionView,
   isCollectionKind,
@@ -1250,62 +1249,76 @@ const PROFILE_COLUMNS: Record<string, string> = {
 async function applyFieldMerge(
   op: IncomingOp,
   userId: string,
-  rev: number,
+  now: number,
   env: Env,
-): Promise<void> {
+): Promise<number> {
+  // إعادة نفس op_id لا يجوز أن تحصل على rev جديد وتكتب قيمة قديمة فوق الأحدث.
+  const previous = await env.DB.prepare('SELECT rev FROM applied_ops WHERE op_id = ?')
+    .bind(op.opId)
+    .first<{ rev: number }>();
+  if (previous) return Number(previous.rev);
+
+  const rev = await allocateRev(env);
   // الهوية الداخلية تُسقط قبل الدمج، ولا يُرفض الطلب: الرفض يجعل تعديل الاسم
-  // يفشل بلا سبب ظاهر للمستخدم
+  // يفشل بلا سبب ظاهر للمستخدم.
   const patch = stripImmutable((op.payload['fields'] ?? {}) as Record<string, unknown>);
+  const statements: D1PreparedStatement[] = [];
+
+  // مفاتيح settings تدخل JSON path. نقبل أسماء الحقول المعتادة فقط حتى لا
+  // يستطيع مفتاح ملفّق تغيير مسار JSON آخر.
+  const safeFields = Object.entries(patch).filter(([key]) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key));
 
   if (op.kind === 'settings.patch') {
-    const row = await env.DB.prepare('SELECT data, field_revs FROM settings WHERE user_id = ?')
-      .bind(userId)
-      .first<{ data: string; field_revs: string }>();
-    const existing = JSON.parse(row?.data ?? '{}') as Record<string, unknown>;
-    const revs = JSON.parse(row?.field_revs ?? '{}') as Record<string, number>;
-    const merged = mergeFields(existing, revs, patch, rev);
-    await env.DB.prepare(
-      `INSERT INTO settings (user_id, data, field_revs, rev) VALUES (?, ?, ?, ?)
-       ON CONFLICT (user_id) DO UPDATE SET data = excluded.data, field_revs = excluded.field_revs, rev = excluded.rev`,
-    )
-      .bind(userId, JSON.stringify(merged.value), JSON.stringify(merged.revs), rev)
-      .run();
-    return;
+    statements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev)
+         VALUES (?, '{}', '{}', 0)`,
+      ).bind(userId),
+    );
+    for (const [key, value] of safeFields) {
+      const path = `$.${key}`;
+      statements.push(
+        env.DB.prepare(
+          `UPDATE settings
+              SET data = json_set(data, ?, json(?)),
+                  field_revs = json_set(field_revs, ?, ?),
+                  rev = ?
+            WHERE user_id = ?
+              AND ? > COALESCE(json_extract(field_revs, ?), 0)
+              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+        ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
+      );
+    }
+  } else {
+    statements.push(
+      env.DB.prepare(
+        'INSERT OR IGNORE INTO profiles (user_id, field_revs, rev) VALUES (?, ?, 0)',
+      ).bind(userId, '{}'),
+    );
+    for (const [key, value] of safeFields) {
+      const column = PROFILE_COLUMNS[key];
+      if (!column) continue;
+      const path = `$.${key}`;
+      statements.push(
+        env.DB.prepare(
+          `UPDATE profiles
+              SET ${column} = ?, field_revs = json_set(field_revs, ?, ?), rev = ?
+            WHERE user_id = ?
+              AND ? > COALESCE(json_extract(field_revs, ?), 0)
+              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+        ).bind(value, path, rev, rev, userId, rev, path, op.opId),
+      );
+    }
   }
 
-  const row = await env.DB.prepare(
-    'SELECT display_name, avatar_key, banner_key, bio, accent, field_revs FROM profiles WHERE user_id = ?',
-  )
-    .bind(userId)
-    .first<Record<string, unknown>>();
-  const existing: Record<string, unknown> = {
-    displayName: row?.['display_name'] ?? null,
-    avatarKey: row?.['avatar_key'] ?? null,
-    bannerKey: row?.['banner_key'] ?? null,
-    bio: row?.['bio'] ?? null,
-    accent: row?.['accent'] ?? null,
-  };
-  const revs = JSON.parse((row?.['field_revs'] as string | undefined) ?? '{}') as Record<string, number>;
-  // حقل غير معروف يُسقط: عمود لا وجود له يُفشل الجملة كلها
-  const known: Record<string, unknown> = {};
-  for (const key of Object.keys(patch)) if (key in PROFILE_COLUMNS) known[key] = patch[key];
-  const merged = mergeFields(existing, revs, known, rev);
-
-  await env.DB.prepare(
-    `UPDATE profiles SET display_name = ?, avatar_key = ?, banner_key = ?, bio = ?, accent = ?, field_revs = ?, rev = ?
-      WHERE user_id = ?`,
-  )
-    .bind(
-      merged.value['displayName'] ?? null,
-      merged.value['avatarKey'] ?? null,
-      merged.value['bannerKey'] ?? null,
-      merged.value['bio'] ?? null,
-      merged.value['accent'] ?? null,
-      JSON.stringify(merged.revs),
-      rev,
-      userId,
-    )
-    .run();
+  // D1 batch معاملة واحدة: الأثر وحجز op_id يثبتان معًا أو لا شيء منهما.
+  statements.push(
+    env.DB.prepare(
+      'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+    ).bind(op.opId, userId, op.kind, rev, now),
+  );
+  await env.DB.batch(statements);
+  return rev;
 }
 
 const MAX_OPS_PER_REQUEST = 200;
@@ -1343,13 +1356,14 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
     return json({ error: authorizationError.error }, { status: authorizationError.status });
   }
 
-  const rev = await allocateRev(env);
-
-  // دمج الحقول يحتاج قراءة قبل الكتابة فلا يدخل الدفعة الذرّية. يُنفَّذ أولًا،
-  // وإعادة تنفيذه بلا ضرر: نفس القيم الواردة تُكتب مرة أخرى فحسب.
+  // كل رقعة حقول لها rev مستقل، وأثرها وحجز op_id يثبتان في دفعة واحدة.
+  // هذا يمنع رقعة قديمة معادة من الكتابة فوق قيمة أحدث، ويجعل رقعتين متداخلتين
+  // في نفس الطلب تتقدمان بالترتيب بدل أن تشتركا في rev واحد.
   for (const op of ops) {
-    if (FIELD_MERGE_KINDS.has(op.kind)) await applyFieldMerge(op, userId, rev, env);
+    if (FIELD_MERGE_KINDS.has(op.kind)) await applyFieldMerge(op, userId, now, env);
   }
+
+  const rev = await allocateRev(env);
 
   // الأثر ثم الحجز، في دفعة واحدة.
   //
@@ -1388,6 +1402,8 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   }
   const applied = ops.filter((op) => !unapplied.has(op.opId));
   for (const op of applied) {
+    // عمليات الحقول حجزت op_id ذرّيًا مع أثرها داخل applyFieldMerge.
+    if (FIELD_MERGE_KINDS.has(op.kind)) continue;
     statements.push(
       env.DB.prepare(
         'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
