@@ -44,6 +44,7 @@ const SHELL = [
   '/screens/accounts.js',
   '/screens/sources.js',
   '/lib/extension-engine.js',
+  '/lib/catalog.js',
   '/manifest.webmanifest',
   '/fonts/NotoNaskhArabic-Regular.woff2',
   '/icons/icon-192.png',

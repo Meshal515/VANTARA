@@ -19,7 +19,9 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -160,30 +162,69 @@ class ExtensionEnginePlugin : Plugin() {
         source.getSearchManga(page, query, FilterList())
     }
 
-    /** تفاصيل عمل. يأخذ العمل كاملًا لا رابطه، فـ`memo` يعود معه. */
+    /**
+     * تفاصيل عمل وفصوله في **نداء واحد**. يأخذ العمل كاملًا لا رابطه، فـ`memo`
+     * يعود معه.
+     *
+     * الجمع ليس تحسينًا بل تصحيحُ عقد. `getMangaUpdate` في lib 1.6 مصمَّمة
+     * لتردّ الاثنين معًا، وإضافاتها تحرس ضد ندائين متوازيين لنفس العمل فترمي
+     * `getMangaUpdate must not be called concurrently for same manga`. وشطرُها
+     * إلى `details` و`chapters` متوازيين كان يُسقط كل مصدر 1.6 سقوطًا يبدو
+     * عشوائيًّا — يمرّ حين يسبق أحد النداءين الآخر، ويثبت حين يفشل الجلب
+     * فيترك حارس الإضافة العملَ مسمومًا إلى أن يُعاد تشغيل التطبيق. ومصادر
+     * 1.4 كانت تنجو لأن جسرنا يترجم النداء بلا حارس — وهذا وحده سبب أن
+     * Mangalek كان يعمل وغيره لا.
+     *
+     * والتفاصيل تبقى ثانوية كما كانت: إن سقط النداء الجامع طُلبت الفصول
+     * وحدها — بالتتابع لا بالتوازي — فوصفٌ مكسور لا يمنع القراءة.
+     */
     @PluginMethod
-    fun details(call: PluginCall) {
+    fun series(call: PluginCall) {
         scope.launch {
             try {
                 val source = obtain(requireSourceId(call))
                 val input = mangaFrom(call.getObject("manga"))
-                val out = source.getMangaUpdate(
-                    manga = input,
-                    chapters = emptyList(),
-                    fetchDetails = true,
-                    fetchChapters = false,
-                ).manga
+                val update = try {
+                    source.getMangaUpdate(input, emptyList(), fetchDetails = true, fetchChapters = true)
+                } catch (cancel: CancellationException) {
+                    // لا `runCatching` هنا: يبتلع الإلغاء فيطلق نداءً شبكيًّا
+                    // ثانيًا بعد أن تكون الشاشة أُغلقت.
+                    throw cancel
+                } catch (ignored: Throwable) {
+                    val only = source.getMangaUpdate(
+                        manga = input,
+                        chapters = emptyList(),
+                        fetchDetails = false,
+                        fetchChapters = true,
+                    )
+                    SMangaUpdate(input, only.chapters)
+                }
                 // محلّلات التفاصيل ترجع عادةً SManga جزئيًّا بلا url. المستضيف
                 // يعرف الرابط الأصلي من البحث ويجب أن يحمله معه.
+                val out = update.manga
                 out.url = input.url
                 if (!out.isTitleSet()) out.title = input.title
-                call.resolve(JSObject().put("manga", out.toJs()))
+                val chapters = JSArray()
+                update.chapters.forEach { chapters.put(it.toJs()) }
+                call.resolve(
+                    JSObject()
+                        .put("manga", out.toJs())
+                        .put("chapters", chapters)
+                        .put("count", update.chapters.size),
+                )
             } catch (t: Throwable) {
                 call.reject(t.readable(), t.javaClass.name, t as? Exception)
             }
         }
     }
 
+    /**
+     * فصول عمل بلا تفاصيله.
+     *
+     * هذا طريق الدمج: حين يوجد العمل في أكثر من مصدر نطلب فصول البقية وحدها،
+     * فوصفُها لا يعنينا وقد جاء من المصدر الأول. ولا تصادم مع [series]: كل
+     * مصدر كائنٌ مستقل بحارسه، والنداءات تتوازى بين المصادر لا داخل الواحد.
+     */
     @PluginMethod
     fun chapters(call: PluginCall) {
         scope.launch {

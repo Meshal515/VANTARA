@@ -17,12 +17,7 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
-import {
-  screenExtReader,
-  screenExtSeries,
-  screenSource,
-  screenSources,
-} from './screens/sources.js';
+import { screenCatalog, screenExtReader, screenWork } from './screens/sources.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
@@ -1520,34 +1515,26 @@ async function go(route) {
     case 'library':
       return screenHome();
     // «استكشاف» هو مدخل المصادر: من هنا تُقرأ المانجا والمانهوا مباشرة من
-    // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق.
+    // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق. والمصادر
+    // لا تظهر للقارئ: تُسأل كلها معًا وتُعرض نتائجها ككتالوج واحد.
     // `standalone` يعني: دخلنا من شاشة «اضبط عنوان الخادم» بلا حساب. عندها
     // يُخفى الشريط السفلي، فتبويباته تفتح شاشات تفترض حسابًا قائمًا.
     case 'explore':
     case 'sources':
-      return screenSources({ ...screenDeps(), standalone: route.standalone });
-    case 'source':
-      return screenSource({
+      return screenCatalog({ ...screenDeps(), standalone: route.standalone });
+    case 'work':
+      return screenWork({
         ...screenDeps(),
         standalone: route.standalone,
-        sourceId: route.sourceId,
-        label: route.label,
-      });
-    case 'extSeries':
-      return screenExtSeries({
-        ...screenDeps(),
-        standalone: route.standalone,
-        sourceId: route.sourceId,
-        label: route.label,
-        manga: route.manga,
+        work: route.work,
       });
     case 'extReader':
       return screenExtReader({
         ...screenDeps(),
         sourceId: route.sourceId,
-        label: route.label,
         manga: route.manga,
         chapter: route.chapter,
+        work: route.work,
         standalone: route.standalone,
       });
     case 'friends':
@@ -1975,7 +1962,7 @@ async function boot() {
         // والمزامنة تبقى خلف عنوانها: الحسابات والأصدقاء والتقدّم لا تعمل
         // بلا Worker، وهذا الزر لا يدّعي غير التصفّح والقراءة.
         if (enginePresent()) {
-          const browse = el('button', 'btn btn--ghost', 'تصفّح المصادر بلا حساب');
+          const browse = el('button', 'btn btn--ghost', 'اقرأ بلا حساب');
           browse.type = 'button';
           browse.addEventListener('click', () => void go({ name: 'sources', standalone: true }));
           inner.append(browse);

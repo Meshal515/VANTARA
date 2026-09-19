@@ -64,15 +64,19 @@ export async function search(sourceId, query, page = 1) {
 }
 
 /**
- * تفاصيل عمل.
+ * تفاصيل عمل وفصوله معًا: `{ manga, chapters }`.
  *
- * يأخذ كائن العمل كاملًا لا رابطه: عقد lib 1.6 يعطي كل عمل حالةً خاصة
+ * نداءٌ واحد لا اثنان، وهذا شرط صحة لا تحسين: إضافات lib 1.6 ترمي
+ * `getMangaUpdate must not be called concurrently for same manga` حين يصلها
+ * طلبان لنفس العمل في وقت واحد. فلا تُشطر هذه إلى نداءين متوازيين ثانيةً.
+ *
+ * ويأخذ كائن العمل كاملًا لا رابطه: عقد lib 1.6 يعطي كل عمل حالةً خاصة
  * بالمصدر (`memo`) يحتاجها حين يُسأل عنه، وإرسال الرابط وحده يعني أن
  * المصدر يستقبل عملًا لا يعرفه. فمرّر ما جاءك كما جاءك.
  */
-export async function details(sourceId, manga) {
-	const { manga: out } = await required().details({ sourceId, manga });
-	return out;
+export async function series(sourceId, manga) {
+	const out = await required().series({ sourceId, manga });
+	return { manga: out.manga, chapters: out.chapters ?? [] };
 }
 
 /** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
@@ -116,7 +120,7 @@ export default {
 	popular,
 	latest,
 	search,
-	details,
+	series,
 	chapters,
 	pages,
 	pageImage,

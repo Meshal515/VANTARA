@@ -68,6 +68,8 @@ h1, h2, h3, p { margin: 0; }
 
 .state { padding: 26px 8px; color: var(--muted); text-align: center; font-size: 14px; }
 .state--error { color: var(--danger); }
+/* مصدرٌ لم يردّ: خبرٌ يُقال ولا يُصرَخ به، فالنتائج الباقية معروضة فوقه */
+.state--dim { padding: 10px 8px; font-size: 12px; opacity: 0.65; }
 
 .skeleton { position: relative; overflow: hidden; background: var(--surface-2); }
 .skeleton::after {
