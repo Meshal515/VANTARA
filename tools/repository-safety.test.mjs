@@ -384,6 +384,32 @@ test('the service worker cache name changes whenever the shell changes', () => {
   );
 });
 
+test('the APK never serves its shell from a cache an update cannot clear', () => {
+  // أصول الـAPK ملفاتٌ على قرص الجهاز يخدمها خادم Capacitor المحلي: قراءتها
+  // فورية وهي دائمًا التي شُحنت. وتخزينها في كاش الـservice worker لا يشتري
+  // شيئًا، ويشتري عطلًا: الكاش لا يُمسح بتحديث التطبيق، فتبقى حزمةٌ جديدة
+  // تعرض جافاسكربت السابقة إلى أن تُمسح بيانات التطبيق يدويًّا.
+  //
+  // وهذا يناقض الغرض من توقيع الإصدارات بمفتاح ثابت: أن تُثبَّت فوق سابقتها.
+  const worker = read('apps/web/sw.js');
+
+  assert.match(
+    worker,
+    /^const BUNDLED = self\.location\.hostname === 'localhost';$/m,
+    'sw.js must know when it runs inside the Capacitor bundle',
+  );
+  assert.match(
+    worker,
+    /if \(BUNDLED\) return;/,
+    'the fetch handler must let bundled assets through untouched',
+  );
+  assert.match(
+    worker,
+    /BUNDLED \? names :/,
+    'activate must drop every cache inside the APK, including ones an older worker left behind',
+  );
+});
+
 test('the app shell is served from cache before the network', () => {
   // شبكة أولًا على مستند التنقّل تعني شاشة بيضاء بطول زمن الشبكة عند كل
   // إقلاع بارد. والتحديث لا يضيع: `lib/update.js` يعرضه صراحةً.

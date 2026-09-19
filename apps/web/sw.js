@@ -33,6 +33,28 @@ const SHELL_DIGEST = 'e98f854d583104f15b5895d14fa99094999d8a8aadee3d589be3153ea3
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
+/**
+ * هل نحن داخل الـAPK؟
+ *
+ * Capacitor يقدّم الصفحة من `https://localhost` عبر خادم محلي يقرأ ملفات
+ * الحزمة من قرص الجهاز. فالأصول هناك **ليست على الشبكة**: قراءتها فورية، وهي
+ * دائمًا التي شُحنت مع هذا الإصدار.
+ *
+ * وتخزينها في كاش الـservice worker لا يشتري سرعةً ولا عملًا دون اتصال —
+ * الملفات في الحزمة على الحالين — ويشتري عطلًا واحدًا: حزمةٌ جديدة تُثبَّت فوق
+ * قديمة، والكاش باقٍ في تخزين الـWebView لأنه لا يُمسح بتحديث التطبيق، فيبقى
+ * يخدم جافاسكربت الإصدار السابق. كودٌ صحيح داخل الحزمة لا يصل الشاشة أبدًا،
+ * ولا علاج إلا مسح بيانات التطبيق. حدث هذا فعلًا وكلّف إصدارًا كاملًا.
+ *
+ * فلا اعتراض هنا إطلاقًا، و`activate` يمسح كل كاشٍ يجده — ومنه ما خلّفته نسخة
+ * أقدم من هذا الملف. وبهذا يصل تحديث الـAPK إلى الشاشة من أول إقلاع، وهو
+ * الغرض من توقيع الإصدارات بمفتاح ثابت: تُثبَّت فوق سابقتها ولا تُحذف.
+ *
+ * والكاش يبقى على الويب كما كان: هناك الأصول على الشبكة فعلًا، والقشرة
+ * المخزَّنة هي الفرق بين إقلاعٍ فوري وشاشةٍ بيضاء.
+ */
+const BUNDLED = self.location.hostname === 'localhost';
+
 // كل ملف هنا يجب أن يكون مخزَّنًا **قبل** أول رسم. وحارس في
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
 // هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
@@ -68,10 +90,12 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(VERSION);
-      // addAll ذرّية: ملف واحد يفشل ⇒ لا تثبيت، وهذا مقصود حتى لا تبقى
-      // قشرة نصف مخزّنة تُخدم لاحقًا
-      await cache.addAll(SHELL);
+      if (!BUNDLED) {
+        const cache = await caches.open(VERSION);
+        // addAll ذرّية: ملف واحد يفشل ⇒ لا تثبيت، وهذا مقصود حتى لا تبقى
+        // قشرة نصف مخزّنة تُخدم لاحقًا
+        await cache.addAll(SHELL);
+      }
       await self.skipWaiting();
     })(),
   );
@@ -81,7 +105,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      await Promise.all(names.filter((name) => name !== VERSION).map((name) => caches.delete(name)));
+      // داخل الـAPK يُمسح كل شيء، ومنه ما خزّنته نسخة أقدم من هذا الملف —
+      // وهذا ما يفكّ جهازًا عالقًا على واجهة قديمة بلا مسح بيانات التطبيق.
+      const doomed = BUNDLED ? names : names.filter((name) => name !== VERSION);
+      await Promise.all(doomed.map((name) => caches.delete(name)));
       await self.clients.claim();
     })(),
   );
@@ -106,6 +133,10 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   // أصل آخر: لا شأن لنا به
   if (url.origin !== self.location.origin) return;
+
+  // داخل الـAPK لا اعتراض: الطلب يذهب إلى خادم Capacitor المحلي فيقرأ ملف
+  // الحزمة الحالي. وهذا وحده يضمن أن تحديث الـAPK يصل الشاشة.
+  if (BUNDLED) return;
 
   // كل ما هو مصادَق عليه يمر إلى الشبكة ولا يُلمس
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/health')) return;
