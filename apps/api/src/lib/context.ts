@@ -31,6 +31,8 @@ export function buildContext(config: Config): AppContext {
 declare module 'fastify' {
   interface FastifyRequest {
     session?: Session;
+    /** B10: خيط التتبّع بين هذا الطلب وسطر سجلّه وبلاغ المستخدم عنه. */
+    correlationId: string;
   }
 }
 

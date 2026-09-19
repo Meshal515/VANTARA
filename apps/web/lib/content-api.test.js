@@ -192,3 +192,52 @@ describe('Content API bearer transport', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('B10 — الخيط إلى سطر السجلّ', () => {
+  it('يحمل معرّف الربط من الترويسة على الخطأ', async () => {
+    // بلا هذا يصل البلاغ ومعه الوقت وحده، والسجلّ فيه مئة سطر في تلك الدقيقة
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'internal_error' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json', 'x-correlation-id': 'req-abc12345' },
+          }),
+      ),
+    );
+
+    await expect(
+      requestContent({ baseUrl: 'https://api.example', path: '/v1/library' }),
+    ).rejects.toMatchObject({ status: 500, correlationId: 'req-abc12345' });
+  });
+
+  it('يقع على المعرّف في الجسم حين تغيب الترويسة', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'internal_error', correlationId: 'body-abc12345' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+
+    await expect(
+      requestContent({ baseUrl: 'https://api.example', path: '/v1/library' }),
+    ).rejects.toMatchObject({ correlationId: 'body-abc12345' });
+  });
+
+  it('لا يخترع معرّفًا حين لا يرسله الخادم', async () => {
+    // معرّفٌ لا يقابله سطر خيطٌ لا يصل إلى شيء، وهو أسوأ من غيابه
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 503 })),
+    );
+
+    await expect(
+      requestContent({ baseUrl: 'https://api.example', path: '/v1/library' }),
+    ).rejects.toMatchObject({ correlationId: null });
+  });
+});

@@ -7,7 +7,12 @@
  * replace authentication without rewriting sync semantics in the same patch.
  */
 
-import { mintIdentityToken, verifyIdentityToken } from '@vantara/domain';
+import {
+  CORRELATION_HEADER,
+  correlationIdFrom,
+  mintIdentityToken,
+  verifyIdentityToken,
+} from '@vantara/domain';
 import legacyWorker from './index.ts';
 import { bearerFrom, mintToken } from './session.ts';
 import type { Env, ExecutionContext } from './types.ts';
@@ -282,8 +287,17 @@ export default {
       const delegated = new Request(request, { headers });
       return legacyWorker.fetch(delegated, env, ctx);
     } catch (error) {
-      console.error('sync-worker secure gate', error instanceof Error ? error.message : error);
-      return json({ error: 'internal' }, { status: 500 }, cors);
+      // B10: نفس قاعدة البوابة الأخرى — الرسالة تبقى، والمعرّف يخرج
+      const correlationId = correlationIdFrom(request.headers.get(CORRELATION_HEADER));
+      console.error(
+        'sync-worker secure gate',
+        correlationId,
+        error instanceof Error ? error.message : error,
+      );
+      return json({ error: 'internal', correlationId }, { status: 500 }, {
+        ...cors,
+        [CORRELATION_HEADER]: correlationId,
+      });
     }
   },
 };

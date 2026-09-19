@@ -35,10 +35,14 @@ async function loadSync({ storage, fetchImpl }) {
   return createSync({ baseUrl: 'https://sync.test' });
 }
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body, status = 200, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    // `Response` الحقيقي يحمل `headers` دائمًا. نموذجٌ بلا هذا يجعل أي كود
+    // يقرأ ترويسةً يسقط في الاختبار وحده — وقد سقط فعلًا حين قرأنا معرّف
+    // الربط، فبدا العطل في المزامنة وهو في النموذج.
+    headers: { get: (name) => headers[String(name).toLowerCase()] ?? null },
     json: async () => body,
   };
 }

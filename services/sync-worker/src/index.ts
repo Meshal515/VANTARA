@@ -36,6 +36,8 @@ import {
   stripImmutable,
   summariseWeek,
   weekEnding,
+  CORRELATION_HEADER,
+  correlationIdFrom,
 } from '@vantara/domain';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
@@ -1739,9 +1741,15 @@ export default {
       if (!response) return json({ error: 'not_found' }, { status: 404 }, cors);
       return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
     } catch (error) {
-      // الرسالة لا تخرج: قد تحمل بنية الجدول أو جزءًا من قيمة
-      console.error('sync-worker', error instanceof Error ? error.message : error);
-      return json({ error: 'internal' }, { status: 500 }, cors);
+      // B10: الرسالة لا تخرج — قد تحمل بنية الجدول أو جزءًا من قيمة —
+      // لكن المعرّف يخرج. وهو الشيء الوحيد الذي يجعل «التطبيق ما اشتغل»
+      // قابلًا للربط بهذا السطر بالذات.
+      const correlationId = correlationIdFrom(request.headers.get(CORRELATION_HEADER));
+      console.error('sync-worker', correlationId, error instanceof Error ? error.message : error);
+      return json({ error: 'internal', correlationId }, { status: 500 }, {
+        ...cors,
+        [CORRELATION_HEADER]: correlationId,
+      });
     }
   },
 };

@@ -295,6 +295,9 @@ export function createSync({ baseUrl }) {
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
+      // B10: الخيط إلى سطر السجلّ عند الخادم. يُحمل على الخطأ فيصل إلى
+      // `lastError` ومنه إلى البلاغ، بدل أن يبقى البلاغ يقول «ما اشتغل».
+      error.correlationId = response.headers.get('x-correlation-id') ?? null;
       throw error;
     }
     return response.status === 204 ? null : response.json();
@@ -487,7 +490,7 @@ export function createSync({ baseUrl }) {
       }
       lastError = null;
     } catch (error) {
-      lastError = { status: error?.status ?? 0, at: Date.now() };
+      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
       emit(['sync']);
     } finally {
       pulling = false;
@@ -566,7 +569,7 @@ export function createSync({ baseUrl }) {
           payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
         } catch (error) {
           const status = error?.status ?? 0;
-          lastError = { status, at: Date.now() };
+          lastError = { status, at: Date.now(), correlationId: error?.correlationId ?? null };
           const verdict = classifyFailure(status);
           // الجلسة انتهت: الكتابات سليمة وتنتظر جلسة جديدة، فلا عزل ولا تراجع
           if (verdict === 'auth') return;

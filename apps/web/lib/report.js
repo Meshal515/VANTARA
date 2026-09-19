@@ -114,6 +114,10 @@ export async function submitReport({
   const note = text(description, 2000);
   if (note) body.description = note;
   if (Number.isInteger(pageIndex) && pageIndex >= 0) body.pageIndex = pageIndex;
+  // B10: معرّف النداء الذي فشل عند المستخدم. بلا هذا يبقى البلاغ يقول
+  // «ما اشتغل» ويبقى السجلّ يحمل مئة سطر في تلك الدقيقة، والربط تخمين.
+  const correlationId = text(context.correlationId ?? context.lastError?.correlationId, 64);
+  if (correlationId) body.correlationId = correlationId;
 
   return api('/v1/reports', { method: 'POST', body });
 }

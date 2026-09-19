@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { query, queryOne } from '@vantara/db';
-import { containsSecret, ownerOf, scrubDiagnostics } from '@vantara/domain';
+import { containsSecret, isCorrelationId, ownerOf, scrubDiagnostics } from '@vantara/domain';
 import { requireSession, sessionOf, type AppContext } from '../lib/context.ts';
 
 const KINDS = [
@@ -25,6 +25,8 @@ const reportBody = z.object({
   description: z.string().max(2000).optional(),
   /** حالة العميل: نسخة التطبيق، المتصفح، سلسلة الاحتياط، تصنيف الخطأ. */
   client: z.record(z.unknown()).optional(),
+  /** معرّف النداء الذي فشل عند المستخدم، كما عاد إليه في ترويسة الخطأ. */
+  correlationId: z.string().max(64).optional(),
 });
 
 export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
@@ -76,8 +78,8 @@ export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promi
       const row = await queryOne<{ id: string }>(
         `INSERT INTO vantara_reports
            (reporter_id, kind, series_ref, chapter_ref, page_index, source_id,
-            description, diagnostics)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            description, diagnostics, correlation_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
         [
           session.userId,
@@ -88,6 +90,10 @@ export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promi
           input.sourceId ?? null,
           input.description ?? null,
           JSON.stringify(diagnostics),
+          // B10: معرّف النداء الفاشل إن أرسلته الواجهة، وإلا معرّف طلب
+          // البلاغ نفسه. ولا يُولَّد معرّف جديد هنا: معرّفٌ لا يقابله سطر
+          // في السجلّ خيطٌ لا يصل إلى شيء، وهو أسوأ من غيابه.
+          isCorrelationId(input.correlationId) ? input.correlationId : request.correlationId,
         ],
       );
 

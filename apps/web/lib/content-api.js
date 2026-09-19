@@ -54,6 +54,11 @@ export async function requestContent({
     const error = new Error(payload?.error ?? `HTTP ${response.status}`);
     error.status = response.status;
     error.code = payload?.error;
+    // B10: الخادم يعيد معرّف هذا النداء في الترويسة وفي الجسم. حملُه على
+    // الخطأ يجعل «أبلغ عن مشكلة» يصل ومعه الخيط إلى سطر السجلّ بالضبط،
+    // بدل أن يصل ومعه الوقت وحده.
+    error.correlationId =
+      response.headers.get('x-correlation-id') ?? payload?.correlationId ?? null;
     throw error;
   }
   return payload;

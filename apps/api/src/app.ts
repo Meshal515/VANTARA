@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
+import { CORRELATION_HEADER, correlationIdFrom } from '@vantara/domain';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
 import { registerCors } from './lib/cors.ts';
@@ -49,14 +50,31 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     timeWindow: '1 minute',
   });
 
+  /**
+   * B10: كل طلب يحمل معرّفًا، ويعود به إلى العميل.
+   *
+   * بلا هذا يبقى «التطبيق ما اشتغل» بلا خيط: البلاغ يذكر وقتًا، والسجلّ
+   * يحمل مئة سطر في تلك الدقيقة. والمعرّف يُقبل من العميل حين يصحّ شكله
+   * فتُربط الشاشة بالسجلّ بلا جولة ثانية — و`correlationIdFrom` هي من
+   * تحرس ذلك، فلا تصل ترويسةُ عميلٍ إلى سجلّنا كما جاءت.
+   */
+  app.addHook('onRequest', async (request, reply) => {
+    request.correlationId = correlationIdFrom(request.headers[CORRELATION_HEADER]);
+    void reply.header(CORRELATION_HEADER, request.correlationId);
+  });
+
   app.setErrorHandler((error: FastifyError, request, reply) => {
     const status = error.statusCode ?? 500;
+    const correlationId = request.correlationId;
     if (status >= 500) {
-      // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل
-      request.log.error({ err: error }, 'request failed');
-      return reply.code(status).send({ error: 'internal_error' });
+      // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل — إلا
+      // المعرّف، وهو ما يجعل البلاغ قابلًا للربط بهذا السطر بالضبط
+      request.log.error({ err: error, correlationId }, 'request failed');
+      return reply.code(status).send({ error: 'internal_error', correlationId });
     }
-    return reply.code(status).send({ error: error.code ?? 'bad_request', message: error.message });
+    return reply
+      .code(status)
+      .send({ error: error.code ?? 'bad_request', message: error.message, correlationId });
   });
 
   /** حياة العملية. لا يلمس القاعدة — يجيب حتى وهي ساقطة. */
