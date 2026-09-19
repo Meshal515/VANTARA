@@ -1,5 +1,6 @@
 package dev.vantara.spike
 
+import android.app.Application
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.view.Gravity
@@ -11,6 +12,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import java.io.IOException
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -21,6 +23,7 @@ import okhttp3.Request
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
+import uy.kohesive.injekt.api.addSingleton
 import uy.kohesive.injekt.api.addSingletonFactory
 import uy.kohesive.injekt.api.get
 
@@ -77,24 +80,40 @@ class MainActivity : AppCompatActivity() {
             line("═══ ${spec.label} ═══", bold = true)
             line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
 
-            // ١) التنزيل
-            val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
-                runCatching {
-                    network.client.newCall(Request.Builder().url(spec.apkUrl).build())
-                        .execute().use { res ->
-                            // الرابط في الرسالة: 404 بلا رابط لا يقول أي
-                            // رابط سقط، وقد سقط أول تشغيل على هذا بالضبط.
-                            require(res.isSuccessful) { "HTTP ${res.code} ← ${spec.apkUrl}" }
-                            res.body.bytes()
+            // ١) نستعمل النسخة المحلية الموثّقة أولًا. هذا مهم عمليًا:
+            // انقطاع DNS عن github.com لا يجب أن يعطّل مصدرًا سبق تنزيله والتحقق منه.
+            val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
+            val apk = if (cached != null) {
+                line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
+                cached
+            } else {
+                val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
+                    runCatching {
+                        var lastIo: IOException? = null
+                        repeat(3) { attempt ->
+                            try {
+                                return@runCatching network.client
+                                    .newCall(Request.Builder().url(spec.apkUrl).build())
+                                    .execute().use { res ->
+                                        require(res.isSuccessful) {
+                                            "HTTP ${res.code} ← ${spec.apkUrl}"
+                                        }
+                                        res.body.bytes()
+                                    }
+                            } catch (io: IOException) {
+                                lastIo = io
+                                if (attempt < 2) Thread.sleep(800L * (attempt + 1))
+                            }
                         }
+                        throw lastIo ?: IOException("download failed without an I/O cause")
+                    }
                 }
-            }
 
-            val apk = downloaded.getOrElse {
-                line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                continue
+                downloaded.getOrElse {
+                    line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
+                    continue
+                }.also { line("✓ download — ${it.size} بايت") }
             }
-            line("✓ download — ${apk.size} بايت")
 
             // ٢) التحقق والتحميل من ملف
             // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله.
@@ -217,7 +236,11 @@ class MainActivity : AppCompatActivity() {
  */
 class SpikeModule(private val activity: MainActivity) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
-        addSingletonFactory { NetworkHelper(activity) }
+        // Keiyoushi core نفسه يعتمد على Application عبر Injekt (مثل
+        // Generated.getBaseUrl للمرايا والتفضيلات). Mangalek أثبت هذا
+        // Runtime على الجهاز، لذلك هذا جزء من عقد المستضيف لا workaround.
+        addSingleton<Application>(activity.application)
+        addSingletonFactory { NetworkHelper(activity.application) }
         addSingletonFactory {
             kotlinx.serialization.json.Json {
                 ignoreUnknownKeys = true
