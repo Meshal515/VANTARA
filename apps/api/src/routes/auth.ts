@@ -25,17 +25,18 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
    * اختيار حساب لا تحتاج أن تكشف بنية الحسابات لمن لم يسجّل الدخول.
    */
   app.get('/v1/auth/accounts', async (_request, reply) => {
-    const rows = await query<{ username: string; display_name: string | null; avatar_path: string | null }>(
-      `SELECT u.username, p.display_name, p.avatar_path
-         FROM vantara_users u
-         LEFT JOIN vantara_profiles p USING (uchiyomi_user_id)
-        ORDER BY u.first_seen_at`,
+    const rows = await query<{ username: string }>(
+      `SELECT username
+         FROM vantara_users
+        ORDER BY first_seen_at`,
     );
     return reply.send({
       content: rows.map((row) => ({
         username: row.username,
-        displayName: row.display_name ?? row.username,
-        avatar: row.avatar_path,
+        // الملف الاجتماعي يملكه D1. هذا المسار legacy ولا يعيد إنشاء نسخة
+        // ثانية منه في PostgreSQL؛ شاشة التطبيق الفعلية تقرأ /v1/accounts.
+        displayName: row.username,
+        avatar: null,
       })),
     });
   });
