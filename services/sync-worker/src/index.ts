@@ -590,6 +590,17 @@ export function statementsFor(
                rev = excluded.rev`,
           )
           .bind(userId, chapterKey, seriesRef, asNumber(p['chapterNumber']), now, now, rev, op.opId),
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'CHAPTER_DONE',
+          accounts: ctx.accounts,
+          seriesRef,
+          link: socialLinkFor({ kind: 'work', seriesRef }),
+          payload: { chapter: asNumber(p['chapterNumber']) },
+          now,
+          rev,
+        }),
       ];
     }
 
@@ -646,6 +657,17 @@ export function statementsFor(
             now,
             rev,
           ),
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'LIBRARY_ADD',
+          accounts: ctx.accounts,
+          seriesRef,
+          link: socialLinkFor({ kind: 'work', seriesRef }),
+          payload: { title: asString(p['seriesTitle'], 300) },
+          now,
+          rev,
+        }),
       ];
     }
 
@@ -700,6 +722,18 @@ export function statementsFor(
                rev = excluded.rev`,
           )
           .bind(userId, kind, seriesRef, member, asNumber(p['position']), now, rev),
+        ...(op.kind === 'favorite.set' && member === 1
+          ? socialActivityStatements(db, {
+              opId: op.opId,
+              actorId: userId,
+              verb: 'FAVORITED',
+              accounts: ctx.accounts,
+              seriesRef,
+              link: socialLinkFor({ kind: 'work', seriesRef }),
+              now,
+              rev,
+            })
+          : []),
       ];
     }
 
@@ -1101,25 +1135,9 @@ export function statementsFor(
     }
 
     case 'activity.add': {
-      const verb = asString(p['verb'], 40);
-      if (!verb) return null;
-      return [
-        db
-          .prepare(
-            `INSERT INTO activity (id, actor_id, verb, series_ref, payload, created_at, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (id) DO NOTHING`,
-          )
-          .bind(
-            op.opId,
-            userId,
-            verb,
-            asString(p['seriesRef'], 200),
-            JSON.stringify(p['payload'] ?? {}),
-            now,
-            rev,
-          ),
-      ];
+      // Deprecated compatibility op. handleOps settles it as skipped so an old
+      // APK drains its queue, but client-authored activity is never published.
+      return null;
     }
 
     default:
@@ -1129,6 +1147,8 @@ export function statementsFor(
 
 /** التعديلات التي تحتاج قراءة قبل الكتابة: rev لكل حقل مخزّن كـJSON. */
 const FIELD_MERGE_KINDS = new Set(['profile.patch', 'settings.patch']);
+/** عميل قديم قد يرسلها؛ تُصرَّف بلا نشر لأن النشاط يولّده الخادم فقط. */
+const DEPRECATED_NOOP_KINDS = new Set(['activity.add']);
 
 /** العمليات التي تحتاج قائمة الحسابات (بثّ لكل المستلمين). */
 const ACCOUNT_AWARE_KINDS = new Set([
@@ -1136,6 +1156,9 @@ const ACCOUNT_AWARE_KINDS = new Set([
   'rating.set',
   'comment.add',
   'reaction.set',
+  'chapter.complete',
+  'library.add',
+  'favorite.set',
 ]);
 
 async function allAccountIds(env: Env): Promise<string[]> {
@@ -1394,13 +1417,18 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // أن يُعاد إلى الأبد أو يُنسى. فلا حقل جديد هنا: الإسقاط هو الإشارة.
   const statements: D1PreparedStatement[] = [];
   const unapplied = new Set<string>();
+  const skipped = new Set<string>();
   for (const op of ops) {
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
+    if (DEPRECATED_NOOP_KINDS.has(op.kind)) {
+      skipped.add(op.opId);
+      continue;
+    }
     const built = statementsFor(op, userId, rev, now, env, ctx);
     if (built && built.length > 0) statements.push(...built);
     else unapplied.add(op.opId);
   }
-  const applied = ops.filter((op) => !unapplied.has(op.opId));
+  const applied = ops.filter((op) => !unapplied.has(op.opId) && !skipped.has(op.opId));
   for (const op of applied) {
     // عمليات الحقول حجزت op_id ذرّيًا مع أثرها داخل applyFieldMerge.
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
@@ -1419,7 +1447,7 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // و«كانت مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
   return json({
     applied: applied.map((op) => op.opId),
-    skipped: [],
+    skipped: [...skipped],
     cursor: rev,
     serverRev: await currentRev(env),
   });
