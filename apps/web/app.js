@@ -17,6 +17,12 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
+import {
+  screenExtReader,
+  screenExtSeries,
+  screenSource,
+  screenSources,
+} from './screens/sources.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
@@ -1469,6 +1475,16 @@ async function screenReader({ bookId, seriesId, title, seriesTitle }) {
 
 // ───────────────────────────── التوجيه ─────────────────────────────
 
+/**
+ * ما تحتاجه شاشات المصادر من القشرة.
+ *
+ * تُمرَّر حقنًا لا استيرادًا: `screens/sources.js` لا يعرف عن `app.js` شيئًا،
+ * فيبقى قابلًا للقراءة والاختبار وحده — وهو نفس عقد `screens/accounts.js`.
+ */
+function screenDeps() {
+  return { mount, topbar, bottomNav, go };
+}
+
 async function go(route) {
   state.route = route;
   switch (route.name) {
@@ -1491,8 +1507,28 @@ async function go(route) {
       return screenHome();
     case 'library':
       return screenHome();
+    // «استكشاف» هو مدخل المصادر: من هنا تُقرأ المانجا والمانهوا مباشرة من
+    // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق.
     case 'explore':
-      return screenHome();
+    case 'sources':
+      return screenSources(screenDeps());
+    case 'source':
+      return screenSource({ ...screenDeps(), sourceId: route.sourceId, label: route.label });
+    case 'extSeries':
+      return screenExtSeries({
+        ...screenDeps(),
+        sourceId: route.sourceId,
+        label: route.label,
+        manga: route.manga,
+      });
+    case 'extReader':
+      return screenExtReader({
+        ...screenDeps(),
+        sourceId: route.sourceId,
+        label: route.label,
+        manga: route.manga,
+        chapter: route.chapter,
+      });
     case 'friends':
       return screenFriends();
     case 'friend':

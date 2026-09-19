@@ -1,192 +1,77 @@
-# Capacitor Extension Engine Bridge
+# محرّك الإضافات داخل VANTARA
 
-## Architecture Overview
-
-The VANTARA reader consists of two separate Android components:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    VANTARA Reader (apps/web)                 │
-│                    JavaScript + Capacitor                    │
-│                                                               │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ Reader UI (Library, Search, Read, etc.)                │ │
-│  │                                                          │ │
-│  │ ExtensionEngine.searchManga("mangalek", "ون بيس")      │ │
-│  │ ExtensionEngine.getChapters("mangalek", url)           │ │
-│  │ ExtensionEngine.getPages("mangalek", chapterUrl)       │ │
-│  │ ExtensionEngine.getImage("mangalek", imageUrl)         │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│                      Capacitor Bridge                          │
-│                             │                                  │
-└─────────────────────────────┼──────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Extension Engine (spike module)                  │
-│                   Kotlin Native Code                          │
-│                                                               │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ ExtensionEnginePlugin.kt (Capacitor Plugin)            │ │
-│  │ - testSource()                                          │ │
-│  │ - searchManga()                                         │ │
-│  │ - getChapters()                                         │ │
-│  │ - getPages()                                            │ │
-│  │ - getImage()                                            │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│                     (future integration)                       │
-│                             │                                  │
-│  ┌──────────────────────────▼──────────────────────────────┐ │
-│  │ SourceProbe.kt                                          │ │
-│  │ - run(): Full 5-step probe (search, details, chapters, │ │
-│  │         pages, image)                                   │ │
-│  │ - announce(): Live status display                       │ │
-│  │ - diagnostic(): Error analysis                          │ │
-│  │ - hypothesize(): Evidence-based classification          │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│  ┌──────────────────────────▼──────────────────────────────┐ │
-│  │ FileExtensionLoader.kt + DexClassLoader                 │ │
-│  │ - Download APK from GitHub                              │ │
-│  │ - Verify SHA-256 signature                              │ │
-│  │ - Load DEX bytecode into memory                         │ │
-│  │ - Instantiate CatalogueSource                           │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│  ┌──────────────────────────▼──────────────────────────────┐ │
-│  │ NetworkHelper.kt + OkHttp                               │ │
-│  │ - HTTP client with Cloudflare solver                    │ │
-│  │ - Automatic retry on transient errors                   │ │
-│  │ - Cookie persistence                                    │ │
-│  │ - Source-specific headers                               │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│  ┌──────────────────────────▼──────────────────────────────┐ │
-│  │ 5 Keiyoushi Extensions (loaded dynamically)             │ │
-│  │ 1. Mangalek      (ar.mangalek)      lib 1.4             │ │
-│  │ 2. MangaSpark    (ar.mangaspark)    lib 1.4             │ │
-│  │ 3. Azora         (ar.azora)         lib 1.6             │ │
-│  │ 4. MangaSwat     (ar.mangaswat)     lib 1.6             │ │
-│  │ 5. Team X        (ar.teamx)         lib 1.6             │ │
-│  └──────────────────────────▲──────────────────────────────┘ │
-│                             │                                  │
-│                    Keiyoushi Extension API                    │
-│              (RxJava 1 observables, dynamic)                  │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Files
-
-### JavaScript Side (apps/web/lib/)
-
-**extension-engine.js**
-- Main wrapper module
-- Exports functions: testSource, searchManga, getChapters, getPages, getImage
-- Hardcoded extension metadata with exact URLs and SHA256 hashes
-- Handles Capacitor plugin registration and fallback loading
-
-**extension-engine-web.js**
-- Fallback implementation for browser/development
-- Returns mock data for testing without device
-- Allows frontend development to proceed independently
-
-### Kotlin Side (android/app/src/main/java/com/vantara/plugins/)
-
-**ExtensionEnginePlugin.kt**
-- Capacitor plugin entry point
-- Implements @CapacitorPlugin decorator
-- Methods: testSource, searchManga, getChapters, getPages, getImage
-- Currently: placeholder implementation
-- Future: bridges to spike/extension-engine
-
-## Integration Path
-
-### Phase 1: Bridge Layer (✅ Complete)
-- [x] Create Capacitor plugin wrapper
-- [x] Define extension metadata (URLs, SHA256)
-- [x] Create JavaScript wrapper functions
-- [x] Add web fallback for development
-
-### Phase 2: Full Integration (⏳ Next)
-1. Move spike module dependencies into main Android app (build.gradle)
-2. Initialize Injekt in MainActivity for extension engine
-3. Implement ExtensionEnginePlugin methods to call SourceProbe
-4. Handle RxJava 1 → Kotlin coroutine conversion
-5. Test plugin methods with actual extensions
-
-### Phase 3: Reader Integration (⏳ Future)
-1. Add search UI integration in apps/web/src/routes/search
-2. Display manga results from extension sources
-3. Add source selection UI
-4. Implement reading view with extension pages
-5. Add to library management
-
-## Current Status
-
-- ✅ Bridge architecture defined
-- ✅ JavaScript wrapper API created
-- ✅ Kotlin plugin skeleton with all methods
-- ✅ Extension metadata hardcoded (5 sources)
-- ✅ Web fallback for development
-- ⏳ Full spike module integration pending
-- ⏳ Reader UI integration pending
-
-## Testing the Bridge
-
-### On Device (Android)
-```kotlin
-// JavaScript side
-import { testSource } from '@/lib/extension-engine.js';
-
-const result = await testSource('mangalek');
-// Returns: {success, baseUrl, chapterSpan, imageFromChapter, ...}
-```
-
-### In Browser (Development)
-```javascript
-// Uses extension-engine-web.js fallback automatically
-// Returns mock data for UI development
-```
-
-## Extension Metadata
-
-Five sources are pre-configured with exact download URLs and SHA256 hashes:
+المحرّك الذي أثبته `spike/extension-engine` على الجهاز صار جزءًا من التطبيق
+نفسه. لا سيرفر، ولا Suwayomi، ولا تثبيت إضافة يدويًّا.
 
 ```
-✓ Mangalek      https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangalek-v1.4.65.apk
-✓ MangaSpark    https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaspark-v1.4.60.apk
-✓ Azora         https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.azora-v1.6.73.apk
-✓ MangaSwat     https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaswat-v1.6.61.apk
-✓ Team X        https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.teamx-v1.6.33.apk
+القارئ (apps/web)                    الطبقة الأصلية (android/app)
+─────────────────                    ──────────────────────────
+screens/sources.js                   com/vantara/plugins/
+  ├ screenSources                       ExtensionEnginePlugin.kt
+  ├ screenSource      ──── Capacitor ──┤  sources / prepare
+  ├ screenExtSeries        bridge      │  popular / latest / search
+  └ screenExtReader                    │  details / chapters / pages
+                                       │  image / clearImageCache
+lib/extension-engine.js                │
+  غلاف رقيق بلا منطق                   ▼
+                                    dev/vantara/spike/
+                                      FileExtensionLoader (DexClassLoader + SHA-256)
+                                      Sources.kt (بيان المصادر الخمسة)
+                                       ▼
+                                    eu/kanade/tachiyomi/**
+                                      سطح المستضيف الذي تشير إليه الإضافات
+                                      NetworkHelper + اعتراض Cloudflare
+                                       ▼
+                                    إضافات Keiyoushi (APK تُحمَّل من ملف)
 ```
 
-All hashes verified against actual releases (2026-09-18).
+## المسار الذي يسلكه القارئ
 
-## Security Model
+«استكشاف» ← المصادر ← مصدر (رائج/بحث) ← عمل (فصول) ← قراءة.
 
-1. **Extension Verification**: Each APK verified by SHA-256 before loading
-2. **Isolated Loading**: Extensions loaded via DexClassLoader in private app storage
-3. **Read-Only Storage**: APK files set to read-only (Android 14+ requirement)
-4. **No Installation**: No system APK installation required
-5. **Network Isolation**: Keiyoushi sources handle their own HTTP with OkHttp
+كل خطوة نداءٌ واحد إلى المحرّك. والصور تُنزَّل بعميل المصدر وترويساته، تُكتب
+في `cacheDir/pages/<sha256>.<ext>`، ويقرؤها `<img>` من خادم Capacitor المحلي.
 
-## Next Steps
+## قرارات ثبتت بالتجربة، لا تُنقض بلا سبب
 
-To complete the integration:
+**`memo` يعود كما خرج.** عقد lib 1.6 يعطي كل عمل وفصل حالةً خاصة بالمصدر
+يحتاجها حين يُسأل عنه ثانيةً. لذلك يُمرَّر كائن العمل كاملًا بين الشاشات ولا
+يُختصر إلى رابط. إسقاطه يُظهر العطل بعد خطوتين من موضعه.
 
-1. Add spike module as dependency in android/build.gradle
-2. Ensure MainActivity initializes Injekt/SpikeModule
-3. Implement ExtensionEnginePlugin methods to call SourceProbe
-4. Test with `./scripts/build-android.sh` on device
-5. Verify all 5 sources work (search, chapters, pages, images)
-6. Add UI in apps/web for source selection and manga browsing
+**الصورة تُجلب بعميل المصدر.** مضيفات الصور تردّ 403 بلا `Referer` الصحيح،
+فعميلٌ عامّ يفشل على صورةٍ سليمة ويُقرأ الفشل كعطل مصدر.
 
-## References
+**الملف المحفوظ له امتداد.** خادم Capacitor يستنتج `Content-Type` من
+الامتداد، وملفٌ بلا امتداد يُخدَم `octet-stream` فيرفضه `<img>`.
 
-- SourceProbe: `/home/user/VANTARA/spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/SourceProbe.kt`
-- FileExtensionLoader: `/home/user/VANTARA/spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/FileExtensionLoader.kt`
-- NetworkHelper: `/home/user/VANTARA/spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt`
-- Sources: `/home/user/VANTARA/spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/Sources.kt`
+**Kotlin 2.2.21 قيد لا ذوق.** okhttp 5.3.2 وokio 3.16.4 مبنيّة بـKotlin 2.2،
+ومُصرِّف أقدم لا يقرأ بياناتها الوصفية.
+
+**minSdk 26.** إضافات lib 1.6 تُشحن بهذه الأرضية؛ ما دونها يفشل عند فكّ
+الـDEX لا عند الاستعمال.
+
+**`cleartextTrafficPermitted` لمضيفات المصادر بالاسم وحدها.** بعض شبكات
+توصيل الصور على http، ومنعُه يُنتج فشلًا كاذبًا. وفتحُه عامًّا كان سيفتح
+معه مزامنة الحساب — وثمن صورةٍ لا يُدفع من حساب.
+
+**لا بديل وهمي على الويب.** `isAvailable()` ترجع false في المتصفح والشاشة
+تقول ذلك صراحة. بديلٌ يرجع بيانات تشبه الحقيقية يجعل المكسور يبدو سليمًا.
+
+## المصادر الخمسة
+
+بيانها في `android/app/src/main/kotlin/dev/vantara/spike/Sources.kt` وحده —
+رابط القطعة كاملًا كما ينشره الفهرس، وبصمة SHA-256 لبايتاتها. جهة
+الجافاسكربت لا تعرف عنها شيئًا وتقرأها بـ`sources()`.
+
+| المصدر | lib |
+|---|---|
+| Mangalek | 1.4 |
+| MangaSpark | 1.4 |
+| Azora | 1.6 |
+| MangaSwat | 1.6 |
+| Team X | 1.6 |
+
+## `spike/extension-engine`
+
+يبقى مشروعًا مستقلًّا: شاشةُ تشخيصٍ تعرض السلسلة الخمس خطوةً خطوة وتُحصي
+الكتالوج. هي التي أثبتت كل قرار أعلاه، وتُشغَّل وحدها حين يسقط مصدر.

@@ -400,6 +400,10 @@ h1, h2, h3, p { margin: 0; }
 .tile__meta { color: var(--muted); font-size: 11px; }
 .tile--ghost { height: 200px; border-radius: var(--r-md); background: var(--surface-2); }
 
+/* شبكة أعمال المصدر: تلتفّ بدل أن تنزلق، فالتصفّح رأسي كأي موقع قراءة */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 13px; }
+.tiles__more { display: grid; place-items: center; padding: 18px 0; }
+
 /* ───────────────────────────── الأصدقاء ───────────────────────────── */
 
 .friends {
@@ -480,6 +484,7 @@ h1, h2, h3, p { margin: 0; }
 .work__cover { width: 100%; aspect-ratio: 2 / 3; border-radius: var(--r-md); object-fit: cover; background: var(--surface-2); }
 .work__meta { display: grid; gap: 12px; align-content: start; }
 .work__title { font-size: 20px; font-weight: 900; line-height: 1.35; }
+.work__desc { color: var(--text-dim); font-size: 13px; line-height: 1.6; }
 .work__actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .work__actions .btn { min-height: 40px; padding: 0 15px; font-size: 13px; }
 

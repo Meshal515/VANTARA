@@ -7,8 +7,17 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        // AGP 8.7.3 — نفس ما أثبته spike المحرك على الجهاز، ويعمل على Java 21
+        // الذي يستعمله سير الإصدار. (8.2.1 لا يعمل على Java 21 أصلًا.)
+        classpath 'com.android.tools.build:gradle:8.7.3'
         classpath 'com.google.gms:google-services:4.4.0'
+
+        // إصدار Kotlin قيد لا ذوق: اعتماديات المحرك (okhttp 5.3.2، okio
+        // 3.16.4) مبنيّة بـKotlin 2.2 وتسحب stdlib 2.2.x، ومُصرِّف أقدم لا
+        // يقرأ بياناتها الوصفية. القاعدة: المُصرِّف ≥ بيانات ما يقرأ.
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21'
+        // الإضافات تُصرَّف بـkotlinx.serialization ومولّداتها تحتاج وقت تشغيل
+        classpath 'org.jetbrains.kotlin:kotlin-serialization:2.2.21'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -21,6 +30,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // injekt وquickjs يُنشران على JitPack وحده، والإضافات تطلبهما
+        maven { url 'https://jitpack.io' }
     }
 }
 

@@ -42,6 +42,8 @@ const SHELL = [
   '/lib/toast.js',
   '/lib/report.js',
   '/screens/accounts.js',
+  '/screens/sources.js',
+  '/lib/extension-engine.js',
   '/manifest.webmanifest',
   '/fonts/NotoNaskhArabic-Regular.woff2',
   '/icons/icon-192.png',

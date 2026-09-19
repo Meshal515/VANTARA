@@ -1,8 +1,16 @@
 package com.vantara.app;
 
+import android.os.Bundle;
+
 import com.getcapacitor.BridgeActivity;
-import com.getcapacitor.Plugin;
 import com.vantara.plugins.ExtensionEnginePlugin;
 
-public class MainActivity extends BridgeActivity {}
-
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        // التسجيل قبل super: الجسر يبني قائمة الإضافات داخل onCreate، وما
+        // يُسجَّل بعده لا تراه صفحة الويب.
+        registerPlugin(ExtensionEnginePlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}

@@ -28,4 +28,36 @@
         <domain includeSubdomains="false">10.0.2.2</domain>
         <domain includeSubdomains="true">vantara.local</domain>
     </domain-config>
+
+    <!--
+      مضيفات مصادر القراءة، مسمّاةً واحدًا واحدًا.
+
+      لماذا استثناء أصلًا: شبكات توصيل صور الفصول لا تزال بعضها على http،
+      ومنعُه يُنتج **فشلًا كاذبًا** — صورة سليمة تُردّ فيُقرأ المنع كعطل
+      محرك، والتشخيص يذهب في اتجاه خاطئ.
+
+      ولماذا بالاسم لا بقاعدة عامة: حساب المالك ومزامنة D1 تمرّان على نفس
+      العميل. `cleartextTrafficPermitted="true"` في `base-config` كان
+      سيفتحهما معًا، وثمن صورةٍ لا يُدفع من حساب.
+
+      والمكشوف هنا محتوى صور فقط: لا اعتماد ولا هوية تمرّ على هذه المضيفات.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Mangalek — ورأينا صوره تُخدم من ssolo.mangalik.net -->
+        <domain includeSubdomains="true">mangalik.net</domain>
+        <domain includeSubdomains="true">mangalek.com</domain>
+        <!-- Azora — وصوره من storage.azorafly.com -->
+        <domain includeSubdomains="true">azorafly.com</domain>
+        <domain includeSubdomains="true">azora.top</domain>
+        <!-- MangaSwat — المضيف meshmanga.com والصور من appswat.com -->
+        <domain includeSubdomains="true">meshmanga.com</domain>
+        <domain includeSubdomains="true">appswat.com</domain>
+        <domain includeSubdomains="true">mangaswat.com</domain>
+        <!-- Team X -->
+        <domain includeSubdomains="true">olympustaff.com</domain>
+        <domain includeSubdomains="true">teamx.info</domain>
+        <domain includeSubdomains="true">teamxnovel.com</domain>
+        <!-- MangaSpark -->
+        <domain includeSubdomains="true">mangaspark.com</domain>
+    </domain-config>
 </network-security-config>

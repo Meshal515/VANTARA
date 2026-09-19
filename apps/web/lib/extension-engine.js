@@ -1,152 +1,124 @@
-import { registerPlugin } from '@capacitor/core';
-
-const ExtensionEngine = registerPlugin('ExtensionEngine', {
-  web: () => import('./extension-engine-web.js').then(m => new m.ExtensionEngineWeb()),
-});
-
-export const extensions = {
-  mangalek: {
-    url: 'https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangalek-v1.4.65.apk',
-    sha256: '3474d105c5e7192b65ce1efd82a932fdc057375282d70838ca9950a1b97fc5a1',
-    baseUrl: 'https://mangalek.com',
-    name: 'Mangalek',
-    pkg: 'eu.kanade.tachiyomi.extension.ar.mangalek',
-  },
-  mangaspark: {
-    url: 'https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaspark-v1.4.60.apk',
-    sha256: '1912b552e3c1777c8ee797d7024ecffbc55108a14f883d16fdddca8074bceec3',
-    baseUrl: 'https://mangaspark.com',
-    name: 'MangaSpark',
-    pkg: 'eu.kanade.tachiyomi.extension.ar.mangaspark',
-  },
-  azora: {
-    url: 'https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.azora-v1.6.73.apk',
-    sha256: '34c01978ce98c809ac47168ebb37b4c5abd14cc4fba10d15aa3c3103c5f668f0',
-    baseUrl: 'https://www.azora.top',
-    name: 'Azora',
-    pkg: 'eu.kanade.tachiyomi.extension.ar.azora',
-  },
-  mangaswat: {
-    url: 'https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaswat-v1.6.61.apk',
-    sha256: 'a9d1cca2acd447d581fe6e1a00db68d352746eb18bab931077b2dd60b976917e',
-    baseUrl: 'https://mangaswat.com',
-    name: 'MangaSwat',
-    pkg: 'eu.kanade.tachiyomi.extension.ar.mangaswat',
-  },
-  teamx: {
-    url: 'https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.teamx-v1.6.33.apk',
-    sha256: '57292720171427ad511b53116e3f1b183185973ee961fd1bde19353d36d9d335',
-    baseUrl: 'https://teamx.info',
-    name: 'Team X',
-    pkg: 'eu.kanade.tachiyomi.extension.ar.teamx',
-  },
-};
-
 /**
- * Test if an extension source works
- * Returns {success, baseUrl, chapterSpan, imageFromChapter, catalogueSample, catalogueFull}
+ * محرّك الإضافات — جهة القارئ.
+ *
+ * الطبقة الأصلية (`ExtensionEnginePlugin.kt`) تحمّل إضافة Keiyoushi من ملف
+ * وتشغّلها في نفس العملية. هذا الملف لا يعرف عن المصادر شيئًا: لا روابط ولا
+ * بصمات ولا أسماء مضيفات. بيان المصادر يسكن في `Sources.kt` وحده، ويُقرأ
+ * بـ`sources()`.
+ *
+ * ومقصودٌ ألّا يكون هنا بديلٌ يعمل على الويب. القارئ على المتصفح لا يستطيع
+ * تحميل DEX، وبديلٌ يرجع بيانات تشبه الحقيقية يجعل شاشةً مكسورة تبدو سليمة
+ * — وهذا أسوأ من شاشة تقول «غير متاح». فـ`isAvailable()` تُسأل أولًا.
  */
-export async function testSource(sourceName) {
-  const source = extensions[sourceName];
-  if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
-  return ExtensionEngine.testSource({
-    sourceUrl: source.url,
-    sourceSha256: source.sha256,
-    baseUrl: source.baseUrl,
-  });
+/** الجسر، أو `null` على الويب. يُقرأ عند كل نداء: Capacitor يحقنه قبل JS. */
+function bridge() {
+	return globalThis.Capacitor?.Plugins?.ExtensionEngine ?? null;
+}
+
+/** هل المحرّك موجود أصلًا؟ تُسأل قبل عرض أي واجهة مصادر. */
+export function isAvailable() {
+	return bridge() !== null;
+}
+
+function required() {
+	const plugin = bridge();
+	if (!plugin) {
+		throw new Error('محرّك الإضافات غير متاح — هذه الشاشة تعمل داخل التطبيق فقط');
+	}
+	return plugin;
 }
 
 /**
- * Search for manga in a specific source
- * Returns array of {title, url, thumbnail}
+ * بيان المصادر: `{ id, label, lib, ready }`.
+ *
+ * `ready` يقول إن المصدر محمَّل في الذاكرة الآن، فالنداء التالي عليه فوري.
  */
-export async function searchManga(sourceName, query) {
-  const source = extensions[sourceName];
-  if (!source) throw new Error(`Unknown source: ${sourceName}`);
-
-  const result = await ExtensionEngine.searchManga({
-    sourceUrl: source.url,
-    sourceSha256: source.sha256,
-    baseUrl: source.baseUrl,
-    query,
-  });
-
-  return result.results || [];
+export async function sources() {
+	const { sources: list } = await required().sources();
+	return list ?? [];
 }
 
 /**
- * Get chapters for a manga
- * Returns array of {name, url, dateUpload, chapterNumber}
+ * تنزيل ⇒ تحقّق بصمة ⇒ تحميل. يُنادى مرة قبل تصفّح مصدر.
+ *
+ * أول نداء يلمس الشبكة وقد يطول (تنزيل حزمة ~٦٠ كيلوبايت ثم فكّ DEX)، وما
+ * بعده يُخدَم من الذاكرة. فالواجهة تُظهر «جارٍ فتح المصدر» على هذا وحده.
  */
-export async function getChapters(sourceName, mangaUrl) {
-  const source = extensions[sourceName];
-  if (!source) throw new Error(`Unknown source: ${sourceName}`);
+export async function prepare(sourceId) {
+	return required().prepare({ sourceId });
+}
 
-  const result = await ExtensionEngine.getChapters({
-    sourceUrl: source.url,
-    sourceSha256: source.sha256,
-    baseUrl: source.baseUrl,
-    mangaUrl,
-  });
+/** الرائج — الواجهة الأولى عند فتح مصدر. `{ mangas, hasNextPage, page }`. */
+export async function popular(sourceId, page = 1) {
+	return required().popular({ sourceId, page });
+}
 
-  return result.chapters || [];
+/** آخر التحديثات — ومنه يأتي «الجلب التلقائي» للفصول الجديدة. */
+export async function latest(sourceId, page = 1) {
+	return required().latest({ sourceId, page });
+}
+
+export async function search(sourceId, query, page = 1) {
+	return required().search({ sourceId, query, page });
 }
 
 /**
- * Get pages for a chapter
- * Returns array of {imageUrl, url, pageNumber}
+ * تفاصيل عمل.
+ *
+ * يأخذ كائن العمل كاملًا لا رابطه: عقد lib 1.6 يعطي كل عمل حالةً خاصة
+ * بالمصدر (`memo`) يحتاجها حين يُسأل عنه، وإرسال الرابط وحده يعني أن
+ * المصدر يستقبل عملًا لا يعرفه. فمرّر ما جاءك كما جاءك.
  */
-export async function getPages(sourceName, chapterUrl) {
-  const source = extensions[sourceName];
-  if (!source) throw new Error(`Unknown source: ${sourceName}`);
+export async function details(sourceId, manga) {
+	const { manga: out } = await required().details({ sourceId, manga });
+	return out;
+}
 
-  const result = await ExtensionEngine.getPages({
-    sourceUrl: source.url,
-    sourceSha256: source.sha256,
-    baseUrl: source.baseUrl,
-    chapterUrl,
-  });
+/** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
+export async function chapters(sourceId, manga) {
+	const { chapters: list } = await required().chapters({ sourceId, manga });
+	return list ?? [];
+}
 
-  return result.pages || [];
+/** صفحات فصل. مرّر كائن الفصل كما جاءك من `chapters()`. */
+export async function pages(sourceId, chapter) {
+	const { pages: list } = await required().pages({ sourceId, chapter });
+	return list ?? [];
 }
 
 /**
- * Get image data (base64)
- * Returns {imageBase64}
+ * رابط صورة صفحة، جاهزًا لـ`<img src>`.
+ *
+ * الطبقة الأصلية تنزّل بعميل المصدر وترويساته — مضيفات الصور تردّ 403 بلا
+ * `Referer` الصحيح — ثم تكتب الملف في كاش التطبيق وترجع مساره. و
+ * `convertFileSrc` يحوّله إلى رابط يقرؤه الـWebView من خادم Capacitor
+ * المحلي، فلا تمرّ بايتات الصورة عبر جسر JSON ولا تسكن ذاكرة الصفحة.
  */
-export async function getImage(sourceName, imageUrl) {
-  const source = extensions[sourceName];
-  if (!source) throw new Error(`Unknown source: ${sourceName}`);
-
-  const result = await ExtensionEngine.getImage({
-    sourceUrl: source.url,
-    sourceSha256: source.sha256,
-    baseUrl: source.baseUrl,
-    imageUrl,
-  });
-
-  return result.imageBase64;
+export async function pageImage(sourceId, page) {
+	const result = await required().image({ sourceId, page });
+	const convert = globalThis.Capacitor?.convertFileSrc;
+	return {
+		...result,
+		src: convert ? convert(result.path) : result.dataUrl ?? result.path,
+	};
 }
 
-/**
- * Get all available extension sources
- */
-export function getAvailableSources() {
-  return Object.entries(extensions).map(([key, ext]) => ({
-    id: key,
-    name: ext.name,
-    baseUrl: ext.baseUrl,
-  }));
+/** إفراغ كاش الصفحات. يُنادى من «امسح التنزيلات» أو عند ضيق التخزين. */
+export async function clearImageCache() {
+	return required().clearImageCache();
 }
 
 export default {
-  ExtensionEngine,
-  extensions,
-  testSource,
-  searchManga,
-  getChapters,
-  getPages,
-  getImage,
-  getAvailableSources,
+	isAvailable,
+	sources,
+	prepare,
+	popular,
+	latest,
+	search,
+	details,
+	chapters,
+	pages,
+	pageImage,
+	clearImageCache,
 };

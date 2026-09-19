@@ -1,11 +1,19 @@
 ext {
-    minSdkVersion = 22
-    compileSdkVersion = 34
+    // 26 لا 22: إضافات Keiyoushi على lib 1.6 تُشحن بـminSdk 26، فتحميلها على
+    // أقل من ذلك يفشل عند فكّ الـDEX لا عند الاستعمال. وأجهزة المالك 13+.
+    minSdkVersion = 26
+    // 35 لازم: androidx.core 1.15 (اعتمادية المحرك) ترفض التصريف على 34.
+    compileSdkVersion = 35
+    // يبقى 34 بقصد: رفعه إلى 35 يفرض edge-to-edge على أندرويد 15 ويغيّر
+    // تخطيط WebView، وهذا تغيير واجهة لا علاقة له بتشغيل المصادر.
     targetSdkVersion = 34
     androidxActivityVersion = '1.8.0'
-    androidxAppCompatVersion = '1.6.1'
+    // 1.7.0 لا 1.6.1: محرّك الإضافات يسحب core 1.15، وهو المزيج الذي أثبته
+    // spike على الجهاز. خلطُ appcompat قديم مع core جديد يُنتج
+    // NoSuchMethodError متقطّعًا يصعب ردّه إلى سببه.
+    androidxAppCompatVersion = '1.7.0'
     androidxCoordinatorLayoutVersion = '1.2.0'
-    androidxCoreVersion = '1.12.0'
+    androidxCoreVersion = '1.15.0'
     androidxFragmentVersion = '1.6.2'
     coreSplashScreenVersion = '1.0.1'
     androidxWebkitVersion = '1.9.0'
