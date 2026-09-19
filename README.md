@@ -133,6 +133,7 @@ cd android && ./gradlew :app:assembleDebug
 | [`docs/VANTARA_TRANSPORT.md`](docs/VANTARA_TRANSPORT.md) | عقد النقل بين الـAPK وخادم المحتوى: CORS وBearer والصور الموقَّعة |
 | [`docs/VANTARA_FAILURE_MATRIX.md`](docs/VANTARA_FAILURE_MATRIX.md) | كل عطل متوقَّع: `COVERED` بمرجع اختباره أو `DEFERRED` بما يحتاجه |
 | [`docs/VANTARA_SOCIAL_SYSTEM.md`](docs/VANTARA_SOCIAL_SYSTEM.md) | الأصدقاء والحضور والنشاط والقراءة المشتركة. §1–§45 نصّ المالك وهو المرجع |
+| [`docs/VANTARA_LESSONS.md`](docs/VANTARA_LESSONS.md) | **أخطاء وقعت هنا فعلًا** وثمنُها وحارسُها. تُقرأ قبل أول باتش |
 | [`docs/VANTARA_MASTER_PLAN.md`](docs/VANTARA_MASTER_PLAN.md) | خطة الإصلاح والتحقق، وحالة كل بند |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | نشر مكدّس المحتوى المستضاف ذاتيًّا |
 | [`docs/UPSTREAMS.md`](docs/UPSTREAMS.md) | كل تابع خارجي: كيف يُربط وكيف يُثبَّت |
