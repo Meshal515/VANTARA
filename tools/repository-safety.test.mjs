@@ -23,10 +23,7 @@ import test from 'node:test';
  * عند الـWorker). الملفان قيد إعادة بناء في باتش الهوية الموحدة، فتعديلهما من
  * هنا تعارض مقصود ممنوع. مسجّل كـhandoff، ولا يجوز أن تطول هذه القائمة.
  */
-const RETIRED_TABLE_EXCEPTIONS = Object.freeze({
-  'apps/api/src/lib/sessions.ts': ['vantara_profiles', 'vantara_user_gates'],
-  'apps/api/src/routes/auth.ts': ['vantara_profiles'],
-});
+const RETIRED_TABLE_EXCEPTIONS = Object.freeze({});
 
 function retiredTablesFromMatrix() {
   const source = read('packages/domain/src/ownership.ts');
@@ -298,21 +295,12 @@ test('every failure scenario has a status and deferred ones say what they need',
   }
 });
 
-test('the retired-table exception list stays at the declared identity handoff', () => {
+test('the retired-table exception list is empty after the identity handoff', () => {
   assert.deepEqual(
-    Object.keys(RETIRED_TABLE_EXCEPTIONS).sort(),
-    ['apps/api/src/lib/sessions.ts', 'apps/api/src/routes/auth.ts'],
-    'a new exception means a second owner came back — declare it in the office first',
+    Object.keys(RETIRED_TABLE_EXCEPTIONS),
+    [],
+    'retired PostgreSQL social tables have no live-code exceptions after B4/B1 closure',
   );
-
-  // التهيئة إدراج فقط: لا منطق يقرأ البوابة من المخزن المتقاعد
-  const sessions = read('apps/api/src/lib/sessions.ts');
-  assert.match(sessions, /INSERT INTO vantara_user_gates/);
-  assert.doesNotMatch(sessions, /(SELECT[^;]*FROM|UPDATE|DELETE\s+FROM)\s+vantara_user_gates/i);
-
-  // ولا يكتب مسار الحسابات في المتقاعد، يقرأ فقط
-  const auth = read('apps/api/src/routes/auth.ts');
-  assert.doesNotMatch(auth, /(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+vantara_profiles/i);
 });
 
 test('signed Android release workflow is tag-only, main-only, and CI-verified', () => {
