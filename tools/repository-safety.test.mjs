@@ -674,3 +674,53 @@ test('the spike pins published artifact urls instead of building them', () => {
   const hashes = [...sources.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
   assert.equal(hashes.length, 5, 'every pinned artifact needs its sha256');
 });
+
+test('no spike probe step can run without a deadline or an announcement', () => {
+  // تشغيلٌ حقيقي وقف عند «load» بلا سطرٍ بعده. ولم يكن سقوطًا: خطوةٌ واحدة
+  // تملك دقيقتَي `callTimeout`، وداخلهما إعادة محاولة ثلاثية، وداخل كل
+  // محاولة قد ينتظر اعتراض Cloudflare متصفحًا مخفيًّا عشرين ثانية — وطوال
+  // ذلك لا يُطبع حرف. فقُرئ العملُ موتًا.
+  //
+  // فشرطان على كل خطوة: تُعلن اسمها قبل أن تبدأ، وتموت بمهلة معلنة. وبهما
+  // لا تعود الشاشة تصمت، ولا يحجز مصدرٌ واحد التشغيل عن البقية.
+  const probe = read('spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/SourceProbe.kt');
+
+  assert.match(
+    probe,
+    /announce\(name\)[\s\S]{0,400}?withTimeout\(timeoutMs\)/,
+    'step() must announce itself and then run under withTimeout',
+  );
+  assert.match(
+    probe,
+    /const val STEP_TIMEOUT_MS = [\d_]+L/,
+    'the step deadline must be a named constant, not a magic number',
+  );
+  assert.match(
+    probe,
+    /if \(t is CancellationException && t !is TimeoutCancellationException\) throw t/,
+    'a real cancellation must propagate; only our own timeout may be swallowed',
+  );
+
+  // قياس الكتالوج يمشي حتى أربعين صفحة، فيحتاج سقفًا زمنيًّا مستقلًّا
+  assert.match(
+    probe,
+    /const val CATALOGUE_BUDGET_MS = [\d_]+L/,
+    'the catalogue walk needs its own time budget',
+  );
+
+  // والشاشة لا تُنهي تشغيلًا بلا خبر ولا تترك الزر ميتًا
+  const screen = read('spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt');
+  assert.match(
+    screen,
+    /\} finally \{[\s\S]*?انتهى[\s\S]*?button\.isEnabled = true/,
+    'runAll must always print an ending and re-enable the button',
+  );
+
+  // والصورة تُعرض من البايتات التي قبِلها المسبار، لا بتنزيلٍ ثانٍ بعميل
+  // بلا ترويسات المصدر — ذاك يردّه مضيف الصور 403 فيُكذّب إثباتًا صحيحًا
+  assert.match(
+    screen,
+    /report\.imageData\?\.let/,
+    'the on-screen image must decode the bytes the probe already proved',
+  );
+});

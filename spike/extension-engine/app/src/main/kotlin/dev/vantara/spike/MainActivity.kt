@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         }
         val run = Button(this).apply {
             text = "شغّل الخمسة"
-            setOnClickListener { it.isEnabled = false; runAll() }
+            setOnClickListener { it.isEnabled = false; runAll(this) }
         }
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(run)
@@ -71,89 +71,127 @@ class MainActivity : AppCompatActivity() {
         line("بلا Suwayomi · بلا سيرفر · بلا تثبيت إضافات يدويًّا")
     }
 
-    private fun runAll() = lifecycleScope.launch {
+    private fun runAll(button: Button) = lifecycleScope.launch {
         val loader = FileExtensionLoader(this@MainActivity)
         val probe = SourceProbe(network.client)
 
-        for (spec in SPIKE_SOURCES) {
-            line("")
-            line("═══ ${spec.label} ═══", bold = true)
-            line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
+        // سطر حيّ واحد يُعاد استعماله: يقول ما ننتظره الآن، لا ما مضى.
+        // بلا هذا السطر كانت الشاشة تقف عند آخر نجاح دقائقَ كاملة بلا حرف،
+        // فتُقرأ كأن التطبيق مات — وهو يعمل.
+        val status = TextView(this@MainActivity).apply {
+            textSize = 13f
+            gravity = Gravity.START
+            textDirection = View.TEXT_DIRECTION_LOCALE
+            setTextColor(0xFF8899AA.toInt())
+        }
+        log.addView(status)
+        fun waiting(what: String?) {
+            status.text = if (what == null) "" else "⟳ $what — جارٍ…"
+        }
 
-            // ١) نستعمل النسخة المحلية الموثّقة أولًا. هذا مهم عمليًا:
-            // انقطاع DNS عن github.com لا يجب أن يعطّل مصدرًا سبق تنزيله والتحقق منه.
-            val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
-            val apk = if (cached != null) {
-                line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
-                cached
-            } else {
-                val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
-                    runCatching {
-                        var lastIo: IOException? = null
-                        repeat(3) { attempt ->
-                            try {
-                                return@runCatching network.client
-                                    .newCall(Request.Builder().url(spec.apkUrl).build())
-                                    .execute().use { res ->
-                                        require(res.isSuccessful) {
-                                            "HTTP ${res.code} ← ${spec.apkUrl}"
+        try {
+            for (spec in SPIKE_SOURCES) {
+                waiting("${spec.label} · تنزيل")
+                line("")
+                line("═══ ${spec.label} ═══", bold = true)
+                line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
+
+                // ١) نستعمل النسخة المحلية الموثّقة أولًا. هذا مهم عمليًا:
+                // انقطاع DNS عن github.com لا يجب أن يعطّل مصدرًا سبق تنزيله والتحقق منه.
+                val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
+                val apk = if (cached != null) {
+                    line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
+                    cached
+                } else {
+                    val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
+                        runCatching {
+                            var lastIo: IOException? = null
+                            repeat(3) { attempt ->
+                                try {
+                                    return@runCatching network.client
+                                        .newCall(Request.Builder().url(spec.apkUrl).build())
+                                        .execute().use { res ->
+                                            require(res.isSuccessful) {
+                                                "HTTP ${res.code} ← ${spec.apkUrl}"
+                                            }
+                                            res.body.bytes()
                                         }
-                                        res.body.bytes()
-                                    }
-                            } catch (io: IOException) {
-                                lastIo = io
-                                if (attempt < 2) Thread.sleep(800L * (attempt + 1))
+                                } catch (io: IOException) {
+                                    lastIo = io
+                                    if (attempt < 2) Thread.sleep(800L * (attempt + 1))
+                                }
                             }
+                            throw lastIo ?: IOException("download failed without an I/O cause")
                         }
-                        throw lastIo ?: IOException("download failed without an I/O cause")
                     }
+
+                    downloaded.getOrElse {
+                        line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
+                        continue
+                    }.also { line("✓ download — ${it.size} بايت") }
                 }
 
-                downloaded.getOrElse {
-                    line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                    continue
-                }.also { line("✓ download — ${it.size} بايت") }
-            }
-
-            // ٢) التحقق والتحميل من ملف
-            // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله.
-            // الـPoC التشخيصي يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
-            val loaded = try {
-                withContext(Dispatchers.IO) { loader.load(spec, apk) }
-            } catch (t: Throwable) {
-                line(
-                    "✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
-                    bad = true,
-                )
-                continue
-            }
-
-            when (loaded) {
-                is FileExtensionLoader.Result.Fail -> {
-                    line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
-                    loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
+                // ٢) التحقق والتحميل من ملف
+                // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله.
+                // الـPoC التشخيصي يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
+                waiting("${spec.label} · تحميل من ملف")
+                val loaded = try {
+                    withContext(Dispatchers.IO) { loader.load(spec, apk) }
+                } catch (t: Throwable) {
+                    line(
+                        "✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
+                        bad = true,
+                    )
                     continue
                 }
-                is FileExtensionLoader.Result.Ok -> {
-                    val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-                    line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
 
-                    val source = sources.first()
-                    val report = try {
-                        withContext(Dispatchers.IO) { probe.run(spec.label, source) }
-                    } catch (t: Throwable) {
-                        line(
-                            "✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
-                            bad = true,
-                        )
+                when (loaded) {
+                    is FileExtensionLoader.Result.Fail -> {
+                        line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
+                        loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
                         continue
                     }
-                    render(report)
+                    is FileExtensionLoader.Result.Ok -> {
+                        val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
+                        line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
+
+                        // حزمةٌ حُمّلت بلا مصدرٍ واحد قابل للتصفّح ليست حالة
+                        // مستحيلة: `first()` عليها ترمي، والرمية خارج أي حراسة
+                        // كانت ستُنهي التشغيل كله بلا سطر.
+                        val source = sources.firstOrNull()
+                        if (source == null) {
+                            line("✗ load — الحزمة بلا CatalogueSource", bad = true)
+                            continue
+                        }
+
+                        val report = try {
+                            withContext(Dispatchers.IO) {
+                                probe.run(spec.label, source) { stepName ->
+                                    withContext(Dispatchers.Main) {
+                                        waiting("${spec.label} · $stepName")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            line(
+                                "✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}",
+                                bad = true,
+                            )
+                            continue
+                        }
+                        render(report)
+                    }
                 }
             }
+        } finally {
+            // ينتهي التشغيل دائمًا بخبر، ويعود الزر دائمًا صالحًا — حتى إذا
+            // خرج شيء من كل الحراسات. شاشةٌ بزرٍّ ميت بلا «انتهى» لا تقول
+            // للمالك أسقَطَ التطبيقُ أم ما زال يعمل، ولا تدعه يعيد المحاولة.
+            waiting(null)
+            line("")
+            line("انتهى.", bold = true)
+            button.isEnabled = true
         }
-        line("")
-        line("انتهى.", bold = true)
     }
 
     private fun render(report: SourceProbe.Report) {
@@ -167,17 +205,19 @@ class MainActivity : AppCompatActivity() {
             step.live?.let { line("   ${it.describe()}") }
             step.hypothesis?.let { line("   ${it}") }
         }
+        report.baseUrl?.let { line("   المضيف: $it") }
         report.imageUrl?.let { line("   الصورة: ${it.take(90)}") }
 
-        // الصورة على الشاشة: `BitmapFactory` ترفض ما ليس صورة، فهي الحَكَم
-        report.imageBytes?.let {
-            val url = report.imageUrl ?: return@let
+        // الصورة على الشاشة: `BitmapFactory` ترفض ما ليس صورة، فهي الحَكَم.
+        //
+        // وتُفكَّك من بايتات المسبار نفسها، لا بتنزيلٍ ثانٍ: التنزيل الثاني
+        // كان يخرج بعميل المستضيف بلا ترويسات المصدر — و`Referer` خاصةً —
+        // فيردّه مضيف الصور 403، فتُعرض صورةٌ صحيحة أثبتها المسبار على أنها
+        // «ليست صورة حقيقية». الحَكَم يجب أن يحكم على ما أُثبت لا على شيء آخر.
+        report.imageData?.let { bytes ->
             lifecycleScope.launch {
                 val bmp = withContext(Dispatchers.IO) {
-                    runCatching {
-                        network.client.newCall(Request.Builder().url(url).build())
-                            .execute().use { res -> BitmapFactory.decodeStream(res.body.byteStream()) }
-                    }.getOrNull()
+                    runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
                 }
                 if (bmp == null) {
                     line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)

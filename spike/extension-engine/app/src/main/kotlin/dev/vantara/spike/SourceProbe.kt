@@ -5,8 +5,12 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * السلسلة الخمس لمصدر واحد، ثم قياس الكتالوج.
@@ -76,30 +80,76 @@ class SourceProbe(private val http: OkHttpClient) {
 
     data class Report(
         val label: String,
+        /**
+         * المضيف الذي تضربه الإضافة فعلًا بعد اختيارها مرآتها.
+         *
+         * يُعرض لأن التشغيل الحيّ أظهر مصدرًا نجح بحثه وتفاصيله ثم طلب
+         * الفصول من مضيف آخر تمامًا. بلا طباعة هذه القيمة يبقى السؤال
+         * «أي مضيف؟» بلا جواب في كل تقرير.
+         */
+        val baseUrl: String?,
         val steps: List<Step>,
         /** رابط صورة صفحة حقيقية، تُعرض في الشاشة لا تُوصف. */
         val imageUrl: String?,
         val imageBytes: Int?,
+        /**
+         * بايتات الصورة كما قبِلها المسبار.
+         *
+         * تُحفظ ولا يُعاد تنزيلها للعرض: الطلب الثاني يخرج بعميلٍ آخر وبلا
+         * ترويسات المصدر — و`Referer` خاصةً — فكثير من مضيفات الصور تردّه
+         * 403، فتُقرأ صورةٌ صحيحة على أنها «لم تُفكَّك». والعرض من هذه
+         * البايتات يجعل ما يُرى هو نفسه ما أُثبت.
+         */
+        val imageData: ByteArray?,
         val reach: CatalogueReach?,
     ) {
         val passed: Boolean get() = steps.all { it.ok } && (imageBytes ?: 0) > 0
         val failedAt: String? get() = steps.firstOrNull { !it.ok }?.name
     }
 
+    /**
+     * ما تعرضه الشاشة **قبل** أن تبدأ الخطوة.
+     *
+     * يُسند مرة واحدة في أول `run`، والتشغيل متسلسل مصدرًا بعد مصدر فلا
+     * تتزاحم عليه خطوتان.
+     */
+    private var announce: suspend (String) -> Unit = {}
+
+    /**
+     * خطوة واحدة: تُعلَن قبلها، وتُوقَّت، وتُمهَل، ولا تُفلت رميةً واحدة.
+     *
+     * والإعلان قبل التنفيذ ليس زينة. خطوة واحدة قد تستغرق دقائق مشروعة:
+     * `callTimeout` دقيقتان، وداخلها إعادة محاولة ثلاثية لـGET، وداخل كل
+     * محاولة قد يفتح اعتراض Cloudflare متصفحًا مخفيًّا وينتظره عشرين ثانية.
+     * وطوال ذلك لم يكن يُطبع حرف: الشاشة تقف عند آخر سطر نجح، فتُقرأ كأن
+     * التطبيق مات. الآن يظهر اسم الخطوة أولًا، فيُعرف أين نحن لا أين كنّا.
+     *
+     * والمهلة تُكمل المعنى: ما تجاوزها يصير سطرًا أحمر مقروءًا، والتشغيل
+     * يمضي إلى الخطوة التالية بدل أن يُعلّق البقية خلفه.
+     */
     private suspend fun <T> step(
         name: String,
         into: MutableList<Step>,
         baseUrl: String?,
+        timeoutMs: Long = STEP_TIMEOUT_MS,
         block: suspend () -> T,
     ): T? {
+        announce(name)
         val started = System.currentTimeMillis()
         return try {
-            val value = block()
+            val value = withTimeout(timeoutMs) { block() }
             into += Step(name, true, describe(value), System.currentTimeMillis() - started)
             value
         } catch (t: Throwable) {
+            // إلغاءٌ حقيقي (إغلاق الشاشة) يمرّ؛ ومهلتُنا وحدها تُلتقط. بلا
+            // هذا التمييز يبتلع المسبار إلغاء النطاق فيبدو حيًّا وهو ميت.
+            if (t is CancellationException && t !is TimeoutCancellationException) throw t
+
             val kind = t.javaClass.name
-            val msg = diagnostic(t)
+            val msg = when (t) {
+                is TimeoutCancellationException -> "تجاوز المهلة (${timeoutMs / 1000}ث)"
+                else -> diagnostic(t)
+            }
             // الدليل يُجمع **الآن**: الموقع لحظةَ الفشل، لا أمس
             val live = baseUrl?.let { liveCheck(it) }
             into += Step(
@@ -116,6 +166,16 @@ class SourceProbe(private val http: OkHttpClient) {
     }
 
     /**
+     * عميل الفحص الحيّ: نفس إعداد المصدر، بمهلة نداءٍ أقصر.
+     *
+     * الفحص يجري **داخل معالج الفشل**، فلو أخذ دقيقتَي العميل الأصلي تأخّر
+     * السطر الذي يشرح الفشل أصلًا — ويصير التشخيص هو ما يؤخّر التشخيص.
+     */
+    private val prober: OkHttpClient by lazy {
+        http.newBuilder().callTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS).build()
+    }
+
+    /**
      * طلب خامّ للموقع، بلا الإضافة وبلا عميلها.
      *
      * غرضه واحد: هل الموقع نفسه يردّ الآن؟ ولا يقول أكثر من ذلك — وتحديدًا
@@ -125,7 +185,7 @@ class SourceProbe(private val http: OkHttpClient) {
         val request = Request.Builder().url(baseUrl)
             .header("user-agent", RAW_UA)
             .build()
-        http.newCall(request).execute().use { res ->
+        prober.newCall(request).execute().use { res ->
             val body = res.body.bytes()
             LiveCheck(baseUrl, res.code, body.size, res.header("content-type"), null)
         }
@@ -144,6 +204,17 @@ class SourceProbe(private val http: OkHttpClient) {
         val missing = (t as? NoClassDefFoundError)?.message?.take(120)
 
         return when {
+            // مهلة ليست فشلًا مُسمّى: لا تقول الموقعَ ولا المحرك، تقول
+            // «طال». والفحص الحيّ هو ما يوجّه القراءة بعدها.
+            t is TimeoutCancellationException ->
+                "فرضية: الخطوة طالت ولم تُنهِ (النوع $name). " +
+                    if (live != null && live.error == null) {
+                        "والموقع يردّ ${live.status} لطلبٍ خامّ الآن، فالبطء " +
+                            "أقرب إلى مسارنا (إعادة محاولة، اعتراض Cloudflare، " +
+                            "متصفح مخفيّ) منه إلى سقوط الموقع — وليست قطعًا."
+                    } else {
+                        "ولا فحص حيّ ناجح يرافقها، فقد يكون الموقع نفسه بطيئًا."
+                    }
             // صنف مفقود يسمّي نفسه: القرينة هنا في **الاسم** لا في النوع
             t is NoClassDefFoundError || t is ClassNotFoundException ->
                 "فرضية: نقصٌ في سطح المستضيف — الصنف الغائب «$missing». " +
@@ -187,7 +258,12 @@ class SourceProbe(private val http: OkHttpClient) {
         else -> value.toString().take(80)
     }
 
-    suspend fun run(label: String, source: CatalogueSource): Report {
+    suspend fun run(
+        label: String,
+        source: CatalogueSource,
+        onStepStart: suspend (String) -> Unit = {},
+    ): Report {
+        announce = onStepStart
         val steps = mutableListOf<Step>()
         // `baseUrl` من المصدر نفسه لا من بياننا: الإضافة قد تكون هاجرت إلى
         // مرآة أخرى (`baseUrl { mirrors(...) }`)، فالفحص الحيّ يجب أن يضرب
@@ -205,7 +281,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // بلا نتيجة بحث لا معنى لبقية السلسلة: نتوقف ونقول أين
         val first = found?.firstOrNull()
-            ?: return Report(label, steps, null, null, null)
+            ?: return Report(label, base, steps, null, null, null, null)
 
         // ٢) تفاصيل العمل
         val details = step("details", steps, base) {
@@ -237,7 +313,7 @@ class SourceProbe(private val http: OkHttpClient) {
         }
 
         val chapter = chapters?.firstOrNull()
-        if (chapter == null) return Report(label, steps, null, null, null)
+        if (chapter == null) return Report(label, base, steps, null, null, null, null)
 
         // ٤) الصفحات
         val pages = step("pages", steps, base) {
@@ -249,6 +325,7 @@ class SourceProbe(private val http: OkHttpClient) {
         // ٥) صورة فعلية — بايتات حقيقية لا رابط فقط
         var imageUrl: String? = null
         var imageBytes: Int? = null
+        var imageData: ByteArray? = null
         val page = pages?.firstOrNull()
         if (page != null) {
             step("image", steps, base) {
@@ -269,14 +346,20 @@ class SourceProbe(private val http: OkHttpClient) {
                     val body = response.body.bytes()
                     require(body.size > 1024) { "image too small: ${body.size} bytes" }
                     imageBytes = body.size
+                    imageData = body
                     "${body.size} بايت · ${response.header("content-type")}"
                 }
             }
         }
 
         // ٦) قياس الكتالوج — لا يُحسب إلا إذا مرّت السلسلة
-        val reach = if (steps.all { it.ok }) measureCatalogue(source) else null
-        return Report(label, steps, imageUrl, imageBytes, reach)
+        val reach = if (steps.all { it.ok }) {
+            announce("catalogue")
+            measureCatalogue(source)
+        } else {
+            null
+        }
+        return Report(label, base, steps, imageUrl, imageBytes, imageData, reach)
     }
 
     /**
@@ -291,29 +374,45 @@ class SourceProbe(private val http: OkHttpClient) {
      */
     private suspend fun measureCatalogue(source: CatalogueSource): CatalogueReach {
         val seen = LinkedHashSet<String>()
+        // عدّاد صريح لِما جُلب بنجاح. اشتقاقه من رقم الصفحة عند الخروج كان
+        // يخطئ باثنتين في اتجاهين متعاكسين: صفحةٌ سقطت تُحسب مجلوبة، وصفحةُ
+        // التكرار لا تُحسب وقد جُلبت. والرقم هنا يُقرأ كدليل، فوجب صدقه.
+        var fetched = 0
         var page = 1
         var stoppedBecause = "page-cap"
         var reachedEnd = false
+        val deadline = System.currentTimeMillis() + CATALOGUE_BUDGET_MS
 
         while (page <= PAGE_CAP) {
-            val result = try {
-                source.getPopularManga(page)
-            } catch (t: Throwable) {
-                stoppedBecause = "error: ${t.javaClass.simpleName}"
+            // ميزانية زمنية للقياس كله: أربعون صفحة على مصدر بطيء تبتلع
+            // التشغيل وتترك المصادر الباقية بلا اختبار، والعدد الناقص
+            // يُعلَن سببه فلا يُقرأ كأنه نهاية الكتالوج.
+            if (System.currentTimeMillis() >= deadline) {
+                stoppedBecause = "time-budget"
                 break
             }
+            announce("catalogue p$page")
+            val result = try {
+                withTimeout(STEP_TIMEOUT_MS) { source.getPopularManga(page) }
+            } catch (t: Throwable) {
+                if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                stoppedBecause = when (t) {
+                    is TimeoutCancellationException -> "timeout@p$page"
+                    else -> "error@p$page: ${t.javaClass.simpleName}"
+                }
+                break
+            }
+            fetched += 1
+
             val before = seen.size
             result.mangas.forEach { seen += it.url }
-            val added = seen.size - before
-
-            if (added == 0) {
+            if (seen.size == before) {
                 stoppedBecause = "repeat"
                 break
             }
             if (!result.hasNextPage) {
                 stoppedBecause = "end-of-catalogue"
                 reachedEnd = true
-                page += 1
                 break
             }
             page += 1
@@ -321,7 +420,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         return CatalogueReach(
             uniqueWorks = seen.size,
-            pagesFetched = page - 1,
+            pagesFetched = fetched,
             reachedEnd = reachedEnd,
             stoppedBecause = stoppedBecause,
         )
@@ -343,5 +442,19 @@ class SourceProbe(private val http: OkHttpClient) {
          * يُعلن في التقرير، فلا يُقرأ رقمٌ ناقص كأنه نهاية الكتالوج.
          */
         const val PAGE_CAP = 40
+
+        /**
+         * مهلة الخطوة الواحدة.
+         *
+         * أوسع من `callTimeout` الافتراضي للعميل بقليل، فلا تقطع نداءً
+         * مشروعًا، وأضيق من أن تُجمّد الشاشة بلا خبر.
+         */
+        const val STEP_TIMEOUT_MS = 150_000L
+
+        /** ميزانية قياس الكتالوج كاملًا لمصدر واحد. */
+        const val CATALOGUE_BUDGET_MS = 180_000L
+
+        /** الفحص الحيّ يجري داخل معالج الفشل، فيُقطع أسرع من النداء العادي. */
+        const val LIVE_CHECK_TIMEOUT_S = 20L
     }
 }
