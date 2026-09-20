@@ -14,6 +14,7 @@ import android.content.Context
 import android.webkit.WebSettings
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
+import eu.kanade.tachiyomi.network.interceptor.BrowserVerificationInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
@@ -90,6 +91,7 @@ class NetworkHelper(context: Context) {
         }
         .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+        .addInterceptor(BrowserVerificationInterceptor())
         .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
         .build()
 
