@@ -85,17 +85,58 @@ function json(body: unknown, init: ResponseInit = {}, extra: Record<string, stri
 // ───────────────────────────── العدّاد ─────────────────────────────
 
 /**
- * يحجز رقم مراجعة واحدًا للطلب كله.
+ * ينشر revision مع أثره في **المعاملة نفسها**.
  *
- * كل عمليات الطلب تتشارك الرقم: الـrev رقم معاملة منطقية لا طابع لكل صف.
- * والفراغات فيه مقصودة ومقبولة — العميل يقارن بـ`>` فقط، فرقم محجوز لطلب فشل
- * لا يضرّ. وهذا أرخص من حجز رقم لكل عملية برحلة كتابة لكل واحدة.
+ * القراءة القديمة كانت ترفع sync_state.rev في طلب مستقل ثم تكتب الصفوف لاحقًا؛
+ * pull متزامن يستطيع رؤية cursor الجديد قبل الصفوف ثم يتجاوزها للأبد.
+ *
+ * هنا نقرأ المرشح خارج المعاملة ثم نعمل compare-and-swap داخل D1 batch. جدول
+ * sync_commits + claim_id يحول فشل الـCAS إلى constraint failure، فتُلغى
+ * المعاملة كلها ويُعاد البناء على revision أحدث. لا يصبح rev مرئيًا إلا مع
+ * كل الصفوف وapplied_ops التي تحمله.
  */
-async function allocateRev(env: Env): Promise<number> {
-  const row = await env.DB.prepare('UPDATE sync_state SET rev = rev + 1 WHERE id = 1 RETURNING rev')
-    .first<{ rev: number }>();
-  if (!row) throw new Error('sync_state missing');
-  return row.rev;
+const MAX_REVISION_RETRIES = 8;
+
+async function commitNextRevision(
+  env: Env,
+  now: number,
+  build: (rev: number) => D1PreparedStatement[],
+): Promise<number | null> {
+  for (let attempt = 0; attempt < MAX_REVISION_RETRIES; attempt += 1) {
+    const base = await currentRev(env);
+    const rev = base + 1;
+    const claimId = crypto.randomUUID();
+    const effects = build(rev);
+    if (effects.length === 0) return null;
+
+    try {
+      await env.DB.batch([
+        env.DB.prepare(
+          'UPDATE sync_state SET rev = ?, claim_id = ? WHERE id = 1 AND rev = ?',
+        ).bind(rev, claimId, base),
+        env.DB.prepare(
+          `INSERT INTO sync_commits (rev, claim_id, committed_at, owned)
+           VALUES (
+             ?, ?, ?,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM sync_state
+                WHERE id = 1 AND rev = ? AND claim_id = ?
+             ) THEN 1 ELSE 0 END
+           )`,
+        ).bind(rev, claimId, now, rev, claimId),
+        ...effects,
+      ]);
+      return rev;
+    } catch (error) {
+      // إن سبقنا كاتب آخر فالـCAS/PK guard يفشل وتُلغى الدفعة كاملة.
+      // نعيد المحاولة فقط إذا تحرك العداد فعلًا؛ خطأ SQL/constraint آخر
+      // يبقى خطأً حقيقيًا ولا نخفيه بإعادة عمياء.
+      const observed = await currentRev(env).catch(() => base);
+      if (observed > base && attempt + 1 < MAX_REVISION_RETRIES) continue;
+      throw error;
+    }
+  }
+  throw new Error('revision contention exhausted');
 }
 
 async function currentRev(env: Env): Promise<number> {
