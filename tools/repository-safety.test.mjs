@@ -109,22 +109,53 @@ test('sync worker production deploy is CI-gated and main-only', () => {
   assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
-test('sync worker production deploy provisions every runtime authentication secret', () => {
+test('new D1 migrations are expand-only while migrations run before Worker deploy', () => {
+  // 0010 and earlier are historical production state. From 0012 onward this
+  // guard makes the deployment order safe: the old Worker must keep working
+  // after a migration and before the new Worker version becomes active.
+  const dir = resolve(ROOT, 'services/sync-worker/migrations');
+  const migrations = readdirSync(dir)
+    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+    .filter((name) => Number.parseInt(name.slice(0, 4), 10) >= 12)
+    .sort();
+
+  assert.ok(migrations.length >= 1, 'expected the post-freeze D1 migration baseline');
+  const destructive =
+    /\bDROP\s+(?:TABLE|COLUMN|INDEX)\b|\bALTER\s+TABLE\b[\s\S]{0,240}\bRENAME\b|\bRENAME\s+TO\b/i;
+  const offenders = migrations.filter((name) => destructive.test(stripComments(read(`services/sync-worker/migrations/${name}`))));
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `D1 deploy is migrate-then-code, so new migrations must be backwards-compatible expansions. Use an expand/contract release instead:\n${offenders.join('\n')}`,
+  );
+});
+
+test('sync worker production deploy fails closed unless runtime auth secrets already exist', () => {
   const workflow = read('.github/workflows/sync-worker.yml');
-  for (const secret of [
+  const wrangler = read('services/sync-worker/wrangler.toml');
+  const required = [
     'VANTARA_SESSION_SECRET',
     'VANTARA_IDENTITY_SECRET',
     'VANTARA_DEVICE_PEPPER',
-  ]) {
-    assert.ok(
-      workflow.includes('${{ secrets.' + secret + ' }}'),
-      `sync-worker deploy must read GitHub secret ${secret}`,
-    );
-    assert.ok(
-      workflow.includes(`secret put ${secret}`),
-      `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
-    );
+  ];
+
+  assert.match(wrangler, /\[secrets\][\s\S]*required\s*=/m, 'Wrangler must declare required secrets');
+  for (const secret of required) {
+    assert.ok(wrangler.includes(`"${secret}"`), `Wrangler must require ${secret}`);
+    assert.ok(workflow.includes(secret), `deploy preflight must verify ${secret}`);
   }
+
+  const preflight = workflow.indexOf('- name: Verify Worker auth bindings before changing D1');
+  const migrations = workflow.indexOf('- name: Apply D1 migrations');
+  const deploy = workflow.indexOf('- name: Deploy');
+  assert.ok(preflight >= 0 && preflight < migrations && migrations < deploy, 'secret preflight must run before any production schema/code change');
+  assert.match(workflow.slice(preflight, migrations), /wrangler@4 secret list --format json/, 'deploy must query Cloudflare secret bindings');
+  assert.doesNotMatch(
+    workflow,
+    /wrangler@4 (?:versions )?secret (?:put|bulk)|wrangler@4 secret put/,
+    'ordinary deploy must never create a surprise Worker version by mutating secrets',
+  );
 });
 
 test('live D1 verification receives the device pepper required for trusted-device pairing', () => {
