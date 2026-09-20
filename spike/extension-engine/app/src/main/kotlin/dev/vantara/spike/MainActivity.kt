@@ -4,10 +4,12 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -26,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.Request
+import kotlin.coroutines.cancellation.CancellationException
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
@@ -44,55 +47,50 @@ import uy.kohesive.injekt.api.get
  *
  * كل حزمة مستقلة عن غيرها. سقوط مصدر لا يوقف التالي، وكل خطوة لها مهلة.
  * المصادر المتخصصة BL/GL موجودة في اللقطة لأجل اكتمال التقرير فقط لكنها
- * BLOCKED ولا تُنزّل ولا تُشغّل. NSFW له زر منفصل وإقرار صريح، ولا تُعرض
- * صوره على الشاشة حتى أثناء الفحص.
+ * BLOCKED ولا تُنزّل ولا تُشغّل. بقية SAFE/MIXED/NSFW تُفحص في تشغيل واحد،
+ * وبعد إقرار NSFW تظهر صورة اختبار مصغّرة لكل مصدر يمرّ حتى الصورة.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var log: LinearLayout
     private val network by lazy { Injekt.get<NetworkHelper>() }
-    private val reportText = StringBuilder()
+    private val checkpoint by lazy { ProbeCheckpointStore(filesDir) }
     private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WebViewActivityHolder.set(this)
-        Injekt.importModule(SpikeModule(this))
+        synchronized(INJEKT_LOCK) {
+            if (!injektReady) {
+                Injekt.importModule(SpikeModule(this))
+                injektReady = true
+            }
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 24, 24, 24)
         }
 
-        val runRegular = Button(this).apply {
-            text = "اختبر SAFE + MIXED"
-            setOnClickListener {
-                runSelected(
-                    button = this,
-                    warnings = setOf(ContentWarning.SAFE, ContentWarning.MIXED),
-                )
+        val runUnified = Button(this).apply {
+            text = if (checkpoint.hasCheckpoint()) {
+                "استأنف فحص كل المصادر"
+            } else {
+                "اختبر كل المصادر — SAFE + MIXED + NSFW"
             }
-        }
-
-        val runNsfw = Button(this).apply {
-            text = "اختبر NSFW (يتطلب إقرار)"
             setOnClickListener {
                 if (running) return@setOnClickListener
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("فحص مصادر NSFW")
+                    .setTitle("فحص موحّد لكل المصادر")
                     .setMessage(
-                        "هذا فحص هندسي للمصدر فقط. لن يعرض صور الصفحات، " +
-                            "لكن التطبيق سيطلب البحث والفصول والصفحات ويتحقق من بايتات الصورة. " +
+                        "يشمل SAFE وMIXED وNSFW في تقرير واحد، وستظهر صورة اختبار مصغّرة " +
+                            "للمصدر إذا وصلت السلسلة إلى صورة فصل. " +
                             "المصادر BL/GL المحظورة لن تُشغّل مهما كان هذا الإقرار.",
                     )
                     .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("أقر وأختبر") { _, _ ->
-                        runSelected(
-                            button = this,
-                            warnings = setOf(ContentWarning.NSFW),
-                        )
-                    }
+                    .setPositiveButton("أقر وابدأ") { _, _ -> runUnified(this) }
                     .show()
             }
         }
@@ -106,7 +104,9 @@ class MainActivity : AppCompatActivity() {
             text = "نسخ التقرير"
             setOnClickListener {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("VANTARA Arabic sources spike", reportText.toString()))
+                clipboard.setPrimaryClip(
+                    ClipData.newPlainText("VANTARA Arabic sources spike", checkpoint.readReport()),
+                )
                 text = "تم نسخ التقرير"
                 postDelayed({ text = "نسخ التقرير" }, 1500)
             }
@@ -117,21 +117,27 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 if (running) return@setOnClickListener
                 log.removeAllViews()
-                reportText.clear()
+                checkpoint.clear()
                 printHeader()
+                runUnified.text = "اختبر كل المصادر — SAFE + MIXED + NSFW"
             }
         }
 
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(runRegular)
-        root.addView(runNsfw)
+        root.addView(runUnified)
         root.addView(crawl)
         root.addView(copy)
         root.addView(clear)
         root.addView(ScrollView(this).apply { addView(log) })
         setContentView(root)
 
-        printHeader()
+        val restored = checkpoint.readReport()
+        if (restored.isBlank()) {
+            printHeader()
+        } else {
+            restored.lineSequence().forEach { displayLine(it) }
+            displayLine("تم استرجاع التقرير المحفوظ — اضغط استئناف لإكمال الباقي.", bold = true)
+        }
     }
 
     private fun printHeader() {
@@ -139,7 +145,7 @@ class MainActivity : AppCompatActivity() {
         line("لقطة Keiyoushi: ${SPIKE_INDEX_COMMIT.take(12)}")
         line(SPIKE_SNAPSHOT_NOTE)
         line("المصادر المتخصصة BL/GL: تظهر BLOCKED في التقرير ولا تُشغّل.")
-        line("MIXED وNSFW: تُفك صورة الاختبار للتحقق فقط، بلا عرضها على الشاشة.")
+        line("SAFE وMIXED وNSFW: فحص واحد، وصور اختبار مصغّرة لحماية الذاكرة.")
     }
 
     private fun statusLine(): (String?) -> Unit {
@@ -253,10 +259,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun runSelected(
-        button: Button,
-        warnings: Set<ContentWarning>,
-    ) {
+    private fun runUnified(button: Button) {
         if (running) return
         running = true
         button.isEnabled = false
@@ -265,70 +268,84 @@ class MainActivity : AppCompatActivity() {
             val loader = FileExtensionLoader(this@MainActivity)
             val probe = SourceProbe(network.client)
             val waiting = statusLine()
-            val selected = SPIKE_SOURCES.filter { it.warning in warnings }
+            val selected = SPIKE_SOURCES.filter { it.blockedReason == null }
+            if (!checkpoint.hasCheckpoint()) {
+                checkpoint.reset(selected.map { it.pkg })
+                log.removeAllViews()
+                printHeader()
+            }
+            val remaining = checkpoint.remaining().toHashSet()
+            val pending = selected.filter { it.pkg in remaining }
 
             var packagesOk = 0
             var packagesFailed = 0
-            var policyBlocked = 0
             var sourcesPassed = 0
+            var sourcesPartial = 0
             var sourcesFailed = 0
 
             line("")
             line(
-                "── بدء الفحص: ${warnings.joinToString()} · ${selected.size} حزمة في اللقطة ──",
+                "── الفحص الموحّد: متبقٍ ${pending.size} من ${selected.size} حزمة قابلة للتشغيل ──",
                 bold = true,
             )
 
             try {
-                for (spec in selected) {
-                    if (spec.blockedReason != null) {
-                        policyBlocked += 1
-                        obtainArabicSources(spec, loader, waiting)
-                        continue
-                    }
+                for ((packageIndex, spec) in pending.withIndex()) {
+                    var packageFinished = false
+                    try {
+                        val sources = obtainArabicSources(spec, loader, waiting)
+                        if (sources.isEmpty()) {
+                            packagesFailed += 1
+                            packageFinished = true
+                            continue
+                        }
+                        packagesOk += 1
 
-                    val sources = obtainArabicSources(spec, loader, waiting)
-                    if (sources.isEmpty()) {
-                        packagesFailed += 1
-                        continue
-                    }
-                    packagesOk += 1
+                        for (source in sources) {
+                            val label =
+                                if (sources.size > 1 || source.name != spec.label) {
+                                    "${spec.label} / ${source.name}"
+                                } else {
+                                    spec.label
+                                }
 
-                    for (source in sources) {
-                        val label =
-                            if (sources.size > 1 || source.name != spec.label) {
-                                "${spec.label} / ${source.name}"
-                            } else {
-                                spec.label
-                            }
-
-                        val report = try {
-                            withContext(Dispatchers.IO) {
-                                withTimeout(SOURCE_BUDGET_MS) {
-                                    probe.run(label, source, spec.query) { stepName ->
-                                        withContext(Dispatchers.Main) {
-                                            waiting(
-                                                "$label · $stepName · " +
-                                                    "نجح $sourcesPassed / فشل $sourcesFailed",
-                                            )
+                            val report = try {
+                                withContext(Dispatchers.IO) {
+                                    withTimeout(SOURCE_BUDGET_MS) {
+                                        probe.run(label, source, spec.query) { stepName ->
+                                            withContext(Dispatchers.Main) {
+                                                waiting(
+                                                    "${packageIndex + 1}/${pending.size} · $label · $stepName · " +
+                                                        "كامل $sourcesPassed / جزئي $sourcesPartial / فشل $sourcesFailed",
+                                                )
+                                            }
                                         }
                                     }
                                 }
+                            } catch (t: Throwable) {
+                                if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                                val detail = if (t is TimeoutCancellationException) {
+                                    "تجاوز ميزانية المصدر ${SOURCE_BUDGET_MS / 60_000} دقائق"
+                                } else {
+                                    "${t.javaClass.name}: ${t.message?.take(300)}"
+                                }
+                                line("✗ probe-fatal — $label — $detail", bad = true)
+                                sourcesFailed += 1
+                                continue
                             }
-                        } catch (t: Throwable) {
-                            val detail = if (t is TimeoutCancellationException) {
-                                "تجاوز ميزانية المصدر ${SOURCE_BUDGET_MS / 60_000} دقائق"
-                            } else {
-                                "${t.javaClass.name}: ${t.message?.take(300)}"
-                            }
-                            line("✗ probe-fatal — $label — $detail", bad = true)
-                            sourcesFailed += 1
-                            continue
-                        }
 
-                        val showPreview = spec.warning == ContentWarning.SAFE
-                        render(report, showPreview)
-                        if (report.passed) sourcesPassed += 1 else sourcesFailed += 1
+                            render(report)
+                            when {
+                                report.passed -> sourcesPassed += 1
+                                report.imageBytes != null -> sourcesPartial += 1
+                                else -> sourcesFailed += 1
+                            }
+                        }
+                        packageFinished = true
+                    } finally {
+                        // نجاحًا أو فشلًا: لا نعيد حجز التشغيل بالمصدر نفسه بعد
+                        // إعادة تشغيل التطبيق. التقرير المحفوظ يحمل النتيجة.
+                        if (packageFinished) checkpoint.markCompleted(spec.pkg)
                     }
                 }
             } finally {
@@ -336,11 +353,18 @@ class MainActivity : AppCompatActivity() {
                 line("")
                 line(
                     "النتيجة — حزم حُمّلت: $packagesOk · حزم فشلت قبل المسبار: $packagesFailed · " +
-                        "مصادر مرت بالسلسلة: $sourcesPassed · مصادر فشلت: $sourcesFailed · " +
-                        "BLOCKED بالسياسة: $policyBlocked",
+                        "مصادر كاملة: $sourcesPassed · جزئية ووصلت للصورة: $sourcesPartial · " +
+                        "مصادر فشلت: $sourcesFailed",
                     bold = true,
                 )
-                line("انتهى.", bold = true)
+                if (checkpoint.remaining().isEmpty()) {
+                    checkpoint.finish()
+                    line("انتهى الفحص الكامل.", bold = true)
+                    button.text = "أعد فحص كل المصادر"
+                } else {
+                    line("توقف التشغيل؛ التقرير محفوظ. اضغط استئناف لإكمال الباقي.", bold = true)
+                    button.text = "استأنف فحص كل المصادر"
+                }
                 running = false
                 button.isEnabled = true
             }
@@ -414,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun render(report: SourceProbe.Report, showPreview: Boolean) {
+    private suspend fun render(report: SourceProbe.Report) {
         for (step in report.steps) {
             line(
                 "${if (step.ok) "✓" else "✗"} ${step.name} — ${step.detail} (${step.millis}ms)",
@@ -430,24 +454,23 @@ class MainActivity : AppCompatActivity() {
 
         report.imageData?.let { bytes ->
             val bmp = withContext(Dispatchers.Default) {
-                runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+                decodePreview(bytes)
             }
             if (bmp == null) {
                 line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)
-            } else if (showPreview) {
+            } else {
                 log.addView(
                     ImageView(this@MainActivity).apply {
                         setImageBitmap(bmp)
                         adjustViewBounds = true
                         layoutParams = LinearLayout.LayoutParams(
-                            600,
+                            PREVIEW_WIDTH_PX,
                             LinearLayout.LayoutParams.WRAP_CONTENT,
                         )
                     },
                 )
-                line("✓ الصورة ظهرت — ${bmp.width}×${bmp.height}")
-            } else {
-                line("✓ الصورة فُكّت — ${bmp.width}×${bmp.height} · المعاينة مخفية بالسياسة")
+                trimLog()
+                line("✓ الصورة ظهرت مصغّرة — ${bmp.width}×${bmp.height}")
             }
         }
 
@@ -465,13 +488,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Decode a bounded RGB_565 thumbnail; never retain the full manga page bitmap. */
+    private fun decodePreview(bytes: ByteArray): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = ImagePayloadPolicy.sampleSize(
+                bounds.outWidth,
+                bounds.outHeight,
+                PREVIEW_WIDTH_PX,
+                PREVIEW_HEIGHT_PX,
+            )
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }.getOrNull()
+
     override fun onDestroy() {
         WebViewActivityHolder.set(null)
         super.onDestroy()
     }
 
     private fun line(text: String, bold: Boolean = false, bad: Boolean = false) {
-        reportText.appendLine(text)
+        checkpoint.appendLine(text)
+        displayLine(text, bold, bad)
+    }
+
+    private fun displayLine(text: String, bold: Boolean = false, bad: Boolean = false) {
         log.addView(
             TextView(this).apply {
                 this.text = text
@@ -482,11 +527,29 @@ class MainActivity : AppCompatActivity() {
                 textDirection = View.TEXT_DIRECTION_LOCALE
             },
         )
+        trimLog()
+    }
+
+    /** The full report is on disk; the view keeps only a rolling window. */
+    private fun trimLog() {
+        while (log.childCount > MAX_ONSCREEN_ITEMS) {
+            val oldest = log.getChildAt(0)
+            if (oldest is ImageView) {
+                (oldest.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap?.recycle()
+            }
+            log.removeViewAt(0)
+        }
     }
 
     private companion object {
         /** حدّ أعلى للمصدر كله؛ يمنع مصدرًا واحدًا من حجز فحص عشرات المصادر. */
         const val SOURCE_BUDGET_MS = 6L * 60L * 1000L
+        const val PREVIEW_WIDTH_PX = 320
+        const val PREVIEW_HEIGHT_PX = 480
+        const val MAX_ONSCREEN_ITEMS = 500
+
+        val INJEKT_LOCK = Any()
+        var injektReady = false
     }
 }
 
