@@ -36,6 +36,16 @@ class ImagePayloadPolicyTest {
     }
 
     @Test
+    fun `generic binary mime is accepted when the bytes are a real image`() {
+        val png = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D,
+        ) + ByteArray(2048)
+
+        assertTrue(ImagePayloadPolicy.validate("application/octet-stream", png).accepted)
+    }
+
+    @Test
     fun `preview sampling bounds a very tall manga page`() {
         assertEquals(32, ImagePayloadPolicy.sampleSize(4_000, 12_000, 320, 480))
         assertEquals(1, ImagePayloadPolicy.sampleSize(240, 400, 320, 480))
