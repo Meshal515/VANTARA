@@ -180,12 +180,19 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
     .first<AccountRow>();
   if (!account) return json({ error: 'unknown_account' }, { status: 404 });
 
-  await env.DB.prepare(
+  // هذه هي نقطة السماح النهائية بإصدار الجلسة. إذا سبق logout هذا
+  // التحديث فسيعدّل صفر صفوف ونرفض الإصدار. إذا حدث logout بعده فالجلسة
+  // تُعد صادرة قبله وتبقى فقط ضمن TTL القصير الموثق (15 دقيقة).
+  const touch = await env.DB.prepare(
     `UPDATE trusted_devices SET last_used_at = ?
-      WHERE device_id = ? AND user_id = ? AND revoked_at IS NULL`,
+      WHERE device_id = ? AND user_id = ? AND credential_hash = ?
+        AND revoked_at IS NULL`,
   )
-    .bind(now, deviceId, userId)
+    .bind(now, deviceId, userId, credentialHash)
     .run();
+  if ((touch.meta.changes ?? 0) !== 1) {
+    return json({ error: 'device_untrusted' }, { status: 401 });
+  }
 
   const token = await mintIdentityToken(
     { userId: account.user_id, deviceId },
