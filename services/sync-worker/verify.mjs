@@ -129,6 +129,12 @@ async function pairVerifierDevice(deviceId, deviceCredential) {
 
 async function cleanup() {
   // idempotent: يُستدعى قبل الفحص وبعده، ويزيل بقايا Run انقطع سابقًا.
+  //
+  // 0012 أضاف op_claims كدفتر حجز دائم قبل applied_ops. verifier يستخدم
+  // op_id ثابتة عمدًا لاختبار replay، لذلك إبقاء claim من Run سابق يجعل
+  // أول كتابة في الـRun التالي تصطدم بالمفتاح الفريد وتظهر كـ500 زائف.
+  // نحذف claims الخاصة بالـfixtures فقط؛ claims المستخدمين الحقيقيين لا تُمس.
+  await d1Query("DELETE FROM op_claims WHERE op_id LIKE '__verify__%'");
   await d1Query("DELETE FROM notifications WHERE id LIKE '__verify__%'");
   await d1Query("DELETE FROM applied_ops WHERE user_id = ? OR op_id LIKE '__verify__%'", [USER_ID]);
   await d1Query("DELETE FROM works WHERE series_ref LIKE '__verify__%'");
