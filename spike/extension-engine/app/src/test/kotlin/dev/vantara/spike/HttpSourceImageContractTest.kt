@@ -21,17 +21,20 @@ class HttpSourceImageContractTest {
         var seenHeader: String? = null
         val payload = byteArrayOf(1, 2, 3, 4)
 
-        val testClient: OkHttpClient = OkHttpClient.Builder()
-            .addInterceptor(Interceptor { chain ->
+        val fakeNetwork = object : Interceptor {
+            override fun intercept(chain: Interceptor.Chain): Response {
                 seenHeader = chain.request().header("X-Source-Image")
-                Response.Builder()
+                return Response.Builder()
                     .request(chain.request())
                     .protocol(Protocol.HTTP_1_1)
                     .code(200)
                     .message("OK")
                     .body(payload.toResponseBody("image/png".toMediaType()))
                     .build()
-            })
+            }
+        }
+        val testClient: OkHttpClient = OkHttpClient.Builder()
+            .addInterceptor(fakeNetwork)
             .build()
 
         val source = object : HttpSource() {
