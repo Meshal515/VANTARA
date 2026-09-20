@@ -176,18 +176,55 @@ export class UchiyomiClient {
    * هذا ما يعفي VANTARA من دورة refresh: توكن الجلسة عند Uchiyomi يعيش 900
    * ثانية، أما هذا فيعيش بعمر جلسة VANTARA. السرّ يُرجَع مرة واحدة فقط.
    */
-  mintToken(
+  async mintToken(
     sessionToken: string,
-    options: { name: string; scopes: string[]; expiresInDays: number },
+    options: {
+      name: string;
+      scopes: string[];
+      expiresInDays: number;
+      /**
+       * الاسم يجب أن يكون فريدًا لهذه المحاولة. عند ضياع رد POST نستخدم
+       * قائمة التوكنات (لا تعرض السر الخام) للعثور على الـcredential الذي
+       * ربما أُنشئ ثم نلغيه، بدل ترك Token شبح حتى انتهاء صلاحيته.
+       */
+      reconcileAmbiguousFailure?: boolean;
+    },
   ): Promise<{ id: string; token: string }> {
-    return this.#require<{ id: string; token: string }>('/api/tokens', {
-      method: 'POST',
-      token: sessionToken,
-      body: options,
-      // إنشاء التوكن ليس idempotent. إذا أنشأه upstream ثم انقطع الرد، إعادة
-      // POST تنشئ credential ثانيًا لا نعرف id حقه ويبقى صالحًا حتى انتهاءه.
-      noRetry: true,
-    });
+    const { reconcileAmbiguousFailure = false, ...body } = options;
+    try {
+      return await this.#require<{ id: string; token: string }>('/api/tokens', {
+        method: 'POST',
+        token: sessionToken,
+        body,
+        // POST غير idempotent: ممنوع إعادة الإنشاء آليًا.
+        noRetry: true,
+      });
+    } catch (creationError) {
+      if (!reconcileAmbiguousFailure) throw creationError;
+
+      try {
+        const existing = await this.listTokens(sessionToken);
+        const matching = existing.filter((candidate) => candidate.name === body.name);
+        for (const candidate of matching) {
+          await this.revokeToken(sessionToken, candidate.id);
+        }
+      } catch (reconciliationError) {
+        throw new AggregateError(
+          [creationError, reconciliationError],
+          'token creation was ambiguous and reconciliation failed',
+        );
+      }
+      throw creationError;
+    }
+  }
+
+  async listTokens(
+    sessionToken: string,
+  ): Promise<Array<{ id: string; name: string; expiresAt: string | null; expired: boolean }>> {
+    const out = await this.#require<{
+      content: Array<{ id: string; name: string; expiresAt: string | null; expired: boolean }>;
+    }>('/api/tokens', { token: sessionToken });
+    return out.content;
   }
 
   async revokeToken(sessionToken: string, tokenId: string): Promise<void> {
