@@ -309,4 +309,33 @@ describe('SessionStore upstream credential authority', () => {
       ),
     ).toBe(false);
   });
+
+  it('keeps an ambiguous mint attempt pending when immediate reconciliation sees no token yet', async () => {
+    const service = upstream();
+    service.mintToken.mockRejectedValueOnce(
+      new UchiyomiError('upstream unavailable', 502, 'upstream_unavailable', '/api/tokens'),
+    );
+    service.listTokens.mockResolvedValueOnce([]);
+
+    const store = new SessionStore({
+      key: Buffer.alloc(32, 31),
+      ttlDays: 60,
+      uchiyomi: service as never,
+    });
+
+    await expect(store.login('mansour', 'password', 'late-commit-device')).rejects.toThrow(
+      'upstream unavailable',
+    );
+
+    expect(
+      db.query.mock.calls.some(([sql]) =>
+        String(sql).includes('INSERT INTO vantara_token_mint_attempts'),
+      ),
+    ).toBe(true);
+    expect(
+      db.query.mock.calls.some(([sql]) =>
+        String(sql).includes('resolved_at = now()'),
+      ),
+    ).toBe(false);
+  });
 });
