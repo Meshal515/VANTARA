@@ -181,6 +181,31 @@ export class UchiyomiClient {
    * هذا ما يعفي VANTARA من دورة refresh: توكن الجلسة عند Uchiyomi يعيش 900
    * ثانية، أما هذا فيعيش بعمر جلسة VANTARA. السرّ يُرجَع مرة واحدة فقط.
    */
+  /**
+   * يسرد metadata فقط؛ Uchiyomi لا يعيد السر بعد الإنشاء.
+   * نستخدم الاسم/المعرّف لمصالحة POST غامض ولتعلّم انتهاء روابط قديمة.
+   */
+  async listTokens(sessionToken: string): Promise<Array<{
+    id: string;
+    name: string;
+    scopes: string[];
+    createdAt: string;
+    lastSeen: string | null;
+    expiresAt: string | null;
+    expired: boolean;
+  }>> {
+    const out = await this.#require<{ content: Array<{
+      id: string;
+      name: string;
+      scopes: string[];
+      createdAt: string;
+      lastSeen: string | null;
+      expiresAt: string | null;
+      expired: boolean;
+    }> }>('/api/tokens', { token: sessionToken });
+    return out.content;
+  }
+
   mintToken(
     sessionToken: string,
     options: { name: string; scopes: string[]; expiresInDays: number },
@@ -189,8 +214,8 @@ export class UchiyomiClient {
       method: 'POST',
       token: sessionToken,
       body: options,
-      // إنشاء التوكن ليس idempotent. إذا أنشأه upstream ثم انقطع الرد، إعادة
-      // POST تنشئ credential ثانيًا لا نعرف id حقه ويبقى صالحًا حتى انتهاءه.
+      // إنشاء التوكن ليس idempotent. SessionStore يصالح النتيجة الغامضة
+      // بالاسم الفريد عبر GET /api/tokens ثم يلغي أي credential مجهول.
       noRetry: true,
     });
   }
