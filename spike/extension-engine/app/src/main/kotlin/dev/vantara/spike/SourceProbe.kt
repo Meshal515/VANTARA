@@ -361,16 +361,35 @@ class SourceProbe(private val http: OkHttpClient) {
         // أول عمل يثبت فعليًا أن له فصولًا.
         val seed = candidates?.let { list ->
             step("seed", steps, base, timeoutMs = BROWSE_TIMEOUT_MS) {
-                selectFirstNonEmptyCandidate(
-                    candidates = list,
-                    maxCandidates = MAX_SEED_CANDIDATES,
-                ) { candidate ->
-                    source.getMangaUpdate(
-                        manga = candidate,
-                        chapters = emptyList(),
-                        fetchDetails = false,
-                        fetchChapters = true,
-                    ).chapters
+                suspend fun select(pool: List<SManga>) =
+                    selectFirstNonEmptyCandidate(
+                        candidates = pool,
+                        maxCandidates = MAX_SEED_CANDIDATES,
+                    ) { candidate ->
+                        SourceCompatRepairs.loadChapters(source, candidate)
+                    }
+
+                try {
+                    select(list)
+                } catch (first: NoUsableCandidateException) {
+                    // Search can legitimately return one stale/placeholder work.
+                    // Before condemning the source, supplement it with live
+                    // browse results and try distinct titles. This fixes the
+                    // test methodology without hiding a source-wide parser error.
+                    val popular = runCatching { source.getPopularManga(1).mangas }
+                        .getOrElse { emptyList() }
+                    val latest = if (source.supportsLatest) {
+                        runCatching { source.getLatestUpdates(1).mangas }
+                            .getOrElse { emptyList() }
+                    } else {
+                        emptyList()
+                    }
+                    val expanded = (list + popular + latest).distinctBy { manga ->
+                        runCatching { manga.url }.getOrNull()?.takeIf(String::isNotBlank)
+                            ?: runCatching { manga.title.lowercase() }.getOrDefault("")
+                    }
+                    if (expanded.size <= list.size) throw first
+                    select(expanded)
                 }
             }
         } ?: return Report(label, base, steps, null, null, null, null, null, null)
@@ -381,16 +400,15 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // ٢) تفاصيل العمل المختار القابل للقراءة
         val details = step("details", steps, base) {
-            source.getMangaUpdate(
+            SourceCompatRepairs.loadDetails(
+                source = source,
                 manga = first,
-                chapters = prefetchedChapters,
-                fetchDetails = true,
-                fetchChapters = false,
-            ).manga.apply {
+                knownChapters = prefetchedChapters,
+            ).apply {
                 // Details parsers commonly return a partial SManga without url.
                 // The host already knows the canonical url from search and must
                 // carry it forward before asking for pages/chapters.
-                url = first.url
+                if (source.name != "Hizo Manga") url = first.url
             }
         } ?: first
 
@@ -414,7 +432,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         // ٤) الصفحات
         val pages = step("pages", steps, base) {
-            val list = source.getPageList(chapter)
+            val list = SourceCompatRepairs.loadPages(source, chapter)
             require(list.isNotEmpty()) { "page list is empty" }
             list
         }
