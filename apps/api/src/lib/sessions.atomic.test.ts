@@ -146,3 +146,78 @@ describe('SessionStore.purgeExpired credential lifecycle', () => {
     expect(db.query).toHaveBeenCalledTimes(2);
   });
 });
+
+
+describe('SessionStore identity credential renewal', () => {
+  it('renews a content credential before it expires while the VANTARA device stays trusted', async () => {
+    const service = upstream();
+    const key = Buffer.alloc(32, 17);
+    const oldToken = 'old-identity-upstream-token';
+    db.queryOne
+      .mockResolvedValueOnce({
+        vantara_identity_id: '11111111-1111-1111-1111-111111111111',
+        uchiyomi_user_id: 'upstream-user-1',
+        token_encrypted: encrypt(oldToken, key),
+        token_id: 'old-token-id',
+        token_expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        username: 'mansour',
+      })
+      .mockResolvedValueOnce({ token_id: 'minted-token-id' });
+
+    const store = new SessionStore({
+      key,
+      ttlDays: 60,
+      uchiyomi: service as never,
+    });
+
+    const resolved = await store.resolveIdentity(
+      '11111111-1111-1111-1111-111111111111',
+      'device-1',
+    );
+
+    expect(service.mintToken).toHaveBeenCalledTimes(1);
+    expect(service.mintToken).toHaveBeenCalledWith(
+      oldToken,
+      expect.objectContaining({
+        scopes: ['read', 'write'],
+        expiresInDays: 60,
+        reconcileAmbiguousFailure: true,
+      }),
+    );
+    expect(db.queryOne).toHaveBeenCalledTimes(2);
+    expect(resolved).toMatchObject({
+      token: 'minted-long-lived-token',
+      tokenId: 'minted-token-id',
+      username: 'mansour',
+    });
+  });
+
+  it('fails closed when the stored content credential is already expired', async () => {
+    const service = upstream();
+    const key = Buffer.alloc(32, 19);
+    db.queryOne.mockResolvedValueOnce({
+      vantara_identity_id: '11111111-1111-1111-1111-111111111111',
+      uchiyomi_user_id: 'upstream-user-1',
+      token_encrypted: encrypt('expired-token', key),
+      token_id: 'expired-token-id',
+      token_expires_at: new Date(Date.now() - 1_000).toISOString(),
+      username: 'mansour',
+    });
+    db.query.mockResolvedValueOnce([]);
+
+    const store = new SessionStore({
+      key,
+      ttlDays: 60,
+      uchiyomi: service as never,
+    });
+
+    await expect(
+      store.resolveIdentity('11111111-1111-1111-1111-111111111111', 'device-1'),
+    ).resolves.toBeUndefined();
+    expect(service.mintToken).not.toHaveBeenCalled();
+    expect(db.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET revoked_at = now()'),
+      ['11111111-1111-1111-1111-111111111111'],
+    );
+  });
+});
