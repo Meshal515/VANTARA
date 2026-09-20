@@ -52,7 +52,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
                   url: requestUrlForLog(request.url),
                   hostname: request.hostname,
                   remoteAddress: request.ip,
-                  remotePort: request.socket?.remotePort,
+                  remotePort: request.socket?.remotePort ?? 0,
                 };
               },
             },
