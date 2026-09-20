@@ -647,7 +647,8 @@ export function statementsFor(
       const day = suppliedDay == null
         ? new Date(now).toISOString().slice(0, 10)
         : asString(suppliedDay, 10);
-      if (!day || !isIsoDay(day)) return null;
+      const today = new Date(now).toISOString().slice(0, 10);
+      if (!day || !isIsoDay(day) || day > today) return null;
       return [
         db
           .prepare(
@@ -832,6 +833,9 @@ export function statementsFor(
       if (!seriesRef || !body) return null;
       const parentId = asString(p['parentId'], 80);
       const parent = parentId ? ctx.comments?.[parentId] : undefined;
+      // بعد restore قد يشير الطابور إلى أب لم يعد موجودًا؛ أو قد يرسل عميل
+      // معطوب parent من عمل آخر. في الحالتين نعزل هذه العملية وحدها.
+      if (parentId && (!parent || parent.seriesRef !== seriesRef)) return null;
       const link = socialLinkFor({ kind: 'comment', seriesRef, commentId: op.opId });
       // الحرق قرار الكاتب وحده، ويُقرأ صريحًا: أي شيء غير `true` ليس حرقًا
       const spoiler = isSpoiler(p['spoiler']);
@@ -898,6 +902,8 @@ export function statementsFor(
       const emoji = asString(p['emoji'], 16);
       if (!commentId || !emoji) return null;
       const comment = ctx.comments?.[commentId];
+      // FK قديم بعد restore لا يجوز أن يسقط batch كاملة.
+      if (!comment) return null;
       const active = p['active'] === false ? 0 : 1;
       const statements: D1PreparedStatement[] = [
         db
@@ -1208,11 +1214,11 @@ async function allAccountIds(env: Env): Promise<string[]> {
  * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
  * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
  */
-export async function validateRecommendationResponses(
+export async function invalidRecommendationResponses(
   ops: readonly IncomingOp[],
   userId: string,
   env: Env,
-): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+): Promise<Set<string>> {
   const ids: string[] = [];
   const seen = new Set<string>();
 
@@ -1224,7 +1230,7 @@ export async function validateRecommendationResponses(
     ids.push(id);
   }
 
-  if (ids.length === 0) return null;
+  if (ids.length === 0) return new Set();
 
   const rows = new Map<string, string | null>();
   const CHUNK = 90;
@@ -1245,15 +1251,13 @@ export async function validateRecommendationResponses(
     for (const row of results) rows.set(row.id, row.recipient_user_id);
   }
 
+  const invalid = new Set<string>();
   for (const op of ops) {
     if (op.kind !== 'recommendation.respond') continue;
     const id = asString(op.payload['recommendationId'], 80);
-    if (!id) continue;
-    if (!rows.has(id)) return { status: 404, error: 'recommendation_not_found' };
-    if (rows.get(id) !== userId) return { status: 403, error: 'forbidden' };
+    if (!id || !rows.has(id) || rows.get(id) !== userId) invalid.add(op.opId);
   }
-
-  return null;
+  return invalid;
 }
 
 export async function loadOpContext(
@@ -1410,10 +1414,9 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   );
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
 
-  const authorizationError = await validateRecommendationResponses(ops, userId, env);
-  if (authorizationError) {
-    return json({ error: authorizationError.error }, { status: authorizationError.status });
-  }
+  // عملية توصية قديمة/غير مصرح بها لا تسمّم الدفعة كلها. نتركها بلا settlement
+  // فيعزلها العميل وحدها، بينما تكمل بقية الكتابات الصحيحة.
+  const invalidRecommendations = await invalidRecommendationResponses(ops, userId, env);
 
   // كل رقعة حقول لها rev مستقل، وأثرها وحجز op_id يثبتان في دفعة واحدة.
   // هذا يمنع رقعة قديمة معادة من الكتابة فوق قيمة أحدث، ويجعل رقعتين متداخلتين
@@ -1452,9 +1455,10 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   // `applied` ولا `skipped` يُعزل حالًا (`not_settled`) فيظهر للمستخدم بدل
   // أن يُعاد إلى الأبد أو يُنسى. فلا حقل جديد هنا: الإسقاط هو الإشارة.
   const statements: D1PreparedStatement[] = [];
-  const unapplied = new Set<string>();
+  const unapplied = new Set<string>(invalidRecommendations);
   const skipped = new Set<string>();
   for (const op of ops) {
+    if (unapplied.has(op.opId)) continue;
     if (FIELD_MERGE_KINDS.has(op.kind)) continue;
     if (DEPRECATED_NOOP_KINDS.has(op.kind)) {
       skipped.add(op.opId);
@@ -1774,7 +1778,7 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     const ms = Number(row['active_ms'] ?? 0);
     totalMs += ms;
     if (day === today) todayMs += ms;
-    if (day >= weekStart) weekMs += ms;
+    if (day >= weekStart && day <= today) weekMs += ms;
   }
 
   return json({ userId: targetId, ...stats, usage: { todayMs, weekMs, totalMs } });
