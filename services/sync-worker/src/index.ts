@@ -1852,9 +1852,11 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
   for (const row of usage?.results ?? []) {
     const day = String(row['day']);
     const ms = Number(row['active_ms'] ?? 0);
+    // دفاع ثانٍ عن بيانات قديمة كُتبت قبل رفض الأيام المستقبلية في write path.
+    if (day > today) continue;
     totalMs += ms;
     if (day === today) todayMs += ms;
-    if (day >= weekStart) weekMs += ms;
+    if (day >= weekStart && day <= today) weekMs += ms;
   }
 
   return json({ userId: targetId, ...stats, usage: { todayMs, weekMs, totalMs } });
