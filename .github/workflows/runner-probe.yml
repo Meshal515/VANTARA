@@ -1,0 +1,15 @@
+name: Runner Probe
+
+on:
+  push:
+    branches:
+      - chatgpt/backend-final-closure-20260919
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "runner-started"
