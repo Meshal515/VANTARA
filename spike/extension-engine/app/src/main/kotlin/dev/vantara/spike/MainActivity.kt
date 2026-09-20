@@ -478,12 +478,20 @@ class MainActivity : AppCompatActivity() {
                                     source = source,
                                     startPage = resume?.nextPage ?: 1,
                                     initialSeen = resume?.seenKeys.orEmpty(),
-                                    onPageCommitted = { _, nextPage, newKeys, _ ->
+                                    onPageCommitted = { page, nextPage, newKeys, totalSeen ->
                                         catalogueCheckpoint.savePage(
                                             key = key,
                                             nextPage = nextPage,
                                             newKeys = newKeys,
                                         )
+                                        if (page == 1 || page % CRAWL_REPORT_EVERY_PAGES == 0) {
+                                            withContext(Dispatchers.Main) {
+                                                line(
+                                                    "↳ $label — حُفظت الصفحة $page · " +
+                                                        "$totalSeen عملًا حتى الآن",
+                                                )
+                                            }
+                                        }
                                     },
                                 ) { page, found ->
                                     withContext(Dispatchers.Main) {
@@ -513,6 +521,12 @@ class MainActivity : AppCompatActivity() {
                                 "صفحات ناجحة هذه الجلسة: ${reach.pagesFetched} · " +
                                 "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
                         )
+                        if (reach.skippedPages.isNotEmpty()) {
+                            line(
+                                "↳ تجاوز آمن لصفحات Iken الخالية من المانجا: " +
+                                    reach.skippedPages.joinToString(),
+                            )
+                        }
 
                         if (reach.reachedEnd) {
                             catalogueCheckpoint.markComplete(key)
@@ -667,6 +681,7 @@ class MainActivity : AppCompatActivity() {
         const val PREVIEW_WIDTH_PX = 320
         const val PREVIEW_HEIGHT_PX = 480
         const val MAX_ONSCREEN_ITEMS = 500
+        const val CRAWL_REPORT_EVERY_PAGES = 10
 
         val INJEKT_LOCK = Any()
         var injektReady = false

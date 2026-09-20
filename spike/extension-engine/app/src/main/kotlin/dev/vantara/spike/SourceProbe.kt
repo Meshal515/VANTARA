@@ -24,6 +24,18 @@ internal fun describeProbeValue(value: Any?): String = when (value) {
 }
 
 /**
+ * Iken 1.6.73 filters novels after using the API totalCount. When a page has
+ * only novels, its recursive skip path dereferences an uninitialized page map
+ * entry and throws NPE. That page contains no supported manga, so the host can
+ * safely advance it. Keep this exact to Iken + NPE; arbitrary parser failures
+ * must remain visible and must never be silently skipped.
+ */
+internal fun isKnownEmptyIkenPageBug(t: Throwable, hierarchyNames: List<String>): Boolean =
+    t is NullPointerException && IKEN_CLASS_NAME in hierarchyNames
+
+private const val IKEN_CLASS_NAME = "eu.kanade.tachiyomi.multisrc.iken.Iken"
+
+/**
  * السلسلة الخمس لمصدر واحد، ثم قياس الكتالوج.
  *
  * كل خطوة تُسجَّل باسمها ووقتها ودليلها. **ولا تُصنَّف تلقائيًّا.**
@@ -101,6 +113,8 @@ class SourceProbe(private val http: OkHttpClient) {
         val reachedEnd: Boolean,
         val stopKind: CatalogueStopKind,
         val stoppedBecause: String,
+        /** Pages skipped only for an exact, proven upstream empty-page bug. */
+        val skippedPages: List<Int> = emptyList(),
     ) {
         /** أي رقم غير مكتمل يُعرض للمستخدم كـ "على الأقل"، لا كإجمالي نهائي. */
         val isPartial: Boolean get() = !reachedEnd && uniqueWorks > 0
@@ -225,7 +239,10 @@ class SourceProbe(private val http: OkHttpClient) {
             .header("user-agent", RAW_UA)
             .build()
         prober.newCall(request).execute().use { res ->
-            val body = res.body.bytes()
+            // This is diagnostic evidence, not a page download. A broken or
+            // hostile origin must not be able to OOM the whole batch merely by
+            // returning a huge HTML error document after another step failed.
+            val body = res.peekBody(LIVE_CHECK_MAX_BYTES).bytes()
             LiveCheck(baseUrl, res.code, body.size, res.header("content-type"), null)
         }
     } catch (t: Throwable) {
@@ -492,6 +509,7 @@ class SourceProbe(private val http: OkHttpClient) {
         var stoppedBecause = "page-cap"
         var stopKind = CatalogueStopKind.PAGE_CAP
         var reachedEnd = false
+        val skippedPages = mutableListOf<Int>()
         val deadline = System.currentTimeMillis() + budgetMs
 
         while (page <= pageCap) {
@@ -505,9 +523,27 @@ class SourceProbe(private val http: OkHttpClient) {
             onProgress(page, seen.size)
 
             val result = try {
-                withTimeout(STEP_TIMEOUT_MS) { source.getPopularManga(page) }
+                // A catalogue page is a browse request, not a whole-source job.
+                // Do not let one page make the app appear frozen for 150 s.
+                withTimeout(BROWSE_TIMEOUT_MS) { source.getPopularManga(page) }
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
+
+                val hierarchyNames = generateSequence<Class<*>>(source.javaClass) { it.superclass }
+                    .map { it.name }
+                    .toList()
+                if (
+                    skippedPages.size < IKEN_EMPTY_PAGE_SKIP_LIMIT &&
+                    isKnownEmptyIkenPageBug(t, hierarchyNames)
+                ) {
+                    // The failed Iken page is known to contain only novels,
+                    // which this manga engine intentionally does not support.
+                    // Persist the advance so resume does not loop on it forever.
+                    skippedPages += page
+                    onPageCommitted(page, page + 1, emptyList(), seen.size)
+                    page += 1
+                    continue
+                }
 
                 when (t) {
                     is CloudflareBypassException -> {
@@ -573,6 +609,7 @@ class SourceProbe(private val http: OkHttpClient) {
             reachedEnd = reachedEnd,
             stopKind = stopKind,
             stoppedBecause = stoppedBecause,
+            skippedPages = skippedPages,
         )
     }
 
@@ -590,6 +627,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         /** Prevent one hostile or malformed page from exhausting the app heap. */
         const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
+        const val LIVE_CHECK_MAX_BYTES = 256L * 1024L
 
         /**
          * حاجز الأمان للإحصاء الكامل، لا سقفَ سياسة.
@@ -604,6 +642,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         /** لا نعلن loop من صفحة مكررة واحدة؛ بعض APIs تعيد صفحة cache مكررة عابرًا. */
         const val REPEAT_STREAK_LIMIT = 3
+        const val IKEN_EMPTY_PAGE_SKIP_LIMIT = 20
 
         /**
          * مهلة الخطوة الواحدة.
