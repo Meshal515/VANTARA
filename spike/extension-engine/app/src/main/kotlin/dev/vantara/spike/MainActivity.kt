@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
         WebViewActivityHolder.set(this)
         synchronized(INJEKT_LOCK) {
             if (!injektReady) {
-                Injekt.importModule(SpikeModule(this))
+                Injekt.importModule(SpikeModule(application))
                 injektReady = true
             }
         }
@@ -553,10 +553,10 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-class SpikeModule(private val activity: MainActivity) : InjektModule {
+class SpikeModule(private val application: Application) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
-        addSingleton<Application>(activity.application)
-        addSingletonFactory { NetworkHelper(activity.application) }
+        addSingleton<Application>(application)
+        addSingletonFactory { NetworkHelper(application) }
         addSingletonFactory {
             kotlinx.serialization.json.Json {
                 ignoreUnknownKeys = true
