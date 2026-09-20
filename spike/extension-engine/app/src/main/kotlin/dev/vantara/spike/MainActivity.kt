@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val checkpoint by lazy { ProbeCheckpointStore(filesDir) }
+    private val catalogueCheckpoint by lazy { CatalogueCrawlCheckpointStore(filesDir) }
     private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity() {
         // Preserve the report and only remove the now-empty resume plan.
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
         val hasPendingCheckpoint = checkpoint.hasCheckpoint()
+        val hasCatalogueProgress = catalogueCheckpoint.hasAnyProgress()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -101,7 +103,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val crawl = Button(this).apply {
-            text = "احصِ كتالوج SAFE فقط (يطول)"
+            text =
+                if (hasCatalogueProgress) {
+                    "استأنف إحصاء كتالوج SAFE"
+                } else {
+                    "احصِ كتالوج SAFE فقط (يطول)"
+                }
             setOnClickListener { crawlSafe(this) }
         }
 
@@ -123,8 +130,10 @@ class MainActivity : AppCompatActivity() {
                 if (running) return@setOnClickListener
                 log.removeAllViews()
                 checkpoint.clear()
+                catalogueCheckpoint.clear()
                 printHeader()
                 runUnified.text = "اختبر كل المصادر — SAFE + MIXED + NSFW"
+                crawl.text = "احصِ كتالوج SAFE فقط (يطول)"
             }
         }
 
@@ -410,31 +419,86 @@ class MainActivity : AppCompatActivity() {
             val safe = SPIKE_SOURCES.filter {
                 it.warning == ContentWarning.SAFE && it.blockedReason == null
             }
+            val resumed = catalogueCheckpoint.hasAnyProgress()
+            var allComplete = true
 
             line("")
-            line("── إحصاء كامل لمصادر SAFE حتى يقول المصدر «لا مزيد» ──", bold = true)
+            line(
+                if (resumed) {
+                    "── استئناف إحصاء SAFE من آخر صفحة محفوظة ──"
+                } else {
+                    "── إحصاء كامل لمصادر SAFE حتى يقول المصدر «لا مزيد» ──"
+                },
+                bold = true,
+            )
+            line("الحفظ الآن صفحة بصفحة؛ موت التطبيق لا يعيد المصدر إلى الصفحة 1.")
 
             try {
                 for (spec in safe) {
-                    val sources = obtainArabicSources(spec, loader, waiting)
+                    val sources = try {
+                        obtainArabicSources(spec, loader, waiting)
+                    } catch (t: Throwable) {
+                        line(
+                            "✗ source-load-fatal — ${spec.label} — ${t.javaClass.name}: ${t.message?.take(300)}",
+                            bad = true,
+                        )
+                        allComplete = false
+                        continue
+                    }
+
+                    if (sources.isEmpty()) {
+                        allComplete = false
+                        continue
+                    }
+
                     for (source in sources) {
+                        val key = "${spec.pkg}|${source.id}"
                         val label = "${spec.label} / ${source.name}"
+
+                        if (catalogueCheckpoint.isComplete(key)) {
+                            line("✓ $label — مكتمل من جلسة سابقة؛ لن نعيده.")
+                            continue
+                        }
+
+                        val resume = catalogueCheckpoint.load(key)
+                        if (resume != null) {
+                            line(
+                                "↻ $label — استئناف من صفحة ${resume.nextPage} · " +
+                                    "محفوظ ${resume.seenKeys.size} عملًا",
+                                bold = true,
+                            )
+                        }
+
                         val started = System.currentTimeMillis()
                         val reach = try {
                             withContext(Dispatchers.IO) {
-                                probe.crawlCatalogue(source) { page, found ->
+                                probe.crawlCatalogue(
+                                    source = source,
+                                    startPage = resume?.nextPage ?: 1,
+                                    initialSeen = resume?.seenKeys.orEmpty(),
+                                    onPageCommitted = { _, nextPage, newKeys, _ ->
+                                        catalogueCheckpoint.savePage(
+                                            key = key,
+                                            nextPage = nextPage,
+                                            newKeys = newKeys,
+                                        )
+                                    },
+                                ) { page, found ->
                                     withContext(Dispatchers.Main) {
                                         waiting("$label · صفحة $page · $found عملًا")
                                     }
                                 }
                             }
                         } catch (t: Throwable) {
+                            if (t is CancellationException && t !is TimeoutCancellationException) throw t
                             line(
                                 "✗ crawl-fatal — $label — ${t.javaClass.name}: ${t.message?.take(300)}",
                                 bad = true,
                             )
+                            allComplete = false
                             continue
                         }
+
                         val seconds = (System.currentTimeMillis() - started) / 1000
                         val countText =
                             if (reach.reachedEnd) {
@@ -444,24 +508,37 @@ class MainActivity : AppCompatActivity() {
                             }
                         line(
                             "$label — أعمال فريدة: $countText · " +
-                                "صفحات ناجحة: ${reach.pagesFetched} · " +
+                                "صفحات ناجحة هذه الجلسة: ${reach.pagesFetched} · " +
                                 "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
                         )
-                        line(
-                            if (reach.reachedEnd) {
-                                "✓ COMPLETE — بلغنا نهاية الكتالوج فعلًا"
-                            } else {
-                                "⚠ ${catalogueStopLabel(reach.stopKind)} — العدد جزئي وليس إجماليًا · " +
-                                    "السبب: ${reach.stoppedBecause}"
-                            },
-                            bad = !reach.reachedEnd,
-                        )
+
+                        if (reach.reachedEnd) {
+                            catalogueCheckpoint.markComplete(key)
+                            line("✓ COMPLETE — بلغنا نهاية الكتالوج فعلًا")
+                        } else {
+                            allComplete = false
+                            line(
+                                "⚠ ${catalogueStopLabel(reach.stopKind)} — العدد جزئي ومحفوظ للاستئناف · " +
+                                    "السبب: ${reach.stoppedBecause}",
+                                bad = true,
+                            )
+                        }
                     }
                 }
             } finally {
                 waiting(null)
                 line("")
-                line("انتهى الإحصاء.", bold = true)
+                if (allComplete) {
+                    catalogueCheckpoint.clear()
+                    line("انتهى الإحصاء الكامل لكل مصادر SAFE.", bold = true)
+                    button.text = "احصِ كتالوج SAFE فقط (يطول)"
+                } else {
+                    line(
+                        "انتهت هذه الجولة. غير المكتمل محفوظ صفحة بصفحة؛ اضغط استئناف لإكماله.",
+                        bold = true,
+                    )
+                    button.text = "استأنف إحصاء كتالوج SAFE"
+                }
                 running = false
                 button.isEnabled = true
             }
