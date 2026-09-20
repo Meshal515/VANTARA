@@ -2,6 +2,7 @@ import {
   type ChapterVersions,
   type SeriesListing,
   type AdminUser,
+  type ApiTokenSummary,
   type Book,
   type Chapter,
   type GroupedResult,
@@ -190,6 +191,13 @@ export class UchiyomiClient {
       // POST تنشئ credential ثانيًا لا نعرف id حقه ويبقى صالحًا حتى انتهاءه.
       noRetry: true,
     });
+  }
+
+  async listTokens(sessionToken: string): Promise<ApiTokenSummary[]> {
+    const out = await this.#require<{ content: ApiTokenSummary[] }>('/api/tokens', {
+      token: sessionToken,
+    });
+    return out.content;
   }
 
   async revokeToken(sessionToken: string, tokenId: string): Promise<void> {
