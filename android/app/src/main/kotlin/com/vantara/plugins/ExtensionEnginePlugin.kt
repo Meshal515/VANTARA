@@ -294,14 +294,20 @@ class ExtensionEnginePlugin : Plugin() {
                     bytes = withContext(Dispatchers.IO) { hit.readBytes() }
                     type = typeForExtension(hit.extension)
                 } else {
-                    val request = Request.Builder().url(url)
-                        .apply { asHttp?.headers?.let { headers(it) } }
-                        .build()
-                    val caller = asHttp?.client ?: network.client
+                    page.imageUrl = url
                     val fetched = withContext(Dispatchers.IO) {
-                        caller.newCall(request).execute().use { res ->
-                            require(res.isSuccessful) { "image HTTP ${res.code} ← $url" }
-                            res.body.bytes() to res.header("content-type")
+                        if (asHttp != null) {
+                            // Preserve the extension's imageRequest override
+                            // (Referer/Origin/custom headers) and keep the
+                            // streaming response alive until its body is read.
+                            asHttp.getImage(page).use { res ->
+                                res.body.bytes() to res.header("content-type")
+                            }
+                        } else {
+                            network.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
+                                require(res.isSuccessful) { "image HTTP ${res.code} ← $url" }
+                                res.body.bytes() to res.header("content-type")
+                            }
                         }
                     }
                     bytes = fetched.first
