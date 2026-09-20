@@ -288,7 +288,7 @@ describe('reports', () => {
         seriesRef: 'test:nano',
         chapterRef: '184',
         pageIndex: 7,
-        description: 'الصفحة السابعة فاضية',
+        description: 'الصفحة السابعة فاضية Bearer uy_descriptionsecret987654',
         client: {
           appVersion: '0.1.0',
           cookie: 'session=abc123',
@@ -299,8 +299,8 @@ describe('reports', () => {
     });
     expect(res.statusCode).toBe(201);
 
-    const stored = await query<{ diagnostics: unknown }>(
-      `SELECT diagnostics FROM vantara_reports WHERE id = $1`,
+    const stored = await query<{ diagnostics: unknown; description: string | null }>(
+      `SELECT diagnostics, description FROM vantara_reports WHERE id = $1`,
       [res.json().id],
     );
     const dump = JSON.stringify(stored[0]?.diagnostics);
@@ -310,6 +310,8 @@ describe('reports', () => {
     expect(dump).not.toContain('session=abc123');
     expect(dump).toContain('redacted');
     expect(dump).toContain('0.1.0');
+    expect(stored[0]?.description).not.toContain('uy_descriptionsecret987654');
+    expect(stored[0]?.description).toContain('redacted');
   });
 
   it('rejects an unknown report kind', async () => {
