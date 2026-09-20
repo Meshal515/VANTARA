@@ -39,6 +39,10 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import dev.vantara.spike.ChromeUserAgent
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -51,6 +55,7 @@ import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CloudflareInterceptor(
     private val context: Context,
@@ -187,6 +192,7 @@ class CloudflareInterceptor(
         var webView: WebView? = null
         var outcome = SolveOutcome.TIMEOUT
         var challengeFound = false
+        val interactive = AtomicBoolean(false)
         val rootUrl = request.url.newBuilder()
             .encodedPath("/")
             .query(null)
@@ -225,7 +231,8 @@ class CloudflareInterceptor(
                     @JavascriptInterface
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
-                        finish(SolveOutcome.INTERACTIVE)
+                        interactive.set(true)
+                        showInteractive(view, request.url.host)
                     }
                 },
                 "kagari",
@@ -268,9 +275,15 @@ class CloudflareInterceptor(
             view.loadUrl(rootUrl, mapOf("User-Agent" to userAgent))
             handler.postDelayed(poller, POLL_MS)
         }
+        // التحدي الصامت يأخذ مهلة قصيرة. إذا طلب Cloudflare إنسانًا، فالـWebView
+        // يظهر بالحجم الكامل ونمنح المستخدم وقتًا واقعيًّا لإكمال التحقق.
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
+        if (outcome == SolveOutcome.TIMEOUT && interactive.get()) {
+            latch.await(INTERACTIVE_TIMEOUT_SEC - TIMEOUT_SEC, TimeUnit.SECONDS)
+        }
         // Cookie may have landed between the last poll and the timeout.
         if (outcome == SolveOutcome.TIMEOUT && isBypassed()) outcome = SolveOutcome.SOLVED
+        if (outcome == SolveOutcome.TIMEOUT && interactive.get()) outcome = SolveOutcome.INTERACTIVE
         destroyOnMain(webView) { handler.removeCallbacks(poller) }
         if (outcome == SolveOutcome.SOLVED) {
             CookieManager.getInstance().flush()
@@ -394,6 +407,7 @@ class CloudflareInterceptor(
             databaseEnabled = true
             userAgentString = userAgent
         }
+        setMatchingUserAgentMetadata(view, userAgent)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
@@ -404,6 +418,57 @@ class CloudflareInterceptor(
             decor.addView(view)
         }
         return view
+    }
+
+    /** Make a human-solvable Turnstile visible instead of failing a hidden 1×1 browser. */
+    private fun showInteractive(view: WebView, host: String) {
+        handler.post {
+            view.alpha = 1f
+            view.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            view.setBackgroundColor(android.graphics.Color.WHITE)
+            view.bringToFront()
+            Toast.makeText(
+                context,
+                "أكمل تحقق Cloudflare لـ $host، وسيعود الفحص تلقائيًا",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    /**
+     * `settings.userAgentString` وحده غير كافٍ في Chromium الحديث: Sec-CH-UA
+     * يبقى معلنًا عن Android WebView. Cloudflare يرى التناقض ويحجب الطلب.
+     */
+    private fun setMatchingUserAgentMetadata(view: WebView, userAgent: String) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
+        val chrome = ChromeUserAgent.parse(userAgent) ?: return
+        try {
+            val current = WebSettingsCompat.getUserAgentMetadata(view.settings)
+            val brands = current.brandVersionList.map { item ->
+                val brand = when (item.brand) {
+                    "Android WebView" -> "Google Chrome"
+                    "Chromium" -> "Chromium"
+                    else -> return@map item
+                }
+                UserAgentMetadata.BrandVersion.Builder()
+                    .setBrand(brand)
+                    .setMajorVersion(chrome.major)
+                    .setFullVersion(chrome.full)
+                    .build()
+            }
+            WebSettingsCompat.setUserAgentMetadata(
+                view.settings,
+                UserAgentMetadata.Builder(current)
+                    .setBrandVersionList(brands)
+                    .setFullVersion(chrome.full)
+                    .build(),
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to align WebView user-agent metadata", t)
+        }
     }
 
     private fun destroyOnMain(view: WebView?, also: () -> Unit = {}) {
@@ -422,6 +487,7 @@ class CloudflareInterceptor(
     companion object {
         private const val TAG = "CloudflareInterceptor"
         private const val TIMEOUT_SEC = 20L
+        private const val INTERACTIVE_TIMEOUT_SEC = 120L
         private const val POLL_MS = 400L
         private const val RECENT_SOLVE_MS = 15_000L
         private val ERROR_CODES = listOf(403, 503)
