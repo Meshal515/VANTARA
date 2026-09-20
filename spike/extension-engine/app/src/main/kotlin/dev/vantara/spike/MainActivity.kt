@@ -75,6 +75,8 @@ class MainActivity : AppCompatActivity() {
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
         val hasPendingCheckpoint = checkpoint.hasCheckpoint()
         val hasCatalogueProgress = catalogueCheckpoint.hasAnyProgress()
+        val contentLabel = batchContentLabel(SPIKE_SOURCES.map { it.warning }.toSet())
+        val batchSize = SPIKE_SOURCES.size
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -83,21 +85,21 @@ class MainActivity : AppCompatActivity() {
 
         val runUnified = Button(this).apply {
             text = if (hasPendingCheckpoint) {
-                "استأنف فحص كل المصادر"
+                "استأنف فحص الدفعة — $contentLabel"
             } else {
-                "اختبر كل المصادر — SAFE + MIXED + NSFW"
+                "اختبر الدفعة ($batchSize) — $contentLabel"
             }
             setOnClickListener {
                 if (running) return@setOnClickListener
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("فحص موحّد لكل المصادر")
+                    .setTitle("فحص الدفعة الحالية")
                     .setMessage(
-                        "يشمل SAFE وMIXED وNSFW في تقرير واحد، وستظهر صورة اختبار مصغّرة " +
-                            "للمصدر إذا وصلت السلسلة إلى صورة فصل. " +
-                            "المصادر BL/GL المحظورة لن تُشغّل مهما كان هذا الإقرار.",
+                        "هذه الدفعة تحتوي $batchSize حزم ($contentLabel). " +
+                            "ستظهر صورة اختبار مصغّرة للمصدر إذا وصلت السلسلة إلى صورة فصل. " +
+                            "لا توجد حزم NSFW في هذه الدفعة.",
                     )
                     .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("أقر وابدأ") { _, _ -> runUnified(this) }
+                    .setPositiveButton("ابدأ الفحص") { _, _ -> runUnified(this) }
                     .show()
             }
         }
@@ -173,7 +175,7 @@ class MainActivity : AppCompatActivity() {
         line("لقطة Keiyoushi: ${SPIKE_INDEX_COMMIT.take(12)}")
         line(SPIKE_SNAPSHOT_NOTE)
         line("المصادر المتخصصة BL/GL: تظهر BLOCKED في التقرير ولا تُشغّل.")
-        line("SAFE وMIXED وNSFW: فحص واحد، وصور اختبار مصغّرة لحماية الذاكرة.")
+        line("محتوى الدفعة: ${batchContentLabel(SPIKE_SOURCES.map { it.warning }.toSet())} · ${SPIKE_SOURCES.size} حزم.")
     }
 
     private fun statusLine(): (String?) -> Unit {
@@ -391,7 +393,7 @@ class MainActivity : AppCompatActivity() {
                 if (checkpoint.remaining().isEmpty()) {
                     checkpoint.finish()
                     line("انتهى الفحص الكامل.", bold = true)
-                    button.text = "أعد فحص كل المصادر"
+                    button.text = "أعد فحص الدفعة"
                 } else {
                     line("توقف التشغيل؛ التقرير محفوظ. اضغط استئناف لإكمال الباقي.", bold = true)
                     button.text = "استأنف فحص كل المصادر"
