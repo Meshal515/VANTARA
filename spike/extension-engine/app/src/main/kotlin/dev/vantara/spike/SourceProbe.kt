@@ -272,6 +272,7 @@ class SourceProbe(private val http: OkHttpClient) {
     suspend fun run(
         label: String,
         source: CatalogueSource,
+        query: String,
         onStepStart: suspend (String) -> Unit = {},
     ): Report {
         announce = onStepStart
@@ -289,8 +290,7 @@ class SourceProbe(private val http: OkHttpClient) {
             // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
             // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
             // حرفيًا؛ نجاحه يثبت أن مسار البحث نفسه يعمل.
-            val preferred = queryFor(label)
-            val firstTry = source.getSearchManga(1, preferred, FilterList())
+            val firstTry = source.getSearchManga(1, query, FilterList())
             if (firstTry.mangas.isNotEmpty()) {
                 firstTry.mangas
             } else {
@@ -483,9 +483,6 @@ class SourceProbe(private val http: OkHttpClient) {
             stoppedBecause = stoppedBecause,
         )
     }
-
-    private fun queryFor(label: String): String =
-        SPIKE_SOURCES.firstOrNull { it.label == label }?.query ?: "مانجا"
 
     private companion object {
         /** ترويسة الفحص الخامّ: نفس ما استُعمل في خطّ الأساس، فالمقارنة عادلة. */
