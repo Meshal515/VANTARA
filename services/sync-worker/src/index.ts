@@ -544,6 +544,7 @@ function workStatements(
     title?: string | null;
     coverUrl?: string | null;
     sourceId?: string | null;
+    opId: string;
     now: number;
     rev: number;
   },
@@ -553,7 +554,8 @@ function workStatements(
     db
       .prepare(
         `INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev)
-         VALUES (?, ?, ?, ?, ?, ?)
+         SELECT ?, ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
          ON CONFLICT (series_ref) DO UPDATE SET
            title = COALESCE(excluded.title, works.title),
            cover_url = COALESCE(excluded.cover_url, works.cover_url),
@@ -568,6 +570,7 @@ function workStatements(
         input.sourceId ?? null,
         input.now,
         input.rev,
+        input.opId,
       ),
   ];
 }
@@ -603,7 +606,8 @@ export function statementsFor(
             // وإلا اعتُبر تقدم لم يره المالك مؤكَّدًا فسقط بلا دفع.
             `INSERT INTO progress
                (user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+             SELECT ?, ?, ?, ?, ?, ?, ?, 0
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, chapter_key) DO UPDATE SET
                page = MAX(progress.page, excluded.page),
                ratio = MAX(progress.ratio, excluded.ratio),
@@ -614,7 +618,7 @@ export function statementsFor(
                   AND MAX(progress.ratio, excluded.ratio) = progress.ratio
                  THEN progress.owner_synced ELSE 0 END`,
           )
-          .bind(userId, chapterKey, seriesRef, normalized.page, normalized.ratio, now, rev),
+          .bind(userId, chapterKey, seriesRef, normalized.page, normalized.ratio, now, rev, op.opId),
       ];
     }
 
@@ -636,9 +640,10 @@ export function statementsFor(
         db
           .prepare(
             `UPDATE progress SET owner_synced = 1, rev = ?
-              WHERE user_id = ? AND chapter_key = ? AND page <= ?`,
+              WHERE user_id = ? AND chapter_key = ? AND page <= ?
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
           )
-          .bind(rev, userId, chapterKey, Math.max(0, Math.floor(page))),
+          .bind(rev, userId, chapterKey, Math.max(0, Math.floor(page)), op.opId),
       ];
     }
 
@@ -689,6 +694,9 @@ export function statementsFor(
         ? new Date(now).toISOString().slice(0, 10)
         : asString(suppliedDay, 10);
       if (!day || !isIsoDay(day)) return null;
+      // يوم من المستقبل لا يجوز أن يلوّث هذا الأسبوع أو الإجمالي بسبب ساعة جهاز خاطئة.
+      const today = new Date(now).toISOString().slice(0, 10);
+      if (day > today) return null;
       return [
         db
           .prepare(
@@ -712,13 +720,15 @@ export function statementsFor(
           title: asString(p['seriesTitle'], 300),
           coverUrl: asString(p['coverUrl'], 600),
           sourceId: asString(p['sourceId'], 120),
+          opId: op.opId,
           now,
           rev,
         }),
         db
           .prepare(
             `INSERT INTO library (user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+             SELECT ?, ?, ?, ?, ?, ?, 0, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, series_ref) DO UPDATE SET
                series_title = COALESCE(excluded.series_title, library.series_title),
                cover_url = COALESCE(excluded.cover_url, library.cover_url),
@@ -733,6 +743,7 @@ export function statementsFor(
             asString(p['sourceId'], 120),
             now,
             rev,
+            op.opId,
           ),
         ...socialActivityStatements(db, {
           opId: op.opId,
@@ -756,10 +767,11 @@ export function statementsFor(
         db
           .prepare(
             `INSERT INTO library (user_id, series_ref, added_at, removed, rev)
-             VALUES (?, ?, ?, 1, ?)
+             SELECT ?, ?, ?, 1, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, series_ref) DO UPDATE SET removed = 1, rev = excluded.rev`,
           )
-          .bind(userId, seriesRef, now, rev),
+          .bind(userId, seriesRef, now, rev, op.opId),
       ];
     }
 
@@ -784,13 +796,15 @@ export function statementsFor(
           title: asString(p['seriesTitle'], 300),
           coverUrl: asString(p['coverUrl'], 600),
           sourceId: asString(p['sourceId'], 120),
+          opId: op.opId,
           now,
           rev,
         }),
         db
           .prepare(
             `INSERT INTO collections (user_id, kind, series_ref, member, position, updated_at, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+             SELECT ?, ?, ?, ?, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, kind, series_ref) DO UPDATE SET
                member = excluded.member,
                -- الموضع لا يُمحى بعملية لا تحمله: إعادة الإضافة لا تفقد الترتيب
@@ -798,7 +812,7 @@ export function statementsFor(
                updated_at = excluded.updated_at,
                rev = excluded.rev`,
           )
-          .bind(userId, kind, seriesRef, member, asNumber(p['position']), now, rev),
+          .bind(userId, kind, seriesRef, member, asNumber(p['position']), now, rev, op.opId),
         ...(op.kind === 'favorite.set' && member === 1
           ? socialActivityStatements(db, {
               opId: op.opId,
@@ -834,9 +848,10 @@ export function statementsFor(
         db
           .prepare(
             `UPDATE collections SET position = ?, updated_at = ?, rev = ?
-              WHERE user_id = ? AND kind = ? AND series_ref = ?`,
+              WHERE user_id = ? AND kind = ? AND series_ref = ?
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
           )
-          .bind(position, now, rev, userId, kind, seriesRef),
+          .bind(position, now, rev, userId, kind, seriesRef, op.opId),
       );
     }
 
@@ -848,11 +863,12 @@ export function statementsFor(
         db
           .prepare(
             `INSERT INTO ratings (user_id, series_ref, score, updated_at, rev)
-             VALUES (?, ?, ?, ?, ?)
+             SELECT ?, ?, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (user_id, series_ref) DO UPDATE SET
                score = excluded.score, updated_at = excluded.updated_at, rev = excluded.rev`,
           )
-          .bind(userId, seriesRef, score, now, rev),
+          .bind(userId, seriesRef, score, now, rev, op.opId),
         ...socialActivityStatements(db, {
           opId: op.opId,
           actorId: userId,
@@ -873,6 +889,9 @@ export function statementsFor(
       if (!seriesRef || !body) return null;
       const parentId = asString(p['parentId'], 80);
       const parent = parentId ? ctx.comments?.[parentId] : undefined;
+      // stale FK بعد restore أو parent من عمل آخر يعزل هذه العملية وحدها.
+      if (parentId && !parent) return null;
+      if (parent && parent.seriesRef !== seriesRef) return null;
       const link = socialLinkFor({ kind: 'comment', seriesRef, commentId: op.opId });
       // الحرق قرار الكاتب وحده، ويُقرأ صريحًا: أي شيء غير `true` ليس حرقًا
       const spoiler = isSpoiler(p['spoiler']);
@@ -939,16 +958,18 @@ export function statementsFor(
       const emoji = asString(p['emoji'], 16);
       if (!commentId || !emoji) return null;
       const comment = ctx.comments?.[commentId];
+      if (!comment) return null;
       const active = p['active'] === false ? 0 : 1;
       const statements: D1PreparedStatement[] = [
         db
           .prepare(
             `INSERT INTO reactions (comment_id, user_id, emoji, active, rev)
-             VALUES (?, ?, ?, ?, ?)
+             SELECT ?, ?, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
              ON CONFLICT (comment_id, user_id, emoji) DO UPDATE SET
                active = excluded.active, rev = excluded.rev`,
           )
-          .bind(commentId, userId, emoji, active, rev),
+          .bind(commentId, userId, emoji, active, rev, op.opId),
       ];
 
       if (comment) {
@@ -1007,6 +1028,7 @@ export function statementsFor(
           seriesRef,
           title: asString(p['seriesTitle'], 300),
           coverUrl: asString(p['coverUrl'], 600),
+          opId: op.opId,
           now,
           rev,
         }),
@@ -1185,9 +1207,10 @@ export function statementsFor(
         db
           .prepare(
             `UPDATE notifications SET read = 1, seen = 1, rev = ?
-              WHERE id = ? AND user_id = ?`,
+              WHERE id = ? AND user_id = ?
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
           )
-          .bind(rev, id, userId),
+          .bind(rev, id, userId, op.opId),
       ];
     }
 
@@ -1205,9 +1228,10 @@ export function statementsFor(
         db
           .prepare(
             `UPDATE notifications SET seen = 1, rev = ?
-              WHERE id = ? AND user_id = ? AND seen = 0`,
+              WHERE id = ? AND user_id = ? AND seen = 0
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
           )
-          .bind(rev, id, userId),
+          .bind(rev, id, userId, op.opId),
       ];
     }
 
