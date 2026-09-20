@@ -27,12 +27,23 @@ function upstream() {
         role: 'user',
       },
     })),
-    mintToken: vi.fn(async () => ({
+    mintToken: vi.fn(async (
+      _authorizationToken: string,
+      _options: { name: string; scopes: string[]; expiresInDays: number },
+    ) => ({
       id: 'minted-token-id',
       token: 'minted-long-lived-token',
     })),
-    listTokens: vi.fn(async () => []),
-    revokeToken: vi.fn(async () => undefined),
+    listTokens: vi.fn(async (_authorizationToken: string) => [] as Array<{
+      id: string;
+      name: string;
+      scopes: string[];
+      createdAt: string;
+      lastSeen: string | null;
+      expiresAt: string | null;
+      expired: boolean;
+    }>),
+    revokeToken: vi.fn(async (_authorizationToken: string, _tokenId: string) => undefined),
   };
 }
 
