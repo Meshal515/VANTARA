@@ -69,6 +69,10 @@ class MainActivity : AppCompatActivity() {
                 injektReady = true
             }
         }
+        // The process may die after recording the last package but before finish().
+        // Preserve the report and only remove the now-empty resume plan.
+        if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
+        val hasPendingCheckpoint = checkpoint.hasCheckpoint()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -76,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val runUnified = Button(this).apply {
-            text = if (checkpoint.hasCheckpoint()) {
+            text = if (hasPendingCheckpoint) {
                 "استأنف فحص كل المصادر"
             } else {
                 "اختبر كل المصادر — SAFE + MIXED + NSFW"
@@ -144,7 +148,14 @@ class MainActivity : AppCompatActivity() {
             printHeader()
         } else {
             restored.lineSequence().forEach { displayLine(it) }
-            displayLine("تم استرجاع التقرير المحفوظ — اضغط استئناف لإكمال الباقي.", bold = true)
+            displayLine(
+                if (hasPendingCheckpoint) {
+                    "تم استرجاع التقرير المحفوظ — اضغط استئناف لإكمال الباقي."
+                } else {
+                    "تم استرجاع التقرير المكتمل المحفوظ."
+                },
+                bold = true,
+            )
         }
     }
 
@@ -269,8 +280,9 @@ class MainActivity : AppCompatActivity() {
             val loader = FileExtensionLoader(this@MainActivity)
             val probe = SourceProbe(network.client)
             val waiting = statusLine()
-            val selected = SPIKE_SOURCES.filter { it.blockedReason == null }
-            if (!checkpoint.hasCheckpoint()) {
+            val selected = SPIKE_SOURCES
+            val resumed = checkpoint.hasCheckpoint()
+            if (!checkpoint.hasPlan()) {
                 checkpoint.reset(selected.map { it.pkg })
                 log.removeAllViews()
                 printHeader()
@@ -280,13 +292,14 @@ class MainActivity : AppCompatActivity() {
 
             var packagesOk = 0
             var packagesFailed = 0
+            var packagesBlocked = 0
             var sourcesPassed = 0
             var sourcesPartial = 0
             var sourcesFailed = 0
 
             line("")
             line(
-                "── الفحص الموحّد: متبقٍ ${pending.size} من ${selected.size} حزمة قابلة للتشغيل ──",
+                "── الفحص الموحّد: متبقٍ ${pending.size} من ${selected.size} حزمة في التقرير ──",
                 bold = true,
             )
 
@@ -294,6 +307,12 @@ class MainActivity : AppCompatActivity() {
                 for ((packageIndex, spec) in pending.withIndex()) {
                     var packageFinished = false
                     try {
+                        if (spec.blockedReason != null) {
+                            obtainArabicSources(spec, loader, waiting)
+                            packagesBlocked += 1
+                            packageFinished = true
+                            continue
+                        }
                         val sources = obtainArabicSources(spec, loader, waiting)
                         if (sources.isEmpty()) {
                             packagesFailed += 1
@@ -353,7 +372,9 @@ class MainActivity : AppCompatActivity() {
                 waiting(null)
                 line("")
                 line(
-                    "النتيجة — حزم حُمّلت: $packagesOk · حزم فشلت قبل المسبار: $packagesFailed · " +
+                    "نتيجة ${if (resumed) "جلسة الاستئناف" else "هذه الجلسة"} — " +
+                        "حزم حُمّلت: $packagesOk · BLOCKED: $packagesBlocked · " +
+                        "حزم فشلت قبل المسبار: $packagesFailed · " +
                         "مصادر كاملة: $sourcesPassed · جزئية ووصلت للصورة: $sourcesPartial · " +
                         "مصادر فشلت: $sourcesFailed",
                     bold = true,
