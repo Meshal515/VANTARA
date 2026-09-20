@@ -61,6 +61,22 @@ $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR
 $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -v ON_ERROR_STOP=1 \
   -c "UPDATE b1_restore_marker SET value = 'uchiyomi-after-backup';"
 
+# Inject failure after the first database has been promoted. The restore command
+# must fail, but the pair visible afterwards must still be the pre-restore pair.
+if $compose run --rm -e CONFIRM_RESTORE=YES -e RESTORE_FAULT_AFTER_PRIMARY_PROMOTE=YES \
+  --entrypoint sh db-backup /scripts/restore-postgres.sh; then
+  echo 'Fault-injected restore unexpectedly succeeded.' >&2
+  exit 1
+fi
+
+vantara_after_failed_restore="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+  'SELECT value FROM b1_restore_marker')"
+uchiyomi_after_failed_restore="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -Atc \
+  'SELECT value FROM b1_restore_marker')"
+test "$vantara_after_failed_restore" = 'vantara-after-backup'
+test "$uchiyomi_after_failed_restore" = 'uchiyomi-after-backup'
+
+# A clean retry promotes both staged snapshots together.
 $compose run --rm -e CONFIRM_RESTORE=YES --entrypoint sh db-backup /scripts/restore-postgres.sh
 
 vantara_value="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
