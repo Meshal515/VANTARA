@@ -95,15 +95,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 d1 migrations apply "$D1_NAME" --remote
 
-      - name: Deploy
+      - name: Deploy code and authentication secrets as one version
         id: deploy
-        working-directory: ${{ env.WORKER_DIR }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy
-
-      - name: Store Worker authentication secrets
         working-directory: ${{ env.WORKER_DIR }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -112,9 +105,20 @@ jobs:
           VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
           VANTARA_DEVICE_PEPPER: ${{ secrets.VANTARA_DEVICE_PEPPER }}
         run: |
-          printf '%s' "$VANTARA_SESSION_SECRET" | npx --yes wrangler@4 secret put VANTARA_SESSION_SECRET
-          printf '%s' "$VANTARA_IDENTITY_SECRET" | npx --yes wrangler@4 secret put VANTARA_IDENTITY_SECRET
-          printf '%s' "$VANTARA_DEVICE_PEPPER" | npx --yes wrangler@4 secret put VANTARA_DEVICE_PEPPER
+          set -euo pipefail
+          secrets_file="$(mktemp)"
+          trap 'rm -f "$secrets_file"' EXIT
+          chmod 600 "$secrets_file"
+          jq -n \
+            --arg session "$VANTARA_SESSION_SECRET" \
+            --arg identity "$VANTARA_IDENTITY_SECRET" \
+            --arg pepper "$VANTARA_DEVICE_PEPPER" \
+            '{
+              VANTARA_SESSION_SECRET: $session,
+              VANTARA_IDENTITY_SECRET: $identity,
+              VANTARA_DEVICE_PEPPER: $pepper
+            }' > "$secrets_file"
+          npx --yes wrangler@4 deploy --secrets-file "$secrets_file"
 
       - name: Smoke test /health
         id: smoke
