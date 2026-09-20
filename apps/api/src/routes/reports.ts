@@ -69,9 +69,13 @@ export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promi
       };
 
       const diagnostics = scrubDiagnostics(collected);
-      if (containsSecret(diagnostics)) {
-        // لا نكتب شيئًا نشكّ أنه يحمل سرًّا
-        request.log.error('diagnostics still contained a secret after scrubbing — refusing');
+      const description =
+        input.description === undefined
+          ? null
+          : (scrubDiagnostics(input.description) as string);
+      if (containsSecret(diagnostics) || containsSecret(description)) {
+        // لا نكتب شيئًا نشكّ أنه يحمل سرًّا، سواء جاء آليًا أو كتبه المستخدم.
+        request.log.error('report still contained a secret after scrubbing — refusing');
         return reply.code(500).send({ error: 'diagnostics_unsafe' });
       }
 
@@ -88,7 +92,7 @@ export async function reportRoutes(app: FastifyInstance, ctx: AppContext): Promi
           input.chapterRef ?? null,
           input.pageIndex ?? null,
           input.sourceId ?? null,
-          input.description ?? null,
+          description,
           JSON.stringify(diagnostics),
           // B10: معرّف النداء الفاشل إن أرسلته الواجهة، وإلا معرّف طلب
           // البلاغ نفسه. ولا يُولَّد معرّف جديد هنا: معرّفٌ لا يقابله سطر
