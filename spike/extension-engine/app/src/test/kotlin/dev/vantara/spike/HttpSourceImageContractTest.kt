@@ -3,6 +3,7 @@ package dev.vantara.spike
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.runBlocking
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -21,7 +22,7 @@ class HttpSourceImageContractTest {
         val payload = byteArrayOf(1, 2, 3, 4)
 
         val client = OkHttpClient.Builder()
-            .addInterceptor { chain ->
+            .addInterceptor(Interceptor { chain ->
                 seenHeader = chain.request().header("X-Source-Image")
                 Response.Builder()
                     .request(chain.request())
@@ -30,7 +31,7 @@ class HttpSourceImageContractTest {
                     .message("OK")
                     .body(payload.toResponseBody("image/png".toMediaType()))
                     .build()
-            }
+            })
             .build()
 
         val source = object : HttpSource() {
