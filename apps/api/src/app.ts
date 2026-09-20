@@ -25,10 +25,37 @@ export interface BuiltApp {
   ctx: AppContext;
 }
 
+/** لا تسمح لقدرات الوسائط الموجودة في query أن تدخل سجل الطلبات. */
+export function requestUrlForLog(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl, 'http://vantara.invalid');
+    if (parsed.searchParams.has('t')) parsed.searchParams.set('t', '[REDACTED]');
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return rawUrl.replace(/([?&]t=)[^&]*/gi, '$1[REDACTED]');
+  }
+}
+
 export async function buildApp(config: Config): Promise<BuiltApp> {
   const app = Fastify({
     // في الاختبار نكتم السجل كليًا بدل تعطيل سجل الطلبات وحده
-    logger: config.NODE_ENV === 'test' ? false : { level: config.LOG_LEVEL },
+    logger:
+      config.NODE_ENV === 'test'
+        ? false
+        : {
+            level: config.LOG_LEVEL,
+            serializers: {
+              req(request) {
+                return {
+                  method: request.method,
+                  url: requestUrlForLog(request.url),
+                  hostname: request.hostname,
+                  remoteAddress: request.ip,
+                  remotePort: request.socket?.remotePort,
+                };
+              },
+            },
+          },
     // VANTARA يقف خلف Cloudflare Tunnel: العنوان الحقيقي يأتي في الترويسة
     trustProxy: true,
     bodyLimit: 1024 * 1024,
