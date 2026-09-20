@@ -878,7 +878,7 @@ test('D1 rollout migrations after the adversarial baseline are backward-compatib
     .filter((name) => /^\d+_.*\.sql$/.test(name))
     .filter((name) => Number(name.slice(0, 4)) >= 12);
 
-  const forbidden = /\bDROP\s+(?:TABLE|COLUMN|INDEX)\b|\bRENAME\s+(?:TO|COLUMN)\b|\bALTER\s+COLUMN\b[^;]*\bTYPE\b/i;
+  const forbidden = /\bDROP\s+(?:TABLE|COLUMN|INDEX|CONSTRAINT)\b|\bRENAME\s+(?:TO|COLUMN)\b|\bALTER\s+COLUMN\b[^;]*\b(?:TYPE|SET\s+NOT\s+NULL)\b/i;
   const bad = [];
   for (const name of migrations) {
     const sql = read(`services/sync-worker/migrations/${name}`);

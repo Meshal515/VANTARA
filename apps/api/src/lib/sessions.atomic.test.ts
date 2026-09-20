@@ -69,7 +69,11 @@ describe('SessionStore.login atomicity', () => {
       'minted-long-lived-token',
       'minted-token-id',
     );
-    expect(db.query).not.toHaveBeenCalled();
+    expect(
+      db.query.mock.calls.some(([sql]) =>
+        String(sql).includes('vantara_token_mint_attempts'),
+      ),
+    ).toBe(true);
   });
 
   it('persists user, identity link, and session inside one transaction', async () => {
@@ -170,9 +174,19 @@ describe('SessionStore identity credential renewal', () => {
         token_encrypted: encrypt(oldToken, key),
         token_id: 'old-token-id',
         token_expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        token_expiry_authoritative: true,
         username: 'mansour',
-      })
-      .mockResolvedValueOnce({ token_id: 'minted-token-id' });
+      });
+
+    const rotationClient = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [{ token_id: 'minted-token-id' }] })
+        .mockResolvedValueOnce({ rows: [] }),
+    };
+    db.transaction.mockImplementationOnce(
+      async (fn: (client: typeof rotationClient) => Promise<unknown>) => fn(rotationClient),
+    );
 
     const store = new SessionStore({
       key,
@@ -194,7 +208,7 @@ describe('SessionStore identity credential renewal', () => {
         reconcileAmbiguousFailure: true,
       }),
     );
-    expect(db.queryOne).toHaveBeenCalledTimes(2);
+    expect(db.queryOne).toHaveBeenCalledTimes(1);
     expect(resolved).toMatchObject({
       token: 'minted-long-lived-token',
       tokenId: 'minted-token-id',
@@ -211,6 +225,7 @@ describe('SessionStore identity credential renewal', () => {
       token_encrypted: encrypt('expired-token', key),
       token_id: 'expired-token-id',
       token_expires_at: new Date(Date.now() - 1_000).toISOString(),
+      token_expiry_authoritative: true,
       username: 'mansour',
     });
     db.query.mockResolvedValueOnce([]);
