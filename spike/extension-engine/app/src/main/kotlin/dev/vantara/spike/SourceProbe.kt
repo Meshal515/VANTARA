@@ -6,10 +6,12 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -69,15 +71,32 @@ class SourceProbe(private val http: OkHttpClient) {
         }
     }
 
+    enum class CatalogueStopKind {
+        COMPLETE,
+        REPEAT_SUSPECTED,
+        CLOUDFLARE,
+        DEAD_HOST,
+        TIMEOUT,
+        SOURCE_ERROR,
+        TIME_BUDGET,
+        PAGE_CAP,
+    }
+
     data class CatalogueReach(
-        /** عدد الأعمال الفريدة التي كُشفت فعلًا. */
+        /** عدد الأعمال الفريدة التي كُشفت فعلًا. هذا حد أدنى إذا لم نبلغ النهاية. */
         val uniqueWorks: Int,
-        /** كم صفحة طُلبت. */
+        /** كم صفحة جُلبت بنجاح. */
         val pagesFetched: Int,
-        /** هل بلغنا النهاية فعلًا، أو توقفنا عند السقف؟ */
+        /** آخر رقم صفحة حاولنا الوصول إليه. */
+        val lastPageAttempted: Int,
+        /** هل بلغنا النهاية فعلًا، أو توقفنا قبلها؟ */
         val reachedEnd: Boolean,
+        val stopKind: CatalogueStopKind,
         val stoppedBecause: String,
-    )
+    ) {
+        /** أي رقم غير مكتمل يُعرض للمستخدم كـ "على الأقل"، لا كإجمالي نهائي. */
+        val isPartial: Boolean get() = !reachedEnd && uniqueWorks > 0
+    }
 
     data class Report(
         val label: String,
@@ -452,54 +471,89 @@ class SourceProbe(private val http: OkHttpClient) {
         onProgress: suspend (Int, Int) -> Unit,
     ): CatalogueReach {
         val seen = LinkedHashSet<String>()
-        // عدّاد صريح لِما جُلب بنجاح. اشتقاقه من رقم الصفحة عند الخروج كان
-        // يخطئ باثنتين في اتجاهين متعاكسين: صفحةٌ سقطت تُحسب مجلوبة، وصفحةُ
-        // التكرار لا تُحسب وقد جُلبت. والرقم هنا يُقرأ كدليل، فوجب صدقه.
         var fetched = 0
         var page = 1
+        var lastPageAttempted = 0
+        var repeatStreak = 0
         var stoppedBecause = "page-cap"
+        var stopKind = CatalogueStopKind.PAGE_CAP
         var reachedEnd = false
         val deadline = System.currentTimeMillis() + budgetMs
 
         while (page <= pageCap) {
-            // ميزانية زمنية للقياس كله: أربعون صفحة على مصدر بطيء تبتلع
-            // التشغيل وتترك المصادر الباقية بلا اختبار، والعدد الناقص
-            // يُعلَن سببه فلا يُقرأ كأنه نهاية الكتالوج.
             if (System.currentTimeMillis() >= deadline) {
                 stoppedBecause = "time-budget"
+                stopKind = CatalogueStopKind.TIME_BUDGET
                 break
             }
+
+            lastPageAttempted = page
             onProgress(page, seen.size)
+
             val result = try {
                 withTimeout(STEP_TIMEOUT_MS) { source.getPopularManga(page) }
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
-                stoppedBecause = when (t) {
-                    is TimeoutCancellationException -> "timeout@p$page"
-                    else -> "error@p$page: ${t.javaClass.simpleName}"
+
+                when (t) {
+                    is CloudflareBypassException -> {
+                        stopKind = CatalogueStopKind.CLOUDFLARE
+                        stoppedBecause =
+                            if (t.interactive) "cloudflare-interactive@p$page" else "cloudflare@p$page"
+                    }
+                    is UnknownHostException -> {
+                        stopKind = CatalogueStopKind.DEAD_HOST
+                        stoppedBecause = "dead-host@p$page: ${t.message?.take(120)}"
+                    }
+                    is TimeoutCancellationException -> {
+                        stopKind = CatalogueStopKind.TIMEOUT
+                        stoppedBecause = "timeout@p$page"
+                    }
+                    else -> {
+                        stopKind = CatalogueStopKind.SOURCE_ERROR
+                        stoppedBecause = "source-error@p$page: ${t.javaClass.simpleName}"
+                    }
                 }
                 break
             }
+
             fetched += 1
 
             val before = seen.size
-            result.mangas.forEach { seen += it.url }
-            if (seen.size == before) {
-                stoppedBecause = "repeat"
-                break
+            result.mangas.forEach { manga ->
+                val key = manga.url.takeIf(String::isNotBlank)
+                    ?: "title:${manga.title.trim()}#p$page"
+                seen += key
             }
+            val added = seen.size - before
+
             if (!result.hasNextPage) {
                 stoppedBecause = "end-of-catalogue"
+                stopKind = CatalogueStopKind.COMPLETE
                 reachedEnd = true
                 break
             }
+
+            if (added == 0) {
+                repeatStreak += 1
+                if (repeatStreak >= REPEAT_STREAK_LIMIT) {
+                    stoppedBecause = "repeat-$repeatStreak@p$page"
+                    stopKind = CatalogueStopKind.REPEAT_SUSPECTED
+                    break
+                }
+            } else {
+                repeatStreak = 0
+            }
+
             page += 1
         }
 
         return CatalogueReach(
             uniqueWorks = seen.size,
             pagesFetched = fetched,
+            lastPageAttempted = lastPageAttempted,
             reachedEnd = reachedEnd,
+            stopKind = stopKind,
             stoppedBecause = stoppedBecause,
         )
     }
@@ -529,6 +583,9 @@ class SourceProbe(private val http: OkHttpClient) {
          */
         const val FULL_PAGE_CAP = 5_000
         const val FULL_BUDGET_MS = 45L * 60L * 1000L
+
+        /** لا نعلن loop من صفحة مكررة واحدة؛ بعض APIs تعيد صفحة cache مكررة عابرًا. */
+        const val REPEAT_STREAK_LIMIT = 3
 
         /**
          * مهلة الخطوة الواحدة.
