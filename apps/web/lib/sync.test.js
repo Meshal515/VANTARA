@@ -396,11 +396,16 @@ describe('account isolation and remote logout', () => {
     const oldPull = new Promise((resolve) => { releaseOldPull = resolve; });
     const accountB = { userId: 'u2', username: 'mansour', displayName: 'منصور' };
 
+    let syncCalls = 0;
     const fetchImpl = vi.fn(async (url, options) => {
       const value = String(url);
       if (value.includes('/v1/sync')) {
-        if (!releaseOldPull) throw new Error('old pull barrier missing');
-        return oldPull;
+        syncCalls += 1;
+        if (syncCalls === 1) {
+          if (!releaseOldPull) throw new Error('old pull barrier missing');
+          return oldPull;
+        }
+        return jsonResponse({ reset: false, cursor: 0, changes: {} });
       }
       if (value.includes('/v1/session')) {
         const body = JSON.parse(options.body);
