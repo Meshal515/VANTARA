@@ -56,6 +56,7 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class CloudflareInterceptor(
     private val context: Context,
@@ -186,11 +187,10 @@ class CloudflareInterceptor(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun solveClearance(request: Request): SolveOutcome {
-        // latch.countDown() happens-before await() returns, so plain vars written
-        // on the main thread are visible here afterward.
         val latch = CountDownLatch(1)
-        var webView: WebView? = null
-        var outcome = SolveOutcome.TIMEOUT
+        val webView = AtomicReference<WebView?>(null)
+        val outcome = AtomicReference(SolveOutcome.TIMEOUT)
+        val active = AtomicBoolean(true)
         var challengeFound = false
         val interactive = AtomicBoolean(false)
         val rootUrl = request.url.newBuilder()
@@ -207,7 +207,7 @@ class CloudflareInterceptor(
 
         fun isBypassed(): Boolean = cookieManager.get(cookieUrl).any { it.name == "cf_clearance" }
         fun finish(result: SolveOutcome) {
-            outcome = result
+            outcome.set(result)
             latch.countDown()
         }
 
@@ -221,8 +221,13 @@ class CloudflareInterceptor(
             }
         }
         handler.post {
+            if (!active.get()) return@post
             val view = newWebView(userAgent)
-            webView = view
+            webView.set(view)
+            if (!active.get()) {
+                destroyOnMain(webView.getAndSet(null))
+                return@post
+            }
             // Cloudflare's challenge script posts a message the moment it decides
             // it needs the user (checkbox / Turnstile). The JS interface callback
             // runs on a binder thread; latch.countDown() publishes the write.
@@ -278,20 +283,22 @@ class CloudflareInterceptor(
         // التحدي الصامت يأخذ مهلة قصيرة. إذا طلب Cloudflare إنسانًا، فالـWebView
         // يظهر بالحجم الكامل ونمنح المستخدم وقتًا واقعيًّا لإكمال التحقق.
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
-        if (outcome == SolveOutcome.TIMEOUT && interactive.get()) {
+        if (outcome.get() == SolveOutcome.TIMEOUT && interactive.get()) {
             latch.await(INTERACTIVE_TIMEOUT_SEC - TIMEOUT_SEC, TimeUnit.SECONDS)
         }
+        active.set(false)
         // Cookie may have landed between the last poll and the timeout.
-        if (outcome == SolveOutcome.TIMEOUT && isBypassed()) outcome = SolveOutcome.SOLVED
-        if (outcome == SolveOutcome.TIMEOUT && interactive.get()) outcome = SolveOutcome.INTERACTIVE
-        destroyOnMain(webView) { handler.removeCallbacks(poller) }
-        if (outcome == SolveOutcome.SOLVED) {
+        if (outcome.get() == SolveOutcome.TIMEOUT && isBypassed()) outcome.set(SolveOutcome.SOLVED)
+        if (outcome.get() == SolveOutcome.TIMEOUT && interactive.get()) outcome.set(SolveOutcome.INTERACTIVE)
+        destroyOnMain(webView.getAndSet(null)) { handler.removeCallbacks(poller) }
+        val result = outcome.get()
+        if (result == SolveOutcome.SOLVED) {
             CookieManager.getInstance().flush()
             Log.i(TAG, "Cloudflare clearance obtained for ${request.url.host}")
         } else {
-            Log.i(TAG, "Cloudflare solve for ${request.url.host} ended: $outcome")
+            Log.i(TAG, "Cloudflare solve for ${request.url.host} ended: $result")
         }
-        return outcome
+        return result
     }
 
     /**
@@ -303,11 +310,10 @@ class CloudflareInterceptor(
     private fun byteFetchResponse(request: Request): Response? {
         if (request.method != "GET") return null
 
-        // The JS interface callback runs on a binder thread; its latch.countDown()
-        // happens-before await() returns here, making the write visible.
         val latch = CountDownLatch(1)
-        var webView: WebView? = null
-        var dataUrl: String? = null
+        val webView = AtomicReference<WebView?>(null)
+        val dataUrl = AtomicReference<String?>(null)
+        val active = AtomicBoolean(true)
 
         val url = request.url.toString()
         val userAgent = request.header("User-Agent") ?: defaultUserAgentProvider()
@@ -315,13 +321,18 @@ class CloudflareInterceptor(
         Log.d(TAG, "Fetching via WebView $url")
 
         handler.post {
+            if (!active.get()) return@post
             val view = newWebView(userAgent)
-            webView = view
+            webView.set(view)
+            if (!active.get()) {
+                destroyOnMain(webView.getAndSet(null))
+                return@post
+            }
             view.addJavascriptInterface(
                 object {
                     @JavascriptInterface
                     fun onData(data: String) {
-                        dataUrl = data
+                        dataUrl.set(data)
                         latch.countDown()
                     }
 
@@ -344,9 +355,10 @@ class CloudflareInterceptor(
         }
 
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
-        destroyOnMain(webView)
+        active.set(false)
+        destroyOnMain(webView.getAndSet(null))
 
-        val data = dataUrl ?: return null
+        val data = dataUrl.get() ?: return null
         val comma = data.indexOf(',')
         if (comma <= 0) return null
         val meta = data.substring(0, comma)
@@ -490,6 +502,7 @@ class CloudflareInterceptor(
         private const val INTERACTIVE_TIMEOUT_SEC = 120L
         private const val POLL_MS = 400L
         private const val RECENT_SOLVE_MS = 15_000L
+        private const val MAX_WEBVIEW_IMAGE_BYTES = 12 * 1024 * 1024
         private val ERROR_CODES = listOf(403, 503)
         private val SERVER_CHECK = listOf("cloudflare-nginx", "cloudflare")
         private val COOKIE_NAMES = listOf("cf_clearance")
@@ -514,11 +527,13 @@ class CloudflareInterceptor(
          * block page, and handing that back as a 200 would put an HTML error page
          * where the app expects an image.
          */
-        private const val BYTE_FETCH_JS =
+        private val BYTE_FETCH_JS =
             "fetch(location.href).then(function(r){" +
                 "if(!r.ok){ImgFetch.onError('http '+r.status);return null}" +
                 "return r.blob()})" +
-                ".then(function(b){if(!b)return;var f=new FileReader();" +
+                ".then(function(b){if(!b)return;" +
+                "if(b.size>$MAX_WEBVIEW_IMAGE_BYTES){ImgFetch.onError('too-large '+b.size);return;}" +
+                "var f=new FileReader();" +
                 "f.onload=function(){ImgFetch.onData(f.result)};" +
                 "f.onerror=function(){ImgFetch.onError('read')};" +
                 "f.readAsDataURL(b)}).catch(function(e){ImgFetch.onError(''+e)})"
