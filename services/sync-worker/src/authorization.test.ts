@@ -7,11 +7,11 @@ type Guard = (
   ops: readonly Incoming[],
   userId: string,
   env: Env,
-) => Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null>;
+) => Promise<Set<string>>;
 
-const validateRecommendationResponses = (
-  worker as unknown as { validateRecommendationResponses?: Guard }
-).validateRecommendationResponses;
+const invalidRecommendationResponses = (
+  worker as unknown as { invalidRecommendationResponses?: Guard }
+).invalidRecommendationResponses;
 
 interface Query {
   sql: string;
@@ -69,45 +69,48 @@ const respond = (recommendationId: string): Incoming => ({
 });
 
 describe('B8 recommendation response authorization', () => {
-  it('returns not-found when the recommendation does not exist', async () => {
-    expect(typeof validateRecommendationResponses).toBe('function');
-    if (!validateRecommendationResponses) return;
+  it('marks a missing recommendation response invalid without rejecting the whole batch', async () => {
+    expect(typeof invalidRecommendationResponses).toBe('function');
+    if (!invalidRecommendationResponses) return;
 
     const { env } = authEnv([]);
     await expect(
-      validateRecommendationResponses([respond('missing')], 'ngm', env),
-    ).resolves.toEqual({ status: 404, error: 'recommendation_not_found' });
+      invalidRecommendationResponses([respond('missing')], 'ngm', env),
+    ).resolves.toEqual(new Set(['response-missing']));
   });
 
-  it('returns forbidden when the recommendation exists but the viewer is not a recipient', async () => {
-    expect(typeof validateRecommendationResponses).toBe('function');
-    if (!validateRecommendationResponses) return;
+  it('marks a response invalid when the viewer is not a recipient', async () => {
+    expect(typeof invalidRecommendationResponses).toBe('function');
+    if (!invalidRecommendationResponses) return;
 
     const { env } = authEnv([{ id: 'r1', recipient_user_id: null }]);
-    await expect(validateRecommendationResponses([respond('r1')], 'ngm', env)).resolves.toEqual({
-      status: 403,
-      error: 'forbidden',
-    });
+    await expect(
+      invalidRecommendationResponses([respond('r1')], 'ngm', env),
+    ).resolves.toEqual(new Set(['response-r1']));
   });
 
   it('allows a real recipient', async () => {
-    expect(typeof validateRecommendationResponses).toBe('function');
-    if (!validateRecommendationResponses) return;
+    expect(typeof invalidRecommendationResponses).toBe('function');
+    if (!invalidRecommendationResponses) return;
 
     const { env } = authEnv([{ id: 'r1', recipient_user_id: 'ngm' }]);
-    await expect(validateRecommendationResponses([respond('r1')], 'ngm', env)).resolves.toBeNull();
+    await expect(
+      invalidRecommendationResponses([respond('r1')], 'ngm', env),
+    ).resolves.toEqual(new Set());
   });
 
   it('does not query recommendations when the batch has no response operation', async () => {
-    expect(typeof validateRecommendationResponses).toBe('function');
-    if (!validateRecommendationResponses) return;
+    expect(typeof invalidRecommendationResponses).toBe('function');
+    if (!invalidRecommendationResponses) return;
 
     const { env, queries } = authEnv([]);
-    await validateRecommendationResponses(
-      [{ opId: 'rating-1', kind: 'rating.set', payload: { seriesRef: 's1', score: 9 } }],
-      'ngm',
-      env,
-    );
+    await expect(
+      invalidRecommendationResponses(
+        [{ opId: 'rating-1', kind: 'rating.set', payload: { seriesRef: 's1', score: 9 } }],
+        'ngm',
+        env,
+      ),
+    ).resolves.toEqual(new Set());
     expect(queries.some((query) => /FROM recommendations/i.test(query.sql))).toBe(false);
   });
 });
