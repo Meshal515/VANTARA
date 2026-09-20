@@ -570,6 +570,7 @@ class MainActivity : AppCompatActivity() {
         SourceProbe.CatalogueStopKind.COMPLETE -> "COMPLETE"
         SourceProbe.CatalogueStopKind.REPEAT_SUSPECTED -> "LOOP_SUSPECTED"
         SourceProbe.CatalogueStopKind.CLOUDFLARE -> "CLOUDFLARE"
+        SourceProbe.CatalogueStopKind.BROWSER_VERIFY -> "BROWSER_VERIFY"
         SourceProbe.CatalogueStopKind.DEAD_HOST -> "DEAD_HOST"
         SourceProbe.CatalogueStopKind.TIMEOUT -> "TIMEOUT"
         SourceProbe.CatalogueStopKind.SOURCE_ERROR -> "SOURCE_ERROR"
