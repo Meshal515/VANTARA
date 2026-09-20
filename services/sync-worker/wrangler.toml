@@ -15,10 +15,14 @@ database_id = "__D1_DATABASE_ID__"
 [observability]
 enabled = true
 
-# الأسرار الثلاثة لا تُكتب هنا:
-# - VANTARA_IDENTITY_SECRET: توقيع access token v2 المشترك مع Content API.
-# - VANTARA_DEVICE_PEPPER: HMAC لبيانات device/pairing المخزنة في D1.
-# - VANTARA_SESSION_SECRET: مهايئ داخلي مؤقت للـlegacy sync handlers حتى B3.
-# تُضبط جميعها بـ`wrangler secret put` ولا تدخل المستودع ولا الـAPK.
+# الأسماء ليست أسرارًا؛ القيم وحدها سرية في Cloudflare. إعلان الأسماء يجعل
+# wrangler deploy يرفض النشر قبل تبديل النسخة إذا كان أي binding مفقودًا.
+[secrets]
+required = [
+  "VANTARA_SESSION_SECRET",
+  "VANTARA_IDENTITY_SECRET",
+  "VANTARA_DEVICE_PEPPER",
+]
+
 [vars]
 ALLOWED_ORIGINS = "https://vantara.pages.dev"
