@@ -126,8 +126,8 @@ test('sync worker production deploy fails closed before migrations when remote s
   assert.match(workflow, /wrangler@4 secret list --format json/,
     'release must inspect the secrets already attached to the deployed Worker');
   assert.doesNotMatch(
-    workflow,
-    /wrangler@4 secret put|wrangler secret put/,
+    stripComments(workflow),
+    /wrangler@4\s+secret\s+put|wrangler\s+secret\s+put/,
     'ordinary code deploy must not mutate secrets: secret put creates/deploys another Worker version',
   );
 
