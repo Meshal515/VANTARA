@@ -29,6 +29,20 @@ export function sanitizeRequestUrl(raw: unknown): string {
   return query === -1 ? raw : raw.slice(0, query);
 }
 
+export function requestLogSerializer(request: {
+  method?: unknown;
+  url?: unknown;
+  hostname?: unknown;
+  ip?: unknown;
+}) {
+  return {
+    method: typeof request.method === 'string' ? request.method : undefined,
+    url: sanitizeRequestUrl(request.url),
+    hostname: typeof request.hostname === 'string' ? request.hostname : undefined,
+    remoteAddress: typeof request.ip === 'string' ? request.ip : undefined,
+  };
+}
+
 export interface BuiltApp {
   app: FastifyInstance;
   ctx: AppContext;
@@ -43,14 +57,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
         : {
             level: config.LOG_LEVEL,
             serializers: {
-              req(request) {
-                return {
-                  method: request.method,
-                  url: sanitizeRequestUrl(request.url),
-                  hostname: request.hostname,
-                  remoteAddress: request.ip,
-                };
-              },
+              req: requestLogSerializer,
             },
           },
     // VANTARA يقف خلف Cloudflare Tunnel: العنوان الحقيقي يأتي في الترويسة
