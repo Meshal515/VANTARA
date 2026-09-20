@@ -632,3 +632,40 @@ describe('deprecated client-authored activity', () => {
     expect(translate('activity.add', { verb: 'FABRICATED', seriesRef: 's1' })).toEqual([]);
   });
 });
+
+
+describe('relational social ops survive stale/off-series references', () => {
+  it('rejects a reply whose parent belongs to another series', () => {
+    const ctx: OpContext = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: {
+        parent: { authorId: 'mansour', seriesRef: 'series-a' },
+      },
+    };
+    expect(
+      translate(
+        'comment.add',
+        { seriesRef: 'series-b', body: 'رد', parentId: 'parent' },
+        { ctx },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects a reply whose parent disappeared after restore', () => {
+    const ctx: OpContext = { accounts: ['dahmi', 'mansour', 'ngm'], comments: {} };
+    expect(
+      translate(
+        'comment.add',
+        { seriesRef: 'series-a', body: 'رد', parentId: 'gone-parent' },
+        { ctx },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects a reaction whose comment disappeared after restore', () => {
+    const ctx: OpContext = { accounts: ['dahmi', 'mansour', 'ngm'], comments: {} };
+    expect(
+      translate('reaction.set', { commentId: 'gone-comment', emoji: '🔥' }, { ctx }),
+    ).toEqual([]);
+  });
+});
