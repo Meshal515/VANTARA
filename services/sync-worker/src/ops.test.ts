@@ -202,7 +202,7 @@ describe('cumulative ops', () => {
   });
 
   it('adds usage time and guards it the same way', () => {
-    const [statement] = translate('usage.add', { activeMs: 60_000, day: '2026-09-18' });
+    const [statement] = translate('usage.add', { activeMs: 60_000, day: '2023-11-14' });
     expect(statement?.sql).toContain('active_ms = usage_daily.active_ms + excluded.active_ms');
     expect(statement?.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)');
   });
@@ -210,6 +210,10 @@ describe('cumulative ops', () => {
   it('rejects a malformed usage day instead of poisoning weekly totals', () => {
     expect(translate('usage.add', { activeMs: 5_000, day: 'zzzzzzzzzz' })).toEqual([]);
     expect(translate('usage.add', { activeMs: 5_000, day: '2026-02-31' })).toEqual([]);
+  });
+
+  it('rejects a future usage day relative to the server clock', () => {
+    expect(translate('usage.add', { activeMs: 5_000, day: '2099-01-01' })).toEqual([]);
   });
 });
 
@@ -449,6 +453,20 @@ describe('B8 server-derived activity', () => {
     const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
     expect(activity).toBeDefined();
     expect(activity?.values).toContain('vantara://series/lookism/comment/op-1');
+  });
+
+  it('refuses a reply whose parent belongs to another series', () => {
+    const ctx = {
+      accounts: ['dahmi', 'mansour', 'ngm'],
+      comments: { parent1: { authorId: 'ngm', seriesRef: 'series-a' } },
+    } as unknown as OpContext;
+    expect(
+      translate(
+        'comment.add',
+        { seriesRef: 'series-b', parentId: 'parent1', body: 'wrong work' },
+        { ctx },
+      ),
+    ).toEqual([]);
   });
 
   it('notifies a parent comment author on a reply, excluding self', () => {
