@@ -55,6 +55,12 @@ class FakeStatement implements D1PreparedStatement {
       const [userId] = this.#values as [string];
       const row = this.#db.accounts.find((account) => account.userId === userId);
       if (!row) return null;
+      if (this.#db.revokeBeforeFinalTouch) {
+        for (const device of this.#db.devices) {
+          if (device.userId === userId && device.revokedAt === null) device.revokedAt = Date.now();
+        }
+        this.#db.revokeBeforeFinalTouch = false;
+      }
       return {
         user_id: row.userId,
         username: row.username,
@@ -71,10 +77,13 @@ class FakeStatement implements D1PreparedStatement {
 
   async run(): Promise<D1Result> {
     if (this.#sql.startsWith('UPDATE trusted_devices SET last_used_at')) {
-      const [now, deviceId, userId] = this.#values as [number, string, string];
+      const [now, deviceId, userId, credentialHash] = this.#values as [number, string, string, string];
       const row = this.#db.devices.find(
         (device) =>
-          device.deviceId === deviceId && device.userId === userId && device.revokedAt === null,
+          device.deviceId === deviceId &&
+          device.userId === userId &&
+          device.credentialHash === credentialHash &&
+          device.revokedAt === null,
       );
       if (!row) return result(0);
       row.lastUsedAt = now;
@@ -117,6 +126,7 @@ class FakeStatement implements D1PreparedStatement {
 class FakeDb implements D1Database {
   readonly accounts: AccountRow[] = [];
   readonly devices: DeviceRow[] = [];
+  revokeBeforeFinalTouch = false;
 
   prepare(query: string): D1PreparedStatement {
     return new FakeStatement(this, query);
@@ -232,6 +242,22 @@ describe('B2 trusted-device session gate', () => {
     );
     expect(claims).toMatchObject({ version: 2, userId, deviceId });
     expect((claims?.expiresAt ?? 0) - (claims?.issuedAt ?? 0)).toBe(15 * 60 * 1000);
+  });
+
+  it('does not mint a new session when logout wins after the initial device check', async () => {
+    const db = new FakeDb();
+    const userId = 'user-1';
+    const deviceId = 'device-0001';
+    const credential = 'correct-device-credential-00000001';
+    db.accounts.push({ userId, username: 'meshal', displayName: 'Meshal' });
+    await seedTrusted(db, userId, deviceId, credential);
+    db.revokeBeforeFinalTouch = true;
+
+    const response = await worker.fetch(sessionRequest(userId, deviceId, credential), env(db), ctx);
+
+    expect(response.status).toBe(401);
+    await expect(jsonBody(response)).resolves.toMatchObject({ error: 'device_untrusted' });
+    expect(db.devices[0]?.revokedAt).not.toBeNull();
   });
 
   it('logout-device revokes the device so it cannot mint another session', async () => {
