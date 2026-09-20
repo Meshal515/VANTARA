@@ -68,25 +68,7 @@ export class SessionStore {
     );
   }
 
-  async #reconcilePendingMintAttempts(
-    authToken: string,
-    userId: string,
-    onlyName?: string,
-  ): Promise<void> {
-    const pending = await query<{ name: string }>(
-      `SELECT name
-         FROM vantara_token_mint_attempts
-        WHERE uchiyomi_user_id = $1
-          AND resolved_at IS NULL
-          AND ($2::text IS NULL OR name = $2)
-        ORDER BY created_at
-        LIMIT 100`,
-      [userId, onlyName ?? null],
-    );
-    if (pending.length === 0) return;
-
-    // A durable attempt is cleanup intent, not permission to revoke blindly.
-    // Protect credentials already adopted by a live identity or cookie session.
+  async #protectedTokenIds(): Promise<Set<string>> {
     const protectedRows = await query<{ token_id: string }>(
       `SELECT token_id
          FROM vantara_identity_links
@@ -96,7 +78,38 @@ export class SessionStore {
          FROM vantara_sessions
         WHERE revoked_at IS NULL AND expires_at > now() AND token_id IS NOT NULL`,
     );
-    const protectedIds = new Set(protectedRows.map((row) => row.token_id));
+    return new Set(protectedRows.map((row) => row.token_id));
+  }
+
+  async #reconcileMintAttemptName(authToken: string, name: string): Promise<void> {
+    const protectedIds = await this.#protectedTokenIds();
+    const tokens = await this.#options.uchiyomi.listTokens(authToken);
+    const matches = tokens.filter((token) => token.name === name);
+
+    for (const token of matches) {
+      if (!protectedIds.has(token.id)) {
+        await this.#options.uchiyomi.revokeToken(authToken, token.id);
+      }
+    }
+    await this.#finishMintAttempt(name, matches[0]?.id ?? null);
+  }
+
+  async #reconcilePendingMintAttempts(
+    authToken: string,
+    userId: string,
+  ): Promise<void> {
+    const pending = await query<{ name: string }>(
+      `SELECT name
+         FROM vantara_token_mint_attempts
+        WHERE uchiyomi_user_id = $1
+          AND resolved_at IS NULL
+        ORDER BY created_at
+        LIMIT 100`,
+      [userId],
+    );
+    if (pending.length === 0) return;
+
+    const protectedIds = await this.#protectedTokenIds();
     const tokens = await this.#options.uchiyomi.listTokens(authToken);
 
     for (const attempt of pending) {
@@ -159,7 +172,7 @@ export class SessionStore {
       }
 
       try {
-        await this.#reconcilePendingMintAttempts(authToken, userId, name);
+        await this.#reconcileMintAttemptName(authToken, name);
       } catch (reconcileError) {
         throw new AggregateError(
           [createError, reconcileError],
