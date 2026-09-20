@@ -387,3 +387,81 @@ describe('the identity seam the content api reads', () => {
     expect(sync.authorizationHeader).toBeNull();
   });
 });
+
+
+describe('adversarial account and logout races', () => {
+  it('drops an old account pull that returns after switching accounts', async () => {
+    let releaseOldPull;
+    let announceOldPull;
+    const oldPullStarted = new Promise((resolve) => {
+      announceOldPull = resolve;
+    });
+    let syncCalls = 0;
+    const accountB = { userId: 'u2', username: 'mansour', displayName: 'منصور' };
+
+    const fetchImpl = vi.fn(async (url) => {
+      const value = String(url);
+      if (value.includes('/v1/session')) {
+        return jsonResponse({ token: 'token-b', user: accountB });
+      }
+      if (value.includes('/v1/sync')) {
+        syncCalls += 1;
+        if (syncCalls === 1) {
+          announceOldPull();
+          return new Promise((resolve) => {
+            releaseOldPull = () =>
+              resolve(
+                jsonResponse({
+                  reset: false,
+                  cursor: 50,
+                  changes: {
+                    library: [{ user_id: 'u1', series_ref: 'from-account-a', rev: 50 }],
+                  },
+                }),
+              );
+          });
+        }
+        return jsonResponse({
+          reset: false,
+          cursor: 1,
+          changes: {
+            library: [{ user_id: 'u2', series_ref: 'from-account-b', rev: 1 }],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch: ${value}`);
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    const pendingA = sync.pull();
+    await oldPullStarted;
+
+    await sync.signIn('u2');
+    releaseOldPull();
+    await pendingA;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const mirror = JSON.parse(storage.getItem('vantara.mirror') ?? '{}');
+    expect(sync.user?.userId).toBe('u2');
+    expect(JSON.stringify(mirror)).not.toContain('from-account-a');
+    expect(Number(storage.getItem('vantara.cursor') ?? 0)).not.toBe(50);
+  });
+
+  it('does not claim remote logout success when revocation returns 503', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).includes('/v1/device/logout-all')) {
+        return jsonResponse({ error: 'unavailable' }, 503);
+      }
+      return jsonResponse({ reset: false, cursor: 0, changes: {} });
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    const deviceCredential = storage.getItem('vantara.device.credential');
+
+    await expect(sync.logoutAll()).rejects.toMatchObject({ status: 503 });
+
+    expect(sync.signedIn).toBe(true);
+    expect(sync.authorizationHeader).toBe('Bearer token-1');
+    expect(storage.getItem('vantara.device.credential')).toBe(deviceCredential);
+  });
+});
