@@ -53,7 +53,7 @@ CREATE TABLE b1_restore_marker (value text PRIMARY KEY);
 INSERT INTO b1_restore_marker VALUES ('uchiyomi-before-backup');
 SQL
 
-$compose run --rm --entrypoint sh db-backup /scripts/backup-postgres.sh
+$compose run --rm -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup /scripts/backup-postgres.sh
 
 # Corrupt both markers after the snapshot. A successful restore must undo this.
 $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
@@ -61,7 +61,7 @@ $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR
 $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -v ON_ERROR_STOP=1 \
   -c "UPDATE b1_restore_marker SET value = 'uchiyomi-after-backup';"
 
-$compose run --rm -e CONFIRM_RESTORE=YES --entrypoint sh db-backup /scripts/restore-postgres.sh
+$compose run --rm -e CONFIRM_RESTORE=YES -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup /scripts/restore-postgres.sh
 
 vantara_value="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
   'SELECT value FROM b1_restore_marker')"
