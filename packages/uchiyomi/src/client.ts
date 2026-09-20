@@ -105,7 +105,12 @@ export class UchiyomiClient {
         }
       } catch (err) {
         if (err instanceof UchiyomiError && !err.retryable) throw err;
-        if (attempt === maxAttempts) throw err;
+        if (attempt === maxAttempts) {
+          if (err instanceof UchiyomiError) throw err;
+          // fetch/timeout errors have no HTTP status. Normalize them here so every
+          // route gets the same gateway semantics instead of an accidental 500.
+          throw new UchiyomiError('upstream unavailable', 502, 'upstream_unavailable', path);
+        }
         lastError = err;
       }
 
