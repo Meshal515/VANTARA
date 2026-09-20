@@ -15,6 +15,14 @@ import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
 
+internal fun describeProbeValue(value: Any?): String = when (value) {
+    null -> "null"
+    is Collection<*> -> "${value.size} عنصرًا"
+    is SManga -> runCatching { value.title.take(60) }.getOrElse { "SManga بلا عنوان بعد" }
+    is SChapter -> runCatching { value.name.take(60) }.getOrElse { "SChapter بلا اسم بعد" }
+    else -> runCatching { value.toString().take(80) }.getOrElse { value.javaClass.simpleName }
+}
+
 /**
  * السلسلة الخمس لمصدر واحد، ثم قياس الكتالوج.
  *
@@ -169,7 +177,7 @@ class SourceProbe(private val http: OkHttpClient) {
         val started = System.currentTimeMillis()
         return try {
             val value = withTimeout(timeoutMs) { block() }
-            into += Step(name, true, describe(value), System.currentTimeMillis() - started)
+            into += Step(name, true, describeProbeValue(value), System.currentTimeMillis() - started)
             value
         } catch (t: Throwable) {
             // إلغاءٌ حقيقي (إغلاق الشاشة) يمرّ؛ ومهلتُنا وحدها تُلتقط. بلا
@@ -279,14 +287,6 @@ class SourceProbe(private val http: OkHttpClient) {
         val frames = t.stackTrace.take(6)
             .joinToString(" | ") { f -> "${f.className}.${f.methodName}:${f.lineNumber}" }
         return "$chain\nstack: $frames"
-    }
-
-    private fun describe(value: Any?): String = when (value) {
-        null -> "null"
-        is Collection<*> -> "${value.size} عنصرًا"
-        is SManga -> value.title.take(60)
-        is SChapter -> value.name.take(60)
-        else -> value.toString().take(80)
     }
 
     suspend fun run(
@@ -400,30 +400,28 @@ class SourceProbe(private val http: OkHttpClient) {
                 imageUrl = url
                 val httpSource = asHttp ?: error("source is not HttpSource; cannot issue its image request")
                 page.imageUrl = url
-                // Headers قد تصل بنجاح ثم يقطع خادم HTTP/2 جسم الصورة
-                // بـStreamResetException. إعادة المحاولة في NetworkHelper لا
-                // ترى هذا العطل لأنه يقع بعد chain.proceed()، لذلك نعيد
-                // عملية الصورة كاملة هنا مع نفس imageRequest للمصدر.
-                retryImageTransport(maxAttempts = 3) {
-                    httpSource.fetchImage(page).awaitSingle().use { response ->
-                        val body = BoundedPayloadReader.read(
-                            input = response.body.byteStream(),
-                            declaredLength = response.body.contentLength(),
-                            maxBytes = MAX_IMAGE_BYTES,
-                        )
-                        require(body.size > 1024) { "image too small: ${body.size} bytes" }
-                        val type = response.header("content-type")
-                        val verdict = ImagePayloadPolicy.validate(type, body)
-                        require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
-                        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-                            "Android image decoder rejected payload"
-                        }
-                        imageBytes = body.size
-                        imageData = body
-                        "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
+                // استخدم عقد Mihon الحديث: getImage يستدعي imageRequest
+                // الافتراضي/المخصص للمصدر ثم يعيد Response حيًا بلا Rx.
+                // المسار السابق fetchImage().awaitSingle() كان يلغي الـCall
+                // فور onNext قبل قراءة body، وهو سبب CANCEL/Socket closed.
+                httpSource.getImage(page).use { response ->
+                    val body = BoundedPayloadReader.read(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        maxBytes = MAX_IMAGE_BYTES,
+                    )
+                    require(body.size > 1024) { "image too small: ${body.size} bytes" }
+                    val type = response.header("content-type")
+                    val verdict = ImagePayloadPolicy.validate(type, body)
+                    require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
+                    require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+                        "Android image decoder rejected payload"
                     }
+                    imageBytes = body.size
+                    imageData = body
+                    "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
                 }
             }
         }
