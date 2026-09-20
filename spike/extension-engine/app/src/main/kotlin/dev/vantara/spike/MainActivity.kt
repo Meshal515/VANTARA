@@ -53,6 +53,7 @@ import uy.kohesive.injekt.api.get
 class MainActivity : AppCompatActivity() {
 
     private lateinit var log: LinearLayout
+    private lateinit var status: TextView
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val checkpoint by lazy { ProbeCheckpointStore(filesDir) }
     private var running = false
@@ -124,10 +125,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        status = TextView(this).apply {
+            textSize = 13f
+            gravity = Gravity.START
+            textDirection = View.TEXT_DIRECTION_LOCALE
+            setTextColor(0xFF8899AA.toInt())
+        }
         root.addView(runUnified)
         root.addView(crawl)
         root.addView(copy)
         root.addView(clear)
+        root.addView(status)
         root.addView(ScrollView(this).apply { addView(log) })
         setContentView(root)
 
@@ -149,14 +157,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun statusLine(): (String?) -> Unit {
-        val view = TextView(this).apply {
-            textSize = 13f
-            gravity = Gravity.START
-            textDirection = View.TEXT_DIRECTION_LOCALE
-            setTextColor(0xFF8899AA.toInt())
-        }
-        log.addView(view)
-        return { what -> view.text = if (what == null) "" else "⟳ $what — جارٍ…" }
+        return { what -> status.text = if (what == null) "" else "⟳ $what — جارٍ…" }
     }
 
     /**
