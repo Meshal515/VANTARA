@@ -109,20 +109,65 @@ test('sync worker production deploy is CI-gated and main-only', () => {
   assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
-test('sync worker production deploy provisions every runtime authentication secret', () => {
+test('sync worker production deploy fails closed before migrations when remote secrets are missing', () => {
   const workflow = read('.github/workflows/sync-worker.yml');
-  for (const secret of [
+  const wrangler = read('services/sync-worker/wrangler.toml');
+  const required = [
     'VANTARA_SESSION_SECRET',
     'VANTARA_IDENTITY_SECRET',
     'VANTARA_DEVICE_PEPPER',
-  ]) {
+  ];
+
+  const preflight = workflow.indexOf('- name: Verify deployed Worker secrets before migrations');
+  const migrations = workflow.indexOf('- name: Apply D1 migrations');
+  const deploy = workflow.indexOf('- name: Deploy');
+  assert.ok(preflight >= 0 && preflight < migrations && migrations < deploy,
+    'remote Worker secrets must be verified before any D1 mutation or code deploy');
+  assert.match(workflow, /wrangler@4 secret list --format json/,
+    'release must inspect the secrets already attached to the deployed Worker');
+  assert.doesNotMatch(
+    workflow,
+    /wrangler@4 secret put|wrangler secret put/,
+    'ordinary code deploy must not mutate secrets: secret put creates/deploys another Worker version',
+  );
+
+  for (const secret of required) {
     assert.ok(
       workflow.includes('${{ secrets.' + secret + ' }}'),
-      `sync-worker deploy must read GitHub secret ${secret}`,
+      `release/live verification must still receive GitHub secret ${secret}`,
     );
     assert.ok(
-      workflow.includes(`secret put ${secret}`),
-      `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
+      workflow.includes(`for name in VANTARA_SESSION_SECRET VANTARA_IDENTITY_SECRET VANTARA_DEVICE_PEPPER`),
+      'remote preflight must enumerate every authentication secret',
+    );
+    assert.ok(
+      wrangler.includes(secret),
+      `wrangler.toml must declare ${secret} as required`,
+    );
+  }
+  assert.match(wrangler, /\[secrets\][\s\S]*required\s*=\s*\[/,
+    'Wrangler must enforce required Worker secrets at deploy time too');
+});
+
+test('D1 migrations that run before deploy are expand-only', () => {
+  // migration-first is safe only while the old Worker can keep running against
+  // the expanded schema. Historical contractions are frozen; no new DROP/RENAME
+  // may enter the same release as code that assumes the new schema.
+  const grandfathered = new Set([
+    '0010_manual_spoiler_flag.sql',
+    '0011_top_collection.sql',
+  ]);
+  const files = readdirSync(resolve(ROOT, 'services/sync-worker/migrations'))
+    .filter((name) => name.endsWith('.sql'))
+    .sort();
+
+  for (const name of files) {
+    if (grandfathered.has(name)) continue;
+    const sql = stripComments(read(`services/sync-worker/migrations/${name}`));
+    assert.doesNotMatch(
+      sql,
+      /\bDROP\s+(?:TABLE|COLUMN)\b|\bALTER\s+TABLE\b[\s\S]{0,200}?\bRENAME\b/i,
+      `${name} is destructive; use an expand/deploy/contract sequence across separate releases`,
     );
   }
 });
@@ -557,8 +602,8 @@ test('the server never acknowledges a write it did not apply', () => {
   );
   assert.match(
     worker,
-    /if\s*\(statements\.length\s*>\s*0\)\s*await\s+env\.DB\.batch/,
-    'an all-unknown batch must not call D1 with an empty batch, which throws',
+    /if \(effects\.length === 0\) return null/,
+    'an all-unknown batch must not call D1 with an empty commit, which throws',
   );
 
   const queue = read('apps/web/lib/sync.js');
