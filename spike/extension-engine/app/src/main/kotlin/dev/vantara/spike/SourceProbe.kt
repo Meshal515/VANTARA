@@ -285,7 +285,7 @@ class SourceProbe(private val http: OkHttpClient) {
         val base = runCatching { (source as? HttpSource)?.baseUrl }.getOrNull()
 
         // ١) البحث
-        val found = step("search", steps, base) {
+        val foundBySearch = step("search", steps, base) {
             // نبدأ باستعلام الاختبار المثبّت. لو رجع صفرًا، ما نحكم أن
             // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
             // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
@@ -304,8 +304,17 @@ class SourceProbe(private val http: OkHttpClient) {
             }
         }
 
-        // بلا نتيجة بحث لا معنى لبقية السلسلة: نتوقف ونقول أين
-        val first = found?.firstOrNull()
+        // عطل البحث لا يعني أن المصدر كله ميت. نجرّب الرائج كي نعرف هل
+        // التصفح/الفصول/الصفحات ما زالت تعمل، لكن خطوة search تبقى حمراء
+        // والتقرير يصنّفه «جزئيًّا» لا نجاحًا كاملًا.
+        val candidates = foundBySearch ?: step("popular-fallback", steps, base) {
+            val popular = source.getPopularManga(1).mangas
+            require(popular.isNotEmpty()) { "popular list is empty" }
+            popular
+        }
+
+        // بلا نتيجة من البحث ولا من الرائج لا معنى لبقية السلسلة.
+        val first = candidates?.firstOrNull()
             ?: return Report(label, base, steps, null, null, null, null, null, null)
 
         // ٢) تفاصيل العمل
@@ -369,19 +378,20 @@ class SourceProbe(private val http: OkHttpClient) {
                     ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
                     ?: error("page carries no imageUrl")
                 imageUrl = url
-                // `imageRequest` محمية في العقد، فنبني الطلب بترويسات المصدر
-                // نفسها: كثير من المواقع يرفض بلا `Referer` الصحيح.
-                val request = Request.Builder().url(url)
-                    .apply { asHttp?.headers?.let { headers(it) } }
-                    .build()
-                val caller = asHttp?.client ?: http
-                caller.newCall(request).execute().use { response ->
-                    require(response.isSuccessful) { "image HTTP ${response.code}" }
+                val httpSource = asHttp ?: error("source is not HttpSource; cannot issue its image request")
+                page.imageUrl = url
+                // لا نبني GET عامًّا: بعض الإضافات تتجاوز imageRequest وتضيف
+                // Referer/Cookie/مضيفًا ديناميكيًّا. fetchImage هو عقد المصدر
+                // الحقيقي، واستخدام غيره كان يجعل صفحات سليمة حمراء.
+                httpSource.fetchImage(page).awaitSingle().use { response ->
                     val body = response.body.bytes()
                     require(body.size > 1024) { "image too small: ${body.size} bytes" }
+                    val type = response.header("content-type")
+                    val verdict = ImagePayloadPolicy.validate(type, body)
+                    require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
                     imageBytes = body.size
                     imageData = body
-                    "${body.size} بايت · ${response.header("content-type")}"
+                    "${body.size} بايت · $type"
                 }
             }
         }
