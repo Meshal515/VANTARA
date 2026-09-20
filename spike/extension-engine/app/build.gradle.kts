@@ -126,4 +126,6 @@ dependencies {
 
     // بعض المصادر تُقيّم JavaScript لفكّ روابط الصفحات
     implementation("com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597")
+
+    testImplementation("junit:junit:4.13.2")
 }
