@@ -400,27 +400,30 @@ class SourceProbe(private val http: OkHttpClient) {
                 imageUrl = url
                 val httpSource = asHttp ?: error("source is not HttpSource; cannot issue its image request")
                 page.imageUrl = url
-                // لا نبني GET عامًّا: بعض الإضافات تتجاوز imageRequest وتضيف
-                // Referer/Cookie/مضيفًا ديناميكيًّا. fetchImage هو عقد المصدر
-                // الحقيقي، واستخدام غيره كان يجعل صفحات سليمة حمراء.
-                httpSource.fetchImage(page).awaitSingle().use { response ->
-                    val body = BoundedPayloadReader.read(
-                        input = response.body.byteStream(),
-                        declaredLength = response.body.contentLength(),
-                        maxBytes = MAX_IMAGE_BYTES,
-                    )
-                    require(body.size > 1024) { "image too small: ${body.size} bytes" }
-                    val type = response.header("content-type")
-                    val verdict = ImagePayloadPolicy.validate(type, body)
-                    require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
-                    require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-                        "Android image decoder rejected payload"
+                // Headers قد تصل بنجاح ثم يقطع خادم HTTP/2 جسم الصورة
+                // بـStreamResetException. إعادة المحاولة في NetworkHelper لا
+                // ترى هذا العطل لأنه يقع بعد chain.proceed()، لذلك نعيد
+                // عملية الصورة كاملة هنا مع نفس imageRequest للمصدر.
+                retryImageTransport(maxAttempts = 3) {
+                    httpSource.fetchImage(page).awaitSingle().use { response ->
+                        val body = BoundedPayloadReader.read(
+                            input = response.body.byteStream(),
+                            declaredLength = response.body.contentLength(),
+                            maxBytes = MAX_IMAGE_BYTES,
+                        )
+                        require(body.size > 1024) { "image too small: ${body.size} bytes" }
+                        val type = response.header("content-type")
+                        val verdict = ImagePayloadPolicy.validate(type, body)
+                        require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
+                        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+                            "Android image decoder rejected payload"
+                        }
+                        imageBytes = body.size
+                        imageData = body
+                        "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
                     }
-                    imageBytes = body.size
-                    imageData = body
-                    "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
                 }
             }
         }
