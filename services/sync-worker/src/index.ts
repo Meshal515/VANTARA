@@ -1273,11 +1273,11 @@ async function allAccountIds(env: Env): Promise<string[]> {
  * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
  * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
  */
-export async function validateRecommendationResponses(
+async function recommendationResponseRecipients(
   ops: readonly IncomingOp[],
   userId: string,
   env: Env,
-): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+): Promise<Map<string, string | null>> {
   const ids: string[] = [];
   const seen = new Set<string>();
 
@@ -1288,8 +1288,6 @@ export async function validateRecommendationResponses(
     seen.add(id);
     ids.push(id);
   }
-
-  if (ids.length === 0) return null;
 
   const rows = new Map<string, string | null>();
   const CHUNK = 90;
@@ -1309,7 +1307,19 @@ export async function validateRecommendationResponses(
 
     for (const row of results) rows.set(row.id, row.recipient_user_id);
   }
+  return rows;
+}
 
+/**
+ * واجهة التحقق القديمة تبقى للاختبارات/المستهلكين المباشرين، لكن handleOps
+ * لم يعد يحول خطأ توصية واحدة إلى 4xx للدفعة كلها.
+ */
+export async function validateRecommendationResponses(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+  const rows = await recommendationResponseRecipients(ops, userId, env);
   for (const op of ops) {
     if (op.kind !== 'recommendation.respond') continue;
     const id = asString(op.payload['recommendationId'], 80);
@@ -1317,8 +1327,22 @@ export async function validateRecommendationResponses(
     if (!rows.has(id)) return { status: 404, error: 'recommendation_not_found' };
     if (rows.get(id) !== userId) return { status: 403, error: 'forbidden' };
   }
-
   return null;
+}
+
+async function invalidRecommendationResponseOps(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<Set<string>> {
+  const rows = await recommendationResponseRecipients(ops, userId, env);
+  const invalid = new Set<string>();
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id || !rows.has(id) || rows.get(id) !== userId) invalid.add(op.opId);
+  }
+  return invalid;
 }
 
 export async function loadOpContext(
