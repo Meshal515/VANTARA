@@ -85,17 +85,33 @@ function json(body: unknown, init: ResponseInit = {}, extra: Record<string, stri
 // ───────────────────────────── العدّاد ─────────────────────────────
 
 /**
- * يحجز رقم مراجعة واحدًا للطلب كله.
+ * لا يجوز نشر رقم مراجعة قبل الصفوف التي تحمله.
  *
- * كل عمليات الطلب تتشارك الرقم: الـrev رقم معاملة منطقية لا طابع لكل صف.
- * والفراغات فيه مقصودة ومقبولة — العميل يقارن بـ`>` فقط، فرقم محجوز لطلب فشل
- * لا يضرّ. وهذا أرخص من حجز رقم لكل عملية برحلة كتابة لكل واحدة.
+ * D1 لا exposes transaction handle طويل العمر، لذلك نقرأ المرشح ثم نحجزه
+ * داخل نفس batch الذي يكتب البيانات. لو قرأ كاتبان الرقم نفسه يتصادمان على
+ * PK في sync_revision_claims؛ معاملة الخاسر تتراجع بالكامل ثم يعيد المحاولة.
  */
-async function allocateRev(env: Env): Promise<number> {
-  const row = await env.DB.prepare('UPDATE sync_state SET rev = rev + 1 WHERE id = 1 RETURNING rev')
-    .first<{ rev: number }>();
-  if (!row) throw new Error('sync_state missing');
-  return row.rev;
+const SYNC_CLAIM_RETRIES = 6;
+
+function isSyncClaimConflict(error: unknown): boolean {
+  const message = String((error as { message?: unknown } | null)?.message ?? error ?? '');
+  return (
+    message.includes('sync_revision_claims.rev') ||
+    message.includes('sync_op_claims.op_id')
+  );
+}
+
+function revisionClaimStatements(
+  env: Env,
+  rev: number,
+  now: number,
+): D1PreparedStatement[] {
+  return [
+    env.DB.prepare(
+      'INSERT INTO sync_revision_claims (rev, committed_at) VALUES (?, ?)',
+    ).bind(rev, now),
+    env.DB.prepare('UPDATE sync_state SET rev = ? WHERE id = 1').bind(rev),
+  ];
 }
 
 async function currentRev(env: Env): Promise<number> {
@@ -647,7 +663,8 @@ export function statementsFor(
       const day = suppliedDay == null
         ? new Date(now).toISOString().slice(0, 10)
         : asString(suppliedDay, 10);
-      if (!day || !isIsoDay(day)) return null;
+      const today = new Date(now).toISOString().slice(0, 10);
+      if (!day || !isIsoDay(day) || day > today) return null;
       return [
         db
           .prepare(
@@ -832,6 +849,8 @@ export function statementsFor(
       if (!seriesRef || !body) return null;
       const parentId = asString(p['parentId'], 80);
       const parent = parentId ? ctx.comments?.[parentId] : undefined;
+      if (parentId && !parent) return null;
+      if (parent && parent.seriesRef !== seriesRef) return null;
       const link = socialLinkFor({ kind: 'comment', seriesRef, commentId: op.opId });
       // الحرق قرار الكاتب وحده، ويُقرأ صريحًا: أي شيء غير `true` ليس حرقًا
       const spoiler = isSpoiler(p['spoiler']);
@@ -898,6 +917,7 @@ export function statementsFor(
       const emoji = asString(p['emoji'], 16);
       if (!commentId || !emoji) return null;
       const comment = ctx.comments?.[commentId];
+      if (!comment) return null;
       const active = p['active'] === false ? 0 : 1;
       const statements: D1PreparedStatement[] = [
         db
@@ -1208,11 +1228,11 @@ async function allAccountIds(env: Env): Promise<string[]> {
  * لا query لكل عملية: مراجع التعليقات تُنزع تكراراتها وتُقرأ على دفعات صغيرة
  * حتى لا نصنع IN clause ضخمة. العمليات التي لا تشير إلى تعليق لا تلمس الجدول.
  */
-export async function validateRecommendationResponses(
+async function recommendationResponseAccess(
   ops: readonly IncomingOp[],
   userId: string,
   env: Env,
-): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+): Promise<Map<string, 'ok' | 'forbidden' | 'not_found'>> {
   const ids: string[] = [];
   const seen = new Set<string>();
 
@@ -1224,7 +1244,8 @@ export async function validateRecommendationResponses(
     ids.push(id);
   }
 
-  if (ids.length === 0) return null;
+  const access = new Map<string, 'ok' | 'forbidden' | 'not_found'>();
+  if (ids.length === 0) return access;
 
   const rows = new Map<string, string | null>();
   const CHUNK = 90;
@@ -1245,15 +1266,48 @@ export async function validateRecommendationResponses(
     for (const row of results) rows.set(row.id, row.recipient_user_id);
   }
 
+  for (const id of ids) {
+    if (!rows.has(id)) access.set(id, 'not_found');
+    else if (rows.get(id) !== userId) access.set(id, 'forbidden');
+    else access.set(id, 'ok');
+  }
+  return access;
+}
+
+/**
+ * العقد القديم باقٍ للاختبارات/المستهلكين المباشرين، لكن handleOps لا يعود
+ * يرفض الدفعة كلها بسببه؛ هناك يُعزل op المخالف وحده.
+ */
+export async function validateRecommendationResponses(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<{ status: 403 | 404; error: 'forbidden' | 'recommendation_not_found' } | null> {
+  const access = await recommendationResponseAccess(ops, userId, env);
   for (const op of ops) {
     if (op.kind !== 'recommendation.respond') continue;
     const id = asString(op.payload['recommendationId'], 80);
     if (!id) continue;
-    if (!rows.has(id)) return { status: 404, error: 'recommendation_not_found' };
-    if (rows.get(id) !== userId) return { status: 403, error: 'forbidden' };
+    const verdict = access.get(id);
+    if (verdict === 'not_found') return { status: 404, error: 'recommendation_not_found' };
+    if (verdict === 'forbidden') return { status: 403, error: 'forbidden' };
   }
-
   return null;
+}
+
+async function invalidRecommendationResponseOpIds(
+  ops: readonly IncomingOp[],
+  userId: string,
+  env: Env,
+): Promise<Set<string>> {
+  const access = await recommendationResponseAccess(ops, userId, env);
+  const invalid = new Set<string>();
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.respond') continue;
+    const id = asString(op.payload['recommendationId'], 80);
+    if (!id || access.get(id) !== 'ok') invalid.add(op.opId);
+  }
+  return invalid;
 }
 
 export async function loadOpContext(
@@ -1311,73 +1365,80 @@ async function applyFieldMerge(
   now: number,
   env: Env,
 ): Promise<number> {
-  // إعادة نفس op_id لا يجوز أن تحصل على rev جديد وتكتب قيمة قديمة فوق الأحدث.
-  const previous = await env.DB.prepare('SELECT rev FROM applied_ops WHERE op_id = ?')
-    .bind(op.opId)
-    .first<{ rev: number }>();
-  if (previous) return Number(previous.rev);
+  for (let attempt = 0; attempt < SYNC_CLAIM_RETRIES; attempt += 1) {
+    const previous = await env.DB.prepare('SELECT rev FROM applied_ops WHERE op_id = ?')
+      .bind(op.opId)
+      .first<{ rev: number }>();
+    if (previous) return Number(previous.rev);
 
-  const rev = await allocateRev(env);
-  // الهوية الداخلية تُسقط قبل الدمج، ولا يُرفض الطلب: الرفض يجعل تعديل الاسم
-  // يفشل بلا سبب ظاهر للمستخدم.
-  const patch = stripImmutable((op.payload['fields'] ?? {}) as Record<string, unknown>);
-  const statements: D1PreparedStatement[] = [];
+    const rev = (await currentRev(env)) + 1;
+    const patch = stripImmutable((op.payload['fields'] ?? {}) as Record<string, unknown>);
+    const statements: D1PreparedStatement[] = [];
+    const safeFields = Object.entries(patch).filter(([key]) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key));
 
-  // مفاتيح settings تدخل JSON path. نقبل أسماء الحقول المعتادة فقط حتى لا
-  // يستطيع مفتاح ملفّق تغيير مسار JSON آخر.
-  const safeFields = Object.entries(patch).filter(([key]) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key));
-
-  if (op.kind === 'settings.patch') {
-    statements.push(
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev)
-         VALUES (?, '{}', '{}', 0)`,
-      ).bind(userId),
-    );
-    for (const [key, value] of safeFields) {
-      const path = `$.${key}`;
+    if (op.kind === 'settings.patch') {
       statements.push(
         env.DB.prepare(
-          `UPDATE settings
-              SET data = json_set(data, ?, json(?)),
-                  field_revs = json_set(field_revs, ?, ?),
-                  rev = ?
-            WHERE user_id = ?
-              AND ? > COALESCE(json_extract(field_revs, ?), 0)
-              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
-        ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
+          `INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev)
+           VALUES (?, '{}', '{}', 0)`,
+        ).bind(userId),
       );
+      for (const [key, value] of safeFields) {
+        const path = `$.${key}`;
+        statements.push(
+          env.DB.prepare(
+            `UPDATE settings
+                SET data = json_set(data, ?, json(?)),
+                    field_revs = json_set(field_revs, ?, ?),
+                    rev = ?
+              WHERE user_id = ?
+                AND ? > COALESCE(json_extract(field_revs, ?), 0)
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
+        );
+      }
+    } else {
+      statements.push(
+        env.DB.prepare(
+          'INSERT OR IGNORE INTO profiles (user_id, field_revs, rev) VALUES (?, ?, 0)',
+        ).bind(userId, '{}'),
+      );
+      for (const [key, value] of safeFields) {
+        const column = PROFILE_COLUMNS[key];
+        if (!column) continue;
+        const path = `$.${key}`;
+        statements.push(
+          env.DB.prepare(
+            `UPDATE profiles
+                SET ${column} = ?, field_revs = json_set(field_revs, ?, ?), rev = ?
+              WHERE user_id = ?
+                AND ? > COALESCE(json_extract(field_revs, ?), 0)
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          ).bind(value, path, rev, rev, userId, rev, path, op.opId),
+        );
+      }
     }
-  } else {
-    statements.push(
+
+    const batch = [
+      ...revisionClaimStatements(env, rev, now),
       env.DB.prepare(
-        'INSERT OR IGNORE INTO profiles (user_id, field_revs, rev) VALUES (?, ?, 0)',
-      ).bind(userId, '{}'),
-    );
-    for (const [key, value] of safeFields) {
-      const column = PROFILE_COLUMNS[key];
-      if (!column) continue;
-      const path = `$.${key}`;
-      statements.push(
-        env.DB.prepare(
-          `UPDATE profiles
-              SET ${column} = ?, field_revs = json_set(field_revs, ?, ?), rev = ?
-            WHERE user_id = ?
-              AND ? > COALESCE(json_extract(field_revs, ?), 0)
-              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
-        ).bind(value, path, rev, rev, userId, rev, path, op.opId),
-      );
+        'INSERT INTO sync_op_claims (op_id, user_id, kind, claimed_at) VALUES (?, ?, ?, ?)',
+      ).bind(op.opId, userId, op.kind, now),
+      ...statements,
+      env.DB.prepare(
+        'INSERT INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+      ).bind(op.opId, userId, op.kind, rev, now),
+    ];
+
+    try {
+      await env.DB.batch(batch);
+      return rev;
+    } catch (error) {
+      if (isSyncClaimConflict(error)) continue;
+      throw error;
     }
   }
-
-  // D1 batch معاملة واحدة: الأثر وحجز op_id يثبتان معًا أو لا شيء منهما.
-  statements.push(
-    env.DB.prepare(
-      'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
-    ).bind(op.opId, userId, op.kind, rev, now),
-  );
-  await env.DB.batch(statements);
-  return rev;
+  throw new Error('sync_claim_retry_exhausted');
 }
 
 const MAX_OPS_PER_REQUEST = 200;
@@ -1410,81 +1471,95 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   );
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
 
-  const authorizationError = await validateRecommendationResponses(ops, userId, env);
-  if (authorizationError) {
-    return json({ error: authorizationError.error }, { status: authorizationError.status });
-  }
-
-  // كل رقعة حقول لها rev مستقل، وأثرها وحجز op_id يثبتان في دفعة واحدة.
-  // هذا يمنع رقعة قديمة معادة من الكتابة فوق قيمة أحدث، ويجعل رقعتين متداخلتين
-  // في نفس الطلب تتقدمان بالترتيب بدل أن تشتركا في rev واحد.
-  for (const op of ops) {
-    if (FIELD_MERGE_KINDS.has(op.kind)) await applyFieldMerge(op, userId, now, env);
-  }
-
-  const rev = await allocateRev(env);
-
-  // الأثر ثم الحجز، في دفعة واحدة.
-  //
-  // الترتيب هو كل شيء. الحجز في دفعة منفصلة قبل الأثر يعني أن فشل دفعة الأثر
-  // يترك op_id محجوزًا بلا كتابة: إعادة محاولة العميل تُتجاهل، والكتابة تُفقد
-  // بصمت — وهذا أسوأ عيب ممكن في المزامنة.
-  //
-  // D1 تنفّذ batch كمعاملة واحدة، فالأثر والحجز يثبتان معًا أو لا شيء منهما.
-  // والأثر يسبق الحجز حتى يرى حرس `NOT EXISTS` في العمليات التراكمية حالة
-  // ما قبل هذا الطلب: إعادة تسليم تجد op_id موجودًا من طلب سابق فلا تحتسب
-  // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
-  // قائمة الحسابات تُقرأ مرة واحدة وفقط إن احتاجتها عملية: توصية «للجميع»
-  // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
+  const invalidRecommendations = await invalidRecommendationResponseOpIds(ops, userId, env);
   const ctx = await loadOpContext(ops, env);
-
-  // عملية لم تُنتج جملة واحدة لا تُقَرّ ولا يُحجز لها op_id.
-  //
-  // `statementsFor` ترجع `null` على كل ما لا تعرفه: `kind` غير منشور بعد،
-  // أو حمولة بلا مفتاحها المطلوب. إقرارها يعني أن العميل يُفرّغ طابوره
-  // والكتابة لم تحدث ولن تحدث — وهو الضياع الصامت نفسه الذي يحرس منه
-  // ترتيب «الأثر ثم الحجز» أعلاه، داخلًا من الباب الآخر.
-  //
-  // وهذا ليس فرضًا نظريًّا: ثلاثة أجهزة أندرويد تُحدَّث في أوقات مختلفة،
-  // فAPK أحدث من الـWorker المنشور يرسل `kind` لا يعرفه الخادم.
-  //
-  // وطابور B5 عند العميل يعرف هذا العقد أصلًا: ما لا تذكره الاستجابة في
-  // `applied` ولا `skipped` يُعزل حالًا (`not_settled`) فيظهر للمستخدم بدل
-  // أن يُعاد إلى الأبد أو يُنسى. فلا حقل جديد هنا: الإسقاط هو الإشارة.
-  const statements: D1PreparedStatement[] = [];
-  const unapplied = new Set<string>();
   const skipped = new Set<string>();
+  const unapplied = new Set<string>(invalidRecommendations);
+  const appliedIds = new Set<string>();
+  let cursor = await currentRev(env);
+
+  // رقع الحقول تحتاج rev مستقل لكل عملية حتى تبقى «آخر رقعة» قابلة للترتيب.
   for (const op of ops) {
-    if (FIELD_MERGE_KINDS.has(op.kind)) continue;
+    if (!FIELD_MERGE_KINDS.has(op.kind) || invalidRecommendations.has(op.opId)) continue;
+    const rev = await applyFieldMerge(op, userId, now, env);
+    appliedIds.add(op.opId);
+    cursor = Math.max(cursor, rev);
+  }
+
+  let pending = ops.filter((op) => {
+    if (FIELD_MERGE_KINDS.has(op.kind) || invalidRecommendations.has(op.opId)) return false;
     if (DEPRECATED_NOOP_KINDS.has(op.kind)) {
       skipped.add(op.opId);
-      continue;
+      return false;
     }
-    const built = statementsFor(op, userId, rev, now, env, ctx);
-    if (built && built.length > 0) statements.push(...built);
-    else unapplied.add(op.opId);
-  }
-  const applied = ops.filter((op) => !unapplied.has(op.opId) && !skipped.has(op.opId));
-  for (const op of applied) {
-    // عمليات الحقول حجزت op_id ذرّيًا مع أثرها داخل applyFieldMerge.
-    if (FIELD_MERGE_KINDS.has(op.kind)) continue;
-    statements.push(
-      env.DB.prepare(
-        'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
-      ).bind(op.opId, userId, op.kind, rev, now),
-    );
-  }
-  // D1 ترفض دفعة فارغة (`No SQL statements detected`). دفعة كل عملياتها
-  // مجهولة تنتهي هنا بلا جملة واحدة، فالنداء يرمي ويصير الردّ 500 — أي
-  // «أعد المحاولة» عند العميل، على عمليات لن تُطبَّق أبدًا.
-  if (statements.length > 0) await env.DB.batch(statements);
+    return true;
+  });
 
-  // المُقَرّة مستقرّة الآن: العميل يُفرّغ طابوره منها. التمييز بين «طُبّقت»
-  // و«كانت مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
+  for (let attempt = 0; attempt < SYNC_CLAIM_RETRIES && pending.length > 0; attempt += 1) {
+    // إعادة إرسال عادية لا تدخل حتى دفعة الكتابة. أما السباق الحقيقي فيُحسم
+    // بمفتاح sync_op_claims داخل المعاملة، ثم نعيد هذه القراءة في المحاولة التالية.
+    const existing = await env.DB.batch(
+      pending.map((op) =>
+        env.DB.prepare('SELECT rev FROM applied_ops WHERE op_id = ?').bind(op.opId),
+      ),
+    );
+    pending = pending.filter((op, index) => {
+      if ((existing[index]?.results?.length ?? 0) > 0) {
+        skipped.add(op.opId);
+        return false;
+      }
+      return true;
+    });
+    if (pending.length === 0) break;
+
+    const rev = (await currentRev(env)) + 1;
+    const effects: D1PreparedStatement[] = [];
+    const candidates: IncomingOp[] = [];
+    for (const op of pending) {
+      const built = statementsFor(op, userId, rev, now, env, ctx);
+      if (built && built.length > 0) {
+        candidates.push(op);
+        effects.push(...built);
+      } else {
+        unapplied.add(op.opId);
+      }
+    }
+    pending = candidates;
+    if (pending.length === 0) break;
+
+    const batch: D1PreparedStatement[] = [
+      ...revisionClaimStatements(env, rev, now),
+      ...pending.map((op) =>
+        env.DB.prepare(
+          'INSERT INTO sync_op_claims (op_id, user_id, kind, claimed_at) VALUES (?, ?, ?, ?)',
+        ).bind(op.opId, userId, op.kind, now),
+      ),
+      ...effects,
+      ...pending.map((op) =>
+        env.DB.prepare(
+          'INSERT INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+        ).bind(op.opId, userId, op.kind, rev, now),
+      ),
+    ];
+
+    try {
+      await env.DB.batch(batch);
+      for (const op of pending) appliedIds.add(op.opId);
+      cursor = rev;
+      pending = [];
+      break;
+    } catch (error) {
+      if (isSyncClaimConflict(error)) continue;
+      throw error;
+    }
+  }
+
+  if (pending.length > 0) throw new Error('sync_claim_retry_exhausted');
+
   return json({
-    applied: applied.map((op) => op.opId),
+    applied: [...appliedIds],
     skipped: [...skipped],
-    cursor: rev,
+    cursor,
     serverRev: await currentRev(env),
   });
 }
@@ -1774,7 +1849,7 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     const ms = Number(row['active_ms'] ?? 0);
     totalMs += ms;
     if (day === today) todayMs += ms;
-    if (day >= weekStart) weekMs += ms;
+    if (day >= weekStart && day <= today) weekMs += ms;
   }
 
   return json({ userId: targetId, ...stats, usage: { todayMs, weekMs, totalMs } });
