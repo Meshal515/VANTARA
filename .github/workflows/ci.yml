@@ -1,6 +1,7 @@
 name: VANTARA CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - '**'
@@ -15,32 +16,272 @@ concurrency:
 
 jobs:
   node:
+    name: Node backend
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      POSTGRES_USER: vantara
+      POSTGRES_PASSWORD: vantara-ci-password
+      POSTGRES_DB: vantara
+      UCHIYOMI_DB: uchiyomi
+      PUBLIC_ORIGIN: http://127.0.0.1:8080
+      SESSION_SECRET: ci-session-secret-ci-session-secret-1234
+      VANTARA_IDENTITY_SECRET: ci-identity-secret-ci-identity-secret-12
+      TUNNEL_TOKEN: ci-unused-tunnel-token
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan public Git history for credential signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+'
+          commits="$(git rev-list --all)"
+          if [ -n "$commits" ]; then
+            set +e
+            git grep -nI -E -e "$pattern" $commits > /tmp/history-credential-scan 2>&1
+            scan_status=$?
+            set -e
+            case "$scan_status" in
+              0)
+                cat /tmp/history-credential-scan
+                echo 'Credential-like material found in public Git history.'
+                exit 1
+                ;;
+              1) ;;
+              *)
+                cat /tmp/history-credential-scan
+                echo "Credential history scan itself failed with status $scan_status."
+                exit "$scan_status"
+                ;;
+            esac
+          fi
+
+      - name: Reject tracked secret files
+        shell: bash
+        run: |
+          bad="$(
+            git ls-files |
+              grep -E '(^|/)(\.env($|\.)|\.dev\.vars$|id_rsa$|.*\.(pem|key|p12|pfx|jks)$)' |
+              grep -vE '(^|/)\.env\.example$' || true
+          )"
+          if [ -n "$bad" ]; then
+            echo "Secret-like tracked files are not allowed:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Scan production source for credential signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          git grep -nI -E -e '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' -- \
+            ':!*.test.*' ':!**/tests/**' ':!.env.example' > /tmp/source-credential-scan 2>&1
+          scan_status=$?
+          set -e
+          case "$scan_status" in
+            0)
+              cat /tmp/source-credential-scan
+              echo 'Credential-like material found in tracked production source.'
+              exit 1
+              ;;
+            1) ;;
+            *)
+              cat /tmp/source-credential-scan
+              echo "Credential source scan itself failed with status $scan_status."
+              exit "$scan_status"
+              ;;
+          esac
+          grep -q '__D1_DATABASE_ID__' services/sync-worker/wrangler.toml
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
           run_install: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+
       - name: Repository safety invariants
         run: pnpm test:safety
-      - name: B1 clean database bootstrap + backup/restore
+
+      - name: Validate operational scripts
+        run: node --check services/sync-worker/verify.mjs
+
+      - name: Clean database bootstrap + backup/restore
         run: sh infra/test-db-bootstrap.sh
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      # البناء قبل الفحص: `services/sync-worker` و`apps/api` يستوردان
-      # `@vantara/domain` عبر declarations مُولَّدة، فبلا بناء أولًا يُفحص
-      # المشروع على مخرجات قديمة — أو لا شيء — ويمرّ ما لا يجب أن يمرّ.
-      - run: pnpm build
-      - run: pnpm typecheck
-      - run: pnpm test
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint repository
+        run: pnpm lint
+
+      - name: Build repository
+        run: pnpm build
+
+      - name: Typecheck repository
+        run: pnpm typecheck
+
+      - name: Test repository
+        run: pnpm test
+
+      - name: Start live Postgres and Uchiyomi
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose='docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml'
+          $compose down -v --remove-orphans >/dev/null 2>&1 || true
+          $compose up -d postgres uchiyomi
+
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8080/livez >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 120 ]; then
+              $compose ps
+              $compose logs postgres uchiyomi
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8080/livez >/dev/null
+
+      - name: Create temporary Uchiyomi admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST http://127.0.0.1:8080/api/setup             -H 'Content-Type: application/json'             --data '{"username":"mansour","password":"ci-only-password-1234567890123456","displayName":"CI Admin"}'
+
+      - name: Probe Uchiyomi token self-revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          login_json="$(curl -fsS -X POST http://127.0.0.1:8080/auth/login             -H 'Content-Type: application/json'             --data '{"username":"mansour","password":"ci-only-password-1234567890123456"}')"
+          session_token="$(printf '%s' "$login_json" | jq -er '.accessToken')"
+
+          minted_json="$(curl -fsS -X POST http://127.0.0.1:8080/api/tokens             -H "Authorization: Bearer $session_token"             -H 'Content-Type: application/json'             --data '{"name":"vantara-self-revoke-probe","scopes":["read","write"],"expiresInDays":1}')"
+          token_id="$(printf '%s' "$minted_json" | jq -er '.id')"
+          token="$(printf '%s' "$minted_json" | jq -er '.token')"
+
+          curl -fsS http://127.0.0.1:8080/auth/me             -H "Authorization: Bearer $token" >/dev/null
+
+          revoke_status="$(curl -sS -o /tmp/revoke-body -w '%{http_code}'             -X DELETE "http://127.0.0.1:8080/api/tokens/$token_id"             -H "Authorization: Bearer $token")"
+          case "$revoke_status" in
+            2*) ;;
+            *) cat /tmp/revoke-body; echo "self-revoke returned HTTP $revoke_status"; exit 1 ;;
+          esac
+
+          after_status="$(curl -sS -o /tmp/after-revoke -w '%{http_code}'             http://127.0.0.1:8080/auth/me             -H "Authorization: Bearer $token")"
+          test "$after_status" = '401'
+
+      - name: Apply VANTARA Postgres migrations
+        env:
+          DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
+        run: pnpm --filter @vantara/db migrate
+
+      - name: Smoke boot actual API server
+        shell: bash
+        env:
+          NODE_ENV: test
+          HOST: 127.0.0.1
+          PORT: '3100'
+          DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
+          UCHIYOMI_URL: http://127.0.0.1:8080
+          SESSION_SECRET: ci-session-secret-ci-session-secret-1234
+          VANTARA_IDENTITY_SECRET: ci-identity-secret-ci-identity-secret-12
+          COOKIE_SECURE: 'false'
+          VANTARA_DISABLE_JOBS: 'true'
+          LOG_LEVEL: error
+        run: |
+          set -euo pipefail
+          pnpm --filter @vantara/api start >/tmp/vantara-api.log 2>&1 &
+          api_pid=$!
+          cleanup_api() { kill "$api_pid" >/dev/null 2>&1 || true; }
+          trap cleanup_api EXIT INT TERM
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3100/livez >/dev/null               && curl -fsS http://127.0.0.1:3100/healthz >/dev/null; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/vantara-api.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Exercise live dependency restarts
+        shell: bash
+        env:
+          NODE_ENV: test
+          HOST: 127.0.0.1
+          PORT: '3101'
+          DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
+          UCHIYOMI_URL: http://127.0.0.1:8080
+          SESSION_SECRET: ci-session-secret-ci-session-secret-1234
+          VANTARA_IDENTITY_SECRET: ci-identity-secret-ci-identity-secret-12
+          COOKIE_SECURE: 'false'
+          VANTARA_DISABLE_JOBS: 'true'
+          LOG_LEVEL: error
+        run: |
+          set -euo pipefail
+          compose='docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml'
+          node apps/api/dist/server.js >/tmp/vantara-restart-api.log 2>&1 &
+          api_pid=$!
+          cleanup_api() { kill "$api_pid" >/dev/null 2>&1 || true; }
+          trap cleanup_api EXIT INT TERM
+
+          wait_ready() {
+            for attempt in $(seq 1 45); do
+              if ! kill -0 "$api_pid" >/dev/null 2>&1; then
+                echo 'API process exited during dependency restart probe.'
+                cat /tmp/vantara-restart-api.log
+                return 1
+              fi
+              if curl -fsS http://127.0.0.1:3101/healthz >/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            cat /tmp/vantara-restart-api.log
+            $compose ps
+            $compose logs postgres uchiyomi
+            return 1
+          }
+
+          wait_ready
+
+          # Same API process must reconnect after PostgreSQL disappears/restarts.
+          $compose restart postgres
+          wait_ready
+
+          # Same API process must recover when the content upstream restarts.
+          $compose restart uchiyomi
+          wait_ready
+
+      - name: Run live API integration
+        env:
+          DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
+          UCHIYOMI_URL: http://127.0.0.1:8080
+          TEST_USERNAME: mansour
+          TEST_PASSWORD: ci-only-password-1234567890123456
+          VANTARA_REQUIRE_LIVE_INTEGRATION: 'true'
+        run: pnpm --filter @vantara/api test
+
+      - name: Stop live integration services
+        if: always()
+        shell: bash
+        run: docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml down -v --remove-orphans
 
   translation-worker:
+    name: Translation worker
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -48,6 +289,7 @@ jobs:
         working-directory: services/translation-worker
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -55,18 +297,24 @@ jobs:
           cache-dependency-path: |
             services/translation-worker/requirements.txt
             services/translation-worker/requirements-dev.txt
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install Python test dependencies
+        run: pip install Pillow==12.3.0 pytest==8.3.4
+
       - name: Install Noto test fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-core
           test -f /usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf
           test -f /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+
       - name: Verify RAQM support
         run: |
           python - <<'PY'
           from PIL import features
-          assert features.check('raqm'), 'Pillow was installed without RAQM; Arabic typesetting would be unsafe'
+          assert features.check('raqm'), 'Pillow was installed without RAQM'
           print('RAQM OK')
           PY
-      - run: pytest -q
+
+      - name: Run translation tests
+        run: pytest -q
