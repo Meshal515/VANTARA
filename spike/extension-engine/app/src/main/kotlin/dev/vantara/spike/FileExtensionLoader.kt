@@ -15,7 +15,7 @@ import java.security.MessageDigest
  *
  * هذا هو الفرق الجوهري عن Mihon. Mihon يمسح الحزم المثبَّتة
  * (`getInstalledPackages`)، فكل إضافة تحتاج نافذة تثبيت يضغطها المستخدم —
- * ولهذا وُجد Shizuku. ونحن نريد ٤٣ مصدرًا جاهزًا من أول تشغيل بلا ضغطة، فلا
+ * ولهذا وُجد Shizuku. ونحن نريد عشرات المصادر جاهزة من أول تشغيل بلا ضغطة، فلا
  * نستطيع أن نقلّده.
  *
  * والمسار هنا: ننزّل الـAPK إلى مجلدنا الخاص، نتحقق من بصمته، نجعله
@@ -105,24 +105,48 @@ class FileExtensionLoader(private val context: Context) {
             )
         }
 
-        // ٣) البيانات الوصفية من الأرشيف نفسه، بلا تثبيت
-        val meta: Bundle = try {
+        // ٣) البيانات الوصفية من الأرشيف نفسه، بلا تثبيت.
+        //
+        // لا يكفي أن «APK صالح»: في spike الكلّي ننزّل عشرات الحزم، فخلط
+        // رابطٍ بحزمة أخرى يجب أن يسقط هنا بوضوح بدل أن يظهر لاحقًا كعطل مصدر.
+        val info = try {
             @Suppress("DEPRECATION")
-            val info = context.packageManager.getPackageArchiveInfo(
+            context.packageManager.getPackageArchiveInfo(
                 apk.absolutePath,
                 PackageManager.GET_META_DATA,
             ) ?: return Result.Fail("parse", "getPackageArchiveInfo returned null")
-            @Suppress("DEPRECATION")
-            info.applicationInfo?.metaData
-                ?: return Result.Fail("parse", "apk carries no application metaData")
         } catch (t: Throwable) {
             return Result.Fail("parse", "cannot parse apk archive", t)
         }
+        if (info.packageName != spec.pkg) {
+            return Result.Fail(
+                "identity",
+                "package mismatch: expected ${spec.pkg}, archive says ${info.packageName}",
+            )
+        }
+        val archiveVersion = info.versionName
+        if (archiveVersion != null && archiveVersion != spec.versionName) {
+            return Result.Fail(
+                "identity",
+                "version mismatch: expected ${spec.versionName}, archive says $archiveVersion",
+            )
+        }
+        @Suppress("DEPRECATION")
+        val meta: Bundle = info.applicationInfo?.metaData
+            ?: return Result.Fail("parse", "apk carries no application metaData")
 
         val libVersion = readLibVersion(meta)
             ?: return Result.Fail("lib", "no extension lib version in metaData")
         if (libVersion !in LIB_MIN..LIB_MAX) {
             return Result.Fail("lib", "unsupported extension lib $libVersion")
+        }
+        // expectedLib ليس للعرض. تغيّره تغيير عقد؛ لا نقبل 1.6 بينما البيان
+        // الذي بنينا عليه يقول 1.4 حتى لو كلاهما داخل النطاق المدعوم.
+        if (kotlin.math.abs(libVersion - spec.expectedLib) > 0.0001) {
+            return Result.Fail(
+                "lib",
+                "extensionLib mismatch: index ${spec.expectedLib}, archive $libVersion",
+            )
         }
 
         val classNames = meta.getString(METADATA_CLASS)
