@@ -136,7 +136,11 @@ export function createSync({ baseUrl }) {
   let mirror = readJson(MIRROR_KEY, {});
   let quarantine = readJson(QUARANTINE_KEY, []);
   let pulling = false;
+  let pullAgain = false;
   let pushing = false;
+  // كل تبديل/خروج من الحساب يبطل الطلبات التي بدأت تحت الجلسة السابقة.
+  // الرد القديم لا يحق له تعديل مرآة أو طابور أو تجديد جلسة الحساب الجديد.
+  let sessionGeneration = 0;
 
   /** محاولات متتالية لكل عملية، بمفتاح op_id. لا تُحفظ: العدّ لكل جلسة. */
   const attemptsOf = new Map();
@@ -245,34 +249,53 @@ export function createSync({ baseUrl }) {
     writeJson(USER_KEY, user);
   }
 
+  function staleSessionError() {
+    const error = new Error('stale_session');
+    error.staleSession = true;
+    return error;
+  }
+
   async function refreshSession() {
     if (!user?.userId) {
       const error = new Error('unauthorized');
       error.status = 401;
       throw error;
     }
+    const generation = sessionGeneration;
+    const userId = user.userId;
     try {
-      const payload = await sessionPayload(user.userId);
+      const payload = await sessionPayload(userId);
+      if (generation !== sessionGeneration || user?.userId !== userId) throw staleSessionError();
       persistSession(payload);
       emit(['session']);
       return payload;
     } catch (error) {
-      token = null;
-      localStorage.removeItem(TOKEN_KEY);
-      emit(['session']);
+      if (error?.staleSession) throw error;
+      if (generation === sessionGeneration && user?.userId === userId) {
+        token = null;
+        localStorage.removeItem(TOKEN_KEY);
+        emit(['session']);
+      }
       throw error;
     }
   }
 
   async function request(path, options = {}, allowRefresh = true) {
+    const generation = sessionGeneration;
+    const userId = user?.userId ?? null;
+    const requestToken = token;
     const headers = { ...(options.headers ?? {}) };
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (requestToken) headers.authorization = `Bearer ${requestToken}`;
     if (options.body) headers['content-type'] = 'application/json';
     const response = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+
+    if (generation !== sessionGeneration || userId !== (user?.userId ?? null)) {
+      throw staleSessionError();
+    }
 
     if (response.status === 401) {
       if (allowRefresh && user?.userId) {
@@ -382,14 +405,20 @@ export function createSync({ baseUrl }) {
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
   async function signIn(userId) {
     const previousId = user?.userId ?? null;
+    const generation = ++sessionGeneration;
     const payload = await sessionPayload(userId);
+    if (generation !== sessionGeneration) throw staleSessionError();
     persistSession(payload);
     if (previousId && previousId !== user.userId) resetAll();
     emit(['session']);
+    // إذا كان سحب الحساب السابق ما زال في الجو، pullAgain يضمن بدء سحب
+    // الحساب الجديد فور انتهاء الطلب القديم بدل انتظار المؤقت الدوري.
+    void pull();
     return user;
   }
 
   function signOut() {
+    sessionGeneration += 1;
     token = null;
     user = null;
     localStorage.removeItem(TOKEN_KEY);
@@ -399,13 +428,15 @@ export function createSync({ baseUrl }) {
   }
 
   async function logoutDevice() {
-    if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    // لا نمسح إثبات الجهاز ولا ندّعي نجاح الخروج البعيد إلا بعد تأكيد الخادم.
+    // عند 5xx/انقطاع الشبكة تبقى الجلسة قابلة لإعادة المحاولة بدل نجاح كاذب.
+    if (token) await request('/v1/device/logout', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
 
   async function logoutAll() {
-    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
@@ -445,13 +476,20 @@ export function createSync({ baseUrl }) {
    * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
    */
   async function pull() {
-    if (!token || pulling) return;
+    if (!token) return;
+    if (pulling) {
+      pullAgain = true;
+      return;
+    }
+    const generation = sessionGeneration;
+    const userId = user?.userId ?? null;
     pulling = true;
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
         const payload = await request(`/v1/sync?since=${cursor}`);
+        if (generation !== sessionGeneration || userId !== (user?.userId ?? null)) return;
         if (!payload) break;
 
         if (payload.reset) {
@@ -490,10 +528,16 @@ export function createSync({ baseUrl }) {
       }
       lastError = null;
     } catch (error) {
-      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
-      emit(['sync']);
+      if (!error?.staleSession) {
+        lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
+        emit(['sync']);
+      }
     } finally {
       pulling = false;
+      if (pullAgain) {
+        pullAgain = false;
+        setTimeout(() => void pull(), 0);
+      }
     }
   }
 
@@ -552,6 +596,8 @@ export function createSync({ baseUrl }) {
     if (!force && Date.now() < nextPushAt) return;
     if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
+    const generation = sessionGeneration;
+    const userId = user?.userId ?? null;
     pushing = true;
     try {
       // لا شيء في الطريق الآن، فالضغط آمن: يقلّص الطلبات بعد انقطاع طويل
@@ -567,7 +613,9 @@ export function createSync({ baseUrl }) {
         let payload;
         try {
           payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
+          if (generation !== sessionGeneration || userId !== (user?.userId ?? null)) return;
         } catch (error) {
+          if (error?.staleSession) return;
           const status = error?.status ?? 0;
           lastError = { status, at: Date.now(), correlationId: error?.correlationId ?? null };
           const verdict = classifyFailure(status);
