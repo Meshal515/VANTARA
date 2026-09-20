@@ -57,7 +57,7 @@ private const val IKEN_CLASS_NAME = "eu.kanade.tachiyomi.multisrc.iken.Iken"
  * اللحظة** لا خطَّ أساسٍ من الأمس. ثم يعرض **فرضية موسومة كفرضية**،
  * والتصنيف يبقى لقارئ التقرير.
  */
-class SourceProbe(private val http: OkHttpClient) {
+class SourceProbe {
 
     data class Step(
         val name: String,
