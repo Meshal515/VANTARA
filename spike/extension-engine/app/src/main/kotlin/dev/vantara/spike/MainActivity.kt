@@ -436,15 +436,23 @@ class MainActivity : AppCompatActivity() {
                             continue
                         }
                         val seconds = (System.currentTimeMillis() - started) / 1000
+                        val countText =
+                            if (reach.reachedEnd) {
+                                "${reach.uniqueWorks}"
+                            } else {
+                                "على الأقل ${reach.uniqueWorks}"
+                            }
                         line(
-                            "$label — أعمال فريدة: ${reach.uniqueWorks} · " +
-                                "صفحات: ${reach.pagesFetched} · ${seconds}ث",
+                            "$label — أعمال فريدة: $countText · " +
+                                "صفحات ناجحة: ${reach.pagesFetched} · " +
+                                "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
                         )
                         line(
                             if (reach.reachedEnd) {
-                                "✓ بلغنا نهاية الكتالوج — المصدر قال لا مزيد"
+                                "✓ COMPLETE — بلغنا نهاية الكتالوج فعلًا"
                             } else {
-                                "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
+                                "⚠ ${catalogueStopLabel(reach.stopKind)} — العدد جزئي وليس إجماليًا · " +
+                                    "السبب: ${reach.stoppedBecause}"
                             },
                             bad = !reach.reachedEnd,
                         )
@@ -458,6 +466,17 @@ class MainActivity : AppCompatActivity() {
                 button.isEnabled = true
             }
         }
+    }
+
+    private fun catalogueStopLabel(kind: SourceProbe.CatalogueStopKind): String = when (kind) {
+        SourceProbe.CatalogueStopKind.COMPLETE -> "COMPLETE"
+        SourceProbe.CatalogueStopKind.REPEAT_SUSPECTED -> "LOOP_SUSPECTED"
+        SourceProbe.CatalogueStopKind.CLOUDFLARE -> "CLOUDFLARE"
+        SourceProbe.CatalogueStopKind.DEAD_HOST -> "DEAD_HOST"
+        SourceProbe.CatalogueStopKind.TIMEOUT -> "TIMEOUT"
+        SourceProbe.CatalogueStopKind.SOURCE_ERROR -> "SOURCE_ERROR"
+        SourceProbe.CatalogueStopKind.TIME_BUDGET -> "TIME_BUDGET"
+        SourceProbe.CatalogueStopKind.PAGE_CAP -> "PAGE_CAP"
     }
 
     private suspend fun render(report: SourceProbe.Report) {
