@@ -219,13 +219,28 @@ class SourceProbe(private val http: OkHttpClient) {
     }
 
     /**
-     * عميل الفحص الحيّ: نفس إعداد المصدر، بمهلة نداءٍ أقصر.
+     * عميل فحص حيّ خام ومعزول عن عميل المصادر.
      *
-     * الفحص يجري **داخل معالج الفشل**، فلو أخذ دقيقتَي العميل الأصلي تأخّر
-     * السطر الذي يشرح الفشل أصلًا — ويصير التشخيص هو ما يؤخّر التشخيص.
+     * الفحص يجري **داخل معالج الفشل**، لذلك لا يجوز أن يحمل Cloudflare
+     * interceptor أو retry أو cookies من المصدر؛ وإلا يمكن للتشخيص نفسه أن
+     * يعلق بعد انتهاء مهلة الخطوة ويمنع الانتقال للمصدر التالي.
      */
     private val prober: OkHttpClient by lazy {
-        http.newBuilder().callTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS).build()
+        // Diagnostic reachability must NOT reuse the source client. Reusing it
+        // also reuses Cloudflare/retry/cookie interceptors, so a step that
+        // already timed out can enter another Cloudflare solve here, outside
+        // the step timeout, while the UI still says "search — جارٍ".
+        //
+        // This probe asks one narrower question only: can a plain HTTP client
+        // reach the origin right now? Keep it isolated and strictly bounded.
+        OkHttpClient.Builder()
+            .connectTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS)
+            .readTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS)
+            .writeTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS)
+            .callTimeout(LIVE_CHECK_TIMEOUT_S, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
     }
 
     /**
