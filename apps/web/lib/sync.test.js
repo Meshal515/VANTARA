@@ -387,3 +387,54 @@ describe('the identity seam the content api reads', () => {
     expect(sync.authorizationHeader).toBeNull();
   });
 });
+
+describe('adversarial session races', () => {
+  it('discards an old-account pull that returns after switching accounts', async () => {
+    let releasePull;
+    const heldPull = new Promise((resolve) => { releasePull = resolve; });
+    const accountB = { userId: 'u2', username: 'mansour', displayName: 'منصور' };
+    let firstPull = true;
+    const fetchImpl = vi.fn(async (url) => {
+      const value = String(url);
+      if (value.includes('/v1/session')) {
+        return jsonResponse({ token: 'token-b', user: accountB });
+      }
+      if (value.includes('/v1/sync') && firstPull) {
+        firstPull = false;
+        await heldPull;
+        return jsonResponse({
+          reset: false,
+          cursor: 50,
+          changes: { library: [{ user_id: 'u1', series_ref: 'secret-a', rev: 50 }] },
+        });
+      }
+      return jsonResponse({ reset: false, cursor: 0, changes: {} });
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    const oldPull = sync.pull();
+    await sync.signIn('u2');
+    releasePull();
+    await oldPull;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sync.user.userId).toBe('u2');
+    expect(sync.rows('library')).toEqual([]);
+    expect(storage.getItem('vantara.cursor')).toBe('0');
+  });
+
+  it('keeps the device credential and signed-in state when remote logout fails', async () => {
+    storage.setItem('vantara.deviceCredential', 'keep-me-for-retry');
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).includes('/v1/device/logout-all')) {
+        return jsonResponse({ error: 'down' }, 503);
+      }
+      return jsonResponse({});
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+
+    await expect(sync.logoutAll()).rejects.toMatchObject({ status: 503 });
+    expect(storage.getItem('vantara.deviceCredential')).toBe('keep-me-for-retry');
+    expect(sync.signedIn).toBe(true);
+  });
+});

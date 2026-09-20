@@ -136,6 +136,8 @@ export function createSync({ baseUrl }) {
   let mirror = readJson(MIRROR_KEY, {});
   let quarantine = readJson(QUARANTINE_KEY, []);
   let pulling = false;
+  let pullAgain = false;
+  let sessionGeneration = 0;
   let pushing = false;
 
   /** محاولات متتالية لكل عملية، بمفتاح op_id. لا تُحفظ: العدّ لكل جلسة. */
@@ -241,6 +243,7 @@ export function createSync({ baseUrl }) {
   function persistSession(payload) {
     token = payload.token;
     user = payload.user;
+    sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
     writeJson(USER_KEY, user);
   }
@@ -390,6 +393,7 @@ export function createSync({ baseUrl }) {
   }
 
   function signOut() {
+    sessionGeneration += 1;
     token = null;
     user = null;
     localStorage.removeItem(TOKEN_KEY);
@@ -399,13 +403,15 @@ export function createSync({ baseUrl }) {
   }
 
   async function logoutDevice() {
-    if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    // الإلغاء البعيد هو العملية الأمنية. إذا فشل لا نمسح الدليل المحلي ولا
+    // ندّعي نجاح logout؛ يستطيع المستخدم إعادة المحاولة أو اختيار signOut محليًا.
+    if (token) await request('/v1/device/logout', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
 
   async function logoutAll() {
-    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
@@ -445,14 +451,26 @@ export function createSync({ baseUrl }) {
    * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
    */
   async function pull() {
-    if (!token || pulling) return;
+    if (!token) return;
+    if (pulling) {
+      pullAgain = true;
+      return;
+    }
     pulling = true;
+    const generation = sessionGeneration;
+    const pullUserId = user?.userId ?? null;
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
         const payload = await request(`/v1/sync?since=${cursor}`);
         if (!payload) break;
+
+        // رد بدأ تحت حساب/جلسة أقدم لا يملك حق لمس مرآة الحساب الحالي.
+        if (generation !== sessionGeneration || pullUserId !== (user?.userId ?? null)) {
+          pullAgain = true;
+          break;
+        }
 
         if (payload.reset) {
           // عدّاد الخادم رجع (استعادة نسخة احتياطية): نُعيد بناء المرآة، ولا
@@ -494,6 +512,10 @@ export function createSync({ baseUrl }) {
       emit(['sync']);
     } finally {
       pulling = false;
+      if (pullAgain) {
+        pullAgain = false;
+        queueMicrotask(() => void pull());
+      }
     }
   }
 

@@ -20,5 +20,8 @@ enabled = true
 # - VANTARA_DEVICE_PEPPER: HMAC لبيانات device/pairing المخزنة في D1.
 # - VANTARA_SESSION_SECRET: مهايئ داخلي مؤقت للـlegacy sync handlers حتى B3.
 # تُضبط جميعها بـ`wrangler secret put` ولا تدخل المستودع ولا الـAPK.
+[secrets]
+required = ["VANTARA_SESSION_SECRET", "VANTARA_IDENTITY_SECRET", "VANTARA_DEVICE_PEPPER"]
+
 [vars]
 ALLOWED_ORIGINS = "https://vantara.pages.dev"

@@ -109,22 +109,43 @@ test('sync worker production deploy is CI-gated and main-only', () => {
   assertCiGatedProductionWorkflow('.github/workflows/sync-worker.yml');
 });
 
-test('sync worker production deploy provisions every runtime authentication secret', () => {
+test('sync worker production deploy provisions every runtime authentication secret in the deployed version', () => {
   const workflow = read('.github/workflows/sync-worker.yml');
-  for (const secret of [
-    'VANTARA_SESSION_SECRET',
-    'VANTARA_IDENTITY_SECRET',
-    'VANTARA_DEVICE_PEPPER',
-  ]) {
+  const wrangler = read('services/sync-worker/wrangler.toml');
+  const aliases = new Map([
+    ['VANTARA_SESSION_SECRET', 'session'],
+    ['VANTARA_IDENTITY_SECRET', 'identity'],
+    ['VANTARA_DEVICE_PEPPER', 'pepper'],
+  ]);
+
+  for (const [secret, alias] of aliases) {
     assert.ok(
       workflow.includes('${{ secrets.' + secret + ' }}'),
       `sync-worker deploy must read GitHub secret ${secret}`,
     );
     assert.ok(
-      workflow.includes(`secret put ${secret}`),
-      `sync-worker deploy must upload ${secret} to Cloudflare before smoke testing`,
+      workflow.includes('--arg ' + alias + ' "$' + secret + '"'),
+      `the one-version secrets file must source ${secret} from its environment binding`,
+    );
+    assert.ok(
+      workflow.includes(secret + ': $' + alias),
+      `the one-version JSON must include the ${secret} key`,
+    );
+    assert.ok(
+      wrangler.includes(secret),
+      `wrangler must declare ${secret} as a required binding`,
     );
   }
+  assert.match(
+    workflow,
+    /wrangler@4 deploy --secrets-file/,
+    'code and authentication secrets must be uploaded as the same Worker version',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /wrangler@4 secret put/,
+    'ordinary deploy must not create extra live Worker versions while rotating secrets',
+  );
 });
 
 test('live D1 verification receives the device pepper required for trusted-device pairing', () => {
@@ -552,13 +573,18 @@ test('the server never acknowledges a write it did not apply', () => {
   );
   assert.match(
     worker,
-    /applied:\s*applied\.map/,
-    'the response must list only the ops that produced statements',
+    /applied:\s*ops[\s\S]*acknowledged\.has\(op\.opId\)/,
+    'the response must list only ops acknowledged by the atomic commit path',
   );
   assert.match(
     worker,
-    /if\s*\(statements\.length\s*>\s*0\)\s*await\s+env\.DB\.batch/,
-    'an all-unknown batch must not call D1 with an empty batch, which throws',
+    /commitAtNextRevision\([\s\S]*commitCandidates\.map\(\(op\)\s*=>\s*op\.opId\)/,
+    'known writes must pass through the atomic revision/op-claim commit gate',
+  );
+  assert.match(
+    worker,
+    /if\s*\(commitCandidates\.length\s*===\s*0\)\s*break/,
+    'an all-unknown batch must not call D1 with an empty write transaction',
   );
 
   const queue = read('apps/web/lib/sync.js');
@@ -842,5 +868,89 @@ test('no spike probe step can run without a deadline or an announcement', () => 
     screen,
     /report\.imageData\?\.let/,
     'the on-screen image must decode the bytes the probe already proved',
+  );
+});
+
+
+function isBackwardCompatibleD1Migration(sql) {
+  const source = stripComments(sql);
+  const statements = source
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  for (const statement of statements) {
+    // Fail closed. Migration-first is safe only for a small set of operations
+    // whose effect cannot make the still-serving old Worker reject writes.
+    if (/^CREATE\s+TABLE\b/i.test(statement)) continue;
+    if (/^CREATE\s+INDEX\b/i.test(statement)) continue;
+
+    if (/^ALTER\s+TABLE\b[\s\S]*\bADD\s+COLUMN\b/i.test(statement)) {
+      // A new column is compatible only when old INSERTs can omit it and when
+      // the column itself does not impose a new validation/reference contract.
+      if (/\b(?:CHECK|REFERENCES|UNIQUE|PRIMARY\s+KEY|GENERATED)\b/i.test(statement)) {
+        return false;
+      }
+      if (/\bNOT\s+NULL\b/i.test(statement) && !/\bDEFAULT\b/i.test(statement)) {
+        return false;
+      }
+      continue;
+    }
+
+    // DROP/RENAME/ALTER existing columns, constraints, triggers, unique indexes,
+    // data rewrites, and unknown SQL all require an explicit staged rollout.
+    return false;
+  }
+
+  return true;
+}
+
+test('D1 rollout classifier rejects write-incompatible changes disguised as expansions', () => {
+  const unsafe = [
+    'ALTER TABLE comments ADD COLUMN required_text TEXT NOT NULL;',
+    'ALTER TABLE comments ADD CONSTRAINT comments_body_nonempty CHECK (length(body) > 0);',
+    'CREATE UNIQUE INDEX comments_one_body ON comments(body);',
+    'ALTER TABLE comments ALTER COLUMN body SET NOT NULL;',
+    "ALTER TABLE comments ADD COLUMN mood TEXT CHECK (mood = 'ok') DEFAULT 'bad';",
+    "CREATE TRIGGER reject_old_write BEFORE INSERT ON comments BEGIN SELECT RAISE(FAIL, 'blocked'); END;",
+  ];
+  for (const sql of unsafe) {
+    assert.equal(
+      isBackwardCompatibleD1Migration(sql),
+      false,
+      `old Worker writes may fail after this migration is applied first: ${sql}`,
+    );
+  }
+
+  const safe = [
+    'ALTER TABLE comments ADD COLUMN optional_text TEXT;',
+    'ALTER TABLE comments ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0;',
+    'CREATE INDEX comments_rev_extra ON comments(rev);',
+    'CREATE TABLE extra_metadata (id TEXT PRIMARY KEY, note TEXT);',
+  ];
+  for (const sql of safe) {
+    assert.equal(
+      isBackwardCompatibleD1Migration(sql),
+      true,
+      `expand-only rollout should allow: ${sql}`,
+    );
+  }
+});
+
+test('D1 rollout migrations after the adversarial baseline are backward-compatible expansions', () => {
+  const dir = resolve(ROOT, 'services/sync-worker/migrations');
+  const migrations = readdirSync(dir)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .filter((name) => Number(name.slice(0, 4)) >= 12);
+
+  const bad = [];
+  for (const name of migrations) {
+    const sql = read(`services/sync-worker/migrations/${name}`);
+    if (!isBackwardCompatibleD1Migration(sql)) bad.push(name);
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    'D1 migrations applied before Worker deploy must use expand/contract; destructive steps belong in a later release',
   );
 });

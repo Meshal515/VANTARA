@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import { CORRELATION_HEADER, correlationIdFrom } from '@vantara/domain';
+import { UchiyomiError } from '@vantara/uchiyomi';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
 import { registerCors } from './lib/cors.ts';
@@ -25,10 +26,37 @@ export interface BuiltApp {
   ctx: AppContext;
 }
 
+/** لا تسمح لقدرات الوسائط الموجودة في query أن تدخل سجل الطلبات. */
+export function requestUrlForLog(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl, 'http://vantara.invalid');
+    if (parsed.searchParams.has('t')) parsed.searchParams.set('t', '[REDACTED]');
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return rawUrl.replace(/([?&]t=)[^&]*/gi, '$1[REDACTED]');
+  }
+}
+
 export async function buildApp(config: Config): Promise<BuiltApp> {
   const app = Fastify({
     // في الاختبار نكتم السجل كليًا بدل تعطيل سجل الطلبات وحده
-    logger: config.NODE_ENV === 'test' ? false : { level: config.LOG_LEVEL },
+    logger:
+      config.NODE_ENV === 'test'
+        ? false
+        : {
+            level: config.LOG_LEVEL,
+            serializers: {
+              req(request) {
+                return {
+                  method: request.method,
+                  url: requestUrlForLog(request.url),
+                  hostname: request.hostname,
+                  remoteAddress: request.ip,
+                  remotePort: request.socket?.remotePort ?? 0,
+                };
+              },
+            },
+          },
     // VANTARA يقف خلف Cloudflare Tunnel: العنوان الحقيقي يأتي في الترويسة
     trustProxy: true,
     bodyLimit: 1024 * 1024,
@@ -64,8 +92,29 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    const status = error.statusCode ?? 500;
     const correlationId = request.correlationId;
+
+    if (error instanceof UchiyomiError) {
+      const status = error.status >= 500 ? 502 : error.status;
+      if (status >= 500) {
+        request.log.warn(
+          { upstreamStatus: error.status, upstreamCode: error.code, upstreamPath: error.path, correlationId },
+          'upstream request failed',
+        );
+      }
+      return reply.code(status).send({
+        error:
+          error.code ??
+          (status === 429
+            ? 'rate_limited'
+            : status === 401 || status === 403
+              ? 'upstream_auth_required'
+              : 'upstream_unavailable'),
+        correlationId,
+      });
+    }
+
+    const status = error.statusCode ?? 500;
     if (status >= 500) {
       // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل — إلا
       // المعرّف، وهو ما يجعل البلاغ قابلًا للربط بهذا السطر بالضبط

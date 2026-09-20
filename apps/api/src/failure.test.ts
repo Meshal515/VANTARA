@@ -10,6 +10,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { UchiyomiError } from '@vantara/uchiyomi';
 
 vi.mock('@vantara/db', () => ({
   query: vi.fn(async (sql: string) => {
@@ -99,6 +100,17 @@ beforeAll(async () => {
       readProgress: { page: 7, completed: false },
     };
   }) as typeof built.ctx.uchiyomi.book;
+  built.ctx.uchiyomi.me = (async () => {
+    if (upstreamDown) {
+      throw new UchiyomiError('socket died', 502, 'upstream_unavailable', '/auth/me');
+    }
+    return {
+      id: 'user-1',
+      username: 'dahmi',
+      displayName: 'Dahmi',
+      role: 'user',
+    };
+  }) as typeof built.ctx.uchiyomi.me;
 
   await app.ready();
 });
@@ -163,6 +175,15 @@ describe('readiness tells the truth about each dependency', () => {
 });
 
 describe('upstream down', () => {
+  it('maps a typed Uchiyomi failure from auth/me to 502 instead of a generic 500', async () => {
+    healthy();
+    upstreamDown = true;
+    const res = await app.inject({ method: 'GET', url: '/v1/auth/me', headers: { cookie } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: 'upstream_unavailable' });
+    expect(res.body).not.toContain('socket died');
+  });
+
   it('says the upstream failed instead of returning an empty library', async () => {
     healthy();
     upstreamDown = true;

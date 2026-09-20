@@ -48,6 +48,7 @@ class FakeStatement implements D1PreparedStatement {
           device.credentialHash === credentialHash &&
           device.revokedAt === null,
       );
+      if (row && this.#db.revokeAfterTrustCheck) row.revokedAt = Date.now();
       return (row ? ({ ok: 1 } as T) : null);
     }
 
@@ -71,10 +72,13 @@ class FakeStatement implements D1PreparedStatement {
 
   async run(): Promise<D1Result> {
     if (this.#sql.startsWith('UPDATE trusted_devices SET last_used_at')) {
-      const [now, deviceId, userId] = this.#values as [number, string, string];
+      const [now, deviceId, userId, credentialHash] = this.#values as [number, string, string, string];
       const row = this.#db.devices.find(
         (device) =>
-          device.deviceId === deviceId && device.userId === userId && device.revokedAt === null,
+          device.deviceId === deviceId &&
+          device.userId === userId &&
+          device.credentialHash === credentialHash &&
+          device.revokedAt === null,
       );
       if (!row) return result(0);
       row.lastUsedAt = now;
@@ -117,6 +121,7 @@ class FakeStatement implements D1PreparedStatement {
 class FakeDb implements D1Database {
   readonly accounts: AccountRow[] = [];
   readonly devices: DeviceRow[] = [];
+  revokeAfterTrustCheck = false;
 
   prepare(query: string): D1PreparedStatement {
     return new FakeStatement(this, query);
@@ -297,4 +302,19 @@ describe('B2 trusted-device session gate', () => {
     expect(firstRetry.status).toBe(401);
     expect(secondRetry.status).toBe(401);
   });
+  it('does not mint a session if logout wins the race after the first trust check', async () => {
+    const db = new FakeDb();
+    const userId = 'user-1';
+    const deviceId = 'device-race-0001';
+    const credential = 'race-device-credential-0000000001';
+    db.accounts.push({ userId, username: 'meshal', displayName: 'Meshal' });
+    await seedTrusted(db, userId, deviceId, credential);
+    db.revokeAfterTrustCheck = true;
+
+    const response = await worker.fetch(sessionRequest(userId, deviceId, credential), env(db), ctx);
+
+    expect(response.status).toBe(401);
+    await expect(jsonBody(response)).resolves.toMatchObject({ error: 'device_untrusted' });
+  });
+
 });

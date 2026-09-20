@@ -3,7 +3,12 @@ import { verifyIdentityToken } from '@vantara/domain';
 import { UchiyomiClient } from '@vantara/uchiyomi';
 import type { Config } from './config.ts';
 import { deriveKey } from './crypto.ts';
-import { SESSION_COOKIE, SessionStore, type Session } from './sessions.ts';
+import {
+  IdentityRelinkRequiredError,
+  SESSION_COOKIE,
+  SessionStore,
+  type Session,
+} from './sessions.ts';
 
 export interface AppContext {
   config: Config;
@@ -53,10 +58,18 @@ export function requireSession(ctx: AppContext) {
     if (bearer) {
       const claims = await verifyIdentityToken(bearer, ctx.config.VANTARA_IDENTITY_SECRET);
       if (claims) {
-        const session = await ctx.sessions.resolveIdentity(claims.userId, claims.deviceId);
-        if (session) {
-          request.session = session;
-          return;
+        try {
+          const session = await ctx.sessions.resolveIdentity(claims.userId, claims.deviceId);
+          if (session) {
+            request.session = session;
+            return;
+          }
+        } catch (error) {
+          if (error instanceof IdentityRelinkRequiredError) {
+            await reply.code(409).send({ error: 'content_relink_required' });
+            return;
+          }
+          throw error;
         }
       }
       await reply.code(401).send({ error: 'unauthorized' });

@@ -1,9 +1,19 @@
 import { query, queryOne, transaction } from '@vantara/db';
 import { identityIdForUsername } from '@vantara/domain';
-import type { UchiyomiClient } from '@vantara/uchiyomi';
+import { UchiyomiError, type UchiyomiClient } from '@vantara/uchiyomi';
 import { decrypt, encrypt, newSessionId } from './crypto.ts';
 
 export const SESSION_COOKIE = 'vantara_session';
+
+const IDENTITY_RENEW_WINDOW_MS = 7 * 86_400_000;
+const AMBIGUOUS_MINT_GRACE_MS = 60 * 60_000;
+
+export class IdentityRelinkRequiredError extends Error {
+  constructor() {
+    super('content_relink_required');
+    this.name = 'IdentityRelinkRequiredError';
+  }
+}
 
 export interface Session {
   id: string;
@@ -31,6 +41,8 @@ interface IdentityLinkRow {
   uchiyomi_user_id: string;
   token_encrypted: string;
   token_id: string | null;
+  token_expires_at: string | Date | null;
+  token_expiry_authoritative: boolean;
   username: string;
 }
 
@@ -47,6 +59,172 @@ export class SessionStore {
     this.#options = options;
   }
 
+
+  async #finishMintAttempt(name: string, tokenId: string | null): Promise<void> {
+    await query(
+      `UPDATE vantara_token_mint_attempts
+          SET token_id = COALESCE($2, token_id), resolved_at = now()
+        WHERE name = $1 AND resolved_at IS NULL`,
+      [name, tokenId],
+    );
+  }
+
+  async #protectedTokenIds(): Promise<Set<string>> {
+    const protectedRows = await query<{ token_id: string }>(
+      `SELECT token_id
+         FROM vantara_identity_links
+        WHERE revoked_at IS NULL AND token_id IS NOT NULL
+       UNION
+       SELECT token_id
+         FROM vantara_sessions
+        WHERE revoked_at IS NULL AND expires_at > now() AND token_id IS NOT NULL`,
+    );
+    return new Set(protectedRows.map((row) => row.token_id));
+  }
+
+  async #reconcileMintAttemptName(authToken: string, name: string): Promise<void> {
+    const protectedIds = await this.#protectedTokenIds();
+    const tokens = await this.#options.uchiyomi.listTokens(authToken);
+    const matches = tokens.filter((token) => token.name === name);
+
+    for (const token of matches) {
+      if (!protectedIds.has(token.id)) {
+        await this.#options.uchiyomi.revokeToken(authToken, token.id);
+      }
+    }
+
+    // An empty list immediately after a lost POST response is NOT proof that
+    // creation did not happen: the original request may still be committing.
+    // Keep the durable intent pending; a later authenticated request reconciles it.
+    if (matches.length > 0) {
+      await this.#finishMintAttempt(name, matches[0]!.id);
+    }
+  }
+
+  async #reconcilePendingMintAttempts(
+    authToken: string,
+    userId: string,
+  ): Promise<void> {
+    const pending = await query<{ name: string; created_at: string | Date }>(
+      `SELECT name, created_at
+         FROM vantara_token_mint_attempts
+        WHERE uchiyomi_user_id = $1
+          AND resolved_at IS NULL
+        ORDER BY created_at
+        LIMIT 100`,
+      [userId],
+    );
+    if (pending.length === 0) return;
+
+    const protectedIds = await this.#protectedTokenIds();
+    const tokens = await this.#options.uchiyomi.listTokens(authToken);
+
+    for (const attempt of pending) {
+      const matches = tokens.filter((token) => token.name === attempt.name);
+      for (const token of matches) {
+        if (!protectedIds.has(token.id)) {
+          await this.#options.uchiyomi.revokeToken(authToken, token.id);
+        }
+      }
+
+      if (matches.length > 0) {
+        await this.#finishMintAttempt(attempt.name, matches[0]!.id);
+        continue;
+      }
+
+      // Only conclude "never created" after a generous grace period. This
+      // prevents a GET racing ahead of an in-flight POST commit from erasing
+      // the sole durable reconciliation handle.
+      const createdAt = new Date(attempt.created_at).getTime();
+      if (
+        Number.isFinite(createdAt) &&
+        Date.now() - createdAt >= AMBIGUOUS_MINT_GRACE_MS
+      ) {
+        await this.#finishMintAttempt(attempt.name, null);
+      }
+    }
+  }
+
+  async #authoritativeTokenExpiry(authToken: string, tokenId: string): Promise<string> {
+    const tokens = await this.#options.uchiyomi.listTokens(authToken);
+    const metadata = tokens.find((token) => token.id === tokenId);
+    if (!metadata || metadata.expired || !metadata.expiresAt) {
+      throw new Error('upstream_token_metadata_unavailable');
+    }
+
+    const expiresAt = Date.parse(metadata.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      throw new Error('upstream_token_expired');
+    }
+    return new Date(expiresAt).toISOString();
+  }
+
+  async #mintTrackedToken(
+    authToken: string,
+    userId: string,
+    name: string,
+  ): Promise<{ id: string; token: string; expiresAt: string; attemptName: string }> {
+    // The intent is durable BEFORE the non-idempotent upstream POST. If both the
+    // create response and immediate reconciliation are lost, a later valid
+    // credential can still find this exact name and revoke it.
+    await query(
+      `INSERT INTO vantara_token_mint_attempts (name, uchiyomi_user_id)
+       VALUES ($1, $2)`,
+      [name, userId],
+    );
+
+    let minted: { id: string; token: string };
+    try {
+      minted = await this.#options.uchiyomi.mintToken(authToken, {
+        name,
+        scopes: ['read', 'write'],
+        expiresInDays: this.#options.ttlDays,
+        reconcileAmbiguousFailure: true,
+      });
+    } catch (createError) {
+      const definitelyRejected =
+        createError instanceof UchiyomiError &&
+        createError.path === '/api/tokens' &&
+        createError.status >= 400 &&
+        createError.status < 500;
+
+      if (definitelyRejected) {
+        await this.#finishMintAttempt(name, null);
+        throw createError;
+      }
+
+      try {
+        await this.#reconcileMintAttemptName(authToken, name);
+      } catch (reconcileError) {
+        throw new AggregateError(
+          [createError, reconcileError],
+          'ambiguous upstream token mint remains durably tracked',
+        );
+      }
+      throw createError;
+    }
+
+    let expiresAt: string;
+    try {
+      expiresAt = await this.#authoritativeTokenExpiry(authToken, minted.id);
+    } catch (metadataError) {
+      try {
+        // The newly minted credential has write scope and the repository's live
+        // probe already verifies self-revocation.
+        await this.#options.uchiyomi.revokeToken(minted.token, minted.id);
+        await this.#finishMintAttempt(name, minted.id);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [metadataError, cleanupError],
+          'minted token metadata could not be verified and cleanup failed',
+        );
+      }
+      throw metadataError;
+    }
+
+    return { ...minted, expiresAt, attemptName: name };
+  }
+
   /**
    * Legacy/owner linking path. كلمة المرور لا تدخل شاشة الحساب اليومية. عند
    * نجاح الربط نحفظ توكن Uchiyomi مشفّرًا تحت VANTARA identity الثابتة حتى
@@ -57,15 +235,16 @@ export class SessionStore {
     const result = await uchiyomi.login(username, password);
 
     const expiresInDays = this.#options.ttlDays;
-    const minted = await uchiyomi.mintToken(result.accessToken, {
-      name: `vantara${device ? ` (${device})` : ''}`,
-      scopes: ['read', 'write'],
-      expiresInDays,
-    });
+    const id = newSessionId();
+    const tokenName = `vantara-${id}`;
+    const minted = await this.#mintTrackedToken(
+      result.accessToken,
+      result.user.id,
+      tokenName,
+    );
 
     const encrypted = encrypt(minted.token, this.#options.key);
     const identityId = identityIdForUsername(result.user.username);
-    const id = newSessionId();
 
     try {
       await transaction(async (client) => {
@@ -80,16 +259,19 @@ export class SessionStore {
         if (identityId) {
           await client.query(
             `INSERT INTO vantara_identity_links
-               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
-             VALUES ($1, $2, $3, $4, NULL)
+               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id,
+                token_expires_at, token_expiry_authoritative, revoked_at)
+             VALUES ($1, $2, $3, $4, $5, true, NULL)
              ON CONFLICT (vantara_identity_id) DO UPDATE SET
                uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
                token_encrypted = EXCLUDED.token_encrypted,
                token_id = EXCLUDED.token_id,
+               token_expires_at = EXCLUDED.token_expires_at,
+               token_expiry_authoritative = true,
                linked_at = now(),
                last_used_at = now(),
                revoked_at = NULL`,
-            [identityId, result.user.id, encrypted, minted.id],
+            [identityId, result.user.id, encrypted, minted.id, minted.expiresAt],
           );
         }
 
@@ -99,15 +281,32 @@ export class SessionStore {
            VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' days')::interval)`,
           [id, result.user.id, encrypted, minted.id, device ?? null, String(expiresInDays)],
         );
+
+        await client.query(
+          `UPDATE vantara_token_mint_attempts
+              SET token_id = $2, resolved_at = now()
+            WHERE name = $1 AND resolved_at IS NULL`,
+          [minted.attemptName, minted.id],
+        );
       });
     } catch (dbError) {
       try {
         await uchiyomi.revokeToken(minted.token, minted.id);
+        await this.#finishMintAttempt(minted.attemptName, minted.id);
       } catch (cleanupError) {
-        throw new AggregateError([dbError, cleanupError], 'login persistence and cleanup both failed');
+        throw new AggregateError(
+          [dbError, cleanupError],
+          'login persistence and cleanup both failed',
+        );
       }
       throw dbError;
     }
+
+    // A previous ambiguous attempt may have survived an upstream outage.
+    // It is already durable, so failure to sweep it must not turn this newly
+    // committed login into a false failure.
+    void this.#reconcilePendingMintAttempts(result.accessToken, result.user.id).catch(() => {});
+
     return {
       id,
       ...(identityId ? { identityId } : {}),
@@ -154,7 +353,8 @@ export class SessionStore {
    */
   async resolveIdentity(identityId: string, deviceId: string): Promise<Session | undefined> {
     const row = await queryOne<IdentityLinkRow>(
-      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id, u.username
+      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id,
+              l.token_expires_at, l.token_expiry_authoritative, u.username
          FROM vantara_identity_links l
          JOIN vantara_users u USING (uchiyomi_user_id)
         WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
@@ -174,19 +374,150 @@ export class SessionStore {
       return undefined;
     }
 
-    void query(
-      `UPDATE vantara_identity_links SET last_used_at = now()
-        WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
-      [identityId],
-    ).catch(() => {});
+    let expiresAt = row.token_expires_at
+      ? new Date(row.token_expires_at).getTime()
+      : Number.NaN;
+
+    // 0007 only knew linked_at + historical TTL. Existing links reconcile once
+    // with the metadata owner before that estimate is trusted.
+    if (!row.token_expiry_authoritative || !Number.isFinite(expiresAt)) {
+      try {
+        if (!row.token_id) throw new IdentityRelinkRequiredError();
+        const exactExpiry = await this.#authoritativeTokenExpiry(token, row.token_id);
+        expiresAt = Date.parse(exactExpiry);
+        await query(
+          `UPDATE vantara_identity_links
+              SET token_expires_at = $2,
+                  token_expiry_authoritative = true,
+                  last_used_at = now()
+            WHERE vantara_identity_id = $1
+              AND token_id IS NOT DISTINCT FROM $3
+              AND revoked_at IS NULL`,
+          [identityId, exactExpiry, row.token_id],
+        );
+      } catch (error) {
+        const relink =
+          error instanceof IdentityRelinkRequiredError ||
+          (error instanceof UchiyomiError && (error.status === 401 || error.status === 403)) ||
+          (error instanceof Error &&
+            /upstream_token_(?:metadata_unavailable|expired)/.test(error.message));
+        if (!relink) throw error;
+
+        await query(
+          `UPDATE vantara_identity_links SET revoked_at = now()
+            WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+          [identityId],
+        );
+        throw new IdentityRelinkRequiredError();
+      }
+    }
+
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      await query(
+        `UPDATE vantara_identity_links SET revoked_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+        [identityId],
+      );
+      throw new IdentityRelinkRequiredError();
+    }
+
+    let activeToken = token;
+    let activeTokenId = row.token_id;
+
+    if (expiresAt - Date.now() <= IDENTITY_RENEW_WINDOW_MS && row.token_id) {
+      const renewed = await this.#mintTrackedToken(
+        token,
+        row.uchiyomi_user_id,
+        `vantara-${newSessionId()}`,
+      ).catch((error) => {
+        // A transient proactive-renewal failure cannot make a still-valid
+        // current credential unavailable.
+        if (expiresAt > Date.now()) return undefined;
+        throw error;
+      });
+
+      if (renewed) {
+        const renewedEncrypted = encrypt(renewed.token, this.#options.key);
+        let won = false;
+
+        try {
+          won = await transaction(async (client) => {
+            const rotated = await client.query<{ token_id: string }>(
+              `UPDATE vantara_identity_links
+                  SET token_encrypted = $1,
+                      token_id = $2,
+                      token_expires_at = $3,
+                      token_expiry_authoritative = true,
+                      linked_at = now(),
+                      last_used_at = now()
+                WHERE vantara_identity_id = $4
+                  AND token_id = $5
+                  AND revoked_at IS NULL
+                RETURNING token_id`,
+              [renewedEncrypted, renewed.id, renewed.expiresAt, identityId, row.token_id],
+            );
+            if (rotated.rows.length !== 1) return false;
+
+            await client.query(
+              `UPDATE vantara_token_mint_attempts
+                  SET token_id = $2, resolved_at = now()
+                WHERE name = $1 AND resolved_at IS NULL`,
+              [renewed.attemptName, renewed.id],
+            );
+            return true;
+          });
+        } catch (dbError) {
+          try {
+            await this.#options.uchiyomi.revokeToken(renewed.token, renewed.id);
+            await this.#finishMintAttempt(renewed.attemptName, renewed.id);
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [dbError, cleanupError],
+              'identity rotation persistence and cleanup both failed',
+            );
+          }
+          throw dbError;
+        }
+
+        if (won) {
+          activeToken = renewed.token;
+          activeTokenId = renewed.id;
+        } else {
+          // Another request rotated first. Never leave our losing credential active.
+          await this.#options.uchiyomi.revokeToken(renewed.token, renewed.id);
+          await this.#finishMintAttempt(renewed.attemptName, renewed.id);
+
+          const latest = await queryOne<IdentityLinkRow>(
+            `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id,
+                    l.token_expires_at, l.token_expiry_authoritative, u.username
+               FROM vantara_identity_links l
+               JOIN vantara_users u USING (uchiyomi_user_id)
+              WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
+            [identityId],
+          );
+          if (!latest) throw new IdentityRelinkRequiredError();
+          activeToken = decrypt(latest.token_encrypted, this.#options.key);
+          activeTokenId = latest.token_id;
+        }
+      }
+    } else {
+      void query(
+        `UPDATE vantara_identity_links SET last_used_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+        [identityId],
+      ).catch(() => {});
+    }
+
+    // Exact-name reconciliation is safe because protected token ids are excluded.
+    void this.#reconcilePendingMintAttempts(activeToken, row.uchiyomi_user_id).catch(() => {});
 
     return {
       id: `identity:${identityId}:${deviceId}`,
       identityId: row.vantara_identity_id,
       userId: row.uchiyomi_user_id,
       username: row.username,
-      token,
-      ...(row.token_id ? { tokenId: row.token_id } : {}),
+      token: activeToken,
+      ...(activeTokenId ? { tokenId: activeTokenId } : {}),
     };
   }
 
