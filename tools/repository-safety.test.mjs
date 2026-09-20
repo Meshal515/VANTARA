@@ -112,19 +112,24 @@ test('sync worker production deploy is CI-gated and main-only', () => {
 test('sync worker production deploy provisions every runtime authentication secret in the deployed version', () => {
   const workflow = read('.github/workflows/sync-worker.yml');
   const wrangler = read('services/sync-worker/wrangler.toml');
-  for (const secret of [
-    'VANTARA_SESSION_SECRET',
-    'VANTARA_IDENTITY_SECRET',
-    'VANTARA_DEVICE_PEPPER',
-  ]) {
+  const aliases = new Map([
+    ['VANTARA_SESSION_SECRET', 'session'],
+    ['VANTARA_IDENTITY_SECRET', 'identity'],
+    ['VANTARA_DEVICE_PEPPER', 'pepper'],
+  ]);
+
+  for (const [secret, alias] of aliases) {
     assert.ok(
       workflow.includes('${{ secrets.' + secret + ' }}'),
       `sync-worker deploy must read GitHub secret ${secret}`,
     );
-    assert.match(
-      workflow,
-      new RegExp(secret + ':\\s*\\$' + secret),
-      `the one-version secrets file must include ${secret}`,
+    assert.ok(
+      workflow.includes('--arg ' + alias + ' "$' + secret + '"'),
+      `the one-version secrets file must source ${secret} from its environment binding`,
+    );
+    assert.ok(
+      workflow.includes(secret + ': $' + alias),
+      `the one-version JSON must include the ${secret} key`,
     );
     assert.ok(
       wrangler.includes(secret),
