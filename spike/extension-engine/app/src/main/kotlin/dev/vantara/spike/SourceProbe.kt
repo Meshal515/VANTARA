@@ -305,7 +305,7 @@ class SourceProbe(private val http: OkHttpClient) {
         val base = runCatching { (source as? HttpSource)?.baseUrl }.getOrNull()
 
         // ١) البحث
-        val foundBySearch = step("search", steps, base) {
+        val foundBySearch = step("search", steps, base, timeoutMs = SEARCH_TIMEOUT_MS) {
             // نبدأ باستعلام الاختبار المثبّت. لو رجع صفرًا، ما نحكم أن
             // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
             // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
@@ -327,7 +327,7 @@ class SourceProbe(private val http: OkHttpClient) {
         // عطل البحث لا يعني أن المصدر كله ميت. نجرّب الرائج كي نعرف هل
         // التصفح/الفصول/الصفحات ما زالت تعمل، لكن خطوة search تبقى حمراء
         // والتقرير يصنّفه «جزئيًّا» لا نجاحًا كاملًا.
-        val candidates = foundBySearch ?: step("popular-fallback", steps, base) {
+        val candidates = foundBySearch ?: step("popular-fallback", steps, base, timeoutMs = BROWSE_TIMEOUT_MS) {
             val popular = source.getPopularManga(1).mangas
             require(popular.isNotEmpty()) { "popular list is empty" }
             popular
@@ -594,6 +594,14 @@ class SourceProbe(private val http: OkHttpClient) {
          * مشروعًا، وأضيق من أن تُجمّد الشاشة بلا خبر.
          */
         const val STEP_TIMEOUT_MS = 150_000L
+
+        /**
+         * البحث هو أكثر نقطة علقت عليها عشرات المصادر في الفحص الجماعي.
+         * لا نسمح له بحجز المصدر لدقيقتين ونصف: إذا لم يرد سريعًا نسجله
+         * كفشل search ونكمل عبر popular-fallback بدل تجميد بقية المصادر.
+         */
+        const val SEARCH_TIMEOUT_MS = 45_000L
+        const val BROWSE_TIMEOUT_MS = 45_000L
 
         /** الفحص الحيّ يجري داخل معالج الفشل، فيُقطع أسرع من النداء العادي. */
         const val LIVE_CHECK_TIMEOUT_S = 20L
