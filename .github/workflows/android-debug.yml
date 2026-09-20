@@ -67,8 +67,30 @@ jobs:
       - name: Assemble the debug APK
         working-directory: android
         run: |
+          set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+          for attempt in 1 2 3; do
+            set +e
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee /tmp/gradle-build.log
+            status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+
+            if grep -Eq 'status code 429|Too Many Requests|status code 5[0-9][0-9]|Connection reset|Read timed out|Connect timed out|Temporary failure in name resolution' /tmp/gradle-build.log; then
+              if [ "$attempt" -lt 3 ]; then
+                delay=$((attempt * 20))
+                echo "Transient dependency/network failure; retrying Gradle in ${delay}s (attempt $attempt/3)."
+                sleep "$delay"
+                continue
+              fi
+            fi
+
+            exit "$status"
+          done
 
       # الفشل معلومة بقدر النجاح: نريد سببه كاملًا لا سطرًا واحدًا
       - name: Report build failure

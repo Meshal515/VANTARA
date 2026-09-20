@@ -145,4 +145,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ steps.d1.outputs.id }}
+          VANTARA_DEVICE_PEPPER: ${{ secrets.VANTARA_DEVICE_PEPPER }}
         run: node services/sync-worker/verify.mjs "${{ steps.smoke.outputs.url }}"

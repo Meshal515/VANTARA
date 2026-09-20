@@ -127,6 +127,18 @@ test('sync worker production deploy provisions every runtime authentication secr
   }
 });
 
+test('live D1 verification receives the device pepper required for trusted-device pairing', () => {
+  const workflow = read('.github/workflows/sync-worker.yml');
+  const start = workflow.indexOf('- name: Verify sync invariants against live D1');
+  assert.ok(start >= 0, 'sync-worker workflow must keep the live D1 verification step');
+  const block = workflow.slice(start, start + 700);
+  assert.match(
+    block,
+    /VANTARA_DEVICE_PEPPER:\s*\$\{\{\s*secrets\.VANTARA_DEVICE_PEPPER\s*\}\}/,
+    'live D1 verifier must receive the same device pepper used by the deployed Worker',
+  );
+});
+
 test('Cloudflare Pages production deploy is CI-gated and main-only', () => {
   const workflow = read('.github/workflows/cloudflare-pages.yml');
   assertCiGatedProductionWorkflow('.github/workflows/cloudflare-pages.yml');
