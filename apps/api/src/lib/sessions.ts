@@ -5,6 +5,17 @@ import { decrypt, encrypt, newSessionId } from './crypto.ts';
 
 export const SESSION_COOKIE = 'vantara_session';
 
+const DAY_MS = 86_400_000;
+const IDENTITY_RENEW_WINDOW_MS = 7 * DAY_MS;
+const VANTARA_TOKEN_PREFIX = 'vantara-link:';
+
+export class RelinkRequiredError extends Error {
+  constructor() {
+    super('uchiyomi_relink_required');
+    this.name = 'RelinkRequiredError';
+  }
+}
+
 export interface Session {
   id: string;
   /** هوية VANTARA الموحدة، عند الدخول عبر access token v2. */
@@ -31,6 +42,8 @@ interface IdentityLinkRow {
   uchiyomi_user_id: string;
   token_encrypted: string;
   token_id: string | null;
+  token_expires_at: string | null;
+  linked_at: string;
   username: string;
 }
 
@@ -47,6 +60,157 @@ export class SessionStore {
     this.#options = options;
   }
 
+  #newTokenName(): string {
+    // حد Uchiyomi للاسم 60 حرفًا. UUID يجعل نتيجة POST قابلة للمصالحة بلا
+    // إعادة POST غير idempotent.
+    return `${VANTARA_TOKEN_PREFIX}${newSessionId()}`;
+  }
+
+  async #mintTokenReconciled(
+    authToken: string,
+    expiresInDays: number,
+  ): Promise<{ id: string; token: string; expiresAt: Date; name: string }> {
+    const name = this.#newTokenName();
+    try {
+      const minted = await this.#options.uchiyomi.mintToken(authToken, {
+        name,
+        scopes: ['read', 'write'],
+        expiresInDays,
+      });
+      return {
+        ...minted,
+        name,
+        expiresAt: new Date(Date.now() + expiresInDays * DAY_MS),
+      };
+    } catch (createError) {
+      // POST قد يكون التزم عند Uchiyomi ثم ضاع الرد. لا نعيد POST. بدل ذلك
+      // نسرد metadata بالجلسة التي بدأت العملية ونلغي الاسم الفريد إن وُجد.
+      try {
+        const tokens = await this.#options.uchiyomi.listTokens(authToken);
+        for (const token of tokens) {
+          if (token.name === name) {
+            await this.#options.uchiyomi.revokeToken(authToken, token.id);
+          }
+        }
+      } catch (reconcileError) {
+        throw new AggregateError(
+          [createError, reconcileError],
+          'token creation outcome could not be reconciled',
+        );
+      }
+      throw createError;
+    }
+  }
+
+  async #sweepOldVantaraTokens(authToken: string, protectedId: string): Promise<void> {
+    const tokens = await this.#options.uchiyomi.listTokens(authToken);
+    const cutoff = Date.now() - 10 * 60_000;
+    for (const token of tokens) {
+      if (token.id === protectedId || !token.name.startsWith(VANTARA_TOKEN_PREFIX)) continue;
+      const created = Date.parse(token.createdAt);
+      // لا نقتل إنشاءً متزامنًا ما زال بين POST وحفظه في PostgreSQL.
+      if (!Number.isFinite(created) || created > cutoff) continue;
+      await this.#options.uchiyomi.revokeToken(authToken, token.id);
+    }
+  }
+
+  async #identityCredential(
+    row: IdentityLinkRow,
+    token: string,
+  ): Promise<{ token: string; tokenId?: string }> {
+    let expiresAt = row.token_expires_at ? new Date(row.token_expires_at) : null;
+
+    // روابط ما قبل migration لا نخمّن TTL التاريخي لها: Uchiyomi يعطينا
+    // expiresAt من GET /api/tokens بدون كشف السر.
+    if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+      let listed;
+      try {
+        listed = await this.#options.uchiyomi.listTokens(token);
+      } catch (error) {
+        if ((error as { status?: number })?.status === 401) throw new RelinkRequiredError();
+        throw error;
+      }
+      const current = row.token_id ? listed.find((item) => item.id === row.token_id) : undefined;
+      if (!current || current.expired || !current.expiresAt) throw new RelinkRequiredError();
+      expiresAt = new Date(current.expiresAt);
+      await query(
+        `UPDATE vantara_identity_links
+            SET token_expires_at = $2, last_used_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL
+            AND token_id IS NOT DISTINCT FROM $3`,
+        [row.vantara_identity_id, expiresAt.toISOString(), row.token_id],
+      );
+    }
+
+    if (expiresAt.getTime() <= Date.now()) throw new RelinkRequiredError();
+    if (expiresAt.getTime() - Date.now() > IDENTITY_RENEW_WINDOW_MS) {
+      return { token, ...(row.token_id ? { tokenId: row.token_id } : {}) };
+    }
+
+    // credential الحالي ما زال صالحًا وبنطاق write، لذلك يجدد نفسه قبل
+    // انتهاءه. CAS في PostgreSQL يمنع طلبين متزامنين من اعتماد توكنين.
+    const minted = await this.#mintTokenReconciled(token, this.#options.ttlDays);
+    const encrypted = encrypt(minted.token, this.#options.key);
+    const updated = await query<{ token_id: string }>(
+      `UPDATE vantara_identity_links
+          SET token_encrypted = $2,
+              token_id = $3,
+              token_expires_at = $4,
+              linked_at = now(),
+              last_used_at = now()
+        WHERE vantara_identity_id = $1
+          AND revoked_at IS NULL
+          AND token_id IS NOT DISTINCT FROM $5
+        RETURNING token_id`,
+      [
+        row.vantara_identity_id,
+        encrypted,
+        minted.id,
+        minted.expiresAt.toISOString(),
+        row.token_id,
+      ],
+    );
+
+    if (updated.length === 0) {
+      // طلب آخر سبقنا. credential الذي أنشأناه لا يصبح orphan.
+      await this.#options.uchiyomi.revokeToken(minted.token, minted.id);
+      const fresh = await queryOne<IdentityLinkRow>(
+        `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted,
+                l.token_id, l.token_expires_at, l.linked_at, u.username
+           FROM vantara_identity_links l
+           JOIN vantara_users u USING (uchiyomi_user_id)
+          WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
+        [row.vantara_identity_id],
+      );
+      if (!fresh) throw new RelinkRequiredError();
+      try {
+        return {
+          token: decrypt(fresh.token_encrypted, this.#options.key),
+          ...(fresh.token_id ? { tokenId: fresh.token_id } : {}),
+        };
+      } catch {
+        throw new RelinkRequiredError();
+      }
+    }
+
+    // لا نلغي القديم إذا كانت جلسة cookie ما زالت تعتمد عليه؛ purgeExpired
+    // سيلغيه عندما ينتهي آخر مرجع. غير ذلك نغلقه فورًا.
+    if (row.token_id && row.token_id !== minted.id) {
+      const legacy = await queryOne<{ active: number }>(
+        `SELECT 1 AS active FROM vantara_sessions
+          WHERE token_id = $1 AND revoked_at IS NULL AND expires_at > now()
+          LIMIT 1`,
+        [row.token_id],
+      );
+      if (!legacy) {
+        await this.#options.uchiyomi.revokeToken(minted.token, row.token_id);
+      }
+    }
+
+    void this.#sweepOldVantaraTokens(minted.token, minted.id).catch(() => {});
+    return { token: minted.token, tokenId: minted.id };
+  }
+
   /**
    * Legacy/owner linking path. كلمة المرور لا تدخل شاشة الحساب اليومية. عند
    * نجاح الربط نحفظ توكن Uchiyomi مشفّرًا تحت VANTARA identity الثابتة حتى
@@ -57,14 +221,17 @@ export class SessionStore {
     const result = await uchiyomi.login(username, password);
 
     const expiresInDays = this.#options.ttlDays;
-    const minted = await uchiyomi.mintToken(result.accessToken, {
-      name: `vantara${device ? ` (${device})` : ''}`,
-      scopes: ['read', 'write'],
-      expiresInDays,
-    });
+    const identityId = identityIdForUsername(result.user.username);
+    const previousLink = identityId
+      ? await queryOne<{ token_id: string | null }>(
+          `SELECT token_id FROM vantara_identity_links
+            WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+          [identityId],
+        )
+      : undefined;
+    const minted = await this.#mintTokenReconciled(result.accessToken, expiresInDays);
 
     const encrypted = encrypt(minted.token, this.#options.key);
-    const identityId = identityIdForUsername(result.user.username);
     const id = newSessionId();
 
     try {
@@ -80,16 +247,18 @@ export class SessionStore {
         if (identityId) {
           await client.query(
             `INSERT INTO vantara_identity_links
-               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
-             VALUES ($1, $2, $3, $4, NULL)
+               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id,
+                token_expires_at, revoked_at)
+             VALUES ($1, $2, $3, $4, $5, NULL)
              ON CONFLICT (vantara_identity_id) DO UPDATE SET
                uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
                token_encrypted = EXCLUDED.token_encrypted,
                token_id = EXCLUDED.token_id,
+               token_expires_at = EXCLUDED.token_expires_at,
                linked_at = now(),
                last_used_at = now(),
                revoked_at = NULL`,
-            [identityId, result.user.id, encrypted, minted.id],
+            [identityId, result.user.id, encrypted, minted.id, minted.expiresAt.toISOString()],
           );
         }
 
@@ -108,6 +277,22 @@ export class SessionStore {
       }
       throw dbError;
     }
+    // بعد اعتماد الجديد، نظف credential السابق الذي كان يحمي نفس identity
+    // إن لم يعد مستخدمًا بجلسة cookie. الفشل هنا لا يحوّل Login ناجحًا إلى
+    // فشل كاذب؛ عمر القديم محدود، وsweep/purge يعيدان المحاولة لاحقًا.
+    if (previousLink?.token_id && previousLink.token_id !== minted.id) {
+      void (async () => {
+        const legacy = await queryOne<{ active: number }>(
+          `SELECT 1 AS active FROM vantara_sessions
+            WHERE token_id = $1 AND revoked_at IS NULL AND expires_at > now()
+            LIMIT 1`,
+          [previousLink.token_id],
+        );
+        if (!legacy) await uchiyomi.revokeToken(minted.token, previousLink.token_id!);
+      })().catch(() => {});
+    }
+    void this.#sweepOldVantaraTokens(minted.token, minted.id).catch(() => {});
+
     return {
       id,
       ...(identityId ? { identityId } : {}),
@@ -154,7 +339,8 @@ export class SessionStore {
    */
   async resolveIdentity(identityId: string, deviceId: string): Promise<Session | undefined> {
     const row = await queryOne<IdentityLinkRow>(
-      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id, u.username
+      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id,
+              l.token_expires_at, l.linked_at, u.username
          FROM vantara_identity_links l
          JOIN vantara_users u USING (uchiyomi_user_id)
         WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
@@ -174,6 +360,8 @@ export class SessionStore {
       return undefined;
     }
 
+    const credential = await this.#identityCredential(row, token);
+
     void query(
       `UPDATE vantara_identity_links SET last_used_at = now()
         WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
@@ -185,8 +373,8 @@ export class SessionStore {
       identityId: row.vantara_identity_id,
       userId: row.uchiyomi_user_id,
       username: row.username,
-      token,
-      ...(row.token_id ? { tokenId: row.token_id } : {}),
+      token: credential.token,
+      ...(credential.tokenId ? { tokenId: credential.tokenId } : {}),
     };
   }
 
