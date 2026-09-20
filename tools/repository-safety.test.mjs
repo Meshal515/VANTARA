@@ -513,26 +513,42 @@ test('a build with no endpoint baked still offers a way in', () => {
   );
 });
 
-test('database restore is atomic, so a half-applied restore cannot report success', () => {
-  // ‏`pg_restore` الافتراضي: «exit on error, default is to continue». ومع
-  // ‏`--clean` هذا يعني استعادة متعثّرة أسقطت القديم وبنت نصف الجديد، ثم
-  // طبعت «Restore completed» — نجاح كاذب على مسار التعافي من كارثة.
+test('database pair restore stages both archives and closes the mixed-state window', () => {
   const script = read('infra/restore-postgres.sh');
   const restores = script.match(/pg_restore[^\n]*(?:\\\n[^\n]*)*--dbname/g) ?? [];
-  assert.ok(restores.length >= 2, 'restore script must restore both databases');
+  assert.ok(restores.length >= 2, 'restore script must restore both databases into staging databases first');
 
   for (const invocation of restores) {
-    assert.match(
-      invocation,
-      /--single-transaction/,
-      'each restore must run in one transaction: either the database comes back whole, or it is untouched',
-    );
-    assert.match(
-      invocation,
-      /--exit-on-error/,
-      'each restore must stop at the first error instead of continuing past it',
-    );
+    assert.match(invocation, /--single-transaction/, 'each staged restore must be atomic inside its database');
+    assert.match(invocation, /--exit-on-error/, 'each staged restore must stop on the first archive error');
   }
+
+  assert.match(script, /stage_primary=.*stage_a/, 'VANTARA restore needs an isolated staging database');
+  assert.match(script, /stage_uchiyomi=.*stage_b/, 'Uchiyomi restore needs an isolated staging database');
+  assert.match(script, /ALLOW_CONNECTIONS \$state/, 'promotion must close databases to client connections');
+  assert.match(script, /rollback_one/, 'a half-finished pair promotion needs compensating rollback');
+  assert.match(
+    script,
+    /RESTORE_FAULT_AFTER_PRIMARY_PROMOTE/,
+    'CI must have a fault-injection point between the two promotions',
+  );
+
+  const testScript = read('infra/test-db-bootstrap.sh');
+  assert.match(
+    testScript,
+    /RESTORE_FAULT_AFTER_PRIMARY_PROMOTE=YES/,
+    'bootstrap CI must exercise the dangerous promotion midpoint',
+  );
+  assert.match(
+    testScript,
+    /vantara_after_failed_restore[\s\S]*vantara-after-backup/,
+    'fault injection must prove the first live DB was rolled back',
+  );
+  assert.match(
+    testScript,
+    /uchiyomi_after_failed_restore[\s\S]*uchiyomi-after-backup/,
+    'fault injection must prove the second live DB remained on the same recovery point',
+  );
 });
 
 test('Android pairing links are wired from Capacitor into the trusted-device client', () => {
@@ -571,32 +587,39 @@ test('local worker secrets and local D1 state can never be committed', () => {
   assert.match(ignore, /\.wrangler\//, '.gitignore must ignore local D1 state');
 });
 
-test('the server never acknowledges a write it did not apply', () => {
-  // العميل يعزل ما لا تذكره الاستجابة، لكنه يُفرّغ طابوره من كل ما تُقرّه.
-  // فإقرار عملية بلا جملة = ضياع صامت: APK أحدث من الـWorker المنشور يرسل
-  // `kind` مجهولًا، فيُقَرّ ولا يُكتب ولا يُعاد أبدًا.
+test('the server acknowledges only ops whose atomic write batch committed', () => {
   const worker = read('services/sync-worker/src/index.ts');
   assert.match(
     worker,
     /unapplied\.add\(op\.opId\)/,
-    'ops that build no statement must be collected, not acknowledged',
+    'ops that build no statement must remain unsettled',
   );
   assert.match(
     worker,
-    /applied:\s*applied\.map/,
-    'the response must list only the ops that produced statements',
+    /INSERT INTO sync_op_claims/,
+    'every current write batch must reserve op_id inside the transaction',
   );
   assert.match(
     worker,
-    /if\s*\(statements\.length\s*>\s*0\)\s*await\s+env\.DB\.batch/,
-    'an all-unknown batch must not call D1 with an empty batch, which throws',
+    /INSERT INTO sync_revision_claims/,
+    'the public revision must be claimed inside the same transaction',
+  );
+  assert.match(
+    worker,
+    /await env\.DB\.batch\(batch\);[\s\S]{0,180}appliedIds\.add\(op\.opId\)/,
+    'an op may enter the applied response only after its D1 batch commits',
+  );
+  assert.match(
+    worker,
+    /applied:\s*\[\.\.\.appliedIds\]/,
+    'the response must be built from the post-commit applied set',
   );
 
   const queue = read('apps/web/lib/sync.js');
   assert.match(
     queue,
     /quarantineOp\(op,\s*422,\s*'not_settled'\)/,
-    'the client half of the contract must keep quarantining unsettled ops',
+    'the client must keep quarantining any op the server did not settle',
   );
 });
 
