@@ -92,7 +92,7 @@ class NetworkHelper(context: Context) {
         }
         .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
-        .addInterceptor(BrowserVerificationInterceptor())
+        .addInterceptor(BrowserVerificationInterceptor(context, ::defaultUserAgentProvider))
         .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
         .build()
 
