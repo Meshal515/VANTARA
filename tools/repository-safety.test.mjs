@@ -16,17 +16,10 @@ import test from 'node:test';
  */
 
 /**
- * الاستثناءات المعلنة — ملفّا طبقة الهوية وحدهما.
- *
- * تهيئة الجلسة تُدرج صفّ بروفايل وبوابة فارغين، و`/v1/auth/accounts` يقرأ
- * البروفايل لقائمة حسابات لا يستهلكها العميل (المستهلك الحقيقي هو `/v1/accounts`
- * عند الـWorker). الملفان قيد إعادة بناء في باتش الهوية الموحدة، فتعديلهما من
- * هنا تعارض مقصود ممنوع. مسجّل كـhandoff، ولا يجوز أن تطول هذه القائمة.
+ * B4 أُغلق فعليًا: الجداول الاجتماعية المتقاعدة أُسقطت من PostgreSQL،
+ * لذلك لا يوجد أي ملف مسموح له بقراءتها أو الكتابة فيها بعد الآن.
  */
-const RETIRED_TABLE_EXCEPTIONS = Object.freeze({
-  'apps/api/src/lib/sessions.ts': ['vantara_profiles', 'vantara_user_gates'],
-  'apps/api/src/routes/auth.ts': ['vantara_profiles'],
-});
+const RETIRED_TABLE_EXCEPTIONS = Object.freeze({});
 
 function retiredTablesFromMatrix() {
   const source = read('packages/domain/src/ownership.ts');
@@ -298,21 +291,27 @@ test('every failure scenario has a status and deferred ones say what they need',
   }
 });
 
-test('the retired-table exception list stays at the declared identity handoff', () => {
+test('the retired-table exception list stays empty after B4 physical retirement', () => {
   assert.deepEqual(
-    Object.keys(RETIRED_TABLE_EXCEPTIONS).sort(),
-    ['apps/api/src/lib/sessions.ts', 'apps/api/src/routes/auth.ts'],
-    'a new exception means a second owner came back — declare it in the office first',
+    Object.keys(RETIRED_TABLE_EXCEPTIONS),
+    [],
+    'a new exception means a retired PostgreSQL social owner came back',
   );
 
-  // التهيئة إدراج فقط: لا منطق يقرأ البوابة من المخزن المتقاعد
   const sessions = read('apps/api/src/lib/sessions.ts');
-  assert.match(sessions, /INSERT INTO vantara_user_gates/);
-  assert.doesNotMatch(sessions, /(SELECT[^;]*FROM|UPDATE|DELETE\s+FROM)\s+vantara_user_gates/i);
-
-  // ولا يكتب مسار الحسابات في المتقاعد، يقرأ فقط
   const auth = read('apps/api/src/routes/auth.ts');
-  assert.doesNotMatch(auth, /(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+vantara_profiles/i);
+  for (const table of retiredTablesFromMatrix()) {
+    assert.equal(
+      sqlReferences(stripComments(sessions), table),
+      false,
+      `sessions.ts must never revive retired table ${table}`,
+    );
+    assert.equal(
+      sqlReferences(stripComments(auth), table),
+      false,
+      `auth.ts must never revive retired table ${table}`,
+    );
+  }
 });
 
 test('signed Android release workflow is tag-only, main-only, and CI-verified', () => {
@@ -585,7 +584,7 @@ test('a capped sync page can never strand rows behind the cursor', () => {
   // يعلّق العميل في حلقة. الجدول يُستنزف عند ذلك الـrev مرة واحدة.
   assert.match(
     worker,
-    /WHERE rev = \? ORDER BY rev/,
+    /WHERE rev = \?\$\{scope\.sql\} ORDER BY rev/,
     'a page whose rows share one rev must be drained at that rev',
   );
 });
