@@ -46,7 +46,7 @@ function recorder(): { env: Env; statements: Recorded[] } {
   return { env, statements };
 }
 
-const NOW = 1_700_000_000_000;
+const NOW = Date.UTC(2026, 8, 20);
 const REV = 42;
 const ACCOUNTS: OpContext = { accounts: ['dahmi', 'mansour', 'ngm'] };
 
@@ -207,9 +207,11 @@ describe('cumulative ops', () => {
     expect(statement?.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)');
   });
 
-  it('rejects a malformed usage day instead of poisoning weekly totals', () => {
+  it('rejects malformed and future usage days instead of poisoning weekly totals', () => {
     expect(translate('usage.add', { activeMs: 5_000, day: 'zzzzzzzzzz' })).toEqual([]);
     expect(translate('usage.add', { activeMs: 5_000, day: '2026-02-31' })).toEqual([]);
+    expect(translate('usage.add', { activeMs: 5_000, day: '2026-09-21' })).toEqual([]);
+    expect(translate('usage.add', { activeMs: 5_000, day: '2026-09-20' })).not.toEqual([]);
   });
 });
 
