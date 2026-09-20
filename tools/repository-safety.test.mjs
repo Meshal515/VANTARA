@@ -913,6 +913,8 @@ test('D1 rollout classifier rejects write-incompatible changes disguised as expa
     'ALTER TABLE comments ADD CONSTRAINT comments_body_nonempty CHECK (length(body) > 0);',
     'CREATE UNIQUE INDEX comments_one_body ON comments(body);',
     'ALTER TABLE comments ALTER COLUMN body SET NOT NULL;',
+    "ALTER TABLE comments ADD COLUMN mood TEXT CHECK (mood = 'ok') DEFAULT 'bad';",
+    "CREATE TRIGGER reject_old_write BEFORE INSERT ON comments BEGIN SELECT RAISE(FAIL, 'blocked'); END;",
   ];
   for (const sql of unsafe) {
     assert.equal(
