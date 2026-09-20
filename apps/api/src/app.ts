@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import { CORRELATION_HEADER, correlationIdFrom } from '@vantara/domain';
+import { UchiyomiError } from '@vantara/uchiyomi';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
 import { registerCors } from './lib/cors.ts';
@@ -20,6 +21,14 @@ import { libraryRoutes } from './routes/library.ts';
 import { mediaRoutes } from './routes/media.ts';
 import { sourceRoutes } from './routes/sources.ts';
 
+export function sanitizeRequestUrl(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) return '';
+  // Access logs do not need query values. Media capabilities live in ?t= and
+  // any future credential-like query value is safer omitted than selectively redacted.
+  const query = raw.indexOf('?');
+  return query === -1 ? raw : raw.slice(0, query);
+}
+
 export interface BuiltApp {
   app: FastifyInstance;
   ctx: AppContext;
@@ -28,7 +37,22 @@ export interface BuiltApp {
 export async function buildApp(config: Config): Promise<BuiltApp> {
   const app = Fastify({
     // في الاختبار نكتم السجل كليًا بدل تعطيل سجل الطلبات وحده
-    logger: config.NODE_ENV === 'test' ? false : { level: config.LOG_LEVEL },
+    logger:
+      config.NODE_ENV === 'test'
+        ? false
+        : {
+            level: config.LOG_LEVEL,
+            serializers: {
+              req(request) {
+                return {
+                  method: request.method,
+                  url: sanitizeRequestUrl(request.url),
+                  hostname: request.hostname,
+                  remoteAddress: request.ip,
+                };
+              },
+            },
+          },
     // VANTARA يقف خلف Cloudflare Tunnel: العنوان الحقيقي يأتي في الترويسة
     trustProxy: true,
     bodyLimit: 1024 * 1024,
@@ -64,8 +88,33 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    const status = error.statusCode ?? 500;
     const correlationId = request.correlationId;
+
+    if (error instanceof UchiyomiError) {
+      // خطأ المنبع ليس عطبًا داخليًا في VANTARA، ولا نعيد 401/403 للعميل
+      // فتدخل الواجهة في حلقة تجديد VANTARA token بينما العطب في Uchiyomi.
+      const status = error.status === 429 ? 429 : error.status === 404 ? 404 : 502;
+      const code =
+        error.status === 429
+          ? 'upstream_rate_limited'
+          : error.status === 404
+            ? 'upstream_not_found'
+            : error.status === 401 || error.status === 403
+              ? 'upstream_auth_failed'
+              : 'upstream_unavailable';
+      request.log.warn(
+        {
+          correlationId,
+          upstreamStatus: error.status,
+          upstreamCode: error.code,
+          upstreamPath: error.path,
+        },
+        'uchiyomi request failed',
+      );
+      return reply.code(status).send({ error: code, correlationId });
+    }
+
+    const status = error.statusCode ?? 500;
     if (status >= 500) {
       // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل — إلا
       // المعرّف، وهو ما يجعل البلاغ قابلًا للربط بهذا السطر بالضبط
