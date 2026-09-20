@@ -42,10 +42,9 @@ active_writers="$(psql --dbname=postgres -Atc "
     FROM pg_stat_activity
    WHERE datname IN ('$primary_db', '$uchiyomi_db')
      AND backend_type = 'client backend'
-     AND state <> 'idle'
 " 2>/dev/null || printf 'unknown')"
 if [ "$active_writers" = "unknown" ] || [ "$active_writers" -ne 0 ] 2>/dev/null; then
-  echo "Refusing paired restore: active database work detected ($active_writers)." >&2
+  echo "Refusing paired restore: active database connections detected ($active_writers)." >&2
   exit 3
 fi
 
