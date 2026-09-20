@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 
+# PostgreSQL لا يستطيع مزامنة snapshot منطقي بين قاعدتين مختلفتين. لذلك
+# الزوج VANTARA/Uchiyomi لا يُنشر كـrecovery point واحد إلا في نافذة كتابة
+# متوقفة. هذا شرط صحة، لا مجرد تأكيد شكلي.
+if [ "${CONFIRM_SERVICES_PAUSED:-}" != "YES" ]; then
+  echo 'Refusing paired backup: stop VANTARA/Uchiyomi writers and set CONFIRM_SERVICES_PAUSED=YES' >&2
+  exit 2
+fi
+
 backup_dir="${BACKUP_DIR:-/backups/postgres}"
 primary_db="${POSTGRES_DB:-vantara}"
 uchiyomi_db="${UCHIYOMI_DB:-uchiyomi}"
@@ -11,8 +19,8 @@ tmp_dir="$backup_dir/.tmp-$stamp-$$"
 mkdir -p "$tmp_dir"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-# custom format gives us pg_restore validation/selective restore and is safe for a
-# running PostgreSQL instance because pg_dump takes a consistent logical snapshot.
+# كل pg_dump متسق داخل قاعدة واحدة. شرط الخدمات المتوقفة أعلاه هو الذي يجعل
+# اللقطتين المتتاليتين زوجًا منطقيًا واحدًا عبر القاعدتين.
 pg_dump --format=custom --no-owner --no-acl --dbname="$primary_db" --file="$tmp_dir/vantara.dump"
 pg_dump --format=custom --no-owner --no-acl --dbname="$uchiyomi_db" --file="$tmp_dir/uchiyomi.dump"
 
