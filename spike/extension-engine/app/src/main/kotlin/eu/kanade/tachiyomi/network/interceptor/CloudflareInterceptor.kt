@@ -44,6 +44,8 @@ import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import dev.vantara.spike.ChromeUserAgent
+import dev.vantara.spike.CloudflareInteractiveAction
+import dev.vantara.spike.cloudflareInteractiveAction
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -66,6 +68,11 @@ class CloudflareInterceptor(
 ) : Interceptor {
 
     private val handler = Handler(Looper.getMainLooper())
+
+    // This APK is an automated source batch probe. It must never replace the
+    // whole activity with a human Cloudflare challenge while dozens of sources
+    // are queued behind it.
+    private val batchProbe = true
 
     /** Serializes WebView work and remembers what we've learned per host. */
     private val solveLock = Any()
@@ -245,7 +252,10 @@ class CloudflareInterceptor(
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
                         interactive.set(true)
-                        showInteractive(view, request.url.host)
+                        when (cloudflareInteractiveAction(batchProbe)) {
+                            CloudflareInteractiveAction.FAIL_FAST -> finish(SolveOutcome.INTERACTIVE)
+                            CloudflareInteractiveAction.SHOW_BROWSER -> showInteractive(view, request.url.host)
+                        }
                     }
                 },
                 "kagari",
