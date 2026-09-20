@@ -1,9 +1,25 @@
 import { query, queryOne, transaction } from '@vantara/db';
 import { identityIdForUsername } from '@vantara/domain';
-import type { UchiyomiClient } from '@vantara/uchiyomi';
+import { UchiyomiError, type UchiyomiClient } from '@vantara/uchiyomi';
 import { decrypt, encrypt, newSessionId } from './crypto.ts';
 
 export const SESSION_COOKIE = 'vantara_session';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const IDENTITY_ROTATE_BEFORE_MS = 7 * DAY_MS;
+
+export class IdentityRelinkRequiredError extends Error {
+  constructor() {
+    super('content identity must be linked again');
+    this.name = 'IdentityRelinkRequiredError';
+  }
+}
+
+function estimatedTokenExpiry(ttlDays: number): Date {
+  // Uchiyomi starts its TTL while processing the mint request. Subtract one
+  // minute so VANTARA never believes a token lives longer than upstream does.
+  return new Date(Date.now() + ttlDays * DAY_MS - 60_000);
+}
 
 export interface Session {
   id: string;
@@ -31,6 +47,7 @@ interface IdentityLinkRow {
   uchiyomi_user_id: string;
   token_encrypted: string;
   token_id: string | null;
+  token_expires_at: string | Date | null;
   username: string;
 }
 
@@ -48,6 +65,49 @@ export class SessionStore {
   }
 
   /**
+   * POST /api/tokens is intentionally not retried: its response can be lost
+   * after Uchiyomi committed the credential. Every attempt therefore has a
+   * unique name. On an ambiguous 5xx/network result we list that user's tokens
+   * and revoke any row carrying that exact name before surfacing the failure.
+   */
+  async #mintTokenReconciled(
+    authorizationToken: string,
+    name: string,
+  ): Promise<{ id: string; token: string }> {
+    try {
+      return await this.#options.uchiyomi.mintToken(authorizationToken, {
+        name,
+        scopes: ['read', 'write'],
+        expiresInDays: this.#options.ttlDays,
+      });
+    } catch (error) {
+      const ambiguous =
+        error instanceof UchiyomiError &&
+        error.path === '/api/tokens' &&
+        error.status >= 500;
+      if (!ambiguous) throw error;
+
+      try {
+        const tokens = await this.#options.uchiyomi.listTokens(authorizationToken);
+        for (const token of tokens) {
+          if (token.name !== name) continue;
+          await this.#options.uchiyomi.revokeToken(authorizationToken, token.id);
+        }
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'ambiguous upstream token mint could not be reconciled',
+        );
+      }
+      throw error;
+    }
+  }
+
+  #mintName(kind: 'login' | 'rotate'): string {
+    return `vantara-${kind}-${newSessionId().slice(0, 32)}`;
+  }
+
+  /**
    * Legacy/owner linking path. كلمة المرور لا تدخل شاشة الحساب اليومية. عند
    * نجاح الربط نحفظ توكن Uchiyomi مشفّرًا تحت VANTARA identity الثابتة حتى
    * يستطيع access token v2 فتح المحتوى من دون Login ثانٍ.
@@ -57,15 +117,12 @@ export class SessionStore {
     const result = await uchiyomi.login(username, password);
 
     const expiresInDays = this.#options.ttlDays;
-    const minted = await uchiyomi.mintToken(result.accessToken, {
-      name: `vantara${device ? ` (${device})` : ''}`,
-      scopes: ['read', 'write'],
-      expiresInDays,
-    });
+    const id = newSessionId();
+    const minted = await this.#mintTokenReconciled(result.accessToken, this.#mintName('login'));
+    const tokenExpiresAt = estimatedTokenExpiry(expiresInDays);
 
     const encrypted = encrypt(minted.token, this.#options.key);
     const identityId = identityIdForUsername(result.user.username);
-    const id = newSessionId();
 
     try {
       await transaction(async (client) => {
@@ -80,16 +137,17 @@ export class SessionStore {
         if (identityId) {
           await client.query(
             `INSERT INTO vantara_identity_links
-               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
-             VALUES ($1, $2, $3, $4, NULL)
+               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, token_expires_at, revoked_at)
+             VALUES ($1, $2, $3, $4, $5, NULL)
              ON CONFLICT (vantara_identity_id) DO UPDATE SET
                uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
                token_encrypted = EXCLUDED.token_encrypted,
                token_id = EXCLUDED.token_id,
+               token_expires_at = EXCLUDED.token_expires_at,
                linked_at = now(),
                last_used_at = now(),
                revoked_at = NULL`,
-            [identityId, result.user.id, encrypted, minted.id],
+            [identityId, result.user.id, encrypted, minted.id, tokenExpiresAt],
           );
         }
 
