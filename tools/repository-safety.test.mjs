@@ -781,27 +781,66 @@ test('every XML the Android builds depend on actually parses', () => {
   }
 });
 
-test('the spike pins published artifact urls instead of building them', () => {
-  // أول تشغيل حقيقي سقط على الخمسة بـ404: الفهرس ينشر الـAPK والـJAR تحت
-  // **وسمَي إصدار مختلفين**، وبناءُ رابط الـAPK من وسم الـJAR يطلب ملفًا
-  // لا وجود له. وما ينشره المصدر يُنسخ، ولا يُعاد تركيبه من قاعدة نستنبطها.
-  const sources = read('spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/Sources.kt');
-
-  assert.doesNotMatch(
-    sources,
-    /apkUrl = "\$/,
-    'apkUrl must be a full literal url, never interpolated from a base',
+test('the all-Arabic spike pins an index snapshot and copies published APK urls verbatim', () => {
+  // أول تشغيل حقيقي سقط على الخمسة بـ404 لأن رابط APK بُني من قاعدة مستنبطة.
+  // النسخة الكلّية لا تعود لقائمة يدوية: workflow يثبّت commit للفهرس،
+  // والمولّد يأخذ resources.apkUrl نفسه ثم يحسب SHA-256 من البايتات المنشورة.
+  const workflow = read('.github/workflows/spike-extension-engine.yml');
+  const generator = read('spike/extension-engine/tools/generate_arabic_sources.py');
+  const fallback = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt',
   );
-  const urls = [...sources.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
-  assert.equal(urls.length, 5, 'all five sources must carry an apk url');
-  for (const url of urls) {
-    assert.match(url, /^https:\/\/github\.com\/keiyoushi\/extensions\/releases\/download\//, url);
-    assert.match(url, /\.apk$/, `${url} must point at an apk, not a jar`);
-  }
 
-  // وكل مصدر ببصمته: تحميل من ملف يتخلّى عن تحقّق التوقيع، فالبصمة هي الضمانة
-  const hashes = [...sources.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
-  assert.equal(hashes.length, 5, 'every pinned artifact needs its sha256');
+  assert.match(
+    workflow,
+    /^\s*KEIYOUSHI_INDEX_COMMIT:\s*[0-9a-f]{40}\s*$/m,
+    'the discovery spike must build from one exact Keiyoushi index commit',
+  );
+  assert.match(
+    generator,
+    /apk_url = resources\.get\("apkUrl"\)/,
+    'the generator must copy resources.apkUrl from index.json',
+  );
+  assert.doesNotMatch(
+    generator,
+    /apkUrl.*(?:versionName|packageName).*f["']/,
+    'the generator must never reconstruct apkUrl from metadata',
+  );
+  assert.match(
+    generator,
+    /hashlib\.sha256\(data\)\.hexdigest\(\)/,
+    'every downloaded APK in the generated snapshot needs a byte-level SHA-256',
+  );
+  assert.match(
+    generator,
+    /s\.get\("language"\) == "ar"/,
+    'Arabic discovery must use sources[].language, not directory naming',
+  );
+
+  // والـfallback المحلي هو نفس دفعة الإقرار التي نسلّمها: 18 حزمة محددة،
+  // MangaDex وحده من namespace العام، ومصدرا NSFW العربيان المحددان فقط.
+  const urls = [...fallback.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
+  const hashes = [...fallback.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
+  const packages = [...fallback.matchAll(/pkg = "([^"]+)"/g)].map((match) => match[1]);
+  const warnings = [...fallback.matchAll(/warning = ContentWarning\.(SAFE|MIXED|NSFW)/g)]
+    .map((match) => match[1]);
+  assert.equal(urls.length, 18, 'the delivered spike must contain exactly eighteen packages');
+  assert.equal(hashes.length, urls.length, 'every fallback artifact needs its sha256');
+  assert.deepEqual(
+    packages.filter((pkg) => pkg.includes('.extension.all.')),
+    ['eu.kanade.tachiyomi.extension.all.mangadex'],
+    'MangaDex must be the only foreign catalogue package',
+  );
+  assert.deepEqual(
+    packages.filter((pkg) => !pkg.includes('.extension.all.'))
+      .every((pkg) => pkg.includes('.extension.ar.')),
+    true,
+    'all remaining packages must be Arabic',
+  );
+  assert.equal(warnings.filter((warning) => warning === 'SAFE').length, 15);
+  assert.equal(warnings.filter((warning) => warning === 'MIXED').length, 1);
+  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 2);
+  for (const url of urls) assert.match(url, /^https:\/\/.*\.apk$/, url);
 });
 
 test('no spike probe step can run without a deadline or an announcement', () => {

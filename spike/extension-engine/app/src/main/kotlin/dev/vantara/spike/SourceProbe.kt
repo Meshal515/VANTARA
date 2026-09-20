@@ -1,16 +1,39 @@
 package dev.vantara.spike
 
+import android.graphics.BitmapFactory
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
+
+internal fun describeProbeValue(value: Any?): String = when (value) {
+    null -> "null"
+    is Collection<*> -> "${value.size} عنصرًا"
+    is SManga -> runCatching { value.title.take(60) }.getOrElse { "SManga بلا عنوان بعد" }
+    is SChapter -> runCatching { value.name.take(60) }.getOrElse { "SChapter بلا اسم بعد" }
+    else -> runCatching { value.toString().take(80) }.getOrElse { value.javaClass.simpleName }
+}
+
+/**
+ * Iken 1.6.73 filters novels after using the API totalCount. When a page has
+ * only novels, its recursive skip path dereferences an uninitialized page map
+ * entry and throws NPE. That page contains no supported manga, so the host can
+ * safely advance it. Keep this exact to Iken + NPE; arbitrary parser failures
+ * must remain visible and must never be silently skipped.
+ */
+internal fun isKnownEmptyIkenPageBug(t: Throwable, hierarchyNames: List<String>): Boolean =
+    t is NullPointerException && IKEN_CLASS_NAME in hierarchyNames
+
+private const val IKEN_CLASS_NAME = "eu.kanade.tachiyomi.multisrc.iken.Iken"
 
 /**
  * السلسلة الخمس لمصدر واحد، ثم قياس الكتالوج.
@@ -68,15 +91,34 @@ class SourceProbe(private val http: OkHttpClient) {
         }
     }
 
+    enum class CatalogueStopKind {
+        COMPLETE,
+        REPEAT_SUSPECTED,
+        CLOUDFLARE,
+        DEAD_HOST,
+        TIMEOUT,
+        SOURCE_ERROR,
+        TIME_BUDGET,
+        PAGE_CAP,
+    }
+
     data class CatalogueReach(
-        /** عدد الأعمال الفريدة التي كُشفت فعلًا. */
+        /** عدد الأعمال الفريدة التي كُشفت فعلًا. هذا حد أدنى إذا لم نبلغ النهاية. */
         val uniqueWorks: Int,
-        /** كم صفحة طُلبت. */
+        /** كم صفحة جُلبت بنجاح. */
         val pagesFetched: Int,
-        /** هل بلغنا النهاية فعلًا، أو توقفنا عند السقف؟ */
+        /** آخر رقم صفحة حاولنا الوصول إليه. */
+        val lastPageAttempted: Int,
+        /** هل بلغنا النهاية فعلًا، أو توقفنا قبلها؟ */
         val reachedEnd: Boolean,
+        val stopKind: CatalogueStopKind,
         val stoppedBecause: String,
-    )
+        /** Pages skipped only for an exact, proven upstream empty-page bug. */
+        val skippedPages: List<Int> = emptyList(),
+    ) {
+        /** أي رقم غير مكتمل يُعرض للمستخدم كـ "على الأقل"، لا كإجمالي نهائي. */
+        val isPartial: Boolean get() = !reachedEnd && uniqueWorks > 0
+    }
 
     data class Report(
         val label: String,
@@ -149,7 +191,7 @@ class SourceProbe(private val http: OkHttpClient) {
         val started = System.currentTimeMillis()
         return try {
             val value = withTimeout(timeoutMs) { block() }
-            into += Step(name, true, describe(value), System.currentTimeMillis() - started)
+            into += Step(name, true, describeProbeValue(value), System.currentTimeMillis() - started)
             value
         } catch (t: Throwable) {
             // إلغاءٌ حقيقي (إغلاق الشاشة) يمرّ؛ ومهلتُنا وحدها تُلتقط. بلا
@@ -197,7 +239,10 @@ class SourceProbe(private val http: OkHttpClient) {
             .header("user-agent", RAW_UA)
             .build()
         prober.newCall(request).execute().use { res ->
-            val body = res.body.bytes()
+            // This is diagnostic evidence, not a page download. A broken or
+            // hostile origin must not be able to OOM the whole batch merely by
+            // returning a huge HTML error document after another step failed.
+            val body = res.peekBody(LIVE_CHECK_MAX_BYTES).bytes()
             LiveCheck(baseUrl, res.code, body.size, res.header("content-type"), null)
         }
     } catch (t: Throwable) {
@@ -261,17 +306,10 @@ class SourceProbe(private val http: OkHttpClient) {
         return "$chain\nstack: $frames"
     }
 
-    private fun describe(value: Any?): String = when (value) {
-        null -> "null"
-        is Collection<*> -> "${value.size} عنصرًا"
-        is SManga -> value.title.take(60)
-        is SChapter -> value.name.take(60)
-        else -> value.toString().take(80)
-    }
-
     suspend fun run(
         label: String,
         source: CatalogueSource,
+        query: String,
         onStepStart: suspend (String) -> Unit = {},
     ): Report {
         announce = onStepStart
@@ -284,13 +322,12 @@ class SourceProbe(private val http: OkHttpClient) {
         val base = runCatching { (source as? HttpSource)?.baseUrl }.getOrNull()
 
         // ١) البحث
-        val found = step("search", steps, base) {
+        val foundBySearch = step("search", steps, base, timeoutMs = SEARCH_TIMEOUT_MS) {
             // نبدأ باستعلام الاختبار المثبّت. لو رجع صفرًا، ما نحكم أن
             // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
             // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
             // حرفيًا؛ نجاحه يثبت أن مسار البحث نفسه يعمل.
-            val preferred = queryFor(label)
-            val firstTry = source.getSearchManga(1, preferred, FilterList())
+            val firstTry = source.getSearchManga(1, query, FilterList())
             if (firstTry.mangas.isNotEmpty()) {
                 firstTry.mangas
             } else {
@@ -304,8 +341,17 @@ class SourceProbe(private val http: OkHttpClient) {
             }
         }
 
-        // بلا نتيجة بحث لا معنى لبقية السلسلة: نتوقف ونقول أين
-        val first = found?.firstOrNull()
+        // عطل البحث لا يعني أن المصدر كله ميت. نجرّب الرائج كي نعرف هل
+        // التصفح/الفصول/الصفحات ما زالت تعمل، لكن خطوة search تبقى حمراء
+        // والتقرير يصنّفه «جزئيًّا» لا نجاحًا كاملًا.
+        val candidates = foundBySearch ?: step("popular-fallback", steps, base, timeoutMs = BROWSE_TIMEOUT_MS) {
+            val popular = source.getPopularManga(1).mangas
+            require(popular.isNotEmpty()) { "popular list is empty" }
+            popular
+        }
+
+        // بلا نتيجة من البحث ولا من الرائج لا معنى لبقية السلسلة.
+        val first = candidates?.firstOrNull()
             ?: return Report(label, base, steps, null, null, null, null, null, null)
 
         // ٢) تفاصيل العمل
@@ -366,22 +412,33 @@ class SourceProbe(private val http: OkHttpClient) {
                 val asHttp = source as? HttpSource
                 // المصدر قد يعطي الرابط في الصفحة، أو يشتقه بطلب ثانٍ
                 val url = page.imageUrl
-                    ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
+                    ?: asHttp?.getImageUrl(page)
                     ?: error("page carries no imageUrl")
                 imageUrl = url
-                // `imageRequest` محمية في العقد، فنبني الطلب بترويسات المصدر
-                // نفسها: كثير من المواقع يرفض بلا `Referer` الصحيح.
-                val request = Request.Builder().url(url)
-                    .apply { asHttp?.headers?.let { headers(it) } }
-                    .build()
-                val caller = asHttp?.client ?: http
-                caller.newCall(request).execute().use { response ->
-                    require(response.isSuccessful) { "image HTTP ${response.code}" }
-                    val body = response.body.bytes()
+                val httpSource = asHttp ?: error("source is not HttpSource; cannot issue its image request")
+                page.imageUrl = url
+                // استخدم عقد Mihon الحديث: getImage يستدعي imageRequest
+                // الافتراضي/المخصص للمصدر ثم يعيد Response حيًا بلا Rx.
+                // المسار السابق fetchImage().awaitSingle() كان يلغي الـCall
+                // فور onNext قبل قراءة body، وهو سبب CANCEL/Socket closed.
+                httpSource.getImage(page).use { response ->
+                    val body = BoundedPayloadReader.read(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        maxBytes = MAX_IMAGE_BYTES,
+                    )
                     require(body.size > 1024) { "image too small: ${body.size} bytes" }
+                    val type = response.header("content-type")
+                    val verdict = ImagePayloadPolicy.validate(type, body)
+                    require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
+                    require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+                        "Android image decoder rejected payload"
+                    }
                     imageBytes = body.size
                     imageData = body
-                    "${body.size} بايت · ${response.header("content-type")}"
+                    "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
                 }
             }
         }
@@ -412,80 +469,149 @@ class SourceProbe(private val http: OkHttpClient) {
      */
     suspend fun crawlCatalogue(
         source: CatalogueSource,
+        startPage: Int = 1,
+        initialSeen: Set<String> = emptySet(),
+        onPageCommitted: suspend (page: Int, nextPage: Int, newKeys: List<String>, totalSeen: Int) -> Unit =
+            { _, _, _, _ -> },
         onProgress: suspend (Int, Int) -> Unit,
-    ): CatalogueReach = walkCatalogue(source, FULL_PAGE_CAP, FULL_BUDGET_MS, onProgress)
+    ): CatalogueReach = walkCatalogue(
+        source = source,
+        pageCap = FULL_PAGE_CAP,
+        budgetMs = FULL_BUDGET_MS,
+        startPage = startPage,
+        initialSeen = initialSeen,
+        onPageCommitted = onPageCommitted,
+        onProgress = onProgress,
+    )
 
     /**
      * كم عملًا يستطيع هذا المصدر كشفه فعلًا؟
      *
-     * لا نكتفي بـ`hasNextPage`: مصادر تقول `true` إلى الأبد، ومصادر تعيد
-     * نفس الصفحة. فالتوقف على ثلاث علامات، وكلٌّ منها يُسجَّل بالاسم:
-     *
-     *  - `end-of-catalogue`  — الخادم قال لا مزيد، **وهذا وحده إثبات النهاية**
-     *  - `repeat`            — الصفحة الجديدة لم تُضف عملًا واحدًا: حلقة
-     *  - `page-cap`          — بلغنا سقفنا، فلم نُثبت النهاية ونقولها صريحة
+     * الـcrawl قابل للاستئناف من صفحة محفوظة ومعه مجموعة الأعمال التي سبق
+     * إثباتها. بعد كل صفحة ناجحة نكتب checkpoint قبل الانتقال للصفحة التالية.
+     * إذا مات process بعدها، نعيد صفحة واحدة كحد أقصى ولا نرجع إلى الصفحة 1.
      */
     private suspend fun walkCatalogue(
         source: CatalogueSource,
         pageCap: Int,
         budgetMs: Long,
+        startPage: Int = 1,
+        initialSeen: Set<String> = emptySet(),
+        onPageCommitted: suspend (page: Int, nextPage: Int, newKeys: List<String>, totalSeen: Int) -> Unit =
+            { _, _, _, _ -> },
         onProgress: suspend (Int, Int) -> Unit,
     ): CatalogueReach {
-        val seen = LinkedHashSet<String>()
-        // عدّاد صريح لِما جُلب بنجاح. اشتقاقه من رقم الصفحة عند الخروج كان
-        // يخطئ باثنتين في اتجاهين متعاكسين: صفحةٌ سقطت تُحسب مجلوبة، وصفحةُ
-        // التكرار لا تُحسب وقد جُلبت. والرقم هنا يُقرأ كدليل، فوجب صدقه.
+        val seen = LinkedHashSet<String>(initialSeen)
         var fetched = 0
-        var page = 1
+        var page = startPage.coerceAtLeast(1)
+        var lastPageAttempted = page - 1
+        var repeatStreak = 0
         var stoppedBecause = "page-cap"
+        var stopKind = CatalogueStopKind.PAGE_CAP
         var reachedEnd = false
+        val skippedPages = mutableListOf<Int>()
         val deadline = System.currentTimeMillis() + budgetMs
 
         while (page <= pageCap) {
-            // ميزانية زمنية للقياس كله: أربعون صفحة على مصدر بطيء تبتلع
-            // التشغيل وتترك المصادر الباقية بلا اختبار، والعدد الناقص
-            // يُعلَن سببه فلا يُقرأ كأنه نهاية الكتالوج.
             if (System.currentTimeMillis() >= deadline) {
                 stoppedBecause = "time-budget"
+                stopKind = CatalogueStopKind.TIME_BUDGET
                 break
             }
+
+            lastPageAttempted = page
             onProgress(page, seen.size)
+
             val result = try {
-                withTimeout(STEP_TIMEOUT_MS) { source.getPopularManga(page) }
+                // A catalogue page is a browse request, not a whole-source job.
+                // Do not let one page make the app appear frozen for 150 s.
+                withTimeout(BROWSE_TIMEOUT_MS) { source.getPopularManga(page) }
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
-                stoppedBecause = when (t) {
-                    is TimeoutCancellationException -> "timeout@p$page"
-                    else -> "error@p$page: ${t.javaClass.simpleName}"
+
+                val hierarchyNames = generateSequence<Class<*>>(source.javaClass) { it.superclass }
+                    .map { it.name }
+                    .toList()
+                if (
+                    skippedPages.size < IKEN_EMPTY_PAGE_SKIP_LIMIT &&
+                    isKnownEmptyIkenPageBug(t, hierarchyNames)
+                ) {
+                    // The failed Iken page is known to contain only novels,
+                    // which this manga engine intentionally does not support.
+                    // Persist the advance so resume does not loop on it forever.
+                    skippedPages += page
+                    onPageCommitted(page, page + 1, emptyList(), seen.size)
+                    page += 1
+                    continue
+                }
+
+                when (t) {
+                    is CloudflareBypassException -> {
+                        stopKind = CatalogueStopKind.CLOUDFLARE
+                        stoppedBecause =
+                            if (t.interactive) "cloudflare-interactive@p$page" else "cloudflare@p$page"
+                    }
+                    is UnknownHostException -> {
+                        stopKind = CatalogueStopKind.DEAD_HOST
+                        stoppedBecause = "dead-host@p$page: ${t.message?.take(120)}"
+                    }
+                    is TimeoutCancellationException -> {
+                        stopKind = CatalogueStopKind.TIMEOUT
+                        stoppedBecause = "timeout@p$page"
+                    }
+                    else -> {
+                        stopKind = CatalogueStopKind.SOURCE_ERROR
+                        stoppedBecause = "source-error@p$page: ${t.javaClass.simpleName}"
+                    }
                 }
                 break
             }
+
             fetched += 1
 
-            val before = seen.size
-            result.mangas.forEach { seen += it.url }
-            if (seen.size == before) {
-                stoppedBecause = "repeat"
-                break
+            val newKeys = ArrayList<String>(result.mangas.size)
+            result.mangas.forEach { manga ->
+                val key = manga.url.takeIf(String::isNotBlank)
+                    ?: "title:${manga.title.trim()}#p$page"
+                if (seen.add(key)) newKeys += key
             }
+            val added = newKeys.size
+
+            // Commit the page before any early exit. This is the crash boundary:
+            // every successfully parsed page survives process death.
+            onPageCommitted(page, page + 1, newKeys, seen.size)
+
             if (!result.hasNextPage) {
                 stoppedBecause = "end-of-catalogue"
+                stopKind = CatalogueStopKind.COMPLETE
                 reachedEnd = true
                 break
             }
+
+            if (added == 0) {
+                repeatStreak += 1
+                if (repeatStreak >= REPEAT_STREAK_LIMIT) {
+                    stoppedBecause = "repeat-$repeatStreak@p$page"
+                    stopKind = CatalogueStopKind.REPEAT_SUSPECTED
+                    break
+                }
+            } else {
+                repeatStreak = 0
+            }
+
             page += 1
         }
 
         return CatalogueReach(
             uniqueWorks = seen.size,
             pagesFetched = fetched,
+            lastPageAttempted = lastPageAttempted,
             reachedEnd = reachedEnd,
+            stopKind = stopKind,
             stoppedBecause = stoppedBecause,
+            skippedPages = skippedPages,
         )
     }
-
-    private fun queryFor(label: String): String =
-        SPIKE_SOURCES.firstOrNull { it.label == label }?.query ?: "مانجا"
 
     private companion object {
         /** ترويسة الفحص الخامّ: نفس ما استُعمل في خطّ الأساس، فالمقارنة عادلة. */
@@ -499,6 +625,10 @@ class SourceProbe(private val http: OkHttpClient) {
         const val SAMPLE_PAGE_CAP = 3
         const val SAMPLE_BUDGET_MS = 60_000L
 
+        /** Prevent one hostile or malformed page from exhausting the app heap. */
+        const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
+        const val LIVE_CHECK_MAX_BYTES = 256L * 1024L
+
         /**
          * حاجز الأمان للإحصاء الكامل، لا سقفَ سياسة.
          *
@@ -510,6 +640,10 @@ class SourceProbe(private val http: OkHttpClient) {
         const val FULL_PAGE_CAP = 5_000
         const val FULL_BUDGET_MS = 45L * 60L * 1000L
 
+        /** لا نعلن loop من صفحة مكررة واحدة؛ بعض APIs تعيد صفحة cache مكررة عابرًا. */
+        const val REPEAT_STREAK_LIMIT = 3
+        const val IKEN_EMPTY_PAGE_SKIP_LIMIT = 20
+
         /**
          * مهلة الخطوة الواحدة.
          *
@@ -517,6 +651,14 @@ class SourceProbe(private val http: OkHttpClient) {
          * مشروعًا، وأضيق من أن تُجمّد الشاشة بلا خبر.
          */
         const val STEP_TIMEOUT_MS = 150_000L
+
+        /**
+         * البحث هو أكثر نقطة علقت عليها عشرات المصادر في الفحص الجماعي.
+         * لا نسمح له بحجز المصدر لدقيقتين ونصف: إذا لم يرد سريعًا نسجله
+         * كفشل search ونكمل عبر popular-fallback بدل تجميد بقية المصادر.
+         */
+        const val SEARCH_TIMEOUT_MS = 45_000L
+        const val BROWSE_TIMEOUT_MS = 45_000L
 
         /** الفحص الحيّ يجري داخل معالج الفشل، فيُقطع أسرع من النداء العادي. */
         const val LIVE_CHECK_TIMEOUT_S = 20L

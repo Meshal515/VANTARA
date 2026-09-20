@@ -1,25 +1,34 @@
 package dev.vantara.spike
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import java.io.IOException
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.Request
+import kotlin.coroutines.cancellation.CancellationException
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
@@ -28,90 +37,183 @@ import uy.kohesive.injekt.api.addSingletonFactory
 import uy.kohesive.injekt.api.get
 
 /**
- * شاشة واحدة، وغرضها واحد: هل المحرك المحلي يعمل على جهاز حقيقي؟
+ * Spike شامل للمصادر العربية في لقطة Keiyoushi المثبّتة عند البناء.
  *
- * لكل مصدر: تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف ⇒ بحث ⇒ تفاصيل ⇒ فصول ⇒
- * صفحات ⇒ **صورة تُعرض فعلًا** ⇒ قياس الكتالوج.
+ * لا يغيّر قائمة مصادر VANTARA الإنتاجية. الغرض أن نثبت، على جهاز حقيقي،
+ * أي حزم عربية تمر بالسلسلة كاملة:
  *
- * والصورة تُرسم على الشاشة بقصد. رابطٌ في سجل لا يُثبت شيئًا: قد يرجع
- * HTML أو صفحة حجب بحجم معقول. أما `BitmapFactory` فترفض ما ليس صورة،
- * فرؤيتها هي الإثبات.
+ * APK exact URL -> SHA-256 -> package/version/lib -> Arabic source id ->
+ * search -> details -> chapters -> pages -> image bytes/bitmap.
+ *
+ * كل حزمة مستقلة عن غيرها. سقوط مصدر لا يوقف التالي، وكل خطوة لها مهلة.
+ * المصادر المتخصصة BL/GL محظورة ولا تُنزّل ولا تُشغّل. SAFE/MIXED/NSFW
+ * تُفحص في تشغيل واحد، وبعد إقرار صريح تظهر صورة اختبار مصغّرة لكل مصدر
+ * يمرّ حتى الصورة.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var log: LinearLayout
+    private lateinit var status: TextView
     private val network by lazy { Injekt.get<NetworkHelper>() }
+    private val checkpoint by lazy { ProbeCheckpointStore(filesDir) }
+    private val catalogueCheckpoint by lazy { CatalogueCrawlCheckpointStore(filesDir) }
+    private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
-        // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WebViewActivityHolder.set(this)
-
-        // الإضافات تطلب اعتمادياتها بـ`injectLazy()`، فلا بد من تسجيلها
-        // قبل أول تحميل. بلا هذا يسقط أول مصدر بـIllegalStateException من
-        // injekt، ويبدو كأنه عطل مصدر.
-        Injekt.importModule(SpikeModule(this))
+        synchronized(INJEKT_LOCK) {
+            if (!injektReady) {
+                Injekt.importModule(SpikeModule(application))
+                injektReady = true
+            }
+        }
+        // The process may die after recording the last package but before finish().
+        // Preserve the report and only remove the now-empty resume plan.
+        if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
+        val hasPendingCheckpoint = checkpoint.hasCheckpoint()
+        val hasCatalogueProgress = catalogueCheckpoint.hasAnyProgress()
+        val contentLabel = batchContentLabel(SPIKE_SOURCES.map { it.warning }.toSet())
+        val batchSize = SPIKE_SOURCES.size
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 24, 24, 24)
         }
-        val run = Button(this).apply {
-            text = "شغّل الخمسة"
-            setOnClickListener { it.isEnabled = false; runAll(this) }
+
+        val runUnified = Button(this).apply {
+            text = if (hasPendingCheckpoint) {
+                "استأنف فحص الدفعة — $contentLabel"
+            } else {
+                "اختبر الدفعة ($batchSize) — $contentLabel"
+            }
+            setOnClickListener {
+                if (running) return@setOnClickListener
+                val warnings = SPIKE_SOURCES.map { it.warning }
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(
+                        if (requiresExplicitConsent(warnings)) {
+                            "إقرار محتوى قبل الفحص"
+                        } else {
+                            "فحص الدفعة الحالية"
+                        },
+                    )
+                    .setMessage(
+                        "هذه الدفعة تحتوي $batchSize حزمة. " +
+                            batchConsentCopy(warnings) + " " +
+                            "ستظهر صورة اختبار مصغّرة للمصدر إذا وصلت السلسلة إلى صورة فصل. " +
+                            "المتابعة تعني أنك بالغ وتوافق على فحص هذه المصادر داخل السبايك فقط.",
+                    )
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("أقر وأبدأ") { _, _ -> runUnified(this) }
+                    .show()
+            }
         }
-        // العدّ الكامل منفصل بقصد: مصدرٌ بآلاف الأعمال يحتاج مئات الصفحات
-        // ودقائق طويلة، ودمجُه في فحص السلسلة كان يجعل أربعة مصادر تنتظر
-        // خلف واحد — والمالك يريد الاثنين، كلًّا في وقته.
+
         val crawl = Button(this).apply {
-            text = "احصِ كل الأعمال (يطول)"
-            setOnClickListener { it.isEnabled = false; crawlAll(this) }
+            text =
+                if (hasCatalogueProgress) {
+                    "استأنف إحصاء كتالوج SAFE"
+                } else {
+                    "احصِ كتالوج SAFE فقط (يطول)"
+                }
+            setOnClickListener { crawlSafe(this) }
         }
+
+        val copy = Button(this).apply {
+            text = "نسخ التقرير"
+            setOnClickListener {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(
+                    ClipData.newPlainText("VANTARA Arabic sources spike", checkpoint.readReport()),
+                )
+                text = "تم نسخ التقرير"
+                postDelayed({ text = "نسخ التقرير" }, 1500)
+            }
+        }
+
+        val clear = Button(this).apply {
+            text = "مسح التقرير"
+            setOnClickListener {
+                if (running) return@setOnClickListener
+                log.removeAllViews()
+                checkpoint.clear()
+                catalogueCheckpoint.clear()
+                printHeader()
+                runUnified.text = "اختبر الدفعة ($batchSize) — $contentLabel"
+                crawl.text = "احصِ كتالوج SAFE فقط (يطول)"
+            }
+        }
+
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(run)
-        root.addView(crawl)
-        root.addView(ScrollView(this).apply { addView(log) })
-        setContentView(root)
-
-        line("VANTARA — محرك الإضافات المحلي", bold = true)
-        line("بلا Suwayomi · بلا سيرفر · بلا تثبيت إضافات يدويًّا")
-    }
-
-    /**
-     * شريط الحالة الحيّ: سطر واحد يقول ما ننتظره الآن، لا ما مضى.
-     *
-     * بلا هذا السطر كانت الشاشة تقف عند آخر نجاح دقائقَ كاملة بلا حرف،
-     * فتُقرأ كأن التطبيق مات — وهو يعمل.
-     */
-    private fun statusLine(): (String?) -> Unit {
-        val view = TextView(this).apply {
+        status = TextView(this).apply {
             textSize = 13f
             gravity = Gravity.START
             textDirection = View.TEXT_DIRECTION_LOCALE
             setTextColor(0xFF8899AA.toInt())
         }
-        log.addView(view)
-        return { what -> view.text = if (what == null) "" else "⟳ $what — جارٍ…" }
+        root.addView(runUnified)
+        root.addView(crawl)
+        root.addView(copy)
+        root.addView(clear)
+        root.addView(status)
+        root.addView(ScrollView(this).apply { addView(log) })
+        setContentView(root)
+
+        val restored = checkpoint.readReport()
+        if (restored.isBlank()) {
+            printHeader()
+        } else {
+            restored.lineSequence().forEach { displayLine(it) }
+            displayLine(
+                if (hasPendingCheckpoint) {
+                    "تم استرجاع التقرير المحفوظ — اضغط استئناف لإكمال الباقي."
+                } else {
+                    "تم استرجاع التقرير المكتمل المحفوظ."
+                },
+                bold = true,
+            )
+        }
+    }
+
+    private fun printHeader() {
+        line("VANTARA — Arabic Sources Spike", bold = true)
+        line("لقطة Keiyoushi: ${SPIKE_INDEX_COMMIT.take(12)}")
+        line(SPIKE_SNAPSHOT_NOTE)
+        line("المصادر المتخصصة BL/GL: تظهر BLOCKED في التقرير ولا تُشغّل.")
+        line("محتوى الدفعة: ${batchContentLabel(SPIKE_SOURCES.map { it.warning }.toSet())} · ${SPIKE_SOURCES.size} حزم.")
+    }
+
+    private fun statusLine(): (String?) -> Unit {
+        return { what -> status.text = if (what == null) "" else "⟳ $what — جارٍ…" }
     }
 
     /**
-     * من بيانٍ مثبَّت إلى مصدرٍ حيّ: كاش موثَّق ببصمته، وإلا تنزيل، ثم تحميل
-     * من ملف. يطبع كل خطوة، ويرجع `null` بدل أن يرمي — فالزرّان يمشيان على
-     * هذا المسار نفسه ولا يجوز أن يُسقِط أحدَهما مصدرٌ واحد.
+     * تنزيل الحزمة الموثقة وتحميلها ثم استخراج المصادر العربية المقصودة.
+     *
+     * الأهم هنا أننا لا نستعمل `first()`: الإضافة متعددة اللغات قد يكون
+     * أول CatalogueSource فيها إنجليزيًا. نطابق source.id الذي جاء من
+     * index.json، ثم نستعمل lang=ar fallback فقط للـfallback الخماسي المحلي.
      */
-    private suspend fun obtainSource(
+    private suspend fun obtainArabicSources(
         spec: SourceSpec,
         loader: FileExtensionLoader,
         waiting: (String?) -> Unit,
-    ): CatalogueSource? {
+    ): List<CatalogueSource> {
         line("")
         line("═══ ${spec.label} ═══", bold = true)
-        line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
+        line(
+            "الحزمة ${spec.pkg} · v${spec.versionName} · lib ${spec.expectedLib} · " +
+                "${spec.warning}",
+        )
 
-        // النسخة المحلية الموثّقة أولًا: انقطاع DNS عن github.com لا يجب أن
-        // يعطّل مصدرًا سبق تنزيله والتحقق من بصمته.
+        spec.blockedReason?.let { reason ->
+            line("⊘ BLOCKED — $reason", bad = true)
+            return emptyList()
+        }
+
         waiting("${spec.label} · تنزيل")
         val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
         val apk = if (cached != null) {
@@ -141,118 +243,341 @@ class MainActivity : AppCompatActivity() {
             }
             downloaded.getOrElse {
                 line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                return null
+                return emptyList()
             }.also { line("✓ download — ${it.size} بايت") }
         }
 
-        // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله: التشخيص
-        // يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
         waiting("${spec.label} · تحميل من ملف")
         val loaded = try {
             withContext(Dispatchers.IO) { loader.load(spec, apk) }
         } catch (t: Throwable) {
             line("✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-            return null
+            return emptyList()
         }
 
         return when (loaded) {
             is FileExtensionLoader.Result.Fail -> {
                 line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
                 loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
-                null
+                emptyList()
             }
+
             is FileExtensionLoader.Result.Ok -> {
-                val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-                line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
-                // حزمةٌ حُمّلت بلا مصدرٍ قابل للتصفّح ليست حالة مستحيلة،
-                // و`first()` عليها ترمي خارج كل حراسة.
-                val first = sources.firstOrNull()
-                if (first == null) line("✗ load — الحزمة بلا CatalogueSource", bad = true)
-                first
+                val all = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
+                val exact = if (spec.arabicSourceIds.isNotEmpty()) {
+                    all.filter { it.id.toString() in spec.arabicSourceIds }
+                } else {
+                    emptyList()
+                }
+                val arabic = if (exact.isNotEmpty()) exact else all.filter { it.lang.equals("ar", true) }
+
+                if (arabic.isEmpty()) {
+                    line(
+                        "✗ source-select — الحزمة حُمّلت لكن لم نجد source.id عربيًا مطابقًا " +
+                            "(catalogue=${all.size})",
+                        bad = true,
+                    )
+                    emptyList()
+                } else {
+                    line(
+                        "✓ load — ${all.size} CatalogueSource · عربي مطابق ${arabic.size} · " +
+                            "lib ${loaded.loaded.libVersion}",
+                    )
+                    arabic.forEach { line("   ↳ ${it.name} · id=${it.id} · lang=${it.lang}") }
+                    arabic
+                }
             }
         }
     }
 
-    /** فحص السلسلة: بحث ⇐ تفاصيل ⇐ فصول ⇐ صفحات ⇐ صورة، لكل المصادر. */
-    private fun runAll(button: Button) = lifecycleScope.launch {
-        val loader = FileExtensionLoader(this@MainActivity)
-        val probe = SourceProbe(network.client)
-        val waiting = statusLine()
+    private fun runUnified(button: Button) {
+        if (running) return
+        running = true
+        button.isEnabled = false
 
-        try {
-            for (spec in SPIKE_SOURCES) {
-                val source = obtainSource(spec, loader, waiting) ?: continue
-                val report = try {
-                    withContext(Dispatchers.IO) {
-                        probe.run(spec.label, source) { stepName ->
-                            withContext(Dispatchers.Main) { waiting("${spec.label} · $stepName") }
-                        }
-                    }
-                } catch (t: Throwable) {
-                    line("✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-                    continue
-                }
-                render(report)
+        lifecycleScope.launch {
+            val loader = FileExtensionLoader(this@MainActivity)
+            val probe = SourceProbe(network.client)
+            val waiting = statusLine()
+            val selected = SPIKE_SOURCES
+            val resumed = checkpoint.hasCheckpoint()
+            if (!checkpoint.hasPlan()) {
+                checkpoint.reset(selected.map { it.pkg })
+                log.removeAllViews()
+                printHeader()
             }
-        } finally {
-            // ينتهي التشغيل دائمًا بخبر، ويعود الزر دائمًا صالحًا — حتى إذا
-            // خرج شيء من كل الحراسات. شاشةٌ بزرٍّ ميت بلا «انتهى» لا تقول
-            // للمالك أسقَطَ التطبيقُ أم ما زال يعمل، ولا تدعه يعيد المحاولة.
-            waiting(null)
+            val remaining = checkpoint.remaining().toHashSet()
+            val pending = selected.filter { it.pkg in remaining }
+
+            var packagesOk = 0
+            var packagesFailed = 0
+            var packagesBlocked = 0
+            var sourcesPassed = 0
+            var sourcesPartial = 0
+            var sourcesFailed = 0
+
             line("")
-            line("انتهى.", bold = true)
-            button.isEnabled = true
+            line(
+                "── الفحص الموحّد: متبقٍ ${pending.size} من ${selected.size} حزمة في التقرير ──",
+                bold = true,
+            )
+
+            try {
+                for ((packageIndex, spec) in pending.withIndex()) {
+                    var packageFinished = false
+                    try {
+                        if (spec.blockedReason != null) {
+                            obtainArabicSources(spec, loader, waiting)
+                            packagesBlocked += 1
+                            packageFinished = true
+                            continue
+                        }
+                        val sources = obtainArabicSources(spec, loader, waiting)
+                        if (sources.isEmpty()) {
+                            packagesFailed += 1
+                            packageFinished = true
+                            continue
+                        }
+                        packagesOk += 1
+
+                        for (source in sources) {
+                            val label =
+                                if (sources.size > 1 || source.name != spec.label) {
+                                    "${spec.label} / ${source.name}"
+                                } else {
+                                    spec.label
+                                }
+
+                            val report = try {
+                                withContext(Dispatchers.IO) {
+                                    withTimeout(SOURCE_BUDGET_MS) {
+                                        probe.run(label, source, spec.query) { stepName ->
+                                            withContext(Dispatchers.Main) {
+                                                waiting(
+                                                    "${packageIndex + 1}/${pending.size} · $label · $stepName · " +
+                                                        "كامل $sourcesPassed / جزئي $sourcesPartial / فشل $sourcesFailed",
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                                val detail = if (t is TimeoutCancellationException) {
+                                    "تجاوز ميزانية المصدر ${SOURCE_BUDGET_MS / 60_000} دقائق"
+                                } else {
+                                    "${t.javaClass.name}: ${t.message?.take(300)}"
+                                }
+                                line("✗ probe-fatal — $label — $detail", bad = true)
+                                sourcesFailed += 1
+                                continue
+                            }
+
+                            render(report)
+                            when {
+                                report.passed -> sourcesPassed += 1
+                                report.imageBytes != null -> sourcesPartial += 1
+                                else -> sourcesFailed += 1
+                            }
+                        }
+                        packageFinished = true
+                    } finally {
+                        // نجاحًا أو فشلًا: لا نعيد حجز التشغيل بالمصدر نفسه بعد
+                        // إعادة تشغيل التطبيق. التقرير المحفوظ يحمل النتيجة.
+                        if (packageFinished) checkpoint.markCompleted(spec.pkg)
+                    }
+                }
+            } finally {
+                waiting(null)
+                line("")
+                line(
+                    "نتيجة ${if (resumed) "جلسة الاستئناف" else "هذه الجلسة"} — " +
+                        "حزم حُمّلت: $packagesOk · BLOCKED: $packagesBlocked · " +
+                        "حزم فشلت قبل المسبار: $packagesFailed · " +
+                        "مصادر كاملة: $sourcesPassed · جزئية ووصلت للصورة: $sourcesPartial · " +
+                        "مصادر فشلت: $sourcesFailed",
+                    bold = true,
+                )
+                if (checkpoint.remaining().isEmpty()) {
+                    checkpoint.finish()
+                    line("انتهى الفحص الكامل.", bold = true)
+                    button.text = "أعد فحص الدفعة"
+                } else {
+                    line("توقف التشغيل؛ التقرير محفوظ. اضغط استئناف لإكمال الباقي.", bold = true)
+                    button.text = "استأنف فحص كل المصادر"
+                }
+                running = false
+                button.isEnabled = true
+            }
         }
     }
 
     /**
-     * الإحصاء الكامل: كم عملًا يكشفه كل مصدر **حتى نهايته**؟
-     *
-     * لا سقف صفحات هنا. يمشي حتى يقول المصدر `hasNextPage = false`، وعندها
-     * وحدها تُعلن النهاية مُثبَتة. وكل توقّف آخر — تكرار، أو خطأ، أو حاجز
-     * أمان — يُسمّى بسببه، فلا يُقرأ رقمٌ ناقص كأنه الكتالوج كله.
+     * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على عشرات المصادر دفعة
+     * واحدة قد يأخذ ساعات؛ لذلك هو SAFE فقط ولا يخلط «هل المصدر يعمل؟» مع
+     * «كم عملًا في كتالوجه؟».
      */
-    private fun crawlAll(button: Button) = lifecycleScope.launch {
-        val loader = FileExtensionLoader(this@MainActivity)
-        val probe = SourceProbe(network.client)
-        val waiting = statusLine()
+    private fun crawlSafe(button: Button) {
+        if (running) return
+        running = true
+        button.isEnabled = false
 
-        line("")
-        line("── إحصاء كامل: نمشي حتى يقول المصدر «لا مزيد» ──", bold = true)
+        lifecycleScope.launch {
+            val loader = FileExtensionLoader(this@MainActivity)
+            val probe = SourceProbe(network.client)
+            val waiting = statusLine()
+            val safe = SPIKE_SOURCES.filter {
+                it.warning == ContentWarning.SAFE && it.blockedReason == null
+            }
+            val resumed = catalogueCheckpoint.hasAnyProgress()
+            var allComplete = true
 
-        try {
-            for (spec in SPIKE_SOURCES) {
-                val source = obtainSource(spec, loader, waiting) ?: continue
-                val started = System.currentTimeMillis()
-                val reach = try {
-                    withContext(Dispatchers.IO) {
-                        probe.crawlCatalogue(source) { page, found ->
-                            withContext(Dispatchers.Main) {
-                                waiting("${spec.label} · صفحة $page · $found عملًا")
+            line("")
+            line(
+                if (resumed) {
+                    "── استئناف إحصاء SAFE من آخر صفحة محفوظة ──"
+                } else {
+                    "── إحصاء كامل لمصادر SAFE حتى يقول المصدر «لا مزيد» ──"
+                },
+                bold = true,
+            )
+            line("الحفظ الآن صفحة بصفحة؛ موت التطبيق لا يعيد المصدر إلى الصفحة 1.")
+
+            try {
+                for (spec in safe) {
+                    val sources = try {
+                        obtainArabicSources(spec, loader, waiting)
+                    } catch (t: Throwable) {
+                        line(
+                            "✗ source-load-fatal — ${spec.label} — ${t.javaClass.name}: ${t.message?.take(300)}",
+                            bad = true,
+                        )
+                        allComplete = false
+                        continue
+                    }
+
+                    if (sources.isEmpty()) {
+                        allComplete = false
+                        continue
+                    }
+
+                    for (source in sources) {
+                        val key = "${spec.pkg}|${source.id}"
+                        val label = "${spec.label} / ${source.name}"
+
+                        if (catalogueCheckpoint.isComplete(key)) {
+                            line("✓ $label — مكتمل من جلسة سابقة؛ لن نعيده.")
+                            continue
+                        }
+
+                        val resume = catalogueCheckpoint.load(key)
+                        if (resume != null) {
+                            line(
+                                "↻ $label — استئناف من صفحة ${resume.nextPage} · " +
+                                    "محفوظ ${resume.seenKeys.size} عملًا",
+                                bold = true,
+                            )
+                        }
+
+                        val started = System.currentTimeMillis()
+                        val reach = try {
+                            withContext(Dispatchers.IO) {
+                                probe.crawlCatalogue(
+                                    source = source,
+                                    startPage = resume?.nextPage ?: 1,
+                                    initialSeen = resume?.seenKeys.orEmpty(),
+                                    onPageCommitted = { page, nextPage, newKeys, totalSeen ->
+                                        catalogueCheckpoint.savePage(
+                                            key = key,
+                                            nextPage = nextPage,
+                                            newKeys = newKeys,
+                                        )
+                                        if (page == 1 || page % CRAWL_REPORT_EVERY_PAGES == 0) {
+                                            withContext(Dispatchers.Main) {
+                                                line(
+                                                    "↳ $label — حُفظت الصفحة $page · " +
+                                                        "$totalSeen عملًا حتى الآن",
+                                                )
+                                            }
+                                        }
+                                    },
+                                ) { page, found ->
+                                    withContext(Dispatchers.Main) {
+                                        waiting("$label · صفحة $page · $found عملًا")
+                                    }
+                                }
                             }
+                        } catch (t: Throwable) {
+                            if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                            line(
+                                "✗ crawl-fatal — $label — ${t.javaClass.name}: ${t.message?.take(300)}",
+                                bad = true,
+                            )
+                            allComplete = false
+                            continue
+                        }
+
+                        val seconds = (System.currentTimeMillis() - started) / 1000
+                        val countText =
+                            if (reach.reachedEnd) {
+                                "${reach.uniqueWorks}"
+                            } else {
+                                "على الأقل ${reach.uniqueWorks}"
+                            }
+                        line(
+                            "$label — أعمال فريدة: $countText · " +
+                                "صفحات ناجحة هذه الجلسة: ${reach.pagesFetched} · " +
+                                "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
+                        )
+                        if (reach.skippedPages.isNotEmpty()) {
+                            line(
+                                "↳ تجاوز آمن لصفحات Iken الخالية من المانجا: " +
+                                    reach.skippedPages.joinToString(),
+                            )
+                        }
+
+                        if (reach.reachedEnd) {
+                            catalogueCheckpoint.markComplete(key)
+                            line("✓ COMPLETE — بلغنا نهاية الكتالوج فعلًا")
+                        } else {
+                            allComplete = false
+                            line(
+                                "⚠ ${catalogueStopLabel(reach.stopKind)} — العدد جزئي ومحفوظ للاستئناف · " +
+                                    "السبب: ${reach.stoppedBecause}",
+                                bad = true,
+                            )
                         }
                     }
-                } catch (t: Throwable) {
-                    line("✗ crawl-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-                    continue
                 }
-                val seconds = (System.currentTimeMillis() - started) / 1000
-                line("أعمال فريدة: ${reach.uniqueWorks} · صفحات: ${reach.pagesFetched} · ${seconds}ث")
-                line(
-                    if (reach.reachedEnd) {
-                        "✓ بلغنا نهاية الكتالوج — المصدر قال لا مزيد"
-                    } else {
-                        "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
-                    },
-                    bad = !reach.reachedEnd,
-                )
+            } finally {
+                waiting(null)
+                line("")
+                if (allComplete) {
+                    catalogueCheckpoint.clear()
+                    line("انتهى الإحصاء الكامل لكل مصادر SAFE.", bold = true)
+                    button.text = "احصِ كتالوج SAFE فقط (يطول)"
+                } else {
+                    line(
+                        "انتهت هذه الجولة. غير المكتمل محفوظ صفحة بصفحة؛ اضغط استئناف لإكماله.",
+                        bold = true,
+                    )
+                    button.text = "استأنف إحصاء كتالوج SAFE"
+                }
+                running = false
+                button.isEnabled = true
             }
-        } finally {
-            waiting(null)
-            line("")
-            line("انتهى الإحصاء.", bold = true)
-            button.isEnabled = true
         }
+    }
+
+    private fun catalogueStopLabel(kind: SourceProbe.CatalogueStopKind): String = when (kind) {
+        SourceProbe.CatalogueStopKind.COMPLETE -> "COMPLETE"
+        SourceProbe.CatalogueStopKind.REPEAT_SUSPECTED -> "LOOP_SUSPECTED"
+        SourceProbe.CatalogueStopKind.CLOUDFLARE -> "CLOUDFLARE"
+        SourceProbe.CatalogueStopKind.DEAD_HOST -> "DEAD_HOST"
+        SourceProbe.CatalogueStopKind.TIMEOUT -> "TIMEOUT"
+        SourceProbe.CatalogueStopKind.SOURCE_ERROR -> "SOURCE_ERROR"
+        SourceProbe.CatalogueStopKind.TIME_BUDGET -> "TIME_BUDGET"
+        SourceProbe.CatalogueStopKind.PAGE_CAP -> "PAGE_CAP"
     }
 
     private suspend fun render(report: SourceProbe.Report) {
@@ -261,29 +586,17 @@ class MainActivity : AppCompatActivity() {
                 "${if (step.ok) "✓" else "✗"} ${step.name} — ${step.detail} (${step.millis}ms)",
                 bad = !step.ok,
             )
-            // الدليل ثم الفرضية، ولا حكم. التصنيف لقارئ التقرير لا للكود:
-            // موقعٌ يردّ 200 لا يُبرّئ المحرك ولا يُجرّمه.
             step.live?.let { line("   ${it.describe()}") }
-            step.hypothesis?.let { line("   ${it}") }
+            step.hypothesis?.let { line("   $it") }
         }
         report.baseUrl?.let { line("   المضيف: $it") }
-        // العدد وحده لا يقول إن كانت القائمة كاملة؛ طرفاها يقولان المدى
         report.chapterSpan?.let { line("   الفصول: $it") }
         report.imageFromChapter?.let { line("   الصورة من فصل: ${it.take(60)}") }
         report.imageUrl?.let { line("   الصورة: ${it.take(90)}") }
 
-        // الصورة على الشاشة: `BitmapFactory` ترفض ما ليس صورة، فهي الحَكَم.
-        //
-        // وتُفكَّك من بايتات المسبار نفسها، لا بتنزيلٍ ثانٍ: التنزيل الثاني
-        // كان يخرج بعميل المستضيف بلا ترويسات المصدر — و`Referer` خاصةً —
-        // فيردّه مضيف الصور 403، فتُعرض صورةٌ صحيحة أثبتها المسبار على أنها
-        // «ليست صورة حقيقية». الحَكَم يجب أن يحكم على ما أُثبت لا على شيء آخر.
         report.imageData?.let { bytes ->
-            // ننتظر فك الصورة قبل الانتقال للمصدر التالي؛ التشغيل السابق
-            // كان يفكها في Coroutine منفصلة، فظهرت صورة المصدر السابق تحت
-            // عنوان المصدر التالي وأصبح التقرير مضللًا بصريًا.
             val bmp = withContext(Dispatchers.Default) {
-                runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+                decodePreview(bytes)
             }
             if (bmp == null) {
                 line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)
@@ -292,29 +605,60 @@ class MainActivity : AppCompatActivity() {
                     ImageView(this@MainActivity).apply {
                         setImageBitmap(bmp)
                         adjustViewBounds = true
-                        layoutParams = LinearLayout.LayoutParams(600, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        layoutParams = LinearLayout.LayoutParams(
+                            PREVIEW_WIDTH_PX,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
                     },
                 )
-                line("✓ الصورة ظهرت — ${bmp.width}×${bmp.height}")
+                trimLog()
+                line("✓ الصورة ظهرت مصغّرة — ${bmp.width}×${bmp.height}")
             }
         }
 
-        // عيّنة، وتُسمّى عيّنة. الرقم هنا يثبت أن التصفّح يعمل ولا يدّعي عدًّا،
-        // فلا يُعرض بحُمرة «لم نُثبت النهاية»: نهايةُ الكتالوج ليست سؤال هذا
-        // الزر أصلًا، وجوابها عند «احصِ كل الأعمال».
         report.reach?.let { reach ->
-            val more = if (reach.reachedEnd) " — وهذا كل ما عنده" else " · للعدّ الكامل: «احصِ كل الأعمال»"
-            line("   عيّنة تصفّح: ${reach.uniqueWorks} عملًا في ${reach.pagesFetched} صفحات$more")
+            val more =
+                if (reach.reachedEnd) {
+                    " — وهذا كل ما عنده"
+                } else {
+                    " · للعدّ الكامل استخدم زر الإحصاء"
+                }
+            line(
+                "   عيّنة تصفّح: ${reach.uniqueWorks} عملًا في " +
+                    "${reach.pagesFetched} صفحات$more",
+            )
         }
     }
 
+    /** Decode a bounded RGB_565 thumbnail; never retain the full manga page bitmap. */
+    private fun decodePreview(bytes: ByteArray): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = ImagePayloadPolicy.sampleSize(
+                bounds.outWidth,
+                bounds.outHeight,
+                PREVIEW_WIDTH_PX,
+                PREVIEW_HEIGHT_PX,
+            )
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }.getOrNull()
+
     override fun onDestroy() {
-        // مرجع ضعيف، لكن التنظيف الصريح يمنع تسريب نشاط في التدوير
         WebViewActivityHolder.set(null)
         super.onDestroy()
     }
 
     private fun line(text: String, bold: Boolean = false, bad: Boolean = false) {
+        checkpoint.appendLine(text)
+        displayLine(text, bold, bad)
+    }
+
+    private fun displayLine(text: String, bold: Boolean = false, bad: Boolean = false) {
         log.addView(
             TextView(this).apply {
                 this.text = text
@@ -325,22 +669,37 @@ class MainActivity : AppCompatActivity() {
                 textDirection = View.TEXT_DIRECTION_LOCALE
             },
         )
+        trimLog()
+    }
+
+    /** The full report is on disk; the view keeps only a rolling window. */
+    private fun trimLog() {
+        while (log.childCount > MAX_ONSCREEN_ITEMS) {
+            val oldest = log.getChildAt(0)
+            if (oldest is ImageView) {
+                (oldest.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap?.recycle()
+            }
+            log.removeViewAt(0)
+        }
+    }
+
+    private companion object {
+        /** حدّ أعلى للمصدر كله؛ يمنع مصدرًا واحدًا من حجز فحص عشرات المصادر. */
+        const val SOURCE_BUDGET_MS = 6L * 60L * 1000L
+        const val PREVIEW_WIDTH_PX = 320
+        const val PREVIEW_HEIGHT_PX = 480
+        const val MAX_ONSCREEN_ITEMS = 500
+        const val CRAWL_REPORT_EVERY_PAGES = 10
+
+        val INJEKT_LOCK = Any()
+        var injektReady = false
     }
 }
 
-/**
- * ما تطلبه الإضافات من المستضيف عبر injekt.
- *
- * `NetworkHelper` هو الأهم: الإضافة تأخذ منه `client` فيمرّ كل طلبها
- * باعتراضاتنا — ومنها اعتراض Cloudflare الذي يحلّ التحدّي بـWebView الجهاز.
- */
-class SpikeModule(private val activity: MainActivity) : InjektModule {
+class SpikeModule(private val application: Application) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
-        // Keiyoushi core نفسه يعتمد على Application عبر Injekt (مثل
-        // Generated.getBaseUrl للمرايا والتفضيلات). Mangalek أثبت هذا
-        // Runtime على الجهاز، لذلك هذا جزء من عقد المستضيف لا workaround.
-        addSingleton<Application>(activity.application)
-        addSingletonFactory { NetworkHelper(activity.application) }
+        addSingleton<Application>(application)
+        addSingletonFactory { NetworkHelper(application) }
         addSingletonFactory {
             kotlinx.serialization.json.Json {
                 ignoreUnknownKeys = true

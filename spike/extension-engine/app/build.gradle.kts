@@ -92,6 +92,10 @@ configurations.all {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    // Keep WebView's User-Agent Client Hints consistent with the UA string.
+    // Cloudflare compares both and rejects a WebView that claims to be Chrome
+    // in one surface while advertising Android WebView in the other.
+    implementation("androidx.webkit:webkit:1.17.0")
     // `ConfigurableSource.setupPreferenceScreen` يأخذ PreferenceScreen في
     // توقيعه. أي إضافة تنفّذه تشير إلى androidx.preference، فغيابه يعني
     // NoClassDefFoundError عند تحميل الصنف لا عند استعماله.
@@ -126,4 +130,6 @@ dependencies {
 
     // بعض المصادر تُقيّم JavaScript لفكّ روابط الصفحات
     implementation("com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597")
+
+    testImplementation("junit:junit:4.13.2")
 }
