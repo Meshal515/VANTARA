@@ -4,7 +4,7 @@
 >
 > **تاريخ التجميد:** 2026-09-20
 >
-> **Implementation freeze SHA:** `f7c27df61a2423026c794eac0eeba8d175fa7682`
+> **Implementation freeze SHA:** `d9420388ddcfd1c41d16f211fce03698f4eebbc8`
 >
 > هذه الوثيقة هي نقطة الدخول للمقيّم المستقل. لا تطلب منه تصديقها؛ بل تعطيه
 > الادعاءات والأدلة والمسارات التي يجب أن يحاول كسرها.
@@ -35,12 +35,12 @@
 
 | الدليل | Run | النتيجة |
 |---|---:|---|
-| VANTARA CI | #316 · `35490027600` | ✅ SUCCESS |
-| Sync Worker production deploy | #15 · `35490094232` | ✅ SUCCESS |
-| Cloudflare Pages production deploy | #14 · `35490094111` | ✅ SUCCESS |
-| Android debug APK | #81 · `35490027605` | ✅ SUCCESS |
+| VANTARA CI | #480 · `35500443188` | ✅ SUCCESS |
+| Sync Worker production deploy | #17 · `35500535440` | ✅ SUCCESS |
+| Cloudflare Pages production deploy | #16 · `35500535411` | ✅ SUCCESS |
+| Android debug APK | #200 · `35500443298` | ✅ SUCCESS |
 
-### ماذا أثبت VANTARA CI #316؟
+### ماذا أثبت VANTARA CI #480؟
 
 - فحص تاريخ Git بحثًا عن credential signatures
 - رفض الملفات السرية المتتبعة
@@ -62,10 +62,10 @@
 - live API integration
 - translation-worker test suite
 
-### ماذا أثبت Sync Worker deploy #15؟
+### ماذا أثبت Sync Worker deploy #17؟
 
 - D1 resolution
-- تطبيق migrations حتى `0011_top_collection.sql`
+- تطبيق migrations حتى `0012_atomic_sync_writes.sql`
 - نشر Worker الحقيقي
 - رفع runtime authentication secrets
 - `/health` على Worker المنشور
@@ -78,6 +78,34 @@
 - immutable identity
 - logout-all لكل الأجهزة الموثوقة
 - cleanup للـfixtures المؤقتة
+
+---
+
+## 2.1 الإغلاق العدائي النهائي
+
+تم دمج **PR #26 — Final backend adversarial closure** إلى `main` في
+`d9420388ddcfd1c41d16f211fce03698f4eebbc8`.
+
+بعد الدمج نفسه — وليس على فرع الإصلاح فقط — نجحت الأدلة التالية على نفس SHA:
+
+- VANTARA CI #480: ✅
+- Android debug APK #200: ✅
+- Cloudflare Pages deploy #16: ✅
+- Sync Worker deploy #17: ✅
+
+وأُغلقت findings #10–#23 بعد إدخال regression coverage والإصلاحات إلى `main`.
+أما #9 فأُغلق باعتباره عقدًا مقصودًا: access token صادر مسبقًا يبقى صالحًا حتى
+انتهاء عمره المحدود (≤15 دقيقة)، بينما revoke يمنع إصدار توكن جديد.
+
+الإصلاحات النهائية التي أغلقت آخر التحفظات شملت:
+
+- **#12:** حارس D1 rollout يفشل مغلقًا لأي SQL لا يمكن إثبات توافقه مع الـWorker القديم.
+- **#16:** paired recovery set مع manifest/checksums، منع backup/restore أثناء وجود
+  اتصالات تطبيقية، preflight restore، وتعويض القاعدتين مع failure injection.
+- **#22:** durable token-mint intent قبل POST غير idempotent ومصالحة آمنة للتوكنات
+  الغامضة بلا إبطال credentials مستخدمة فعليًا.
+- **#23:** اعتماد expiry الحقيقي من Uchiyomi، proactive rotation، وحالة
+  `content_relink_required` صريحة عند تعذر التجديد.
 
 ---
 
@@ -106,7 +134,7 @@ coverage أو live verification:
    صار الآن يبني حساب تحقق مؤقتًا ويقرن جهازًا حقيقيًا في D1.
 10. **Deployment verifier env gap:** أول deploy بعد التجميد كشف أن
     `VANTARA_DEVICE_PEPPER` لم يكن ممررًا لعملية live verification؛ أُصلح
-    وأصبح deploy #15 أخضر.
+    وأصبح deploy #17 أخضر.
 
 ---
 
@@ -232,10 +260,11 @@ pnpm test
 
 ```text
 BACKEND_FREEZE = ✅
-BACKEND_LIVE_CI = ✅
-SYNC_WORKER_PRODUCTION_VERIFY = ✅
-WEB_PRODUCTION_DEPLOY = ✅
-ANDROID_DEBUG_BUILD = ✅
+BACKEND_ADVERSARIAL_CLOSURE = ✅
+BACKEND_LIVE_CI = ✅  (#480)
+SYNC_WORKER_PRODUCTION_VERIFY = ✅  (#17)
+WEB_PRODUCTION_DEPLOY = ✅  (#16)
+ANDROID_DEBUG_BUILD = ✅  (#200)
 
 CLIENT_B13 = OPEN
 FULL_PRODUCT_RELEASE_READY = NOT YET
