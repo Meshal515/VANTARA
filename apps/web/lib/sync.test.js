@@ -387,3 +387,61 @@ describe('the identity seam the content api reads', () => {
     expect(sync.authorizationHeader).toBeNull();
   });
 });
+
+
+describe('account isolation and remote logout', () => {
+  it('discards an old-account pull that returns after switching accounts', async () => {
+    storage.setItem('vantara.cursor', '0');
+    let releaseOldPull;
+    const oldPull = new Promise((resolve) => { releaseOldPull = resolve; });
+    const accountB = { userId: 'u2', username: 'mansour', displayName: 'منصور' };
+
+    const fetchImpl = vi.fn(async (url, options) => {
+      const value = String(url);
+      if (value.includes('/v1/sync')) {
+        if (!releaseOldPull) throw new Error('old pull barrier missing');
+        return oldPull;
+      }
+      if (value.includes('/v1/session')) {
+        const body = JSON.parse(options.body);
+        return jsonResponse({ token: 'token-b', user: body.userId === 'u2' ? accountB : SIGNED_IN });
+      }
+      throw new Error(`unexpected fetch: ${value}`);
+    });
+
+    const sync = await loadSync({ storage, fetchImpl });
+    const pending = sync.pull();
+    await Promise.resolve();
+    await sync.signIn('u2');
+
+    releaseOldPull(jsonResponse({
+      reset: false,
+      cursor: 50,
+      changes: {
+        profiles: [{ user_id: 'u1', display_name: 'مشعل', rev: 50 }],
+      },
+    }));
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sync.user.userId).toBe('u2');
+    expect(sync.row('profiles', 'u1')).toBeNull();
+    expect(storage.getItem('vantara.cursor')).toBe('0');
+  });
+
+  it('keeps the device credential and session when remote logout-all fails', async () => {
+    storage.setItem('vantara.device.credential', 'device-secret');
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).includes('/v1/device/logout-all')) {
+        return jsonResponse({ error: 'upstream_down' }, 503);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+
+    await expect(sync.logoutAll()).rejects.toMatchObject({ status: 503 });
+    expect(storage.getItem('vantara.device.credential')).toBe('device-secret');
+    expect(sync.signedIn).toBe(true);
+    expect(sync.user.userId).toBe('u1');
+  });
+});
