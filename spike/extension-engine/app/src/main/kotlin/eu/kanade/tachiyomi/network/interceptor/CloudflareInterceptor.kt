@@ -36,6 +36,7 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -117,6 +118,7 @@ class CloudflareInterceptor(
                     // A human is needed. The byte-fetch below would only sit in
                     // front of the same widget for another timeout.
                     SolveOutcome.INTERACTIVE -> throw interactiveError(request)
+                    SolveOutcome.RENDERER_GONE -> throw rendererGoneError(request)
                     SolveOutcome.NOT_A_CHALLENGE, SolveOutcome.TIMEOUT -> Unit
                 }
             }
@@ -145,6 +147,12 @@ class CloudflareInterceptor(
         CloudflareBypassException(
             "Cloudflare wants a human check for ${request.url.host}; open the site in the WebView to pass it",
             interactive = true,
+        )
+
+    private fun rendererGoneError(request: Request): IOException =
+        CloudflareBypassException(
+            "WebView renderer terminated while checking ${request.url.host}; source probe can resume safely",
+            interactive = false,
         )
 
     private fun hasClearance(url: HttpUrl): Boolean =
@@ -183,7 +191,7 @@ class CloudflareInterceptor(
      * not actually a challenge page (e.g. a bare 403 from an image-only CDN).
      */
     /** Why the WebView solve stopped, when it did not produce a cookie. */
-    private enum class SolveOutcome { SOLVED, NOT_A_CHALLENGE, INTERACTIVE, TIMEOUT }
+    private enum class SolveOutcome { SOLVED, NOT_A_CHALLENGE, INTERACTIVE, RENDERER_GONE, TIMEOUT }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun solveClearance(request: Request): SolveOutcome {
@@ -276,6 +284,23 @@ class CloudflareInterceptor(
                     }
                     view.evaluateJavascript(INTERACTIVE_LISTENER_JS, null)
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: RenderProcessGoneDetail,
+                ): Boolean {
+                    Log.e(
+                        TAG,
+                        "WebView renderer gone during Cloudflare solve; didCrash=${detail.didCrash()} host=${request.url.host}",
+                    )
+                    webView.compareAndSet(view, null)
+                    outcome.set(SolveOutcome.RENDERER_GONE)
+                    latch.countDown()
+                    destroyOnMain(view)
+                    // Android's contract: returning true means the app handled
+                    // renderer death. Returning false lets WebView terminate us.
+                    return true
+                }
             }
             view.loadUrl(rootUrl, mapOf("User-Agent" to userAgent))
             handler.postDelayed(poller, POLL_MS)
@@ -347,6 +372,20 @@ class CloudflareInterceptor(
             view.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     view.evaluateJavascript(BYTE_FETCH_JS, null)
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: RenderProcessGoneDetail,
+                ): Boolean {
+                    Log.e(
+                        TAG,
+                        "WebView renderer gone during byte fetch; didCrash=${detail.didCrash()} host=${request.url.host}",
+                    )
+                    webView.compareAndSet(view, null)
+                    latch.countDown()
+                    destroyOnMain(view)
+                    return true
                 }
             }
             val headers = mutableMapOf("User-Agent" to userAgent)
