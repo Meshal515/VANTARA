@@ -552,13 +552,18 @@ test('the server never acknowledges a write it did not apply', () => {
   );
   assert.match(
     worker,
-    /applied:\s*applied\.map/,
-    'the response must list only the ops that produced statements',
+    /applied:\s*ops[\s\S]*acknowledged\.has\(op\.opId\)/,
+    'the response must list only ops acknowledged by the atomic commit path',
   );
   assert.match(
     worker,
-    /if\s*\(statements\.length\s*>\s*0\)\s*await\s+env\.DB\.batch/,
-    'an all-unknown batch must not call D1 with an empty batch, which throws',
+    /commitAtNextRevision\([\s\S]*commitCandidates\.map\(\(op\)\s*=>\s*op\.opId\)/,
+    'known writes must pass through the atomic revision/op-claim commit gate',
+  );
+  assert.match(
+    worker,
+    /if\s*\(commitCandidates\.length\s*===\s*0\)\s*break/,
+    'an all-unknown batch must not call D1 with an empty write transaction',
   );
 
   const queue = read('apps/web/lib/sync.js');
