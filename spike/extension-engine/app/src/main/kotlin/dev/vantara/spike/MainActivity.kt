@@ -1,6 +1,9 @@
 package dev.vantara.spike
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.view.Gravity
@@ -10,15 +13,18 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import java.io.IOException
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.Request
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.InjektModule
@@ -28,63 +34,114 @@ import uy.kohesive.injekt.api.addSingletonFactory
 import uy.kohesive.injekt.api.get
 
 /**
- * شاشة واحدة، وغرضها واحد: هل المحرك المحلي يعمل على جهاز حقيقي؟
+ * Spike شامل للمصادر العربية في لقطة Keiyoushi المثبّتة عند البناء.
  *
- * لكل مصدر: تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف ⇒ بحث ⇒ تفاصيل ⇒ فصول ⇒
- * صفحات ⇒ **صورة تُعرض فعلًا** ⇒ قياس الكتالوج.
+ * لا يغيّر قائمة مصادر VANTARA الإنتاجية. الغرض أن نثبت، على جهاز حقيقي،
+ * أي حزم عربية تمر بالسلسلة كاملة:
  *
- * والصورة تُرسم على الشاشة بقصد. رابطٌ في سجل لا يُثبت شيئًا: قد يرجع
- * HTML أو صفحة حجب بحجم معقول. أما `BitmapFactory` فترفض ما ليس صورة،
- * فرؤيتها هي الإثبات.
+ * APK exact URL -> SHA-256 -> package/version/lib -> Arabic source id ->
+ * search -> details -> chapters -> pages -> image bytes/bitmap.
+ *
+ * كل حزمة مستقلة عن غيرها. سقوط مصدر لا يوقف التالي، وكل خطوة لها مهلة.
+ * المصادر المتخصصة BL/GL موجودة في اللقطة لأجل اكتمال التقرير فقط لكنها
+ * BLOCKED ولا تُنزّل ولا تُشغّل. NSFW له زر منفصل وإقرار صريح، ولا تُعرض
+ * صوره على الشاشة حتى أثناء الفحص.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var log: LinearLayout
     private val network by lazy { Injekt.get<NetworkHelper>() }
+    private val reportText = StringBuilder()
+    private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
-        // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
         WebViewActivityHolder.set(this)
-
-        // الإضافات تطلب اعتمادياتها بـ`injectLazy()`، فلا بد من تسجيلها
-        // قبل أول تحميل. بلا هذا يسقط أول مصدر بـIllegalStateException من
-        // injekt، ويبدو كأنه عطل مصدر.
         Injekt.importModule(SpikeModule(this))
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 24, 24, 24)
         }
-        val run = Button(this).apply {
-            text = "شغّل الخمسة"
-            setOnClickListener { it.isEnabled = false; runAll(this) }
+
+        val runRegular = Button(this).apply {
+            text = "اختبر SAFE + MIXED"
+            setOnClickListener {
+                runSelected(
+                    button = this,
+                    warnings = setOf(ContentWarning.SAFE, ContentWarning.MIXED),
+                )
+            }
         }
-        // العدّ الكامل منفصل بقصد: مصدرٌ بآلاف الأعمال يحتاج مئات الصفحات
-        // ودقائق طويلة، ودمجُه في فحص السلسلة كان يجعل أربعة مصادر تنتظر
-        // خلف واحد — والمالك يريد الاثنين، كلًّا في وقته.
+
+        val runNsfw = Button(this).apply {
+            text = "اختبر NSFW (يتطلب إقرار)"
+            setOnClickListener {
+                if (running) return@setOnClickListener
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("فحص مصادر NSFW")
+                    .setMessage(
+                        "هذا فحص هندسي للمصدر فقط. لن يعرض صور الصفحات، " +
+                            "لكن التطبيق سيطلب البحث والفصول والصفحات ويتحقق من بايتات الصورة. " +
+                            "المصادر BL/GL المحظورة لن تُشغّل مهما كان هذا الإقرار.",
+                    )
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("أقر وأختبر") { _, _ ->
+                        runSelected(
+                            button = this,
+                            warnings = setOf(ContentWarning.NSFW),
+                        )
+                    }
+                    .show()
+            }
+        }
+
         val crawl = Button(this).apply {
-            text = "احصِ كل الأعمال (يطول)"
-            setOnClickListener { it.isEnabled = false; crawlAll(this) }
+            text = "احصِ كتالوج SAFE فقط (يطول)"
+            setOnClickListener { crawlSafe(this) }
         }
+
+        val copy = Button(this).apply {
+            text = "نسخ التقرير"
+            setOnClickListener {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("VANTARA Arabic sources spike", reportText.toString()))
+                text = "تم نسخ التقرير"
+                postDelayed({ text = "نسخ التقرير" }, 1500)
+            }
+        }
+
+        val clear = Button(this).apply {
+            text = "مسح التقرير"
+            setOnClickListener {
+                if (running) return@setOnClickListener
+                log.removeAllViews()
+                reportText.clear()
+                printHeader()
+            }
+        }
+
         log = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(run)
+        root.addView(runRegular)
+        root.addView(runNsfw)
         root.addView(crawl)
+        root.addView(copy)
+        root.addView(clear)
         root.addView(ScrollView(this).apply { addView(log) })
         setContentView(root)
 
-        line("VANTARA — محرك الإضافات المحلي", bold = true)
-        line("بلا Suwayomi · بلا سيرفر · بلا تثبيت إضافات يدويًّا")
+        printHeader()
     }
 
-    /**
-     * شريط الحالة الحيّ: سطر واحد يقول ما ننتظره الآن، لا ما مضى.
-     *
-     * بلا هذا السطر كانت الشاشة تقف عند آخر نجاح دقائقَ كاملة بلا حرف،
-     * فتُقرأ كأن التطبيق مات — وهو يعمل.
-     */
+    private fun printHeader() {
+        line("VANTARA — Arabic Sources Spike", bold = true)
+        line("لقطة Keiyoushi: ${SPIKE_INDEX_COMMIT.take(12)}")
+        line(SPIKE_SNAPSHOT_NOTE)
+        line("المصادر المتخصصة BL/GL: تظهر BLOCKED في التقرير ولا تُشغّل.")
+        line("MIXED وNSFW: تُفك صورة الاختبار للتحقق فقط، بلا عرضها على الشاشة.")
+    }
+
     private fun statusLine(): (String?) -> Unit {
         val view = TextView(this).apply {
             textSize = 13f
@@ -97,21 +154,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * من بيانٍ مثبَّت إلى مصدرٍ حيّ: كاش موثَّق ببصمته، وإلا تنزيل، ثم تحميل
-     * من ملف. يطبع كل خطوة، ويرجع `null` بدل أن يرمي — فالزرّان يمشيان على
-     * هذا المسار نفسه ولا يجوز أن يُسقِط أحدَهما مصدرٌ واحد.
+     * تنزيل الحزمة الموثقة وتحميلها ثم استخراج المصادر العربية المقصودة.
+     *
+     * الأهم هنا أننا لا نستعمل `first()`: الإضافة متعددة اللغات قد يكون
+     * أول CatalogueSource فيها إنجليزيًا. نطابق source.id الذي جاء من
+     * index.json، ثم نستعمل lang=ar fallback فقط للـfallback الخماسي المحلي.
      */
-    private suspend fun obtainSource(
+    private suspend fun obtainArabicSources(
         spec: SourceSpec,
         loader: FileExtensionLoader,
         waiting: (String?) -> Unit,
-    ): CatalogueSource? {
+    ): List<CatalogueSource> {
         line("")
         line("═══ ${spec.label} ═══", bold = true)
-        line("الحزمة ${spec.pkg} · lib ${spec.expectedLib}")
+        line(
+            "الحزمة ${spec.pkg} · v${spec.versionName} · lib ${spec.expectedLib} · " +
+                "${spec.warning}",
+        )
 
-        // النسخة المحلية الموثّقة أولًا: انقطاع DNS عن github.com لا يجب أن
-        // يعطّل مصدرًا سبق تنزيله والتحقق من بصمته.
+        spec.blockedReason?.let { reason ->
+            line("⊘ BLOCKED — $reason", bad = true)
+            return emptyList()
+        }
+
         waiting("${spec.label} · تنزيل")
         val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
         val apk = if (cached != null) {
@@ -141,180 +206,272 @@ class MainActivity : AppCompatActivity() {
             }
             downloaded.getOrElse {
                 line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                return null
+                return emptyList()
             }.also { line("✓ download — ${it.size} بايت") }
         }
 
-        // لا نسمح لخطأ غير متوقّع داخل المحمّل بإسقاط التطبيق كله: التشخيص
-        // يجب أن يعرض الخطأ على الشاشة ويكمل للمصدر التالي.
         waiting("${spec.label} · تحميل من ملف")
         val loaded = try {
             withContext(Dispatchers.IO) { loader.load(spec, apk) }
         } catch (t: Throwable) {
             line("✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-            return null
+            return emptyList()
         }
 
         return when (loaded) {
             is FileExtensionLoader.Result.Fail -> {
                 line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
                 loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
-                null
+                emptyList()
             }
+
             is FileExtensionLoader.Result.Ok -> {
-                val sources = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-                line("✓ load — ${sources.size} مصدرًا · lib ${loaded.loaded.libVersion}")
-                // حزمةٌ حُمّلت بلا مصدرٍ قابل للتصفّح ليست حالة مستحيلة،
-                // و`first()` عليها ترمي خارج كل حراسة.
-                val first = sources.firstOrNull()
-                if (first == null) line("✗ load — الحزمة بلا CatalogueSource", bad = true)
-                first
+                val all = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
+                val exact = if (spec.arabicSourceIds.isNotEmpty()) {
+                    all.filter { it.id.toString() in spec.arabicSourceIds }
+                } else {
+                    emptyList()
+                }
+                val arabic = if (exact.isNotEmpty()) exact else all.filter { it.lang.equals("ar", true) }
+
+                if (arabic.isEmpty()) {
+                    line(
+                        "✗ source-select — الحزمة حُمّلت لكن لم نجد source.id عربيًا مطابقًا " +
+                            "(catalogue=${all.size})",
+                        bad = true,
+                    )
+                    emptyList()
+                } else {
+                    line(
+                        "✓ load — ${all.size} CatalogueSource · عربي مطابق ${arabic.size} · " +
+                            "lib ${loaded.loaded.libVersion}",
+                    )
+                    arabic.forEach { line("   ↳ ${it.name} · id=${it.id} · lang=${it.lang}") }
+                    arabic
+                }
             }
         }
     }
 
-    /** فحص السلسلة: بحث ⇐ تفاصيل ⇐ فصول ⇐ صفحات ⇐ صورة، لكل المصادر. */
-    private fun runAll(button: Button) = lifecycleScope.launch {
-        val loader = FileExtensionLoader(this@MainActivity)
-        val probe = SourceProbe(network.client)
-        val waiting = statusLine()
+    private fun runSelected(
+        button: Button,
+        warnings: Set<ContentWarning>,
+    ) {
+        if (running) return
+        running = true
+        button.isEnabled = false
 
-        try {
-            for (spec in SPIKE_SOURCES) {
-                val source = obtainSource(spec, loader, waiting) ?: continue
-                val report = try {
-                    withContext(Dispatchers.IO) {
-                        probe.run(spec.label, source) { stepName ->
-                            withContext(Dispatchers.Main) { waiting("${spec.label} · $stepName") }
-                        }
-                    }
-                } catch (t: Throwable) {
-                    line("✗ probe-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-                    continue
-                }
-                render(report)
-            }
-        } finally {
-            // ينتهي التشغيل دائمًا بخبر، ويعود الزر دائمًا صالحًا — حتى إذا
-            // خرج شيء من كل الحراسات. شاشةٌ بزرٍّ ميت بلا «انتهى» لا تقول
-            // للمالك أسقَطَ التطبيقُ أم ما زال يعمل، ولا تدعه يعيد المحاولة.
-            waiting(null)
+        lifecycleScope.launch {
+            val loader = FileExtensionLoader(this@MainActivity)
+            val probe = SourceProbe(network.client)
+            val waiting = statusLine()
+            val selected = SPIKE_SOURCES.filter { it.warning in warnings }
+
+            var packagesOk = 0
+            var packagesFailed = 0
+            var policyBlocked = 0
+            var sourcesPassed = 0
+            var sourcesFailed = 0
+
             line("")
-            line("انتهى.", bold = true)
-            button.isEnabled = true
+            line(
+                "── بدء الفحص: ${warnings.joinToString()} · ${selected.size} حزمة في اللقطة ──",
+                bold = true,
+            )
+
+            try {
+                for (spec in selected) {
+                    if (spec.blockedReason != null) {
+                        policyBlocked += 1
+                        obtainArabicSources(spec, loader, waiting)
+                        continue
+                    }
+
+                    val sources = obtainArabicSources(spec, loader, waiting)
+                    if (sources.isEmpty()) {
+                        packagesFailed += 1
+                        continue
+                    }
+                    packagesOk += 1
+
+                    for (source in sources) {
+                        val label =
+                            if (sources.size > 1 || source.name != spec.label) {
+                                "${spec.label} / ${source.name}"
+                            } else {
+                                spec.label
+                            }
+
+                        val report = try {
+                            withContext(Dispatchers.IO) {
+                                withTimeout(SOURCE_BUDGET_MS) {
+                                    probe.run(label, source, spec.query) { stepName ->
+                                        withContext(Dispatchers.Main) {
+                                            waiting(
+                                                "$label · $stepName · " +
+                                                    "نجح $sourcesPassed / فشل $sourcesFailed",
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            val detail = if (t is TimeoutCancellationException) {
+                                "تجاوز ميزانية المصدر ${SOURCE_BUDGET_MS / 60_000} دقائق"
+                            } else {
+                                "${t.javaClass.name}: ${t.message?.take(300)}"
+                            }
+                            line("✗ probe-fatal — $label — $detail", bad = true)
+                            sourcesFailed += 1
+                            continue
+                        }
+
+                        val showPreview = spec.warning == ContentWarning.SAFE
+                        render(report, showPreview)
+                        if (report.passed) sourcesPassed += 1 else sourcesFailed += 1
+                    }
+                }
+            } finally {
+                waiting(null)
+                line("")
+                line(
+                    "النتيجة — حزم حُمّلت: $packagesOk · حزم فشلت قبل المسبار: $packagesFailed · " +
+                        "مصادر مرت بالسلسلة: $sourcesPassed · مصادر فشلت: $sourcesFailed · " +
+                        "BLOCKED بالسياسة: $policyBlocked",
+                    bold = true,
+                )
+                line("انتهى.", bold = true)
+                running = false
+                button.isEnabled = true
+            }
         }
     }
 
     /**
-     * الإحصاء الكامل: كم عملًا يكشفه كل مصدر **حتى نهايته**؟
-     *
-     * لا سقف صفحات هنا. يمشي حتى يقول المصدر `hasNextPage = false`، وعندها
-     * وحدها تُعلن النهاية مُثبَتة. وكل توقّف آخر — تكرار، أو خطأ، أو حاجز
-     * أمان — يُسمّى بسببه، فلا يُقرأ رقمٌ ناقص كأنه الكتالوج كله.
+     * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على عشرات المصادر دفعة
+     * واحدة قد يأخذ ساعات؛ لذلك هو SAFE فقط ولا يخلط «هل المصدر يعمل؟» مع
+     * «كم عملًا في كتالوجه؟».
      */
-    private fun crawlAll(button: Button) = lifecycleScope.launch {
-        val loader = FileExtensionLoader(this@MainActivity)
-        val probe = SourceProbe(network.client)
-        val waiting = statusLine()
+    private fun crawlSafe(button: Button) {
+        if (running) return
+        running = true
+        button.isEnabled = false
 
-        line("")
-        line("── إحصاء كامل: نمشي حتى يقول المصدر «لا مزيد» ──", bold = true)
-
-        try {
-            for (spec in SPIKE_SOURCES) {
-                val source = obtainSource(spec, loader, waiting) ?: continue
-                val started = System.currentTimeMillis()
-                val reach = try {
-                    withContext(Dispatchers.IO) {
-                        probe.crawlCatalogue(source) { page, found ->
-                            withContext(Dispatchers.Main) {
-                                waiting("${spec.label} · صفحة $page · $found عملًا")
-                            }
-                        }
-                    }
-                } catch (t: Throwable) {
-                    line("✗ crawl-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-                    continue
-                }
-                val seconds = (System.currentTimeMillis() - started) / 1000
-                line("أعمال فريدة: ${reach.uniqueWorks} · صفحات: ${reach.pagesFetched} · ${seconds}ث")
-                line(
-                    if (reach.reachedEnd) {
-                        "✓ بلغنا نهاية الكتالوج — المصدر قال لا مزيد"
-                    } else {
-                        "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
-                    },
-                    bad = !reach.reachedEnd,
-                )
+        lifecycleScope.launch {
+            val loader = FileExtensionLoader(this@MainActivity)
+            val probe = SourceProbe(network.client)
+            val waiting = statusLine()
+            val safe = SPIKE_SOURCES.filter {
+                it.warning == ContentWarning.SAFE && it.blockedReason == null
             }
-        } finally {
-            waiting(null)
+
             line("")
-            line("انتهى الإحصاء.", bold = true)
-            button.isEnabled = true
+            line("── إحصاء كامل لمصادر SAFE حتى يقول المصدر «لا مزيد» ──", bold = true)
+
+            try {
+                for (spec in safe) {
+                    val sources = obtainArabicSources(spec, loader, waiting)
+                    for (source in sources) {
+                        val label = "${spec.label} / ${source.name}"
+                        val started = System.currentTimeMillis()
+                        val reach = try {
+                            withContext(Dispatchers.IO) {
+                                probe.crawlCatalogue(source) { page, found ->
+                                    withContext(Dispatchers.Main) {
+                                        waiting("$label · صفحة $page · $found عملًا")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            line(
+                                "✗ crawl-fatal — $label — ${t.javaClass.name}: ${t.message?.take(300)}",
+                                bad = true,
+                            )
+                            continue
+                        }
+                        val seconds = (System.currentTimeMillis() - started) / 1000
+                        line(
+                            "$label — أعمال فريدة: ${reach.uniqueWorks} · " +
+                                "صفحات: ${reach.pagesFetched} · ${seconds}ث",
+                        )
+                        line(
+                            if (reach.reachedEnd) {
+                                "✓ بلغنا نهاية الكتالوج — المصدر قال لا مزيد"
+                            } else {
+                                "⚠ لم نُثبت النهاية — توقفنا لأن: ${reach.stoppedBecause}"
+                            },
+                            bad = !reach.reachedEnd,
+                        )
+                    }
+                }
+            } finally {
+                waiting(null)
+                line("")
+                line("انتهى الإحصاء.", bold = true)
+                running = false
+                button.isEnabled = true
+            }
         }
     }
 
-    private suspend fun render(report: SourceProbe.Report) {
+    private suspend fun render(report: SourceProbe.Report, showPreview: Boolean) {
         for (step in report.steps) {
             line(
                 "${if (step.ok) "✓" else "✗"} ${step.name} — ${step.detail} (${step.millis}ms)",
                 bad = !step.ok,
             )
-            // الدليل ثم الفرضية، ولا حكم. التصنيف لقارئ التقرير لا للكود:
-            // موقعٌ يردّ 200 لا يُبرّئ المحرك ولا يُجرّمه.
             step.live?.let { line("   ${it.describe()}") }
-            step.hypothesis?.let { line("   ${it}") }
+            step.hypothesis?.let { line("   $it") }
         }
         report.baseUrl?.let { line("   المضيف: $it") }
-        // العدد وحده لا يقول إن كانت القائمة كاملة؛ طرفاها يقولان المدى
         report.chapterSpan?.let { line("   الفصول: $it") }
         report.imageFromChapter?.let { line("   الصورة من فصل: ${it.take(60)}") }
         report.imageUrl?.let { line("   الصورة: ${it.take(90)}") }
 
-        // الصورة على الشاشة: `BitmapFactory` ترفض ما ليس صورة، فهي الحَكَم.
-        //
-        // وتُفكَّك من بايتات المسبار نفسها، لا بتنزيلٍ ثانٍ: التنزيل الثاني
-        // كان يخرج بعميل المستضيف بلا ترويسات المصدر — و`Referer` خاصةً —
-        // فيردّه مضيف الصور 403، فتُعرض صورةٌ صحيحة أثبتها المسبار على أنها
-        // «ليست صورة حقيقية». الحَكَم يجب أن يحكم على ما أُثبت لا على شيء آخر.
         report.imageData?.let { bytes ->
-            // ننتظر فك الصورة قبل الانتقال للمصدر التالي؛ التشغيل السابق
-            // كان يفكها في Coroutine منفصلة، فظهرت صورة المصدر السابق تحت
-            // عنوان المصدر التالي وأصبح التقرير مضللًا بصريًا.
             val bmp = withContext(Dispatchers.Default) {
                 runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
             }
             if (bmp == null) {
                 line("✗ الصورة لم تُفكَّك — ليست صورة حقيقية", bad = true)
-            } else {
+            } else if (showPreview) {
                 log.addView(
                     ImageView(this@MainActivity).apply {
                         setImageBitmap(bmp)
                         adjustViewBounds = true
-                        layoutParams = LinearLayout.LayoutParams(600, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        layoutParams = LinearLayout.LayoutParams(
+                            600,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
                     },
                 )
                 line("✓ الصورة ظهرت — ${bmp.width}×${bmp.height}")
+            } else {
+                line("✓ الصورة فُكّت — ${bmp.width}×${bmp.height} · المعاينة مخفية بالسياسة")
             }
         }
 
-        // عيّنة، وتُسمّى عيّنة. الرقم هنا يثبت أن التصفّح يعمل ولا يدّعي عدًّا،
-        // فلا يُعرض بحُمرة «لم نُثبت النهاية»: نهايةُ الكتالوج ليست سؤال هذا
-        // الزر أصلًا، وجوابها عند «احصِ كل الأعمال».
         report.reach?.let { reach ->
-            val more = if (reach.reachedEnd) " — وهذا كل ما عنده" else " · للعدّ الكامل: «احصِ كل الأعمال»"
-            line("   عيّنة تصفّح: ${reach.uniqueWorks} عملًا في ${reach.pagesFetched} صفحات$more")
+            val more =
+                if (reach.reachedEnd) {
+                    " — وهذا كل ما عنده"
+                } else {
+                    " · للعدّ الكامل استخدم زر الإحصاء"
+                }
+            line(
+                "   عيّنة تصفّح: ${reach.uniqueWorks} عملًا في " +
+                    "${reach.pagesFetched} صفحات$more",
+            )
         }
     }
 
     override fun onDestroy() {
-        // مرجع ضعيف، لكن التنظيف الصريح يمنع تسريب نشاط في التدوير
         WebViewActivityHolder.set(null)
         super.onDestroy()
     }
 
     private fun line(text: String, bold: Boolean = false, bad: Boolean = false) {
+        reportText.appendLine(text)
         log.addView(
             TextView(this).apply {
                 this.text = text
@@ -326,19 +483,15 @@ class MainActivity : AppCompatActivity() {
             },
         )
     }
+
+    private companion object {
+        /** حدّ أعلى للمصدر كله؛ يمنع مصدرًا واحدًا من حجز فحص عشرات المصادر. */
+        const val SOURCE_BUDGET_MS = 6L * 60L * 1000L
+    }
 }
 
-/**
- * ما تطلبه الإضافات من المستضيف عبر injekt.
- *
- * `NetworkHelper` هو الأهم: الإضافة تأخذ منه `client` فيمرّ كل طلبها
- * باعتراضاتنا — ومنها اعتراض Cloudflare الذي يحلّ التحدّي بـWebView الجهاز.
- */
 class SpikeModule(private val activity: MainActivity) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
-        // Keiyoushi core نفسه يعتمد على Application عبر Injekt (مثل
-        // Generated.getBaseUrl للمرايا والتفضيلات). Mangalek أثبت هذا
-        // Runtime على الجهاز، لذلك هذا جزء من عقد المستضيف لا workaround.
         addSingleton<Application>(activity.application)
         addSingletonFactory { NetworkHelper(activity.application) }
         addSingletonFactory {
