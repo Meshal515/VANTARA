@@ -158,3 +158,79 @@
 ما هو: «٦٢٥ فصلًا + ٨ بلا ترقيم» لا «٦٣٣».
 
 **الحالة.** لم يُصلَح بعد — سطر الحالة في `screens/sources.js` ما زال يجمعهما.
+
+
+---
+
+## ١٠. اتصال قاعدة خامل يستطيع قتل العملية كلها
+
+**ما حدث.** أعدنا تشغيل PostgreSQL فعليًا بينما API نفسه شغال. `pg.Pool`
+أطلق `error` من idle client، ولم يكن هناك listener. النتيجة:
+`Unhandled 'error' event` ثم سقوط Node كاملًا، رغم أن الـPool نفسه قادر على
+التخلص من الاتصال الميت وإنشاء آخر.
+
+**القاعدة.** اختبار `/healthz` على قاعدة سليمة لا يثبت recovery. أي تبعية طويلة
+العمر يجب اختبار **restart/failover وهي متصلة فعلًا**، لا mock فقط.
+
+**الحارس.** `packages/db/src/index.test.ts` + خطوة
+`Exercise live dependency restarts` في CI. CI #316 أثبت recovery لـPostgreSQL
+ثم Uchiyomi مع نفس API process.
+
+---
+
+## ١١. Retry على POST غير idempotent يصنع أسرارًا يتيمة
+
+**ما حدث.** `UchiyomiClient.mintToken()` كان يرث retry العام. في سيناريو
+«المنبع نفّذ POST ثم انقطع الرد» أرسل الاختبار الطلب **ثلاث مرات**. يستطيع
+Uchiyomi إنشاء عدة tokens بينما VANTARA يعرف معرّف واحد فقط.
+
+**القاعدة.** لا يكفي أن يكون retry محدودًا؛ السؤال الأول: هل العملية
+idempotent؟ POST يصنع credential لا يُعاد تلقائيًا عند network ambiguity.
+
+**الحارس.** `packages/uchiyomi/src/client.test.ts` يثبت نداءً واحدًا فقط،
+و`mintToken` يستخدم `noRetry: true`.
+
+---
+
+## ١٢. CI أخضر على حارس قديم يستطيع معاقبة الإصلاح الصحيح
+
+**ما حدث.** بعد إغلاق B4 بقي Safety Test يتوقع أن `sessions.ts` يكتب
+`vantara_user_gates`، مع أن حذف هذا الجدول هو الإصلاح المطلوب. واختبار pagination
+كان يطابق شكل SQL قديمًا قبل إضافة privacy scope.
+
+**الثمن.** أول CI بعد تحويل المستودع Public فشل لا لأن backend انكسر، بل لأن
+الحارس نفسه وصف المعمارية السابقة.
+
+**القاعدة.** الاختبار البنيوي/static guard عقد أيضًا؛ حين تتغير الملكية أو
+العقد يجب تحديث الحارس ليمنع **الرجوع للخلف** لا ليجمد شكل الكود القديم.
+
+**الحارس الحالي.** قائمة استثناءات الجداول المتقاعدة فارغة، واختبار pagination
+يطابق الاستنزاف الحدّي مع `scope.sql`.
+
+---
+
+## ١٣. نجاح النشر لا يعني نجاح التحقق بعد النشر
+
+**ما حدث.** Sync Worker deploy نجح في migrations، الرفع، secrets و`/health`،
+ثم فشل `verify.mjs` لأن الـworkflow رفع `VANTARA_DEVICE_PEPPER` للـWorker
+لكنه لم يمرره لعملية verifier المحلية.
+
+**القاعدة.** أسرار runtime وأسرار أداة verification عقدان مختلفان. كل خطوة
+تحقق يجب أن تعلن dependencies الخاصة بها صراحةً.
+
+**الحارس.** Safety Test يفحص أن خطوة
+`Verify sync invariants against live D1` نفسها تستقبل
+`VANTARA_DEVICE_PEPPER`. Sync Worker deploy #15 نجح بعد الإصلاح.
+
+---
+
+## ١٤. الأحمر الخارجي لا يُغطّى كأنه compile bug
+
+**ما حدث.** Android debug فشل على Maven Central بـ`429 Too Many Requests`
+أثناء تنزيل Kotlin dependency؛ لا سطر Kotlin فشل.
+
+**القاعدة.** retry مسموح فقط على توقيعات transient network/rate-limit المعروفة.
+compile/test failure حقيقي يجب أن يفشل من أول مرة ولا يُخفى خلف retries.
+
+**الحارس.** `android-debug.yml` يعيد Gradle فقط عند 429/5xx/timeouts/network
+signatures، وAndroid debug #81 نجح.

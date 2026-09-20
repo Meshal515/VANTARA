@@ -3,9 +3,15 @@
 مكتبة وقارئ خاص للمانجا والمانهوا والمانها، لثلاثة مستخدمين: مشعل ومنصور ودحمي.
 واجهة عربية بالكامل، تعمل على الويب وداخل تطبيق أندرويد.
 
-**الحالة:** التطبيق مبنيٌّ ويعمل. الواجهة والمزامنة ومحرّك الإضافات وAPK كلها
-قائمة ومختبَرة وتُنشر آليًّا. وما لم يكتمل بعد مذكورٌ صراحةً في
-[§ ما لم يكتمل](#ما-لم-يكتمل) — لا يُوصف شيء بأنه جاهز قبل أن يُثبَت.
+**الحالة:** Backend VANTARA مجمّد رسميًا كـ `BACKEND_STABLE = ✅` منذ
+2026-09-20. خط الأساس التنفيذي هو
+`f7c27df61a2423026c794eac0eeba8d175fa7682`، وقد نجح عليه CI الكامل،
+النشر الإنتاجي للـSync Worker، نشر الويب، وبناء Android debug APK.
+تفاصيل الأدلة ونطاق التجميد وتعليمات المراجعة المستقلة في
+[`docs/BACKEND_FREEZE.md`](docs/BACKEND_FREEZE.md).
+
+هذا **لا يعني أن المنتج كله Release Ready**: أعمال العميل/B13، القياس على الجهاز
+المرجعي، إعادة التصميم، واكتمال الترجمة ما زالت خارج هذا الإعلان.
 
 ---
 
@@ -134,6 +140,7 @@ cd android && ./gradlew :app:assembleDebug
 | [`docs/VANTARA_FAILURE_MATRIX.md`](docs/VANTARA_FAILURE_MATRIX.md) | كل عطل متوقَّع: `COVERED` بمرجع اختباره أو `DEFERRED` بما يحتاجه |
 | [`docs/VANTARA_SOCIAL_SYSTEM.md`](docs/VANTARA_SOCIAL_SYSTEM.md) | الأصدقاء والحضور والنشاط والقراءة المشتركة. §1–§45 نصّ المالك وهو المرجع |
 | [`docs/VANTARA_LESSONS.md`](docs/VANTARA_LESSONS.md) | **أخطاء وقعت هنا فعلًا** وثمنُها وحارسُها. تُقرأ قبل أول باتش |
+| [`docs/BACKEND_FREEZE.md`](docs/BACKEND_FREEZE.md) | **ابدأ هنا للمراجعة المستقلة:** SHA المجمد، الأدلة الحية، وما هو داخل/خارج Backend Freeze |
 | [`docs/VANTARA_MASTER_PLAN.md`](docs/VANTARA_MASTER_PLAN.md) | خطة الإصلاح والتحقق، وحالة كل بند |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | نشر مكدّس المحتوى المستضاف ذاتيًّا |
 | [`docs/UPSTREAMS.md`](docs/UPSTREAMS.md) | كل تابع خارجي: كيف يُربط وكيف يُثبَّت |
@@ -150,6 +157,8 @@ cd android && ./gradlew :app:assembleDebug
 ---
 
 ## ما لم يكتمل
+
+- **B13 / Client performance hardening:** IndexedDB، توصيل scheduler/cancellation/dedup/netpolicy، وقياسات الأداء على Galaxy Tab A9 ما زالت Client scope بعد Backend Freeze. انظر `docs/VANTARA_MASTER_PLAN.md`.
 
 - **الترجمة العربية** (`services/translation-worker`): **مؤجَّلة بقرار، لا
   متعثّرة.** ترتيبها آخر الصف — بعد المصادر العربية والباك إند والفرونت إند —
@@ -173,3 +182,5 @@ cd android && ./gradlew :app:assembleDebug
 
 > **لا ✅ بلا دليل.** لا تُعتبر مشكلة مُصلَحة لأن الكود تغيّر: اختبارٌ يثبتها،
 > ثم إصلاح، ثم CI أخضر، ثم تجربة المسار الحقيقي.
+
+> **المستودع Public ولا يعتمد على سرية الكود.** لا تُحفظ credentials أو user data في Git؛ runtime secrets تبقى في GitHub/Cloudflare secrets أو البيئة المحلية فقط.

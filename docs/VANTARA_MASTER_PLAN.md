@@ -1,11 +1,48 @@
 # VANTARA — Master Repair, Verification & Redesign Plan
 
-> **الحالة:** المصدر الرسمي الوحيد لخطة إصلاح VANTARA وإعادة تصميمه.
+> **الحالة:** المصدر الرسمي لخطة إصلاح VANTARA وإعادة تصميمه.  
+> **Backend Freeze:** ✅ بتاريخ 2026-09-20.  
+> **Implementation baseline:** `f7c27df61a2423026c794eac0eeba8d175fa7682`  
+> **الفرع الحالي:** `main`  
+> **مرجع المقيّم المستقل:** [`BACKEND_FREEZE.md`](BACKEND_FREEZE.md)
 >
-> **تاريخ البداية:** 2026-09-17  
-> **فرع العمل:** `fix/stability-sweep-20260917`
+> **تاريخ البداية:** 2026-09-17
 >
 > **قاعدة حاكمة:** لا تُعتبر أي مشكلة "تم إصلاحها" لمجرد أن الكود تغيّر. علامة ✅ لا توضع إلا بعد: اختبار فاشل يثبت المشكلة عندما يكون ذلك ممكنًا، تنفيذ الإصلاح، نجاح الاختبارات المستهدفة، نجاح CI، تجربة فعلية للمسار المتأثر، ثم تعقيب لاحق للتأكد أن الإصلاح لم ينكسر بسبب باتش تالٍ.
+
+---
+
+## الحالة التنفيذية الحالية — 2026-09-20
+
+هذه الخلاصة **تتقدم على الحالات التاريخية داخل سجل المشاكل أدناه**. السجل القديم
+يبقى لأنه يشرح كيف وصل المشروع إلى هنا، لكنه لا يجب أن يُقرأ كلوحة الحالة الحالية.
+
+| البند | الحالة الحالية | الدليل |
+|---|---|---|
+| B0 Safety / repo hygiene / production gates | ✅ مُتحقَّق | المستودع Public، `main` هو خط الإنتاج، history/source secret scans خضراء، deploys لا تعمل إلا بعد CI ناجح |
+| B1 Clean bootstrap / migrations / backup-restore | ✅ مُتحقَّق | CI #316: clean DB bootstrap + logical backup/restore + migrations |
+| B2 Unified identity / trusted devices / revoke | ✅ مُتحقَّق | Access Token v2 + Trusted Device proof + token self-revocation + live D1 verifier |
+| B3 Transport contracts | ✅ Backend contract | Bearer/CORS/signed media paths واختبارات النقل خضراء؛ Android debug يبني. القياس اليدوي الكامل للعميل يبقى Client scope |
+| B4 Data ownership | ✅ مُتحقَّق | D1 هو مالك Social؛ PostgreSQL social tables المتقاعدة أُسقطت فعليًا بـ`0006_drop_retired_social.sql` |
+| B5 Offline queue / sync correctness | ✅ Backend contract | replay/idempotency/queue/future cursor/privacy/delta pagination محروسة باختبارات |
+| B6 Source/chapter contract & fallback | ✅ مُتحقَّق | source contract + fallback tests خضراء |
+| B7 Library/search/explore backend contracts | ✅ Backend contract | API/ownership paths خضراء؛ واجهات المنتج النهائية تبقى Frontend scope |
+| B8 Social/recommendations backend | ✅ Backend contract | per-recipient state + receipts + authz/privacy محروسة |
+| B9 Internal notifications backend | ✅ Backend contract | kinds/receipts/state contracts واختبارات sync خضراء |
+| B10 Reports/diagnostics/correlation backend | ✅ Backend contract | diagnostics scrubbing/correlation/runtime routes محروسة |
+| B11 Failure/adversarial testing | ✅ مُتحقَّق | PostgreSQL + Uchiyomi restart على نفس API process، live D1 verify، failure matrix محدثة |
+| B12 Backend freeze/document truth | ✅ Backend Freeze | CI #316 + Sync deploy #15 + Web deploy #14 + Android debug #81 |
+| B13 Instant client / performance | ⬜ مفتوح | Client-only: IndexedDB + wiring scheduler/cancellation/dedup/netpolicy + قياس Tab A9 |
+
+**أدلة الإغلاق على baseline نفسه:**
+
+- VANTARA CI #316 — run `35490027600` — ✅
+- Sync Worker deploy #15 — run `35490094232` — ✅
+- Cloudflare Pages deploy #14 — run `35490094111` — ✅
+- Android debug APK #81 — run `35490027605` — ✅
+
+التفصيل الكامل وما يجب على المقيّم محاولة كسره موجود في
+[`BACKEND_FREEZE.md`](BACKEND_FREEZE.md).
 
 ---
 
@@ -892,12 +929,22 @@ Final status: 🧪 حتى قرار التكامل والتحقق بعده
 
 حاليًا:
 
-`FINAL_REPOSITORY_SWEEP = ⬜`
+`BACKEND_REPOSITORY_SWEEP = ✅`
 
-`VANTARA_RELEASE_READY = ⬜`
+`BACKEND_FREEZE = ✅`
+
+`FINAL_REPOSITORY_SWEEP = ⬜` — هذا يخص المنتج كاملًا بعد Frontend/B13.
+
+`VANTARA_RELEASE_READY = ⬜` — لا يُرفع بسبب Backend Freeze وحده.
 
 ---
 
 # 10. Current Next Step
 
-**التالي مباشرة:** تشغيل CI جديد على commit توثيق B0، ثم مراجعة diff النهائية نسبةً إلى قاعدة الكود `5ecbcf79...`. إذا بقيت خضراء ومحصورة في B0، يصبح تنفيذ B0 جاهزًا لقرار التكامل. بعد قرار التكامل والتحقق من النتيجة، يبدأ B1. **CORS/Transport يبدأ فقط في B3.**
+**الخطوة التالية الرسمية:** مراجعة مستقلة عدائية للـBackend المجمد على baseline
+`f7c27df61a2423026c794eac0eeba8d175fa7682` باستخدام
+[`BACKEND_FREEZE.md`](BACKEND_FREEZE.md) كنقطة دخول.
+
+- إذا كشف المقيّم Bug Backend حقيقيًا: يُعاد فتح البند فورًا، ويُضاف Regression Test ثم Fix ثم CI/live verification.
+- إذا لم يكشف ما يكسر التجميد: يبدأ B13/Client ثم Frontend redesign.
+- لا تُضاف Feature Backend جديدة أثناء التقييم حتى لا يتحرك الهدف تحت المقيّم.

@@ -213,58 +213,43 @@ Provider → Stream → Player.
 
 # 7. المستودعات
 
-## VANTARA — PRIVATE
+## VANTARA — PUBLIC PRIMARY
 
-هذا هو المنتج الحقيقي.
+منذ 2026-09-20 صار **VANTARA نفسه هو المستودع العام الأساسي** ومصدر الحقيقة
+للمنتج والـCI. لم يعد النموذج الحالي هو «Private product + Public lab».
 
-يحتوي على:
+المستودع العام يحتوي على:
 - التطبيق
-- الحسابات الحقيقية
-- Social
-- Sync
-- Backend
+- Social/Sync/Backend
 - Manga
-- Anime
-- Cinema
-- Integration
-- أي إعدادات أو أسرار إنتاجية
+- Anime/Cinema عندما تبدأ
+- Integration code
+- CI/deploy workflows
+- Fixtures واختبارات آمنة للنشر
 
-التجارب الخطرة لا تبدأ هنا.
-
----
-
-## PUBLIC LABS
-
-تستخدم لبناء واختبار المحركات والأجزاء التي يمكن نشرها بدون أي أسرار.
-
-أهم قاعدة:
-
-PUBLIC MUST BE SECRETLESS BY DESIGN.
-
-ممنوع تمامًا:
+وممنوع فيه دائمًا:
 - API secrets
 - Tokens
-- Private URLs
-- Signing keys
+- Private keys / signing keys
 - Production credentials
 - `.env`
-- بيانات المستخدمين
+- بيانات مستخدمين خاصة
 - أي Secret داخل تاريخ Git
 
-الاختبارات العامة تعتمد على:
-- Mocks
-- Fake providers
-- Test fixtures
-- Public test data
-- Local test servers
+الأسرار الإنتاجية تبقى خارج Git في GitHub/Cloudflare secrets أو البيئة المحلية.
 
----
+### Public Labs
+
+يمكن إنشاء Labs عامة منفصلة للتجارب الكبيرة أو المؤقتة، لكنها **اختيارية** وليست
+مكان الحقيقة النهائي. أي كود يدخل المنتج يعود إلى VANTARA عبر Branch + CI +
+Review.
 
 # 8. Workflow التطوير
 
-## المرحلة 1 — Public Lab
+## المرحلة 1 — Branch / Experiment
 
-نبني الميزة أو المحرك في المستودع العام.
+كل تغيير غير تافه يبدأ في Branch واضح النطاق داخل VANTARA أو Lab منفصل إذا كان
+التجريب يحتاج عزلة قوية.
 
 يتم تشغيل:
 - Build
@@ -272,56 +257,29 @@ PUBLIC MUST BE SECRETLESS BY DESIGN.
 - Lint
 - Unit tests
 - Integration tests
-- Provider contract tests
-- Player tests
-- Android build
-- APK smoke tests
-- Health tests
+- Contract tests
+- Android build حيث ينطبق
+- Health/failure tests حيث ينطبق
 
-يمكن التجربة والكسر والتعديل بحرية هنا.
+## المرحلة 2 — Stable Integration
 
----
+بعد نجاح الاختبارات والمراجعة، يدخل التغيير إلى `main`. الإنتاج لا ينشر من
+feature branch؛ Workflows الإنتاجية تعتمد على نجاح `VANTARA CI` على `main`
+وتنشر **نفس SHA الذي اختُبر**.
 
-## المرحلة 2 — Stable Version
+## المرحلة 3 — Production Verification
 
-عندما ينجح كل شيء:
+بعد CI الناجح:
+- Pages deploy
+- Sync Worker deploy + D1 migrations
+- live smoke/verification
+- Android debug artifact
 
-يتم تثبيت نسخة واضحة مثل:
+أي فشل هنا يعيد فتح التغيير حتى لو كانت unit tests خضراء.
 
-`video-v1.0.0`
-
-ولا نعتمد على "آخر كود موجود" بدون نسخة محددة.
-
----
-
-## المرحلة 3 — Private Integration
-
-تنقل النسخة المستقرة إلى VANTARA Private.
-
-لا تدخل مباشرة إلى النسخة النهائية.
-
-تدخل إلى Integration Branch.
-
-مثال:
-
-`integration/video`
-
-ثم نختبرها مع:
-
-- Accounts
-- Friends
-- Social
-- Recommendations
-- Progress
-- Library
-- Real UI
-- Real APK
-- Backend
-- Sync
-
-بعد نجاح التكامل فقط يتم دمجها في المسار المستقر.
-
----
+**Backend Freeze الحالي:** baseline
+`f7c27df61a2423026c794eac0eeba8d175fa7682`، والتفصيل في
+`docs/BACKEND_FREEZE.md`.
 
 # 9. قاعدة مهمة للـAI
 
@@ -699,11 +657,11 @@ Playback Source يعرف:
 
 # 20. القاعدة النهائية
 
-VANTARA Private:
-المنتج الحقيقي ومكان التكامل.
+VANTARA Public Primary:
+المنتج الحقيقي ومصدر الحقيقة والـCI، Secretless by design.
 
 Public Labs:
-المصنع ومكان التجارب والـCI.
+اختيارية للتجارب المعزولة، وليست مصدر الحقيقة النهائي.
 
 Manga Engine:
 مستقل ومستقر.

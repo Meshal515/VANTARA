@@ -1,6 +1,7 @@
 # VANTARA — Failure Matrix
 
-> **الحالة:** مخرج Patch **B11 — Adversarial & Failure Testing**.
+> **الحالة:** B11 مغلق ضمن Backend Freeze بتاريخ 2026-09-20.  
+> baseline: `f7c27df61a2423026c794eac0eeba8d175fa7682`.
 >
 > **القاعدة:** الفشل المتوقع يجب أن يعطي تدهورًا مفهومًا، ولا يسبب فقد بيانات
 > صامتًا. كل سيناريو في الخطة الرئيسية مذكور هنا بحالة واحدة من اثنتين:
@@ -28,16 +29,16 @@
 | 12 | قسم استكشاف واحد يتعثّر | `COVERED` | `apps/api/src/discovery.test.ts` — `available: false` والباقي يُعرض |
 | 13 | فصل ناقص لا يوجد في أي مصدر | `COVERED` | `packages/domain/src/chapters.test.ts` — تدقيق التغطية يسمّي الأرقام الغائبة صراحةً |
 | 14 | نسخة فصل محجوبة أو فاشلة | `COVERED` | `packages/domain/src/chapters.test.ts` — `pickCopy` يستثني النسخ الفاشلة |
-| 15 | إعادة تشغيل PostgreSQL فعليًا (pool reconnect) | `DEFERRED` | يحتاج PostgreSQL حقيقيًا: `docker compose restart postgres` ثم طلب مباشرة بعده. مسجَّل لـB11 بعد أن تتوفر البيئة، أو لـB12 داخل بوابة E2E |
-| 16 | إعادة تشغيل Uchiyomi فعليًا | `DEFERRED` | يحتاج نسخة Uchiyomi حيّة. `spike/uchiyomi-openapi-v0.34.yaml` هو العقد المستخدم في المحاكاة، والحقيقي لم يُشغَّل من هذه البيئة |
-| 17 | مصدر أول يسقط ومصدر ثانٍ ينجح | `DEFERRED` | ملك **B6** (`apps/api/src/lib/chapter-fallback.test.ts` على فرعه). لا أكتب تغطية ثانية لنفس المنطق في ملف يملكه باتش قيد التنفيذ |
+| 15 | إعادة تشغيل PostgreSQL فعليًا (pool reconnect) | `COVERED` | CI #316 — خطوة `Exercise live dependency restarts`: نفس API process نجا من `docker compose restart postgres` وأعاد readiness؛ regression في `packages/db/src/index.test.ts` |
+| 16 | إعادة تشغيل Uchiyomi فعليًا | `COVERED` | CI #316 — نفس API process بقي حيًا بعد restart Uchiyomi ثم نجح live API integration |
+| 17 | مصدر أول يسقط ومصدر ثانٍ ينجح | `COVERED` | `apps/api/src/lib/chapter-fallback.test.ts` + B6 source contract tests ضمن CI #316 |
 | 19 | صور القارئ على الـAPK (الكوكي عبر الأصول) | `COVERED` | `apps/api/src/media.test.ts` — الرابط الموقَّع يُفتح بلا أي اعتماد، ورقم صفحة مُعدَّل يُرفض 403، والمنتهي 401 لا 403 · `apps/web/reader.test.js` — التجديد عند الانتهاء والسقوط لمسار الكوكي عند تعذّر التوقيع |
 | 20 | خادم بلا `UCHIYOMI_SERVICE_TOKEN` | `COVERED` | `apps/api/src/media.test.ts` — يُقال عند **التوقيع** (503 على `POST`) لا عند كل صورة، فيسقط العميل لمسار الكوكي مرة واحدة بدل فصل من 503 |
 | 21 | فصل أطول من سقف التوقيع (640 صفحة) | `COVERED` | `apps/web/reader.test.js` — العميل يجزّئ الطلب بدل أن يُرفض ويسقط لمسار لا يعمل على الـAPK |
 | 22 | توكن الهوية ينتهي في منتصف القراءة | `COVERED` | `apps/web/lib/content-api.test.js` — تجديد واحد ثم إعادة **نفس** الطلب بالتوكن الجديد · `sync.test.js` — التجديد لا يمسح المرآة ولا يطلب من المستخدم شيئًا |
 | 23 | توكن ميت والتجديد نفسه يفشل | `COVERED` | `apps/web/lib/content-api.test.js` — محاولتان بلا ثالثة (التجديد المتكرر حلقة تُغرق الخادم)، والخطأ المُبلَّغ هو 401 الأصلي لا خطأ التجديد |
 | 24 | زائر بلا هوية على الويب (مسار الكوكي) | `COVERED` | `apps/web/lib/content-api.test.js` — لا ترويسة تُرسل، ولا إعادة محاولة على 401: الويب لا يدفع ثمن إصلاح الـAPK |
-| 18 | فحوص D1 الحقيقية (الصندوق الصادر، الإخفاء، الإشعارات) | `DEFERRED` | `services/sync-worker/verify.mjs` مكتوب وجاهز، ويحتاج Worker منشورًا وD1 حقيقية. لم يُشغَّل، ولا أدّعي أنه شُغّل |
+| 18 | فحوص D1 الحقيقية (الصندوق الصادر، الإخفاء، الإشعارات) | `COVERED` | Sync Worker deploy #15 — `verify.mjs` شُغّل على Worker منشور وD1 حقيقية باستخدام Trusted Device pairing وAccess Token v2، ثم نظّف fixtures |
 
 ---
 
@@ -67,8 +68,10 @@ npx vitest run apps/web/lib/failure.test.js   # سيناريوهات العمي�
 npx vitest run apps/api/src/failure.test.ts   # تدهور التبعيات
 ```
 
-وما يحتاج بيئة حقيقية:
+والتحقق الحي الذي تنفذه بوابة النشر:
 
 ```bash
-node services/sync-worker/verify.mjs <worker-url>   # D1 حقيقية — لم يُشغَّل بعد
+node services/sync-worker/verify.mjs <worker-url>
 ```
+
+شُغّل فعليًا بنجاح في Sync Worker deploy #15 (run `35490094232`) على D1 الحقيقية.
