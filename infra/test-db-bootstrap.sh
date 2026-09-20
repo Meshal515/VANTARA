@@ -59,6 +59,49 @@ if $compose run --rm --entrypoint sh db-backup /scripts/backup-postgres.sh >/tmp
 fi
 grep -q 'CONFIRM_SERVICES_PAUSED' /tmp/vantara-backup-unpaused.log
 
+# CONFIRM_SERVICES_PAUSED is not enough by itself: an idle application connection
+# proves the service was not actually stopped. Hold one psql client open after
+# completing a query, verify PostgreSQL reports it as idle, and require backup
+# to refuse the recovery point.
+idle_fifo="/tmp/vantara-idle-client.$"
+rm -f "$idle_fifo"
+mkfifo "$idle_fifo"
+$compose exec -T -e PGAPPNAME=vantara-idle-backup-test postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" <"$idle_fifo" >/tmp/vantara-idle-client.log 2>&1 &
+idle_pid=$!
+exec 9>"$idle_fifo"
+printf 'SELECT 1;\n' >&9
+
+attempt=0
+idle_state=''
+until [ "$idle_state" = 'idle' ]; do
+  idle_state="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d postgres -Atc \
+    "SELECT state FROM pg_stat_activity WHERE application_name = 'vantara-idle-backup-test' LIMIT 1")"
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 20 ]; then
+    echo "could not establish idle recovery-guard client (state=$idle_state)" >&2
+    exec 9>&-
+    wait "$idle_pid" || true
+    rm -f "$idle_fifo"
+    exit 1
+  fi
+  [ "$idle_state" = 'idle' ] || sleep 1
+done
+
+if $compose run --rm -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup \
+  /scripts/backup-postgres.sh >/tmp/vantara-backup-idle-client.log 2>&1; then
+  echo 'paired backup unexpectedly accepted an idle application connection' >&2
+  exec 9>&-
+  wait "$idle_pid" || true
+  rm -f "$idle_fifo"
+  exit 1
+fi
+grep -q 'active database' /tmp/vantara-backup-idle-client.log
+
+exec 9>&-
+wait "$idle_pid" || true
+rm -f "$idle_fifo"
+
 $compose run --rm -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup /scripts/backup-postgres.sh
 
 $compose run --rm --entrypoint sh db-backup -c '

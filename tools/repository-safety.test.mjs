@@ -872,6 +872,36 @@ test('no spike probe step can run without a deadline or an announcement', () => 
 });
 
 
+test('D1 rollout classifier rejects write-incompatible changes disguised as expansions', () => {
+  const unsafe = [
+    'ALTER TABLE comments ADD COLUMN required_text TEXT NOT NULL;',
+    'ALTER TABLE comments ADD CONSTRAINT comments_body_nonempty CHECK (length(body) > 0);',
+    'CREATE UNIQUE INDEX comments_one_body ON comments(body);',
+    'ALTER TABLE comments ALTER COLUMN body SET NOT NULL;',
+  ];
+  for (const sql of unsafe) {
+    assert.equal(
+      isBackwardCompatibleD1Migration(sql),
+      false,
+      `old Worker writes may fail after this migration is applied first: ${sql}`,
+    );
+  }
+
+  const safe = [
+    'ALTER TABLE comments ADD COLUMN optional_text TEXT;',
+    'ALTER TABLE comments ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0;',
+    'CREATE INDEX comments_rev_extra ON comments(rev);',
+    'CREATE TABLE extra_metadata (id TEXT PRIMARY KEY, note TEXT);',
+  ];
+  for (const sql of safe) {
+    assert.equal(
+      isBackwardCompatibleD1Migration(sql),
+      true,
+      `expand-only rollout should allow: ${sql}`,
+    );
+  }
+});
+
 test('D1 rollout migrations after the adversarial baseline are backward-compatible expansions', () => {
   const dir = resolve(ROOT, 'services/sync-worker/migrations');
   const migrations = readdirSync(dir)
