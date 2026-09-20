@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import { CORRELATION_HEADER, correlationIdFrom } from '@vantara/domain';
+import { UchiyomiError } from '@vantara/uchiyomi';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
 import { registerCors } from './lib/cors.ts';
@@ -91,8 +92,29 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    const status = error.statusCode ?? 500;
     const correlationId = request.correlationId;
+
+    if (error instanceof UchiyomiError) {
+      const status = error.status >= 500 ? 502 : error.status;
+      if (status >= 500) {
+        request.log.warn(
+          { upstreamStatus: error.status, upstreamCode: error.code, upstreamPath: error.path, correlationId },
+          'upstream request failed',
+        );
+      }
+      return reply.code(status).send({
+        error:
+          error.code ??
+          (status === 429
+            ? 'rate_limited'
+            : status === 401 || status === 403
+              ? 'upstream_auth_required'
+              : 'upstream_unavailable'),
+        correlationId,
+      });
+    }
+
+    const status = error.statusCode ?? 500;
     if (status >= 500) {
       // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل — إلا
       // المعرّف، وهو ما يجعل البلاغ قابلًا للربط بهذا السطر بالضبط
