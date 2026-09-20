@@ -1,86 +1,60 @@
 package dev.vantara.spike
 
 /**
- * بيان المصادر المثبَّت.
+ * نموذج مصدر واحد في Spike اكتشاف المصادر العربية.
  *
- * في النظام النهائي يسكن هذا في D1 ويُحدَّث بلا إصدار APK جديد. وفي هذا
- * الـspike مثبَّت في الكود بقصد: نُثبت المحرك لا نظام التحديث.
+ * هذه ليست قائمة الإنتاج. الـworkflow يولّد `GeneratedSources.kt` من لقطة
+ * **مثبّتة بــ commit** من فهرس Keiyoushi، ثم ينزّل كل APK في اللقطة ويحسِب
+ * SHA-256 حقيقيًا قبل بناء الـAPK التجريبي.
  *
- * و`sha256` ليس تزيينًا. تحميل الكود من ملف يتخلّى عن تحقّق التوقيع عبر
- * `PackageManager` — وهذا مُثبَت: `getPackageArchiveInfo` لا يعطي شهادة
- * لأرشيف غير مثبَّت. فالبصمة هي الضمانة، وهي تثبّت البايتات نفسها لا
- * الشهادة وحدها.
- *
- * البصمات أدناه محسوبة فعليًّا من القطع المنزَّلة في 2026‑09‑18.
+ * الدروس التي يفرضها هذا العقد:
+ *  - لا نبني رابط APK من الاسم أو الإصدار؛ ننسخ `resources.apkUrl` كما نشره الفهرس.
+ *  - «عربي» يعني أن `sources[].language == "ar"`، لا أن مجلد الإضافة تحت `src/ar`.
+ *    بهذا ندخل الإضافات متعددة اللغات التي تحمل مصدرًا عربيًا أيضًا.
+ *  - الحزمة قد تعرض عدة CatalogueSource؛ نختار معرّفات المصادر العربية نفسها،
+ *    ولا نستعمل `first()` ونفترض أن الأول عربي.
+ *  - contentWarning قيمة ثلاثية SAFE/MIXED/NSFW وتبقى محفوظة في التقرير.
+ *  - BL/GL المتخصص يُحفظ في اللقطة لكن يُوسم BLOCKED ولا يُحمَّل أو يُشغَّل.
  */
+enum class ContentWarning {
+    SAFE,
+    MIXED,
+    NSFW,
+}
+
 data class SourceSpec(
-    /** الاسم كما يُعرض في الشاشة. */
+    /** اسم الإضافة كما في index.json. */
     val label: String,
     val pkg: String,
-    /** إصدار المكتبة المتوقَّع. تغيّره تغييرُ عقد، فيُعرض ولا يُطبَّق صامتًا. */
+    /** extensionLib المتوقع من الفهرس؛ المحمّل يطابقه مع MetaData داخل الـAPK. */
     val expectedLib: Double,
-    /**
-     * رابط القطعة **كاملًا كما ينشره الفهرس**، لا مبنيًّا من أجزاء.
-     *
-     * بناؤه يدويًّا أسقط أول تشغيل حقيقي بـ404 على الخمسة: الفهرس ينشر
-     * الـAPK والـJAR تحت **وسمَي إصدار مختلفين** (`6ca40f6-0` للـAPK و
-     * `19c8e5f-0` للـJAR)، وأنا أخذت وسم الـJAR وبنيت به رابط الـAPK.
-     *
-     * والدرس أوسع من الوسم: ما ينشره المصدر يُنسخ، ولا يُعاد تركيبه من
-     * قواعد نستنبطها — فالقاعدة تنكسر بلا إشعار.
-     */
+    /** الرابط الكامل كما نشره الفهرس. لا يُعاد تركيبه. */
     val apkUrl: String,
+    /** SHA-256 للـAPK نفسه، محسوب في workflow من البايتات المنشورة. */
     val sha256: String,
-    /** نصّ البحث العربي الذي نجرّبه على هذا المصدر. */
-    val query: String,
+    val versionName: String,
+    val warning: ContentWarning,
+    /** source.id للمصادر العربية داخل الحزمة. String لتجنّب أي مشكلة signed/unsigned. */
+    val arabicSourceIds: Set<String>,
+    /** أسماء المصادر العربية كما ظهرت في الفهرس، للتقرير فقط. */
+    val arabicSourceNames: List<String>,
+    /** استعلام أولي؛ المسبار يرجع لعنوان حي من popular إذا لم يجد نتيجة. */
+    val query: String = "ون بيس",
+    /** سياسة المالك: وجود سبب يعني أن المصدر ظاهر في التقرير فقط ولا يُشغَّل. */
+    val blockedReason: String? = null,
 )
 
 /**
- * الخمسة، وكلها `CONTENT_WARNING_SAFE` في فهرس Keiyoushi.
+ * يولّده `tools/generate_arabic_sources.py` في workflow.
  *
- * مقصودٌ أن تكون مزيجًا: اثنان على `lib 1.4` وثلاثة على `1.6`، فالـspike
- * يختبر العقدين لا واحدًا.
+ * الملف المتتبَّع في Git fallback صغير كي يبقى المشروع قابلًا للبناء محليًا؛
+ * Artifact الـSpike الذي نجربه فعليًا يُبنى بعد استبداله باللقطة الكاملة.
  */
-val SPIKE_SOURCES: List<SourceSpec> = listOf(
-    SourceSpec(
-        label = "Mangalek",
-        pkg = "eu.kanade.tachiyomi.extension.ar.mangalek",
-        expectedLib = 1.4,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangalek-v1.4.65.apk",
-        sha256 = "3474d105c5e7192b65ce1efd82a932fdc057375282d70838ca9950a1b97fc5a1",
-        query = "ون بيس",
-    ),
-    SourceSpec(
-        label = "MangaSpark",
-        pkg = "eu.kanade.tachiyomi.extension.ar.mangaspark",
-        expectedLib = 1.4,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaspark-v1.4.60.apk",
-        sha256 = "1912b552e3c1777c8ee797d7024ecffbc55108a14f883d16fdddca8074bceec3",
-        query = "ناروتو",
-    ),
-    SourceSpec(
-        label = "Azora",
-        pkg = "eu.kanade.tachiyomi.extension.ar.azora",
-        expectedLib = 1.6,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.azora-v1.6.73.apk",
-        sha256 = "34c01978ce98c809ac47168ebb37b4c5abd14cc4fba10d15aa3c3103c5f668f0",
-        query = "ون بيس",
-    ),
-    SourceSpec(
-        label = "MangaSwat",
-        pkg = "eu.kanade.tachiyomi.extension.ar.mangaswat",
-        expectedLib = 1.6,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.mangaswat-v1.6.61.apk",
-        sha256 = "a9d1cca2acd447d581fe6e1a00db68d352746eb18bab931077b2dd60b976917e",
-        query = "سولو ليفلنج",
-    ),
-    SourceSpec(
-        label = "Team X",
-        pkg = "eu.kanade.tachiyomi.extension.ar.teamx",
-        expectedLib = 1.6,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/6ca40f6-0/tachiyomi-ar.teamx-v1.6.33.apk",
-        sha256 = "57292720171427ad511b53116e3f1b183185973ee961fd1bde19353d36d9d335",
-        query = "ون بيس",
-    ),
-)
+val SPIKE_SOURCES: List<SourceSpec>
+    get() = GENERATED_SPIKE_SOURCES
 
+val SPIKE_INDEX_COMMIT: String
+    get() = GENERATED_INDEX_COMMIT
+
+val SPIKE_SNAPSHOT_NOTE: String
+    get() = GENERATED_SNAPSHOT_NOTE

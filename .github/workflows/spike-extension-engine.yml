@@ -25,7 +25,10 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    env:
+      # لقطة ثابتة: الـSpike يختبر مجموعة معلومة، لا فهرسًا يتغير أثناء البناء.
+      KEIYOUSHI_INDEX_COMMIT: 72413a8a4bb858f7438a22d2bedcb358a0267642
     defaults:
       run:
         working-directory: spike/extension-engine
@@ -49,12 +52,27 @@ jobs:
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" || true
 
+      - name: Generate pinned Arabic source snapshot
+        run: |
+          set -euo pipefail
+          python3 tools/generate_arabic_sources.py
+          python3 - <<'PY'
+          import json
+          p = json.load(open('build/arabic-source-snapshot.json', encoding='utf-8'))
+          print('index:', p['indexCommit'])
+          print('counts:', p['counts'])
+          print('packages:', len(p['packages']))
+          PY
+
       - uses: gradle/actions/setup-gradle@v4
 
       # لا نشحن gradle-wrapper.jar في المستودع: ملف ثنائي في Git يُراجع
       # بالثقة لا بالقراءة. الـrunner يولّده من نسخة Gradle المثبّتة.
       - name: Generate the Gradle wrapper
         run: gradle wrapper --gradle-version 8.11.1 --no-daemon
+
+      - name: Run spike unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Build the debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
@@ -79,7 +97,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vantara-spike-engine-debug
-          path: ${{ steps.apk.outputs.path }}
+          name: vantara-spike-all-arabic-debug
+          path: |
+            ${{ steps.apk.outputs.path }}
+            spike/extension-engine/build/arabic-source-snapshot.json
           if-no-files-found: error
           retention-days: 14

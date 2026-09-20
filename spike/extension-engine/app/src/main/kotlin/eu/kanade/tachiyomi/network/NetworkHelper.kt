@@ -13,6 +13,7 @@ package eu.kanade.tachiyomi.network
 import android.content.Context
 import android.webkit.WebSettings
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
@@ -77,6 +78,9 @@ class NetworkHelper(context: Context) {
                         response = chain.proceed(request)
                         return@addInterceptor response!!
                     } catch (io: IOException) {
+                        // إعادة الطلب بنفس البصمة لا تحل تحدي Cloudflare؛
+                        // الاعتراض نفسه يعرض التحقق المرئي عند الحاجة.
+                        if (io is CloudflareBypassException) throw io
                         last = io
                         if (attempt < 2) Thread.sleep(500L * (attempt + 1))
                     }
