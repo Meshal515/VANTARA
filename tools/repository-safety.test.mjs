@@ -954,3 +954,18 @@ test('D1 rollout migrations after the adversarial baseline are backward-compatib
     'D1 migrations applied before Worker deploy must use expand/contract; destructive steps belong in a later release',
   );
 });
+
+
+test('live D1 verifier cleans durable fixture op claims between runs', () => {
+  const verifier = read('services/sync-worker/verify.mjs');
+  const start = verifier.indexOf('async function cleanup()');
+  const end = verifier.indexOf('function rowsOf', start);
+  assert.ok(start >= 0 && end > start, 'verify.mjs must keep an explicit cleanup function');
+
+  const cleanup = verifier.slice(start, end);
+  assert.match(
+    cleanup,
+    /DELETE FROM op_claims WHERE op_id LIKE '__verify__%'/,
+    're-running live verification must not collide with durable op_claims left by the previous run',
+  );
+});
