@@ -7,7 +7,11 @@ object ImagePayloadPolicy {
 
     fun validate(contentType: String?, bytes: ByteArray): Verdict {
         val normalizedType = contentType?.substringBefore(';')?.trim()?.lowercase()
-        if (normalizedType != null && !normalizedType.startsWith("image/")) {
+        if (
+            normalizedType != null &&
+            normalizedType != "application/octet-stream" &&
+            !normalizedType.startsWith("image/")
+        ) {
             return Verdict(false, "content-type $contentType is not an image")
         }
         if (!hasSupportedSignature(bytes)) {
