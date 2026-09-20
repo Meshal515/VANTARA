@@ -849,3 +849,27 @@ test('no spike probe step can run without a deadline or an announcement', () => 
     'the on-screen image must decode the bytes the probe already proved',
   );
 });
+
+
+test('D1 rollout migrations after the adversarial baseline are backward-compatible expansions', () => {
+  // الإنتاج يطبق D1 migration قبل نشر الـWorker الذي اختبره CI. لذلك أي
+  // migration جديدة يجب أن يستطيع الـWorker القديم العيش معها حتى لحظة
+  // التبديل. الحذف/إعادة التسمية تُنفذ في إصدار لاحق بعد توقف كل القراءات
+  // القديمة، لا في نفس الإصدار.
+  const dir = resolve(ROOT, 'services/sync-worker/migrations');
+  const migrations = readdirSync(dir)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .filter((name) => Number(name.slice(0, 4)) >= 12);
+
+  const forbidden = /\bDROP\s+(?:TABLE|COLUMN|INDEX)\b|\bRENAME\s+(?:TO|COLUMN)\b|\bALTER\s+COLUMN\b[^;]*\bTYPE\b/i;
+  const bad = [];
+  for (const name of migrations) {
+    const sql = read(`services/sync-worker/migrations/${name}`);
+    if (forbidden.test(sql)) bad.push(name);
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    'D1 migrations applied before Worker deploy must use expand/contract; destructive steps belong in a later release',
+  );
+});
