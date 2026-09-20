@@ -29,6 +29,18 @@ jobs:
     env:
       # لقطة ثابتة: الـSpike يختبر مجموعة معلومة، لا فهرسًا يتغير أثناء البناء.
       KEIYOUSHI_INDEX_COMMIT: 72413a8a4bb858f7438a22d2bedcb358a0267642
+      # Batch 1: only ten SAFE sources. Owner policy is zero NSFW.
+      VANTARA_SOURCE_PACKAGES: >-
+        eu.kanade.tachiyomi.extension.ar.mangalek,
+        eu.kanade.tachiyomi.extension.ar.mangaspark,
+        eu.kanade.tachiyomi.extension.ar.azora,
+        eu.kanade.tachiyomi.extension.ar.mangaswat,
+        eu.kanade.tachiyomi.extension.ar.teamx,
+        eu.kanade.tachiyomi.extension.ar.manga3asq,
+        eu.kanade.tachiyomi.extension.ar.anyonemanga,
+        eu.kanade.tachiyomi.extension.ar.areamanga,
+        eu.kanade.tachiyomi.extension.ar.ariatoon,
+        eu.kanade.tachiyomi.extension.ar.comicverse
     defaults:
       run:
         working-directory: spike/extension-engine
@@ -51,6 +63,9 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" || true
+
+      - name: Run source generator policy tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
 
       - name: Generate pinned Arabic source snapshot
         run: |
@@ -97,7 +112,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vantara-spike-all-arabic-debug
+          name: vantara-spike-batch1-ten-safe-debug
           path: |
             ${{ steps.apk.outputs.path }}
             spike/extension-engine/build/arabic-source-snapshot.json
