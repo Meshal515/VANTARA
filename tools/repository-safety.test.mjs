@@ -872,6 +872,41 @@ test('no spike probe step can run without a deadline or an announcement', () => 
 });
 
 
+function isBackwardCompatibleD1Migration(sql) {
+  const source = stripComments(sql);
+  const statements = source
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  for (const statement of statements) {
+    // Migration-first means the old Worker keeps serving against this schema.
+    // Reject any operation that can remove/rename an object or tighten an
+    // existing write contract before compatible code is deployed.
+    if (
+      /\bDROP\s+(?:TABLE|COLUMN|INDEX|CONSTRAINT)\b/i.test(statement) ||
+      /\bRENAME\s+(?:TO|COLUMN)\b/i.test(statement) ||
+      /\bALTER\s+COLUMN\b[\s\S]*\b(?:TYPE|SET\s+NOT\s+NULL)\b/i.test(statement) ||
+      /\bALTER\s+TABLE\b[\s\S]*\bADD\s+CONSTRAINT\b/i.test(statement) ||
+      /\bCREATE\s+UNIQUE\s+INDEX\b/i.test(statement)
+    ) {
+      return false;
+    }
+
+    // Adding a required column without a default breaks INSERT statements from
+    // the still-serving old Worker. Required + DEFAULT is compatible because
+    // omitted old columns receive the database default.
+    if (
+      /\bALTER\s+TABLE\b[\s\S]*\bADD\s+COLUMN\b[\s\S]*\bNOT\s+NULL\b/i.test(statement) &&
+      !/\bDEFAULT\b/i.test(statement)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 test('D1 rollout classifier rejects write-incompatible changes disguised as expansions', () => {
   const unsafe = [
     'ALTER TABLE comments ADD COLUMN required_text TEXT NOT NULL;',
@@ -908,11 +943,10 @@ test('D1 rollout migrations after the adversarial baseline are backward-compatib
     .filter((name) => /^\d+_.*\.sql$/.test(name))
     .filter((name) => Number(name.slice(0, 4)) >= 12);
 
-  const forbidden = /\bDROP\s+(?:TABLE|COLUMN|INDEX|CONSTRAINT)\b|\bRENAME\s+(?:TO|COLUMN)\b|\bALTER\s+COLUMN\b[^;]*\b(?:TYPE|SET\s+NOT\s+NULL)\b/i;
   const bad = [];
   for (const name of migrations) {
     const sql = read(`services/sync-worker/migrations/${name}`);
-    if (forbidden.test(sql)) bad.push(name);
+    if (!isBackwardCompatibleD1Migration(sql)) bad.push(name);
   }
   assert.deepEqual(
     bad,
