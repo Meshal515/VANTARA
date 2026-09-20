@@ -1,5 +1,6 @@
 package dev.vantara.spike
 
+import android.graphics.BitmapFactory
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -375,7 +376,7 @@ class SourceProbe(private val http: OkHttpClient) {
                 val asHttp = source as? HttpSource
                 // المصدر قد يعطي الرابط في الصفحة، أو يشتقه بطلب ثانٍ
                 val url = page.imageUrl
-                    ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
+                    ?: asHttp?.getImageUrl(page)
                     ?: error("page carries no imageUrl")
                 imageUrl = url
                 val httpSource = asHttp ?: error("source is not HttpSource; cannot issue its image request")
@@ -384,14 +385,23 @@ class SourceProbe(private val http: OkHttpClient) {
                 // Referer/Cookie/مضيفًا ديناميكيًّا. fetchImage هو عقد المصدر
                 // الحقيقي، واستخدام غيره كان يجعل صفحات سليمة حمراء.
                 httpSource.fetchImage(page).awaitSingle().use { response ->
-                    val body = response.body.bytes()
+                    val body = BoundedPayloadReader.read(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        maxBytes = MAX_IMAGE_BYTES,
+                    )
                     require(body.size > 1024) { "image too small: ${body.size} bytes" }
                     val type = response.header("content-type")
                     val verdict = ImagePayloadPolicy.validate(type, body)
                     require(verdict.accepted) { verdict.reason ?: "invalid image payload" }
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(body, 0, body.size, bounds)
+                    require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+                        "Android image decoder rejected payload"
+                    }
                     imageBytes = body.size
                     imageData = body
-                    "${body.size} بايت · $type"
+                    "${body.size} بايت · $type · ${bounds.outWidth}×${bounds.outHeight}"
                 }
             }
         }
@@ -505,6 +515,9 @@ class SourceProbe(private val http: OkHttpClient) {
          */
         const val SAMPLE_PAGE_CAP = 3
         const val SAMPLE_BUDGET_MS = 60_000L
+
+        /** Prevent one hostile or malformed page from exhausting the app heap. */
+        const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
         /**
          * حاجز الأمان للإحصاء الكامل، لا سقفَ سياسة.
