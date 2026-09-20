@@ -880,28 +880,26 @@ function isBackwardCompatibleD1Migration(sql) {
     .filter(Boolean);
 
   for (const statement of statements) {
-    // Migration-first means the old Worker keeps serving against this schema.
-    // Reject any operation that can remove/rename an object or tighten an
-    // existing write contract before compatible code is deployed.
-    if (
-      /\bDROP\s+(?:TABLE|COLUMN|INDEX|CONSTRAINT)\b/i.test(statement) ||
-      /\bRENAME\s+(?:TO|COLUMN)\b/i.test(statement) ||
-      /\bALTER\s+COLUMN\b[\s\S]*\b(?:TYPE|SET\s+NOT\s+NULL)\b/i.test(statement) ||
-      /\bALTER\s+TABLE\b[\s\S]*\bADD\s+CONSTRAINT\b/i.test(statement) ||
-      /\bCREATE\s+UNIQUE\s+INDEX\b/i.test(statement)
-    ) {
-      return false;
+    // Fail closed. Migration-first is safe only for a small set of operations
+    // whose effect cannot make the still-serving old Worker reject writes.
+    if (/^CREATE\s+TABLE\b/i.test(statement)) continue;
+    if (/^CREATE\s+INDEX\b/i.test(statement)) continue;
+
+    if (/^ALTER\s+TABLE\b[\s\S]*\bADD\s+COLUMN\b/i.test(statement)) {
+      // A new column is compatible only when old INSERTs can omit it and when
+      // the column itself does not impose a new validation/reference contract.
+      if (/\b(?:CHECK|REFERENCES|UNIQUE|PRIMARY\s+KEY|GENERATED)\b/i.test(statement)) {
+        return false;
+      }
+      if (/\bNOT\s+NULL\b/i.test(statement) && !/\bDEFAULT\b/i.test(statement)) {
+        return false;
+      }
+      continue;
     }
 
-    // Adding a required column without a default breaks INSERT statements from
-    // the still-serving old Worker. Required + DEFAULT is compatible because
-    // omitted old columns receive the database default.
-    if (
-      /\bALTER\s+TABLE\b[\s\S]*\bADD\s+COLUMN\b[\s\S]*\bNOT\s+NULL\b/i.test(statement) &&
-      !/\bDEFAULT\b/i.test(statement)
-    ) {
-      return false;
-    }
+    // DROP/RENAME/ALTER existing columns, constraints, triggers, unique indexes,
+    // data rewrites, and unknown SQL all require an explicit staged rollout.
+    return false;
   }
 
   return true;
