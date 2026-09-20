@@ -31,6 +31,7 @@ interface IdentityLinkRow {
   uchiyomi_user_id: string;
   token_encrypted: string;
   token_id: string | null;
+  token_expires_at: string;
   username: string;
 }
 
@@ -57,15 +58,19 @@ export class SessionStore {
     const result = await uchiyomi.login(username, password);
 
     const expiresInDays = this.#options.ttlDays;
+    const id = newSessionId();
+    // اسم فريد يجعل POST غير الـidempotent قابلًا للمصالحة إن ضاع رده.
+    // 8 + 43 = 51 حرفًا، تحت حد Uchiyomi (60).
+    const tokenName = `vantara-${id}`;
     const minted = await uchiyomi.mintToken(result.accessToken, {
-      name: `vantara${device ? ` (${device})` : ''}`,
+      name: tokenName,
       scopes: ['read', 'write'],
       expiresInDays,
+      reconcileAmbiguousFailure: true,
     });
 
     const encrypted = encrypt(minted.token, this.#options.key);
     const identityId = identityIdForUsername(result.user.username);
-    const id = newSessionId();
 
     try {
       await transaction(async (client) => {
@@ -80,16 +85,18 @@ export class SessionStore {
         if (identityId) {
           await client.query(
             `INSERT INTO vantara_identity_links
-               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
-             VALUES ($1, $2, $3, $4, NULL)
+               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id,
+                token_expires_at, revoked_at)
+             VALUES ($1, $2, $3, $4, now() + ($5 || ' days')::interval, NULL)
              ON CONFLICT (vantara_identity_id) DO UPDATE SET
                uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
                token_encrypted = EXCLUDED.token_encrypted,
                token_id = EXCLUDED.token_id,
+               token_expires_at = EXCLUDED.token_expires_at,
                linked_at = now(),
                last_used_at = now(),
                revoked_at = NULL`,
-            [identityId, result.user.id, encrypted, minted.id],
+            [identityId, result.user.id, encrypted, minted.id, String(expiresInDays)],
           );
         }
 
@@ -154,7 +161,8 @@ export class SessionStore {
    */
   async resolveIdentity(identityId: string, deviceId: string): Promise<Session | undefined> {
     const row = await queryOne<IdentityLinkRow>(
-      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id, u.username
+      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id,
+              l.token_expires_at, u.username
          FROM vantara_identity_links l
          JOIN vantara_users u USING (uchiyomi_user_id)
         WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
@@ -174,19 +182,81 @@ export class SessionStore {
       return undefined;
     }
 
-    void query(
-      `UPDATE vantara_identity_links SET last_used_at = now()
-        WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
-      [identityId],
-    ).catch(() => {});
+    const expiresAt = new Date(row.token_expires_at).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      // الاعتماد الأعلى انتهى؛ لا نبقي رابطًا يبدو حيًا وهو غير قابل للاستخدام.
+      await query(
+        `UPDATE vantara_identity_links SET revoked_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+        [identityId],
+      );
+      return undefined;
+    }
+
+    let activeToken = token;
+    let activeTokenId = row.token_id;
+
+    // جدّد قبل سبعة أيام من الانتهاء. API token ذو write scope يستطيع إدارة
+    // توكناته الشخصية في Uchiyomi؛ لا نحتاج كلمة مرور المستخدم كل شهرين.
+    if (expiresAt - Date.now() <= 7 * 86_400_000 && row.token_id) {
+      const renewalId = newSessionId();
+      const renewed = await this.#options.uchiyomi.mintToken(token, {
+        name: `vantara-${renewalId}`,
+        scopes: ['read', 'write'],
+        expiresInDays: this.#options.ttlDays,
+        reconcileAmbiguousFailure: true,
+      });
+      const renewedEncrypted = encrypt(renewed.token, this.#options.key);
+
+      const won = await queryOne<{ token_id: string }>(
+        `UPDATE vantara_identity_links
+            SET token_encrypted = $1,
+                token_id = $2,
+                token_expires_at = now() + ($3 || ' days')::interval,
+                linked_at = now(),
+                last_used_at = now()
+          WHERE vantara_identity_id = $4
+            AND token_id = $5
+            AND revoked_at IS NULL
+          RETURNING token_id`,
+        [renewedEncrypted, renewed.id, String(this.#options.ttlDays), identityId, row.token_id],
+      );
+
+      if (won) {
+        activeToken = renewed.token;
+        activeTokenId = renewed.id;
+        // لا نلغي القديم هنا: جلسة cookie قد تستخدم credential نفسه. هو على
+        // أي حال داخل نافذة <=7 أيام وسينتهي طبيعيًا.
+      } else {
+        // طلب موازٍ سبقنا بالتجديد. لا نترك التوكن الذي خسر CAS يتيمًا.
+        await this.#options.uchiyomi.revokeToken(renewed.token, renewed.id);
+        const latest = await queryOne<IdentityLinkRow>(
+          `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id,
+                  l.token_expires_at, u.username
+             FROM vantara_identity_links l
+             JOIN vantara_users u USING (uchiyomi_user_id)
+            WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
+          [identityId],
+        );
+        if (!latest) return undefined;
+        activeToken = decrypt(latest.token_encrypted, this.#options.key);
+        activeTokenId = latest.token_id;
+      }
+    } else {
+      void query(
+        `UPDATE vantara_identity_links SET last_used_at = now()
+          WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+        [identityId],
+      ).catch(() => {});
+    }
 
     return {
       id: `identity:${identityId}:${deviceId}`,
       identityId: row.vantara_identity_id,
       userId: row.uchiyomi_user_id,
       username: row.username,
-      token,
-      ...(row.token_id ? { tokenId: row.token_id } : {}),
+      token: activeToken,
+      ...(activeTokenId ? { tokenId: activeTokenId } : {}),
     };
   }
 
