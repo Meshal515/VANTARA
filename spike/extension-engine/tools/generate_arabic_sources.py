@@ -96,6 +96,51 @@ def warning(value: str | None) -> str:
     raise RuntimeError(f"unknown contentWarning: {raw}")
 
 
+def select_extensions(
+    extensions: list[dict],
+    *,
+    allowed_packages: set[str] | None = None,
+) -> list[dict]:
+    """Apply owner policy before any APK bytes are downloaded.
+
+    NSFW is excluded unconditionally. An optional package allowlist narrows a
+    diagnostic batch without changing the pinned Keiyoushi snapshot semantics.
+    """
+    selected: list[dict] = []
+    for ext in extensions:
+        package_name = str(ext.get("packageName", ""))
+        if allowed_packages is not None and package_name not in allowed_packages:
+            continue
+
+        arabic = [s for s in ext.get("sources", []) if s.get("language") == "ar"]
+        if not arabic:
+            continue
+
+        content_warning = warning(ext.get("contentWarning"))
+        if content_warning == "NSFW":
+            continue
+
+        resources = ext.get("resources") or {}
+        apk_url = resources.get("apkUrl")
+        if not apk_url:
+            raise RuntimeError(f"{package_name} has Arabic source(s) but no apkUrl")
+
+        selected.append(
+            {
+                "label": str(ext["name"]),
+                "packageName": package_name,
+                "extensionLib": str(ext["extensionLib"]),
+                "versionName": str(ext["versionName"]),
+                "warning": content_warning,
+                "apkUrl": str(apk_url),
+                "arabicSourceIds": [str(s["id"]) for s in arabic],
+                "arabicSourceNames": [str(s["name"]) for s in arabic],
+                "blockedReason": blocked_reason(ext, arabic),
+            }
+        )
+    return selected
+
+
 def kotlin_string(value: str) -> str:
     return (
         '"'
@@ -111,36 +156,23 @@ def main() -> None:
     root = json.loads(index_bytes)
     extensions = root["extensionList"]["extensions"]
 
-    selected: list[dict] = []
-    for ext in extensions:
-        arabic = [s for s in ext.get("sources", []) if s.get("language") == "ar"]
-        if not arabic:
-            continue
-
-        resources = ext.get("resources") or {}
-        apk_url = resources.get("apkUrl")
-        if not apk_url:
-            raise RuntimeError(f"{ext.get('packageName')} has Arabic source(s) but no apkUrl")
-
-        selected.append(
-            {
-                "label": str(ext["name"]),
-                "packageName": str(ext["packageName"]),
-                "extensionLib": str(ext["extensionLib"]),
-                "versionName": str(ext["versionName"]),
-                "warning": warning(ext.get("contentWarning")),
-                "apkUrl": str(apk_url),
-                "arabicSourceIds": [str(s["id"]) for s in arabic],
-                "arabicSourceNames": [str(s["name"]) for s in arabic],
-                "blockedReason": blocked_reason(ext, arabic),
-            }
-        )
+    raw_allowlist = os.environ.get("VANTARA_SOURCE_PACKAGES", "")
+    allowed_packages = {p.strip() for p in raw_allowlist.split(",") if p.strip()} or None
+    selected = select_extensions(extensions, allowed_packages=allowed_packages)
 
     if not selected:
-        raise RuntimeError("pinned index yielded zero Arabic-capable extensions")
+        raise RuntimeError("pinned index yielded zero allowed Arabic-capable extensions")
+
+    if allowed_packages is not None:
+        found = {item["packageName"] for item in selected}
+        missing = sorted(allowed_packages - found)
+        if missing:
+            raise RuntimeError(
+                "batch allowlist contains missing or NSFW packages: " + ", ".join(missing)
+            )
 
     selected.sort(key=lambda x: (x["label"].casefold(), x["packageName"]))
-    print(f"Arabic-capable extension packages: {len(selected)}")
+    print(f"Selected Arabic extension packages: {len(selected)}")
 
     def hash_one(item: dict) -> tuple[str, int]:
         data = fetch_bytes(item["apkUrl"], timeout=90)
