@@ -223,6 +223,18 @@ describe('upstream down', () => {
   });
 });
 
+describe('shared Uchiyomi error mapping', () => {
+  it('maps an uncaught auth/me network failure to upstream_unavailable, not internal_error', async () => {
+    healthy();
+    // ctx.uchiyomi.me remains the real client pointed at 127.0.0.1:1 in this
+    // suite, so this exercises the raw route + shared error handler path.
+    const res = await app.inject({ method: 'GET', url: '/v1/auth/me', headers: { cookie } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: 'upstream_unavailable' });
+    expect(res.json()).toHaveProperty('correlationId');
+  });
+});
+
 describe('database down', () => {
   it('fails closed on a route whose policy it cannot read', async () => {
     // سياسة «الحذف للجميع» تُقرأ من القاعدة. تعذّر قراءتها لا يجوز أن يعني
