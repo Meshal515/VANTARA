@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
+import eu.kanade.tachiyomi.network.interceptor.BrowserVerificationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
@@ -94,6 +95,7 @@ class SourceProbe(private val http: OkHttpClient) {
         COMPLETE,
         REPEAT_SUSPECTED,
         CLOUDFLARE,
+        BROWSER_VERIFY,
         DEAD_HOST,
         TIMEOUT,
         SOURCE_ERROR,
@@ -279,6 +281,9 @@ class SourceProbe(private val http: OkHttpClient) {
             t is LinkageError ->
                 "فرضية: تعارض إصدارات في اعتمادية (OkHttp/serialization). " +
                     "تُحقَّق من `resolutionStrategy` ومن شجرة الاعتماديات."
+            t is BrowserVerificationException ->
+                "الموقع يعيد صفحة تحقق متصفح بدل الكتالوج مع HTTP 200؛ " +
+                    "هذا anti-bot وليس نتيجة بحث فارغة ولا selector مكسور."
             live?.error != null ->
                 "فرضية: الموقع لا يردّ الآن. تُحقَّق بإعادة المحاولة لاحقًا، " +
                     "ولا تُنسب إلى المحرك قبل ذلك."
@@ -562,6 +567,10 @@ class SourceProbe(private val http: OkHttpClient) {
                         stopKind = CatalogueStopKind.CLOUDFLARE
                         stoppedBecause =
                             if (t.interactive) "cloudflare-interactive@p$page" else "cloudflare@p$page"
+                    }
+                    is BrowserVerificationException -> {
+                        stopKind = CatalogueStopKind.BROWSER_VERIFY
+                        stoppedBecause = "browser-verification@p$page"
                     }
                     is UnknownHostException -> {
                         stopKind = CatalogueStopKind.DEAD_HOST
