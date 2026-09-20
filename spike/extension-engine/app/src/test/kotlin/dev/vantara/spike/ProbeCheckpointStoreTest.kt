@@ -34,4 +34,22 @@ class ProbeCheckpointStoreTest {
         assertEquals(listOf("b"), store.remaining())
         assertTrue(store.hasCheckpoint())
     }
+
+    @Test
+    fun `final mark survives process death without erasing the completed report`() {
+        val dir = Files.createTempDirectory("vantara-probe-test").toFile()
+        ProbeCheckpointStore(dir).apply {
+            reset(listOf("only-source"))
+            appendLine("complete audit")
+            markCompleted("only-source")
+        }
+
+        val recreated = ProbeCheckpointStore(dir)
+        assertTrue(recreated.hasPlan())
+        assertTrue(recreated.remaining().isEmpty())
+        assertEquals("complete audit\n", recreated.readReport())
+
+        recreated.finish()
+        assertEquals("complete audit\n", recreated.readReport())
+    }
 }
