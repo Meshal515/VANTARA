@@ -297,7 +297,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val loader = FileExtensionLoader(this@MainActivity)
-            val probe = SourceProbe(network.client)
+            val probe = SourceProbe()
             val waiting = statusLine()
             val selected = SPIKE_SOURCES
             val resumed = checkpoint.hasCheckpoint()
@@ -424,7 +424,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val loader = FileExtensionLoader(this@MainActivity)
-            val probe = SourceProbe(network.client)
+            val probe = SourceProbe()
             val waiting = statusLine()
             val safe = SPIKE_SOURCES.filter {
                 it.warning == ContentWarning.SAFE && it.blockedReason == null
