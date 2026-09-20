@@ -40,6 +40,10 @@ class ProbeCheckpointStore(root: File) {
     @Synchronized
     fun hasCheckpoint(): Boolean = plan.isFile && remaining().isNotEmpty()
 
+    /** A plan can exist with no pending sources if the process died after the final mark. */
+    @Synchronized
+    fun hasPlan(): Boolean = plan.isFile
+
     @Synchronized
     fun finish() {
         plan.delete()
