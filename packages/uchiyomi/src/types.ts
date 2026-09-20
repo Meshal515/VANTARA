@@ -15,6 +15,16 @@ export interface LoginResult {
   refreshExpiresAt: number;
 }
 
+export interface ApiTokenSummary {
+  id: string;
+  name: string;
+  scopes: string[];
+  createdAt: string;
+  lastSeen: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+}
+
 export interface AdminUser {
   id: string;
   username: string;
