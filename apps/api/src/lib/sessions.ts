@@ -6,6 +6,7 @@ import { decrypt, encrypt, newSessionId } from './crypto.ts';
 export const SESSION_COOKIE = 'vantara_session';
 
 const IDENTITY_RENEW_WINDOW_MS = 7 * 86_400_000;
+const AMBIGUOUS_MINT_GRACE_MS = 60 * 60_000;
 
 export class IdentityRelinkRequiredError extends Error {
   constructor() {
@@ -91,15 +92,21 @@ export class SessionStore {
         await this.#options.uchiyomi.revokeToken(authToken, token.id);
       }
     }
-    await this.#finishMintAttempt(name, matches[0]?.id ?? null);
+
+    // An empty list immediately after a lost POST response is NOT proof that
+    // creation did not happen: the original request may still be committing.
+    // Keep the durable intent pending; a later authenticated request reconciles it.
+    if (matches.length > 0) {
+      await this.#finishMintAttempt(name, matches[0]!.id);
+    }
   }
 
   async #reconcilePendingMintAttempts(
     authToken: string,
     userId: string,
   ): Promise<void> {
-    const pending = await query<{ name: string }>(
-      `SELECT name
+    const pending = await query<{ name: string; created_at: string | Date }>(
+      `SELECT name, created_at
          FROM vantara_token_mint_attempts
         WHERE uchiyomi_user_id = $1
           AND resolved_at IS NULL
@@ -119,7 +126,22 @@ export class SessionStore {
           await this.#options.uchiyomi.revokeToken(authToken, token.id);
         }
       }
-      await this.#finishMintAttempt(attempt.name, matches[0]?.id ?? null);
+
+      if (matches.length > 0) {
+        await this.#finishMintAttempt(attempt.name, matches[0]!.id);
+        continue;
+      }
+
+      // Only conclude "never created" after a generous grace period. This
+      // prevents a GET racing ahead of an in-flight POST commit from erasing
+      // the sole durable reconciliation handle.
+      const createdAt = new Date(attempt.created_at).getTime();
+      if (
+        Number.isFinite(createdAt) &&
+        Date.now() - createdAt >= AMBIGUOUS_MINT_GRACE_MS
+      ) {
+        await this.#finishMintAttempt(attempt.name, null);
+      }
     }
   }
 
