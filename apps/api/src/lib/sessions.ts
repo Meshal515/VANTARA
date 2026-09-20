@@ -210,9 +210,126 @@ export class SessionStore {
    * يحول VANTARA identity الموقعة إلى جلسة محتوى؛ التوكن الحقيقي يبقى على
    * الخادم. deviceId يدخل id التشخيصي فقط، والـWorker هو من يثبت الجهاز.
    */
+  async #rotateIdentityCredential(identityId: string): Promise<{
+    identityId: string;
+    userId: string;
+    username: string;
+    token: string;
+    tokenId?: string;
+  } | undefined> {
+    let minted:
+      | { id: string; token: string }
+      | undefined;
+    let oldTokenId: string | null = null;
+
+    try {
+      const rotated = await transaction(async (client) => {
+        const result = await client.query<IdentityLinkRow>(
+          `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted,
+                  l.token_id, l.token_expires_at, u.username
+             FROM vantara_identity_links l
+             JOIN vantara_users u USING (uchiyomi_user_id)
+            WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL
+            FOR UPDATE OF l`,
+          [identityId],
+        );
+        const row = result.rows[0];
+        if (!row) return undefined;
+
+        let currentToken: string;
+        try {
+          currentToken = decrypt(row.token_encrypted, this.#options.key);
+        } catch {
+          throw new IdentityRelinkRequiredError();
+        }
+
+        const expiry = row.token_expires_at
+          ? new Date(row.token_expires_at).getTime()
+          : null;
+        if (
+          expiry !== null &&
+          Number.isFinite(expiry) &&
+          expiry - Date.now() > IDENTITY_ROTATE_BEFORE_MS
+        ) {
+          return {
+            identityId: row.vantara_identity_id,
+            userId: row.uchiyomi_user_id,
+            username: row.username,
+            token: currentToken,
+            ...(row.token_id ? { tokenId: row.token_id } : {}),
+          };
+        }
+
+        try {
+          minted = await this.#mintTokenReconciled(currentToken, this.#mintName('rotate'));
+        } catch (error) {
+          // A credential that Uchiyomi itself rejects cannot rotate itself.
+          // The trusted VANTARA device is still valid, but the content identity
+          // now needs an explicit password re-link rather than a fake 500 loop.
+          if (
+            error instanceof UchiyomiError &&
+            (error.status === 401 || error.status === 403)
+          ) {
+            throw new IdentityRelinkRequiredError();
+          }
+          throw error;
+        }
+
+        const tokenExpiresAt = estimatedTokenExpiry(this.#options.ttlDays);
+        const encrypted = encrypt(minted.token, this.#options.key);
+        oldTokenId = row.token_id;
+
+        await client.query(
+          `UPDATE vantara_identity_links
+              SET token_encrypted = $2,
+                  token_id = $3,
+                  token_expires_at = $4,
+                  linked_at = now(),
+                  last_used_at = now()
+            WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+          [identityId, encrypted, minted.id, tokenExpiresAt],
+        );
+
+        return {
+          identityId: row.vantara_identity_id,
+          userId: row.uchiyomi_user_id,
+          username: row.username,
+          token: minted.token,
+          tokenId: minted.id,
+        };
+      });
+
+      // Commit first, then revoke the predecessor with the replacement. A
+      // revoke outage can leave only the already-near-expiry predecessor alive;
+      // it must never roll the durable link back to the older credential.
+      if (rotated && minted && oldTokenId && oldTokenId !== minted.id) {
+        await this.#options.uchiyomi
+          .revokeToken(minted.token, oldTokenId)
+          .catch(() => {});
+      }
+      return rotated;
+    } catch (error) {
+      // Mint succeeded but the PostgreSQL transaction did not: self-revoke the
+      // new credential so a DB failure cannot manufacture an orphan.
+      if (minted) {
+        await this.#options.uchiyomi.revokeToken(minted.token, minted.id).catch(() => {});
+      }
+
+      if (error instanceof IdentityRelinkRequiredError) {
+        await query(
+          `UPDATE vantara_identity_links SET revoked_at = now()
+            WHERE vantara_identity_id = $1 AND revoked_at IS NULL`,
+          [identityId],
+        );
+      }
+      throw error;
+    }
+  }
+
   async resolveIdentity(identityId: string, deviceId: string): Promise<Session | undefined> {
     const row = await queryOne<IdentityLinkRow>(
-      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted, l.token_id, u.username
+      `SELECT l.vantara_identity_id, l.uchiyomi_user_id, l.token_encrypted,
+              l.token_id, l.token_expires_at, u.username
          FROM vantara_identity_links l
          JOIN vantara_users u USING (uchiyomi_user_id)
         WHERE l.vantara_identity_id = $1 AND l.revoked_at IS NULL`,
@@ -230,6 +347,35 @@ export class SessionStore {
         [identityId],
       );
       return undefined;
+    }
+
+    const expiresAt = row.token_expires_at
+      ? new Date(row.token_expires_at).getTime()
+      : null;
+    const shouldRotate =
+      expiresAt === null ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt - Date.now() <= IDENTITY_ROTATE_BEFORE_MS;
+
+    if (shouldRotate) {
+      try {
+        const rotated = await this.#rotateIdentityCredential(identityId);
+        if (rotated) {
+          return {
+            id: `identity:${identityId}:${deviceId}`,
+            identityId: rotated.identityId,
+            userId: rotated.userId,
+            username: rotated.username,
+            token: rotated.token,
+            ...(rotated.tokenId ? { tokenId: rotated.tokenId } : {}),
+          };
+        }
+      } catch (error) {
+        if (error instanceof IdentityRelinkRequiredError) throw error;
+        // Proactive rotation is not allowed to make an otherwise-valid current
+        // credential unavailable just because the network blipped.
+        if (expiresAt !== null && expiresAt <= Date.now()) throw error;
+      }
     }
 
     void query(
