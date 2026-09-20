@@ -2,7 +2,6 @@ package dev.vantara.spike
 
 import android.graphics.BitmapFactory
 import eu.kanade.tachiyomi.source.CatalogueSource
-import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
@@ -190,7 +189,9 @@ class SourceProbe(private val http: OkHttpClient) {
         announce(name)
         val started = System.currentTimeMillis()
         return try {
-            val value = withTimeout(timeoutMs) { block() }
+            val value = withTimeout(timeoutMs) {
+                retryTransientNetwork(maxAttempts = TRANSIENT_NETWORK_ATTEMPTS) { block() }
+            }
             into += Step(name, true, describeProbeValue(value), System.currentTimeMillis() - started)
             value
         } catch (t: Throwable) {
@@ -327,13 +328,13 @@ class SourceProbe(private val http: OkHttpClient) {
             // البحث مكسور مباشرة: قد يكون العنوان ببساطة غير موجود في هذا
             // المصدر. نأخذ عنوانًا موجودًا الآن من Popular ثم نبحث عنه
             // حرفيًا؛ نجاحه يثبت أن مسار البحث نفسه يعمل.
-            val firstTry = source.getSearchManga(1, query, FilterList())
+            val firstTry = source.getSearchManga(1, query, source.getFilterList())
             if (firstTry.mangas.isNotEmpty()) {
                 firstTry.mangas
             } else {
                 val seed = source.getPopularManga(1).mangas.firstOrNull()?.title
                     ?: error("search returned zero results and popular returned no seed title")
-                val retry = source.getSearchManga(1, seed, FilterList())
+                val retry = source.getSearchManga(1, seed, source.getFilterList())
                 require(retry.mangas.isNotEmpty()) {
                     "search returned zero results for pinned query and live title: $seed"
                 }
@@ -350,37 +351,48 @@ class SourceProbe(private val http: OkHttpClient) {
             popular
         }
 
-        // بلا نتيجة من البحث ولا من الرائج لا معنى لبقية السلسلة.
-        val first = candidates?.firstOrNull()
-            ?: return Report(label, base, steps, null, null, null, null, null, null)
+        // لا نحكم على المصدر من أول بطاقة. بعض المواقع تترك أعمالًا قديمة
+        // أو placeholders بلا فصول في نتائج البحث. نأخذ عينة محدودة ونختار
+        // أول عمل يثبت فعليًا أن له فصولًا.
+        val seed = candidates?.let { list ->
+            step("seed", steps, base, timeoutMs = BROWSE_TIMEOUT_MS) {
+                selectFirstNonEmptyCandidate(
+                    candidates = list,
+                    maxCandidates = MAX_SEED_CANDIDATES,
+                ) { candidate ->
+                    source.getMangaUpdate(
+                        manga = candidate,
+                        chapters = emptyList(),
+                        fetchDetails = false,
+                        fetchChapters = true,
+                    ).chapters
+                }
+            }
+        } ?: return Report(label, base, steps, null, null, null, null, null, null)
 
-        // ٢) تفاصيل العمل
+        seed ?: return Report(label, base, steps, null, null, null, null, null, null)
+        val first = seed.candidate
+        val prefetchedChapters = seed.items
+
+        // ٢) تفاصيل العمل المختار القابل للقراءة
         val details = step("details", steps, base) {
-            // الوسيط الثاني هو الفصول **المعروفة سلفًا**، وهي فارغة في أول
-            // استعلام. حذفُه كان خطأً عندي لا في العقد.
             source.getMangaUpdate(
                 manga = first,
-                chapters = emptyList(),
+                chapters = prefetchedChapters,
                 fetchDetails = true,
                 fetchChapters = false,
             ).manga.apply {
                 // Details parsers commonly return a partial SManga without url.
                 // The host already knows the canonical url from search and must
-                // carry it forward before asking for chapters.
+                // carry it forward before asking for pages/chapters.
                 url = first.url
             }
         } ?: first
 
-        // ٣) الفصول
+        // ٣) الفصول — جرى إثباتها أثناء اختيار seed، فلا نعيد نفس النداء.
         val chapters = step("chapters", steps, base) {
-            val list = source.getMangaUpdate(
-                manga = details,
-                chapters = emptyList(),
-                fetchDetails = false,
-                fetchChapters = true,
-            ).chapters
-            require(list.isNotEmpty()) { "chapter list is empty" }
-            list
+            require(prefetchedChapters.isNotEmpty()) { "chapter list is empty" }
+            prefetchedChapters
         }
 
         // طرفا القائمة لا عددُها وحده. «٩٩٧ فصلًا» لا يقول هل القائمة كاملة
@@ -659,6 +671,8 @@ class SourceProbe(private val http: OkHttpClient) {
          */
         const val SEARCH_TIMEOUT_MS = 45_000L
         const val BROWSE_TIMEOUT_MS = 45_000L
+        const val MAX_SEED_CANDIDATES = 6
+        const val TRANSIENT_NETWORK_ATTEMPTS = 3
 
         /** الفحص الحيّ يجري داخل معالج الفشل، فيُقطع أسرع من النداء العادي. */
         const val LIVE_CHECK_TIMEOUT_S = 20L
