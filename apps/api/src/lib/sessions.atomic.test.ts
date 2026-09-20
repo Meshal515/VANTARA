@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { UchiyomiError } from '@vantara/uchiyomi';
 import { encrypt } from './crypto.ts';
 
 const db = vi.hoisted(() => ({
@@ -31,11 +32,20 @@ function upstream() {
       token: 'minted-long-lived-token',
     })),
     revokeToken: vi.fn(async () => undefined),
+    listTokens: vi.fn(async () => [
+      {
+        id: 'minted-token-id',
+        name: 'vantara-test-token',
+        expiresAt: '2026-12-01T00:00:00.000Z',
+        expired: false,
+      },
+    ]),
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.query.mockResolvedValue([]);
 });
 
 describe('SessionStore.login atomicity', () => {
@@ -78,7 +88,7 @@ describe('SessionStore.login atomicity', () => {
     const session = await store.login('mansour', 'password', 'ci-device');
 
     expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(client.query).toHaveBeenCalledTimes(4);
     expect(service.revokeToken).not.toHaveBeenCalled();
     expect(session).toMatchObject({
       userId: 'upstream-user-1',
@@ -213,11 +223,75 @@ describe('SessionStore identity credential renewal', () => {
 
     await expect(
       store.resolveIdentity('11111111-1111-1111-1111-111111111111', 'device-1'),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ name: 'IdentityRelinkRequiredError' });
     expect(service.mintToken).not.toHaveBeenCalled();
     expect(db.query).toHaveBeenCalledWith(
       expect.stringContaining('SET revoked_at = now()'),
       ['11111111-1111-1111-1111-111111111111'],
     );
+  });
+});
+
+
+describe('SessionStore upstream credential authority', () => {
+  it('persists the exact expiry reported by Uchiyomi token metadata', async () => {
+    const service = upstream();
+    const exactExpiry = '2026-10-31T12:34:56.789Z';
+    service.listTokens.mockResolvedValue([
+      {
+        id: 'minted-token-id',
+        name: 'vantara-authoritative-expiry',
+        expiresAt: exactExpiry,
+        expired: false,
+      },
+    ]);
+    const client = { query: vi.fn(async () => ({ rows: [] })) };
+    db.transaction.mockImplementationOnce(async (fn: (client: typeof client) => Promise<unknown>) =>
+      fn(client),
+    );
+
+    const store = new SessionStore({
+      key: Buffer.alloc(32, 23),
+      ttlDays: 60,
+      uchiyomi: service as never,
+    });
+
+    await store.login('mansour', 'password', 'expiry-device');
+
+    expect(service.listTokens).toHaveBeenCalled();
+    const identityWrite = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO vantara_identity_links'),
+    );
+    expect(identityWrite).toBeDefined();
+    expect(identityWrite?.[1]).toContain(exactExpiry);
+  });
+
+  it('durably records an ambiguous token mint before the upstream POST', async () => {
+    const service = upstream();
+    service.mintToken.mockRejectedValueOnce(
+      new UchiyomiError('upstream unavailable', 502, 'upstream_unavailable', '/api/tokens'),
+    );
+    service.listTokens.mockRejectedValueOnce(new Error('reconciliation unavailable'));
+
+    const store = new SessionStore({
+      key: Buffer.alloc(32, 29),
+      ttlDays: 60,
+      uchiyomi: service as never,
+    });
+
+    await expect(store.login('mansour', 'password', 'ambiguous-device')).rejects.toBeInstanceOf(
+      AggregateError,
+    );
+
+    expect(
+      db.query.mock.calls.some(([sql]) =>
+        String(sql).includes('INSERT INTO vantara_token_mint_attempts'),
+      ),
+    ).toBe(true);
+    expect(
+      db.query.mock.calls.some(([sql]) =>
+        String(sql).includes('resolved_at = now()'),
+      ),
+    ).toBe(false);
   });
 });

@@ -53,7 +53,20 @@ CREATE TABLE b1_restore_marker (value text PRIMARY KEY);
 INSERT INTO b1_restore_marker VALUES ('uchiyomi-before-backup');
 SQL
 
-$compose run --rm --entrypoint sh db-backup /scripts/backup-postgres.sh
+if $compose run --rm --entrypoint sh db-backup /scripts/backup-postgres.sh >/tmp/vantara-backup-unpaused.log 2>&1; then
+  echo 'paired backup unexpectedly ran while writers were not confirmed paused' >&2
+  exit 1
+fi
+grep -q 'CONFIRM_SERVICES_PAUSED' /tmp/vantara-backup-unpaused.log
+
+$compose run --rm -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup /scripts/backup-postgres.sh
+
+$compose run --rm --entrypoint sh db-backup -c '
+  set -eu
+  cd /backups/postgres/latest
+  test -f manifest.sha256
+  sha256sum -c manifest.sha256
+'
 
 # Corrupt both markers after the snapshot. A successful restore must undo this.
 $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
@@ -61,7 +74,13 @@ $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR
 $compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -v ON_ERROR_STOP=1 \
   -c "UPDATE b1_restore_marker SET value = 'uchiyomi-after-backup';"
 
-$compose run --rm -e CONFIRM_RESTORE=YES --entrypoint sh db-backup /scripts/restore-postgres.sh
+if $compose run --rm -e CONFIRM_RESTORE=YES --entrypoint sh db-backup /scripts/restore-postgres.sh >/tmp/vantara-restore-unpaused.log 2>&1; then
+  echo 'paired restore unexpectedly ran while writers were not confirmed paused' >&2
+  exit 1
+fi
+grep -q 'CONFIRM_SERVICES_PAUSED' /tmp/vantara-restore-unpaused.log
+
+$compose run --rm -e CONFIRM_RESTORE=YES -e CONFIRM_SERVICES_PAUSED=YES --entrypoint sh db-backup /scripts/restore-postgres.sh
 
 vantara_value="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
   'SELECT value FROM b1_restore_marker')"
@@ -71,4 +90,29 @@ uchiyomi_value="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYO
 test "$vantara_value" = 'vantara-before-backup'
 test "$uchiyomi_value" = 'uchiyomi-before-backup'
 
-printf '%s\n' 'B1 clean bootstrap + logical backup/restore: OK'
+# Failure after the first production restore must compensate BOTH databases
+# back to the pre-restore pair, never leave a split recovery point.
+$compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+  -c "UPDATE b1_restore_marker SET value = 'vantara-live-before-failed-restore';"
+$compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -v ON_ERROR_STOP=1 \
+  -c "UPDATE b1_restore_marker SET value = 'uchiyomi-live-before-failed-restore';"
+
+if $compose run --rm \
+  -e CONFIRM_RESTORE=YES \
+  -e CONFIRM_SERVICES_PAUSED=YES \
+  -e VANTARA_RESTORE_TEST_MODE=YES \
+  -e VANTARA_RESTORE_FAIL_DB_FOR_TESTS="$UCHIYOMI_DB" \
+  --entrypoint sh db-backup /scripts/restore-postgres.sh; then
+  echo 'injected second-database restore failure unexpectedly succeeded' >&2
+  exit 1
+fi
+
+vantara_after_failure="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+  'SELECT value FROM b1_restore_marker')"
+uchiyomi_after_failure="$($compose exec -T postgres psql -U "$POSTGRES_USER" -d "$UCHIYOMI_DB" -Atc \
+  'SELECT value FROM b1_restore_marker')"
+
+test "$vantara_after_failure" = 'vantara-live-before-failed-restore'
+test "$uchiyomi_after_failure" = 'uchiyomi-live-before-failed-restore'
+
+printf '%s\n' 'B1 clean bootstrap + paired backup/restore failure recovery: OK'
