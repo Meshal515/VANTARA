@@ -527,26 +527,52 @@ test('a build with no endpoint baked still offers a way in', () => {
   );
 });
 
-test('database restore is atomic, so a half-applied restore cannot report success', () => {
-  // ‏`pg_restore` الافتراضي: «exit on error, default is to continue». ومع
-  // ‏`--clean` هذا يعني استعادة متعثّرة أسقطت القديم وبنت نصف الجديد، ثم
-  // طبعت «Restore completed» — نجاح كاذب على مسار التعافي من كارثة.
-  const script = read('infra/restore-postgres.sh');
-  const restores = script.match(/pg_restore[^\n]*(?:\\\n[^\n]*)*--dbname/g) ?? [];
-  assert.ok(restores.length >= 2, 'restore script must restore both databases');
+test('paired database recovery cannot leave a lasting split recovery point', () => {
+  const backup = read('infra/backup-postgres.sh');
+  const restore = read('infra/restore-postgres.sh');
 
-  for (const invocation of restores) {
-    assert.match(
-      invocation,
-      /--single-transaction/,
-      'each restore must run in one transaction: either the database comes back whole, or it is untouched',
-    );
-    assert.match(
-      invocation,
-      /--exit-on-error/,
-      'each restore must stop at the first error instead of continuing past it',
-    );
-  }
+  // PostgreSQL snapshots cannot be imported across different databases. The
+  // pair is therefore only a recovery point while both writers are quiesced.
+  assert.match(
+    backup,
+    /CONFIRM_SERVICES_PAUSED/,
+    'paired backups must refuse to claim one recovery point while writers are active',
+  );
+  assert.match(
+    restore,
+    /CONFIRM_SERVICES_PAUSED/,
+    'paired restores must require the same quiesced-writer window',
+  );
+
+  // Before the first destructive restore, capture BOTH current databases.
+  const safetyVantara = restore.indexOf('--file="$rollback_dir/vantara.before.dump"');
+  const safetyUchiyomi = restore.indexOf('--file="$rollback_dir/uchiyomi.before.dump"');
+  const firstTarget = restore.indexOf('restore_one "$primary_db" "$vantara_dump"');
+  assert.ok(
+    safetyVantara >= 0 && safetyUchiyomi >= 0 &&
+      safetyVantara < firstTarget && safetyUchiyomi < firstTarget,
+    'both pre-restore safety dumps must exist before either target database is mutated',
+  );
+
+  assert.match(
+    restore,
+    /rollback_pair\(\)[\s\S]*?restore_one "\$primary_db" "\$rollback_dir\/vantara\.before\.dump"[\s\S]*?restore_one "\$uchiyomi_db" "\$rollback_dir\/uchiyomi\.before\.dump"/,
+    'a failed second restore must compensate both databases to the pre-restore pair',
+  );
+  assert.match(
+    restore,
+    /if ! restore_one "\$uchiyomi_db" "\$uchiyomi_dump"; then[\s\S]*?rollback_pair/,
+    'Uchiyomi restore failure must trigger paired rollback',
+  );
+
+  const restoreOne = restore.slice(
+    restore.indexOf('restore_one()'),
+    restore.indexOf('rollback_pair()'),
+  );
+  assert.match(restoreOne, /--single-transaction/,
+    'each individual database restore must still be transactional');
+  assert.match(restoreOne, /--exit-on-error/,
+    'each individual database restore must stop at the first error');
 });
 
 test('Android pairing links are wired from Capacitor into the trusted-device client', () => {
