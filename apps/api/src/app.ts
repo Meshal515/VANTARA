@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { query } from '@vantara/db';
 import { CORRELATION_HEADER, correlationIdFrom } from '@vantara/domain';
+import { UchiyomiError } from '@vantara/uchiyomi';
 import type { Config } from './lib/config.ts';
 import { buildContext, type AppContext } from './lib/context.ts';
 import { registerCors } from './lib/cors.ts';
@@ -25,10 +26,51 @@ export interface BuiltApp {
   ctx: AppContext;
 }
 
+/**
+ * روابط الصفحات الموقعة Bearer-capabilities؛ لا يجوز أن يصل t/sig/token إلى logs.
+ * نبقي المسار وأسماء المعاملات للتشخيص ونحجب القيمة فقط.
+ */
+export function sanitizeRequestUrlForLog(value: string | undefined): string {
+  if (!value) return '';
+  try {
+    const url = new URL(value, 'http://vantara.invalid');
+    for (const key of ['t', 'sig', 'signature', 'token']) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, '[redacted]');
+    }
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return value.replace(
+      /([?&](?:t|sig|signature|token)=)[^&#\s]*/gi,
+      '$1[redacted]',
+    );
+  }
+}
+
+function requestLogSerializer(request: {
+  method?: string;
+  url?: string;
+  headers?: { host?: string };
+  ip?: string;
+  socket?: { remoteAddress?: string };
+}) {
+  return {
+    method: request.method,
+    url: sanitizeRequestUrlForLog(request.url),
+    host: request.headers?.host,
+    remoteAddress: request.ip ?? request.socket?.remoteAddress,
+  };
+}
+
 export async function buildApp(config: Config): Promise<BuiltApp> {
   const app = Fastify({
     // في الاختبار نكتم السجل كليًا بدل تعطيل سجل الطلبات وحده
-    logger: config.NODE_ENV === 'test' ? false : { level: config.LOG_LEVEL },
+    logger:
+      config.NODE_ENV === 'test'
+        ? false
+        : {
+            level: config.LOG_LEVEL,
+            serializers: { req: requestLogSerializer },
+          },
     // VANTARA يقف خلف Cloudflare Tunnel: العنوان الحقيقي يأتي في الترويسة
     trustProxy: true,
     bodyLimit: 1024 * 1024,
@@ -64,8 +106,21 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    const status = error.statusCode ?? 500;
     const correlationId = request.correlationId;
+
+    if (error instanceof UchiyomiError) {
+      const status = error.status === 429 ? 503 : 502;
+      request.log.warn(
+        { upstreamStatus: error.status, upstreamPath: error.path, correlationId },
+        'upstream request failed',
+      );
+      return reply.code(status).send({
+        error: error.status === 429 ? 'upstream_rate_limited' : 'upstream_unavailable',
+        correlationId,
+      });
+    }
+
+    const status = error.statusCode ?? 500;
     if (status >= 500) {
       // الأخطاء الداخلية تُسجَّل كاملة ولا يُعاد منها شيء للعميل — إلا
       // المعرّف، وهو ما يجعل البلاغ قابلًا للربط بهذا السطر بالضبط
