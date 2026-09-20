@@ -70,6 +70,11 @@ class CatalogueCrawlCheckpointStore(root: File) {
     fun hasResumeState(): Boolean =
         dir.listFiles()?.any { it.isFile && it.name.startsWith("state-") && it.name.endsWith(".txt") } == true
 
+    /** Includes sources already completed before a process death between sources. */
+    @Synchronized
+    fun hasAnyProgress(): Boolean =
+        hasResumeState() || completed.readLinesSafe().isNotEmpty()
+
     @Synchronized
     fun clear() {
         dir.deleteRecursively()
