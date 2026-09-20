@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UchiyomiClient } from './client.ts';
+import { UchiyomiError } from './types.ts';
 
 describe('UchiyomiClient retry safety', () => {
   it('does not retry token minting after an ambiguous network failure', async () => {
@@ -15,13 +16,17 @@ describe('UchiyomiClient retry safety', () => {
       fetchImpl,
     });
 
-    await expect(
-      client.mintToken('session-token', {
-        name: 'vantara test',
-        scopes: ['read', 'write'],
-        expiresInDays: 1,
-      }),
-    ).rejects.toThrow('socket closed after write');
+    const promise = client.mintToken('session-token', {
+      name: 'vantara test',
+      scopes: ['read', 'write'],
+      expiresInDays: 1,
+    });
+    await expect(promise).rejects.toMatchObject({
+      name: 'UchiyomiError',
+      status: 502,
+      code: 'upstream_unavailable',
+    });
+    await expect(promise).rejects.toBeInstanceOf(UchiyomiError);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
