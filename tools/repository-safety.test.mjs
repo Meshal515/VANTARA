@@ -121,8 +121,27 @@ test('sync worker production deploy provisions every runtime authentication secr
       workflow.includes('${{ secrets.' + secret + ' }}'),
       `sync-worker deploy must read GitHub secret ${secret}`,
     );
+    assert.match(
+      workflow,
+      new RegExp(secret + ':\\s*\\$' + secret),
+      `the one-version secrets file must include ${secret}`,
+    );
     assert.ok(
-      workflow.includes(secret + ': 
+      wrangler.includes(secret),
+      `wrangler must declare ${secret} as a required binding`,
+    );
+  }
+  assert.match(
+    workflow,
+    /wrangler@4 deploy --secrets-file/,
+    'code and authentication secrets must be uploaded as the same Worker version',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /wrangler@4 secret put/,
+    'ordinary deploy must not create extra live Worker versions while rotating secrets',
+  );
+});
 
 test('live D1 verification receives the device pepper required for trusted-device pairing', () => {
   const workflow = read('.github/workflows/sync-worker.yml');
