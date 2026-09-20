@@ -21,7 +21,7 @@ class HttpSourceImageContractTest {
         var seenHeader: String? = null
         val payload = byteArrayOf(1, 2, 3, 4)
 
-        val client = OkHttpClient.Builder()
+        val testClient: OkHttpClient = OkHttpClient.Builder()
             .addInterceptor(Interceptor { chain ->
                 seenHeader = chain.request().header("X-Source-Image")
                 Response.Builder()
@@ -38,7 +38,7 @@ class HttpSourceImageContractTest {
             override val name = "test"
             override val lang = "en"
             override val baseUrl = "https://example.test"
-            override val client: OkHttpClient = client
+            override val client: OkHttpClient = testClient
 
             override fun imageRequest(page: Page): Request =
                 Request.Builder()
