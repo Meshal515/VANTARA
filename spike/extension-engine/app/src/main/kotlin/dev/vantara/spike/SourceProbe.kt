@@ -225,7 +225,10 @@ class SourceProbe(private val http: OkHttpClient) {
             .header("user-agent", RAW_UA)
             .build()
         prober.newCall(request).execute().use { res ->
-            val body = res.body.bytes()
+            // This is diagnostic evidence, not a page download. A broken or
+            // hostile origin must not be able to OOM the whole batch merely by
+            // returning a huge HTML error document after another step failed.
+            val body = res.peekBody(LIVE_CHECK_MAX_BYTES).bytes()
             LiveCheck(baseUrl, res.code, body.size, res.header("content-type"), null)
         }
     } catch (t: Throwable) {
@@ -590,6 +593,7 @@ class SourceProbe(private val http: OkHttpClient) {
 
         /** Prevent one hostile or malformed page from exhausting the app heap. */
         const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
+        const val LIVE_CHECK_MAX_BYTES = 256L * 1024L
 
         /**
          * حاجز الأمان للإحصاء الكامل، لا سقفَ سياسة.
