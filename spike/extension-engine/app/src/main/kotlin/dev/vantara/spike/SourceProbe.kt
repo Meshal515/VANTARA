@@ -451,29 +451,42 @@ class SourceProbe(private val http: OkHttpClient) {
      */
     suspend fun crawlCatalogue(
         source: CatalogueSource,
+        startPage: Int = 1,
+        initialSeen: Set<String> = emptySet(),
+        onPageCommitted: suspend (page: Int, nextPage: Int, newKeys: List<String>, totalSeen: Int) -> Unit =
+            { _, _, _, _ -> },
         onProgress: suspend (Int, Int) -> Unit,
-    ): CatalogueReach = walkCatalogue(source, FULL_PAGE_CAP, FULL_BUDGET_MS, onProgress)
+    ): CatalogueReach = walkCatalogue(
+        source = source,
+        pageCap = FULL_PAGE_CAP,
+        budgetMs = FULL_BUDGET_MS,
+        startPage = startPage,
+        initialSeen = initialSeen,
+        onPageCommitted = onPageCommitted,
+        onProgress = onProgress,
+    )
 
     /**
      * كم عملًا يستطيع هذا المصدر كشفه فعلًا؟
      *
-     * لا نكتفي بـ`hasNextPage`: مصادر تقول `true` إلى الأبد، ومصادر تعيد
-     * نفس الصفحة. فالتوقف على ثلاث علامات، وكلٌّ منها يُسجَّل بالاسم:
-     *
-     *  - `end-of-catalogue`  — الخادم قال لا مزيد، **وهذا وحده إثبات النهاية**
-     *  - `repeat`            — الصفحة الجديدة لم تُضف عملًا واحدًا: حلقة
-     *  - `page-cap`          — بلغنا سقفنا، فلم نُثبت النهاية ونقولها صريحة
+     * الـcrawl قابل للاستئناف من صفحة محفوظة ومعه مجموعة الأعمال التي سبق
+     * إثباتها. بعد كل صفحة ناجحة نكتب checkpoint قبل الانتقال للصفحة التالية.
+     * إذا مات process بعدها، نعيد صفحة واحدة كحد أقصى ولا نرجع إلى الصفحة 1.
      */
     private suspend fun walkCatalogue(
         source: CatalogueSource,
         pageCap: Int,
         budgetMs: Long,
+        startPage: Int = 1,
+        initialSeen: Set<String> = emptySet(),
+        onPageCommitted: suspend (page: Int, nextPage: Int, newKeys: List<String>, totalSeen: Int) -> Unit =
+            { _, _, _, _ -> },
         onProgress: suspend (Int, Int) -> Unit,
     ): CatalogueReach {
-        val seen = LinkedHashSet<String>()
+        val seen = LinkedHashSet<String>(initialSeen)
         var fetched = 0
-        var page = 1
-        var lastPageAttempted = 0
+        var page = startPage.coerceAtLeast(1)
+        var lastPageAttempted = page - 1
         var repeatStreak = 0
         var stoppedBecause = "page-cap"
         var stopKind = CatalogueStopKind.PAGE_CAP
@@ -519,13 +532,17 @@ class SourceProbe(private val http: OkHttpClient) {
 
             fetched += 1
 
-            val before = seen.size
+            val newKeys = ArrayList<String>(result.mangas.size)
             result.mangas.forEach { manga ->
                 val key = manga.url.takeIf(String::isNotBlank)
                     ?: "title:${manga.title.trim()}#p$page"
-                seen += key
+                if (seen.add(key)) newKeys += key
             }
-            val added = seen.size - before
+            val added = newKeys.size
+
+            // Commit the page before any early exit. This is the crash boundary:
+            // every successfully parsed page survives process death.
+            onPageCommitted(page, page + 1, newKeys, seen.size)
 
             if (!result.hasNextPage) {
                 stoppedBecause = "end-of-catalogue"
