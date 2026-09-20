@@ -105,8 +105,16 @@ export class UchiyomiClient {
         }
       } catch (err) {
         if (err instanceof UchiyomiError && !err.retryable) throw err;
-        if (attempt === maxAttempts) throw err;
-        lastError = err;
+
+        // أخطاء الشبكة/المهلة ليست خطأ Fastify داخليًا. نحولها إلى خطأ
+        // Uchiyomi صريح كي تقدر طبقة API ترد بتدهور 502 مفهوم بدل 500 مبهم.
+        const normalized =
+          err instanceof UchiyomiError
+            ? err
+            : new UchiyomiError('upstream unavailable', 502, 'upstream_unavailable', path);
+
+        if (attempt === maxAttempts) throw normalized;
+        lastError = normalized;
       }
 
       // تراجع أُسّي: 200ms, 400ms, 800ms …
