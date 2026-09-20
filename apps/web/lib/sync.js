@@ -137,6 +137,10 @@ export function createSync({ baseUrl }) {
   let quarantine = readJson(QUARANTINE_KEY, []);
   let pulling = false;
   let pushing = false;
+  // يتغير فقط عندما تتغير هوية الحساب/تنتهي الجلسة، لا عند تدوير التوكن لنفس
+  // الحساب. أي رد شبكي بدأ على جيل أقدم يُرمى بدل أن يكتب في مرآة الحساب الجديد.
+  let sessionGeneration = 0;
+  let pullAgain = false;
 
   /** محاولات متتالية لكل عملية، بمفتاح op_id. لا تُحفظ: العدّ لكل جلسة. */
   const attemptsOf = new Map();
@@ -383,6 +387,11 @@ export function createSync({ baseUrl }) {
   async function signIn(userId) {
     const previousId = user?.userId ?? null;
     const payload = await sessionPayload(userId);
+    const nextId = payload?.user?.userId ?? null;
+    if (previousId && nextId && previousId !== nextId) {
+      sessionGeneration += 1;
+      if (pulling) pullAgain = true;
+    }
     persistSession(payload);
     if (previousId && previousId !== user.userId) resetAll();
     emit(['session']);
@@ -390,6 +399,8 @@ export function createSync({ baseUrl }) {
   }
 
   function signOut() {
+    sessionGeneration += 1;
+    if (pulling) pullAgain = true;
     token = null;
     user = null;
     localStorage.removeItem(TOKEN_KEY);
@@ -399,13 +410,15 @@ export function createSync({ baseUrl }) {
   }
 
   async function logoutDevice() {
-    if (token) await request('/v1/device/logout', { method: 'POST' }, false).catch(() => {});
+    // لا نمثل الإلغاء البعيد كنجاح ما لم يؤكده الخادم. عند 5xx/انقطاع الشبكة
+    // يبقى credential محليًا حتى يستطيع المستخدم إعادة المحاولة.
+    if (token) await request('/v1/device/logout', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
 
   async function logoutAll() {
-    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false).catch(() => {});
+    if (token) await request('/v1/device/logout-all', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
     signOut();
   }
@@ -447,11 +460,19 @@ export function createSync({ baseUrl }) {
   async function pull() {
     if (!token || pulling) return;
     pulling = true;
+    const generation = sessionGeneration;
+    const ownerId = user?.userId ?? null;
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
         const payload = await request(`/v1/sync?since=${cursor}`);
+        // ربما بدّل المستخدم الحساب بينما كان الطلب في الطريق. لا يحق لرد
+        // الحساب القديم لمس المرآة أو المؤشر الجديد ولو كان الرد صحيحًا بذاته.
+        if (generation !== sessionGeneration || ownerId !== (user?.userId ?? null)) {
+          pullAgain = Boolean(token);
+          return;
+        }
         if (!payload) break;
 
         if (payload.reset) {
@@ -494,6 +515,10 @@ export function createSync({ baseUrl }) {
       emit(['sync']);
     } finally {
       pulling = false;
+      if (pullAgain) {
+        pullAgain = false;
+        setTimeout(() => void pull(), 0);
+      }
     }
   }
 
