@@ -19,6 +19,10 @@ enabled = true
 # - VANTARA_IDENTITY_SECRET: توقيع access token v2 المشترك مع Content API.
 # - VANTARA_DEVICE_PEPPER: HMAC لبيانات device/pairing المخزنة في D1.
 # - VANTARA_SESSION_SECRET: مهايئ داخلي مؤقت للـlegacy sync handlers حتى B3.
-# تُضبط جميعها بـ`wrangler secret put` ولا تدخل المستودع ولا الـAPK.
+# القيم نفسها لا تدخل المستودع ولا الـAPK. الأسماء فقط معلنة كي يفشل
+# deploy إذا كان Worker ناقص سرًا بدل نشر نسخة لا تستطيع المصادقة.
+[secrets]
+required = ["VANTARA_SESSION_SECRET", "VANTARA_IDENTITY_SECRET", "VANTARA_DEVICE_PEPPER"]
+
 [vars]
 ALLOWED_ORIGINS = "https://vantara.pages.dev"
