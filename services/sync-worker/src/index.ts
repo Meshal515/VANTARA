@@ -1382,67 +1382,70 @@ async function applyFieldMerge(
     .first<{ rev: number }>();
   if (previous) return Number(previous.rev);
 
-  const rev = await allocateRev(env);
   // الهوية الداخلية تُسقط قبل الدمج، ولا يُرفض الطلب: الرفض يجعل تعديل الاسم
   // يفشل بلا سبب ظاهر للمستخدم.
   const patch = stripImmutable((op.payload['fields'] ?? {}) as Record<string, unknown>);
-  const statements: D1PreparedStatement[] = [];
 
   // مفاتيح settings تدخل JSON path. نقبل أسماء الحقول المعتادة فقط حتى لا
   // يستطيع مفتاح ملفّق تغيير مسار JSON آخر.
   const safeFields = Object.entries(patch).filter(([key]) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key));
 
-  if (op.kind === 'settings.patch') {
-    statements.push(
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev)
-         VALUES (?, '{}', '{}', 0)`,
-      ).bind(userId),
-    );
-    for (const [key, value] of safeFields) {
-      const path = `$.${key}`;
-      statements.push(
-        env.DB.prepare(
-          `UPDATE settings
-              SET data = json_set(data, ?, json(?)),
-                  field_revs = json_set(field_revs, ?, ?),
-                  rev = ?
-            WHERE user_id = ?
-              AND ? > COALESCE(json_extract(field_revs, ?), 0)
-              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
-        ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
-      );
-    }
-  } else {
-    statements.push(
-      env.DB.prepare(
-        'INSERT OR IGNORE INTO profiles (user_id, field_revs, rev) VALUES (?, ?, 0)',
-      ).bind(userId, '{}'),
-    );
-    for (const [key, value] of safeFields) {
-      const column = PROFILE_COLUMNS[key];
-      if (!column) continue;
-      const path = `$.${key}`;
-      statements.push(
-        env.DB.prepare(
-          `UPDATE profiles
-              SET ${column} = ?, field_revs = json_set(field_revs, ?, ?), rev = ?
-            WHERE user_id = ?
-              AND ? > COALESCE(json_extract(field_revs, ?), 0)
-              AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
-        ).bind(value, path, rev, rev, userId, rev, path, op.opId),
-      );
-    }
-  }
+  const committed = await commitNextRevision(env, now, (rev) => {
+    const statements: D1PreparedStatement[] = [];
 
-  // D1 batch معاملة واحدة: الأثر وحجز op_id يثبتان معًا أو لا شيء منهما.
-  statements.push(
-    env.DB.prepare(
-      'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
-    ).bind(op.opId, userId, op.kind, rev, now),
-  );
-  await env.DB.batch(statements);
-  return rev;
+    if (op.kind === 'settings.patch') {
+      statements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev)
+           VALUES (?, '{}', '{}', 0)`,
+        ).bind(userId),
+      );
+      for (const [key, value] of safeFields) {
+        const path = `$.${key}`;
+        statements.push(
+          env.DB.prepare(
+            `UPDATE settings
+                SET data = json_set(data, ?, json(?)),
+                    field_revs = json_set(field_revs, ?, ?),
+                    rev = ?
+              WHERE user_id = ?
+                AND ? > COALESCE(json_extract(field_revs, ?), 0)
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
+        );
+      }
+    } else {
+      statements.push(
+        env.DB.prepare(
+          'INSERT OR IGNORE INTO profiles (user_id, field_revs, rev) VALUES (?, ?, 0)',
+        ).bind(userId, '{}'),
+      );
+      for (const [key, value] of safeFields) {
+        const column = PROFILE_COLUMNS[key];
+        if (!column) continue;
+        const path = `$.${key}`;
+        statements.push(
+          env.DB.prepare(
+            `UPDATE profiles
+                SET ${column} = ?, field_revs = json_set(field_revs, ?, ?), rev = ?
+              WHERE user_id = ?
+                AND ? > COALESCE(json_extract(field_revs, ?), 0)
+                AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
+          ).bind(value, path, rev, rev, userId, rev, path, op.opId),
+        );
+      }
+    }
+
+    statements.push(
+      env.DB.prepare(
+        'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+      ).bind(op.opId, userId, op.kind, rev, now),
+    );
+    return statements;
+  });
+
+  if (committed === null) throw new Error('field merge produced no statements');
+  return committed;
 }
 
 const MAX_OPS_PER_REQUEST = 200;
@@ -1475,81 +1478,69 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   );
   if (ops.length === 0) return json({ applied: [], skipped: [], cursor: await currentRev(env) });
 
-  const authorizationError = await validateRecommendationResponses(ops, userId, env);
-  if (authorizationError) {
-    return json({ error: authorizationError.error }, { status: authorizationError.status });
-  }
+  // توصية واحدة منتهية/ليست لهذا المستخدم لا تُحوّل الطلب كله إلى 4xx.
+  // نحدد op_ids غير الصالحة ونترك بقية الدفعة تكمل؛ العميل يعزل ما لم يُذكر.
+  const invalidRecommendations = await invalidRecommendationResponseOps(ops, userId, env);
 
-  // كل رقعة حقول لها rev مستقل، وأثرها وحجز op_id يثبتان في دفعة واحدة.
-  // هذا يمنع رقعة قديمة معادة من الكتابة فوق قيمة أحدث، ويجعل رقعتين متداخلتين
-  // في نفس الطلب تتقدمان بالترتيب بدل أن تشتركا في rev واحد.
-  for (const op of ops) {
-    if (FIELD_MERGE_KINDS.has(op.kind)) await applyFieldMerge(op, userId, now, env);
-  }
-
-  const rev = await allocateRev(env);
-
-  // الأثر ثم الحجز، في دفعة واحدة.
-  //
-  // الترتيب هو كل شيء. الحجز في دفعة منفصلة قبل الأثر يعني أن فشل دفعة الأثر
-  // يترك op_id محجوزًا بلا كتابة: إعادة محاولة العميل تُتجاهل، والكتابة تُفقد
-  // بصمت — وهذا أسوأ عيب ممكن في المزامنة.
-  //
-  // D1 تنفّذ batch كمعاملة واحدة، فالأثر والحجز يثبتان معًا أو لا شيء منهما.
-  // والأثر يسبق الحجز حتى يرى حرس `NOT EXISTS` في العمليات التراكمية حالة
-  // ما قبل هذا الطلب: إعادة تسليم تجد op_id موجودًا من طلب سابق فلا تحتسب
-  // مرتين. أما بقية العمليات فهي upsert بطبيعتها، وتكرارها بلا أثر.
-  // قائمة الحسابات تُقرأ مرة واحدة وفقط إن احتاجتها عملية: توصية «للجميع»
-  // مستلموها ليسوا في الحمولة. قراءتها دائمًا رحلة زائدة لكل طلب كتابة.
+  // metadata الخارجية تُقرأ مرة واحدة قبل بناء المعاملة.
   const ctx = await loadOpContext(ops, env);
 
-  // عملية لم تُنتج جملة واحدة لا تُقَرّ ولا يُحجز لها op_id.
-  //
-  // `statementsFor` ترجع `null` على كل ما لا تعرفه: `kind` غير منشور بعد،
-  // أو حمولة بلا مفتاحها المطلوب. إقرارها يعني أن العميل يُفرّغ طابوره
-  // والكتابة لم تحدث ولن تحدث — وهو الضياع الصامت نفسه الذي يحرس منه
-  // ترتيب «الأثر ثم الحجز» أعلاه، داخلًا من الباب الآخر.
-  //
-  // وهذا ليس فرضًا نظريًّا: ثلاثة أجهزة أندرويد تُحدَّث في أوقات مختلفة،
-  // فAPK أحدث من الـWorker المنشور يرسل `kind` لا يعرفه الخادم.
-  //
-  // وطابور B5 عند العميل يعرف هذا العقد أصلًا: ما لا تذكره الاستجابة في
-  // `applied` ولا `skipped` يُعزل حالًا (`not_settled`) فيظهر للمستخدم بدل
-  // أن يُعاد إلى الأبد أو يُنسى. فلا حقل جديد هنا: الإسقاط هو الإشارة.
-  const statements: D1PreparedStatement[] = [];
+  // رقع الحقول تحتاج rev مستقل لكل عملية حتى يبقى ترتيب رقعتين لنفس الحقل
+  // واضحًا. commitNextRevision يجعل rev + الأثر + applied_ops معاملة واحدة.
+  let lastCommittedRev = await currentRev(env);
+  for (const op of ops) {
+    if (!FIELD_MERGE_KINDS.has(op.kind)) continue;
+    const rev = await applyFieldMerge(op, userId, now, env);
+    if (rev > lastCommittedRev) lastCommittedRev = rev;
+  }
+
   const unapplied = new Set<string>();
   const skipped = new Set<string>();
-  for (const op of ops) {
-    if (FIELD_MERGE_KINDS.has(op.kind)) continue;
-    if (DEPRECATED_NOOP_KINDS.has(op.kind)) {
-      skipped.add(op.opId);
-      continue;
-    }
-    const built = statementsFor(op, userId, rev, now, env, ctx);
-    if (built && built.length > 0) statements.push(...built);
-    else unapplied.add(op.opId);
-  }
-  const applied = ops.filter((op) => !unapplied.has(op.opId) && !skipped.has(op.opId));
-  for (const op of applied) {
-    // عمليات الحقول حجزت op_id ذرّيًا مع أثرها داخل applyFieldMerge.
-    if (FIELD_MERGE_KINDS.has(op.kind)) continue;
-    statements.push(
-      env.DB.prepare(
-        'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
-      ).bind(op.opId, userId, op.kind, rev, now),
-    );
-  }
-  // D1 ترفض دفعة فارغة (`No SQL statements detected`). دفعة كل عملياتها
-  // مجهولة تنتهي هنا بلا جملة واحدة، فالنداء يرمي ويصير الردّ 500 — أي
-  // «أعد المحاولة» عند العميل، على عمليات لن تُطبَّق أبدًا.
-  if (statements.length > 0) await env.DB.batch(statements);
 
-  // المُقَرّة مستقرّة الآن: العميل يُفرّغ طابوره منها. التمييز بين «طُبّقت»
-  // و«كانت مطبَّقة» لا يغيّر شيئًا عنده، والحقلان يبقيان للتشخيص.
+  const committed = await commitNextRevision(env, now, (rev) => {
+    unapplied.clear();
+    skipped.clear();
+    const statements: D1PreparedStatement[] = [];
+
+    for (const op of ops) {
+      if (FIELD_MERGE_KINDS.has(op.kind)) continue;
+      if (DEPRECATED_NOOP_KINDS.has(op.kind)) {
+        skipped.add(op.opId);
+        continue;
+      }
+      if (invalidRecommendations.has(op.opId)) {
+        unapplied.add(op.opId);
+        continue;
+      }
+
+      const built = statementsFor(op, userId, rev, now, env, ctx);
+      if (built && built.length > 0) statements.push(...built);
+      else unapplied.add(op.opId);
+    }
+
+    const applied = ops.filter(
+      (op) =>
+        !FIELD_MERGE_KINDS.has(op.kind) &&
+        !unapplied.has(op.opId) &&
+        !skipped.has(op.opId),
+    );
+    for (const op of applied) {
+      statements.push(
+        env.DB.prepare(
+          'INSERT OR IGNORE INTO applied_ops (op_id, user_id, kind, rev, applied_at) VALUES (?, ?, ?, ?, ?)',
+        ).bind(op.opId, userId, op.kind, rev, now),
+      );
+    }
+    return statements;
+  });
+
+  if (committed !== null && committed > lastCommittedRev) lastCommittedRev = committed;
+
+  const applied = ops.filter((op) => !unapplied.has(op.opId) && !skipped.has(op.opId));
   return json({
     applied: applied.map((op) => op.opId),
     skipped: [...skipped],
-    cursor: rev,
+    cursor: lastCommittedRev,
     serverRev: await currentRev(env),
   });
 }
