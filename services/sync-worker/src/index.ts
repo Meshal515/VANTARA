@@ -42,7 +42,7 @@ import {
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
-import { bearerFrom, mintToken, verifyToken } from './session.ts';
+import { bearerFrom, verifyToken } from './session.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -177,31 +177,6 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
   });
 }
 
-/** اختيار الحساب هو الدخول: لا كلمة مرور، ولا خطوة تحقق. */
-async function handleSession(request: Request, env: Env): Promise<Response> {
-  const body = (await request.json().catch(() => null)) as { userId?: unknown } | null;
-  const userId = typeof body?.userId === 'string' ? body.userId : '';
-  if (!userId) return json({ error: 'bad_request' }, { status: 400 });
-
-  // الحسابات الثلاثة فقط. لا إنشاء حساب من الشبكة.
-  const account = await env.DB.prepare(
-    'SELECT a.user_id, a.username, p.display_name FROM accounts a LEFT JOIN profiles p USING (user_id) WHERE a.user_id = ?',
-  )
-    .bind(userId)
-    .first<{ user_id: string; username: string; display_name: string | null }>();
-  if (!account) return json({ error: 'unknown_account' }, { status: 404 });
-
-  const token = await mintToken(account.user_id, env.VANTARA_SESSION_SECRET);
-  return json({
-    token,
-    user: {
-      userId: account.user_id,
-      username: account.username,
-      displayName: account.display_name ?? account.username,
-    },
-  });
-}
-
 // ───────────────────────────── السحب ─────────────────────────────
 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
@@ -250,15 +225,57 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
     return json({ protocol: SYNC_PROTOCOL, reset: true, cursor: 0, serverRev, changes: {} });
   }
 
-  // بعض الجداول ملك الحساب نفسه ولا يجوز أن تغادر إلى جهاز صديق.
-  // فلترة الواجهة ليست حماية: إن وصل الصف إلى المرآة المحلية فقد كُشف أصلًا.
-  const selfScoped = (table: string) => table === 'settings' || table === 'notifications';
+  // الفروقات نفسها حدّ أمان، لا مجرد transport. الصف الذي لا يحتاجه
+  // هذا الحساب لا يصل إلى مرآته المحلية أصلًا؛ إخفاؤه في الواجهة بعد التنزيل
+  // يعني أن البيانات كُشفت بالفعل.
+  const deltaScope = (table: string): { sql: string; values: string[] } => {
+    switch (table) {
+      case 'library':
+      case 'progress':
+      case 'collections':
+      case 'settings':
+      case 'notifications':
+        return { sql: ' AND user_id = ?', values: [userId] };
+
+      // المستلم يرى حالته فقط، والمرسل يحتاج حالات كل من أرسل إليهم.
+      case 'recommendation_recipients':
+        return {
+          sql: ' AND (user_id = ? OR recommendation_id IN (SELECT id FROM recommendations WHERE from_id = ?))',
+          values: [userId, userId],
+        };
+
+      // التوصية الموجّهة لا تخص الصديق الثالث. broadcast (to_id IS NULL)
+      // اجتماعية للجميع، والمرسل يرى دائمًا ما أرسله.
+      case 'recommendations':
+        return {
+          sql: ' AND (from_id = ? OR to_id IS NULL OR to_id = ?)',
+          values: [userId, userId],
+        };
+
+      // النشاط الموجّه (رد/تفاعل/توصية لشخص) للفاعل والهدف فقط.
+      case 'activity':
+        return {
+          sql: ' AND (actor_id = ? OR target_user_id IS NULL OR target_user_id = ?)',
+          values: [userId, userId],
+        };
+
+      // المشاهد يرى إيصالاته، والفاعل يرى إيصالات حدثه لعرض delivered/seen.
+      case 'activity_receipts':
+        return {
+          sql: ' AND (user_id = ? OR event_id IN (SELECT id FROM activity WHERE actor_id = ?))',
+          values: [userId, userId],
+        };
+
+      default:
+        return { sql: '', values: [] };
+    }
+  };
 
   const statements = DELTA_TABLES.map(([table, columns]) => {
-    const statement = env.DB.prepare(
-      `SELECT ${columns} FROM ${table} WHERE rev > ?${selfScoped(table) ? ' AND user_id = ?' : ''} ORDER BY rev LIMIT ${PAGE_SIZE}`,
-    );
-    return selfScoped(table) ? statement.bind(cursor, userId) : statement.bind(cursor);
+    const scope = deltaScope(table);
+    return env.DB.prepare(
+      `SELECT ${columns} FROM ${table} WHERE rev > ?${scope.sql} ORDER BY rev LIMIT ${PAGE_SIZE}`,
+    ).bind(cursor, ...scope.values);
   });
   const results = await env.DB.batch<Record<string, unknown>>(statements);
 
@@ -289,12 +306,13 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
         boundaryStart -= 1;
       }
 
+      const scope = deltaScope(table);
       const boundaryStatement = env.DB.prepare(
-        `SELECT ${columns} FROM ${table} WHERE rev = ?${selfScoped(table) ? ' AND user_id = ?' : ''} ORDER BY rev`,
+        `SELECT ${columns} FROM ${table} WHERE rev = ?${scope.sql} ORDER BY rev`,
       );
-      const boundary = await (
-        selfScoped(table) ? boundaryStatement.bind(lastRev, userId) : boundaryStatement.bind(lastRev)
-      ).all<Record<string, unknown>>();
+      const boundary = await boundaryStatement
+        .bind(lastRev, ...scope.values)
+        .all<Record<string, unknown>>();
       rows = [...rows.slice(0, boundaryStart), ...(boundary.results ?? rows.slice(boundaryStart))];
 
       // قد توجد مراجعات أعلى من lastRev؛ نبقي more=true فتُسحب في الجولة
@@ -452,6 +470,8 @@ function socialActivityStatements(
   const viewers = notificationTargets({
     accounts: input.accounts,
     actorId: input.actorId,
+    // نشاط موجّه لشخص واحد لا يُنشئ receipts للصديق الثالث.
+    to: input.targetUserId ?? null,
   });
   for (const viewer of viewers) {
     statements.push(
@@ -1782,11 +1802,6 @@ export default {
         const response = await handleAccounts(env, now);
         return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
       }
-      if (path === '/v1/session' && request.method === 'POST') {
-        const response = await handleSession(request, env);
-        return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
-      }
-
       const token = bearerFrom(request);
       const userId = token ? await verifyToken(token, env.VANTARA_SESSION_SECRET) : null;
       if (!userId) return json({ error: 'unauthorized' }, { status: 401 }, cors);

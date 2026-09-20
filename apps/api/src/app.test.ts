@@ -15,7 +15,8 @@ import { identityIdForUsername, mintIdentityToken } from '@vantara/domain';
 import { buildApp } from './app.ts';
 import { loadConfig } from './lib/config.ts';
 import { SESSION_COOKIE } from './lib/context.ts';
-import { decrypt, deriveKey } from './lib/crypto.ts';
+import { SessionStore } from './lib/sessions.ts';
+import { decrypt, deriveKey, encrypt } from './lib/crypto.ts';
 
 const DATABASE_URL =
   process.env['DATABASE_URL'] ?? 'postgres://vantara:vantara_dev@127.0.0.1:5433/vantara';
@@ -268,8 +269,9 @@ describe('data ownership freeze', () => {
       headers: { cookie },
       payload: {},
     });
-    // 404 لأن اللقطة غير موجودة، أو 403 لغير المشرف — المهم أن المسار موجود
-    expect([403, 404]).toContain(split.statusCode);
+    // D-03: لا نعلن split ناجحًا بلا استعادة ذرّية عند المالكين.
+    // غير المشرف يُرفض، والمشرف يرى أن الاستعادة غير متاحة بدل نجاح مزيف.
+    expect([403, 409]).toContain(split.statusCode);
   });
 });
 
@@ -431,6 +433,35 @@ describe('deleted works', () => {
 });
 
 describe('logout', () => {
+  it('does not pretend Bearer logout revoked Worker device state', async () => {
+    if (skipUnlessSession()) return;
+
+    const identityId = identityIdForUsername(USERNAME);
+    expect(identityId).not.toBeNull();
+    if (!identityId) return;
+
+    const bearer = await mintIdentityToken(
+      { userId: identityId, deviceId: 'ci-live-device' },
+      TEST_IDENTITY_SECRET,
+    );
+
+    const one = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/logout',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(one.statusCode).toBe(409);
+    expect(one.json()).toEqual({ error: 'device_logout_required' });
+
+    const all = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/logout-all',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(all.statusCode).toBe(409);
+    expect(all.json()).toEqual({ error: 'device_logout_all_required' });
+  });
+
   it('closes the legacy cookie without stranding the active VANTARA identity link', async () => {
     if (skipUnlessSession()) return;
 
@@ -487,5 +518,82 @@ describe('logout', () => {
       headers: { authorization: `Bearer ${upstreamToken}` },
     });
     expect(afterUpstream.status).toBe(200);
+  });
+
+  it('logout-all revokes unprotected legacy credentials and preserves the active identity credential', async () => {
+    if (skipUnlessSession()) return;
+
+    const sessionId = cookie.slice(`${SESSION_COOKIE}=`.length);
+    const ownerRows = await query<{ uchiyomi_user_id: string }>(
+      'SELECT uchiyomi_user_id FROM vantara_sessions WHERE id = $1',
+      [sessionId],
+    );
+    const userId = ownerRows[0]?.uchiyomi_user_id;
+    expect(userId).toBeTruthy();
+    if (!userId) return;
+
+    const links = await query<{ token_encrypted: string; token_id: string | null }>(
+      `SELECT token_encrypted, token_id
+         FROM vantara_identity_links
+        WHERE uchiyomi_user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(links[0]?.token_id).toBeTruthy();
+    if (!links[0]?.token_id) return;
+
+    const key = deriveKey(TEST_SESSION_SECRET, 'session-token');
+    const prefix = `logout-all-${Date.now()}`;
+    const protectedSession = `${prefix}-protected`;
+    const firstSession = `${prefix}-first`;
+    const secondSession = `${prefix}-second`;
+
+    await query(
+      `INSERT INTO vantara_sessions
+         (id, uchiyomi_user_id, token_encrypted, token_id, device, expires_at)
+       VALUES
+         ($1, $4, $5, $6, 'ci-protected', now() + interval '1 day'),
+         ($2, $4, $7, $8, 'ci-old-1', now() + interval '1 day'),
+         ($3, $4, $9, $10, 'ci-old-2', now() + interval '1 day')`,
+      [
+        protectedSession,
+        firstSession,
+        secondSession,
+        userId,
+        links[0].token_encrypted,
+        links[0].token_id,
+        encrypt('legacy-token-one', key),
+        `${prefix}-token-1`,
+        encrypt('legacy-token-two', key),
+        `${prefix}-token-2`,
+      ],
+    );
+
+    const revoked: Array<{ token: string; tokenId: string }> = [];
+    const store = new SessionStore({
+      key,
+      ttlDays: 60,
+      uchiyomi: {
+        async revokeToken(token: string, tokenId: string) {
+          revoked.push({ token, tokenId });
+        },
+      } as never,
+    });
+
+    const count = await store.revokeAllFor(userId);
+    expect(count).toBeGreaterThanOrEqual(3);
+    expect(revoked).toEqual([
+      { token: 'legacy-token-one', tokenId: `${prefix}-token-1` },
+      { token: 'legacy-token-two', tokenId: `${prefix}-token-2` },
+    ]);
+
+    const local = await query<{ id: string; revoked: boolean }>(
+      `SELECT id, revoked_at IS NOT NULL AS revoked
+         FROM vantara_sessions
+        WHERE id = ANY($1::text[])
+        ORDER BY id`,
+      [[protectedSession, firstSession, secondSession]],
+    );
+    expect(local).toHaveLength(3);
+    expect(local.every((row) => row.revoked)).toBe(true);
   });
 });

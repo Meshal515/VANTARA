@@ -1,4 +1,4 @@
-import { query, queryOne } from '@vantara/db';
+import { query, queryOne, transaction } from '@vantara/db';
 import { identityIdForUsername } from '@vantara/domain';
 import type { UchiyomiClient } from '@vantara/uchiyomi';
 import { decrypt, encrypt, newSessionId } from './crypto.ts';
@@ -63,39 +63,51 @@ export class SessionStore {
       expiresInDays,
     });
 
-    await query(
-      `INSERT INTO vantara_users (uchiyomi_user_id, username)
-            VALUES ($1, $2)
-       ON CONFLICT (uchiyomi_user_id)
-       DO UPDATE SET username = EXCLUDED.username, last_seen_at = now()`,
-      [result.user.id, result.user.username],
-    );
     const encrypted = encrypt(minted.token, this.#options.key);
     const identityId = identityIdForUsername(result.user.username);
-    if (identityId) {
-      await query(
-        `INSERT INTO vantara_identity_links
-           (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
-         VALUES ($1, $2, $3, $4, NULL)
-         ON CONFLICT (vantara_identity_id) DO UPDATE SET
-           uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
-           token_encrypted = EXCLUDED.token_encrypted,
-           token_id = EXCLUDED.token_id,
-           linked_at = now(),
-           last_used_at = now(),
-           revoked_at = NULL`,
-        [identityId, result.user.id, encrypted, minted.id],
-      );
-    }
-
     const id = newSessionId();
-    await query(
-      `INSERT INTO vantara_sessions
-         (id, uchiyomi_user_id, token_encrypted, token_id, device, expires_at)
-       VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' days')::interval)`,
-      [id, result.user.id, encrypted, minted.id, device ?? null, String(expiresInDays)],
-    );
 
+    try {
+      await transaction(async (client) => {
+        await client.query(
+          `INSERT INTO vantara_users (uchiyomi_user_id, username)
+                VALUES ($1, $2)
+           ON CONFLICT (uchiyomi_user_id)
+           DO UPDATE SET username = EXCLUDED.username, last_seen_at = now()`,
+          [result.user.id, result.user.username],
+        );
+
+        if (identityId) {
+          await client.query(
+            `INSERT INTO vantara_identity_links
+               (vantara_identity_id, uchiyomi_user_id, token_encrypted, token_id, revoked_at)
+             VALUES ($1, $2, $3, $4, NULL)
+             ON CONFLICT (vantara_identity_id) DO UPDATE SET
+               uchiyomi_user_id = EXCLUDED.uchiyomi_user_id,
+               token_encrypted = EXCLUDED.token_encrypted,
+               token_id = EXCLUDED.token_id,
+               linked_at = now(),
+               last_used_at = now(),
+               revoked_at = NULL`,
+            [identityId, result.user.id, encrypted, minted.id],
+          );
+        }
+
+        await client.query(
+          `INSERT INTO vantara_sessions
+             (id, uchiyomi_user_id, token_encrypted, token_id, device, expires_at)
+           VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' days')::interval)`,
+          [id, result.user.id, encrypted, minted.id, device ?? null, String(expiresInDays)],
+        );
+      });
+    } catch (dbError) {
+      try {
+        await uchiyomi.revokeToken(minted.token, minted.id);
+      } catch (cleanupError) {
+        throw new AggregateError([dbError, cleanupError], 'login persistence and cleanup both failed');
+      }
+      throw dbError;
+    }
     return {
       id,
       ...(identityId ? { identityId } : {}),
@@ -240,17 +252,96 @@ export class SessionStore {
   }
 
   async revokeAllFor(userId: string): Promise<number> {
-    const rows = await query<{ id: string }>(
-      `UPDATE vantara_sessions SET revoked_at = now()
-        WHERE uchiyomi_user_id = $1 AND revoked_at IS NULL
-        RETURNING id`,
+    const sessions = await query<{
+      id: string;
+      token_encrypted: string;
+      token_id: string | null;
+    }>(
+      `SELECT id, token_encrypted, token_id
+         FROM vantara_sessions
+        WHERE uchiyomi_user_id = $1
+          AND revoked_at IS NULL`,
       [userId],
     );
-    return rows.length;
+
+    // بعض جلسات cookie قد تحمل نفس credential الذي يحمي Identity v2.
+    // هذا credential لا يُلغى هنا؛ Worker يملك logout-all للأجهزة الحديثة.
+    const linked = await query<{ token_id: string }>(
+      `SELECT token_id
+         FROM vantara_identity_links
+        WHERE uchiyomi_user_id = $1
+          AND revoked_at IS NULL
+          AND token_id IS NOT NULL`,
+      [userId],
+    );
+    const protectedIds = new Set(linked.map((row) => row.token_id));
+    const attempted = new Set<string>();
+    let revokeError: unknown;
+
+    try {
+      for (const session of sessions) {
+        const tokenId = session.token_id;
+        if (!tokenId || protectedIds.has(tokenId) || attempted.has(tokenId)) continue;
+        attempted.add(tokenId);
+
+        try {
+          const token = decrypt(session.token_encrypted, this.#options.key);
+          await this.#options.uchiyomi.revokeToken(token, tokenId);
+        } catch (error) {
+          // نكمل تنظيف بقية credentials ولا نترك جلسة محلية حية بسبب فشل واحد.
+          revokeError ??= error;
+        }
+      }
+    } finally {
+      await query(
+        `UPDATE vantara_sessions SET revoked_at = now()
+          WHERE uchiyomi_user_id = $1 AND revoked_at IS NULL`,
+        [userId],
+      );
+    }
+
+    if (revokeError) throw revokeError;
+    return sessions.length;
   }
 
-  /** تنظيف دوري. الجلسة المنتهية تبقى صفًا ميتًا حتى تُحذف. */
+  /**
+   * تنظيف دوري مع إلغاء credential المنبع قبل فقد آخر مرجع محلي له.
+   *
+   * حذف الصف أولًا كان يترك توكن Uchiyomi طويل العمر صالحًا حتى 60 يومًا
+   * بلا token_id/token_encrypted يمكن الرجوع إليهما. إذا فشل الإلغاء نحتفظ
+   * بالصف ونفشل المهمة كي تعيد المحاولة لاحقًا.
+   */
   async purgeExpired(): Promise<number> {
+    const candidates = await query<{
+      id: string;
+      token_encrypted: string;
+      token_id: string | null;
+    }>(
+      `SELECT id, token_encrypted, token_id
+         FROM vantara_sessions
+        WHERE expires_at < now() - interval '7 days'
+           OR revoked_at < now() - interval '7 days'`,
+    );
+    if (candidates.length === 0) return 0;
+
+    const linked = await query<{ token_id: string }>(
+      `SELECT token_id
+         FROM vantara_identity_links
+        WHERE revoked_at IS NULL
+          AND token_id IS NOT NULL`,
+    );
+    const protectedIds = new Set(linked.map((row) => row.token_id));
+    const revokedIds = new Set<string>();
+
+    for (const session of candidates) {
+      const tokenId = session.token_id;
+      if (!tokenId || protectedIds.has(tokenId) || revokedIds.has(tokenId)) continue;
+
+      const token = decrypt(session.token_encrypted, this.#options.key);
+      await this.#options.uchiyomi.revokeToken(token, tokenId);
+      revokedIds.add(tokenId);
+    }
+
     const rows = await query<{ id: string }>(
       `DELETE FROM vantara_sessions
         WHERE expires_at < now() - interval '7 days'
