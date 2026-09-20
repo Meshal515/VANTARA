@@ -222,23 +222,20 @@ class MainActivity : AppCompatActivity() {
         } else {
             val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
                 runCatching {
-                    var lastIo: IOException? = null
-                    repeat(3) { attempt ->
-                        try {
-                            return@runCatching network.client
-                                .newCall(Request.Builder().url(spec.apkUrl).build())
-                                .execute().use { res ->
-                                    require(res.isSuccessful) {
-                                        "HTTP ${res.code} ← ${spec.apkUrl}"
-                                    }
-                                    res.body.bytes()
+                    // Extension APK delivery is infrastructure, not source health.
+                    // A short Android DNS outage must not permanently condemn the
+                    // next source (the previous run lost Hijala while github.com
+                    // itself temporarily failed to resolve).
+                    retryTransientNetwork(maxAttempts = 5, delayMs = 1_000) {
+                        network.client
+                            .newCall(Request.Builder().url(spec.apkUrl).build())
+                            .execute().use { res ->
+                                require(res.isSuccessful) {
+                                    "HTTP ${res.code} ← ${spec.apkUrl}"
                                 }
-                        } catch (io: IOException) {
-                            lastIo = io
-                            if (attempt < 2) Thread.sleep(800L * (attempt + 1))
-                        }
+                                res.body.bytes()
+                            }
                     }
-                    throw lastIo ?: IOException("download failed without an I/O cause")
                 }
             }
             downloaded.getOrElse {
