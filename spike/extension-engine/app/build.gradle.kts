@@ -19,13 +19,13 @@ android {
     defaultConfig {
         // Separate install identity: CI debug signing keys are ephemeral, so an
         // APK from a newer runner cannot update the old spike in-place.
-        applicationId = "dev.vantara.spike.safe16"
+        applicationId = "dev.vantara.spike.catalogue16"
         // إضافات lib 1.6 تُشحن بـminSdk 26. وأجهزتنا كلها 13+، فلا مسار
         // خفض DEX مطلوب أصلًا — لكن الأرضية تبقى 26 حتى لا نَعِد بما لا نُثبت.
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "safe16-2"
+        versionCode = 3
+        versionName = "catalogue16-3"
     }
 
     buildTypes {
