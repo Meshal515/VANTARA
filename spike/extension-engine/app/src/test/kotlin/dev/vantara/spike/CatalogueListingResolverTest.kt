@@ -42,6 +42,20 @@ class CatalogueListingResolverTest {
     }
 
     @Test
+    fun `finite popularity ranking does not hide a paginated latest catalogue`() = runBlocking {
+        val resolved = resolveFullCatalogueListing { kind ->
+            when (kind) {
+                CatalogueListingKind.SEARCH_ALL -> throw UnsupportedOperationException("empty query")
+                CatalogueListingKind.POPULAR -> page(size = 10, hasNext = false)
+                CatalogueListingKind.LATEST -> page(size = 20, hasNext = true)
+            }
+        }
+
+        assertEquals(CatalogueListingKind.LATEST, resolved.kind)
+        assertEquals(true, resolved.firstPage.hasNextPage)
+    }
+
+    @Test
     fun `empty search and empty popular fall back to latest catalogue`() = runBlocking {
         val resolved = resolveFullCatalogueListing { kind ->
             when (kind) {
