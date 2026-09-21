@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # لقطة ثابتة: الـSpike يختبر مجموعة معلومة، لا فهرسًا يتغير أثناء البناء.
+      # لقطة ثابتة حديثة: تجدد الروابط المنشورة بدل الاعتماد على أصول إصدار محذوفة.
       KEIYOUSHI_INDEX_COMMIT: e38245f4ecc7bd1858551c2ea149dbf8129dbad4
       # Owner-approved diagnostic batch: 15 Arabic SAFE, Arabic MangaDex only,
       # and one general Arabic NSFW source behind an in-app acknowledgement.
