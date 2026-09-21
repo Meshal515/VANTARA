@@ -24,4 +24,19 @@ class SourceCompatRepairsTest {
             ),
         )
     }
+
+    @Test
+    fun `MangaDar data-mds base64 resolves to its signed image url`() {
+        val picked = chooseRealImageUrl(
+            listOf(
+                "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+                "aHR0cHM6Ly9tYW5nYWRhci5jb20vP21kcnM9MSZjPTE3Nzc4MyZpPTAmZXhwPTE3ODk5OTIwMDAmcG5vbmNlPW4wJnNpZz1zMA==",
+            ),
+        )
+
+        assertEquals(
+            "https://mangadar.com/?mdrs=1&c=177783&i=0&exp=1789992000&pnonce=n0&sig=s0",
+            picked,
+        )
+    }
 }
