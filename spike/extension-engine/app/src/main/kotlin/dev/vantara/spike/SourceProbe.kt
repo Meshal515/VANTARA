@@ -114,6 +114,8 @@ class SourceProbe(private val http: OkHttpClient) {
         val reachedEnd: Boolean,
         val stopKind: CatalogueStopKind,
         val stoppedBecause: String,
+        /** Listing contract used for every page in this crawl and on resume. */
+        val listingKind: CatalogueListingKind? = null,
         /** Pages skipped only for an exact, proven upstream empty-page bug. */
         val skippedPages: List<Int> = emptyList(),
     ) {
@@ -478,7 +480,7 @@ class SourceProbe(private val http: OkHttpClient) {
             }
         }
 
-        // ٦) عيّنة كتالوج فقط: هل `getPopularManga` يعمل أصلًا؟
+        // ٦) عيّنة كتالوج فقط: هل مسار الكتالوج الكامل يعمل أصلًا؟
         //
         // الإحصاء الكامل **ليس هنا**. مصدرٌ بآلاف الأعمال يحتاج مئات الصفحات
         // ودقائق طويلة، ووضعُ ذلك داخل فحص السلسلة كان يجعل أربعة مصادر
@@ -546,6 +548,18 @@ class SourceProbe(private val http: OkHttpClient) {
         var reachedEnd = false
         val skippedPages = mutableListOf<Int>()
         val deadline = System.currentTimeMillis() + budgetMs
+        val catalogueFilters = source.getFilterList()
+        var listing: ResolvedCatalogueListing? = null
+
+        suspend fun fetchCataloguePage(kind: CatalogueListingKind, requestedPage: Int) =
+            withTimeout(BROWSE_TIMEOUT_MS) {
+                when (kind) {
+                    CatalogueListingKind.SEARCH_ALL ->
+                        source.getSearchManga(requestedPage, "", catalogueFilters)
+                    CatalogueListingKind.POPULAR -> source.getPopularManga(requestedPage)
+                    CatalogueListingKind.LATEST -> source.getLatestUpdates(requestedPage)
+                }
+            }
 
         while (page <= pageCap) {
             if (System.currentTimeMillis() >= deadline) {
@@ -560,7 +574,10 @@ class SourceProbe(private val http: OkHttpClient) {
             val result = try {
                 // A catalogue page is a browse request, not a whole-source job.
                 // Do not let one page make the app appear frozen for 150 s.
-                withTimeout(BROWSE_TIMEOUT_MS) { source.getPopularManga(page) }
+                val selected = listing ?: resolveFullCatalogueListing { kind ->
+                    fetchCataloguePage(kind, 1)
+                }.also { listing = it }
+                if (page == 1) selected.firstPage else fetchCataloguePage(selected.kind, page)
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
 
@@ -648,6 +665,7 @@ class SourceProbe(private val http: OkHttpClient) {
             reachedEnd = reachedEnd,
             stopKind = stopKind,
             stoppedBecause = stoppedBecause,
+            listingKind = listing?.kind,
             skippedPages = skippedPages,
         )
     }
@@ -659,7 +677,7 @@ class SourceProbe(private val http: OkHttpClient) {
                 "(KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
 
         /**
-         * عيّنة فحص السلسلة: تثبت أن `getPopularManga` يعمل، ولا تدّعي عدًّا.
+         * عيّنة فحص السلسلة: تثبت أن مسار الكتالوج يعمل، ولا تدّعي عدًّا.
          */
         const val SAMPLE_PAGE_CAP = 3
         const val SAMPLE_BUDGET_MS = 60_000L
