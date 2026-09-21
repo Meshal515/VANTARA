@@ -115,11 +115,25 @@ class MainActivity : AppCompatActivity() {
         val crawl = Button(this).apply {
             text =
                 if (hasCatalogueProgress) {
-                    "استأنف إحصاء كتالوج SAFE"
+                    "استأنف إحصاء كل المصادر ($batchSize)"
                 } else {
-                    "احصِ كتالوج SAFE فقط (يطول)"
+                    "احصِ كتالوج كل المصادر ($batchSize) — يطول"
                 }
-            setOnClickListener { crawlSafe(this) }
+            setOnClickListener {
+                if (running) return@setOnClickListener
+                val warnings = SPIKE_SOURCES.map { it.warning }
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("إقرار إحصاء كل المصادر")
+                    .setMessage(
+                        "سيُحصى كتالوج كل مصادر الدفعة وعددها $batchSize. " +
+                            batchConsentCopy(warnings) + " " +
+                            "المتابعة تعني أنك بالغ وتوافق على الاتصال بهذه المصادر " +
+                            "وحفظ التقدم صفحة بصفحة داخل السبايك.",
+                    )
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("أقر وابدأ الإحصاء") { _, _ -> crawlAll(this) }
+                    .show()
+                }
         }
 
         val copy = Button(this).apply {
@@ -143,7 +157,7 @@ class MainActivity : AppCompatActivity() {
                 catalogueCheckpoint.clear()
                 printHeader()
                 runUnified.text = "اختبر الدفعة ($batchSize) — $contentLabel"
-                crawl.text = "احصِ كتالوج SAFE فقط (يطول)"
+                crawl.text = "احصِ كتالوج كل المصادر ($batchSize) — يطول"
             }
         }
 
@@ -410,11 +424,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على عشرات المصادر دفعة
-     * واحدة قد يأخذ ساعات؛ لذلك هو SAFE فقط ولا يخلط «هل المصدر يعمل؟» مع
-     * «كم عملًا في كتالوجه؟».
+     * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على كل مصادر الدفعة قد
+     * يأخذ وقتًا طويلًا، لذلك يحفظ بعد كل صفحة ويستأنف من موضعه. الإقرار
+     * يحصل في الزر قبل دخول هذه الدالة لأن الدفعة تضم MIXED وNSFW.
      */
-    private fun crawlSafe(button: Button) {
+    private fun crawlAll(button: Button) {
         if (running) return
         running = true
         button.isEnabled = false
@@ -423,8 +437,8 @@ class MainActivity : AppCompatActivity() {
             val loader = FileExtensionLoader(this@MainActivity)
             val probe = SourceProbe(network.client)
             val waiting = statusLine()
-            val safe = SPIKE_SOURCES.filter {
-                it.warning == ContentWarning.SAFE && it.blockedReason == null
+            val sourcesToCrawl = SPIKE_SOURCES.filter {
+                shouldCrawlCatalogue(it.warning, it.blockedReason)
             }
             val resumed = catalogueCheckpoint.hasAnyProgress()
             var allComplete = true
@@ -432,16 +446,16 @@ class MainActivity : AppCompatActivity() {
             line("")
             line(
                 if (resumed) {
-                    "── استئناف إحصاء SAFE من آخر صفحة محفوظة ──"
+                    "── استئناف إحصاء كل المصادر من آخر صفحة محفوظة ──"
                 } else {
-                    "── إحصاء كامل لمصادر SAFE حتى يقول المصدر «لا مزيد» ──"
+                    "── إحصاء كامل لكل المصادر حتى يقول المصدر «لا مزيد» ──"
                 },
                 bold = true,
             )
             line("الحفظ الآن صفحة بصفحة؛ موت التطبيق لا يعيد المصدر إلى الصفحة 1.")
 
             try {
-                for (spec in safe) {
+                for (spec in sourcesToCrawl) {
                     val sources = try {
                         obtainArabicSources(spec, loader, waiting)
                     } catch (t: Throwable) {
@@ -551,14 +565,14 @@ class MainActivity : AppCompatActivity() {
                 line("")
                 if (allComplete) {
                     catalogueCheckpoint.clear()
-                    line("انتهى الإحصاء الكامل لكل مصادر SAFE.", bold = true)
-                    button.text = "احصِ كتالوج SAFE فقط (يطول)"
+                    line("انتهى الإحصاء الكامل لكل المصادر.", bold = true)
+                    button.text = "احصِ كتالوج كل المصادر (${SPIKE_SOURCES.size}) — يطول"
                 } else {
                     line(
                         "انتهت هذه الجولة. غير المكتمل محفوظ صفحة بصفحة؛ اضغط استئناف لإكماله.",
                         bold = true,
                     )
-                    button.text = "استأنف إحصاء كتالوج SAFE"
+                    button.text = "استأنف إحصاء كل المصادر (${SPIKE_SOURCES.size})"
                 }
                 running = false
                 button.isEnabled = true

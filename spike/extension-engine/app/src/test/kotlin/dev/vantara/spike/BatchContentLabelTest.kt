@@ -23,18 +23,17 @@ class BatchContentLabelTest {
     }
 
     @Test
-    fun consentCopyNamesTheExactEighteenSourcePolicy() {
+    fun consentCopyNamesTheExactSeventeenSourcePolicy() {
         val copy = batchConsentCopy(
             listOf(
                 *Array(15) { ContentWarning.SAFE },
                 ContentWarning.MIXED,
                 ContentWarning.NSFW,
-                ContentWarning.NSFW,
             ),
         )
 
         assertEquals(
-            "15 عربي SAFE · MangaDex واحد MIXED · مصدران عربيان NSFW. " +
+            "15 عربي SAFE · MangaDex واحد MIXED · مصدر عربي واحد NSFW. " +
                 "قد تظهر صور فصول للبالغين أثناء الفحص.",
             copy,
         )
@@ -50,6 +49,19 @@ class BatchContentLabelTest {
         assertEquals(
             true,
             requiresExplicitConsent(listOf(ContentWarning.SAFE, ContentWarning.NSFW)),
+        )
+    }
+
+    @Test
+    fun catalogueCrawlIncludesEveryNonBlockedContentClass() {
+        assertEquals(true, shouldCrawlCatalogue(ContentWarning.SAFE, null))
+        assertEquals(true, shouldCrawlCatalogue(ContentWarning.MIXED, null))
+        assertEquals(true, shouldCrawlCatalogue(ContentWarning.NSFW, null))
+        assertFalse(
+            shouldCrawlCatalogue(
+                ContentWarning.NSFW,
+                "BL/GL specialized source blocked by VANTARA owner policy",
+            ),
         )
     }
 }

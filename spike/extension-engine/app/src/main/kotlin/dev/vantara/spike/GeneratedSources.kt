@@ -4,10 +4,10 @@ package dev.vantara.spike
  * GENERATED FILE — do not hand edit.
  * index commit: 72413a8a4bb858f7438a22d2bedcb358a0267642
  * index sha256: 8d3162d2dd3d0eabeddb976d071d48596ac00422b5d48526b9cbb2e1b2e3ae68
- * Keiyoushi 72413a8a4bb8 · 18 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 2 · policy-blocked 0
+ * Keiyoushi 72413a8a4bb8 · 17 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 1 · policy-blocked 0
  */
 const val GENERATED_INDEX_COMMIT = "72413a8a4bb858f7438a22d2bedcb358a0267642"
-const val GENERATED_SNAPSHOT_NOTE = "Keiyoushi 72413a8a4bb8 · 18 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 2 · policy-blocked 0"
+const val GENERATED_SNAPSHOT_NOTE = "Keiyoushi 72413a8a4bb8 · 17 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 1 · policy-blocked 0"
 
 val GENERATED_SPIKE_SOURCES: List<SourceSpec> = listOf(
     SourceSpec(
@@ -80,18 +80,6 @@ val GENERATED_SPIKE_SOURCES: List<SourceSpec> = listOf(
         warning = ContentWarning.SAFE,
         arabicSourceIds = setOf("7634600808243438399"),
         arabicSourceNames = listOf("Dilar"),
-        blockedReason = null,
-    ),
-    SourceSpec(
-        label = "Goon Scans",
-        pkg = "eu.kanade.tachiyomi.extension.ar.goonscans",
-        expectedLib = 1.6,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/1fbc35e/tachiyomi-ar.goonscans-v1.6.1.apk",
-        sha256 = "5c37a9bf56e97217a12f2086b1536f908dec0d30ec89fcf388bb9d51cc5658fc",
-        versionName = "1.6.1",
-        warning = ContentWarning.NSFW,
-        arabicSourceIds = setOf("2899371341317171497"),
-        arabicSourceNames = listOf("Goon Scans"),
         blockedReason = null,
     ),
     SourceSpec(

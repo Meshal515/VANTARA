@@ -817,14 +817,14 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
     'Arabic discovery must use sources[].language, not directory naming',
   );
 
-  // والـfallback المحلي هو نفس دفعة الإقرار التي نسلّمها: 18 حزمة محددة،
-  // MangaDex وحده من namespace العام، ومصدرا NSFW العربيان المحددان فقط.
+  // والـfallback المحلي هو نفس دفعة الإقرار التي نسلّمها: 17 حزمة محددة،
+  // MangaDex وحده من namespace العام، ومصدر NSFW العربي المحدد فقط.
   const urls = [...fallback.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
   const hashes = [...fallback.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
   const packages = [...fallback.matchAll(/pkg = "([^"]+)"/g)].map((match) => match[1]);
   const warnings = [...fallback.matchAll(/warning = ContentWarning\.(SAFE|MIXED|NSFW)/g)]
     .map((match) => match[1]);
-  assert.equal(urls.length, 18, 'the delivered spike must contain exactly eighteen packages');
+  assert.equal(urls.length, 17, 'the delivered spike must contain exactly seventeen packages');
   assert.equal(hashes.length, urls.length, 'every fallback artifact needs its sha256');
   assert.deepEqual(
     packages.filter((pkg) => pkg.includes('.extension.all.')),
@@ -839,8 +839,24 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
   );
   assert.equal(warnings.filter((warning) => warning === 'SAFE').length, 15);
   assert.equal(warnings.filter((warning) => warning === 'MIXED').length, 1);
-  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 2);
+  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 1);
+  assert.doesNotMatch(fallback, /goonscans|Goon Scans/i, 'Goon Scans was removed by owner request');
   for (const url of urls) assert.match(url, /^https:\/\/.*\.apk$/, url);
+});
+
+test('catalogue counting covers every non-blocked source in the seventeen-package batch', () => {
+  const activity = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt',
+  );
+
+  assert.match(activity, /private fun crawlAll\(button: Button\)/);
+  assert.doesNotMatch(
+    activity,
+    /private fun crawlAll[\s\S]*?warning == ContentWarning\.SAFE[\s\S]*?private fun catalogueStopLabel/,
+    'MIXED and owner-approved NSFW must not be silently omitted from catalogue counting',
+  );
+  assert.match(activity, /استئناف إحصاء كل المصادر/);
+  assert.match(activity, /إحصاء كامل لكل المصادر/);
 });
 
 test('no spike probe step can run without a deadline or an announcement', () => {
