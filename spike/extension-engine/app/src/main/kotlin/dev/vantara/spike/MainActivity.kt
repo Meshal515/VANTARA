@@ -75,7 +75,10 @@ class MainActivity : AppCompatActivity() {
             SPIKE_SOURCES.forEach { append('|').append(it.pkg).append(':').append(it.sha256) }
         }
         checkpoint.ensureSnapshot(batchFingerprint)
-        catalogueCheckpoint.ensureSnapshot(batchFingerprint)
+        // Page 19 from the former popularity feed is not page 19 of the full
+        // catalogue. Bind resume data to both the source snapshot and traversal
+        // contract so a routing fix can never inherit a false COMPLETE marker.
+        catalogueCheckpoint.ensureSnapshot("$batchFingerprint|$CATALOGUE_LISTING_SCHEMA")
         // The process may die after recording the last package but before finish().
         // Preserve the report and only remove the now-empty resume plan.
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
@@ -546,6 +549,9 @@ class MainActivity : AppCompatActivity() {
                                 "صفحات ناجحة هذه الجلسة: ${reach.pagesFetched} · " +
                                 "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
                         )
+                        reach.listingKind?.let {
+                            line("↳ مسار الإحصاء: ${catalogueListingLabel(it)}")
+                        }
                         if (reach.skippedPages.isNotEmpty()) {
                             line(
                                 "↳ تجاوز آمن لصفحات Iken الخالية من المانجا: " +
@@ -596,6 +602,12 @@ class MainActivity : AppCompatActivity() {
         SourceProbe.CatalogueStopKind.SOURCE_ERROR -> "SOURCE_ERROR"
         SourceProbe.CatalogueStopKind.TIME_BUDGET -> "TIME_BUDGET"
         SourceProbe.CatalogueStopKind.PAGE_CAP -> "PAGE_CAP"
+    }
+
+    private fun catalogueListingLabel(kind: CatalogueListingKind): String = when (kind) {
+        CatalogueListingKind.SEARCH_ALL -> "كل الكتالوج (بحث بلا فلتر)"
+        CatalogueListingKind.POPULAR -> "التصفح الشائع (بديل توافق)"
+        CatalogueListingKind.LATEST -> "آخر الإضافات (بديل توافق)"
     }
 
     private suspend fun render(report: SourceProbe.Report) {
