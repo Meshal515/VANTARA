@@ -16,6 +16,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
+import java.util.Base64
 
 internal object SourceCompatRepairs {
 
@@ -149,6 +150,7 @@ internal object SourceCompatRepairs {
                     image.attr("abs:data-manga-src"),
                     firstSrcsetUrl(image.attr("abs:data-srcset")),
                     firstSrcsetUrl(image.attr("abs:srcset")),
+                    image.attr("data-mds"),
                     image.attr("abs:src"),
                 ),
             ) ?: return@mapIndexedNotNull null
@@ -225,7 +227,17 @@ internal object SourceCompatRepairs {
 internal fun chooseRealImageUrl(candidates: List<String?>): String? =
     candidates.asSequence()
         .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
-        .map { it.substringBefore(' ').trim() }
+        .map { candidate ->
+            candidate.substringBefore(' ').trim().let { value ->
+                if (isHttpImage(value)) {
+                    value
+                } else {
+                    runCatching {
+                        Base64.getDecoder().decode(value).toString(Charsets.UTF_8).trim()
+                    }.getOrDefault(value)
+                }
+            }
+        }
         .firstOrNull { isHttpImage(it) }
 
 private fun firstSrcsetUrl(value: String?): String? =
