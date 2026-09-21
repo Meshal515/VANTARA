@@ -841,6 +841,22 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
   assert.equal(warnings.filter((warning) => warning === 'MIXED').length, 1);
   assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 1);
   assert.doesNotMatch(fallback, /goonscans|Goon Scans/i, 'Goon Scans was removed by owner request');
+  assert.doesNotMatch(
+    fallback,
+    /arabmanhwa|ArabManhwa/i,
+    'ArabManhwa routes currently return 404 and must not ship as a false-green source',
+  );
+  assert.doesNotMatch(
+    fallback,
+    /mangalink|Mangalink/i,
+    'MangaLink requires persistent browser verification and must not ship as an automatic source',
+  );
+  assert.match(
+    fallback,
+    /extension\.ar\.arabtoons/,
+    'Arab Toons must replace the intermittent ArabManhwa package',
+  );
+  assert.match(fallback, /extension\.ar\.mangatime/, 'MangaTime must replace the browser-gated MangaLink package');
   for (const url of urls) assert.match(url, /^https:\/\/.*\.apk$/, url);
 });
 
