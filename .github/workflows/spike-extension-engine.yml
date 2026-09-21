@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       # لقطة ثابتة: الـSpike يختبر مجموعة معلومة، لا فهرسًا يتغير أثناء البناء.
-      KEIYOUSHI_INDEX_COMMIT: 72413a8a4bb858f7438a22d2bedcb358a0267642
+      KEIYOUSHI_INDEX_COMMIT: e38245f4ecc7bd1858551c2ea149dbf8129dbad4
       # Owner-approved diagnostic batch: 15 Arabic SAFE, Arabic MangaDex only,
       # and one general Arabic NSFW source behind an in-app acknowledgement.
       VANTARA_SOURCE_PACKAGES: >-
@@ -46,11 +46,11 @@ jobs:
         eu.kanade.tachiyomi.extension.ar.mangastarz,
         eu.kanade.tachiyomi.extension.ar.hizomanga,
         eu.kanade.tachiyomi.extension.ar.mangatales,
-        eu.kanade.tachiyomi.extension.ar.mangalink,
+        eu.kanade.tachiyomi.extension.ar.mangatime,
         eu.kanade.tachiyomi.extension.all.mangadex,
-        eu.kanade.tachiyomi.extension.ar.arabmanhwa
+        eu.kanade.tachiyomi.extension.ar.arabtoons
       VANTARA_NSFW_SOURCE_PACKAGES: >-
-        eu.kanade.tachiyomi.extension.ar.arabmanhwa
+        eu.kanade.tachiyomi.extension.ar.arabtoons
     defaults:
       run:
         working-directory: spike/extension-engine
@@ -96,7 +96,7 @@ jobs:
               'eu.kanade.tachiyomi.extension.all.mangadex',
           }, by_warning['MIXED']
           assert by_warning['NSFW'] == {
-              'eu.kanade.tachiyomi.extension.ar.arabmanhwa',
+              'eu.kanade.tachiyomi.extension.ar.arabtoons',
           }, by_warning['NSFW']
           assert all(package['arabicSourceIds'] for package in p['packages'])
           PY
