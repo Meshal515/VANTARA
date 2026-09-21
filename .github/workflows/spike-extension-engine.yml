@@ -29,8 +29,8 @@ jobs:
     env:
       # لقطة ثابتة حديثة: تجدد الروابط المنشورة بدل الاعتماد على أصول إصدار محذوفة.
       KEIYOUSHI_INDEX_COMMIT: e38245f4ecc7bd1858551c2ea149dbf8129dbad4
-      # Owner-approved diagnostic batch: 15 Arabic SAFE, Arabic MangaDex only,
-      # and one general Arabic NSFW source behind an in-app acknowledgement.
+      # Owner-approved diagnostic batch: 15 Arabic SAFE and Arabic MangaDex.
+      # Dedicated NSFW packages are excluded from the delivered spike.
       VANTARA_SOURCE_PACKAGES: >-
         eu.kanade.tachiyomi.extension.ar.mangalek,
         eu.kanade.tachiyomi.extension.ar.mangaspark,
@@ -47,10 +47,7 @@ jobs:
         eu.kanade.tachiyomi.extension.ar.hizomanga,
         eu.kanade.tachiyomi.extension.ar.mangatales,
         eu.kanade.tachiyomi.extension.ar.mangatime,
-        eu.kanade.tachiyomi.extension.all.mangadex,
-        eu.kanade.tachiyomi.extension.ar.arabtoons
-      VANTARA_NSFW_SOURCE_PACKAGES: >-
-        eu.kanade.tachiyomi.extension.ar.arabtoons
+        eu.kanade.tachiyomi.extension.all.mangadex
     defaults:
       run:
         working-directory: spike/extension-engine
@@ -87,17 +84,15 @@ jobs:
           print('index:', p['indexCommit'])
           print('counts:', p['counts'])
           print('packages:', len(p['packages']))
-          assert len(p['packages']) == 17, p['packages']
-          assert p['counts'] == {'SAFE': 15, 'MIXED': 1, 'NSFW': 1, 'BLOCKED': 0}, p['counts']
+          assert len(p['packages']) == 16, p['packages']
+          assert p['counts'] == {'SAFE': 15, 'MIXED': 1, 'NSFW': 0, 'BLOCKED': 0}, p['counts']
           by_warning = {}
           for package in p['packages']:
               by_warning.setdefault(package['warning'], set()).add(package['packageName'])
           assert by_warning['MIXED'] == {
               'eu.kanade.tachiyomi.extension.all.mangadex',
           }, by_warning['MIXED']
-          assert by_warning['NSFW'] == {
-              'eu.kanade.tachiyomi.extension.ar.arabtoons',
-          }, by_warning['NSFW']
+          assert 'NSFW' not in by_warning, by_warning
           assert all(package['arabicSourceIds'] for package in p['packages'])
           PY
 
@@ -134,7 +129,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vantara-spike-seventeen-arabic-debug
+          name: vantara-spike-safe-sixteen-debug
           path: |
             ${{ steps.apk.outputs.path }}
             spike/extension-engine/build/arabic-source-snapshot.json

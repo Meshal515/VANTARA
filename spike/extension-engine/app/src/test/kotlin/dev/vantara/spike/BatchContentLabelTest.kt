@@ -23,18 +23,17 @@ class BatchContentLabelTest {
     }
 
     @Test
-    fun consentCopyNamesTheExactSeventeenSourcePolicy() {
+    fun consentCopyNamesTheExactSafeSixteenSourcePolicy() {
         val copy = batchConsentCopy(
             listOf(
                 *Array(15) { ContentWarning.SAFE },
                 ContentWarning.MIXED,
-                ContentWarning.NSFW,
             ),
         )
 
         assertEquals(
-            "15 عربي SAFE · MangaDex واحد MIXED · مصدر عربي واحد NSFW. " +
-                "قد تظهر صور فصول للبالغين أثناء الفحص.",
+            "15 عربي SAFE · MangaDex واحد MIXED · لا توجد مصادر NSFW في الدفعة. " +
+                "قد يعرض MangaDex محتوى مختلطًا أثناء الفحص.",
             copy,
         )
     }

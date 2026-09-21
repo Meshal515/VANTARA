@@ -4,10 +4,10 @@ package dev.vantara.spike
  * GENERATED FILE — do not hand edit.
  * index commit: e38245f4ecc7bd1858551c2ea149dbf8129dbad4
  * index sha256: 19675d37f5864dc6ebb9b3ae9cb30287990c2dddce949e205412f77c27b0921e
- * Keiyoushi e38245f4ecc7 · 17 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 1 · policy-blocked 0
+ * Keiyoushi e38245f4ecc7 · 16 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 0 · policy-blocked 0
  */
 const val GENERATED_INDEX_COMMIT = "e38245f4ecc7bd1858551c2ea149dbf8129dbad4"
-const val GENERATED_SNAPSHOT_NOTE = "Keiyoushi e38245f4ecc7 · 17 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 1 · policy-blocked 0"
+const val GENERATED_SNAPSHOT_NOTE = "Keiyoushi e38245f4ecc7 · 16 Arabic-capable packages · SAFE 15 · MIXED 1 · NSFW 0 · policy-blocked 0"
 
 val GENERATED_SPIKE_SOURCES: List<SourceSpec> = listOf(
     SourceSpec(
@@ -20,18 +20,6 @@ val GENERATED_SPIKE_SOURCES: List<SourceSpec> = listOf(
         warning = ContentWarning.SAFE,
         arabicSourceIds = setOf("1073624495230267708"),
         arabicSourceNames = listOf("مانجا العاشق"),
-        blockedReason = null,
-    ),
-    SourceSpec(
-        label = "Arab Toons",
-        pkg = "eu.kanade.tachiyomi.extension.ar.arabtoons",
-        expectedLib = 1.6,
-        apkUrl = "https://github.com/keiyoushi/extensions/releases/download/877d7a0/tachiyomi-ar.arabtoons-v1.6.56.apk",
-        sha256 = "7b7ceedad6f6341990c292438bd87bf2a3d985b69f259a12436a41984960298f",
-        versionName = "1.6.56",
-        warning = ContentWarning.NSFW,
-        arabicSourceIds = setOf("2424761902286195560"),
-        arabicSourceNames = listOf("عرب تونز"),
         blockedReason = null,
     ),
     SourceSpec(

@@ -53,4 +53,35 @@ class CatalogueCrawlCheckpointStoreTest {
         assertFalse(store.hasResumeState())
         assertTrue(store.hasAnyProgress())
     }
+
+    @Test
+    fun `catalogue progress from a different source snapshot is discarded`() {
+        val dir = Files.createTempDirectory("vantara-catalogue-checkpoint").toFile()
+        CatalogueCrawlCheckpointStore(dir).apply {
+            ensureSnapshot("old-snapshot")
+            savePage("old-source", 5, listOf("x"))
+        }
+
+        val recreated = CatalogueCrawlCheckpointStore(dir)
+        recreated.ensureSnapshot("new-snapshot")
+
+        assertFalse(recreated.hasAnyProgress())
+        assertEquals(null, recreated.load("old-source"))
+    }
+
+    @Test
+    fun `manual clear keeps the catalogue snapshot binding`() {
+        val dir = Files.createTempDirectory("vantara-catalogue-checkpoint").toFile()
+        CatalogueCrawlCheckpointStore(dir).apply {
+            ensureSnapshot("current-snapshot")
+            clear()
+            savePage("current-source", 2, listOf("x"))
+        }
+
+        val recreated = CatalogueCrawlCheckpointStore(dir)
+        recreated.ensureSnapshot("current-snapshot")
+
+        assertTrue(recreated.hasAnyProgress())
+        assertEquals(2, recreated.load("current-source")!!.nextPage)
+    }
 }

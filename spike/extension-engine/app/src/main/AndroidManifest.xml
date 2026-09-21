@@ -14,7 +14,7 @@
          والتعليق فوق الوسم لا داخله: تعليقٌ بين خصائص وسمٍ XML غير صالح،
          ويسقط دامجُ الـmanifest عليه — وهذا ما حدث فعلًا في اللفّة الثالثة. -->
     <application
-        android:label="VANTARA Spike"
+        android:label="VANTARA Spike SAFE 16"
         android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">

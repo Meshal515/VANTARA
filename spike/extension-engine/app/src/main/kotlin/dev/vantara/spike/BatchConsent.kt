@@ -6,7 +6,7 @@ fun requiresExplicitConsent(warnings: Collection<ContentWarning>): Boolean =
 
 /** Catalogue counting follows the approved batch; only owner-blocked sources stay excluded. */
 fun shouldCrawlCatalogue(warning: ContentWarning, blockedReason: String?): Boolean {
-    // Keep warning explicit so tests prove SAFE/MIXED/NSFW are all included.
+    // Keep warning explicit so policy tests cover every supported classification.
     return warning in ContentWarning.entries && blockedReason == null
 }
 
@@ -18,10 +18,15 @@ fun batchConsentCopy(warnings: Collection<ContentWarning>): String {
 
     val mixedCopy = if (mixed == 1) "MangaDex واحد MIXED" else "$mixed مصادر MIXED"
     val nsfwCopy = when (nsfw) {
+        0 -> "لا توجد مصادر NSFW في الدفعة"
         1 -> "مصدر عربي واحد NSFW"
         2 -> "مصدران عربيان NSFW"
         else -> "$nsfw مصادر NSFW"
     }
-    return "$safe عربي SAFE · $mixedCopy · $nsfwCopy. " +
+    val disclosure = if (nsfw == 0) {
+        "قد يعرض MangaDex محتوى مختلطًا أثناء الفحص."
+    } else {
         "قد تظهر صور فصول للبالغين أثناء الفحص."
+    }
+    return "$safe عربي SAFE · $mixedCopy · $nsfwCopy. $disclosure"
 }

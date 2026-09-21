@@ -7,6 +7,17 @@ class ProbeCheckpointStore(root: File) {
     private val report = File(root, "arabic-source-probe-report.txt")
     private val plan = File(root, "arabic-source-probe-plan.txt")
     private val completed = File(root, "arabic-source-probe-completed.txt")
+    private val snapshot = File(root, "arabic-source-probe-snapshot.txt")
+
+    /** Never resume or display a report produced by a different source batch. */
+    @Synchronized
+    fun ensureSnapshot(snapshotKey: String) {
+        val current = snapshot.takeIf { it.isFile }?.readText(Charsets.UTF_8)?.trim()
+        if (current == snapshotKey) return
+        clearData()
+        rootReady()
+        atomicWrite(snapshot, "$snapshotKey\n")
+    }
 
     @Synchronized
     fun reset(sourceKeys: List<String>) {
@@ -52,6 +63,10 @@ class ProbeCheckpointStore(root: File) {
 
     @Synchronized
     fun clear() {
+        clearData()
+    }
+
+    private fun clearData() {
         report.delete()
         plan.delete()
         completed.delete()

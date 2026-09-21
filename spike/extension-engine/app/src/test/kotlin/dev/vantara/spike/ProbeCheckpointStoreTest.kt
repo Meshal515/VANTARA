@@ -52,4 +52,38 @@ class ProbeCheckpointStoreTest {
         recreated.finish()
         assertEquals("complete audit\n", recreated.readReport())
     }
+
+    @Test
+    fun `checkpoint from a different source snapshot is discarded`() {
+        val dir = Files.createTempDirectory("vantara-probe-test").toFile()
+        ProbeCheckpointStore(dir).apply {
+            ensureSnapshot("old-snapshot")
+            reset(listOf("old-source"))
+            appendLine("old report")
+        }
+
+        val recreated = ProbeCheckpointStore(dir)
+        recreated.ensureSnapshot("new-snapshot")
+
+        assertEquals("", recreated.readReport())
+        assertTrue(recreated.remaining().isEmpty())
+        assertTrue(!recreated.hasPlan())
+    }
+
+    @Test
+    fun `manual clear keeps the current snapshot binding`() {
+        val dir = Files.createTempDirectory("vantara-probe-test").toFile()
+        ProbeCheckpointStore(dir).apply {
+            ensureSnapshot("current-snapshot")
+            clear()
+            reset(listOf("current-source"))
+            appendLine("current report")
+        }
+
+        val recreated = ProbeCheckpointStore(dir)
+        recreated.ensureSnapshot("current-snapshot")
+
+        assertEquals("current report\n", recreated.readReport())
+        assertEquals(listOf("current-source"), recreated.remaining())
+    }
 }

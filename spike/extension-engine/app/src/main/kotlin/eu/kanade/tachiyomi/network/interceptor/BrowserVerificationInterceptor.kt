@@ -32,7 +32,7 @@ internal fun looksLikeBrowserVerification(contentType: String?, html: String): B
 }
 
 /**
- * Solves HTTP-200 JavaScript verification shells (the current MangaLink gate).
+ * Solves HTTP-200 JavaScript verification shells for compatible sources.
  *
  * Unlike Cloudflare, this gate does not advertise a 403/503 or cf-mitigated
  * header. OkHttp receives a perfectly successful HTML document whose only

@@ -20,6 +20,17 @@ class CatalogueCrawlCheckpointStore(root: File) {
 
     private val dir = File(root, "catalogue-crawl")
     private val completed = File(dir, "completed.txt")
+    private val snapshot = File(dir, "snapshot.txt")
+
+    /** Catalogue pages are only resumable against the exact source batch. */
+    @Synchronized
+    fun ensureSnapshot(snapshotKey: String) {
+        val current = snapshot.takeIf { it.isFile }?.readText(Charsets.UTF_8)?.trim()
+        if (current == snapshotKey) return
+        dir.deleteRecursively()
+        dir.mkdirs()
+        atomicWrite(snapshot, "$snapshotKey\n")
+    }
 
     @Synchronized
     fun load(key: String): Resume? {
@@ -77,7 +88,9 @@ class CatalogueCrawlCheckpointStore(root: File) {
 
     @Synchronized
     fun clear() {
-        dir.deleteRecursively()
+        dir.listFiles()
+            ?.filterNot { it == snapshot }
+            ?.forEach { it.deleteRecursively() }
     }
 
     private fun metaFile(key: String) = File(dir, "state-${digest(key)}.txt")

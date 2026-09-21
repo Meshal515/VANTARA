@@ -46,8 +46,8 @@ import uy.kohesive.injekt.api.get
  * search -> details -> chapters -> pages -> image bytes/bitmap.
  *
  * كل حزمة مستقلة عن غيرها. سقوط مصدر لا يوقف التالي، وكل خطوة لها مهلة.
- * المصادر المتخصصة BL/GL محظورة ولا تُنزّل ولا تُشغّل. SAFE/MIXED/NSFW
- * تُفحص في تشغيل واحد، وبعد إقرار صريح تظهر صورة اختبار مصغّرة لكل مصدر
+ * المصادر المتخصصة BL/GL وكل حزم NSFW محظورة ولا تُنزّل ولا تُشغّل.
+ * SAFE وMIXED تُفحص في تشغيل واحد، وبعد إقرار صريح تظهر صورة اختبار مصغّرة لكل مصدر
  * يمرّ حتى الصورة.
  */
 class MainActivity : AppCompatActivity() {
@@ -70,6 +70,12 @@ class MainActivity : AppCompatActivity() {
                 injektReady = true
             }
         }
+        val batchFingerprint = buildString {
+            append(SPIKE_INDEX_COMMIT)
+            SPIKE_SOURCES.forEach { append('|').append(it.pkg).append(':').append(it.sha256) }
+        }
+        checkpoint.ensureSnapshot(batchFingerprint)
+        catalogueCheckpoint.ensureSnapshot(batchFingerprint)
         // The process may die after recording the last package but before finish().
         // Preserve the report and only remove the now-empty resume plan.
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
@@ -104,7 +110,7 @@ class MainActivity : AppCompatActivity() {
                         "هذه الدفعة تحتوي $batchSize حزمة. " +
                             batchConsentCopy(warnings) + " " +
                             "ستظهر صورة اختبار مصغّرة للمصدر إذا وصلت السلسلة إلى صورة فصل. " +
-                            "المتابعة تعني أنك بالغ وتوافق على فحص هذه المصادر داخل السبايك فقط.",
+                            "المتابعة تعني أنك توافق على فحص هذه المصادر داخل السبايك فقط.",
                     )
                     .setNegativeButton("إلغاء", null)
                     .setPositiveButton("أقر وأبدأ") { _, _ -> runUnified(this) }
@@ -127,7 +133,7 @@ class MainActivity : AppCompatActivity() {
                     .setMessage(
                         "سيُحصى كتالوج كل مصادر الدفعة وعددها $batchSize. " +
                             batchConsentCopy(warnings) + " " +
-                            "المتابعة تعني أنك بالغ وتوافق على الاتصال بهذه المصادر " +
+                            "المتابعة تعني أنك توافق على الاتصال بهذه المصادر " +
                             "وحفظ التقدم صفحة بصفحة داخل السبايك.",
                     )
                     .setNegativeButton("إلغاء", null)
@@ -426,7 +432,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على كل مصادر الدفعة قد
      * يأخذ وقتًا طويلًا، لذلك يحفظ بعد كل صفحة ويستأنف من موضعه. الإقرار
-     * يحصل في الزر قبل دخول هذه الدالة لأن الدفعة تضم MIXED وNSFW.
+     * يحصل في الزر قبل دخول هذه الدالة لأن الدفعة تضم MangaDex المصنّف MIXED.
      */
     private fun crawlAll(button: Button) {
         if (running) return

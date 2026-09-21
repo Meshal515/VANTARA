@@ -817,14 +817,14 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
     'Arabic discovery must use sources[].language, not directory naming',
   );
 
-  // والـfallback المحلي هو نفس دفعة الإقرار التي نسلّمها: 17 حزمة محددة،
-  // MangaDex وحده من namespace العام، ومصدر NSFW العربي المحدد فقط.
+  // والـfallback المحلي هو نفس الدفعة التي نسلّمها: 16 حزمة محددة،
+  // MangaDex وحده من namespace العام، ولا مصدر NSFW.
   const urls = [...fallback.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
   const hashes = [...fallback.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
   const packages = [...fallback.matchAll(/pkg = "([^"]+)"/g)].map((match) => match[1]);
   const warnings = [...fallback.matchAll(/warning = ContentWarning\.(SAFE|MIXED|NSFW)/g)]
     .map((match) => match[1]);
-  assert.equal(urls.length, 17, 'the delivered spike must contain exactly seventeen packages');
+  assert.equal(urls.length, 16, 'the delivered spike must contain exactly sixteen packages');
   assert.equal(hashes.length, urls.length, 'every fallback artifact needs its sha256');
   assert.deepEqual(
     packages.filter((pkg) => pkg.includes('.extension.all.')),
@@ -839,7 +839,7 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
   );
   assert.equal(warnings.filter((warning) => warning === 'SAFE').length, 15);
   assert.equal(warnings.filter((warning) => warning === 'MIXED').length, 1);
-  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 1);
+  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 0);
   assert.doesNotMatch(fallback, /goonscans|Goon Scans/i, 'Goon Scans was removed by owner request');
   assert.doesNotMatch(
     fallback,
@@ -851,16 +851,25 @@ test('the all-Arabic spike pins an index snapshot and copies published APK urls 
     /mangalink|Mangalink/i,
     'MangaLink requires persistent browser verification and must not ship as an automatic source',
   );
-  assert.match(
+  assert.doesNotMatch(
     fallback,
     /extension\.ar\.arabtoons/,
-    'Arab Toons must replace the intermittent ArabManhwa package',
+    'the owner removed every NSFW source from the delivered spike',
   );
   assert.match(fallback, /extension\.ar\.mangatime/, 'MangaTime must replace the browser-gated MangaLink package');
   for (const url of urls) assert.match(url, /^https:\/\/.*\.apk$/, url);
 });
 
-test('catalogue counting covers every non-blocked source in the seventeen-package batch', () => {
+test('the safe spike installs beside older debug builds', () => {
+  const gradle = read('spike/extension-engine/app/build.gradle.kts');
+  const manifest = read('spike/extension-engine/app/src/main/AndroidManifest.xml');
+
+  assert.match(gradle, /applicationId\s*=\s*"dev\.vantara\.spike\.safe16"/);
+  assert.match(gradle, /versionCode\s*=\s*2/);
+  assert.match(manifest, /android:label="VANTARA Spike SAFE 16"/);
+});
+
+test('catalogue counting covers every non-blocked source in the safe sixteen-package batch', () => {
   const activity = read(
     'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt',
   );
@@ -869,10 +878,38 @@ test('catalogue counting covers every non-blocked source in the seventeen-packag
   assert.doesNotMatch(
     activity,
     /private fun crawlAll[\s\S]*?warning == ContentWarning\.SAFE[\s\S]*?private fun catalogueStopLabel/,
-    'MIXED and owner-approved NSFW must not be silently omitted from catalogue counting',
+    'MIXED sources must not be silently omitted from catalogue counting',
   );
   assert.match(activity, /استئناف إحصاء كل المصادر/);
   assert.match(activity, /إحصاء كامل لكل المصادر/);
+});
+
+test('saved probe state is bound to the generated source snapshot', () => {
+  const activity = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt',
+  );
+
+  assert.match(activity, /append\(SPIKE_INDEX_COMMIT\)/);
+  assert.match(activity, /checkpoint\.ensureSnapshot\(batchFingerprint\)/);
+  assert.match(activity, /catalogueCheckpoint\.ensureSnapshot\(batchFingerprint\)/);
+
+  const probeStore = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/ProbeCheckpointStore.kt',
+  );
+  assert.doesNotMatch(
+    probeStore,
+    /fun clear\(\)[\s\S]*?snapshot\.delete\(\)/,
+    'manual report clearing must preserve the current snapshot binding',
+  );
+
+  const catalogueStore = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/CatalogueCrawlCheckpointStore.kt',
+  );
+  assert.doesNotMatch(
+    catalogueStore,
+    /fun clear\(\)[\s\S]*?dir\.deleteRecursively\(\)/,
+    'manual catalogue clearing must preserve the current snapshot binding',
+  );
 });
 
 test('no spike probe step can run without a deadline or an announcement', () => {
