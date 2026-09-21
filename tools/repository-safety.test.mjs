@@ -864,9 +864,9 @@ test('the safe spike installs beside older debug builds', () => {
   const gradle = read('spike/extension-engine/app/build.gradle.kts');
   const manifest = read('spike/extension-engine/app/src/main/AndroidManifest.xml');
 
-  assert.match(gradle, /applicationId\s*=\s*"dev\.vantara\.spike\.safe16"/);
-  assert.match(gradle, /versionCode\s*=\s*2/);
-  assert.match(manifest, /android:label="VANTARA Spike SAFE 16"/);
+  assert.match(gradle, /applicationId\s*=\s*"dev\.vantara\.spike\.catalogue16"/);
+  assert.match(gradle, /versionCode\s*=\s*3/);
+  assert.match(manifest, /android:label="VANTARA Spike Catalogue 16"/);
 });
 
 test('catalogue counting covers every non-blocked source in the safe sixteen-package batch', () => {
@@ -891,7 +891,11 @@ test('saved probe state is bound to the generated source snapshot', () => {
 
   assert.match(activity, /append\(SPIKE_INDEX_COMMIT\)/);
   assert.match(activity, /checkpoint\.ensureSnapshot\(batchFingerprint\)/);
-  assert.match(activity, /catalogueCheckpoint\.ensureSnapshot\(batchFingerprint\)/);
+  assert.match(
+    activity,
+    /catalogueCheckpoint\.ensureSnapshot\("\$batchFingerprint\|\$CATALOGUE_LISTING_SCHEMA"\)/,
+    'catalogue resume data must be invalidated when traversal semantics change',
+  );
 
   const probeStore = read(
     'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/ProbeCheckpointStore.kt',
