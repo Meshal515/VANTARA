@@ -32,6 +32,7 @@ internal suspend fun resolveFullCatalogueListing(
 ): ResolvedCatalogueListing {
     var firstFailure: Throwable? = null
     var firstEmpty: ResolvedCatalogueListing? = null
+    var finiteFallback: ResolvedCatalogueListing? = null
 
     for (kind in CatalogueListingKind.entries) {
         val page = try {
@@ -43,9 +44,17 @@ internal suspend fun resolveFullCatalogueListing(
         }
 
         val resolved = ResolvedCatalogueListing(kind, page)
-        if (page.mangas.isNotEmpty() || page.hasNextPage) return resolved
+        if (page.hasNextPage) return resolved
+        // SEARCH_ALL is the catalogue contract even when every title fits on
+        // one page. A finite POPULAR result may only be a ranking (Dilar = 10),
+        // so keep it as a last resort and still inspect LATEST.
+        if (kind == CatalogueListingKind.SEARCH_ALL && page.mangas.isNotEmpty()) return resolved
+        if (page.mangas.isNotEmpty() && finiteFallback == null) finiteFallback = resolved
         if (firstEmpty == null) firstEmpty = resolved
     }
 
-    return firstEmpty ?: throw firstFailure ?: IllegalStateException("no catalogue listing is available")
+    return finiteFallback
+        ?: firstEmpty
+        ?: throw firstFailure
+        ?: IllegalStateException("no catalogue listing is available")
 }
