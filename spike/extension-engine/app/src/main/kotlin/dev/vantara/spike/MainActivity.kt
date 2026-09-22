@@ -1,11 +1,14 @@
 package dev.vantara.spike
 
+import android.Manifest
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -23,11 +26,12 @@ import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import okhttp3.Request
 import kotlin.coroutines.cancellation.CancellationException
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.InjektModule
@@ -57,7 +61,12 @@ class MainActivity : AppCompatActivity() {
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val checkpoint by lazy { ProbeCheckpointStore(filesDir) }
     private val catalogueCheckpoint by lazy { CatalogueCrawlCheckpointStore(filesDir) }
+    private val crawlState by lazy { CatalogueCrawlStateStore(filesDir) }
     private var running = false
+    private lateinit var crawlButton: Button
+    private lateinit var crawlStatus: TextView
+    private lateinit var crawlResults: TextView
+    private var crawlRender: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,7 +83,6 @@ class MainActivity : AppCompatActivity() {
         // Preserve the report and only remove the now-empty resume plan.
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
         val hasPendingCheckpoint = checkpoint.hasCheckpoint()
-        val hasCatalogueProgress = catalogueCheckpoint.hasAnyProgress()
         val contentLabel = batchContentLabel(SPIKE_SOURCES.map { it.warning }.toSet())
         val batchSize = SPIKE_SOURCES.size
 
@@ -91,6 +99,12 @@ class MainActivity : AppCompatActivity() {
             }
             setOnClickListener {
                 if (running) return@setOnClickListener
+                if (CatalogueCrawlExecutionGate.isRunning()) {
+                    // الفحص والإحصاء على نفس المصادر في وقت واحد يضربان نفس المواقع
+                    // ويخلطان الأعطال؛ واحدٌ في كل مرة
+                    line("الإحصاء يجري في الخلفية — أوقفه أولًا ثم افحص.", bad = true)
+                    return@setOnClickListener
+                }
                 val warnings = SPIKE_SOURCES.map { it.warning }
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle(
@@ -113,14 +127,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         val crawl = Button(this).apply {
-            text =
-                if (hasCatalogueProgress) {
-                    "استأنف إحصاء كل المصادر ($batchSize)"
-                } else {
-                    "احصِ كتالوج كل المصادر ($batchSize) — يطول"
-                }
             setOnClickListener {
                 if (running) return@setOnClickListener
+                val state = crawlState.read()
+                val live = CatalogueCrawlExecutionGate.isRunning()
+                if (CatalogueCrawlUiPolicy.startAction(state, live) == CatalogueCrawlUiPolicy.StartAction.ATTACH) {
+                    CatalogueCrawlService.stop(this@MainActivity)
+                    renderCrawl()
+                    return@setOnClickListener
+                }
                 val warnings = SPIKE_SOURCES.map { it.warning }
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("إقرار إحصاء كل المصادر")
@@ -131,7 +146,7 @@ class MainActivity : AppCompatActivity() {
                             "وحفظ التقدم صفحة بصفحة داخل السبايك.",
                     )
                     .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("أقر وابدأ الإحصاء") { _, _ -> crawlAll(this) }
+                    .setPositiveButton("أقر وابدأ الإحصاء") { _, _ -> startCrawl() }
                     .show()
                 }
         }
@@ -152,12 +167,17 @@ class MainActivity : AppCompatActivity() {
             text = "مسح التقرير"
             setOnClickListener {
                 if (running) return@setOnClickListener
+                if (CatalogueCrawlExecutionGate.isRunning()) {
+                    line("الإحصاء يجري — أوقفه قبل المسح؛ المسح تحته يمحو ما يكتبه.", bad = true)
+                    return@setOnClickListener
+                }
                 log.removeAllViews()
                 checkpoint.clear()
                 catalogueCheckpoint.clear()
+                crawlState.clear()
                 printHeader()
                 runUnified.text = "اختبر الدفعة ($batchSize) — $contentLabel"
-                crawl.text = "احصِ كتالوج كل المصادر ($batchSize) — يطول"
+                renderCrawl()
             }
         }
 
@@ -168,8 +188,22 @@ class MainActivity : AppCompatActivity() {
             textDirection = View.TEXT_DIRECTION_LOCALE
             setTextColor(0xFF8899AA.toInt())
         }
+        crawlButton = crawl
+        crawlStatus = TextView(this).apply {
+            textSize = 13f
+            gravity = Gravity.START
+            textDirection = View.TEXT_DIRECTION_LOCALE
+        }
+        crawlResults = TextView(this).apply {
+            textSize = 12f
+            gravity = Gravity.START
+            textDirection = View.TEXT_DIRECTION_LOCALE
+            setTextIsSelectable(true)
+        }
         root.addView(runUnified)
         root.addView(crawl)
+        root.addView(crawlStatus)
+        root.addView(crawlResults)
         root.addView(copy)
         root.addView(clear)
         root.addView(status)
@@ -333,182 +367,84 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * العدّ الكامل بقي منفصلًا عن فحص الصحة. تشغيله على كل مصادر الدفعة قد
-     * يأخذ وقتًا طويلًا، لذلك يحفظ بعد كل صفحة ويستأنف من موضعه. الإقرار
-     * يحصل في الزر قبل دخول هذه الدالة لأن الدفعة تضم MangaDex المصنّف MIXED.
-     */
-    private fun crawlAll(button: Button) {
-        if (running) return
-        running = true
-        button.isEnabled = false
-
-        lifecycleScope.launch {
-            val loader = FileExtensionLoader(this@MainActivity)
-            val probe = SourceProbe(network.client)
-            val waiting = statusLine()
-            val sourcesToCrawl = SPIKE_SOURCES.filter {
-                shouldCrawlCatalogue(it.warning, it.blockedReason)
-            }
-            val resumed = catalogueCheckpoint.hasAnyProgress()
-            var allComplete = true
-
-            line("")
-            line(
-                if (resumed) {
-                    "── استئناف إحصاء كل المصادر من آخر صفحة محفوظة ──"
-                } else {
-                    "── إحصاء كامل لكل المصادر حتى يقول المصدر «لا مزيد» ──"
-                },
-                bold = true,
-            )
-            line("الحفظ الآن صفحة بصفحة؛ موت التطبيق لا يعيد المصدر إلى الصفحة 1.")
-
-            try {
-                for (spec in sourcesToCrawl) {
-                    val sources = try {
-                        obtainArabicSources(spec, loader, waiting)
-                    } catch (t: Throwable) {
-                        line(
-                            "✗ source-load-fatal — ${spec.label} — ${t.javaClass.name}: ${t.message?.take(300)}",
-                            bad = true,
-                        )
-                        allComplete = false
-                        continue
-                    }
-
-                    if (sources.isEmpty()) {
-                        allComplete = false
-                        continue
-                    }
-
-                    for (source in sources) {
-                        val key = "${spec.pkg}|${source.id}"
-                        val label = "${spec.label} / ${source.name}"
-
-                        if (catalogueCheckpoint.isComplete(key)) {
-                            line("✓ $label — مكتمل من جلسة سابقة؛ لن نعيده.")
-                            continue
-                        }
-
-                        val resume = catalogueCheckpoint.load(key)
-                        if (resume != null) {
-                            line(
-                                "↻ $label — استئناف من صفحة ${resume.nextPage} · " +
-                                    "محفوظ ${resume.seenKeys.size} عملًا",
-                                bold = true,
-                            )
-                        }
-
-                        val started = System.currentTimeMillis()
-                        val reach = try {
-                            withContext(Dispatchers.IO) {
-                                probe.crawlCatalogue(
-                                    source = source,
-                                    startPage = resume?.nextPage ?: 1,
-                                    initialSeen = resume?.seenKeys.orEmpty(),
-                                    onPageCommitted = { page, nextPage, newKeys, totalSeen ->
-                                        catalogueCheckpoint.savePage(
-                                            key = key,
-                                            nextPage = nextPage,
-                                            newKeys = newKeys,
-                                        )
-                                        if (page == 1 || page % CRAWL_REPORT_EVERY_PAGES == 0) {
-                                            withContext(Dispatchers.Main) {
-                                                line(
-                                                    "↳ $label — حُفظت الصفحة $page · " +
-                                                        "$totalSeen عملًا حتى الآن",
-                                                )
-                                            }
-                                        }
-                                    },
-                                ) { page, found ->
-                                    withContext(Dispatchers.Main) {
-                                        waiting("$label · صفحة $page · $found عملًا")
-                                    }
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            if (t is CancellationException && t !is TimeoutCancellationException) throw t
-                            line(
-                                "✗ crawl-fatal — $label — ${t.javaClass.name}: ${t.message?.take(300)}",
-                                bad = true,
-                            )
-                            allComplete = false
-                            continue
-                        }
-
-                        val seconds = (System.currentTimeMillis() - started) / 1000
-                        val countText =
-                            if (reach.reachedEnd) {
-                                "${reach.uniqueWorks}"
-                            } else {
-                                "على الأقل ${reach.uniqueWorks}"
-                            }
-                        line(
-                            "$label — أعمال فريدة: $countText · " +
-                                "صفحات ناجحة هذه الجلسة: ${reach.pagesFetched} · " +
-                                "آخر صفحة محاولة: ${reach.lastPageAttempted} · ${seconds}ث",
-                        )
-                        reach.listingKind?.let {
-                            line("↳ مسار الإحصاء: ${catalogueListingLabel(it)}")
-                        }
-                        if (reach.skippedPages.isNotEmpty()) {
-                            line(
-                                "↳ تجاوز آمن لصفحات Iken الخالية من المانجا: " +
-                                    reach.skippedPages.joinToString(),
-                            )
-                        }
-
-                        if (reach.reachedEnd) {
-                            catalogueCheckpoint.markComplete(key)
-                            line("✓ COMPLETE — بلغنا نهاية الكتالوج فعلًا")
-                        } else {
-                            allComplete = false
-                            line(
-                                "⚠ ${catalogueStopLabel(reach.stopKind)} — العدد جزئي ومحفوظ للاستئناف · " +
-                                    "السبب: ${reach.stoppedBecause}",
-                                bad = true,
-                            )
-                        }
-                    }
-                }
-            } finally {
-                waiting(null)
-                line("")
-                if (allComplete) {
-                    catalogueCheckpoint.clear()
-                    line("انتهى الإحصاء الكامل لكل المصادر.", bold = true)
-                    button.text = "احصِ كتالوج كل المصادر (${SPIKE_SOURCES.size}) — يطول"
-                } else {
-                    line(
-                        "انتهت هذه الجولة. غير المكتمل محفوظ صفحة بصفحة؛ اضغط استئناف لإكماله.",
-                        bold = true,
-                    )
-                    button.text = "استأنف إحصاء كل المصادر (${SPIKE_SOURCES.size})"
-                }
-                running = false
-                button.isEnabled = true
+    override fun onStart() {
+        super.onStart()
+        // الشاشة نافذة على الخدمة: تقرأ الحالة الدائمة كل ثانية وهي ظاهرة فقط
+        crawlRender = lifecycleScope.launch {
+            while (true) {
+                renderCrawl()
+                delay(CRAWL_RENDER_EVERY_MS)
             }
         }
     }
 
-    private fun catalogueStopLabel(kind: SourceProbe.CatalogueStopKind): String = when (kind) {
-        SourceProbe.CatalogueStopKind.COMPLETE -> "COMPLETE"
-        SourceProbe.CatalogueStopKind.REPEAT_SUSPECTED -> "LOOP_SUSPECTED"
-        SourceProbe.CatalogueStopKind.CLOUDFLARE -> "CLOUDFLARE"
-        SourceProbe.CatalogueStopKind.BROWSER_VERIFY -> "BROWSER_VERIFY"
-        SourceProbe.CatalogueStopKind.DEAD_HOST -> "DEAD_HOST"
-        SourceProbe.CatalogueStopKind.TIMEOUT -> "TIMEOUT"
-        SourceProbe.CatalogueStopKind.SOURCE_ERROR -> "SOURCE_ERROR"
-        SourceProbe.CatalogueStopKind.TIME_BUDGET -> "TIME_BUDGET"
-        SourceProbe.CatalogueStopKind.PAGE_CAP -> "PAGE_CAP"
+    override fun onStop() {
+        crawlRender?.cancel()
+        crawlRender = null
+        super.onStop()
     }
 
-    private fun catalogueListingLabel(kind: CatalogueListingKind): String = when (kind) {
-        CatalogueListingKind.SEARCH_ALL -> "كل الكتالوج (بحث بلا فلتر)"
-        CatalogueListingKind.POPULAR -> "التصفح الشائع (بديل توافق)"
-        CatalogueListingKind.LATEST -> "آخر الإضافات (بديل توافق)"
+    /**
+     * «احصِ» بعد إحصاءٍ اكتمل كله يعني إحصاءً جديدًا لا «لا شيء تبقّى». غير
+     * ذلك يكمل من نقاط الحفظ: المكتمل لا يُعاد، والموقوف يُحاوَل من صفحته.
+     */
+    private fun startCrawl() {
+        if (isFreshCrawl(crawlState.read())) {
+            catalogueCheckpoint.clear()
+            crawlState.clear()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            // الرفض لا يوقف شيئًا: الخدمة تعمل، والإشعار وحده يختفي
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
+        }
+        try {
+            CatalogueCrawlService.start(this)
+        } catch (t: RuntimeException) {
+            line("✗ تعذّر بدء خدمة الإحصاء — ${t.javaClass.simpleName}: ${t.message}", bad = true)
+        }
+        renderCrawl()
+    }
+
+    private fun isFreshCrawl(state: CatalogueCrawlState): Boolean {
+        if (!catalogueCheckpoint.hasAnyProgress()) return true
+        val pending = catalogueCheckpoint.hasResumeState() || crawlState.results().any { !it.complete }
+        return state.finished && !pending
+    }
+
+    private fun renderCrawl() {
+        val state = crawlState.read()
+        val live = CatalogueCrawlExecutionGate.isRunning()
+        crawlButton.text = CatalogueCrawlUiPolicy.buttonText(
+            state,
+            live,
+            SPIKE_SOURCES.size,
+            hasProgress = !isFreshCrawl(state),
+        )
+        crawlStatus.text = CatalogueCrawlUiPolicy.statusText(state, live).orEmpty()
+        crawlResults.text = crawlResultsText(crawlState.results())
+    }
+
+    private fun crawlResultsText(results: List<CatalogueSourceResult>): String {
+        if (results.isEmpty()) return ""
+        return buildString {
+            results.forEach { r ->
+                if (r.complete) {
+                    append("✓ ").append(r.label).append(" — ").append(r.uniqueWorks).append(" عملًا (كامل)")
+                } else {
+                    append("… ").append(r.label).append(" — على الأقل ").append(r.uniqueWorks)
+                        .append(" · ").append(r.note.lineSequence().first().take(120))
+                }
+                append('\n')
+            }
+            val done = results.count { it.complete }
+            // مجموعٌ قبل الدمج: نفس العمل في مصدرين يُعدّ مرّتين هنا
+            append("المجموع: ").append(results.sumOf { it.uniqueWorks })
+                .append(" عملًا في ").append(results.size).append(" مصدرًا · مكتمل ")
+                .append(done).append('/').append(results.size)
+                .append(" · قبل الدمج بين المصادر")
+        }
     }
 
     private suspend fun render(report: SourceProbe.Report) {
@@ -620,7 +556,8 @@ class MainActivity : AppCompatActivity() {
         const val PREVIEW_WIDTH_PX = 320
         const val PREVIEW_HEIGHT_PX = 480
         const val MAX_ONSCREEN_ITEMS = 500
-        const val CRAWL_REPORT_EVERY_PAGES = 10
+        const val CRAWL_RENDER_EVERY_MS = 1_000L
+        const val NOTIFICATION_PERMISSION_REQUEST = 7
     }
 }
 

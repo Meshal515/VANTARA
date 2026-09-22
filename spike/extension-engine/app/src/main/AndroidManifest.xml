@@ -6,6 +6,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- إحصاء الكتالوج يطول ساعات ويعيش بعد إغلاق الشاشة: خدمة أمامية من نوع
+         dataSync (أندرويد ١٤+ يطلب صلاحية النوع صراحة)، وقفل استيقاظ جزئي
+         بدل FLAG_KEEP_SCREEN_ON الذي كان يحتاج الشاشة مفتوحة، وصلاحية
+         الإشعار لأن أندرويد ١٣+ يخفي إشعار الخدمة بدونها. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- `usesCleartextTraffic` مسموح في هذا الـspike وحده: كثير من شبكات
          توصيل صور الفصول لا يزال على http، ومنعه هنا يُنتج **فشلًا كاذبًا**
          يُقرأ كعطل محرك وهو ليس منه. وفي الإنتاج يعود إلى false مع
@@ -27,5 +36,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- غير مُصدَّرة: لا تطبيق آخر يبدأ زحفًا ولا يوقفه. -->
+        <service
+            android:name=".CatalogueCrawlService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

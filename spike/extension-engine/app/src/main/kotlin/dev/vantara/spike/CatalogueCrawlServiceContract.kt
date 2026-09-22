@@ -40,4 +40,30 @@ object CatalogueCrawlServiceContract {
      */
     fun onRecreated(durableActive: Boolean): Recreated =
         if (durableActive) Recreated.RESUME else Recreated.STOP_SELF
+
+    enum class StopReason {
+        USER,
+
+        /**
+         * أندرويد ١٥ يعطي `dataSync` ست ساعات في كل ٢٤ ساعة، ثم يستدعي
+         * `onTimeout` وأمام الخدمة ثوانٍ لتنهي نفسها وإلا انهار التطبيق.
+         * فتحُ التطبيق يصفّر العدّاد — لذلك الرسالة تقول «افتح».
+         */
+        SYSTEM_TIME_LIMIT,
+
+        /** أندرويد رفض بدء الخدمة من الخلفية، أو الحدّ اليومي نفد قبل البدء. */
+        START_NOT_ALLOWED,
+
+        /** الخدمة أُنهيت ولم يطلب أحدٌ الإيقاف (أنهاها النظام مثلًا). */
+        INTERRUPTED,
+    }
+
+    fun stopMessage(reason: StopReason): String = when (reason) {
+        StopReason.USER -> "أوقفته أنت. ما جُمع محفوظ صفحة بصفحة."
+        StopReason.SYSTEM_TIME_LIMIT ->
+            "أوقفه أندرويد بعد حدّ الست ساعات. ما جُمع محفوظ — افتح التطبيق واضغط استأنف."
+        StopReason.START_NOT_ALLOWED ->
+            "أندرويد ما سمح يبدأ من الخلفية. ما جُمع محفوظ — اضغط استأنف والتطبيق مفتوح."
+        StopReason.INTERRUPTED -> "توقّف الإحصاء قبل أن يكمل. ما جُمع محفوظ — اضغط استأنف."
+    }
 }

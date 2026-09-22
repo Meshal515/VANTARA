@@ -78,6 +78,27 @@ class CatalogueCrawlServiceContractTest {
     }
 
     @Test
+    fun `android's six hour limit tells the user how to continue`() {
+        // أندرويد ١٥ يوقف dataSync بعد ست ساعات في اليوم؛ فتح التطبيق يصفّر العدّاد
+        val text = CatalogueCrawlServiceContract.stopMessage(CatalogueCrawlServiceContract.StopReason.SYSTEM_TIME_LIMIT)
+        assertTrue(text.contains("افتح التطبيق"))
+        assertTrue(text.contains("استأنف"))
+    }
+
+    @Test
+    fun `a refused start does not pretend to run`() {
+        val text = CatalogueCrawlServiceContract.stopMessage(CatalogueCrawlServiceContract.StopReason.START_NOT_ALLOWED)
+        assertTrue(text.contains("استأنف"))
+    }
+
+    @Test
+    fun `every stop reason keeps the collected works`() {
+        CatalogueCrawlServiceContract.StopReason.values().forEach { reason ->
+            assertTrue(reason.name, CatalogueCrawlServiceContract.stopMessage(reason).contains("محفوظ"))
+        }
+    }
+
+    @Test
     fun `start and stop actions are distinct and namespaced`() {
         assertTrue(CatalogueCrawlServiceContract.ACTION_START.startsWith("dev.vantara.spike."))
         assertTrue(CatalogueCrawlServiceContract.ACTION_STOP.startsWith("dev.vantara.spike."))
