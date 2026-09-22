@@ -870,32 +870,53 @@ test('the safe spike installs beside older debug builds', () => {
 });
 
 test('catalogue counting covers every non-blocked source in the safe sixteen-package batch', () => {
-  const activity = read(
-    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt',
-  );
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const runner = read(`${spike}CatalogueCrawlRunner.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
+  const ui = read(`${spike}CatalogueCrawlUiPolicy.kt`);
 
-  assert.match(activity, /private fun crawlAll\(button: Button\)/);
+  // The batch is filtered by policy only (blocked/NSFW), never by SAFE.
+  assert.match(runner, /specs\.filter \{ shouldCrawlCatalogue\(it\.warning, it\.blockedReason\) \}/);
   assert.doesNotMatch(
-    activity,
-    /private fun crawlAll[\s\S]*?warning == ContentWarning\.SAFE[\s\S]*?private fun catalogueStopLabel/,
+    runner,
+    /ContentWarning\.SAFE/,
     'MIXED sources must not be silently omitted from catalogue counting',
   );
-  assert.match(activity, /استئناف إحصاء كل المصادر/);
-  assert.match(activity, /إحصاء كامل لكل المصادر/);
+  assert.match(service, /specs = SPIKE_SOURCES,/);
+  assert.match(ui, /استأنف إحصاء كل المصادر/);
+  assert.match(ui, /احصِ كتالوج كل المصادر/);
+});
+
+test('the catalogue crawl is owned by the foreground service, not the screen', () => {
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const activity = read(`${spike}MainActivity.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
+
+  // A crawl inside lifecycleScope died with the screen; that is why counts
+  // looked far smaller than the sources are.
+  assert.doesNotMatch(activity, /crawlCatalogue\(/, 'MainActivity must not run the crawl itself');
+  assert.match(activity, /CatalogueCrawlService\.start\(this\)/);
+  assert.match(service, /probe\.crawlCatalogue\(/);
+  assert.match(service, /override fun onTimeout\(startId: Int, fgsType: Int\)/);
 });
 
 test('saved probe state is bound to the generated source snapshot', () => {
-  const activity = read(
-    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/MainActivity.kt',
-  );
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const activity = read(`${spike}MainActivity.kt`);
+  const snapshot = read(`${spike}ArabicSourceLoading.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
 
-  assert.match(activity, /append\(SPIKE_INDEX_COMMIT\)/);
-  assert.match(activity, /checkpoint\.ensureSnapshot\(batchFingerprint\)/);
+  assert.match(snapshot, /append\(SPIKE_INDEX_COMMIT\)/);
+  assert.match(activity, /checkpoint\.ensureSnapshot\(spikeBatchFingerprint\(\)\)/);
   assert.match(
-    activity,
-    /catalogueCheckpoint\.ensureSnapshot\("\$batchFingerprint\|\$CATALOGUE_LISTING_SCHEMA"\)/,
+    snapshot,
+    /fun catalogueSnapshotKey\(\): String = "\$\{spikeBatchFingerprint\(\)\}\|\$CATALOGUE_LISTING_SCHEMA"/,
     'catalogue resume data must be invalidated when traversal semantics change',
   );
+  // Screen and service must bind to the same key, or one wipes the other's pages.
+  assert.match(activity, /catalogueCheckpoint\.ensureSnapshot\(catalogueSnapshotKey\(\)\)/);
+  assert.match(service, /val snapshotKey = catalogueSnapshotKey\(\)/);
+  assert.match(service, /checkpoint\.ensureSnapshot\(snapshotKey\)/);
 
   const probeStore = read(
     'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/ProbeCheckpointStore.kt',
