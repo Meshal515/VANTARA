@@ -64,21 +64,12 @@ class MainActivity : AppCompatActivity() {
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WebViewActivityHolder.set(this)
-        synchronized(INJEKT_LOCK) {
-            if (!injektReady) {
-                Injekt.importModule(SpikeModule(application))
-                injektReady = true
-            }
-        }
-        val batchFingerprint = buildString {
-            append(SPIKE_INDEX_COMMIT)
-            SPIKE_SOURCES.forEach { append('|').append(it.pkg).append(':').append(it.sha256) }
-        }
-        checkpoint.ensureSnapshot(batchFingerprint)
+        ensureSpikeInjekt(application)
+        checkpoint.ensureSnapshot(spikeBatchFingerprint())
         // Page 19 from the former popularity feed is not page 19 of the full
         // catalogue. Bind resume data to both the source snapshot and traversal
         // contract so a routing fix can never inherit a false COMPLETE marker.
-        catalogueCheckpoint.ensureSnapshot("$batchFingerprint|$CATALOGUE_LISTING_SCHEMA")
+        catalogueCheckpoint.ensureSnapshot(catalogueSnapshotKey())
         // The process may die after recording the last package but before finish().
         // Preserve the report and only remove the now-empty resume plan.
         if (checkpoint.hasPlan() && checkpoint.remaining().isEmpty()) checkpoint.finish()
@@ -213,102 +204,12 @@ class MainActivity : AppCompatActivity() {
         return { what -> status.text = if (what == null) "" else "⟳ $what — جارٍ…" }
     }
 
-    /**
-     * تنزيل الحزمة الموثقة وتحميلها ثم استخراج المصادر العربية المقصودة.
-     *
-     * الأهم هنا أننا لا نستعمل `first()`: الإضافة متعددة اللغات قد يكون
-     * أول CatalogueSource فيها إنجليزيًا. نطابق source.id الذي جاء من
-     * index.json، ثم نستعمل lang=ar fallback فقط للـfallback الخماسي المحلي.
-     */
     private suspend fun obtainArabicSources(
         spec: SourceSpec,
         loader: FileExtensionLoader,
         waiting: (String?) -> Unit,
-    ): List<CatalogueSource> {
-        line("")
-        line("═══ ${spec.label} ═══", bold = true)
-        line(
-            "الحزمة ${spec.pkg} · v${spec.versionName} · lib ${spec.expectedLib} · " +
-                "${spec.warning}",
-        )
-
-        spec.blockedReason?.let { reason ->
-            line("⊘ BLOCKED — $reason", bad = true)
-            return emptyList()
-        }
-
-        waiting("${spec.label} · تنزيل")
-        val cached = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
-        val apk = if (cached != null) {
-            line("✓ cache — ${cached.size} بايت · SHA-256 مطابق")
-            cached
-        } else {
-            val downloaded: Result<ByteArray> = withContext(Dispatchers.IO) {
-                runCatching {
-                    // Extension APK delivery is infrastructure, not source health.
-                    // A short Android DNS outage must not permanently condemn the
-                    // next source (the previous run lost Hijala while github.com
-                    // itself temporarily failed to resolve).
-                    retryTransientNetwork(maxAttempts = 5, delayMs = 1_000) {
-                        network.client
-                            .newCall(Request.Builder().url(spec.apkUrl).build())
-                            .execute().use { res ->
-                                require(res.isSuccessful) {
-                                    "HTTP ${res.code} ← ${spec.apkUrl}"
-                                }
-                                res.body.bytes()
-                            }
-                    }
-                }
-            }
-            downloaded.getOrElse {
-                line("✗ download — ${it.javaClass.simpleName}: ${it.message}", bad = true)
-                return emptyList()
-            }.also { line("✓ download — ${it.size} بايت") }
-        }
-
-        waiting("${spec.label} · تحميل من ملف")
-        val loaded = try {
-            withContext(Dispatchers.IO) { loader.load(spec, apk) }
-        } catch (t: Throwable) {
-            line("✗ loader-fatal — ${t.javaClass.name}: ${t.message?.take(300)}", bad = true)
-            return emptyList()
-        }
-
-        return when (loaded) {
-            is FileExtensionLoader.Result.Fail -> {
-                line("✗ ${loaded.stage} — ${loaded.reason}", bad = true)
-                loaded.cause?.let { line("   ${it.javaClass.simpleName}: ${it.message}") }
-                emptyList()
-            }
-
-            is FileExtensionLoader.Result.Ok -> {
-                val all = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-                val exact = if (spec.arabicSourceIds.isNotEmpty()) {
-                    all.filter { it.id.toString() in spec.arabicSourceIds }
-                } else {
-                    emptyList()
-                }
-                val arabic = if (exact.isNotEmpty()) exact else all.filter { it.lang.equals("ar", true) }
-
-                if (arabic.isEmpty()) {
-                    line(
-                        "✗ source-select — الحزمة حُمّلت لكن لم نجد source.id عربيًا مطابقًا " +
-                            "(catalogue=${all.size})",
-                        bad = true,
-                    )
-                    emptyList()
-                } else {
-                    line(
-                        "✓ load — ${all.size} CatalogueSource · عربي مطابق ${arabic.size} · " +
-                            "lib ${loaded.loaded.libVersion}",
-                    )
-                    arabic.forEach { line("   ↳ ${it.name} · id=${it.id} · lang=${it.lang}") }
-                    arabic
-                }
-            }
-        }
-    }
+    ): List<CatalogueSource> =
+        loadArabicSources(spec, loader, network.client, { text, bold, bad -> line(text, bold, bad) }, waiting)
 
     private fun runUnified(button: Button) {
         if (running) return
@@ -720,9 +621,22 @@ class MainActivity : AppCompatActivity() {
         const val PREVIEW_HEIGHT_PX = 480
         const val MAX_ONSCREEN_ITEMS = 500
         const val CRAWL_REPORT_EVERY_PAGES = 10
+    }
+}
 
-        val INJEKT_LOCK = Any()
-        var injektReady = false
+private val INJEKT_LOCK = Any()
+private var injektReady = false
+
+/**
+ * الشاشة والخدمة كلتاهما قد تكون أول ما يعمل في العملية: أندرويد يعيد إنشاء
+ * خدمة `START_STICKY` بلا شاشة، والإضافات تطلب `NetworkHelper` من Injekt.
+ */
+fun ensureSpikeInjekt(application: Application) {
+    synchronized(INJEKT_LOCK) {
+        if (!injektReady) {
+            Injekt.importModule(SpikeModule(application))
+            injektReady = true
+        }
     }
 }
 
