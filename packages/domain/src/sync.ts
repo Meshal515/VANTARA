@@ -148,6 +148,7 @@ export type OpKind =
   | 'reaction.set'
   | 'recommendation.send'
   | 'recommendation.respond'
+  | 'frame.send'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'

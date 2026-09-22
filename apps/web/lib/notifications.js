@@ -14,6 +14,7 @@
 /** نص كل نوع كما يُقرأ في التنبيه والإعدادات. */
 export const NOTIFICATION_LABELS = {
   RECOMMENDATION: 'التوصيات',
+  FRAME: 'الفريمات',
   COMMENT_REPLY: 'الردود والتعليقات',
   REACTION: 'التفاعلات',
   FRIEND_ACTIVITY: 'نشاط الأصدقاء',

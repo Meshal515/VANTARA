@@ -669,3 +669,64 @@ describe('relational social ops survive stale/off-series references', () => {
     ).toEqual([]);
   });
 });
+
+describe('frame.send', () => {
+  const work = { url: '/manga/1', title: 'ون بيس', thumbnailUrl: 'https://cdn.example/c.jpg', memo: '{"k":1}' };
+  const chapter = { url: '/manga/1/1100', name: 'الفصل 1100', memo: '' };
+  const base = {
+    toId: 'ngm',
+    sourceId: 'eu.kanade.tachiyomi.extension.ar.teamx',
+    work,
+    chapter,
+    pages: [{ index: 4, imageUrl: 'https://cdn.example/4.webp' }, { index: 5 }],
+    message: 'شوف هالمشهد',
+  };
+
+  it('stores page references for exactly one friend and notifies only them', () => {
+    const out = translate('frame.send', base);
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'));
+    expect(insert).toBeDefined();
+    // id, from, to, source ...
+    expect(insert!.values.slice(0, 4)).toEqual(['op-1', 'dahmi', 'ngm', base.sourceId]);
+    expect(JSON.parse(String(insert!.values.at(-4)))).toEqual([
+      { index: 4, url: '', imageUrl: 'https://cdn.example/4.webp' },
+      { index: 5, url: '', imageUrl: null },
+    ]);
+
+    const notes = out.filter((s) => s.sql.includes('INSERT INTO notifications'));
+    expect(notes).toHaveLength(1);
+    const [note] = notes;
+    expect(note?.values).toContain('ngm');
+    expect(note?.values).toContain('FRAME');
+    expect(note?.values).toContain('vantara://frame/op-1');
+  });
+
+  it('keeps the work memo intact for the recipient engine', () => {
+    const out = translate('frame.send', base);
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    const stored = insert.values.map(String).find((v) => v.includes('"memo"'))!;
+    expect(JSON.parse(stored).memo).toBe('{"k":1}');
+  });
+
+  it('a frame without a single recipient is refused, never broadcast', () => {
+    // التوصية بلا مستلم تعني «للجميع»؛ الفريم لا: هو لقطة لشخص
+    expect(translate('frame.send', { ...base, toId: undefined })).toEqual([]);
+  });
+
+  it('a frame to yourself or to a stranger is refused', () => {
+    expect(translate('frame.send', { ...base, toId: 'dahmi' })).toEqual([]);
+    expect(translate('frame.send', { ...base, toId: 'someone-else' })).toEqual([]);
+  });
+
+  it('a frame without valid pages or chapter is refused', () => {
+    expect(translate('frame.send', { ...base, pages: [] })).toEqual([]);
+    expect(translate('frame.send', { ...base, pages: [{ index: -2 }] })).toEqual([]);
+    expect(translate('frame.send', { ...base, chapter: null })).toEqual([]);
+    expect(translate('frame.send', { ...base, sourceId: '' })).toEqual([]);
+  });
+
+  it('retrying the same op does not send the frame twice', () => {
+    const out = translate('frame.send', base);
+    expect(out.find((s) => s.sql.includes('INSERT INTO frames'))!.sql).toMatch(/ON CONFLICT \(id\) DO NOTHING/);
+  });
+});

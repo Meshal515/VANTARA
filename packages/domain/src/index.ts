@@ -16,3 +16,4 @@ export * from './top-works.ts';
 export * from './read-together.ts';
 export * from './week.ts';
 export * from './correlation.ts';
+export * from './frames.ts';

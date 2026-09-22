@@ -17,7 +17,8 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
-import { screenCatalog, screenExtReader, screenWork } from './screens/sources.js';
+import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
+import { frameIdFromLink } from './lib/frame.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
@@ -801,7 +802,9 @@ async function screenNotifications() {
       item.addEventListener('click', () => {
         if (!row.read) sync.enqueue('notification.read', { id: row.id });
         // الرابط العميق يفتح المكان الصحيح لا الرئيسية
-        if (row.series_ref) void go({ name: 'series', id: row.series_ref });
+        const frameId = frameIdFromLink(row.link);
+        if (frameId) void go({ name: 'frame', id: frameId });
+        else if (row.series_ref) void go({ name: 'series', id: row.series_ref });
       });
       list.append(item);
     }
@@ -1652,7 +1655,44 @@ function screenDeps() {
     setScreen: (name) => {
       state.screen = name;
     },
+    frames: sync.user ? frameCapability() : null,
   };
+}
+
+/**
+ * ما يحتاجه القارئ ليرسل فريمًا، بلا أن يعرف `sync`.
+ *
+ * كل الحسابات لا المتصلين وحدهم: الفريم يصل صديقًا نائمًا ويجده حين يفتح.
+ */
+function frameCapability() {
+  return {
+    friends: () => {
+      const meId = sync.user?.userId;
+      return sync
+        .rows('accounts', (row) => row.user_id !== meId)
+        .map((row) => ({
+          userId: row.user_id,
+          displayName: nameOf(row.user_id),
+          avatarKey: sync.rows('profiles', (p) => p.user_id === row.user_id)[0]?.avatar_key ?? null,
+        }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+    },
+    send: (payload) => {
+      sync.enqueue('frame.send', payload);
+    },
+  };
+}
+
+/** الفريم من المرآة، أو بعد سحبٍ واحد إن لم يصل بعد (إشعارٌ سبق صفَّه). */
+async function screenFrameById(id) {
+  const find = () => sync.rows('frames', (row) => row.id === id)[0];
+  let frame = find();
+  if (!frame) {
+    await sync.pull();
+    frame = find();
+  }
+  if (!frame) return screenPlaceholder('فريم', 'الفريم ما وصل بعد — جرّب بعد شوي.');
+  return screenFrame({ ...screenDeps(), frame, fromName: nameOf(frame.from_id) });
 }
 
 async function go(route) {
@@ -1698,8 +1738,11 @@ async function go(route) {
         manga: route.manga,
         chapter: route.chapter,
         work: route.work,
+        back: route.back,
         standalone: route.standalone,
       });
+    case 'frame':
+      return screenFrameById(route.id);
     case 'friends':
       return screenFriends();
     case 'friend':
@@ -2074,13 +2117,19 @@ function toastNewNotifications() {
     toastedIds.add(row.id);
     const actor = sync.row('profiles', row.actor_id)?.display_name ?? 'صديق';
     const title =
-      row.kind === 'RECOMMENDATION' ? `${actor} أوصى بعمل` : NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+      row.kind === 'RECOMMENDATION'
+        ? `${actor} أوصى بعمل`
+        : row.kind === 'FRAME'
+          ? `${actor} أرسل لك فريم`
+          : NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
     showToast({
       title,
       body: row.body ?? '',
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        if (row.series_ref) void go({ name: 'series', id: row.series_ref });
+        const frameId = frameIdFromLink(row.link);
+        if (frameId) void go({ name: 'frame', id: frameId });
+        else if (row.series_ref) void go({ name: 'series', id: row.series_ref });
         else void go({ name: 'notifications' });
       },
     });

@@ -37,6 +37,8 @@ import {
   weekEnding,
   CORRELATION_HEADER,
   correlationIdFrom,
+  frameLinkFor,
+  normalizeFramePages,
 } from '@vantara/domain';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
@@ -230,6 +232,10 @@ const DELTA_TABLES = [
   ['accounts', 'user_id, username, created_at, rev'],
   ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
+  [
+    'frames',
+    'id, from_id, to_id, source_id, series_title, chapter_label, cover_url, work_json, chapter_json, pages_json, message, created_at, rev',
+  ],
   // `owner_synced` يسافر مع الصف: العميل يجب أن يعرف أن هذه القيمة لم يرها
   // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
   ['progress', 'user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced'],
@@ -289,6 +295,10 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
           sql: ' AND (user_id = ? OR recommendation_id IN (SELECT id FROM recommendations WHERE from_id = ?))',
           values: [userId, userId],
         };
+
+      // الفريم بين اثنين فقط: لا «للجميع»، والثالث لا يرى حتى وجوده.
+      case 'frames':
+        return { sql: ' AND (from_id = ? OR to_id = ?)', values: [userId, userId] };
 
       // التوصية الموجّهة لا تخص الصديق الثالث. broadcast (to_id IS NULL)
       // اجتماعية للجميع، والمرسل يرى دائمًا ما أرسله.
@@ -420,6 +430,42 @@ function asString(value: unknown, max = 500): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.slice(0, max);
+}
+
+/**
+ * العمل كما يحتاجه محرّك المستلم ليطلب الفصل نفسه، لا أكثر.
+ *
+ * `memo` يعود كما خرج من المصدر (عقد lib 1.6). الوصف والتصنيفات تسقط: لا
+ * يحتاجها القارئ الصغير، وتكبّر كل صف بلا فائدة.
+ */
+function frameWork(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const url = asString(v['url'], 1000);
+  if (!url) return null;
+  return {
+    url,
+    title: asString(v['title'], 300) ?? '',
+    thumbnailUrl: asString(v['thumbnailUrl'], 600),
+    memo: typeof v['memo'] === 'string' ? v['memo'].slice(0, 4000) : '',
+  };
+}
+
+function frameChapter(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const url = asString(v['url'], 1000);
+  if (!url) return null;
+  const chapterNumber = typeof v['chapterNumber'] === 'number' && Number.isFinite(v['chapterNumber'])
+    ? v['chapterNumber']
+    : -1;
+  return {
+    url,
+    name: asString(v['name'], 300) ?? '',
+    chapterNumber,
+    scanlator: asString(v['scanlator'], 200),
+    memo: typeof v['memo'] === 'string' ? v['memo'].slice(0, 4000) : '',
+  };
 }
 
 function asNumber(value: unknown): number | null {
@@ -1100,6 +1146,56 @@ export function statementsFor(
       return statements;
     }
 
+    // «فريم»: صفحات من فصل لصديق واحد. مراجع لا صور — المستلم يجلبها من
+    // المصدر بمحرّكه. لا «للجميع» هنا بخلاف التوصية: الفريم لقطةٌ لشخص.
+    case 'frame.send': {
+      const toId = asString(p['toId'], 80);
+      const sourceId = asString(p['sourceId'], 200);
+      const work = frameWork(p['work']);
+      const chapter = frameChapter(p['chapter']);
+      const pages = normalizeFramePages(p['pages']);
+      if (!toId || !sourceId || !work || !chapter || !pages) return null;
+      const recipients = notificationTargets({ accounts: ctx.accounts, actorId: userId, to: toId });
+      if (recipients.length !== 1) return null;
+      const link = frameLinkFor(op.opId);
+      const message = asString(p['message'], 500);
+      return [
+        db
+          .prepare(
+            `INSERT INTO frames
+               (id, from_id, to_id, source_id, series_title, chapter_label, cover_url,
+                work_json, chapter_json, pages_json, message, created_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO NOTHING`,
+          )
+          .bind(
+            op.opId,
+            userId,
+            toId,
+            sourceId,
+            work.title,
+            chapter.name,
+            work.thumbnailUrl,
+            JSON.stringify(work),
+            JSON.stringify(chapter),
+            JSON.stringify(pages),
+            message,
+            now,
+            rev,
+          ),
+        ...notificationStatements(db, {
+          opId: op.opId,
+          kind: 'FRAME',
+          recipients,
+          actorId: userId,
+          body: message ?? work.title,
+          link,
+          now,
+          rev,
+        }),
+      ];
+    }
+
     case 'recommendation.respond': {
       const recommendationId = asString(p['recommendationId'], 80);
       const state = asString(p['state'], 20);
@@ -1259,6 +1355,7 @@ const DEPRECATED_NOOP_KINDS = new Set(['activity.add']);
 /** العمليات التي تحتاج قائمة الحسابات (بثّ لكل المستلمين). */
 const ACCOUNT_AWARE_KINDS = new Set([
   'recommendation.send',
+  'frame.send',
   'rating.set',
   'comment.add',
   'reaction.set',

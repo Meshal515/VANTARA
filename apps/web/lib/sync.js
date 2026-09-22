@@ -75,6 +75,8 @@ const KEYS = {
   works: (row) => row.series_ref,
   reactions: (row) => `${row.comment_id}/${row.user_id}/${row.emoji}`,
   recommendations: (row) => row.id,
+  // الفريم: صف لكل مستلم. بلا مفتاح يُلقى ويعبر المؤشر فوقه فلا يصل أبدًا
+  frames: (row) => row.id,
   // حالة كل مستلم مستقلة (§19): بلا هذا لا يظهر «منصور قبل · NGM رفض»
   recommendation_recipients: (row) => `${row.recommendation_id}/${row.user_id}`,
   notifications: (row) => row.id,

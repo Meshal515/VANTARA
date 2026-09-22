@@ -241,3 +241,25 @@ describe('sync privacy boundaries', () => {
     expect(serialized).not.toContain('favorite-other');
   });
 });
+
+describe('frame privacy', () => {
+  function insertFrame(db: ReturnType<typeof testEnv>['db'], id: string, from: string, to: string, rev: number) {
+    db.prepare(
+      `INSERT INTO frames
+         (id, from_id, to_id, source_id, series_title, chapter_label, cover_url,
+          work_json, chapter_json, pages_json, message, created_at, rev)
+       VALUES (?, ?, ?, 'pkg', 'عمل', 'الفصل 1', NULL, '{"url":"/w"}', '{"url":"/c"}', '[{"index":1}]', NULL, ?, ?)`,
+    ).run(id, from, to, rev, rev);
+  }
+
+  it('a frame reaches only its sender and its recipient', async () => {
+    const { env, db } = testEnv();
+    insertFrame(db, 'to-viewer', OTHER, VIEWER, 11);
+    insertFrame(db, 'from-viewer', VIEWER, THIRD, 12);
+    // بين صديقين آخرين: المشاهد لا يرى حتى وجوده
+    insertFrame(db, 'between-others', OTHER, THIRD, 13);
+
+    const changes = await pull(env);
+    expect(ids(changes.frames, 'id')).toEqual(['from-viewer', 'to-viewer']);
+  });
+});
