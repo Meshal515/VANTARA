@@ -45,7 +45,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import dev.vantara.spike.ChromeUserAgent
 import dev.vantara.spike.CloudflareInteractiveAction
-import dev.vantara.spike.cloudflareInteractiveAction
+import dev.vantara.spike.CloudflareInteractionMode
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -69,10 +69,10 @@ class CloudflareInterceptor(
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // This APK is an automated source batch probe. It must never replace the
+    // The spike is an automated source batch probe: it must never replace the
     // whole activity with a human Cloudflare challenge while dozens of sources
-    // are queued behind it.
-    private val batchProbe = true
+    // are queued behind it. The reader app shares this file and opts into the
+    // visible challenge through CloudflareInteractionMode.
 
     /** Serializes WebView work and remembers what we've learned per host. */
     private val solveLock = Any()
@@ -252,7 +252,7 @@ class CloudflareInterceptor(
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
                         interactive.set(true)
-                        when (cloudflareInteractiveAction(batchProbe)) {
+                        when (CloudflareInteractionMode.action()) {
                             CloudflareInteractiveAction.FAIL_FAST -> finish(SolveOutcome.INTERACTIVE)
                             CloudflareInteractiveAction.SHOW_BROWSER -> showInteractive(view, request.url.host)
                         }

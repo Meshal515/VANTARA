@@ -1102,3 +1102,43 @@ test('live D1 verifier cleans durable fixture op claims between runs', () => {
     're-running live verification must not collide with durable op_claims left by the previous run',
   );
 });
+
+test('the reader app runs the exact engine the spike proved on device', () => {
+  // The app once kept an older copy of the spike engine: five sources, no
+  // package/version identity check, no per-source repairs, and `first()`
+  // source selection that could hand MangaDex's English catalogue to an
+  // Arabic reader. Shared files must now be byte-identical.
+  const shared = [
+    'dev/vantara/spike/Sources.kt',
+    'dev/vantara/spike/GeneratedSources.kt',
+    'dev/vantara/spike/FileExtensionLoader.kt',
+    'dev/vantara/spike/SourceCompatRepairs.kt',
+    'dev/vantara/spike/DilarCryptoCompat.kt',
+    'dev/vantara/spike/ChromeUserAgent.kt',
+    'dev/vantara/spike/CloudflareInteractionPolicy.kt',
+    'dev/vantara/spike/ArabicSourceSelection.kt',
+    'dev/vantara/spike/ProbeResiliencePolicy.kt',
+    'dev/vantara/spike/ImagePayloadPolicy.kt',
+    'dev/vantara/spike/BoundedPayloadReader.kt',
+    'dev/vantara/spike/RxAwait.kt',
+    'eu/kanade/tachiyomi/network/NetworkHelper.kt',
+    'eu/kanade/tachiyomi/network/interceptor/BrowserVerificationInterceptor.kt',
+    'eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt',
+  ];
+  for (const file of shared) {
+    assert.equal(
+      read(`android/app/src/main/kotlin/${file}`),
+      read(`spike/extension-engine/app/src/main/kotlin/${file}`),
+      `${file} drifted between the spike and the reader app`,
+    );
+  }
+
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+  assert.match(plugin, /selectArabicSources\(spec, all\)/);
+  assert.doesNotMatch(plugin, /filterIsInstance<CatalogueSource>\(\)\.firstOrNull\(\)/);
+  assert.match(plugin, /SourceCompatRepairs\.loadSeries\(/);
+  assert.match(plugin, /SourceCompatRepairs\.loadPages\(/);
+  assert.doesNotMatch(plugin, /source\.getPageList\(/, 'pages must go through the per-source repairs');
+  // The reader solves Cloudflare by hand; only the spike batch fails fast.
+  assert.match(plugin, /CloudflareInteractionMode\.batchProbe = false/);
+});

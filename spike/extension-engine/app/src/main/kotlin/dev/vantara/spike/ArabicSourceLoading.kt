@@ -17,9 +17,8 @@ fun interface SourceLoadLog {
  * خرجت من الشاشة لأن خدمة الزحف تحتاجها بلا شاشة. والسلوك نفسه حرفيًّا:
  * نفس الخطوات ونفس الأسطر ونفس القائمة الفارغة عند الفشل.
  *
- * الأهم هنا أننا لا نستعمل `first()`: الإضافة متعددة اللغات قد يكون
- * أول CatalogueSource فيها إنجليزيًا. نطابق source.id الذي جاء من
- * index.json، ثم نستعمل lang=ar fallback فقط للـfallback الخماسي المحلي.
+ * والاختيار بـ[selectArabicSources] لا `first()`: الإضافة متعددة اللغات قد
+ * يكون أول مصدر فيها إنجليزيًا.
  */
 suspend fun loadArabicSources(
     spec: SourceSpec,
@@ -89,12 +88,7 @@ suspend fun loadArabicSources(
 
         is FileExtensionLoader.Result.Ok -> {
             val all = loaded.loaded.sources.filterIsInstance<CatalogueSource>()
-            val exact = if (spec.arabicSourceIds.isNotEmpty()) {
-                all.filter { it.id.toString() in spec.arabicSourceIds }
-            } else {
-                emptyList()
-            }
-            val arabic = if (exact.isNotEmpty()) exact else all.filter { it.lang.equals("ar", true) }
+            val arabic = selectArabicSources(spec, all)
 
             if (arabic.isEmpty()) {
                 line(

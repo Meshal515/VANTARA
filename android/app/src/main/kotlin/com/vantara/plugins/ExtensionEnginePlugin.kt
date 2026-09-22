@@ -8,9 +8,13 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import dev.vantara.spike.CloudflareInteractionMode
 import dev.vantara.spike.FileExtensionLoader
+import dev.vantara.spike.ImagePayloadPolicy
 import dev.vantara.spike.SPIKE_SOURCES
+import dev.vantara.spike.SourceCompatRepairs
 import dev.vantara.spike.SourceSpec
+import dev.vantara.spike.selectArabicSources
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -85,6 +89,10 @@ class ExtensionEnginePlugin : Plugin() {
         // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
         // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
         WebViewActivityHolder.set(activity)
+        // المحرّك مشترك مع الـspike، والـspike يفشل سريعًا أمام تحدّي Cloudflare
+        // كي لا تُسرق شاشة الدفعة. القارئ هنا يقلّب بيده: التحدّي المرئي هو
+        // الطريق الوحيد، وإلا قرأ «محجوب» ما كان يكفيه أن يحلّه
+        CloudflareInteractionMode.batchProbe = false
         // الإضافات تطلب اعتمادياتها بـ`injectLazy()`. التسجيل قبل أول تحميل،
         // وإلا سقط أول مصدر بـIllegalStateException من injekt فيبدو عطل مصدر.
         //
@@ -106,16 +114,26 @@ class ExtensionEnginePlugin : Plugin() {
 
     // ───────────────────────────── النداءات ─────────────────────────────
 
-    /** بيان المصادر المتاحة. لا يلمس الشبكة ولا يحمّل شيئًا. */
+    /**
+     * بيان المصادر المتاحة. لا يلمس الشبكة ولا يحمّل شيئًا.
+     *
+     * `warning` يعبر إلى الواجهة كما في الفهرس (SAFE/MIXED): MangaDex مختلط،
+     * والقرار في عرضه قرار واجهة لا يُتّخذ هنا صامتًا. والمحظور بالسياسة لا
+     * يُعرض أصلًا.
+     */
     @PluginMethod
     fun sources(call: PluginCall) {
         val list = JSArray()
         for (spec in SPIKE_SOURCES) {
+            if (spec.blockedReason != null) continue
             list.put(
                 JSObject()
                     .put("id", spec.pkg)
                     .put("label", spec.label)
                     .put("lib", spec.expectedLib)
+                    .put("version", spec.versionName)
+                    .put("warning", spec.warning.name)
+                    .put("names", JSArray(spec.arabicSourceNames))
                     .put("ready", loaded.containsKey(spec.pkg)),
             )
         }
@@ -185,19 +203,14 @@ class ExtensionEnginePlugin : Plugin() {
                 val source = obtain(requireSourceId(call))
                 val input = mangaFrom(call.getObject("manga"))
                 val update = try {
-                    source.getMangaUpdate(input, emptyList(), fetchDetails = true, fetchChapters = true)
+                    // إصلاحات المصادر (Hizo) تمرّ من هنا؛ الباقي نداءٌ جامع واحد
+                    SourceCompatRepairs.loadSeries(source, input)
                 } catch (cancel: CancellationException) {
                     // لا `runCatching` هنا: يبتلع الإلغاء فيطلق نداءً شبكيًّا
                     // ثانيًا بعد أن تكون الشاشة أُغلقت.
                     throw cancel
                 } catch (ignored: Throwable) {
-                    val only = source.getMangaUpdate(
-                        manga = input,
-                        chapters = emptyList(),
-                        fetchDetails = false,
-                        fetchChapters = true,
-                    )
-                    SMangaUpdate(input, only.chapters)
+                    SMangaUpdate(input, SourceCompatRepairs.loadChapters(source, input))
                 }
                 // محلّلات التفاصيل ترجع عادةً SManga جزئيًّا بلا url. المستضيف
                 // يعرف الرابط الأصلي من البحث ويجب أن يحمله معه.
@@ -231,12 +244,7 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val source = obtain(requireSourceId(call))
                 val manga = mangaFrom(call.getObject("manga"))
-                val list = source.getMangaUpdate(
-                    manga = manga,
-                    chapters = emptyList(),
-                    fetchDetails = false,
-                    fetchChapters = true,
-                ).chapters
+                val list = SourceCompatRepairs.loadChapters(source, manga)
                 val out = JSArray()
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("chapters", out).put("count", list.size))
@@ -252,7 +260,8 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val source = obtain(requireSourceId(call))
                 val chapter = chapterFrom(call.getObject("chapter"))
-                val list = source.getPageList(chapter)
+                // Dilar وMangaDar يحتاجان إصلاح صفحاتٍ أثبته الـspike على الجهاز
+                val list = SourceCompatRepairs.loadPages(source, chapter)
                 val out = JSArray()
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("pages", out).put("count", list.size))
@@ -311,8 +320,11 @@ class ExtensionEnginePlugin : Plugin() {
                         }
                     }
                     bytes = fetched.first
-                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ صغيرة تُردّ بـ200
+                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: الحجم وحده لا
+                    // يكفي، فصفحة HTML كبيرة تمرّ منه. التوقيع يُفحص قبل الكاش
                     require(bytes.size > 1024) { "image too small: ${bytes.size} bytes" }
+                    val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
+                    require(verdict.accepted) { "not an image: ${verdict.reason}" }
                     // النوع من الاستجابة أولًا، فإن سكتت فمن امتداد الرابط
                     type = fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
@@ -443,6 +455,7 @@ class ExtensionEnginePlugin : Plugin() {
 
         val spec = SPIKE_SOURCES.firstOrNull { it.pkg == sourceId }
             ?: error("unknown sourceId: $sourceId")
+        spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
 
         val apk = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
             ?: withContext(Dispatchers.IO) { download(spec) }
@@ -454,8 +467,10 @@ class ExtensionEnginePlugin : Plugin() {
                     result.cause,
                 )
             is FileExtensionLoader.Result.Ok -> {
-                val source = result.loaded.sources.filterIsInstance<CatalogueSource>().firstOrNull()
-                    ?: error("${spec.label}: الحزمة بلا CatalogueSource")
+                // لا `first()`: أول مصدر في MangaDex قد يكون إنجليزيًا
+                val all = result.loaded.sources.filterIsInstance<CatalogueSource>()
+                val source = selectArabicSources(spec, all).firstOrNull()
+                    ?: error("${spec.label}: لا مصدر عربي في الحزمة (catalogue=${all.size})")
                 loaded[sourceId] = source
                 source
             }
