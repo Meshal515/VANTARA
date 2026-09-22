@@ -30,9 +30,11 @@ function required() {
 }
 
 /**
- * بيان المصادر: `{ id, label, lib, ready }`.
+ * بيان المصادر: `{ id, label, lib, version, warning, names, ready }`.
  *
  * `ready` يقول إن المصدر محمَّل في الذاكرة الآن، فالنداء التالي عليه فوري.
+ * `warning` تصنيف الفهرس كما هو: `SAFE` أو `MIXED` (MangaDex). المحظور
+ * بالسياسة لا يصل إلى هنا أصلًا.
  */
 export async function sources() {
 	const { sources: list } = await required().sources();
