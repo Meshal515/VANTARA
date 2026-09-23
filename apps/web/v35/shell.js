@@ -17,6 +17,7 @@ import { available, browse, detail, editionRows, seriesRefOf } from './works.js'
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
+import { createMajlis } from './majlis.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -33,7 +34,7 @@ const CHAPTER_BATCH = 60;
 
 const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
-  ['الأصدقاء', [['الأصدقاء', 'friends', 'users'], ['النشاط', 'activity', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
+  ['الأصدقاء', [['المجلس', 'majlis', 'users'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
   ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
   ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
@@ -1548,7 +1549,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function drawerNavigate(key) {
     closeDrawer();
-    if (['home', 'library', 'discover', 'settings'].includes(key)) return navTo(key);
+    if (['home', 'library', 'discover', 'settings', 'majlis'].includes(key)) return navTo(key);
     if (key === 'favorites' || key === 'later') {
       state.libraryFilter = key === 'favorites' ? 'favorite' : 'later';
       return navTo('library');
@@ -1577,7 +1578,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
 
-  const MAIN_PAGES = ['home', 'library', 'discover'];
+  const MAIN_PAGES = ['home', 'library', 'discover', 'majlis'];
   const currentPage = () => root.querySelector('.page.active')?.id ?? 'home';
   function showPage(id, { push = true } = {}) {
     const from = currentPage();
@@ -1596,11 +1597,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
     if (id === 'settings') renderSettings();
     if (id === 'notifications') renderNotifications();
+    if (id === 'majlis') majlis.show();
+    else majlis.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
-    if (id === 'friends') return void deps.go({ name: 'friends' });
-    showPage(id);
+    showPage(id === 'friends' ? 'majlis' : id);
   }
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
@@ -1731,6 +1733,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
+    majlis.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
       if (currentPage() === 'notifications') renderNotifications();
@@ -1741,6 +1744,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function handleBack() {
     return closeSheet() || closeDrawer() || goBack();
   }
+
+  const majlis = createMajlis({
+    sync,
+    host: q('majlisBody'),
+    presence: () => deps.presence?.() ?? Promise.resolve([]),
+    avatarNode,
+    mountImage,
+    workFromRef,
+    openWork: (w) => void openWork(w),
+    openFrame: (id) => void deps.go({ name: 'frame', id }),
+    openProfile: (userId) => void deps.go(userId === me() ? { name: 'me' } : { name: 'friend', id: userId }),
+    openShare: () => navTo('discover'),
+    pageImage: available() ? deps.pageImage : null,
+  });
 
   paintNotifyDots();
   void loadHome();
@@ -1755,6 +1772,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     handleBack,
     pause() {
       savedScroll = window.scrollY;
+      majlis.hide();
       clearInterval(state.heroTimer);
       closeDrawer();
       closeSheet();
@@ -1769,8 +1787,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
       }
       if (state.heroItems.length) restartHero();
+      if (currentPage() === 'majlis') majlis.show();
     },
     destroy() {
+      majlis.hide();
       clearInterval(state.heroTimer);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);

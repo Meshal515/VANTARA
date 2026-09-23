@@ -23,6 +23,7 @@ import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
+import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
@@ -1698,7 +1699,26 @@ async function screenFrameById(id) {
     frame = find();
   }
   if (!frame) return screenPlaceholder('فريم', 'الفريم ما وصل بعد — جرّب بعد شوي.');
-  return screenFrame({ ...screenDeps(), frame, fromName: nameOf(frame.from_id) });
+  state.screen = 'FRAME';
+  const meId = sync.user?.userId;
+  const toLabel = frame.broadcast ? 'للجميع' : frame.to_id === meId ? 'لك' : `إلى ${nameOf(frame.to_id)}`;
+  const viewer = openFrameViewer(
+    {
+      engine,
+      mount,
+      exit: () => void go({ name: 'v35' }),
+      readChapter: (target) => screenSmartReader(target),
+      immersive: (on) => void globalThis.Capacitor?.Plugins?.SystemUi?.immersive?.({ on }).catch?.(() => {}),
+    },
+    {
+      frame,
+      fromName: nameOf(frame.from_id),
+      fromAvatar: sync.rows('profiles', (p) => p.user_id === frame.from_id)[0]?.avatar_key ?? null,
+      toLabel,
+    },
+  );
+  state.teardown = () => viewer.destroy();
+  state.back = () => viewer.handleBack();
 }
 
 /**
@@ -1716,7 +1736,7 @@ function dropV35() {
 }
 
 function screenV35(page) {
-  state.screen = page === 'detail' ? 'SERIES' : 'HOME';
+  state.screen = { detail: 'SERIES', majlis: 'FRIENDS', notifications: 'NOTIFICATIONS' }[page] ?? 'HOME';
   if (!v35) {
     v35 = mountV35(
       {
@@ -1725,6 +1745,8 @@ function screenV35(page) {
         go,
         version: appVersion(),
         friends: () => frameCapability().friends(),
+        presence: () => sync.presence(),
+        pageImage: async (sourceId, page) => (await engine.pageImage(sourceId, page)).src,
         // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
         report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),
         openReader: (target) => screenSmartReader(target),
@@ -1752,14 +1774,14 @@ function screenSmartReader(target) {
       sync,
       engine,
       mount,
-      exit: () => void go({ name: 'v35', page: 'detail' }),
+      exit: () => void go({ name: 'v35' }),
       friends: () => frameCapability().friends(),
       sendFrame: (payload) => sync.enqueue('frame.send', payload),
       report: (input) => submitReport({ api, ...input, context: { screen: 'READER' } }),
-      // الحضور: الأصدقاء يرون ما تقرؤه. لا معرّف عمل من خادم المحتوى هنا —
-      // شاشة الصديق تبني منه رابطًا، ومعرّفٌ ملفّق يفتح لا شيء
+      // الحضور: الأصدقاء يرون ما تقرؤه، ومرجع العمل الموحّد (`ext:…`) يسافر
+      // معه فيفتحه المجلس من عندهم
       setReading: (info) => {
-        state.reading = info ? { ...info, seriesId: null, chapterId: null } : null;
+        state.reading = info ? { ...info, seriesId: target.seriesRef, chapterId: null } : null;
       },
       immersive: (on) => void globalThis.Capacitor?.Plugins?.SystemUi?.immersive?.({ on }).catch?.(() => {}),
     },
@@ -1814,7 +1836,8 @@ async function go(route) {
     case 'library':
       return screenV35('library');
     case 'v35':
-      return screenV35(route.page ?? 'home');
+      // بلا صفحة: رجوعٌ إلى حيث كنت (المجلس، الإشعارات، صفحة العمل)
+      return screenV35(route.page ?? (v35 ? null : 'home'));
     // «استكشاف» هو مدخل المصادر: من هنا تُقرأ المانجا والمانهوا مباشرة من
     // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق. والمصادر
     // لا تظهر للقارئ: تُسأل كلها معًا وتُعرض نتائجها ككتالوج واحد.
@@ -1845,7 +1868,8 @@ async function go(route) {
     case 'frame':
       return screenFrameById(route.id);
     case 'friends':
-      return screenFriends();
+    case 'majlis':
+      return screenV35('majlis');
     case 'friend':
       return screenFriend(route.id);
     case 'notifications':

@@ -174,6 +174,11 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body" id="settingsBody"></div>
   </section>
 
+  <section class="page" id="majlis">
+    ${mainTop('المجلس')}
+    <div class="page-body mj-body" id="majlisBody"></div>
+  </section>
+
   <section class="page" id="notifications">
     ${subTop('الإشعارات', { end: iconButton('check', 'علّمها كلها مقروءة', { act: 'readAllNotifications' }) })}
     <div class="page-body notif-body" id="notificationsBody"></div>
@@ -188,7 +193,7 @@ export const SHELL_HTML = `<div class="app">
     ${navItem('home', 'home', 'الرئيسية')}
     ${navItem('library', 'library', 'مكتبتي')}
     ${navItem('discover', 'compass', 'اكتشف')}
-    ${navItem('friends', 'users', 'الأصدقاء')}
+    ${navItem('majlis', 'users', 'المجلس')}
   </nav>
 </div>
 
