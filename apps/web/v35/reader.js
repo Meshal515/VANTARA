@@ -61,6 +61,40 @@ function remember(map, key, value, max) {
 const chapterId = (row) => `${row.sourceId}|${row.chapter?.url ?? ''}`;
 const imageKey = (row, index) => `${chapterId(row)}#${index}`;
 
+function ensureScheduler(engine) {
+  ensureScheduler(engine);
+  return scheduler;
+}
+function sharedPages(engine, row) {
+  const id = chapterId(row);
+  let promise = pageLists.get(id);
+  if (!promise) {
+    promise = engine.pages(row.sourceId, row.chapter).then((list) => {
+      if (!list.length) throw new Error('الفصل بلا صفحات عند المصدر');
+      return list;
+    });
+    promise.catch(() => pageLists.delete(id));
+    remember(pageLists, id, promise, MAX_CACHED_LISTS);
+  }
+  return promise;
+}
+
+/**
+ * يسبق ضغطتك: صفحة العمل تجهّز الفصل الذي ستفتحه (قائمة صفحاته وأول صوره)
+ * وأنت تقرأ النبذة، فيفتح القارئ على صورٍ جاهزة.
+ */
+export function warmChapter(engine, row, images = 3) {
+  if (!row?.chapter || !engine?.pages) return;
+  const sch = ensureScheduler(engine);
+  sharedPages(engine, row)
+    .then((pages) => {
+      for (let i = 0; i < Math.min(images, pages.length); i++) {
+        void sch.request(imageKey(row, i), { sourceId: row.sourceId, page: pages[i] }, PRIORITY.NEXT_CHAPTER).catch(() => {});
+      }
+    })
+    .catch(() => {});
+}
+
 /**
  * @param {{
  *   sync: any,
@@ -78,7 +112,7 @@ const imageKey = (row, index) => `${chapterId(row)}#${index}`;
 export function openSmartReader(deps, ctx) {
   const { sync, engine } = deps;
   scheduler ??= createScheduler({
-    concurrency: 3,
+    concurrency: 5,
     run: async (_key, { sourceId, page }) => (await engine.pageImage(sourceId, page)).src,
   });
 
@@ -202,18 +236,26 @@ export function openSmartReader(deps, ctx) {
   const nav = () => neighbors(sequence, state.row);
   const sameRow = (a, b) => a === b || (a && b && chapterId(a) === chapterId(b));
 
-  function pagesOf(row) {
-    const id = chapterId(row);
-    let promise = pageLists.get(id);
-    if (!promise) {
-      promise = engine.pages(row.sourceId, row.chapter).then((list) => {
-        if (!list.length) throw new Error('الفصل بلا صفحات عند المصدر');
-        return list;
-      });
-      promise.catch(() => pageLists.delete(id));
-      remember(pageLists, id, promise, MAX_CACHED_LISTS);
+  const pagesOf = (row) => sharedPages(engine, row);
+
+  /**
+   * صفحات الفصل، ومن مصدر آخر تلقائيًا إن تعذّر مصدره: المستخدم لا يختار
+   * بديلًا بيده. نفس الفصل (بالرقم) من المصادر الأخرى بترتيبها.
+   * @returns {Promise<{ row: object, pages: object[] }>}
+   */
+  async function pagesFor(row) {
+    try {
+      return { row, pages: await pagesOf(row) };
+    } catch (error) {
+      for (const alt of otherSources(row)) {
+        try {
+          return { row: alt, pages: await pagesOf(alt) };
+        } catch {
+          // التالي
+        }
+      }
+      throw error;
     }
-    return promise;
   }
 
   function savedPage(row) {
@@ -241,7 +283,7 @@ export function openSmartReader(deps, ctx) {
 
     let pages;
     try {
-      pages = await pagesOf(row);
+      ({ row, pages } = await pagesFor(row));
     } catch (error) {
       if (token !== state.token) return;
       scroll.replaceChildren(chapterError(row, error));
@@ -357,10 +399,10 @@ export function openSmartReader(deps, ctx) {
     seg.nextError = null;
     paintBoundary(seg);
     const token = state.token;
-    pagesOf(next)
-      .then((pages) => {
+    pagesFor(next)
+      .then(({ row: used, pages }) => {
         if (token !== state.token || !segs.includes(seg)) return;
-        const nseg = makeSegment(next, pages);
+        const nseg = makeSegment(used, pages);
         seg.next = nseg;
         segs.splice(segs.indexOf(seg) + 1, 0, nseg);
         seg.el.after(nseg.el);

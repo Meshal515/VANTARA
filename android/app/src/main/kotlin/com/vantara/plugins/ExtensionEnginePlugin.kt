@@ -36,6 +36,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -82,7 +83,6 @@ class ExtensionEnginePlugin : Plugin() {
      * يظهر عشوائيًّا حين يفتح القارئ قائمة المصادر أثناء تحميل مصدر.
      */
     private val loaded = java.util.concurrent.ConcurrentHashMap<String, CatalogueSource>()
-    private val loadLock = Mutex()
 
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val loader by lazy { FileExtensionLoader(context) }
@@ -106,6 +106,14 @@ class ExtensionEnginePlugin : Plugin() {
             if (!injektReady) {
                 Injekt.importModule(EngineModule(context.applicationContext as Application))
                 injektReady = true
+            }
+        }
+        // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
+        // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
+        scope.launch {
+            for (spec in SPIKE_SOURCES) {
+                if (spec.blockedReason != null) continue
+                launch { runCatching { obtain(spec.pkg) } }
             }
         }
     }
@@ -451,13 +459,16 @@ class ExtensionEnginePlugin : Plugin() {
         java.io.File(context.filesDir, "covers").apply { mkdirs() }
     }
 
-    private fun coverHit(url: String): java.io.File? {
-        val prefix = digestOf(url) + "."
-        return coverDir.listFiles { f -> f.name.startsWith(prefix) }?.firstOrNull { it.isFile && it.length() > 256 }
+    private fun coverHit(url: String): java.io.File? = hitIn(coverDir, url, 256)?.also {
+        // «آخر استعمال» للتقليم: الغلاف الذي تراه كل يوم لا يُترك أولًا
+        it.setLastModified(System.currentTimeMillis())
     }
 
     /** سقفٌ للأغلفة: ألفا غلاف تكفي مكتبة ثلاثة أصدقاء، والأقدم استعمالًا يُترك أولًا. */
+    private var coverWrites = 0
     private fun pruneCovers() {
+        // المسح مكلف: مرة كل خمسين غلافًا جديدًا تكفي
+        if (++coverWrites % 50 != 1) return
         val files = coverDir.listFiles() ?: return
         if (files.size <= MAX_COVERS) return
         files.sortedBy { it.lastModified() }.take(files.size - MAX_COVERS + 200).forEach { it.delete() }
@@ -504,11 +515,19 @@ class ExtensionEnginePlugin : Plugin() {
      * الامتداد يُقرَّر من نوع الاستجابة وقت التنزيل، فلا يُعرف وقت البحث في
      * الكاش. والبحث بالبادئة يجد الملف بلا أن نخمّن نوعه مرة ثانية.
      */
-    private fun cacheHit(url: String): java.io.File? {
-        val prefix = digestOf(url) + "."
-        return pageCacheDir
-            .listFiles { f -> f.name.startsWith(prefix) }
-            ?.firstOrNull { it.isFile && it.length() > 1024 }
+    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 1024)
+
+    /**
+     * الملف المحفوظ لرابط، بفحص مباشر لا بمسح المجلد: مسحُ آلاف الملفات عند
+     * كل صفحة وكل غلاف كان يأكل من وقت الفتح أكثر مما تأكله الشبكة.
+     */
+    private fun hitIn(dir: java.io.File, url: String, minBytes: Long): java.io.File? {
+        val digest = digestOf(url)
+        for (ext in CACHE_EXTENSIONS) {
+            val f = java.io.File(dir, "$digest.$ext")
+            if (f.isFile && f.length() > minBytes) return f
+        }
+        return null
     }
 
     private fun typeForUrl(url: String): String =
@@ -561,8 +580,22 @@ class ExtensionEnginePlugin : Plugin() {
      * القفل يمنع نداءين متوازيين (القارئ يطلب الرائج والبحث معًا) من تنزيل
      * نفس الحزمة وفكّ الـDEX مرتين.
      */
-    private suspend fun obtain(sourceId: String): CatalogueSource = loadLock.withLock {
-        loaded[sourceId]?.let { return@withLock it }
+    private suspend fun obtain(sourceId: String): CatalogueSource {
+        // المحمَّل لا ينتظر أحدًا: قفلٌ واحد للكل كان يُوقف صور الفصل والأغلفة
+        // خلف تحميل خمسة عشر مصدرًا آخر عند فتح التطبيق
+        loaded[sourceId]?.let { return it }
+        val lock = loadLocks.getOrPut(sourceId) { Mutex() }
+        return lock.withLock {
+            loaded[sourceId]?.let { return@withLock it }
+            loadSlots.withPermit { load(sourceId) }
+        }
+    }
+
+    /** مصدرٌ لكل قفل، وأربعة تُفكّ معًا على الأكثر: توازٍ بلا خنق الجهاز. */
+    private val loadLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private val loadSlots = kotlinx.coroutines.sync.Semaphore(4)
+
+    private suspend fun load(sourceId: String): CatalogueSource = run {
 
         val spec = SPIKE_SOURCES.firstOrNull { it.pkg == sourceId }
             ?: error("unknown sourceId: $sourceId")
@@ -710,6 +743,7 @@ class ExtensionEnginePlugin : Plugin() {
     private companion object {
         val INJEKT_LOCK = Any()
         const val MAX_COVERS = 2000
+        val CACHE_EXTENSIONS = listOf("jpg", "webp", "png", "gif", "avif")
 
         @Volatile
         var injektReady = false

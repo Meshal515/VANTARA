@@ -11,6 +11,7 @@
 
 import engine from '../lib/extension-engine.js';
 import { createWorkIndex, gather, mergeChapters, normalizeTitle, titlesMatch } from '../lib/catalog.js';
+import { readWork, writeWork } from '../lib/chapter-store.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -111,6 +112,45 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
   return { items: index.list().map(toV35Work), hasNextPage, page };
 }
 
+/**
+ * مثل `browse` لكن لا ينتظر أبطأ مصدر: `onUpdate` يُنادى مع كل مصدر يردّ
+ * بالقائمة المدموجة حتى الآن. مصدرٌ ثانٍ عنده نفس العمل يُضاف إليه نسخةً، فلا
+ * يبقى العمل «عاشقيًّا» لأن العاشق ردّ أولًا.
+ */
+export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}) {
+  const list = await sources();
+  const index = createWorkIndex();
+  let hasNextPage = false;
+  let timer = null;
+  const flush = () => {
+    clearTimeout(timer);
+    timer = null;
+    onUpdate({ items: index.list().map(toV35Work), hasNextPage, page });
+  };
+  await Promise.allSettled(
+    list.map(async (source) => {
+      const value = await withTimeout(
+        genre
+          ? engine.genre(source.id, genre, page)
+          : query
+            ? engine.search(source.id, query, page)
+            : kind === 'popular'
+              ? engine.popular(source.id, page)
+              : kind === 'latest'
+                ? engine.latest(source.id, page)
+                : engine.catalogue(source.id, page),
+        LISTING_TIMEOUT_MS,
+      );
+      hasNextPage ||= Boolean(value?.hasNextPage);
+      for (const manga of value?.mangas ?? []) index.add({ sourceId: source.id, label: source.label, manga });
+      // الردود المتلاحقة تُجمع في رسمة واحدة كل ربع ثانية
+      timer ??= setTimeout(flush, 250);
+    }),
+  );
+  flush();
+  return { items: index.list().map(toV35Work), hasNextPage, page };
+}
+
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
 export async function detail(v35work) {
   const work = v35work._work;
@@ -124,7 +164,7 @@ export async function detail(v35work) {
   });
   const values = ok.map((r) => r.value);
   const main = values.find((v) => v.detail) ?? null;
-  const chapters = mergeChapters(values);
+  const chapters = mergeChapters(values, { rank: sourceRank });
   const answered = new Set(values.map((v) => v.sourceId));
   // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
   const cover = v35work.coverImage?.large || main?.detail?.thumbnailUrl || values.find((v) => v.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
@@ -142,6 +182,180 @@ export async function detail(v35work) {
     // المصدر الذي لم يردّ يُقال إنه لم يردّ، لا يختفي كأنه غير موجود
     _failedSources: work.editions.filter((e) => !answered.has(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
   };
+}
+
+// ───────────────── VANTARA: مصدرٌ واحد من ستة عشر ─────────────────
+//
+// المستخدم يرى عملًا واحدًا وفصولًا واحدة. خلف ذلك:
+//   - أولوية المصادر الموثوقة: الفصل يُقرأ من مانجا ليك ثم مانجا ستارز… متى
+//     ملكاه، والبقية تكمل ما ينقص.
+//   - الفصول المحفوظة تُعرض فورًا، والمصادر تُسأل في الخلفية وتضيف ما جدّ.
+//   - المصدر الذي لا يردّ لا يُنقص شيئًا: فصوله من آخر مرة تبقى.
+//   - البحث عن العمل في المصادر التي لم نعرفه فيها صامت، ويُعاد كل 12 ساعة
+//     على الأكثر، ونتيجته تُحفظ للجميع (`work.describe`).
+
+/** أولوية الثقة. من ليس هنا يأتي بعدها بعدد فصوله. */
+const TRUSTED = ['mangalek', 'mangastarz', 'teamx', 'mangaswat', 'azora', 'mangaspark'];
+export function sourceRank(sourceId) {
+  const id = String(sourceId ?? '').toLowerCase();
+  const i = TRUSTED.findIndex((t) => id.endsWith(`.${t}`) || id === t);
+  return i < 0 ? TRUSTED.length : i;
+}
+
+const REDISCOVER_MS = 12 * 3600e3;
+const CHAPTERS_TIMEOUT_MS = 30_000;
+/** أول فتحٍ لعمل بنسخة واحدة: كم ننتظر بقية المصادر قبل أن نعرض ما عندنا. */
+const FIRST_OPEN_HOLD_MS = 3500;
+
+/** العمل كاملًا من نسخٍ بفصولها: ما تعرضه صفحة العمل ويقرؤه القارئ. */
+function assemble(v35work, editions, detail, failed = []) {
+  const chapters = mergeChapters(editions, { rank: sourceRank });
+  const cover = v35work.coverImage?.large || detail?.thumbnailUrl || editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const base = v35work._work ?? { key: String(v35work.id).replace(/^ext:/, ''), title: v35work.title?.english, editions: [] };
+  const work = {
+    ...base,
+    thumbnailUrl: base.thumbnailUrl ?? cover,
+    editions: editions.map(({ chapters: _c, ...e }) => e),
+  };
+  return {
+    ...v35work,
+    ...(cover && !v35work.coverImage?.large ? { coverImage: { extraLarge: cover, large: cover, medium: cover, color: null }, bannerImage: cover } : {}),
+    ...(detail ? detailFields(detail) : {}),
+    _work: work,
+    chapters: chapters.length || null,
+    _chapters: chapters,
+    _editions: editions,
+    _sources: editions.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _failedSources: failed,
+  };
+}
+
+/** نسخٌ بلا تكرار، والأحدث من كل مصدر يفوز. */
+function unionEditions(...lists) {
+  const map = new Map();
+  for (const list of lists) for (const e of list ?? []) if (e?.sourceId) map.set(e.sourceId, { ...(map.get(e.sourceId) ?? {}), ...e });
+  return [...map.values()];
+}
+
+const loading = new Map();
+
+/**
+ * يفتح عملًا كـVANTARA: فورًا مما حُفظ، ثم يكبر مع كل مصدر يردّ.
+ *
+ * `onUpdate(full, { settled })` يُنادى بكل صورة أكمل من التي قبلها — ولا
+ * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
+ * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
+ */
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true } = {}) {
+  const id = String(v35work.id);
+  const cached = await readWork(id);
+  let editions = unionEditions(
+    (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => c.sourceId === e.sourceId)?.chapters ?? null })),
+    cached?.editions,
+  );
+  let detail = cached?.detail ?? null;
+  const failed = new Map();
+  let last = null;
+  let held = false;
+  const emit = (settled = false) => {
+    if (held && !settled) return last;
+    const withChapters = editions.filter((e) => e.chapters?.length);
+    const full = assemble(v35work, withChapters.length ? withChapters : editions, detail, [...failed.values()]);
+    if (!settled && last && (full._chapters?.length ?? 0) === (last._chapters?.length ?? 0) && full.description === last.description) return last;
+    last = full;
+    onUpdate(full, { settled });
+    return full;
+  };
+  if (cached?.editions?.some((e) => e.chapters?.length)) emit();
+
+  const refresh = async (list) => {
+    // التفاصيل (النبذة والتصنيف) من أوثق نسخة
+    const primary = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
+    await Promise.allSettled(
+      list.map(async (edition) => {
+        try {
+          if (edition === primary && !detail) {
+            const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+            detail = out.manga ?? detail;
+            edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
+          } else {
+            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS) };
+          }
+          failed.delete(edition.sourceId);
+          // مصدرٌ ردّ بلا فصول اليوم لا يمحو ما عرفناه منه أمس
+          if (edition.chapters?.length || !editions.find((e) => e.sourceId === edition.sourceId)?.chapters?.length) {
+            editions = unionEditions(editions, [edition]);
+          }
+          emit();
+        } catch {
+          failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label });
+        }
+      }),
+    );
+  };
+
+  // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
+  // (36 من العاشق وعند غيره 600). نسأل الباقين معها، ولا نعرض شيئًا حتى يردّوا
+  // أو تمضي لحظة — الهيكل يبقى بلا رسالة «نبحث».
+  const lonely = !cached && editions.length <= 1;
+  if (lonely) {
+    held = true;
+    setTimeout(() => {
+      held = false;
+      emit();
+    }, FIRST_OPEN_HOLD_MS);
+  }
+  const due = discover && available() && Date.now() - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
+  const discovery = due
+    ? (async () => {
+        try {
+          const found = (await discoverEditions(assemble(v35work, editions, detail))).filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
+          if (found.length) {
+            editions = unionEditions(editions, found.map((e) => ({ ...e, chapters: null })));
+            await refresh(found);
+          }
+          return true;
+        } catch {
+          // الاكتشاف تكميلي: ما عندنا يبقى
+          return false;
+        }
+      })()
+    : Promise.resolve(false);
+
+  await Promise.all([refresh(editions), discovery]);
+  held = false;
+  const full = emit(true);
+  await writeWork(id, { editions, detail, discoveredAt: (await discovery) ? Date.now() : cached?.discoveredAt ?? 0 });
+  return full;
+}
+
+/** فتحٌ واحد لكل عمل في نفس الوقت: البطاقة والتسخين المسبق لا يسألان مرتين. */
+export function loadWorkOnce(v35work, opts) {
+  const id = String(v35work.id);
+  if (!opts?.onUpdate && loading.has(id)) return loading.get(id);
+  const p = loadWork(v35work, opts).finally(() => loading.delete(id));
+  if (!opts?.onUpdate) loading.set(id, p);
+  return p;
+}
+
+/**
+ * تسخين مسبق: أعمال مكتبتك وآخر ما فتحت تُجمع فصولها في الخلفية، واحدًا
+ * واحدًا وبلا استعجال، فتُفتح جاهزة. عملٌ جُمع خلال ست ساعات يُترك.
+ */
+export async function prewarm(works, { onDone = () => {}, maxAgeMs = 6 * 3600e3 } = {}) {
+  if (!available()) return;
+  for (const w of works) {
+    if (!w?._work?.editions?.length) continue;
+    const cached = await readWork(String(w.id));
+    if (cached && Date.now() - (cached.at ?? 0) < maxAgeMs) continue;
+    try {
+      const full = await loadWorkOnce(w, {});
+      onDone(full);
+    } catch {
+      // التالي
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
 }
 
 // ───────────────── نسخ العمل في كل المصادر ─────────────────
@@ -218,7 +432,7 @@ export async function withEditions(full, found) {
   const fresh = ok.map((r) => r.value).filter((v) => v.chapters?.length);
   if (!fresh.length) return full;
   const editions = [...(full._editions ?? []), ...fresh];
-  const chapters = mergeChapters(editions);
+  const chapters = mergeChapters(editions, { rank: sourceRank });
   const work = { ...full._work, editions: [...(full._work?.editions ?? []), ...fresh.map(({ chapters: _c, ...e }) => e)] };
   return {
     ...full,

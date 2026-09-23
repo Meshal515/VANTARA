@@ -13,7 +13,10 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, describe, detail, discoverEditions, editionRows, seriesRefOf, withEditions } from './works.js';
+import { available, browse, browseLive, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
+import { readKv, writeKv } from '../lib/chapter-store.js';
+import { warmChapter } from './reader.js';
+import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
 import { cachedCover, coverCandidates, forgetCover, nativeCover } from './covers.js';
@@ -304,6 +307,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * المصدر (ويُحفظ)، ثم الرابط مباشرة، لكل غلاف من أغلفة نسخ العمل. والحرف
    * الأول لا يظهر إلا إن فشل كل ذلك.
    */
+  const nearWaiters = new Map();
+  const nearObserver =
+    typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (!e.isIntersecting) continue;
+              nearObserver.unobserve(e.target);
+              nearWaiters.get(e.target)?.();
+              nearWaiters.delete(e.target);
+            }
+          },
+          { rootMargin: '600px 600px' },
+        );
+  function nearViewport(node) {
+    if (!nearObserver) return Promise.resolve();
+    return new Promise((resolve) => {
+      nearWaiters.get(node)?.();
+      nearWaiters.set(node, resolve);
+      nearObserver.observe(node);
+    });
+  }
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
@@ -340,6 +366,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       forgetCover(url);
     }
     container.replaceChildren(el('div', 'skeleton'));
+    // ما لم يُحفظ بعد يُجلب حين يقترب من الشاشة: الظاهر أولًا، والشبكة لا
+    // تنشغل بستين غلافًا في آخر الصفحة قبل الذي أمامك
+    await nearViewport(container);
+    if (container.dataset.imageToken !== token) return null;
     for (const { url, sourceId } of candidates) {
       const saved = await nativeCover(url, sourceId);
       if (container.dataset.imageToken !== token) return null;
@@ -450,29 +480,70 @@ export function mountV35(deps, { page = 'home' } = {}) {
       q('homeSections').append(box.firstElementChild);
       return;
     }
-    renderHomeSkeleton();
-    renderHeroSkeleton();
+    // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
+    // لا شاشة تنتظر أبطأ مصدر من ستة عشر
+    const cached = (await readKv('home'))?.value;
+    const fromCache = (list) => (list ?? []).map((w) => ({ ...w, _work: w._work }));
+    if (cached?.featured?.length) {
+      state.home.featured = fromCache(cached.featured);
+      state.home.trending = fromCache(cached.trending);
+      state.home.recent = fromCache(cached.recent);
+      state.home.popular = fromCache(cached.popular);
+      state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+      renderHero();
+      renderHome();
+    } else {
+      renderHomeSkeleton();
+      renderHeroSkeleton();
+    }
+    let heroDone = Boolean(cached?.featured?.length);
+    let paintTimer = null;
+    const paint = () => {
+      clearTimeout(paintTimer);
+      paintTimer = setTimeout(() => {
+        if (!heroDone && (state.home.trending.length || state.home.featured.length)) {
+          state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+          if (state.heroItems.length >= 3) {
+            heroDone = true;
+            renderHero();
+          }
+        }
+        if (currentPage() === 'home') renderHome();
+      }, 120);
+    };
+    const live = (key) => ({ items }) => {
+      // أول ردٍّ لا يمحو رئيسية محفوظة أكمل منه
+      if (cached?.[key]?.length && items.length < Math.min(cached[key].length, 12)) return;
+      state.home[key] = items;
+      paint();
+    };
     try {
-      // ثلاث مسارات متوازية تكفي البداية؛ «المميزة» تُكمل بعدها فلا تُحمّل
-      // ستة عشر مصدرًا بأربعة طلبات دفعةً واحدة
       const [fe, tr, re] = await Promise.all([
-        browse({ kind: 'catalogue', page: 1 }),
-        browse({ kind: 'popular', page: 1 }),
-        browse({ kind: 'latest', page: 1 }),
+        browseLive({ kind: 'catalogue', page: 1 }, live('featured')),
+        browseLive({ kind: 'popular', page: 1 }, live('trending')),
+        browseLive({ kind: 'latest', page: 1 }, live('recent')),
       ]);
       state.home.featured = fe.items;
       state.home.trending = tr.items;
       state.home.recent = re.items;
-      state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
-      renderHero();
+      if (!heroDone || state.heroItems.length < 3) {
+        state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+        renderHero();
+      }
       renderHome();
-      browse({ kind: 'popular', page: 2 })
-        .then((po) => {
-          state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
-          renderHome();
-        })
-        .catch(() => {});
+      if (!fe.items.length && !tr.items.length && !re.items.length && !cached) throw new Error('empty');
+      const po = await browse({ kind: 'popular', page: 2 }).catch(() => ({ items: [] }));
+      state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
+      renderHome();
+      void writeKv('home', {
+        featured: state.home.featured.slice(0, 40),
+        trending: state.home.trending.slice(0, 40),
+        recent: state.home.recent.slice(0, 40),
+        popular: state.home.popular.slice(0, 40),
+      });
     } catch {
+      // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
+      if (cached?.featured?.length) return;
       renderHeroFallback();
       const box = el('div');
       emptyState(box, {
@@ -695,33 +766,47 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
       return;
     }
-    try {
-      const full = await detail(work);
-      if (state.current !== work) return;
+    // VANTARA: الفصول المحفوظة فورًا، وكل مصدر يردّ يضيف ما عنده بصمت
+    let wanted = readNumber;
+    const tryWanted = (w, final) => {
+      if (wanted === null) return;
+      const row = w._chapters?.find((r) => r.number === wanted);
+      if (row) {
+        wanted = null;
+        openChapter(w, row);
+      } else if (final) {
+        wanted = null;
+        toast('هالفصل مو متوفر في مصادرنا الحين');
+      }
+    };
+    const show = (full, { settled }) => {
+      if (state.current?.id !== work.id || currentPage() === 'reader') return;
+      if (!full._chapters?.length && !settled) return;
+      const first = !state.current?._chapters;
       state.current = full;
-      // غلافٌ عرفناه من التفاصيل يُحفظ للبطاقات وللأصدقاء
-      if (full._work?.thumbnailUrl && full._work.thumbnailUrl !== work._work?.thumbnailUrl) rememberWork(full);
-      renderDetail(full);
+      if (first || full._work?.thumbnailUrl !== work._work?.thumbnailUrl) renderDetail(full);
+      else refreshDetailMeta(full);
       renderSources(full);
       renderChapters(full);
-      // من «اقرأ الفصل 110» في المجلس: الفصل نفسه يُفتح حين تصل الفصول
-      let wanted = readNumber;
-      if (wanted !== null) {
-        const row = full._chapters?.find((r) => r.number === wanted);
-        if (row) {
-          openChapter(full, row);
-          wanted = null;
-        }
-      }
-      // ثم باقي المصادر: العمل نفسه عندها قد يبدأ من الفصل الأول
-      const expanded = await expandEditions(full);
-      if (wanted !== null && state.current === expanded) {
-        const row = expanded._chapters?.find((r) => r.number === wanted);
-        if (row) openChapter(expanded, row);
-        else toast('هالفصل مو متوفر في مصادرنا الحين');
+      tryWanted(full, settled);
+    };
+    try {
+      const full = await loadWork(work, { onUpdate: show });
+      if (state.current?.id !== work.id) return;
+      // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
+      rememberWork(full);
+      if (!full._chapters?.length) {
+        emptyState(q('chapterPanel'), {
+          icon: 'offline',
+          error: true,
+          title: 'تعذّر جلب الفصول',
+          text: 'المصادر لم تردّ الآن.',
+          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
+        });
+        setReadCta(null);
       }
     } catch {
-      if (state.current !== work) return;
+      if (state.current?.id !== work.id) return;
       emptyState(q('chapterPanel'), {
         icon: 'offline',
         error: true,
@@ -732,32 +817,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
     }
   }
-  /**
-   * يسأل المصادر التي لم نعرف أن العمل فيها، ويضم ما يطابقه. الصفحة تبقى
-   * صالحة أثناءه: شريحة «نبحث في المصادر» فقط، ثم تتحدّث الفصول والمصادر.
-   */
-  async function expandEditions(w) {
-    if (!available()) return w;
-    state.discovering = w;
-    renderSources(w);
-    try {
-      const found = await discoverEditions(w);
-      if (state.current !== w) return w;
-      const next = await withEditions(w, found);
-      if (state.current !== w) return w;
-      if (next !== w) {
-        state.current = next;
-        rememberWork(next);
-        renderDetail(next);
-        renderChapters(next);
-      }
-      return next;
-    } catch {
-      return w;
-    } finally {
-      if (state.discovering === w) state.discovering = null;
-      if (state.current) renderSources(state.current);
+  /** العدد والتصنيف والنبذة تتحدّث مكانها، بلا إعادة الغلاف ولا قفزة. */
+  function refreshDetailMeta(w) {
+    const sub = q('detailSub');
+    sub.replaceChildren();
+    if (w.status && STATUS_AR[w.status]) {
+      const st = el('span', 'status-dot', STATUS_AR[w.status]);
+      st.dataset.status = w.status;
+      sub.append(st);
     }
+    if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
+    const editions = w._sources ?? [];
+    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
+    renderInfo(w);
   }
   function renderDetail(w) {
     const title = titleOf(w);
@@ -777,7 +849,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
     const editions = w._sources ?? w._work?.editions ?? [];
     if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
-    else if (editions[0]?.label) sub.append(el('span', null, editions[0].label));
 
     q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
 
@@ -915,18 +986,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       all.onclick = () => openSourcesSheet(w, sources, failed, pick);
       chips.push(all);
     }
-    if (state.discovering === w) {
-      const busy = el('span', 'source-chip source-chip--busy');
-      busy.append(el('i', 'spinner'), el('span', null, 'نبحث في باقي المصادر…'));
-      chips.push(busy);
-    }
     q('sourceRow').replaceChildren(...chips);
-    if (state.discovering === w) q('sourcesBlock').hidden = false;
   }
   function openSourcesSheet(w, sources, failed, pick) {
     openSheet((body) => {
       body.append(el('h3', null, 'المصادر المتوفرة'));
-      const note = el('p', null, 'القارئ الذكي يختار لكل فصل أكمل نسخة. اختر مصدرًا لتقرأ فصوله كما هي عنده.');
+      const note = el('p', null, 'القارئ الذكي يجمع فصول كل المصادر ويختار لكل فصل أوثق نسخة. اختر مصدرًا لتقرأ فصوله كما هي عنده.');
       note.style.marginBottom = '8px';
       body.append(note);
       const row = (icon, label, count, value) => {
@@ -978,6 +1043,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const next = [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
     state.nextRow = next;
     setReadCta(next, { started: readCount > 0 });
+    // الفصل الذي سيفتحه «ابدأ/تابع» يُجهَّز الآن، لا بعد الضغطة
+    const warmKey = next ? `${next.sourceId}|${next.chapter?.url}` : null;
+    if (warmKey && warmKey !== state.warmKey && available()) {
+      state.warmKey = warmKey;
+      clearTimeout(state.warmTimer);
+      state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
+    }
 
     q('detailProgress').hidden = false;
     q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
@@ -2440,6 +2512,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     majlis.acknowledgeDelivered();
     migrateLocalHistory();
   }, 0);
+  // مكتبتك وآخر ما فتحت تُجمع فصولها من كل المصادر في الخلفية: تُفتح جاهزة
+  setTimeout(() => {
+    if (!available()) return;
+    const seen = new Set();
+    const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
+    void prewarm(works, { onDone: (full) => rememberWork(full) });
+  }, 6000);
 
   const profile = createProfile({
     sync,
