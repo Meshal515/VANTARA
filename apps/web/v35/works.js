@@ -485,3 +485,90 @@ export function describe(v35work) {
   described.set(key, promise);
   return promise;
 }
+
+// ───────────────── فحص المصادر ─────────────────
+
+export const CHECK_STEPS = [
+  ['list', 'القائمة'],
+  ['search', 'البحث'],
+  ['chapters', 'الفصول'],
+  ['pages', 'الصفحات'],
+  ['image', 'صورة صفحة'],
+  ['cover', 'الغلاف'],
+];
+
+/**
+ * يمرّ على مصدر كما يمرّ القارئ: قائمة ← بحث ← فصول ← صفحات ← صورة ← غلاف.
+ * كل خطوة بوقتها وسببها إن سقطت، فالعطل يُعرف بمكانه لا بـ«المصدر خربان».
+ */
+export async function checkSource(source, onStep = () => {}) {
+  const out = {};
+  const step = async (key, fn) => {
+    const t0 = performance.now();
+    try {
+      const detail = await withTimeout(fn(), 25_000);
+      out[key] = { ok: true, ms: Math.round(performance.now() - t0), detail };
+    } catch (error) {
+      out[key] = { ok: false, ms: Math.round(performance.now() - t0), error: String(error?.message ?? error).slice(0, 160) };
+    }
+    onStep(key, out[key]);
+    return out[key].ok;
+  };
+  let manga = null;
+  let chapter = null;
+  let page = null;
+  if (
+    !(await step('list', async () => {
+      const res = await engine.popular(source.id, 1).catch(() => engine.catalogue(source.id, 1));
+      manga = res?.mangas?.[0] ?? null;
+      if (!manga) throw new Error('القائمة فاضية');
+      return `${res.mangas.length} عمل`;
+    }))
+  )
+    return out;
+  await step('search', async () => {
+    const word = String(manga.title ?? '').split(/\s+/).find((w) => w.length > 2) ?? manga.title;
+    const res = await engine.search(source.id, word, 1);
+    if (!res?.mangas?.length) throw new Error(`ما رجع شي لـ«${word}»`);
+    return `${res.mangas.length} نتيجة`;
+  });
+  if (
+    await step('chapters', async () => {
+      const list = await engine.chapters(source.id, manga);
+      if (!list?.length) throw new Error('بلا فصول');
+      chapter = list[list.length - 1];
+      return `${list.length} فصل`;
+    })
+  ) {
+    if (
+      await step('pages', async () => {
+        const list = await engine.pages(source.id, chapter);
+        if (!list?.length) throw new Error('بلا صفحات');
+        page = list[0];
+        return `${list.length} صفحة`;
+      })
+    ) {
+      await step('image', async () => {
+        const res = await engine.pageImage(source.id, page);
+        return res?.bytes ? `${Math.round(res.bytes / 1024)} ك.ب` : 'وصلت';
+      });
+    }
+  }
+  if (manga.thumbnailUrl) await step('cover', async () => (await engine.cover(source.id, manga.thumbnailUrl), 'وصل'));
+  else out.cover = { ok: false, ms: 0, error: 'المصدر ما يعطي غلاف' };
+  return out;
+}
+
+export async function checkAllSources(onSource = () => {}, onStep = () => {}) {
+  const list = await sources();
+  const queue = [...list];
+  const results = new Map();
+  const worker = async () => {
+    for (let s = queue.shift(); s; s = queue.shift()) {
+      onSource(s);
+      results.set(s.id, await checkSource(s, (key, r) => onStep(s, key, r)));
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return { list, results };
+}

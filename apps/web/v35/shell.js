@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, browseLive, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import engine from '../lib/extension-engine.js';
@@ -2362,6 +2362,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    if (available()) {
+      group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
+    }
+
     group(
       'منطقة الخطر',
       [
@@ -2373,6 +2377,68 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ],
       { cls: 'danger-zone', note: 'لا تلمس شي هنا إلا إذا طُلب منك. كل خيار يسألك قبل ما يسوي شي.' },
     );
+  }
+
+  /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
+  function openSourceCheck() {
+    const rows = new Map();
+    const report = [];
+    openSheet((body) => {
+      body.append(el('h3', null, 'فحص المصادر'));
+      const note = el('p', null, 'يجرّب كل مصدر كما يستعمله القارئ. ياخذ دقيقة تقريبًا.');
+      note.style.marginBottom = '10px';
+      body.append(note);
+      const list = el('div', 'check-list');
+      body.append(list);
+      const copy = el('button', 'btn btn-secondary btn-block');
+      copy.type = 'button';
+      copy.innerHTML = `${glyph('share')}<span>انسخ النتيجة</span>`;
+      copy.disabled = true;
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(report.join('\n'));
+          toast('انسخت. ألصقها لي');
+        } catch {
+          toast('ما قدرت أنسخ');
+        }
+      };
+      copy.style.marginTop = '12px';
+      body.append(copy);
+      const rowOf = (source) => {
+        if (rows.has(source.id)) return rows.get(source.id);
+        const r = el('div', 'check-row');
+        const head = el('div', 'check-head');
+        const state = el('span', 'check-state');
+        state.append(el('i', 'spinner'));
+        head.append(el('strong', null, source.label), state);
+        const steps = el('div', 'check-steps');
+        r.append(head, steps);
+        list.append(r);
+        const entry = { r, state, steps, fails: 0, done: 0 };
+        rows.set(source.id, entry);
+        return entry;
+      };
+      void checkAllSources(
+        (source) => rowOf(source),
+        (source, key, res) => {
+          const e = rowOf(source);
+          e.done += 1;
+          if (!res.ok) e.fails += 1;
+          const label = CHECK_STEPS.find(([k]) => k === key)?.[1] ?? key;
+          const chip = el('span', `check-step check-step--${res.ok ? 'ok' : 'bad'}`, `${res.ok ? '✓' : '✗'} ${label}`);
+          chip.title = res.ok ? `${res.detail ?? ''} · ${res.ms}ms` : res.error;
+          e.steps.append(chip);
+          if (!res.ok) e.steps.append(el('small', 'check-why', `${label}: ${res.error}`));
+          report.push(`${source.label} | ${label} | ${res.ok ? 'OK' : 'FAIL'} | ${res.ms}ms | ${res.ok ? res.detail ?? '' : res.error}`);
+        },
+      ).then(({ list: all }) => {
+        for (const s of all) {
+          const e = rowOf(s);
+          e.state.replaceChildren(el('span', e.fails ? 'check-bad' : 'check-ok', e.fails ? `${e.fails} خلل` : 'سليم'));
+        }
+        copy.disabled = false;
+      });
+    });
   }
 
   function openPopupKinds() {
