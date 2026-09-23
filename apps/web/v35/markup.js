@@ -71,6 +71,7 @@ export const SHELL_HTML = `<div class="app">
       <div class="detail-top-title" id="detailTopTitle"></div>
       <div class="detail-actions">
         ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
+        ${iconButton('eye', 'قراءتي السابقة', { act: 'markPreviousReading' })}
         ${iconButton('heart', 'المفضلة', { act: 'toggleFavoriteCurrent', cls: 'icon-btn icon-btn--fav' })}
         ${iconButton('more', 'خيارات', { act: 'openWorkMenu' })}
       </div>
