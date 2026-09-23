@@ -510,14 +510,35 @@ export function mountV35(deps, { page = 'home' } = {}) {
     tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
     const li = logicalIndex();
     root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
+    // الالتفاف لا يعتمد على transitionend وحده: صفحةٌ مخفية أو تطبيق في الخلفية
+    // لا يطلقه، فكان العدّاد يتجاوز النسخ ويعرض بانرًا فارغًا
+    clearTimeout(state.heroWrapTimer);
+    if (anim) state.heroWrapTimer = setTimeout(heroWrap, 450);
+    else heroWrap();
+  }
+  /** من النسخة الطرفية إلى الأصل بلا حركة. آمنة مهما تكرّرت. */
+  function heroWrap() {
+    const n = state.heroItems.length;
+    if (!n) return;
+    const i = state.heroPhysicalIndex;
+    if (i >= 1 && i <= n) return;
+    state.heroPhysicalIndex = i <= 0 ? n : 1;
+    const tr = q('heroTrack');
+    tr.style.transition = 'none';
+    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
+    void tr.offsetWidth;
+    const li = logicalIndex();
+    root.querySelectorAll('.hero-dot').forEach((d, k) => d.classList.toggle('active', k === li));
   }
   function heroNext() {
     if (!state.heroItems.length) return;
+    heroWrap();
     state.heroPhysicalIndex += 1;
     heroPosition(true);
   }
   function heroPrev() {
     if (!state.heroItems.length) return;
+    heroWrap();
     state.heroPhysicalIndex -= 1;
     heroPosition(true);
   }
@@ -531,16 +552,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (hero.dataset.bound) return;
     hero.dataset.bound = '1';
     const tr = q('heroTrack');
-    tr.addEventListener('transitionend', () => {
-      const n = state.heroItems.length;
-      if (state.heroPhysicalIndex === 0) {
-        state.heroPhysicalIndex = n;
-        heroPosition(false);
-      } else if (state.heroPhysicalIndex === n + 1) {
-        state.heroPhysicalIndex = 1;
-        heroPosition(false);
-      }
-    });
+    tr.addEventListener('transitionend', heroWrap);
     const start = (x) => {
       state.heroDragging = true;
       state.heroStartX = x;
@@ -580,7 +592,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function restartHero() {
     clearInterval(state.heroTimer);
-    if (state.heroItems.length > 1) state.heroTimer = setInterval(heroNext, 5200);
+    // يلفّ والرئيسية أمامك فقط: لا حركة في صفحة مخفية ولا والتطبيق في الخلفية
+    if (state.heroItems.length > 1) state.heroTimer = setInterval(() => currentPage() === 'home' && !document.hidden && heroNext(), 5200);
   }
 
   // ───────────────────────── صفحة العمل ─────────────────────────

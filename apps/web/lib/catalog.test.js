@@ -231,6 +231,9 @@ describe('titlesMatch — نفس العمل في مصدر آخر', async () => {
 		expect(titlesMatch('OnePunch Man', 'One Punch Man')).toBe(true);
 		expect(titlesMatch('Solo Leveling (مانهوا)', 'solo leveling')).toBe(true);
 		expect(titlesMatch('وان بيس', 'ون بيس')).toBe(false);
+		// كما في المصادر فعلًا: العاشق ومانجا ليك وسبارك وستارز
+		expect(titlesMatch('WISTORIA: WAND AND SWORD', 'Wistoria’s Wand and Sword')).toBe(true);
+		expect(titlesMatch('The Beginning After The End', 'Beginning After the End')).toBe(true);
 	});
 	it('لا يدمج عملين مختلفين', () => {
 		expect(titlesMatch('Solo Leveling', 'Solo Leveling: Ragnarok')).toBe(false);

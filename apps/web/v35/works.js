@@ -90,8 +90,9 @@ export const available = () => engine.isAvailable();
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null } = {}) {
   const list = await sources();
+  // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
-    genre
+    withTimeout(genre
       ? engine.genre(source.id, genre, page)
       : query
       ? engine.search(source.id, query, page)
@@ -99,7 +100,7 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
         ? engine.popular(source.id, page)
         : kind === 'latest'
           ? engine.latest(source.id, page)
-          : engine.catalogue(source.id, page),
+          : engine.catalogue(source.id, page), LISTING_TIMEOUT_MS),
   );
   const index = createWorkIndex();
   let hasNextPage = false;
@@ -145,6 +146,7 @@ export async function detail(v35work) {
 // وتُضم كل نسخة يطابق عنوانها، وتُجمع فصولها مع ما عندنا.
 
 const SEARCH_TIMEOUT_MS = 15_000;
+const LISTING_TIMEOUT_MS = 20_000;
 const discovered = new Map();
 
 const withTimeout = (promise, ms) =>
