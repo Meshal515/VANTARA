@@ -1,0 +1,155 @@
+name: Android stable APK
+
+# نسخة التجربة اليومية الحقيقية لمشعل والعيال: نفس مفتاح التوقيع في كل بناء.
+# لا push ولا workflow_dispatch هنا؛ workflow_run يُقرأ من default branch ولا
+# يحصل على أسرار التوقيع إلا بعد نجاح CI على main.
+on:
+  workflow_run:
+    workflows: ['VANTARA CI']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: android-stable-main
+  cancel-in-progress: true
+
+env:
+  CF_PAGES_PROJECT: vantara
+  WORKER_NAME: vantara-sync
+
+jobs:
+  apk:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # نبني بالضبط الـSHA الذي اجتاز CI، لا HEAD أحدث وصل أثناء الانتظار.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify signing secrets exist
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve stable build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # هذا الـworkflow وحده متزايد دائمًا؛ يكفي لتحديثات القناة المستقرة.
+          echo "name=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve endpoint URLs
+        id: urls
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          API_URL_VAR: ${{ vars.VANTARA_API_URL }}
+        run: |
+          set -euo pipefail
+          sync=''
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"               | jq -r '.result.subdomain // empty')
+            if [ -n "$sub" ]; then sync="https://$WORKER_NAME.$sub.workers.dev"; fi
+          fi
+          echo "sync=$sync" >> "$GITHUB_OUTPUT"
+          echo "api=${API_URL_VAR:-}" >> "$GITHUB_OUTPUT"
+          echo "updates=https://$CF_PAGES_PROJECT.pages.dev" >> "$GITHUB_OUTPUT"
+
+      - name: Bake endpoints and version into the APK web bundle
+        env:
+          SYNC_URL: ${{ steps.urls.outputs.sync }}
+          API_URL: ${{ steps.urls.outputs.api }}
+          UPDATES_URL: ${{ steps.urls.outputs.updates }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          path = 'apps/web/lib/config.js'
+          text = open(path, encoding='utf-8').read()
+          for token, value in (
+              ('__VANTARA_SYNC_URL__', os.environ['SYNC_URL']),
+              ('__VANTARA_API_URL__', os.environ['API_URL']),
+              ('__VANTARA_UPDATES_URL__', os.environ['UPDATES_URL']),
+              ('__VANTARA_VERSION__', os.environ['VERSION_NAME']),
+          ):
+              text = text.replace(token, value)
+          open(path, 'w', encoding='utf-8').write(text)
+          PY
+
+      - name: Copy web assets into Android
+        run: npx cap sync android
+
+      - name: Decode stable signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/vantara.jks"
+          test -s "$RUNNER_TEMP/vantara.jks"
+
+      - name: Assemble stable signed APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/vantara.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: vantara
+          VANTARA_VERSION_NAME: ${{ steps.version.outputs.name }}
+          VANTARA_VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Verify signature and stage artifact
+        run: |
+          set -euo pipefail
+          apk=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          test -n "$apk" || { echo 'No stable APK produced'; exit 1; }
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee /tmp/apksigner.txt
+          grep -qE 'v2 scheme \(APK Signature Scheme v2\): true' /tmp/apksigner.txt             || { echo 'v2 signature missing'; exit 1; }
+          mkdir -p dist
+          cp "$apk" dist/VANTARA-stable.apk
+          sha256sum dist/VANTARA-stable.apk > dist/VANTARA-stable.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VANTARA-stable-apk
+          path: |
+            dist/VANTARA-stable.apk
+            dist/VANTARA-stable.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
