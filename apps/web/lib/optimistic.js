@@ -48,6 +48,12 @@ export const PROJECTIONS = {
   'favorite.set': collection('favorite'),
   'readLater.set': collection('read_later'),
   'top.set': collection('top'),
+  'completed.set': (op, get, userId) => {
+    const p = op.payload ?? {};
+    if (!p.seriesRef) return [];
+    const key = `${userId}/${p.seriesRef}`;
+    return [{ table: 'completions', key, row: { user_id: userId, series_ref: p.seriesRef, member: p.member === false ? 0 : 1, updated_at: now() } }];
+  },
   'library.add': (op, get, userId) => {
     const p = op.payload ?? {};
     if (!p.seriesRef) return [];

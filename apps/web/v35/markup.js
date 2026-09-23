@@ -178,8 +178,11 @@ export const SHELL_HTML = `<div class="app">
   </section>
 
   <section class="page" id="majlis">
-    ${mainTop('المجلس')}
-    <div class="page-body mj-body" id="majlisBody"></div>
+    ${mainTop('الاجتماع')}
+    <div class="social-tabs" id="socialTabs" role="tablist" aria-label="أقسام الاجتماع"></div>
+    <div class="page-body social-friends" id="friendsBody"></div>
+    <div class="page-body mj-body" id="majlisBody" hidden></div>
+    <div class="page-body notif-body" id="socialNotifs" hidden></div>
   </section>
 
   <section class="page" id="profile"><div id="profileBody"></div></section>
@@ -198,7 +201,7 @@ export const SHELL_HTML = `<div class="app">
     ${navItem('home', 'home', 'الرئيسية')}
     ${navItem('library', 'library', 'مكتبتي')}
     ${navItem('discover', 'compass', 'اكتشف')}
-    ${navItem('majlis', 'users', 'المجلس')}
+    ${navItem('majlis', 'users', 'الاجتماع')}
   </nav>
 </div>
 

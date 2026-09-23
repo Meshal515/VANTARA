@@ -16,6 +16,7 @@
 import { glyph } from './icons.js';
 import { countLabel } from './plural.js';
 import { displayTitle, refForTitle } from './work-ref.js';
+import { EMOJI_GROUPS } from './emoji.js';
 
 /** نفس القائمة المغلقة في الخادم (`MAJLIS_REACTIONS`). */
 export const REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
@@ -245,6 +246,19 @@ export function createMajlis(ctx) {
       };
       bar.append(b);
     });
+    // «+»: كل الرموز. الشريط يبقى ستة، والباقي في ورقة مرتّبة
+    const more = el('button', 'mj-bar-item mj-bar-more');
+    more.type = 'button';
+    more.setAttribute('role', 'menuitem');
+    more.setAttribute('aria-label', 'كل الرموز');
+    more.innerHTML = glyph('plus', { size: 20 });
+    more.style.animationDelay = `${REACTIONS.length * 22}ms`;
+    more.onclick = (e) => {
+      e.stopPropagation();
+      closeBar();
+      openEmojiSheet(kind, id);
+    };
+    bar.append(more);
     document.body.append(bar);
     const r = anchor.getBoundingClientRect();
     const w = bar.offsetWidth;
@@ -263,6 +277,39 @@ export function createMajlis(ctx) {
     };
     setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
   }
+  function openEmojiSheet(kind, id) {
+    if (!ctx.openSheet) return;
+    const { mine } = reactionsOf(kind, id);
+    ctx.openSheet((body) => {
+      body.append(el('h3', null, 'تفاعل'));
+      const tabs = el('div', 'segmented mj-emoji-tabs');
+      const grid = el('div', 'mj-emoji-grid');
+      const paint = (gi) => {
+        tabs.querySelectorAll('.library-tab').forEach((t, i) => t.classList.toggle('active', i === gi));
+        grid.replaceChildren(
+          ...EMOJI_GROUPS[gi][1].map((emoji) => {
+            const b = el('button', `mj-emoji${emoji === mine ? ' mj-emoji--on' : ''}`, emoji);
+            b.type = 'button';
+            b.onclick = () => {
+              ctx.closeSheet?.();
+              react(kind, id, emoji);
+            };
+            return b;
+          }),
+        );
+        grid.scrollTop = 0;
+      };
+      EMOJI_GROUPS.forEach(([label], gi) => {
+        const t = el('button', 'library-tab', label);
+        t.type = 'button';
+        t.onclick = () => paint(gi);
+        tabs.append(t);
+      });
+      body.append(tabs, grid);
+      paint(0);
+    });
+  }
+
   /**
    * الضغطة المطوّلة تفتح الشريط وتلغي اللمسة العادية بعدها، فلا يفتح العمل
    * تحت إصبعك. والتمرير (حركة أكثر من 8 نقاط) يلغيها.

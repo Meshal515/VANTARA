@@ -134,8 +134,21 @@ function presencePayload() {
   return { status: 'ONLINE', screen: state.screen };
 }
 
+/**
+ * نبضة الآن لا بعد 25 ثانية: فتحتَ التطبيق أو بدأت فصلًا أو خرجت منه، فيرى
+ * أصدقاؤك «متصل» و«يقرأ الآن: …» في ثوانٍ. المتلاحق يُجمع في نبضة واحدة.
+ */
+let beatSoonTimer = null;
+function beatSoon() {
+  clearTimeout(beatSoonTimer);
+  beatSoonTimer = setTimeout(() => {
+    if (document.visibilityState === 'visible') void sync.beat(presencePayload());
+  }, 800);
+}
+
 function startHeartbeat() {
   if (beatTimer) return;
+  beatSoon();
   lastTick = Date.now();
   let sinceFlush = 0;
   beatTimer = setInterval(() => {
@@ -1476,6 +1489,7 @@ function screenSmartReader(target) {
       // معه فيفتحه المجلس من عندهم
       setReading: (info) => {
         state.reading = info ? { ...info, seriesId: target.seriesRef, chapterId: null } : null;
+        beatSoon();
       },
       immersive: (on) => void globalThis.Capacitor?.Plugins?.SystemUi?.immersive?.({ on }).catch?.(() => {}),
     },

@@ -62,7 +62,10 @@ const chapterId = (row) => `${row.sourceId}|${row.chapter?.url ?? ''}`;
 const imageKey = (row, index) => `${chapterId(row)}#${index}`;
 
 function ensureScheduler(engine) {
-  ensureScheduler(engine);
+  scheduler ??= createScheduler({
+    concurrency: 5,
+    run: async (_key, { sourceId, page }) => (await engine.pageImage(sourceId, page)).src,
+  });
   return scheduler;
 }
 function sharedPages(engine, row) {
@@ -111,10 +114,7 @@ export function warmChapter(engine, row, images = 3) {
  */
 export function openSmartReader(deps, ctx) {
   const { sync, engine } = deps;
-  scheduler ??= createScheduler({
-    concurrency: 5,
-    run: async (_key, { sourceId, page }) => (await engine.pageImage(sourceId, page)).src,
-  });
+  ensureScheduler(engine);
 
   const settings = loadSettings();
   const sequence = chapterSequence(ctx.rows?.length ? ctx.rows : [ctx.row]);
@@ -681,6 +681,15 @@ export function openSmartReader(deps, ctx) {
         ratio,
         activeMs: Math.round(seg.activeMs),
       });
+      // آخر فصل في عمل انتهى نشره = أكملته: يظهر في «المكتمل» عندك وفي ملفك
+      if (!neighbors(sequence, seg.row).next && ctx.work?.status === 'FINISHED') {
+        sync.enqueue('completed.set', {
+          seriesRef: ref,
+          seriesTitle: ctx.title,
+          coverUrl: ctx.work?.coverImage?.large ?? null,
+          member: true,
+        });
+      }
     }
     clearTimeout(state.progressTimer);
     state.progressTimer = setTimeout(flushProgress, 1500);

@@ -785,3 +785,32 @@
 .v35 .pv-actions {
   margin-top: 18px;
 }
+
+/* ── «+» وكل الرموز ── */
+.v35 .mj-bar-more {
+  color: var(--text-2);
+}
+.v35 .mj-emoji-tabs {
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+.v35 .mj-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+.v35 .mj-emoji {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  font-size: 26px;
+  line-height: 1;
+}
+.v35 .mj-emoji:active,
+.v35 .mj-emoji--on {
+  background: var(--accent-soft);
+}

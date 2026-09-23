@@ -67,7 +67,7 @@ const CHAPTER_BATCH = 60;
 
 const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
-  ['الأصدقاء', [['المجلس', 'majlis', 'users'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
+  ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
   ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
   ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
@@ -224,18 +224,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const me = () => sync.user?.userId;
   const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed);
   const inCollection = (kind, ref) =>
-    sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
+    kind === 'completed'
+      ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
+      : sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
   function libraryEntry(ref) {
     const row = libraryRows().find((r) => r.series_ref === ref);
     const later = inCollection('read_later', ref);
     const favorite = inCollection('favorite', ref);
-    if (!row && !later && !favorite) return null;
-    return { row, later, favorite, addedAt: row?.added_at ?? 0 };
+    const completed = inCollection('completed', ref);
+    if (!row && !later && !favorite && !completed) return null;
+    return { row, later, favorite, completed, addedAt: row?.added_at ?? 0 };
   }
   function libraryWorks(filter = 'all') {
     const refs = new Set([
       ...libraryRows().map((r) => r.series_ref),
       ...sync.rows('collections', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
+      ...sync.rows('completions', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
     ]);
     return [...refs]
       .map((ref) => {
@@ -252,6 +256,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (filter === 'reading') return Boolean(entry.row);
         if (filter === 'later') return entry.later;
         if (filter === 'favorite') return entry.favorite;
+        if (filter === 'completed') return entry.completed;
         return true;
       })
       .map(({ work }) => work);
@@ -1351,6 +1356,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
           closeSheet();
           toggleTopCurrent();
         }, { pressed: inCollection('top', String(w.id)) }),
+        sheetItem('check', 'أكملته', () => {
+          closeSheet();
+          const member = !inCollection('completed', String(w.id));
+          sync.enqueue('completed.set', { ...descriptorOf(w), member });
+          toast(member ? 'في «المكتمل»' : 'أزيل من «المكتمل»');
+        }, { pressed: inCollection('completed', String(w.id)) }),
       );
       if (deps.report) {
         body.append(
@@ -1495,7 +1506,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   function renderLibrary() {
-    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['favorite', 'المفضلة']];
+    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['completed', 'المكتمل'], ['favorite', 'المفضلة']];
     q('libraryTabs').replaceChildren(
       ...tabs.map(([k, l]) => {
         const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
@@ -1531,6 +1542,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         reading: ['ما تتابع شي الحين', 'الأعمال اللي تضيفها لمكتبتك تظهر هنا.'],
         later: ['القائمة فاضية', 'من قائمة الخيارات في صفحة العمل اختر «أقرأ لاحقًا».'],
         favorite: ['ما عندك مفضلة', 'القلب في صفحة العمل يضيفه هنا.'],
+        completed: ['ما أكملت شي بعد', 'من قائمة ⋮ في صفحة العمل اختر «أكملته»، أو خلّص آخر فصل في عمل مكتمل.'],
       }[state.libraryFilter];
       emptyState(grid, {
         icon: { favorite: 'heart', later: 'clock' }[state.libraryFilter] ?? 'library',
@@ -1935,8 +1947,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     return b;
   }
+  const notificationsVisible = () => currentPage() === 'notifications' || (currentPage() === 'majlis' && state.socialTab === 'notifications');
   function renderNotifications() {
-    const body = q('notificationsBody');
+    const inHub = currentPage() === 'majlis';
+    const body = inHub ? q('socialNotifs') : q('notificationsBody');
     const rows = sync
       .rows('notifications', (r) => r.user_id === me())
       .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
@@ -1965,7 +1979,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // يبقى مميّزًا في هذه الزيارة وحدها لتعرف ما وصل
     clearTimeout(state.notifReadTimer);
     state.notifReadTimer = setTimeout(() => {
-      if (currentPage() !== 'notifications') return;
+      if (!notificationsVisible()) return;
       for (const r of rows) if (!r.read) sync.enqueue('notification.read', { id: r.id });
     }, 900);
   }
@@ -2029,11 +2043,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return navTo('library');
     }
     if (key === 'switchAccount') return confirmSwitchAccount();
-    if (key === 'notifications') return showPage('notifications');
+    if (key === 'notifications') return openSocial('notifications');
+    if (key === 'majlisFeed') return openSocial('majlis');
     if (key === 'profile') return openProfile(me());
     // التوصيات والنشاط صارا في المجلس نفسه: لا شاشة قديمة موازية
-    if (key === 'recommendations') return openMajlis('recs');
-    if (key === 'activity' || key === 'friends') return openMajlis();
+    if (key === 'recommendations') return openSocial('recs');
+    if (key === 'friends') return openSocial('friends');
+    if (key === 'activity') return openSocial('majlis');
   }
   function confirmSwitchAccount() {
     openSheet((body) => {
@@ -2057,6 +2073,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const MAIN_PAGES = ['home', 'library', 'discover', 'majlis'];
   const currentPage = () => root.querySelector('.page.active')?.id ?? 'home';
   function showPage(id, { push = true } = {}) {
+    // الإشعارات صارت قسمًا في «الاجتماع»
+    if (id === 'notifications') {
+      state.socialTab = 'notifications';
+      id = 'majlis';
+    }
     const from = currentPage();
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
@@ -2072,10 +2093,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'library') renderLibrary();
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
     if (id === 'settings') renderSettings();
-    if (id === 'notifications') renderNotifications();
-    if (from === 'notifications' && id !== 'notifications') state.notifFresh = null;
+
+    if (id !== 'majlis' || state.socialTab !== 'notifications') state.notifFresh = null;
     if (id === 'majlis') {
-      majlis.show();
+      renderSocial();
       // وصلتَ للمجلس = رأيت التفاعلات على رسائلك فيه
       for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
         sync.enqueue('notification.read', { id: n.id });
@@ -2085,11 +2106,138 @@ export function mountV35(deps, { page = 'home' } = {}) {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
-    showPage(id === 'friends' ? 'majlis' : id);
+    if (id === 'notifications') return openSocial('notifications');
+    if (id === 'friends') return openSocial('friends');
+    showPage(id);
   }
   function openMajlis(only) {
-    showPage('majlis');
-    if (only) majlis.show(only);
+    openSocial(only === 'recs' ? 'recs' : 'majlis');
+  }
+
+  // ───────────────────────── الاجتماع ─────────────────────────
+  // أربعة أقسام تحت سقف واحد: الأصدقاء أولًا (من هنا ومن يقرأ ماذا)، ثم
+  // المجلس، ثم الإشعارات، ثم التوصيات.
+
+  const SOCIAL_TABS = [
+    ['friends', 'الأصدقاء'],
+    ['majlis', 'المجلس'],
+    ['notifications', 'الإشعارات'],
+    ['recs', 'التوصيات'],
+  ];
+  function openSocial(tab = state.socialTab ?? 'friends') {
+    state.socialTab = tab;
+    if (currentPage() !== 'majlis') showPage('majlis');
+    else renderSocial();
+  }
+  function renderSocial() {
+    const tab = (state.socialTab ??= 'friends');
+    const unread = unreadNotifications();
+    q('socialTabs').replaceChildren(
+      ...SOCIAL_TABS.map(([k, label]) => {
+        const b = el('button', `social-tab${k === tab ? ' active' : ''}`, label);
+        b.type = 'button';
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', String(k === tab));
+        if (k === 'notifications' && unread) b.append(el('span', 'social-tab-dot'));
+        b.onclick = () => {
+          if (state.socialTab === k) return;
+          state.socialTab = k;
+          renderSocial();
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        };
+        return b;
+      }),
+    );
+    q('friendsBody').hidden = tab !== 'friends';
+    q('majlisBody').hidden = tab !== 'majlis' && tab !== 'recs';
+    q('socialNotifs').hidden = tab !== 'notifications';
+    if (tab === 'friends') {
+      majlis.hide();
+      renderFriends();
+      void refreshFriendsPresence();
+    } else if (tab === 'notifications') {
+      majlis.hide();
+      renderNotifications();
+    } else {
+      majlis.show(tab === 'recs' ? 'recs' : 'all');
+    }
+    if (tab !== 'friends') clearInterval(state.friendsTimer);
+  }
+
+  // ── الأصدقاء: وجه، اسم، وما يفعله الآن ──
+  let friendsPresence = [];
+  async function refreshFriendsPresence() {
+    clearInterval(state.friendsTimer);
+    state.friendsTimer = setInterval(() => {
+      if (currentPage() === 'majlis' && state.socialTab === 'friends' && !document.hidden) void refreshFriendsPresence();
+    }, 15_000);
+    try {
+      friendsPresence = (await deps.presence?.()) ?? [];
+    } catch {
+      return;
+    }
+    if (currentPage() === 'majlis' && state.socialTab === 'friends') renderFriends();
+  }
+  function lastSeenLine(at) {
+    if (!at) return 'غير متصل';
+    const minutes = Math.floor((Date.now() - at) / 60_000);
+    if (minutes < 2) return 'كان هنا قبل شوي';
+    return `آخر ظهور ${timeAgo(at)}`;
+  }
+  function renderFriends() {
+    const body = q('friendsBody');
+    const ids = sync
+      .rows('accounts', () => true)
+      .map((a) => a.user_id)
+      .filter((id) => id !== me());
+    if (!ids.length) {
+      emptyState(body, { icon: 'users', title: 'ما فيه أصدقاء بعد', text: 'أصدقاؤك يظهرون هنا أول ما يوصلون.' });
+      return;
+    }
+    const pOf = (id) => friendsPresence.find((p) => p.userId === id) ?? null;
+    const rank = (id) => ({ READING: 0, ONLINE: 1, IDLE: 2 })[pOf(id)?.status] ?? 3;
+    ids.sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b), 'ar'));
+    const list = el('div', 'pal-list');
+    for (const id of ids) {
+      const p = pOf(id);
+      const status = p?.status ?? 'OFFLINE';
+      const row = el('div', `pal-row pal-row--${status.toLowerCase()}`);
+      const face = el('button', 'pal-face');
+      face.type = 'button';
+      face.setAttribute('aria-label', `ملف ${nameOf(id)}`);
+      face.append(avatarNode(personOf(id), 56));
+      if (status !== 'OFFLINE') face.append(el('span', 'pal-dot'));
+      face.onclick = () => openProfile(id);
+      const copy = el('div', 'pal-copy');
+      const name = el('button', 'pal-name', nameOf(id));
+      name.type = 'button';
+      name.onclick = () => openProfile(id);
+      copy.append(name);
+      const line = el('div', 'pal-line');
+      if (status === 'READING' && p?.seriesTitle) {
+        line.append(el('span', null, 'يقرأ الآن: '));
+        const work = workFromRef(p.seriesRef ?? `ext:${p.seriesTitle}`, p.seriesTitle);
+        const title = el('button', 'pal-work');
+        title.type = 'button';
+        title.append(el('bdi', null, titleOf(work)));
+        title.onclick = () => void openWork(work);
+        line.append(title);
+        if (p.chapterLabel) line.append(el('span', 'pal-chapter', ` · ${p.chapterLabel}`));
+      } else if (status === 'ONLINE' || status === 'IDLE') {
+        line.append(el('span', status === 'IDLE' ? 'pal-idle' : 'pal-on', status === 'IDLE' ? 'خامل' : 'متصل الآن'));
+      } else {
+        line.append(el('span', null, lastSeenLine(p?.lastSeenAt)));
+      }
+      copy.append(line);
+      const go = el('button', 'icon-btn pal-go');
+      go.type = 'button';
+      go.setAttribute('aria-label', `ملف ${nameOf(id)}`);
+      go.innerHTML = glyph('chevron');
+      go.onclick = () => openProfile(id);
+      row.append(face, copy, go);
+      list.append(row);
+    }
+    body.replaceChildren(list);
   }
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
@@ -2397,7 +2545,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function paintNotifyDots() {
     const unread = unreadNotifications();
-    root.querySelectorAll('.notify-dot').forEach((d) => (d.hidden = unread === 0));
+    root.querySelectorAll('.notify-dot, .social-tab-dot').forEach((d) => (d.hidden = unread === 0));
     root.querySelectorAll('.has-dot').forEach((b) => b.setAttribute('aria-label', unread ? `الإشعارات، ${countLabel(unread, 'new')}` : 'الإشعارات'));
   }
 
@@ -2469,7 +2617,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (currentPage() === 'library' && state.libraryFilter === 'history') renderLibrary();
       else if (currentPage() === 'home' && tables.includes('work_views')) renderHome();
     }
-    if (tables.some((t) => ['library', 'collections'].includes(t))) {
+    if (tables.some((t) => ['library', 'collections', 'completions'].includes(t))) {
       refreshLibraryDetail();
       if (currentPage() === 'home') renderHome();
       if (currentPage() === 'library') renderLibrary();
@@ -2479,12 +2627,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    majlis.onChange(tables, { visible: currentPage() === 'majlis' });
+    majlis.onChange(tables, { visible: currentPage() === 'majlis' && (state.socialTab === 'majlis' || state.socialTab === 'recs') });
     profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
-      if (currentPage() === 'notifications') renderNotifications();
+      if (notificationsVisible()) renderNotifications();
     }
+    if (currentPage() === 'majlis' && state.socialTab === 'friends' && tables.some((t) => ['profiles', 'accounts', 'works'].includes(t))) renderFriends();
   });
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
@@ -2506,6 +2655,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openProfile: (userId) => openProfile(userId),
     openShare: () => navTo('discover'),
     pageImage: available() ? deps.pageImage : null,
+    openSheet,
+    closeSheet,
   });
   // ما وصل هذا الجهاز قبل فتح الشاشة: المرسل يرى «وصله» الآن لا عند أول مجلس
   setTimeout(() => {
@@ -2532,6 +2683,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     back: () => goBack(),
     edit: () => editProfile(),
     libraryWorks,
+    historyList: (target, opts) => renderHistoryList(target, opts),
+    openHistory: () => {
+      state.libraryFilter = 'history';
+      navTo('library');
+    },
   });
   let editor = null;
   function editProfile() {
@@ -2585,7 +2741,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
       }
       if (state.heroItems.length) restartHero();
-      if (currentPage() === 'majlis') majlis.show();
+      if (currentPage() === 'majlis') renderSocial();
     },
     destroy() {
       majlis.hide();

@@ -78,3 +78,18 @@ describe('full sync', () => {
     expect((changes.profiles ?? []).length).toBe(3);
   });
 });
+
+describe('completions', () => {
+  it('completed.set marks a work done for friends to see, and can be undone', async () => {
+    const { env } = testEnv();
+    await send(env, A, 'completed.set', { seriesRef: 'ext:x', seriesTitle: 'X', member: true });
+    const token = await mintToken(B, SECRET);
+    const pull = async () =>
+      ((await (await worker.fetch(new Request('https://sync.test/v1/sync?since=0', { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as {
+        changes: Record<string, Array<Record<string, unknown>>>;
+      }).changes;
+    expect((await pull()).completions?.[0]).toMatchObject({ user_id: A, series_ref: 'ext:x', member: 1 });
+    await send(env, A, 'completed.set', { seriesRef: 'ext:x', member: false });
+    expect((await pull()).completions?.[0]?.['member']).toBe(0);
+  });
+});

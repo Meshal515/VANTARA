@@ -196,9 +196,10 @@ describe('sync privacy boundaries', () => {
 
     expect(ids(changes['settings'], 'user_id')).toEqual([VIEWER]);
     expect(ids(changes['notifications'], 'user_id')).toEqual([VIEWER]);
-    expect(ids(changes['library'], 'user_id')).toEqual([VIEWER]);
     expect(ids(changes['progress'], 'user_id')).toEqual([VIEWER]);
-    expect(ids(changes['collections'], 'user_id')).toEqual([VIEWER]);
+    // المكتبة والقوائم يراها الأصدقاء في ملفك (يقرأ الآن، لاحقًا، المكتمل)
+    expect(ids(changes['library'], 'user_id').sort()).toEqual([OTHER, VIEWER].sort());
+    expect(ids(changes['collections'], 'user_id').sort()).toEqual([OTHER, VIEWER].sort());
 
     expect(ids(changes['recommendations'], 'id')).toEqual([
       'rec-broadcast',
@@ -236,9 +237,7 @@ describe('sync privacy boundaries', () => {
     expect(serialized).not.toContain('خاص بالحساب الآخر');
     expect(serialized).not.toContain('third-only-secret');
     expect(serialized).not.toContain('activity-third-only');
-    expect(serialized).not.toContain('series-other');
     expect(serialized).not.toContain('chapter-other');
-    expect(serialized).not.toContain('favorite-other');
   });
 });
 

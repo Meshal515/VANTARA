@@ -72,6 +72,8 @@ const KEYS = {
   chapter_marks: (row) => `${row.user_id}/${row.chapter_key}`,
   usage_daily: (row) => `${row.user_id}/${row.day}`,
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
+  // «المكتمل»: صف لكل عمل أكملته
+  completions: (row) => `${row.user_id}/${row.series_ref}`,
   ratings: (row) => `${row.user_id}/${row.series_ref}`,
   comments: (row) => row.id,
   // وصف العمل: عنوانه وغلافه. بلا مفتاح هنا كانت صفوفه تُلقى ويعبر المؤشر

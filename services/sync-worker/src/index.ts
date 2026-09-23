@@ -272,6 +272,7 @@ const DELTA_TABLES = [
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
+  ['completions', 'user_id, series_ref, member, updated_at, rev'],
   // وصف العمل مرة واحدة لكل عمل لا لكل مستخدم: الأصدقاء الثلاثة يرون نفس
   // الأعمال، وبلا هذا الجدول تعرض شاشة المفضلة معرّفًا خامًا
   ['works', 'series_ref, title, cover_url, source_id, updated_at, rev, editions_json'],
@@ -316,10 +317,9 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
   // يعني أن البيانات كُشفت بالفعل.
   const deltaScope = (table: string): { sql: string; values: string[] } => {
     switch (table) {
-      case 'library':
+      // المكتبة والقوائم ليست هنا بقصد: ملف صديقك يعرض ما يقرؤه ويؤجله وأكمله
       case 'progress':
       case 'chapter_marks':
-      case 'collections':
       case 'settings':
       case 'notifications':
         return { sql: ' AND user_id = ?', values: [userId] };
@@ -952,6 +952,30 @@ export function statementsFor(
              ON CONFLICT (user_id, series_ref) DO UPDATE SET removed = 1, rev = excluded.rev`,
           )
           .bind(userId, seriesRef, now, rev),
+      ];
+    }
+
+    // «أكملته»: جدول مستقل، والوصف يرافقه كما يرافق القوائم
+    case 'completed.set': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      if (!seriesRef) return null;
+      return [
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          sourceId: asString(p['sourceId'], 120),
+          now,
+          rev,
+        }),
+        db
+          .prepare(
+            `INSERT INTO completions (user_id, series_ref, member, updated_at, rev)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, series_ref) DO UPDATE SET
+               member = excluded.member, updated_at = excluded.updated_at, rev = excluded.rev`,
+          )
+          .bind(userId, seriesRef, p['member'] === false ? 0 : 1, now, rev),
       ];
     }
 

@@ -84,6 +84,19 @@ export function createProfile(ctx) {
   let silk = null;
   let stopFollow = null;
   let token = 0;
+  let shelfTimer = null;
+  let shownShelves = '';
+  const shelfSig = (userId) =>
+    JSON.stringify([
+      sync.rows('library', (r) => r.user_id === userId && !r.removed).map((r) => r.series_ref).sort(),
+      sync.rows('collections', (r) => r.user_id === userId && r.member).map((r) => `${r.kind}/${r.series_ref}`).sort(),
+      sync.rows('completions', (r) => r.user_id === userId && r.member).map((r) => r.series_ref).sort(),
+      sync
+        .rows('work_views', (r) => r.user_id === userId && !r.removed)
+        .sort((a, b) => b.viewed_at - a.viewed_at)
+        .slice(0, 8)
+        .map((r) => `${r.series_ref}/${r.chapter_number}`),
+    ]);
 
   let shown = null;
   let shownSig = '';
@@ -272,7 +285,7 @@ export function createProfile(ctx) {
     card.append(
       statCell(v('followedWorks'), 'أعمال متابَعة'),
       statCell(v('uniqueChapters'), 'فصول فريدة'),
-      statCell(v('totalReads'), 'قراءات كاملة'),
+      statCell(v('totalReads'), 'قراءات'),
     );
     card.classList.toggle('pf-stats--loading', !numbers);
     return card;
@@ -354,12 +367,49 @@ export function createProfile(ctx) {
     return list;
   }
 
+  // ───────────────────────── الرفوف ─────────────────────────
+
+  /**
+   * رفٌّ من مكتبة صاحب الملف: «reading» مكتبته، والبقية قوائمه. الأحدث مشاهدةً
+   * أولًا، ومع كل عمل آخر فصل فتحه.
+   */
+  function shelfOf(userId, kind) {
+    const refs =
+      kind === 'reading'
+        ? sync.rows('library', (r) => r.user_id === userId && !r.removed).map((r) => r.series_ref)
+        : kind === 'completed'
+          ? sync.rows('completions', (r) => r.user_id === userId && r.member).map((r) => r.series_ref)
+          : sync.rows('collections', (r) => r.user_id === userId && r.kind === kind && r.member).map((r) => r.series_ref);
+    const viewAt = (ref) => sync.rows('work_views', (v) => v.user_id === userId && v.series_ref === ref)[0];
+    return [...new Set(refs)]
+      .map((ref) => ({ ref, view: viewAt(ref) }))
+      .sort((a, b) => (b.view?.viewed_at ?? 0) - (a.view?.viewed_at ?? 0))
+      .map(({ ref, view }) => ({ work: workOf(ref, view?.series_title), view }));
+  }
+  function strip(items, { chapters = false } = {}) {
+    const row = el('div', 'card-strip pf-strip');
+    for (const { work, view } of items.slice(0, 20)) {
+      const b = el('button', 'pf-card');
+      b.type = 'button';
+      const f = el('span', 'pf-card-frame');
+      f.append(poster(work, ''));
+      b.append(f, el('bdi', 'pf-card-title', titleOf(work)));
+      if (chapters && (view?.chapter_label || view?.chapter_number != null)) {
+        b.append(el('span', 'pf-card-meta', view.chapter_label || `الفصل ${view.chapter_number}`));
+      }
+      b.onclick = () => ctx.openWork(work);
+      row.append(b);
+    }
+    return row;
+  }
+
   // ───────────────────────── الصفحة ─────────────────────────
 
   async function show(userId) {
     const my = ++token;
     shown = userId;
     shownSig = signature(userId);
+    shownShelves = shelfSig(userId);
     const own = userId === me();
     const profile = profileOf(userId);
     const name = profile?.display_name || usernameOf(userId) || 'صديق';
@@ -420,24 +470,29 @@ export function createProfile(ctx) {
     let topHost = topSkeleton();
     body.append(section('أفضل 5', topHost, { meta: own ? null : `اختيارات ${name}` }));
 
+    // مكتبة صاحب الملف كما هي عنده: نفس الصفوف التي تقرؤها مكتبته وسجلّه، لا نسخة
+    const shelf = (kind) => shelfOf(userId, kind);
+    const reading = shelf('reading');
+    if (reading.length) body.append(section('يقرأ الآن', strip(reading, { chapters: true }), { meta: countLabel(reading.length, 'work') }));
+    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed);
+    if (views.length) {
+      const hist = el('div');
+      ctx.historyList(hist, { userId, own, limit: 5 });
+      const sec = section('آخر المشاهدات', hist, { meta: countLabel(views.length, 'work') });
+      if (views.length > 5) {
+        const more = el('button', 'pf-log-more', own ? 'اعرض السجل كامل' : `اعرض كل مشاهدات ${name}`);
+        more.type = 'button';
+        more.onclick = () => (own ? ctx.openHistory() : (more.remove(), ctx.historyList(hist, { userId, own, limit: 60 })));
+        sec.append(more);
+      }
+      body.append(sec);
+    }
+    const later = shelf('read_later');
+    if (later.length) body.append(section('أقرأ لاحقًا', strip(later), { meta: countLabel(later.length, 'work') }));
+    const done = shelf('completed');
+    if (done.length) body.append(section('المكتمل', strip(done), { meta: countLabel(done.length, 'work') }));
     const log = readingLog(userId);
     if (log.length) body.append(section(own ? 'سجلّ قراءتك' : 'سجلّ القراءة', logList(log)));
-    if (own) {
-      const later = ctx.libraryWorks('later');
-      if (later.length) {
-        const strip = el('div', 'card-strip pf-strip');
-        for (const w of later.slice(0, 12)) {
-          const b = el('button', 'pf-card');
-          b.type = 'button';
-          const f = el('span', 'pf-card-frame');
-          f.append(poster(w, ''));
-          b.append(f, el('bdi', 'pf-card-title', titleOf(w)));
-          b.onclick = () => ctx.openWork(w);
-          strip.append(b);
-        }
-        body.append(section('أقرأ لاحقًا', strip, { meta: countLabel(later.length, 'work') }));
-      }
-    }
 
     const [presence, numbers, top5] = await Promise.all([
       ctx.presence().catch(() => []),
@@ -496,6 +551,12 @@ export function createProfile(ctx) {
       if (shown === me()) void show(me());
     },
     onChange(tables) {
+      // رفوف ملفٍ مفتوح تتبع مكتبة صاحبه وسجلّه لحظة تتغير
+      // (فقط حين تغيّرت رفوف صاحب الملف نفسه: قراءة صديقٍ آخر لا تعيد رسم ملفك)
+      if (shown && !host.closest('[hidden]') && tables.some((t) => ['library', 'collections', 'completions', 'work_views'].includes(t)) && shelfSig(shown) !== shownShelves) {
+        clearTimeout(shelfTimer);
+        shelfTimer = setTimeout(() => shown && void show(shown), 400);
+      }
       if (!tables.includes('profiles')) return;
       // تُمسح النسخة المحلية حين يطابقها الخادم، لا قبلها: سحبٌ سبق الإرسال لا يُرجع القديم
       if (local) {

@@ -63,6 +63,7 @@ const OPS = {
   'library.remove': { class: STATE, key: (p) => `library/${p.seriesRef}` },
   'favorite.set': { class: STATE, key: (p) => `favorite/${p.seriesRef}` },
   'readLater.set': { class: STATE, key: (p) => `readLater/${p.seriesRef}` },
+  'completed.set': { class: STATE, key: (p) => `completed/${p.seriesRef}` },
   'rating.set': { class: STATE, key: (p) => `rating/${p.seriesRef}` },
   'notification.read': { class: STATE, key: (p) => `notification/${p.id}` },
   'reaction.set': { class: STATE, key: (p) => `reaction/${p.commentId}/${p.emoji}` },

@@ -148,6 +148,7 @@ export type OpKind =
   | 'library.remove'
   | 'favorite.set'
   | 'readLater.set'
+  | 'completed.set'
   | 'collection.reorder'
   | 'top.set'
   | 'rating.set'
