@@ -78,6 +78,36 @@ export function normalizeTitle(raw) {
 	return kept || folded;
 }
 
+/**
+ * هل العنوانان لعمل واحد؟ أصرم من «يشبه»: دمجُ عملين مختلفين يخلط فصولهما، وهذا
+ * أسوأ من نسخة لم تُدمج.
+ *
+ * نفس العنوان بعد التطبيع، أو نفسه بلا مسافات («one punch man» = «onepunch man»)،
+ * أو كلماتٌ متطابقة ٨٠٪ فأكثر (Jaccard) في عنوانين من كلمتين فصاعدًا.
+ * «Solo Leveling» و«Solo Leveling: Ragnarok» ليسا عملًا واحدًا (٦٧٪).
+ */
+// كلمات لا تميّز عملًا: «Wistoria’s Wand and Sword» عند مانجا ليك هو
+// «WISTORIA: WAND AND SWORD» عند العاشق — الفرق ’s و«and» لا غير
+const FILLER = new Set(['s', 'the', 'a', 'an', 'of', 'and', '&']);
+const meaningful = (normalized) => normalized.split(' ').filter((w) => w && !FILLER.has(w));
+
+export function titlesMatch(a, b) {
+	const na = normalizeTitle(a);
+	const nb = normalizeTitle(b);
+	if (!na || !nb) return false;
+	if (na === nb) return true;
+	if (na.replace(/\s+/g, '') === nb.replace(/\s+/g, '')) return true;
+	const wa = meaningful(na);
+	const wb = meaningful(nb);
+	if (wa.length && wa.join('') === wb.join('')) return true;
+	const ta = new Set(wa);
+	const tb = new Set(wb);
+	if (Math.min(ta.size, tb.size) < 2) return false;
+	let shared = 0;
+	for (const t of ta) if (tb.has(t)) shared += 1;
+	return shared / new Set([...ta, ...tb]).size >= 0.8;
+}
+
 // ───────────────────────── أرقام الفصول ─────────────────────────
 
 /**

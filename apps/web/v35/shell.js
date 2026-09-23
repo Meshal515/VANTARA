@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, describe, detail, editionRows, seriesRefOf } from './works.js';
+import { available, browse, describe, detail, discoverEditions, editionRows, seriesRefOf, withEditions } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
@@ -510,14 +510,35 @@ export function mountV35(deps, { page = 'home' } = {}) {
     tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
     const li = logicalIndex();
     root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
+    // الالتفاف لا يعتمد على transitionend وحده: صفحةٌ مخفية أو تطبيق في الخلفية
+    // لا يطلقه، فكان العدّاد يتجاوز النسخ ويعرض بانرًا فارغًا
+    clearTimeout(state.heroWrapTimer);
+    if (anim) state.heroWrapTimer = setTimeout(heroWrap, 450);
+    else heroWrap();
+  }
+  /** من النسخة الطرفية إلى الأصل بلا حركة. آمنة مهما تكرّرت. */
+  function heroWrap() {
+    const n = state.heroItems.length;
+    if (!n) return;
+    const i = state.heroPhysicalIndex;
+    if (i >= 1 && i <= n) return;
+    state.heroPhysicalIndex = i <= 0 ? n : 1;
+    const tr = q('heroTrack');
+    tr.style.transition = 'none';
+    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
+    void tr.offsetWidth;
+    const li = logicalIndex();
+    root.querySelectorAll('.hero-dot').forEach((d, k) => d.classList.toggle('active', k === li));
   }
   function heroNext() {
     if (!state.heroItems.length) return;
+    heroWrap();
     state.heroPhysicalIndex += 1;
     heroPosition(true);
   }
   function heroPrev() {
     if (!state.heroItems.length) return;
+    heroWrap();
     state.heroPhysicalIndex -= 1;
     heroPosition(true);
   }
@@ -531,16 +552,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (hero.dataset.bound) return;
     hero.dataset.bound = '1';
     const tr = q('heroTrack');
-    tr.addEventListener('transitionend', () => {
-      const n = state.heroItems.length;
-      if (state.heroPhysicalIndex === 0) {
-        state.heroPhysicalIndex = n;
-        heroPosition(false);
-      } else if (state.heroPhysicalIndex === n + 1) {
-        state.heroPhysicalIndex = 1;
-        heroPosition(false);
-      }
-    });
+    tr.addEventListener('transitionend', heroWrap);
     const start = (x) => {
       state.heroDragging = true;
       state.heroStartX = x;
@@ -580,7 +592,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function restartHero() {
     clearInterval(state.heroTimer);
-    if (state.heroItems.length > 1) state.heroTimer = setInterval(heroNext, 5200);
+    // يلفّ والرئيسية أمامك فقط: لا حركة في صفحة مخفية ولا والتطبيق في الخلفية
+    if (state.heroItems.length > 1) state.heroTimer = setInterval(() => currentPage() === 'home' && !document.hidden && heroNext(), 5200);
   }
 
   // ───────────────────────── صفحة العمل ─────────────────────────
@@ -623,9 +636,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       // من «اقرأ الفصل 110» في المجلس: الفصل نفسه يُفتح حين تصل الفصول
-      if (readNumber !== null) {
-        const row = full._chapters?.find((r) => r.number === readNumber);
-        if (row) openChapter(full, row);
+      let wanted = readNumber;
+      if (wanted !== null) {
+        const row = full._chapters?.find((r) => r.number === wanted);
+        if (row) {
+          openChapter(full, row);
+          wanted = null;
+        }
+      }
+      // ثم باقي المصادر: العمل نفسه عندها قد يبدأ من الفصل الأول
+      const expanded = await expandEditions(full);
+      if (wanted !== null && state.current === expanded) {
+        const row = expanded._chapters?.find((r) => r.number === wanted);
+        if (row) openChapter(expanded, row);
         else toast('هالفصل مو متوفر في مصادرنا الحين');
       }
     } catch {
@@ -638,6 +661,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
         action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
       });
       setReadCta(null);
+    }
+  }
+  /**
+   * يسأل المصادر التي لم نعرف أن العمل فيها، ويضم ما يطابقه. الصفحة تبقى
+   * صالحة أثناءه: شريحة «نبحث في المصادر» فقط، ثم تتحدّث الفصول والمصادر.
+   */
+  async function expandEditions(w) {
+    if (!available()) return w;
+    state.discovering = w;
+    renderSources(w);
+    try {
+      const found = await discoverEditions(w);
+      if (state.current !== w) return w;
+      const next = await withEditions(w, found);
+      if (state.current !== w) return w;
+      if (next !== w) {
+        state.current = next;
+        rememberWork(next);
+        renderDetail(next);
+        renderChapters(next);
+      }
+      return next;
+    } catch {
+      return w;
+    } finally {
+      if (state.discovering === w) state.discovering = null;
+      if (state.current) renderSources(state.current);
     }
   }
   function renderDetail(w) {
@@ -796,7 +846,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       all.onclick = () => openSourcesSheet(w, sources, failed, pick);
       chips.push(all);
     }
+    if (state.discovering === w) {
+      const busy = el('span', 'source-chip source-chip--busy');
+      busy.append(el('i', 'spinner'), el('span', null, 'نبحث في باقي المصادر…'));
+      chips.push(busy);
+    }
     q('sourceRow').replaceChildren(...chips);
+    if (state.discovering === w) q('sourcesBlock').hidden = false;
   }
   function openSourcesSheet(w, sources, failed, pick) {
     openSheet((body) => {
