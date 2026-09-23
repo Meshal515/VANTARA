@@ -368,6 +368,7 @@
   background: var(--surface-2);
 }
 .v35 .pf-first-frame {
+  position: relative;
   flex: none;
   display: block;
   width: 84px;
@@ -393,19 +394,6 @@
   flex-direction: column;
   justify-content: center;
   gap: 4px;
-}
-.v35 .pf-first-rank {
-  align-self: flex-start;
-  display: grid;
-  place-items: center;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 99px;
-  background: var(--gold);
-  color: #2a1a00;
-  font-size: 15px;
-  font-weight: 800;
 }
 .v35 .pf-first-title {
   display: -webkit-box;
@@ -489,6 +477,11 @@
   font-size: 13px;
   font-weight: 800;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.v35 .pf-rank--gold {
+  background: var(--gold);
+  color: #2a1a00;
+  box-shadow: none;
 }
 .v35 .pf-skel {
   background: var(--surface-2);

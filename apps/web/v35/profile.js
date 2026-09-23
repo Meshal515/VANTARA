@@ -286,9 +286,10 @@ export function createProfile(ctx) {
     const lead = el('button', 'pf-first');
     lead.type = 'button';
     const frame = el('span', 'pf-first-frame');
-    frame.append(poster(first, 'pf-first-poster'));
+    // نفس شارة الأربعة بعده، بالذهبي: الترتيب يُقرأ من الغلاف لا من دائرة بجانب العنوان
+    frame.append(poster(first, 'pf-first-poster'), el('span', 'pf-rank pf-rank--gold', '1'));
     const copy = el('span', 'pf-first-copy');
-    copy.append(el('span', 'pf-first-rank', '1'), el('bdi', 'pf-first-title', titleOf(first)), el('span', 'pf-first-meta', own ? 'الأول عندك' : `الأول عند ${name}`));
+    copy.append(el('bdi', 'pf-first-title', titleOf(first)), el('span', 'pf-first-meta', own ? 'الأول عندك' : `الأول عند ${name}`));
     lead.append(frame, copy);
     lead.onclick = () => ctx.openWork(first);
     wrap.append(lead);
