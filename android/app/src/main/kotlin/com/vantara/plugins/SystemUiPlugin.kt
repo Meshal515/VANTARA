@@ -1,9 +1,11 @@
 package com.vantara.plugins
 
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
@@ -18,6 +20,26 @@ import com.getcapacitor.annotation.CapacitorPlugin
  */
 @CapacitorPlugin(name = "SystemUi")
 class SystemUiPlugin : Plugin() {
+
+    /**
+     * معرّف أندرويد الثابت لنفس (مفتاح توقيع التطبيق + المستخدم + الجهاز).
+     *
+     * لا يُستعمل كسرّ؛ هو فقط مفتاح الاسترجاع بعد حذف التطبيق. الاعتماد الأول
+     * يبقى يدويًا، والإلغاء الصريح في الخادم لا يُعاد فتحه بهذا المعرّف.
+     */
+    @PluginMethod
+    fun deviceId(call: PluginCall) {
+        val currentActivity = activity ?: return call.reject("no activity")
+        val identifier = Settings.Secure.getString(
+            currentActivity.contentResolver,
+            Settings.Secure.ANDROID_ID,
+        )?.trim()?.lowercase()
+        if (identifier.isNullOrBlank()) return call.reject("android id unavailable")
+
+        val ret = JSObject()
+        ret.put("identifier", identifier)
+        call.resolve(ret)
+    }
 
     @PluginMethod
     fun immersive(call: PluginCall) {

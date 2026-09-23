@@ -157,6 +157,12 @@ const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTWXYZ23456789';
 const DEVICE_REQUEST_TTL_MS = 30 * 60_000;
 /** سقف الطلبات المفتوحة معًا: الطلب بلا جلسة، فلا يُترك بابًا لملء القاعدة. */
 const MAX_OPEN_DEVICE_REQUESTS = 30;
+/**
+ * Android 8+ ANDROID_ID is a 64-bit hexadecimal value scoped to
+ * (app signing key, Android user, device). Prefixing it keeps it impossible
+ * to confuse with the browser's random UUID device ids.
+ */
+const STABLE_ANDROID_DEVICE_ID = /^android:[0-9a-f]{16}$/;
 
 export function normalizeDeviceCode(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -256,6 +262,36 @@ async function claimDevice(request: Request, env: Env, now: number): Promise<Res
     ),
   );
   return json({ paired: true, accounts: accounts.length });
+}
+
+/**
+ * حذف التطبيق يمسح الـcredential المحلي، لكنه لا يغيّر ANDROID_ID ما دام
+ * التطبيق بنفس package + signing key. نسمح بتدوير credential فقط لجهاز Android
+ * كان موثوقًا من قبل وما زال غير revoked. جهاز جديد تمامًا يظل يمرّ بمسار
+ * الاعتماد اليدوي المعتاد.
+ *
+ * ANDROID_ID هنا معرّف استرجاع لا سرّ مصادقة عام: لا نقبل UUID المتصفح أو أي
+ * قيمة حرة، ولا نحيي صفوفًا ألغاها المستخدم صراحةً.
+ */
+async function recoverDevice(request: Request, env: Env, now: number): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const deviceId = typeof body?.['deviceId'] === 'string' ? body['deviceId'].toLowerCase() : '';
+  const deviceCredential = body?.['deviceCredential'];
+  if (!STABLE_ANDROID_DEVICE_ID.test(deviceId) || !validSecretPart(deviceCredential)) {
+    return json({ error: 'bad_request' }, { status: 400 });
+  }
+
+  const credentialHash = await hashDeviceSecret(deviceCredential, env.VANTARA_DEVICE_PEPPER);
+  const rotated = await env.DB.prepare(
+    `UPDATE trusted_devices
+        SET credential_hash = ?, last_used_at = ?
+      WHERE device_id = ? AND revoked_at IS NULL`,
+  )
+    .bind(credentialHash, now, deviceId)
+    .run();
+
+  const accounts = Number(rotated.meta.changes ?? 0);
+  return json({ recovered: accounts > 0, accounts });
 }
 
 async function issueSession(request: Request, env: Env, now: number): Promise<Response> {
@@ -368,6 +404,13 @@ export default {
       if ((path === '/v1/device/request' || path === '/v1/device/claim') && request.method === 'POST') {
         const response =
           path === '/v1/device/request' ? await requestDevice(request, env, now) : await claimDevice(request, env, now);
+        return new Response(response.body, {
+          status: response.status,
+          headers: { ...JSON_HEADERS, ...cors },
+        });
+      }
+      if (path === '/v1/device/recover' && request.method === 'POST') {
+        const response = await recoverDevice(request, env, now);
         return new Response(response.body, {
           status: response.status,
           headers: { ...JSON_HEADERS, ...cors },

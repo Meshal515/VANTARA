@@ -356,6 +356,23 @@ test('signed Android release workflow is tag-only, main-only, and CI-verified', 
   assertCommitHasSuccessfulCi(workflow, '$GITHUB_SHA', 'Android release path');
 });
 
+test('stable Android main APK workflow is CI-gated and release-signed', () => {
+  const workflow = read('.github/workflows/android-stable.yml');
+  assertCiGatedProductionWorkflow('.github/workflows/android-stable.yml');
+  assert.match(workflow, /ANDROID_KEYSTORE_BASE64:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_BASE64 \}\}/m);
+  assert.match(workflow, /ANDROID_KEYSTORE_PASSWORD:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_PASSWORD \}\}/m);
+  assert.match(workflow, /:app:assembleRelease|assembleRelease/m, 'stable main APK must be a release build');
+  assert.match(workflow, /apksigner.*verify|apksigner" verify/m, 'stable main APK must verify the produced signature');
+  assert.match(workflow, /actions\/upload-artifact@v4/m, 'stable main APK must be downloadable as an artifact');
+});
+
+test('Android recovery id is sourced from Settings.Secure.ANDROID_ID in the registered native bridge', () => {
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/SystemUiPlugin.kt');
+  assert.match(plugin, /Settings\.Secure\.ANDROID_ID/);
+  assert.match(plugin, /fun\s+deviceId\s*\(/);
+  assert.match(plugin, /ret\.put\(["']identifier["']/);
+});
+
 test('every module the app imports at boot is precached by the service worker', () => {
   // وحدة يستوردها `app.js` ثابتًا وليست في `SHELL` تعني أن أول إقلاع بعد
   // تحديث يذهب للشبكة ليجلبها، وأن الإقلاع دون اتصال قد يفشل كليًا — وهذا

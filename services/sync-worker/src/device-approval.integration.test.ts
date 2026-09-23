@@ -73,6 +73,33 @@ describe('approving a new phone by the code on its screen', () => {
     expect(((await (await post(env, '/v1/device/claim', phone)).json()) as { paired: boolean }).paired).toBe(true);
   });
 
+  it('rotates the credential after reinstall only for an already-trusted stable Android id', async () => {
+    const { env, db } = testEnv();
+    const installed = { deviceId: 'android:0123456789abcdef', deviceCredential: 'credential-before-reinstall-000001' };
+
+    const { code } = (await (await post(env, '/v1/device/request', installed)).json()) as { code: string };
+    db.exec(buildApproveSql(codeHash(code, PEPPER)));
+    expect(((await (await post(env, '/v1/device/claim', installed)).json()) as { paired: boolean }).paired).toBe(true);
+
+    const reinstalled = { deviceId: installed.deviceId, deviceCredential: 'credential-after-reinstall-0000002' };
+    expect((await post(env, '/v1/session', { userId: ME, ...reinstalled })).status).toBe(401);
+
+    const recovered = await post(env, '/v1/device/recover', reinstalled);
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toEqual({ recovered: true, accounts: 3 });
+    expect((await post(env, '/v1/session', { userId: ME, ...reinstalled })).status).toBe(200);
+    expect((await post(env, '/v1/session', { userId: ME, ...installed })).status).toBe(401);
+  });
+
+  it('never treats a browser/random device id as reinstall recovery proof', async () => {
+    const { env } = testEnv();
+    const res = await post(env, '/v1/device/recover', {
+      deviceId: 'phone-0000-0001',
+      deviceCredential: 'credential-after-reinstall-0000002',
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('rejects malformed requests and codes', async () => {
     const { env } = testEnv();
     expect((await post(env, '/v1/device/request', { deviceId: 'x', deviceCredential: 'short' })).status).toBe(400);

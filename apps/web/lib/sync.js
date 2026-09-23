@@ -125,13 +125,33 @@ function randomSecret(bytes = 32) {
 }
 
 /**
- * إثبات الجهاز يُنشأ مرة واحدة ويبقى محليًا. الـWorker يخزّن HMAC فقط.
+ * Android 8+ يوفّر ANDROID_ID ثابتًا لنفس (مفتاح توقيع التطبيق + المستخدم +
+ * الجهاز). لا نستعمله كـcredential؛ دوره معرفة أن التثبيت الجديد عاد إلى
+ * جهاز سبق اعتماده، بينما سر الجهاز نفسه يبقى عشوائيًا ويتدوّر.
  */
-function deviceProof() {
+async function nativeStableDeviceId() {
+  const plugin = globalThis.Capacitor?.Plugins?.SystemUi;
+  if (!plugin || typeof plugin.deviceId !== 'function') return null;
+  try {
+    const result = await plugin.deviceId();
+    const identifier = String(result?.identifier ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{16}$/.test(identifier)) return null;
+    return `android:${identifier}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * الموجود محليًا لا يتغيّر أثناء التحديث العادي. في تثبيت Android نظيف نأخذ
+ * المعرّف الثابت، وفي المتصفح نرجع إلى UUID عشوائي محفوظ محليًا.
+ */
+async function deviceProof(deviceIdProvider) {
   let deviceId = localStorage.getItem(DEVICE_ID_KEY);
   let deviceCredential = localStorage.getItem(DEVICE_CREDENTIAL_KEY);
   if (!deviceId) {
-    deviceId = crypto.randomUUID();
+    deviceId = await deviceIdProvider();
+    if (!deviceId) deviceId = crypto.randomUUID();
     localStorage.setItem(DEVICE_ID_KEY, deviceId);
   }
   if (!deviceCredential) {
@@ -141,7 +161,7 @@ function deviceProof() {
   return { deviceId, deviceCredential };
 }
 
-export function createSync({ baseUrl }) {
+export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId }) {
   const listeners = new Set();
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
   let user = accountWithIdentity(readJson(USER_KEY, null));
@@ -250,7 +270,7 @@ export function createSync({ baseUrl }) {
     const response = await fetch(`${baseUrl}/v1/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, ...deviceProof() }),
+      body: JSON.stringify({ userId, ...(await deviceProof(deviceIdProvider)) }),
     });
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
@@ -267,7 +287,7 @@ export function createSync({ baseUrl }) {
     const response = await fetch(`${baseUrl}/v1/device/request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(deviceProof()),
+      body: JSON.stringify(await deviceProof(deviceIdProvider)),
     });
     if (!response.ok) throw Object.assign(new Error(`request_${response.status}`), { status: response.status });
     return response.json();
@@ -278,9 +298,20 @@ export function createSync({ baseUrl }) {
     const response = await fetch(`${baseUrl}/v1/device/claim`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(deviceProof()),
+      body: JSON.stringify(await deviceProof(deviceIdProvider)),
     });
     if (!response.ok) throw Object.assign(new Error(`claim_${response.status}`), { status: response.status });
+    return response.json();
+  }
+
+  /** يعيد تدوير السر بعد reinstall فقط إن كان Android نفسه موثوقًا من قبل. */
+  async function recoverDevice() {
+    const response = await fetch(`${baseUrl}/v1/device/recover`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(await deviceProof(deviceIdProvider)),
+    });
+    if (!response.ok) return { recovered: false, accounts: 0 };
     return response.json();
   }
 
@@ -357,7 +388,7 @@ export function createSync({ baseUrl }) {
     const response = await fetch(`${baseUrl}/v1/device/pair`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingToken, ...deviceProof() }),
+      body: JSON.stringify({ pairingToken, ...(await deviceProof(deviceIdProvider)) }),
     });
     if (!response.ok) throw new Error(`pair_${response.status}`);
     return response.json();
@@ -430,7 +461,18 @@ export function createSync({ baseUrl }) {
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
   async function signIn(userId) {
     const previousId = user?.userId ?? null;
-    const payload = await sessionPayload(userId);
+    let payload;
+    try {
+      payload = await sessionPayload(userId);
+    } catch (error) {
+      // التثبيت النظيف يمسح credential. إذا كان هذا Android نفسه سبق اعتماده
+      // ندوّر السر مرة واحدة؛ جهاز جديد فعليًا يبقى device_untrusted فتظهر
+      // له شاشة الاعتماد الحالية بلا تغيير.
+      if (error?.code !== 'device_untrusted') throw error;
+      const recovery = await recoverDevice().catch(() => ({ recovered: false }));
+      if (!recovery?.recovered) throw error;
+      payload = await sessionPayload(userId);
+    }
     persistSession(payload);
     if (previousId && previousId !== user.userId) resetAll();
     emit(['session']);
