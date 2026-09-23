@@ -77,6 +77,8 @@ const KEYS = {
   works: (row) => row.series_ref,
   reactions: (row) => `${row.comment_id}/${row.user_id}/${row.emoji}`,
   recommendations: (row) => row.id,
+  // تفاعل المجلس: صف لكل شخص على كل هدف، والجديد يستبدل القديم
+  majlis_reactions: (row) => `${row.target_kind}/${row.target_id}/${row.user_id}`,
   // الفريم: صف لكل مستلم. بلا مفتاح يُلقى ويعبر المؤشر فوقه فلا يصل أبدًا
   frames: (row) => row.id,
   // حالة كل مستلم مستقلة (§19): بلا هذا لا يظهر «منصور قبل · NGM رفض»
@@ -706,6 +708,38 @@ export function createSync({ baseUrl }) {
   }
 
   /**
+   * رفع صورة ملف شخصي (الصورة أو البانر). يرجع `{ url, hash }`.
+   *
+   * جسمٌ ثنائي لا JSON، فلا يمرّ من `request`. والفشل يُرمى بحالته: الواجهة
+   * تفرّق بين «كبيرة» (413) و«ليست صورة» (415) و«لا اتصال».
+   */
+  async function uploadMedia(blob, attempt = 0) {
+    if (!token) throw Object.assign(new Error('unauthorized'), { status: 401 });
+    const response = await fetch(`${baseUrl}/v1/media`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': blob.type || 'application/octet-stream' },
+      body: blob,
+    });
+    if (response.status === 401 && attempt === 0 && user?.userId) {
+      await refreshSession();
+      return uploadMedia(blob, 1);
+    }
+    if (!response.ok) throw Object.assign(new Error(`http_${response.status}`), { status: response.status });
+    return response.json();
+  }
+
+  /** «أفضل 5» لأي حساب: واجهة الملف يراها الأصدقاء. */
+  async function topWorks(userId) {
+    if (!token) return [];
+    try {
+      const out = await request(`/v1/collections?kind=top&user=${encodeURIComponent(userId)}`);
+      return out?.content ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * صفوف التقدم التي لم يستلمها مالكها بعد.
    *
    * تُقرأ من الخادم لا من المرآة المحلية: الصندوق قد يحمل ما كتبه جهاز آخر
@@ -776,6 +810,8 @@ export function createSync({ baseUrl }) {
     enqueue,
     beat,
     presence,
+    uploadMedia,
+    topWorks,
     stats,
     pendingProgress,
     health,

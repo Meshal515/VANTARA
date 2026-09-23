@@ -25,6 +25,12 @@ import {
   notificationTargets,
   majlisAudience,
   hiddenToken,
+  isMajlisReaction,
+  isMajlisTarget,
+  sniffImageType,
+  isMediaHash,
+  MAX_MEDIA_BYTES,
+  MAX_MEDIA_BYTES_PER_USER,
   isRecommendationState,
   isRecommendationIntent,
   socialLinkFor,
@@ -229,6 +235,27 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
 
 // ───────────────────────────── السحب ─────────────────────────────
 
+/**
+ * من يرى هدفًا في المجلس. شرطٌ واحد يُستعمل في مكانين: نطاق السحب (فلا يصل
+ * التفاعل لمن لا يرى هدفه) وكتابة التفاعل (فلا يتفاعل أحد مع ما لا يراه).
+ * القيم بالترتيب: المشاهد، المشاهد، رمز إخفائه — لكل نوع.
+ */
+const MAJLIS_VISIBLE_IDS: Record<'frame' | 'rec' | 'activity', string> = {
+  frame:
+    "SELECT id FROM frames WHERE from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0)",
+  rec:
+    "SELECT id FROM recommendations WHERE from_id = ? OR to_id = ? OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0)",
+  activity: 'SELECT id FROM activity WHERE actor_id = ? OR target_user_id IS NULL OR target_user_id = ?',
+};
+const MAJLIS_OWNER: Record<'frame' | 'rec' | 'activity', string> = {
+  frame: 'SELECT from_id AS owner FROM frames WHERE id = ?',
+  rec: 'SELECT from_id AS owner FROM recommendations WHERE id = ?',
+  activity: 'SELECT actor_id AS owner FROM activity WHERE id = ?',
+};
+/** قيم شرط الرؤية بترتيب علامات `?` فيه. */
+const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) =>
+  kind === 'activity' ? [userId, userId] : [userId, userId, hiddenToken(userId)];
+
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
   ['accounts', 'user_id, username, created_at, rev'],
@@ -251,7 +278,8 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number'],
+  ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
@@ -323,6 +351,20 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
         return {
           sql: ' AND (actor_id = ? OR target_user_id IS NULL OR target_user_id = ?)',
           values: [userId, userId],
+        };
+
+      // التفاعل يراه من يرى هدفه، لا أكثر
+      case 'majlis_reactions':
+        return {
+          sql:
+            ` AND ((target_kind = 'frame' AND target_id IN (${MAJLIS_VISIBLE_IDS.frame}))` +
+            ` OR (target_kind = 'rec' AND target_id IN (${MAJLIS_VISIBLE_IDS.rec}))` +
+            ` OR (target_kind = 'activity' AND target_id IN (${MAJLIS_VISIBLE_IDS.activity})))`,
+          values: [
+            ...majlisViewerValues('frame', userId),
+            ...majlisViewerValues('rec', userId),
+            ...majlisViewerValues('activity', userId),
+          ],
         };
 
       // المشاهد يرى إيصالاته، والفاعل يرى إيصالات حدثه لعرض delivered/seen.
@@ -1117,8 +1159,8 @@ export function statementsFor(
           .prepare(
             `INSERT INTO recommendations
                (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev,
-                audience, hidden_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?)
+                audience, hidden_json, chapter_label, chapter_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
@@ -1132,6 +1174,9 @@ export function statementsFor(
             now,
             rev,
             JSON.stringify(hidden),
+            // ترشيح فصلٍ بعينه («اقرأ الفصل 110»)، أو العمل كله إن غابا
+            asString(p['chapterLabel'], 120),
+            asNumber(p['chapterNumber']),
           ),
       ];
 
@@ -1180,6 +1225,57 @@ export function statementsFor(
 
     // «فريم»: صفحات من فصل لصديق واحد. مراجع لا صور — المستلم يجلبها من
     // المصدر بمحرّكه. لا «للجميع» هنا بخلاف التوصية: الفريم لقطةٌ لشخص.
+    // تفاعل في المجلس. يُكتب فقط إن كان الهدف مرئيًّا لصاحب التفاعل (شرط
+    // النطاق نفسه في SQL)، وصاحب الهدف يُبلَّغ — إلا أن يتفاعل مع نفسه.
+    case 'majlis.react': {
+      const targetKind = p['targetKind'];
+      const targetId = asString(p['targetId'], 200);
+      const emoji = p['emoji'] ?? null;
+      if (!isMajlisTarget(targetKind) || !targetId) return null;
+      if (emoji !== null && !isMajlisReaction(emoji)) return null;
+      const visible = MAJLIS_VISIBLE_IDS[targetKind];
+      const values = majlisViewerValues(targetKind, userId);
+      const statements: D1PreparedStatement[] = [
+        db
+          .prepare(
+            `INSERT INTO majlis_reactions (target_kind, target_id, user_id, emoji, updated_at, rev)
+             SELECT ?, ?, ?, ?, ?, ?
+              WHERE ? IN (${visible})
+             ON CONFLICT (target_kind, target_id, user_id) DO UPDATE SET
+               emoji = excluded.emoji, updated_at = excluded.updated_at, rev = excluded.rev`,
+          )
+          .bind(targetKind, targetId, userId, emoji, now, rev, targetId, ...values),
+      ];
+      if (emoji !== null) {
+        statements.push(
+          db
+            .prepare(
+              `INSERT INTO notifications
+                 (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
+               SELECT ?, owner, 'REACTION', ?, NULL, ?, ?, 0, 0, ?, ?
+                 FROM (${MAJLIS_OWNER[targetKind]})
+                WHERE owner != ? AND ? IN (${visible})
+               ON CONFLICT (id) DO UPDATE SET
+                 body = excluded.body, created_at = excluded.created_at, rev = excluded.rev, read = 0, seen = 0`,
+            )
+            // إشعار واحد لكل شخص على كل هدف: تغيير التفاعل يحدّثه ولا يكرّره
+            .bind(
+              `react:${targetKind}:${targetId}:${userId}`.slice(0, 250),
+              userId,
+              emoji,
+              `vantara://majlis/${targetKind}/${targetId}`,
+              now,
+              rev,
+              targetId,
+              userId,
+              targetId,
+              ...values,
+            ),
+        );
+      }
+      return statements;
+    }
+
     case 'frame.send': {
       // `toId` غائب = الجميع. والفريم يظهر في المجلس إلا لمن أُخفي عنه
       const toId = asString(p['toId'], 80);
@@ -1902,18 +1998,22 @@ async function handleCollection(
 ): Promise<Response> {
   const kind = url.searchParams.get('kind') ?? 'favorite';
   if (!isCollectionKind(kind)) return json({ error: 'unknown_kind' }, { status: 400 });
+  // «أفضل 5» واجهة الملف الشخصي فيراها الأصدقاء؛ المفضلة و«لاحقًا» لصاحبها وحده
+  const requested = url.searchParams.get('user');
+  if (requested && requested !== userId && kind !== 'top') return json({ error: 'forbidden' }, { status: 403 });
+  const owner = requested ?? userId;
 
   const [rows, works] = await env.DB.batch([
     env.DB.prepare(
       `SELECT kind, series_ref, member, position, updated_at
          FROM collections WHERE user_id = ? AND kind = ?`,
-    ).bind(userId, kind),
+    ).bind(owner, kind),
     env.DB.prepare(
       `SELECT w.series_ref, w.title, w.cover_url, w.source_id, w.updated_at
          FROM works w
          JOIN collections c ON c.series_ref = w.series_ref
         WHERE c.user_id = ? AND c.kind = ?`,
-    ).bind(userId, kind),
+    ).bind(owner, kind),
   ]);
 
   const items = collectionView({
@@ -1967,11 +2067,13 @@ async function handlePendingProgress(env: Env, userId: string): Promise<Response
 // ───────────────────────────── الإحصائيات ─────────────────────────────
 
 async function handleStats(env: Env, targetId: string, now: number): Promise<Response> {
-  const [reads, usage] = await env.DB.batch<Record<string, unknown>>([
+  const [reads, usage, followed] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(
       'SELECT chapter_key, read_count FROM chapter_reads WHERE user_id = ? AND read_count > 0',
     ).bind(targetId),
     env.DB.prepare('SELECT day, active_ms FROM usage_daily WHERE user_id = ?').bind(targetId),
+    // المكتبة نفسها خاصة ولا تُزامَن للأصدقاء؛ عددها وحده إحصاء في الملف
+    env.DB.prepare('SELECT COUNT(*) AS n FROM library WHERE user_id = ? AND removed = 0').bind(targetId),
   ]);
 
   const stats = readStats(
@@ -1994,7 +2096,81 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     if (day >= weekStart && day <= today) weekMs += ms;
   }
 
-  return json({ userId: targetId, ...stats, usage: { todayMs, weekMs, totalMs } });
+  const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0);
+  return json({ userId: targetId, ...stats, followedWorks, usage: { todayMs, weekMs, totalMs } });
+}
+
+// ───────────────────────────── الصور ─────────────────────────────
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+function fromBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+/**
+ * رفع صورة ملف شخصي. يرجع رابطها الدائم.
+ *
+ * النوع من بايتات الملف لا من ترويسته، والحجم محدود للصورة وللحساب. والرابط
+ * بعنوان المحتوى: الرفع المكرّر لنفس الصورة لا ينشئ صفًّا ثانيًا.
+ */
+async function handleMediaUpload(request: Request, env: Env, userId: string, url: URL, now: number): Promise<Response> {
+  const declared = Number(request.headers.get('content-length') ?? '0');
+  if (declared > MAX_MEDIA_BYTES) return json({ error: 'too_large', max: MAX_MEDIA_BYTES }, { status: 413 });
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.length === 0) return json({ error: 'empty' }, { status: 400 });
+  if (bytes.length > MAX_MEDIA_BYTES) return json({ error: 'too_large', max: MAX_MEDIA_BYTES }, { status: 413 });
+  const mime = sniffImageType(bytes);
+  if (!mime) return json({ error: 'not_an_image' }, { status: 415 });
+
+  const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM media WHERE owner_id = ?')
+    .bind(userId)
+    .first<{ total: number }>();
+  if (Number(used?.total ?? 0) + bytes.length > MAX_MEDIA_BYTES_PER_USER) {
+    return json({ error: 'quota' }, { status: 413 });
+  }
+
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const hash = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await env.DB.prepare(
+    `INSERT INTO media (hash, owner_id, mime, size, data, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (hash) DO NOTHING`,
+  )
+    .bind(hash, userId, mime, bytes.length, toBase64(bytes), now)
+    .run();
+  return json({ hash, mime, size: bytes.length, url: `${url.origin}/v1/media/${hash}` });
+}
+
+/**
+ * الصورة نفسها، بلا جلسة: `<img>` لا يرسل ترويسة هوية، وشاشة «من يتابع؟»
+ * تعرضها قبل الدخول. المعرّف بصمة محتوى لا تُخمَّن، والصورة لا تتغيّر أبدًا
+ * تحت رابطها فتُخزَّن سنة. و`nosniff` مع سياسة محتوى فارغة: حتى لو التبس
+ * نوعٌ على متصفح لا يُنفَّذ شيء.
+ */
+async function handleMediaGet(env: Env, hash: string): Promise<Response> {
+  if (!isMediaHash(hash)) return new Response('not found', { status: 404 });
+  const row = await env.DB.prepare('SELECT mime, data FROM media WHERE hash = ?')
+    .bind(hash)
+    .first<{ mime: string; data: string }>();
+  if (!row) return new Response('not found', { status: 404 });
+  return new Response(fromBase64(row.data).buffer as ArrayBuffer, {
+    headers: {
+      'content-type': row.mime,
+      'cache-control': 'public, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'",
+      // لون الخلفية الحريرية يُستخرج من الصورة في canvas: يحتاج CORS
+      'access-control-allow-origin': '*',
+      'cross-origin-resource-policy': 'cross-origin',
+    },
+  });
 }
 
 // ───────────────────────────── التوجيه ─────────────────────────────
@@ -2012,6 +2188,10 @@ export default {
     try {
       if (path === '/health') {
         return json({ ok: true, protocol: SYNC_PROTOCOL, rev: await currentRev(env) }, {}, cors);
+      }
+
+      if (path.startsWith('/v1/media/') && request.method === 'GET') {
+        return await handleMediaGet(env, path.slice('/v1/media/'.length));
       }
 
       // بلا جلسة: ما تحتاجه شاشة اختيار الحساب فقط
@@ -2034,6 +2214,9 @@ export default {
       else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, now);
       else if (path === '/v1/progress/pending' && request.method === 'GET') {
         response = await handlePendingProgress(env, userId);
+      }
+      else if (path === '/v1/media' && request.method === 'POST') {
+        response = await handleMediaUpload(request, env, userId, url, now);
       }
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);

@@ -36,6 +36,7 @@ import {
 } from './reader-core.js';
 import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
+import { openShareSheet } from './share.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -862,7 +863,7 @@ export function openSmartReader(deps, ctx) {
       body.append(sheetItem('sliders', 'إعدادات القارئ', openSettings));
       body.append(sheetItem('info', 'معلومات الفصل', openInfo));
       body.append(sheetItem('layers', 'المصدر', openSourceSheet, { trail: state.row.label ?? '' }));
-      if (deps.friends) body.append(sheetItem('share', 'شارك العمل مع صديق', openShareWork));
+      if (deps.friends) body.append(sheetItem('share', 'رشّح هذا الفصل', openShareChapter));
       if (deps.report) body.append(sheetItem('flag', 'بلّغ عن مشكلة', openReport));
     });
   }
@@ -991,20 +992,19 @@ export function openSmartReader(deps, ctx) {
       }
     });
   }
-  function openShareWork() {
-    const friends = deps.friends?.() ?? [];
-    openSheet((body) => {
-      body.append(el('h3', null, 'شارك العمل مع'));
-      if (!friends.length) body.append(el('p', null, 'ما عندك أصدقاء بعد.'));
-      for (const f of friends) {
-        body.append(
-          personRow(f, () => {
-            sync.enqueue('recommendation.send', { toId: f.userId, seriesRef: ref, seriesTitle: ctx.title, message: null });
-            closeSheet();
-            toast(`انرسل لـ ${f.displayName}`);
-          }),
-        );
-      }
+  function openShareChapter() {
+    openShareSheet({
+      sync,
+      friends: deps.friends?.() ?? [],
+      openSheet,
+      closeSheet,
+      sheetBody: () => q('rdSheetBody'),
+      toast,
+      work: { ref, title: ctx.title, cover: ctx.work?.coverImage?.large ?? state.row.manga?.thumbnailUrl ?? null },
+      chapter: {
+        label: chapterLabel(state.row),
+        number: Number.isFinite(state.row.number) && state.row.number >= 0 ? state.row.number : null,
+      },
     });
   }
   const REPORTS = [

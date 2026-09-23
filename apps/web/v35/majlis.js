@@ -16,6 +16,10 @@
 import { glyph } from './icons.js';
 import { countLabel } from './plural.js';
 
+/** نفس القائمة المغلقة في الخادم (`MAJLIS_REACTIONS`). */
+export const REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
+const LONG_PRESS_MS = 420;
+
 const FILTERS = [
   ['all', 'الكل'],
   ['frames', 'فريمات'],
@@ -58,6 +62,8 @@ const parse = (text, fallback) => {
  *   openFrame: (id: string) => void,
  *   openProfile: (userId: string) => void,
  *   openShare: () => void,
+ *   preview: (work: object, opts?: { chapter?: { label: string, number: number|null } }) => void,
+ *   pageImage?: ((sourceId: string, page: object) => Promise<string>) | null,
  * }} ctx
  */
 export function createMajlis(ctx) {
@@ -81,6 +87,138 @@ export function createMajlis(ctx) {
     const row = ref ? sync.rows('works', (w) => w.series_ref === ref)[0] : null;
     return ctx.workFromRef(ref ?? `ext:${String(title ?? '').toLowerCase()}`, row?.title ?? title, row?.cover_url ?? cover);
   };
+
+  // ── التفاعلات ──
+  // ضغطة مطوّلة على أي رسالة تُظهر شريط الرموز فوقها. واختيارك يظهر تحتها
+  // بوجوه من تفاعلوا. تفاعلك يُعرض فورًا، والخادم يُثبته.
+
+  const pendingReaction = new Map();
+  const reactKey = (kind, id) => `${kind}/${id}`;
+  function reactionsOf(kind, id) {
+    const rows = sync.rows('majlis_reactions', (r) => r.target_kind === kind && r.target_id === id && r.user_id !== me());
+    const mine = pendingReaction.has(reactKey(kind, id))
+      ? pendingReaction.get(reactKey(kind, id))
+      : sync.rows('majlis_reactions', (r) => r.target_kind === kind && r.target_id === id && r.user_id === me())[0]?.emoji ?? null;
+    const all = [...rows.filter((r) => r.emoji).map((r) => ({ userId: r.user_id, emoji: r.emoji }))];
+    if (mine) all.push({ userId: me(), emoji: mine });
+    return { all, mine };
+  }
+  function react(kind, id, emoji) {
+    const { mine } = reactionsOf(kind, id);
+    const next = mine === emoji ? null : emoji;
+    pendingReaction.set(reactKey(kind, id), next);
+    sync.enqueue('majlis.react', { targetKind: kind, targetId: id, emoji: next });
+    navigator.vibrate?.(8);
+    render();
+  }
+  function reactionChips(kind, id) {
+    const { all, mine } = reactionsOf(kind, id);
+    if (!all.length) return null;
+    const byEmoji = new Map();
+    for (const r of all) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.userId]);
+    const row = el('div', 'mj-reactions');
+    for (const [emoji, users] of byEmoji) {
+      const chip = el('button', `mj-reaction${emoji === mine ? ' mj-reaction--mine' : ''}`);
+      chip.type = 'button';
+      chip.append(el('span', 'mj-reaction-emoji', emoji));
+      const faces = el('span', 'mj-reaction-faces');
+      for (const u of users.slice(0, 3)) faces.append(ctx.avatarNode(personOf(u), 18));
+      chip.append(faces);
+      if (users.length > 3) chip.append(el('span', 'mj-reaction-more', `+${users.length - 3}`));
+      chip.setAttribute('aria-label', `${emoji} من ${users.map(nameOf).join('، ')}`);
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        react(kind, id, emoji);
+      };
+      row.append(chip);
+    }
+    return row;
+  }
+
+  let bar = null;
+  function closeBar() {
+    if (!bar) return false;
+    bar.remove();
+    bar = null;
+    return true;
+  }
+  function openBar(anchor, kind, id) {
+    closeBar();
+    const { mine } = reactionsOf(kind, id);
+    bar = el('div', 'mj-bar');
+    bar.setAttribute('role', 'menu');
+    bar.setAttribute('aria-label', 'تفاعل');
+    REACTIONS.forEach((emoji, i) => {
+      const b = el('button', `mj-bar-item${emoji === mine ? ' mj-bar-item--on' : ''}`, emoji);
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.style.animationDelay = `${i * 22}ms`;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        closeBar();
+        react(kind, id, emoji);
+      };
+      bar.append(b);
+    });
+    document.body.append(bar);
+    const r = anchor.getBoundingClientRect();
+    const w = bar.offsetWidth;
+    const top = Math.max(12, r.top - bar.offsetHeight - 8);
+    const left = Math.min(window.innerWidth - w - 12, Math.max(12, r.left + r.width / 2 - w / 2));
+    bar.style.top = `${top}px`;
+    bar.style.left = `${left}px`;
+    anchor.classList.add('mj-pressed');
+    setTimeout(() => anchor.classList.remove('mj-pressed'), 260);
+    navigator.vibrate?.(12);
+    const away = (e) => {
+      if (bar && !bar.contains(e.target)) {
+        closeBar();
+        document.removeEventListener('pointerdown', away, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  }
+  /**
+   * الضغطة المطوّلة تفتح الشريط وتلغي اللمسة العادية بعدها، فلا يفتح العمل
+   * تحت إصبعك. والتمرير (حركة أكثر من 8 نقاط) يلغيها.
+   */
+  function bindReact(node, kind, id) {
+    let timer = null;
+    let start = null;
+    node.addEventListener('pointerdown', (e) => {
+      start = { x: e.clientX, y: e.clientY };
+      timer = setTimeout(() => {
+        timer = null;
+        node.dataset.longPressed = '1';
+        openBar(node, kind, id);
+      }, LONG_PRESS_MS);
+    });
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+    };
+    node.addEventListener('pointermove', (e) => {
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) cancel();
+    });
+    node.addEventListener('pointerup', cancel);
+    node.addEventListener('pointercancel', cancel);
+    node.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      cancel();
+      openBar(node, kind, id);
+    });
+    node.addEventListener(
+      'click',
+      (e) => {
+        if (node.dataset.longPressed) {
+          delete node.dataset.longPressed;
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      },
+      true,
+    );
+  }
 
   // ── الحاضرون ──
 
@@ -138,7 +276,7 @@ export function createMajlis(ctx) {
     const live = el('span', 'mj-live');
     live.setAttribute('aria-hidden', 'true');
     b.append(cover, copy, live);
-    b.onclick = () => ctx.openWork(work);
+    b.onclick = () => ctx.preview(work, p.chapterLabel ? { chapter: { label: p.chapterLabel, number: p.chapterNumber ?? null } } : {});
     return b;
   }
 
@@ -211,7 +349,11 @@ export function createMajlis(ctx) {
     copy.append(cta);
     open.append(shot, copy);
     open.onclick = () => ctx.openFrame(f.id);
-    card.append(open, el('time', 'mj-time', timeLabel(e.at)));
+    card.append(open);
+    const chips = reactionChips('frame', f.id);
+    if (chips) card.append(chips);
+    card.append(el('time', 'mj-time', timeLabel(e.at)));
+    bindReact(card, 'frame', f.id);
     return card;
   }
 
@@ -244,7 +386,8 @@ export function createMajlis(ctx) {
   function recCard(e) {
     const r = e.row;
     const card = el('article', 'mj-card mj-card--rec');
-    card.append(headline(e.actor, 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
+    const chapter = r.chapter_label ? { label: r.chapter_label, number: r.chapter_number ?? null } : null;
+    card.append(headline(e.actor, chapter ? `رشّح ${chapter.label}` : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
     const b = el('button', 'mj-work');
     b.type = 'button';
@@ -252,6 +395,12 @@ export function createMajlis(ctx) {
     void ctx.mountImage(cover, work);
     const copy = el('span', 'mj-work-copy');
     copy.append(el('bdi', 'mj-work-title', r.series_title || work.title?.english || 'عمل'));
+    if (chapter) {
+      const tag = el('span', 'mj-chapter-tag');
+      tag.innerHTML = glyph('book', { size: 14 });
+      tag.append(el('span', null, chapter.label));
+      copy.append(tag);
+    }
     if (r.message) {
       const quote = el('span', 'mj-work-note', r.message);
       quote.dir = 'auto';
@@ -272,8 +421,12 @@ export function createMajlis(ctx) {
       }
     }
     b.append(cover, copy);
-    b.onclick = () => ctx.openWork(work);
-    card.append(b, el('time', 'mj-time', timeLabel(e.at)));
+    b.onclick = () => ctx.preview(work, chapter ? { chapter } : {});
+    card.append(b);
+    const chips = reactionChips('rec', r.id);
+    if (chips) card.append(chips);
+    card.append(el('time', 'mj-time', timeLabel(e.at)));
+    bindReact(card, 'rec', r.id);
     return card;
   }
 
@@ -295,10 +448,21 @@ export function createMajlis(ctx) {
       text.append(document.createTextNode(' · '));
       text.append(el('bdi', 'mj-line-work', title));
     }
-    b.append(face, text, el('time', 'mj-line-time', timeLabel(e.at)));
-    if (work) b.onclick = () => ctx.openWork(work);
-    else b.disabled = true;
-    return b;
+    const end = el('span', 'mj-line-end');
+    if (work) {
+      const thumb = el('span', 'mj-line-cover');
+      void ctx.mountImage(thumb, work);
+      end.append(thumb);
+    }
+    end.append(el('time', 'mj-line-time', timeLabel(e.at)));
+    b.append(face, text, end);
+    if (work) b.onclick = () => ctx.preview(work);
+    const wrap = el('div', 'mj-line-wrap');
+    wrap.append(b);
+    const chips = reactionChips('activity', a.id);
+    if (chips) wrap.append(chips);
+    bindReact(wrap, 'activity', a.id);
+    return wrap;
   }
 
   function dayLabel(at) {
@@ -410,9 +574,12 @@ export function createMajlis(ctx) {
     hide() {
       clearInterval(timer);
       timer = null;
+      closeBar();
     },
+    closeBar,
     onChange(tables) {
-      if (tables.some((t) => ['frames', 'recommendations', 'recommendation_recipients', 'activity', 'profiles', 'accounts', 'works'].includes(t))) render();
+      if (tables.includes('majlis_reactions')) pendingReaction.clear();
+      if (tables.some((t) => ['frames', 'recommendations', 'recommendation_recipients', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions'].includes(t))) render();
     },
   };
 }

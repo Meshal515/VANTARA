@@ -52,3 +52,19 @@ export function majlisAudience(input: {
 export function hiddenToken(userId: string): string {
   return JSON.stringify(userId);
 }
+
+/**
+ * تفاعلات المجلس: رموز محددة لا نص حر. القائمة مغلقة فلا يتحول التفاعل إلى
+ * قناة رسائل، ولا تصل رموز لا تعرف الواجهة رسمها.
+ */
+export const MAJLIS_REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'] as const;
+export type MajlisReaction = (typeof MAJLIS_REACTIONS)[number];
+export const MAJLIS_TARGETS = ['frame', 'rec', 'activity'] as const;
+export type MajlisTarget = (typeof MAJLIS_TARGETS)[number];
+
+export function isMajlisReaction(value: unknown): value is MajlisReaction {
+  return typeof value === 'string' && (MAJLIS_REACTIONS as readonly string[]).includes(value);
+}
+export function isMajlisTarget(value: unknown): value is MajlisTarget {
+  return typeof value === 'string' && (MAJLIS_TARGETS as readonly string[]).includes(value);
+}

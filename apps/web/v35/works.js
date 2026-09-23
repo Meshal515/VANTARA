@@ -146,3 +146,32 @@ export function editionRows(v35work, sourceId) {
   if (!edition) return [];
   return mergeChapters([edition]);
 }
+
+const described = new Map();
+
+/**
+ * نبذة العمل وتصنيفه لورقة المعاينة، من نسخةٍ واحدة لا من كل المصادر.
+ *
+ * ورقة المعاينة في المجلس تحتاج سطرين لا فصول العمل كلها. فإن لم تكن نُسخه
+ * معروفة هنا يُبحث عنه بعنوانه أولًا. والنتيجة تُحفظ للجلسة، والفشل لا يُحفظ.
+ */
+export function describe(v35work) {
+  const key = v35work.id;
+  if (described.has(key)) return described.get(key);
+  const promise = (async () => {
+    let work = v35work;
+    if (!work._work?.editions?.length) {
+      const title = work.title?.english ?? '';
+      if (!title || title.startsWith('ext:')) return work;
+      const { items } = await browse({ query: title });
+      work = items.find((x) => x.id === work.id) ?? items[0] ?? work;
+    }
+    const primary = work._work?.editions?.[0];
+    if (!primary) return work;
+    const out = await engine.series(primary.sourceId, primary.manga);
+    return { ...work, ...detailFields(out.manga), _chapterCount: out.chapters?.length ?? null };
+  })();
+  promise.catch(() => described.delete(key));
+  described.set(key, promise);
+  return promise;
+}

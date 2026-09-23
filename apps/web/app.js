@@ -1871,13 +1871,17 @@ async function go(route) {
     case 'majlis':
       return screenV35('majlis');
     case 'friend':
-      return screenFriend(route.id);
+      screenV35(null);
+      v35.openProfile(route.id);
+      return;
     case 'notifications':
       return screenV35('notifications');
     case 'activity':
       return screenActivity();
     case 'me':
-      return screenMe();
+      screenV35(null);
+      v35.openProfile(sync.user?.userId);
+      return;
     case 'series':
       return screenSeries(route.id);
     case 'reader':

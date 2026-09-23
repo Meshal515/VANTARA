@@ -44,3 +44,14 @@ describe('majlisAudience', () => {
     expect(stored.includes(hiddenToken('mish'))).toBe(false);
   });
 });
+
+import { isMajlisReaction, isMajlisTarget } from './majlis.ts';
+describe('majlis reactions', () => {
+  it('قائمة مغلقة من الرموز والأهداف', () => {
+    expect(isMajlisReaction('🔥')).toBe(true);
+    expect(isMajlisReaction('hello')).toBe(false);
+    expect(isMajlisReaction('🍕')).toBe(false);
+    expect(isMajlisTarget('frame')).toBe(true);
+    expect(isMajlisTarget('comment')).toBe(false);
+  });
+});

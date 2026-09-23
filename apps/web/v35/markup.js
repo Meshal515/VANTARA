@@ -179,6 +179,8 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body mj-body" id="majlisBody"></div>
   </section>
 
+  <section class="page" id="profile"><div id="profileBody"></div></section>
+
   <section class="page" id="notifications">
     ${subTop('الإشعارات', { end: iconButton('check', 'علّمها كلها مقروءة', { act: 'readAllNotifications' }) })}
     <div class="page-body notif-body" id="notificationsBody"></div>

@@ -13,11 +13,13 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, detail, editionRows, seriesRefOf } from './works.js';
+import { available, browse, describe, detail, editionRows, seriesRefOf } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
+import { createProfile } from './profile.js';
+import { openShareSheet } from './share.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -558,7 +560,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work) {
+  async function openWork(work, { readNumber = null } = {}) {
     state.current = work;
     state.nextRow = null;
     state.chapterSource = null;
@@ -595,6 +597,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderDetail(full);
       renderSources(full);
       renderChapters(full);
+      // من «اقرأ الفصل 110» في المجلس: الفصل نفسه يُفتح حين تصل الفصول
+      if (readNumber !== null) {
+        const row = full._chapters?.find((r) => r.number === readNumber);
+        if (row) openChapter(full, row);
+        else toast('هالفصل مو متوفر في مصادرنا الحين');
+      }
     } catch {
       if (state.current !== work) return;
       emptyState(q('chapterPanel'), {
@@ -913,6 +921,77 @@ export function mountV35(deps, { page = 'home' } = {}) {
     deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row });
   }
 
+  // ── ورقة المعاينة ──
+  // من المجلس والملف: لمسة على عملٍ تعرض غلافه ونبذته أولًا، ثم «افتح».
+  // لمسةٌ بالغلط وأنت تمرّر لا تنقلك من مكانك.
+
+  function previewWork(work, { chapter = null } = {}) {
+    let alive = true;
+    openSheet((body) => {
+      const box = el('div', 'pv');
+      const cover = el('div', 'pv-cover');
+      void mountImage(cover, work);
+      const copy = el('div', 'pv-copy');
+      const title = el('h3', 'pv-title', titleOf(work));
+      title.dir = 'auto';
+      const meta = el('div', 'pv-meta');
+      const desc = el('p', 'pv-desc');
+      desc.innerHTML = '<span class="skeleton-line"></span><span class="skeleton-line"></span>';
+      copy.append(title, meta, desc);
+      box.append(cover, copy);
+      body.append(box);
+
+      const actions = el('div', 'sheet-actions pv-actions');
+      if (chapter && Number.isFinite(chapter.number)) {
+        const read = el('button', 'btn btn-primary');
+        read.type = 'button';
+        read.innerHTML = glyph('book');
+        read.append(el('span', null, `اقرأ ${chapter.label}`));
+        read.onclick = () => {
+          closeSheet();
+          void openWork(work, { readNumber: chapter.number });
+        };
+        const page = el('button', 'btn btn-secondary', 'صفحة العمل');
+        page.type = 'button';
+        page.onclick = () => {
+          closeSheet();
+          void openWork(work);
+        };
+        actions.append(read, page);
+      } else {
+        const open = el('button', 'btn btn-primary btn-block');
+        open.type = 'button';
+        open.innerHTML = glyph('book');
+        open.append(el('span', null, 'افتح العمل'));
+        open.onclick = () => {
+          closeSheet();
+          void openWork(work);
+        };
+        actions.append(open);
+      }
+      body.append(actions);
+
+      if (!available()) {
+        desc.textContent = '';
+        return () => (alive = false);
+      }
+      describe(work)
+        .then((full) => {
+          if (!alive) return;
+          const bits = [STATUS_AR[full.status], (full.genres || []).slice(0, 3).map(genreAr).join(' · '), full._chapterCount ? countLabel(full._chapterCount, 'chapter') : null].filter(Boolean);
+          meta.textContent = bits.join(' · ');
+          const text = clean(full.description);
+          desc.textContent = text || 'لا توجد نبذة من المصدر.';
+          desc.dir = 'auto';
+          if (full._work?.editions?.length && !work._work?.editions?.length) work = full;
+        })
+        .catch(() => {
+          if (alive) desc.textContent = 'ما قدرنا نجيب النبذة الحين.';
+        });
+      return () => (alive = false);
+    });
+  }
+
   // ── المكتبة والتقييم (في حسابك) ──
 
   function toggleLibraryCurrent() {
@@ -1031,110 +1110,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
     return s;
   }
-  /**
-   * مشاركة العمل: من؟ ثم رسالة.
-   *
-   * الخطوة الأولى وجوه أصدقائك و«الجميع»، والثانية غلاف العمل ورسالتك ومن
-   * تُخفيها عنه في المجلس. الرجوع خطوة لا يضيّع ما كتبت.
-   */
-  function openShare(w) {
-    const friends = deps.friends?.() ?? [];
-    const draft = { message: '' };
-    const pickStep = (body) => {
-      const head = el('div', 'share-head');
-      const title = el('h3', null, 'شارك العمل');
-      head.append(title);
-      const name = el('p', null, titleOf(w));
-      name.dir = 'auto';
-      head.append(name);
-      body.append(head);
-      const grid = el('div', 'share-grid');
-      const target = (person, onPick) => {
-        const b = el('button', 'share-person');
-        b.type = 'button';
-        b.append(person.everyone ? everyoneFace() : avatarNode(person, 58), el('span', null, person.displayName));
-        b.onclick = onPick;
-        return b;
-      };
-      grid.append(target({ displayName: 'الجميع', everyone: true }, () => composeStep(null)));
-      for (const f of friends) grid.append(target(f, () => composeStep(f)));
-      body.append(grid);
-      if (!friends.length) body.append(el('p', null, 'ما عندك أصدقاء بعد.'));
-    };
-    const composeStep = (person) => {
-      const body = q('sheetBody');
-      body.innerHTML = '<div class="sheet-handle"></div>';
-      const head = el('div', 'share-step-head');
-      const back = el('button', 'icon-btn');
-      back.type = 'button';
-      back.setAttribute('aria-label', 'رجوع');
-      back.title = 'رجوع';
-      back.innerHTML = glyph('back');
-      back.onclick = () => {
-        body.innerHTML = '<div class="sheet-handle"></div>';
-        pickStep(body);
-      };
-      const who = el('div', 'share-to');
-      who.append(person ? avatarNode(person, 32) : everyoneFace(32), el('strong', null, person ? person.displayName : 'الجميع'));
-      head.append(back, who);
-      body.append(head);
-
-      const work = el('div', 'share-work-card');
-      const cover = el('div', 'share-work-cover');
-      void mountImage(cover, w);
-      const copy = el('div');
-      const t = el('strong', null, titleOf(w));
-      t.dir = 'auto';
-      copy.append(t, el('span', null, 'يوصل غلاف العمل مع رسالتك'));
-      work.append(cover, copy);
-      body.append(work);
-
-      const note = el('textarea', 'search-input share-note');
-      note.rows = 3;
-      note.maxLength = 300;
-      note.placeholder = 'وش رأيك فيه؟ (اختياري)';
-      note.value = draft.message;
-      note.oninput = () => (draft.message = note.value);
-      body.append(note);
-
-      const hidden = new Set();
-      const others = friends.filter((f) => f.userId !== person?.userId);
-      if (others.length) {
-        const label = el('div', 'settings-group-label', 'يظهر في المجلس لأصدقائك');
-        body.append(label);
-        for (const f of others) {
-          const row = el('label', 'share-hide');
-          row.append(avatarNode(f, 32), el('span', null, `أخفِه عن ${f.displayName}`));
-          const input = el('input');
-          input.type = 'checkbox';
-          input.className = 'switch-input';
-          input.setAttribute('role', 'switch');
-          input.onchange = () => (input.checked ? hidden.add(f.userId) : hidden.delete(f.userId));
-          row.append(input);
-          body.append(row);
-        }
-      }
-
-      const send = el('button', 'btn btn-primary btn-block share-send');
-      send.type = 'button';
-      send.innerHTML = `${glyph('send')}<span>أرسل</span>`;
-      send.onclick = () => {
-        // «الجميع» توصية واحدة بلا مستلم: الخادم يوصلها لكل الأصدقاء
-        sync.enqueue('recommendation.send', {
-          toId: person?.userId ?? null,
-          seriesRef: String(w.id),
-          seriesTitle: titleOf(w),
-          coverUrl: w.coverImage?.large ?? null,
-          message: draft.message.trim() || null,
-          hiddenFrom: [...hidden],
-        });
-        closeSheet();
-        toast(person ? `انرسل لـ ${person.displayName}` : 'انرسل للجميع');
-      };
-      body.append(send);
-      setTimeout(() => note.focus({ preventScroll: true }), 120);
-    };
-    openSheet(pickStep);
+  /** مشاركة العمل (أو فصلٍ منه): الورقة المشتركة مع القارئ في `share.js`. */
+  function openShare(w, chapter = null) {
+    openShareSheet({
+      sync,
+      friends: deps.friends?.() ?? [],
+      openSheet,
+      closeSheet,
+      sheetBody: () => q('sheetBody'),
+      toast,
+      work: { ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null },
+      chapter,
+    });
   }
   function everyoneFace(size = 58) {
     const s = el('span', 'avatar-letter share-everyone');
@@ -1414,10 +1401,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
           cover: work?.cover_url ?? null,
           open: () => row.series_ref && void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url)),
         };
+      case 'REACTION':
+        if (String(row.link ?? '').startsWith('vantara://majlis/')) {
+          const kind = row.link.split('/')[3];
+          const noun = { frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[kind] ?? 'رسالتك';
+          return { text: `تفاعل ${row.body ?? ''} مع ${noun}`, cover: null, open: () => showPage('majlis') };
+        }
+        return { text: 'تفاعل مع تعليقك', cover: work?.cover_url ?? null };
       case 'COMMENT_REPLY':
         return { text: 'ردّ على تعليقك', cover: work?.cover_url ?? null };
-      case 'REACTION':
-        return { text: 'تفاعل مع تعليقك', cover: work?.cover_url ?? null };
       case 'FRIEND_ACTIVITY':
         return { text: row.body || 'عنده جديد', cover: work?.cover_url ?? null };
       default:
@@ -1556,7 +1548,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return showPage('notifications');
-    const route = { friends: 'friends', activity: 'activity', recommendations: 'recommendations', profile: 'me' }[key];
+    if (key === 'profile') return openProfile(me());
+    const route = { friends: 'friends', activity: 'activity', recommendations: 'recommendations' }[key];
     if (route) void deps.go({ name: route });
   }
   function confirmSwitchAccount() {
@@ -1599,6 +1592,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'notifications') renderNotifications();
     if (id === 'majlis') majlis.show();
     else majlis.hide();
+    if (id !== 'profile') profile?.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
@@ -1742,7 +1736,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
-    return closeSheet() || closeDrawer() || goBack();
+    return majlis.closeBar() || closeSheet() || closeDrawer() || goBack();
   }
 
   const majlis = createMajlis({
@@ -1753,11 +1747,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountImage,
     workFromRef,
     openWork: (w) => void openWork(w),
+    preview: (w, opts) => previewWork(w, opts),
     openFrame: (id) => void deps.go({ name: 'frame', id }),
-    openProfile: (userId) => void deps.go(userId === me() ? { name: 'me' } : { name: 'friend', id: userId }),
+    openProfile: (userId) => openProfile(userId),
     openShare: () => navTo('discover'),
     pageImage: available() ? deps.pageImage : null,
   });
+
+  const profile = createProfile({
+    sync,
+    host: q('profileBody'),
+    presence: () => deps.presence?.() ?? Promise.resolve([]),
+    avatarNode,
+    mountImage,
+    workFromRef,
+    openWork: (w) => previewWork(w),
+    openSheet,
+    back: () => goBack(),
+    edit: () => deps.editProfile?.(),
+    libraryWorks,
+  });
+  function openProfile(userId = me()) {
+    showPage('profile');
+    void profile.show(userId);
+  }
 
   paintNotifyDots();
   void loadHome();
@@ -1769,6 +1782,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     root,
     showPage,
     openWork,
+    openProfile,
     handleBack,
     pause() {
       savedScroll = window.scrollY;

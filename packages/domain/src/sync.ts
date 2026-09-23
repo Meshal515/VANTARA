@@ -150,6 +150,7 @@ export type OpKind =
   | 'recommendation.send'
   | 'recommendation.respond'
   | 'frame.send'
+  | 'majlis.react'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'
