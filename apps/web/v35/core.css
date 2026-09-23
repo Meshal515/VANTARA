@@ -2519,3 +2519,190 @@ html,
     transform: rotate(360deg);
   }
 }
+
+/* ── آخر المشاهدات: قائمة بغلاف واسم وفصل ووقت ── */
+.v35 .hist-list { display: flex; flex-direction: column; gap: 14px; padding-block: 4px 12px; }
+.v35 .hist-row {
+  display: flex; align-items: center; gap: 10px;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.v35 .hist-row--gone { opacity: 0; transform: translateX(-24px); }
+.v35 .hist-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px;
+  background: none; border: 0; padding: 0; color: inherit; text-align: start; cursor: pointer;
+}
+.v35 .hist-cover {
+  flex: none; width: 74px; aspect-ratio: 3 / 4; border-radius: var(--r-md); overflow: hidden;
+  background: var(--surface-2); position: relative;
+}
+.v35 .hist-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .hist-copy { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.v35 .hist-title {
+  font-size: var(--fs-title-sm); font-weight: 650; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+}
+.v35 .hist-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  color: var(--text-3); font-size: var(--fs-meta);
+}
+.v35 .hist-chapter { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
+.v35 .hist-chapter .icon { color: var(--text-3); }
+.v35 .hist-dot { color: var(--text-4); }
+.v35 .hist-side { flex: none; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.v35 .hist-ring {
+  --p: 0;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface-3) 0);
+  position: relative;
+}
+.v35 .hist-ring::before { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--bg); }
+.v35 .hist-ring b { position: relative; font-size: 10.5px; font-weight: 700; color: var(--accent-text); }
+.v35 .hist-del {
+  width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 50%;
+  background: none; border: 0; color: var(--text-4); cursor: pointer;
+}
+.v35 .hist-del:active { color: var(--danger); background: var(--danger-soft); }
+
+/* إيصالات المجلس */
+.v35 .mj-receipt--pending { color: var(--text-3); }
+.v35 .mj-receipt--pending .spinner { width: 12px; height: 12px; }
+.v35 .mj-receipt--got { opacity: .8; }
+.v35 .mj-receipt--sent { opacity: .55; }
+
+/* ── الاجتماع: أربعة أقسام في شريط واحد ثابت تحت العنوان ── */
+.v35 .social-tabs {
+  position: sticky;
+  top: calc(var(--top-h) + var(--safe-top));
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin: 0 var(--gutter);
+  padding: 4px;
+  border-radius: 99px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .social-tab {
+  position: relative;
+  min-height: 38px;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  font-weight: 650;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.v35 .social-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.v35 .social-tab-dot {
+  position: absolute;
+  top: 7px;
+  inset-inline-end: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ── الأصدقاء ── */
+.v35 .pal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.v35 .pal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .pal-face {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+}
+.v35 .pal-row--reading .pal-face > :first-child {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+.v35 .pal-dot {
+  position: absolute;
+  bottom: 1px;
+  inset-inline-end: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2.5px var(--surface-1);
+}
+.v35 .pal-row--reading .pal-dot {
+  background: var(--accent);
+}
+.v35 .pal-row--idle .pal-dot {
+  background: var(--warning);
+}
+.v35 .pal-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+.v35 .pal-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-title-sm);
+  font-weight: 700;
+}
+.v35 .pal-line {
+  max-width: 100%;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v35 .pal-work {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 650;
+}
+.v35 .pal-on {
+  color: var(--success);
+}
+.v35 .pal-go {
+  flex: none;
+  color: var(--text-4);
+}
+.v35 .pal-idle {
+  color: var(--warning);
+}
+
+/* فحص المصادر */
+.v35 .check-list { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto; }
+.v35 .check-row { padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); }
+.v35 .check-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v35 .check-state .spinner { width: 14px; height: 14px; }
+.v35 .check-ok { color: var(--success); font-size: var(--fs-meta); font-weight: 650; }
+.v35 .check-bad { color: var(--danger); font-size: var(--fs-meta); font-weight: 650; }
+.v35 .check-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; }
+.v35 .check-step { font-size: var(--fs-caption); }
+.v35 .check-step--ok { color: var(--text-3); }
+.v35 .check-step--bad { color: var(--danger); }
+.v35 .check-why { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-caption); }

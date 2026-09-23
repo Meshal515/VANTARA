@@ -13,11 +13,17 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, describe, detail, discoverEditions, editionRows, seriesRefOf, withEditions } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
+import { readKv, writeKv } from '../lib/chapter-store.js';
+import { warmChapter } from './reader.js';
+import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
+import { titlesMatch } from '../lib/catalog.js';
+import { cachedCover, coverCandidates, forgetCover, nativeCover } from './covers.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
+import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
@@ -61,7 +67,7 @@ const CHAPTER_BATCH = 60;
 
 const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
-  ['الأصدقاء', [['المجلس', 'majlis', 'users'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
+  ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
   ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
   ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
@@ -85,7 +91,8 @@ function writeJson(key, value) {
 }
 
 const clean = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/[ \t]+/g, ' ').trim();
-const titleOf = (w) => w?.title?.english || w?.title?.romaji || w?.title || 'بدون عنوان';
+// المرجع الداخلي (`ext:…`) لا يصل للشاشة أبدًا، ولو غاب كل اسم آخر
+const titleOf = (w) => displayTitle(w?.id, w?.title?.english, w?.title?.romaji, typeof w?.title === 'string' ? w.title : null);
 const unique = (arr) => [...new Set(arr.filter(Boolean))];
 const uniqueById = (items) => {
   const seen = new Set();
@@ -180,21 +187,35 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // المزامنة تحفظ عنوان العمل وغلافه؛ ونُسخه (أي مصدر يحمله) تُحفظ هنا ليُفتح
   // العمل من المكتبة بلا بحث جديد.
 
+  const serverWork = (ref) => sync.rows('works', (x) => x.series_ref === ref)[0] ?? null;
+  /**
+   * يحفظ نسخ العمل في الجهاز، ويخبر الخادم بما لا يعرفه منها: عملٌ فتحتَه
+   * يُفتح بعدها على كل جهاز بنفس نسخه، بلا بحث.
+   */
   function rememberWork(w) {
     const all = readJson(WORKS_KEY, {});
-    all[w.id] = { key: w._work.key, title: w._work.title, thumbnailUrl: w._work.thumbnailUrl, editions: w._work.editions };
+    const editions = w._work.editions ?? [];
+    all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
     writeJson(WORKS_KEY, all);
+    const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
+    if (!editions.length || !describesMore(serverWork(String(w.id)), facts)) return;
+    sync.enqueue('work.describe', { seriesRef: String(w.id), ...facts, editions: compactEditions(editions) });
   }
   function workFromRef(ref, fallbackTitle, cover) {
     const saved = readJson(WORKS_KEY, {})[ref];
-    const base = saved ?? { key: ref.replace(/^ext:/, ''), title: fallbackTitle ?? ref, thumbnailUrl: cover ?? null, editions: [] };
+    const row = serverWork(ref);
+    const title = displayTitle(ref, row?.title, saved?.title, fallbackTitle);
+    const thumbnailUrl = saved?.thumbnailUrl ?? row?.cover_url ?? cover ?? null;
+    // نسخ الجهاز أولًا (تحمل تفاصيل آخر فتح)، ثم ما عرفه غيره عبر الخادم
+    const editions = mergeEditions(saved?.editions, serverEditions(row));
+    const base = { key: saved?.key ?? ref.replace(/^ext:/, ''), title, thumbnailUrl, editions };
     return {
       id: ref,
-      title: { english: base.title },
+      title: { english: title },
       genres: [],
       status: null,
-      coverImage: { large: base.thumbnailUrl, extraLarge: base.thumbnailUrl },
-      bannerImage: base.thumbnailUrl,
+      coverImage: { large: thumbnailUrl, extraLarge: thumbnailUrl },
+      bannerImage: thumbnailUrl,
       staff: { edges: [] },
       _work: base,
     };
@@ -203,18 +224,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const me = () => sync.user?.userId;
   const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed);
   const inCollection = (kind, ref) =>
-    sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
+    kind === 'completed'
+      ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
+      : sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
   function libraryEntry(ref) {
     const row = libraryRows().find((r) => r.series_ref === ref);
     const later = inCollection('read_later', ref);
     const favorite = inCollection('favorite', ref);
-    if (!row && !later && !favorite) return null;
-    return { row, later, favorite, addedAt: row?.added_at ?? 0 };
+    const completed = inCollection('completed', ref);
+    if (!row && !later && !favorite && !completed) return null;
+    return { row, later, favorite, completed, addedAt: row?.added_at ?? 0 };
   }
   function libraryWorks(filter = 'all') {
     const refs = new Set([
       ...libraryRows().map((r) => r.series_ref),
       ...sync.rows('collections', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
+      ...sync.rows('completions', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
     ]);
     return [...refs]
       .map((ref) => {
@@ -231,6 +256,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (filter === 'reading') return Boolean(entry.row);
         if (filter === 'later') return entry.later;
         if (filter === 'favorite') return entry.favorite;
+        if (filter === 'completed') return entry.completed;
         return true;
       })
       .map(({ work }) => work);
@@ -242,12 +268,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sourceId: w._work?.editions?.[0]?.sourceId ?? null,
   });
 
-  const getHistory = () => readJson(HISTORY_KEY, []);
+  // «آخر المشاهدات»: سجلٌّ واحد في حسابك (`work_views`). المكتبة والرئيسية
+  // والملف ومتابعة القراءة تقرأ منه نفسه، فحذف عمل منه يحذفه من كل مكان.
+  const viewRows = (userId = me()) =>
+    sync.rows('work_views', (r) => r.user_id === userId && !r.removed).sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
   function pushHistory(w) {
-    const mini = { ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null };
-    writeJson(HISTORY_KEY, [mini, ...getHistory().filter((x) => x.ref !== mini.ref)].slice(0, 100));
+    sync.enqueue('view.add', { seriesRef: String(w.id), seriesTitle: titleOf(w), coverUrl: w.coverImage?.large ?? null, at: Date.now() });
   }
-  const historyWorks = () => getHistory().map((h) => workFromRef(h.ref, h.title, h.cover));
+  function removeView(ref) {
+    sync.enqueue('view.remove', { seriesRef: ref });
+  }
+  const historyWorks = () => viewRows().map((v) => workFromRef(v.series_ref, v.series_title, v.cover_url));
+  /** السجل القديم كان في الجهاز: يُنقل مرة إلى الحساب بترتيبه ثم يُترك. */
+  function migrateLocalHistory() {
+    const flag = `${HISTORY_KEY}.moved.${me()}`;
+    if (!me() || localStorage.getItem(flag)) return;
+    const local = readJson(HISTORY_KEY, []);
+    if (!viewRows().length) {
+      const t = Date.now();
+      local.slice(0, 60).forEach((h, i) => {
+        if (h?.ref) sync.enqueue('view.add', { seriesRef: h.ref, seriesTitle: h.title ?? null, coverUrl: h.cover ?? null, at: t - (i + 1) * 60_000 });
+      });
+    }
+    try {
+      localStorage.setItem(flag, '1');
+    } catch {
+      // يُعاد النقل مرة أخرى فقط، والخادم يدمج المكرر
+    }
+  }
 
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
@@ -256,16 +304,40 @@ export function mountV35(deps, { page = 'home' } = {}) {
     d.append(el('span', null, initialOf(label)));
     container.replaceChildren(d);
   }
-  const imageUrls = (work) => unique([work.coverImage?.extraLarge, work.coverImage?.large, work.bannerImage]);
-
   /**
    * الصورة بعد تحميلها فقط، ومكانها هيكلٌ لامع حتى ذلك. التسابق محروس
    * بعلامة: البطاقة المعاد استعمالها لا تعرض صورة طلبٍ قديم.
+   *
+   * الترتيب: الملف المحفوظ على الجهاز (فوري وبلا شبكة)، ثم المحرّك بترويسات
+   * المصدر (ويُحفظ)، ثم الرابط مباشرة، لكل غلاف من أغلفة نسخ العمل. والحرف
+   * الأول لا يظهر إلا إن فشل كل ذلك.
    */
+  const nearWaiters = new Map();
+  const nearObserver =
+    typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (!e.isIntersecting) continue;
+              nearObserver.unobserve(e.target);
+              nearWaiters.get(e.target)?.();
+              nearWaiters.delete(e.target);
+            }
+          },
+          { rootMargin: '600px 600px' },
+        );
+  function nearViewport(node) {
+    if (!nearObserver) return Promise.resolve();
+    return new Promise((resolve) => {
+      nearWaiters.get(node)?.();
+      nearWaiters.set(node, resolve);
+      nearObserver.observe(node);
+    });
+  }
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
-    container.replaceChildren(el('div', 'skeleton'));
     const tryUrl = (url, timeoutMs) =>
       new Promise((resolve) => {
         const img = new Image();
@@ -283,14 +355,32 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onerror = () => done(false);
         img.src = url;
       });
-    for (const url of imageUrls(work)) {
-      const img = await tryUrl(url, 9000);
+    const show = (img, url) => {
+      if (opts.position) img.style.objectPosition = opts.position;
+      container.replaceChildren(img);
+      return url;
+    };
+    const candidates = coverCandidates(work);
+    // المحفوظ أولًا وبلا هيكل لامع: الغلاف الذي رأيته أمس يظهر كما هو
+    for (const { url } of candidates) {
+      const local = cachedCover(url);
+      if (!local) continue;
+      const img = await tryUrl(local, 2500);
       if (container.dataset.imageToken !== token) return null;
-      if (img) {
-        if (opts.position) img.style.objectPosition = opts.position;
-        container.replaceChildren(img);
-        return url;
-      }
+      if (img) return show(img, local);
+      forgetCover(url);
+    }
+    container.replaceChildren(el('div', 'skeleton'));
+    // ما لم يُحفظ بعد يُجلب حين يقترب من الشاشة: الظاهر أولًا، والشبكة لا
+    // تنشغل بستين غلافًا في آخر الصفحة قبل الذي أمامك
+    await nearViewport(container);
+    if (container.dataset.imageToken !== token) return null;
+    for (const { url, sourceId } of candidates) {
+      const saved = await nativeCover(url, sourceId);
+      if (container.dataset.imageToken !== token) return null;
+      const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000));
+      if (container.dataset.imageToken !== token) return null;
+      if (img) return show(img, img.src);
     }
     if (container.dataset.imageToken === token) fallbackArt(container, titleOf(work));
     return null;
@@ -365,7 +455,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const reading = libraryWorks('reading');
     if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
     const history = historyWorks();
-    if (history.length) blocks.push(sectionBlock('آخر ما فتحت', 'history', history));
+    if (history.length) blocks.push(sectionBlock('آخر المشاهدات', 'history', history.slice(0, 20)));
     if (state.home.featured.length) blocks.push(sectionBlock('مقترحة لك', 'featured', state.home.featured));
     if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
     if (state.home.recent.length) blocks.push(sectionBlock('المضافة حديثًا', 'recent', state.home.recent));
@@ -395,29 +485,70 @@ export function mountV35(deps, { page = 'home' } = {}) {
       q('homeSections').append(box.firstElementChild);
       return;
     }
-    renderHomeSkeleton();
-    renderHeroSkeleton();
+    // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
+    // لا شاشة تنتظر أبطأ مصدر من ستة عشر
+    const cached = (await readKv('home'))?.value;
+    const fromCache = (list) => (list ?? []).map((w) => ({ ...w, _work: w._work }));
+    if (cached?.featured?.length) {
+      state.home.featured = fromCache(cached.featured);
+      state.home.trending = fromCache(cached.trending);
+      state.home.recent = fromCache(cached.recent);
+      state.home.popular = fromCache(cached.popular);
+      state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+      renderHero();
+      renderHome();
+    } else {
+      renderHomeSkeleton();
+      renderHeroSkeleton();
+    }
+    let heroDone = Boolean(cached?.featured?.length);
+    let paintTimer = null;
+    const paint = () => {
+      clearTimeout(paintTimer);
+      paintTimer = setTimeout(() => {
+        if (!heroDone && (state.home.trending.length || state.home.featured.length)) {
+          state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+          if (state.heroItems.length >= 3) {
+            heroDone = true;
+            renderHero();
+          }
+        }
+        if (currentPage() === 'home') renderHome();
+      }, 120);
+    };
+    const live = (key) => ({ items }) => {
+      // أول ردٍّ لا يمحو رئيسية محفوظة أكمل منه
+      if (cached?.[key]?.length && items.length < Math.min(cached[key].length, 12)) return;
+      state.home[key] = items;
+      paint();
+    };
     try {
-      // ثلاث مسارات متوازية تكفي البداية؛ «المميزة» تُكمل بعدها فلا تُحمّل
-      // ستة عشر مصدرًا بأربعة طلبات دفعةً واحدة
       const [fe, tr, re] = await Promise.all([
-        browse({ kind: 'catalogue', page: 1 }),
-        browse({ kind: 'popular', page: 1 }),
-        browse({ kind: 'latest', page: 1 }),
+        browseLive({ kind: 'catalogue', page: 1 }, live('featured')),
+        browseLive({ kind: 'popular', page: 1 }, live('trending')),
+        browseLive({ kind: 'latest', page: 1 }, live('recent')),
       ]);
       state.home.featured = fe.items;
       state.home.trending = tr.items;
       state.home.recent = re.items;
-      state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
-      renderHero();
+      if (!heroDone || state.heroItems.length < 3) {
+        state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+        renderHero();
+      }
       renderHome();
-      browse({ kind: 'popular', page: 2 })
-        .then((po) => {
-          state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
-          renderHome();
-        })
-        .catch(() => {});
+      if (!fe.items.length && !tr.items.length && !re.items.length && !cached) throw new Error('empty');
+      const po = await browse({ kind: 'popular', page: 2 }).catch(() => ({ items: [] }));
+      state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
+      renderHome();
+      void writeKv('home', {
+        featured: state.home.featured.slice(0, 40),
+        trending: state.home.trending.slice(0, 40),
+        recent: state.home.recent.slice(0, 40),
+        popular: state.home.popular.slice(0, 40),
+      });
     } catch {
+      // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
+      if (cached?.featured?.length) return;
       renderHeroFallback();
       const box = el('div');
       emptyState(box, {
@@ -599,6 +730,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── صفحة العمل ─────────────────────────
 
   async function openWork(work, { readNumber = null } = {}) {
+    // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
+    if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
+      work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
+    }
     state.current = work;
     state.nextRow = null;
     state.chapterSource = null;
@@ -612,11 +747,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
-        const found = (await browse({ query: titleOf(work) })).items.find((w) => w.id === work.id);
+        const { items } = await browse({ query: titleOf(work) });
+        const found = items.find((w) => w.id === work.id) ?? items.find((w) => titlesMatch(titleOf(w), titleOf(work)));
         if (found && state.current === work) {
-          work = found;
-          state.current = found;
-          rememberWork(found);
+          // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
+          const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
+          work = kept;
+          state.current = kept;
+          rememberWork(kept);
         }
       } catch {
         // يبقى العمل بلا نُسخ ويقول ذلك أدناه
@@ -624,35 +762,56 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (state.current !== work) return;
     if (!work._work?.editions?.length) {
-      chapterMessage('ما لقينا هذا العمل في مصادرنا الآن. جرّب البحث باسمه.');
+      emptyState(q('chapterPanel'), {
+        icon: 'search',
+        title: 'ما وصلنا للمصادر الحين',
+        text: 'نحاول مرة ثانية بعد لحظة، أو المسها الحين.',
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber }) },
+      });
       setReadCta(null);
       return;
     }
-    try {
-      const full = await detail(work);
-      if (state.current !== work) return;
+    // VANTARA: الفصول المحفوظة فورًا، وكل مصدر يردّ يضيف ما عنده بصمت
+    let wanted = readNumber;
+    const tryWanted = (w, final) => {
+      if (wanted === null) return;
+      const row = w._chapters?.find((r) => r.number === wanted);
+      if (row) {
+        wanted = null;
+        openChapter(w, row);
+      } else if (final) {
+        wanted = null;
+        toast('هالفصل مو متوفر في مصادرنا الحين');
+      }
+    };
+    const show = (full, { settled }) => {
+      if (state.current?.id !== work.id || currentPage() === 'reader') return;
+      if (!full._chapters?.length && !settled) return;
+      const first = !state.current?._chapters;
       state.current = full;
-      renderDetail(full);
+      if (first || full._work?.thumbnailUrl !== work._work?.thumbnailUrl) renderDetail(full);
+      else refreshDetailMeta(full);
       renderSources(full);
       renderChapters(full);
-      // من «اقرأ الفصل 110» في المجلس: الفصل نفسه يُفتح حين تصل الفصول
-      let wanted = readNumber;
-      if (wanted !== null) {
-        const row = full._chapters?.find((r) => r.number === wanted);
-        if (row) {
-          openChapter(full, row);
-          wanted = null;
-        }
-      }
-      // ثم باقي المصادر: العمل نفسه عندها قد يبدأ من الفصل الأول
-      const expanded = await expandEditions(full);
-      if (wanted !== null && state.current === expanded) {
-        const row = expanded._chapters?.find((r) => r.number === wanted);
-        if (row) openChapter(expanded, row);
-        else toast('هالفصل مو متوفر في مصادرنا الحين');
+      tryWanted(full, settled);
+    };
+    try {
+      const full = await loadWork(work, { onUpdate: show });
+      if (state.current?.id !== work.id) return;
+      // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
+      rememberWork(full);
+      if (!full._chapters?.length) {
+        emptyState(q('chapterPanel'), {
+          icon: 'offline',
+          error: true,
+          title: 'تعذّر جلب الفصول',
+          text: 'المصادر لم تردّ الآن.',
+          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
+        });
+        setReadCta(null);
       }
     } catch {
-      if (state.current !== work) return;
+      if (state.current?.id !== work.id) return;
       emptyState(q('chapterPanel'), {
         icon: 'offline',
         error: true,
@@ -663,32 +822,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
     }
   }
-  /**
-   * يسأل المصادر التي لم نعرف أن العمل فيها، ويضم ما يطابقه. الصفحة تبقى
-   * صالحة أثناءه: شريحة «نبحث في المصادر» فقط، ثم تتحدّث الفصول والمصادر.
-   */
-  async function expandEditions(w) {
-    if (!available()) return w;
-    state.discovering = w;
-    renderSources(w);
-    try {
-      const found = await discoverEditions(w);
-      if (state.current !== w) return w;
-      const next = await withEditions(w, found);
-      if (state.current !== w) return w;
-      if (next !== w) {
-        state.current = next;
-        rememberWork(next);
-        renderDetail(next);
-        renderChapters(next);
-      }
-      return next;
-    } catch {
-      return w;
-    } finally {
-      if (state.discovering === w) state.discovering = null;
-      if (state.current) renderSources(state.current);
+  /** العدد والتصنيف والنبذة تتحدّث مكانها، بلا إعادة الغلاف ولا قفزة. */
+  function refreshDetailMeta(w) {
+    const sub = q('detailSub');
+    sub.replaceChildren();
+    if (w.status && STATUS_AR[w.status]) {
+      const st = el('span', 'status-dot', STATUS_AR[w.status]);
+      st.dataset.status = w.status;
+      sub.append(st);
     }
+    if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
+    const editions = w._sources ?? [];
+    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
+    renderInfo(w);
   }
   function renderDetail(w) {
     const title = titleOf(w);
@@ -708,7 +854,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
     const editions = w._sources ?? w._work?.editions ?? [];
     if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
-    else if (editions[0]?.label) sub.append(el('span', null, editions[0].label));
 
     q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
 
@@ -846,18 +991,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       all.onclick = () => openSourcesSheet(w, sources, failed, pick);
       chips.push(all);
     }
-    if (state.discovering === w) {
-      const busy = el('span', 'source-chip source-chip--busy');
-      busy.append(el('i', 'spinner'), el('span', null, 'نبحث في باقي المصادر…'));
-      chips.push(busy);
-    }
     q('sourceRow').replaceChildren(...chips);
-    if (state.discovering === w) q('sourcesBlock').hidden = false;
   }
   function openSourcesSheet(w, sources, failed, pick) {
     openSheet((body) => {
       body.append(el('h3', null, 'المصادر المتوفرة'));
-      const note = el('p', null, 'القارئ الذكي يختار لكل فصل أكمل نسخة. اختر مصدرًا لتقرأ فصوله كما هي عنده.');
+      const note = el('p', null, 'القارئ الذكي يجمع فصول كل المصادر ويختار لكل فصل أوثق نسخة. اختر مصدرًا لتقرأ فصوله كما هي عنده.');
       note.style.marginBottom = '8px';
       body.append(note);
       const row = (icon, label, count, value) => {
@@ -909,6 +1048,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const next = [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
     state.nextRow = next;
     setReadCta(next, { started: readCount > 0 });
+    // الفصل الذي سيفتحه «ابدأ/تابع» يُجهَّز الآن، لا بعد الضغطة
+    const warmKey = next ? `${next.sourceId}|${next.chapter?.url}` : null;
+    if (warmKey && warmKey !== state.warmKey && available()) {
+      state.warmKey = warmKey;
+      clearTimeout(state.warmTimer);
+      state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
+    }
 
     q('detailProgress').hidden = false;
     q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
@@ -1210,6 +1356,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
           closeSheet();
           toggleTopCurrent();
         }, { pressed: inCollection('top', String(w.id)) }),
+        sheetItem('check', 'أكملته', () => {
+          closeSheet();
+          const member = !inCollection('completed', String(w.id));
+          sync.enqueue('completed.set', { ...descriptorOf(w), member });
+          toast(member ? 'في «المكتمل»' : 'أزيل من «المكتمل»');
+        }, { pressed: inCollection('completed', String(w.id)) }),
       );
       if (deps.report) {
         body.append(
@@ -1279,15 +1431,89 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── المكتبة ─────────────────────────
 
+  // ── «آخر المشاهدات»: قائمة لا شبكة — الغلاف، الاسم، آخر فصل ومتى، وحذف ──
+  function viewedLabel(at) {
+    const days = Math.floor((Date.now() - at) / 86_400_000);
+    if (days < 7) return timeAgo(at).replace(/^الآن$/, 'منذ أقل من دقيقة');
+    return new Date(at).toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' }).replace('، ', ' - ');
+  }
+  function chapterRatio(userId, ref, number) {
+    if (number == null) return null;
+    const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
+    const row = sync.rows('progress', (r) => r.user_id === userId && r.chapter_key === key)[0];
+    return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
+  }
+  /**
+   * @param {HTMLElement} target
+   * @param {{ userId?: string, own?: boolean, limit?: number }} [opts]
+   */
+  function renderHistoryList(target, { userId = me(), own = userId === me(), limit = Infinity } = {}) {
+    const rows = viewRows(userId);
+    if (!rows.length) {
+      emptyState(target, {
+        icon: 'history',
+        title: own ? 'ما فتحت شي بعد' : 'ما فيه مشاهدات',
+        text: own ? 'كل عمل تفتحه يظهر هنا بآخر فصل وصلته، على أجهزتك كلها.' : 'لما يفتح أعمالًا تظهر هنا.',
+      });
+      return;
+    }
+    const list = el('div', 'hist-list');
+    rows.slice(0, limit).forEach((v, i) => {
+      const work = workFromRef(v.series_ref, v.series_title, v.cover_url);
+      const item = el('div', 'hist-row');
+      const open = el('button', 'hist-open');
+      open.type = 'button';
+      const cover = el('span', 'hist-cover');
+      void mountImage(cover, work);
+      const copy = el('span', 'hist-copy');
+      const title = el('bdi', 'hist-title', titleOf(work));
+      const meta = el('span', 'hist-meta');
+      if (v.chapter_label || v.chapter_number != null) {
+        const ch = el('span', 'hist-chapter');
+        ch.innerHTML = glyph('book', { size: 15 });
+        ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
+        meta.append(ch, el('span', 'hist-dot', '·'));
+      }
+      meta.append(el('span', null, viewedLabel(v.viewed_at ?? Date.now())));
+      copy.append(title, meta);
+      open.append(cover, copy);
+      open.onclick = () => void openWork(work);
+      item.append(open);
+      const side = el('span', 'hist-side');
+      // الحلقة لآخر ما فتحت وحده، حين لم تُكمل فصله
+      const ratio = i === 0 ? chapterRatio(userId, v.series_ref, v.chapter_number) : null;
+      if (ratio !== null && ratio < 0.98) {
+        const ring = el('span', 'hist-ring');
+        ring.style.setProperty('--p', String(Math.round(ratio * 100)));
+        ring.append(el('b', null, `${Math.round(ratio * 100)}%`));
+        side.append(ring);
+      }
+      if (own) {
+        const del = el('button', 'hist-del');
+        del.type = 'button';
+        del.innerHTML = glyph('trash', { size: 20 });
+        del.setAttribute('aria-label', `احذف ${titleOf(work)} من السجل`);
+        del.onclick = () => {
+          item.classList.add('hist-row--gone');
+          setTimeout(() => removeView(v.series_ref), 180);
+        };
+        side.append(del);
+      }
+      item.append(side);
+      list.append(item);
+    });
+    target.replaceChildren(list);
+  }
+
   function renderLibrary() {
-    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['later', 'لاحقًا'], ['favorite', 'المفضلة']];
+    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['completed', 'المكتمل'], ['favorite', 'المفضلة']];
     q('libraryTabs').replaceChildren(
       ...tabs.map(([k, l]) => {
         const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
         b.type = 'button';
         b.setAttribute('role', 'tab');
         b.setAttribute('aria-selected', String(k === state.libraryFilter));
-        const n = libraryWorks(k).length;
+        const n = k === 'history' ? viewRows().length : libraryWorks(k).length;
         if (n) b.append(el('b', null, String(n)));
         b.onclick = () => {
           state.libraryFilter = k;
@@ -1296,6 +1522,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return b;
       }),
     );
+    if (state.libraryFilter === 'history') {
+      q('libraryToolbar').hidden = true;
+      q('libraryGrid').classList.remove('grid');
+      renderHistoryList(q('libraryGrid'));
+      return;
+    }
+    q('libraryGrid').classList.add('grid');
     const items = libraryWorks(state.libraryFilter);
     const sort = q('librarySort')?.value || 'added';
     if (sort === 'title') items.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ar'));
@@ -1309,6 +1542,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         reading: ['ما تتابع شي الحين', 'الأعمال اللي تضيفها لمكتبتك تظهر هنا.'],
         later: ['القائمة فاضية', 'من قائمة الخيارات في صفحة العمل اختر «أقرأ لاحقًا».'],
         favorite: ['ما عندك مفضلة', 'القلب في صفحة العمل يضيفه هنا.'],
+        completed: ['ما أكملت شي بعد', 'من قائمة ⋮ في صفحة العمل اختر «أكملته»، أو خلّص آخر فصل في عمل مكتمل.'],
       }[state.libraryFilter];
       emptyState(grid, {
         icon: { favorite: 'heart', later: 'clock' }[state.libraryFilter] ?? 'library',
@@ -1331,10 +1565,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   async function openCollection(kind) {
     if (kind === 'history') {
-      showPage('collection');
-      q('collectionTitle').textContent = 'آخر ما فتحت';
-      q('collectionMore').hidden = true;
-      renderGrid(q('collectionGrid'), historyWorks());
+      state.libraryFilter = 'history';
+      navTo('library');
       return;
     }
     if (kind === 'libraryReading') {
@@ -1649,7 +1881,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
           text: 'رشّح لك',
           title: work?.title ?? row.body ?? null,
           cover: work?.cover_url ?? null,
-          open: () => row.series_ref && void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url)),
+          open: () => {
+            majlis.markSeen('rec', String(row.id).split(':')[0]);
+            if (row.series_ref) void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url));
+          },
         };
       case 'REACTION':
         if (String(row.link ?? '').startsWith('vantara://majlis/')) {
@@ -1679,7 +1914,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function notificationRow(row) {
     const copy = notificationCopy(row);
-    const b = el('button', `notif${row.read ? '' : ' notif--unread'}`);
+    // جديدُ هذه الزيارة يبقى مميّزًا حتى تغادر، ولو صار مقروءًا في الخادم
+    if (!row.read) (state.notifFresh ??= new Set()).add(row.id);
+    const fresh = !row.read || state.notifFresh?.has(row.id);
+    const b = el('button', `notif${fresh ? ' notif--unread' : ''}`);
     b.type = 'button';
     const face = el('span', 'notif-face');
     face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
@@ -1709,8 +1947,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     return b;
   }
+  const notificationsVisible = () => currentPage() === 'notifications' || (currentPage() === 'majlis' && state.socialTab === 'notifications');
   function renderNotifications() {
-    const body = q('notificationsBody');
+    const inHub = currentPage() === 'majlis';
+    const body = inHub ? q('socialNotifs') : q('notificationsBody');
     const rows = sync
       .rows('notifications', (r) => r.user_id === me())
       .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
@@ -1735,8 +1975,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       parts.push(list);
     }
     body.replaceChildren(...parts);
-    // فتح الصندوق = عُرض، لا مقروء: التنبيه لا يتكرر والعنصر يبقى غير مقروء
-    for (const r of rows) if (!r.seen && !r.read) sync.enqueue('notification.seen', { id: r.id });
+    // رأيتها في القائمة = قرأتها: النقطة تختفي الآن وعلى كل أجهزتك، والجديد
+    // يبقى مميّزًا في هذه الزيارة وحدها لتعرف ما وصل
+    clearTimeout(state.notifReadTimer);
+    state.notifReadTimer = setTimeout(() => {
+      if (!notificationsVisible()) return;
+      for (const r of rows) if (!r.read) sync.enqueue('notification.read', { id: r.id });
+    }, 900);
   }
   function readAllNotifications() {
     for (const r of sync.rows('notifications', (x) => x.user_id === me() && !x.read)) sync.enqueue('notification.read', { id: r.id });
@@ -1798,11 +2043,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return navTo('library');
     }
     if (key === 'switchAccount') return confirmSwitchAccount();
-    if (key === 'notifications') return showPage('notifications');
+    if (key === 'notifications') return openSocial('notifications');
+    if (key === 'majlisFeed') return openSocial('majlis');
     if (key === 'profile') return openProfile(me());
     // التوصيات والنشاط صارا في المجلس نفسه: لا شاشة قديمة موازية
-    if (key === 'recommendations') return openMajlis('recs');
-    if (key === 'activity' || key === 'friends') return openMajlis();
+    if (key === 'recommendations') return openSocial('recs');
+    if (key === 'friends') return openSocial('friends');
+    if (key === 'activity') return openSocial('majlis');
   }
   function confirmSwitchAccount() {
     openSheet((body) => {
@@ -1826,6 +2073,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const MAIN_PAGES = ['home', 'library', 'discover', 'majlis'];
   const currentPage = () => root.querySelector('.page.active')?.id ?? 'home';
   function showPage(id, { push = true } = {}) {
+    // الإشعارات صارت قسمًا في «الاجتماع»
+    if (id === 'notifications') {
+      state.socialTab = 'notifications';
+      id = 'majlis';
+    }
     const from = currentPage();
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
@@ -1841,18 +2093,151 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'library') renderLibrary();
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
     if (id === 'settings') renderSettings();
-    if (id === 'notifications') renderNotifications();
-    if (id === 'majlis') majlis.show();
-    else majlis.hide();
+
+    if (id !== 'majlis' || state.socialTab !== 'notifications') state.notifFresh = null;
+    if (id === 'majlis') {
+      renderSocial();
+      // وصلتَ للمجلس = رأيت التفاعلات على رسائلك فيه
+      for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
+        sync.enqueue('notification.read', { id: n.id });
+      }
+    } else majlis.hide();
     if (id !== 'profile') profile?.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
-    showPage(id === 'friends' ? 'majlis' : id);
+    if (id === 'notifications') return openSocial('notifications');
+    if (id === 'friends') return openSocial('friends');
+    showPage(id);
   }
   function openMajlis(only) {
-    showPage('majlis');
-    if (only) majlis.show(only);
+    openSocial(only === 'recs' ? 'recs' : 'majlis');
+  }
+
+  // ───────────────────────── الاجتماع ─────────────────────────
+  // أربعة أقسام تحت سقف واحد: الأصدقاء أولًا (من هنا ومن يقرأ ماذا)، ثم
+  // المجلس، ثم الإشعارات، ثم التوصيات.
+
+  const SOCIAL_TABS = [
+    ['friends', 'الأصدقاء'],
+    ['majlis', 'المجلس'],
+    ['notifications', 'الإشعارات'],
+    ['recs', 'التوصيات'],
+  ];
+  function openSocial(tab = state.socialTab ?? 'friends') {
+    state.socialTab = tab;
+    if (currentPage() !== 'majlis') showPage('majlis');
+    else renderSocial();
+  }
+  function renderSocial() {
+    const tab = (state.socialTab ??= 'friends');
+    const unread = unreadNotifications();
+    q('socialTabs').replaceChildren(
+      ...SOCIAL_TABS.map(([k, label]) => {
+        const b = el('button', `social-tab${k === tab ? ' active' : ''}`, label);
+        b.type = 'button';
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', String(k === tab));
+        if (k === 'notifications' && unread) b.append(el('span', 'social-tab-dot'));
+        b.onclick = () => {
+          if (state.socialTab === k) return;
+          state.socialTab = k;
+          renderSocial();
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        };
+        return b;
+      }),
+    );
+    q('friendsBody').hidden = tab !== 'friends';
+    q('majlisBody').hidden = tab !== 'majlis' && tab !== 'recs';
+    q('socialNotifs').hidden = tab !== 'notifications';
+    if (tab === 'friends') {
+      majlis.hide();
+      renderFriends();
+      void refreshFriendsPresence();
+    } else if (tab === 'notifications') {
+      majlis.hide();
+      renderNotifications();
+    } else {
+      majlis.show(tab === 'recs' ? 'recs' : 'all');
+    }
+    if (tab !== 'friends') clearInterval(state.friendsTimer);
+  }
+
+  // ── الأصدقاء: وجه، اسم، وما يفعله الآن ──
+  let friendsPresence = [];
+  async function refreshFriendsPresence() {
+    clearInterval(state.friendsTimer);
+    state.friendsTimer = setInterval(() => {
+      if (currentPage() === 'majlis' && state.socialTab === 'friends' && !document.hidden) void refreshFriendsPresence();
+    }, 15_000);
+    try {
+      friendsPresence = (await deps.presence?.()) ?? [];
+    } catch {
+      return;
+    }
+    if (currentPage() === 'majlis' && state.socialTab === 'friends') renderFriends();
+  }
+  function lastSeenLine(at) {
+    if (!at) return 'غير متصل';
+    const minutes = Math.floor((Date.now() - at) / 60_000);
+    if (minutes < 2) return 'كان هنا قبل شوي';
+    return `آخر ظهور ${timeAgo(at)}`;
+  }
+  function renderFriends() {
+    const body = q('friendsBody');
+    const ids = sync
+      .rows('accounts', () => true)
+      .map((a) => a.user_id)
+      .filter((id) => id !== me());
+    if (!ids.length) {
+      emptyState(body, { icon: 'users', title: 'ما فيه أصدقاء بعد', text: 'أصدقاؤك يظهرون هنا أول ما يوصلون.' });
+      return;
+    }
+    const pOf = (id) => friendsPresence.find((p) => p.userId === id) ?? null;
+    const rank = (id) => ({ READING: 0, ONLINE: 1, IDLE: 2 })[pOf(id)?.status] ?? 3;
+    ids.sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b), 'ar'));
+    const list = el('div', 'pal-list');
+    for (const id of ids) {
+      const p = pOf(id);
+      const status = p?.status ?? 'OFFLINE';
+      const row = el('div', `pal-row pal-row--${status.toLowerCase()}`);
+      const face = el('button', 'pal-face');
+      face.type = 'button';
+      face.setAttribute('aria-label', `ملف ${nameOf(id)}`);
+      face.append(avatarNode(personOf(id), 56));
+      if (status !== 'OFFLINE') face.append(el('span', 'pal-dot'));
+      face.onclick = () => openProfile(id);
+      const copy = el('div', 'pal-copy');
+      const name = el('button', 'pal-name', nameOf(id));
+      name.type = 'button';
+      name.onclick = () => openProfile(id);
+      copy.append(name);
+      const line = el('div', 'pal-line');
+      if (status === 'READING' && p?.seriesTitle) {
+        line.append(el('span', null, 'يقرأ الآن: '));
+        const work = workFromRef(p.seriesRef ?? `ext:${p.seriesTitle}`, p.seriesTitle);
+        const title = el('button', 'pal-work');
+        title.type = 'button';
+        title.append(el('bdi', null, titleOf(work)));
+        title.onclick = () => void openWork(work);
+        line.append(title);
+        if (p.chapterLabel) line.append(el('span', 'pal-chapter', ` · ${p.chapterLabel}`));
+      } else if (status === 'ONLINE' || status === 'IDLE') {
+        line.append(el('span', status === 'IDLE' ? 'pal-idle' : 'pal-on', status === 'IDLE' ? 'خامل' : 'متصل الآن'));
+      } else {
+        line.append(el('span', null, lastSeenLine(p?.lastSeenAt)));
+      }
+      copy.append(line);
+      const go = el('button', 'icon-btn pal-go');
+      go.type = 'button';
+      go.setAttribute('aria-label', `ملف ${nameOf(id)}`);
+      go.innerHTML = glyph('chevron');
+      go.onclick = () => openProfile(id);
+      row.append(face, copy, go);
+      list.append(row);
+    }
+    body.replaceChildren(list);
   }
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
@@ -1977,6 +2362,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    if (available()) {
+      group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
+    }
+
     group(
       'منطقة الخطر',
       [
@@ -1988,6 +2377,68 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ],
       { cls: 'danger-zone', note: 'لا تلمس شي هنا إلا إذا طُلب منك. كل خيار يسألك قبل ما يسوي شي.' },
     );
+  }
+
+  /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
+  function openSourceCheck() {
+    const rows = new Map();
+    const report = [];
+    openSheet((body) => {
+      body.append(el('h3', null, 'فحص المصادر'));
+      const note = el('p', null, 'يجرّب كل مصدر كما يستعمله القارئ. ياخذ دقيقة تقريبًا.');
+      note.style.marginBottom = '10px';
+      body.append(note);
+      const list = el('div', 'check-list');
+      body.append(list);
+      const copy = el('button', 'btn btn-secondary btn-block');
+      copy.type = 'button';
+      copy.innerHTML = `${glyph('share')}<span>انسخ النتيجة</span>`;
+      copy.disabled = true;
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(report.join('\n'));
+          toast('انسخت. ألصقها لي');
+        } catch {
+          toast('ما قدرت أنسخ');
+        }
+      };
+      copy.style.marginTop = '12px';
+      body.append(copy);
+      const rowOf = (source) => {
+        if (rows.has(source.id)) return rows.get(source.id);
+        const r = el('div', 'check-row');
+        const head = el('div', 'check-head');
+        const state = el('span', 'check-state');
+        state.append(el('i', 'spinner'));
+        head.append(el('strong', null, source.label), state);
+        const steps = el('div', 'check-steps');
+        r.append(head, steps);
+        list.append(r);
+        const entry = { r, state, steps, fails: 0, done: 0 };
+        rows.set(source.id, entry);
+        return entry;
+      };
+      void checkAllSources(
+        (source) => rowOf(source),
+        (source, key, res) => {
+          const e = rowOf(source);
+          e.done += 1;
+          if (!res.ok) e.fails += 1;
+          const label = CHECK_STEPS.find(([k]) => k === key)?.[1] ?? key;
+          const chip = el('span', `check-step check-step--${res.ok ? 'ok' : 'bad'}`, `${res.ok ? '✓' : '✗'} ${label}`);
+          chip.title = res.ok ? `${res.detail ?? ''} · ${res.ms}ms` : res.error;
+          e.steps.append(chip);
+          if (!res.ok) e.steps.append(el('small', 'check-why', `${label}: ${res.error}`));
+          report.push(`${source.label} | ${label} | ${res.ok ? 'OK' : 'FAIL'} | ${res.ms}ms | ${res.ok ? res.detail ?? '' : res.error}`);
+        },
+      ).then(({ list: all }) => {
+        for (const s of all) {
+          const e = rowOf(s);
+          e.state.replaceChildren(el('span', e.fails ? 'check-bad' : 'check-ok', e.fails ? `${e.fails} خلل` : 'سليم'));
+        }
+        copy.disabled = false;
+      });
+    });
   }
 
   function openPopupKinds() {
@@ -2160,7 +2611,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function paintNotifyDots() {
     const unread = unreadNotifications();
-    root.querySelectorAll('.notify-dot').forEach((d) => (d.hidden = unread === 0));
+    root.querySelectorAll('.notify-dot, .social-tab-dot').forEach((d) => (d.hidden = unread === 0));
     root.querySelectorAll('.has-dot').forEach((b) => b.setAttribute('aria-label', unread ? `الإشعارات، ${countLabel(unread, 'new')}` : 'الإشعارات'));
   }
 
@@ -2223,11 +2674,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
   window.addEventListener('scroll', onScroll, { passive: true });
 
   const onKey = (e) => {
-    if (e.key === 'Escape') handleBack();
+    // القارئ فوق القشرة يعالج رجوعه وحده: بلا هذا يرجع Esc خطوتين
+    if (e.key === 'Escape' && !document.querySelector('.rd, .fv')) handleBack();
   };
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {
-    if (tables.some((t) => ['library', 'collections'].includes(t))) {
+    if (tables.includes('work_views') || tables.includes('progress')) {
+      if (currentPage() === 'library' && state.libraryFilter === 'history') renderLibrary();
+      else if (currentPage() === 'home' && tables.includes('work_views')) renderHome();
+    }
+    if (tables.some((t) => ['library', 'collections', 'completions'].includes(t))) {
       refreshLibraryDetail();
       if (currentPage() === 'home') renderHome();
       if (currentPage() === 'library') renderLibrary();
@@ -2237,12 +2693,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    majlis.onChange(tables);
+    majlis.onChange(tables, { visible: currentPage() === 'majlis' && (state.socialTab === 'majlis' || state.socialTab === 'recs') });
     profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
-      if (currentPage() === 'notifications') renderNotifications();
+      if (notificationsVisible()) renderNotifications();
     }
+    if (currentPage() === 'majlis' && state.socialTab === 'friends' && tables.some((t) => ['profiles', 'accounts', 'works'].includes(t))) renderFriends();
   });
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
@@ -2264,7 +2721,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openProfile: (userId) => openProfile(userId),
     openShare: () => navTo('discover'),
     pageImage: available() ? deps.pageImage : null,
+    openSheet,
+    closeSheet,
   });
+  // ما وصل هذا الجهاز قبل فتح الشاشة: المرسل يرى «وصله» الآن لا عند أول مجلس
+  setTimeout(() => {
+    majlis.acknowledgeDelivered();
+    migrateLocalHistory();
+  }, 0);
+  // مكتبتك وآخر ما فتحت تُجمع فصولها من كل المصادر في الخلفية: تُفتح جاهزة
+  setTimeout(() => {
+    if (!available()) return;
+    const seen = new Set();
+    const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
+    void prewarm(works, { onDone: (full) => rememberWork(full) });
+  }, 6000);
 
   const profile = createProfile({
     sync,
@@ -2278,6 +2749,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     back: () => goBack(),
     edit: () => editProfile(),
     libraryWorks,
+    historyList: (target, opts) => renderHistoryList(target, opts),
+    openHistory: () => {
+      state.libraryFilter = 'history';
+      navTo('library');
+    },
   });
   let editor = null;
   function editProfile() {
@@ -2331,7 +2807,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
       }
       if (state.heroItems.length) restartHero();
-      if (currentPage() === 'majlis') majlis.show();
+      if (currentPage() === 'majlis') renderSocial();
     },
     destroy() {
       majlis.hide();

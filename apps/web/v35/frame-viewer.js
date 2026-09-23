@@ -9,6 +9,7 @@
  * من جديد لأن روابط الصور الموقّعة تنتهي؛ المحفوظ بديلٌ لا أصل.
  */
 
+import { refForTitle } from './work-ref.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { resolveFramePages } from '../lib/frame.js';
@@ -80,7 +81,7 @@ export function openFrameViewer(deps, ctx) {
     full.innerHTML = `${glyph('book')}<span>اقرأ الفصل كامل</span>`;
     full.onclick = () =>
       deps.readChapter({
-        seriesRef: `ext:${String(work.title ?? frame.series_title ?? '').toLowerCase()}`,
+        seriesRef: refForTitle(work.title ?? frame.series_title) ?? 'ext:عمل',
         title: frame.series_title || work.title || 'عمل',
         work: null,
         rows: null,

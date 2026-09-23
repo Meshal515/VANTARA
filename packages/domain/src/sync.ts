@@ -37,8 +37,14 @@ export const SYNC_PROTOCOL = 1;
  */
 export const MAX_USAGE_OP_MS = 15 * 60_000;
 
-/** الفصل لا يُحتسب مقروءًا تحت هذه النسبة. */
-export const COMPLETED_READ_RATIO = 0.9;
+/**
+ * الفصل يُحتسب مقروءًا من هذه النسبة.
+ *
+ * خُمس الفصل لا آخره: من قرأ خُمسه دخل فيه فعلًا، وكثيرون يتركون صفحات
+ * الشكر والإعلانات في آخره فلا يبلغون 90% أبدًا. السجل والمتابعة والملف
+ * كلها تتبع هذه العلامة الواحدة.
+ */
+export const COMPLETED_READ_RATIO = 0.2;
 
 /**
  * ولا تحت هذا الوقت الفعلي.
@@ -142,6 +148,7 @@ export type OpKind =
   | 'library.remove'
   | 'favorite.set'
   | 'readLater.set'
+  | 'completed.set'
   | 'collection.reorder'
   | 'top.set'
   | 'rating.set'
@@ -151,12 +158,16 @@ export type OpKind =
   | 'recommendation.respond'
   | 'frame.send'
   | 'majlis.react'
+  | 'majlis.receipt'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'
   | 'notification.read'
   | 'notification.seen'
-  | 'settings.patch';
+  | 'settings.patch'
+  | 'work.describe'
+  | 'view.add'
+  | 'view.remove';
 
 export interface Op {
   opId: string;

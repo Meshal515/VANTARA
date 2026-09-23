@@ -212,10 +212,13 @@ export function groupWorks(entries) {
  * وما لا رقم له يُذيَّل بلا دمج عددي — يُنقّى من التكرار بالاسم وحده، إذ لا
  * سبيل إلى ترتيب فصلٍ لا يقول أين موضعه.
  */
-export function mergeChapters(editions) {
+export function mergeChapters(editions, { rank = null } = {}) {
 	const byNumber = new Map();
 	const loose = new Map();
-	const ranked = [...editions].sort((a, b) => (b.chapters?.length ?? 0) - (a.chapters?.length ?? 0));
+	// `rank` (اختياري): أولوية المصدر، الأصغر أولًا — المصادر الموثوقة تفوز بالفصل
+	// حين تملكه، والبقية تكمل ما ينقصها. التساوي بعدد الفصول كما كان.
+	const tier = (e) => (rank ? rank(e.sourceId) : 0);
+	const ranked = [...editions].sort((a, b) => tier(a) - tier(b) || (b.chapters?.length ?? 0) - (a.chapters?.length ?? 0));
 
 	for (const edition of ranked) {
 		for (const chapter of edition.chapters ?? []) {

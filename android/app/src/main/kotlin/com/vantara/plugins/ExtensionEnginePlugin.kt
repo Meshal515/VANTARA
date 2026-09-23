@@ -36,6 +36,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -82,7 +83,6 @@ class ExtensionEnginePlugin : Plugin() {
      * يظهر عشوائيًّا حين يفتح القارئ قائمة المصادر أثناء تحميل مصدر.
      */
     private val loaded = java.util.concurrent.ConcurrentHashMap<String, CatalogueSource>()
-    private val loadLock = Mutex()
 
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val loader by lazy { FileExtensionLoader(context) }
@@ -106,6 +106,14 @@ class ExtensionEnginePlugin : Plugin() {
             if (!injektReady) {
                 Injekt.importModule(EngineModule(context.applicationContext as Application))
                 injektReady = true
+            }
+        }
+        // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
+        // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
+        scope.launch {
+            for (spec in SPIKE_SOURCES) {
+                if (spec.blockedReason != null) continue
+                launch { runCatching { obtain(spec.pkg) } }
             }
         }
     }
@@ -400,6 +408,72 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    /**
+     * غلاف عمل، يُحفظ على الجهاز ويُرجَع مساره.
+     *
+     * الغلاف كان `<img>` يطلب الرابط مباشرة من WebView: بلا `Referer` المصدر ولا
+     * كوكي Cloudflare، فمصادر مثل AriaToon تردّ 403 ويظهر الحرف الأول مكان
+     * الغلاف — ولا يظهر إلا بعد فتح العمل. هنا يُجلب بعميل المصدر وترويساته كما
+     * يفعل Mihon، ويُكتب في `files/covers` لا الكاش: ما نزل مرة يبقى ظاهرًا بلا
+     * شبكة، ولا يمسحه النظام عند ضيق الكاش.
+     */
+    @PluginMethod
+    fun cover(call: PluginCall) {
+        scope.launch {
+            try {
+                val url = call.getString("url")?.takeIf { it.startsWith("http") } ?: error("cover url is required")
+                val hit = withContext(Dispatchers.IO) { coverHit(url) }
+                if (hit != null) {
+                    call.resolve(JSObject().put("path", hit.absolutePath).put("cached", true))
+                    return@launch
+                }
+                val sourceId = call.getString("sourceId")
+                val source = sourceId?.let { runCatching { obtain(it) }.getOrNull() } as? HttpSource
+                val client = source?.client ?: network.client
+                val request = Request.Builder().url(url).apply {
+                    runCatching { source?.headers }.getOrNull()?.let { headers(it) }
+                }.build()
+                val (bytes, contentType) = withContext(Dispatchers.IO) {
+                    client.newCall(request).execute().use { res ->
+                        require(res.isSuccessful) { "cover HTTP ${res.code}" }
+                        res.body.bytes() to res.header("content-type")
+                    }
+                }
+                require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
+                val verdict = ImagePayloadPolicy.validate(contentType, bytes)
+                require(verdict.accepted) { "not an image: ${verdict.reason}" }
+                val type = contentType?.substringBefore(';')?.trim()?.takeIf { it.startsWith("image/") } ?: typeForUrl(url)
+                val file = java.io.File(coverDir, "${digestOf(url)}.${extensionForType(type)}")
+                withContext(Dispatchers.IO) {
+                    file.writeBytes(bytes)
+                    pruneCovers()
+                }
+                call.resolve(JSObject().put("path", file.absolutePath).put("cached", false))
+            } catch (t: Throwable) {
+                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+            }
+        }
+    }
+
+    private val coverDir by lazy {
+        java.io.File(context.filesDir, "covers").apply { mkdirs() }
+    }
+
+    private fun coverHit(url: String): java.io.File? = hitIn(coverDir, url, 256)?.also {
+        // «آخر استعمال» للتقليم: الغلاف الذي تراه كل يوم لا يُترك أولًا
+        it.setLastModified(System.currentTimeMillis())
+    }
+
+    /** سقفٌ للأغلفة: ألفا غلاف تكفي مكتبة ثلاثة أصدقاء، والأقدم استعمالًا يُترك أولًا. */
+    private var coverWrites = 0
+    private fun pruneCovers() {
+        // المسح مكلف: مرة كل خمسين غلافًا جديدًا تكفي
+        if (++coverWrites % 50 != 1) return
+        val files = coverDir.listFiles() ?: return
+        if (files.size <= MAX_COVERS) return
+        files.sortedBy { it.lastModified() }.take(files.size - MAX_COVERS + 200).forEach { it.delete() }
+    }
+
     /** إفراغ كاش الصفحات. القارئ يناديه عند ضيق التخزين أو عند «امسح التنزيلات». */
     @PluginMethod
     fun clearImageCache(call: PluginCall) {
@@ -441,11 +515,19 @@ class ExtensionEnginePlugin : Plugin() {
      * الامتداد يُقرَّر من نوع الاستجابة وقت التنزيل، فلا يُعرف وقت البحث في
      * الكاش. والبحث بالبادئة يجد الملف بلا أن نخمّن نوعه مرة ثانية.
      */
-    private fun cacheHit(url: String): java.io.File? {
-        val prefix = digestOf(url) + "."
-        return pageCacheDir
-            .listFiles { f -> f.name.startsWith(prefix) }
-            ?.firstOrNull { it.isFile && it.length() > 1024 }
+    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 1024)
+
+    /**
+     * الملف المحفوظ لرابط، بفحص مباشر لا بمسح المجلد: مسحُ آلاف الملفات عند
+     * كل صفحة وكل غلاف كان يأكل من وقت الفتح أكثر مما تأكله الشبكة.
+     */
+    private fun hitIn(dir: java.io.File, url: String, minBytes: Long): java.io.File? {
+        val digest = digestOf(url)
+        for (ext in CACHE_EXTENSIONS) {
+            val f = java.io.File(dir, "$digest.$ext")
+            if (f.isFile && f.length() > minBytes) return f
+        }
+        return null
     }
 
     private fun typeForUrl(url: String): String =
@@ -498,8 +580,22 @@ class ExtensionEnginePlugin : Plugin() {
      * القفل يمنع نداءين متوازيين (القارئ يطلب الرائج والبحث معًا) من تنزيل
      * نفس الحزمة وفكّ الـDEX مرتين.
      */
-    private suspend fun obtain(sourceId: String): CatalogueSource = loadLock.withLock {
-        loaded[sourceId]?.let { return@withLock it }
+    private suspend fun obtain(sourceId: String): CatalogueSource {
+        // المحمَّل لا ينتظر أحدًا: قفلٌ واحد للكل كان يُوقف صور الفصل والأغلفة
+        // خلف تحميل خمسة عشر مصدرًا آخر عند فتح التطبيق
+        loaded[sourceId]?.let { return it }
+        val lock = loadLocks.getOrPut(sourceId) { Mutex() }
+        return lock.withLock {
+            loaded[sourceId]?.let { return@withLock it }
+            loadSlots.withPermit { load(sourceId) }
+        }
+    }
+
+    /** مصدرٌ لكل قفل، وأربعة تُفكّ معًا على الأكثر: توازٍ بلا خنق الجهاز. */
+    private val loadLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private val loadSlots = kotlinx.coroutines.sync.Semaphore(4)
+
+    private suspend fun load(sourceId: String): CatalogueSource = run {
 
         val spec = SPIKE_SOURCES.firstOrNull { it.pkg == sourceId }
             ?: error("unknown sourceId: $sourceId")
@@ -646,6 +742,8 @@ class ExtensionEnginePlugin : Plugin() {
 
     private companion object {
         val INJEKT_LOCK = Any()
+        const val MAX_COVERS = 2000
+        val CACHE_EXTENSIONS = listOf("jpg", "webp", "png", "gif", "avif")
 
         @Volatile
         var injektReady = false

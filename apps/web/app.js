@@ -134,8 +134,21 @@ function presencePayload() {
   return { status: 'ONLINE', screen: state.screen };
 }
 
+/**
+ * نبضة الآن لا بعد 25 ثانية: فتحتَ التطبيق أو بدأت فصلًا أو خرجت منه، فيرى
+ * أصدقاؤك «متصل» و«يقرأ الآن: …» في ثوانٍ. المتلاحق يُجمع في نبضة واحدة.
+ */
+let beatSoonTimer = null;
+function beatSoon() {
+  clearTimeout(beatSoonTimer);
+  beatSoonTimer = setTimeout(() => {
+    if (document.visibilityState === 'visible') void sync.beat(presencePayload());
+  }, 800);
+}
+
 function startHeartbeat() {
   if (beatTimer) return;
+  beatSoon();
   lastTick = Date.now();
   let sinceFlush = 0;
   beatTimer = setInterval(() => {
@@ -1354,6 +1367,12 @@ async function screenFrameById(id) {
   if (!frame) return screenPlaceholder('فريم', 'الفريم ما وصل بعد — جرّب بعد شوي.');
   state.screen = 'FRAME';
   const meId = sync.user?.userId;
+  // فتحتَ الفريم: صاحبه يرى «شافه»، وإشعاره يصير مقروءًا على كل أجهزتك
+  if (frame.from_id !== meId) {
+    sync.enqueue('majlis.receipt', { targetKind: 'frame', targetId: id, seen: true });
+    const note = sync.rows('notifications', (n) => n.id === `${id}:${meId}` && !n.read)[0];
+    if (note) sync.enqueue('notification.read', { id: note.id });
+  }
   const toLabel = frame.broadcast ? 'للجميع' : frame.to_id === meId ? 'لك' : `إلى ${nameOf(frame.to_id)}`;
   const viewer = openFrameViewer(
     {
@@ -1470,6 +1489,7 @@ function screenSmartReader(target) {
       // معه فيفتحه المجلس من عندهم
       setReading: (info) => {
         state.reading = info ? { ...info, seriesId: target.seriesRef, chapterId: null } : null;
+        beatSoon();
       },
       immersive: (on) => void globalThis.Capacitor?.Plugins?.SystemUi?.immersive?.({ on }).catch?.(() => {}),
     },
@@ -1978,6 +1998,9 @@ sync.onChange((tables) => {
   if (tables.includes('notifications')) toastNewNotifications();
 });
 setInterval(() => void sync.pull(), 60_000);
+// نبض كل 4 ثوانٍ والتطبيق أمامك: رقمٌ واحد، والسحب فقط حين يتقدّم. رسالة
+// صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
+setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4_000);
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {

@@ -272,14 +272,18 @@ const DELTA_TABLES = [
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
+  ['completions', 'user_id, series_ref, member, updated_at, rev'],
   // وصف العمل مرة واحدة لكل عمل لا لكل مستخدم: الأصدقاء الثلاثة يرون نفس
   // الأعمال، وبلا هذا الجدول تعرض شاشة المفضلة معرّفًا خامًا
-  ['works', 'series_ref, title, cover_url, source_id, updated_at, rev'],
+  ['works', 'series_ref, title, cover_url, source_id, updated_at, rev, editions_json'],
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
   ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
+  ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
+  // السجل يراه أصدقاؤك في ملفك كما تراه أنت: الأصدقاء الثلاثة مجلس واحد
+  ['work_views', 'user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
@@ -313,10 +317,9 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
   // يعني أن البيانات كُشفت بالفعل.
   const deltaScope = (table: string): { sql: string; values: string[] } => {
     switch (table) {
-      case 'library':
+      // المكتبة والقوائم ليست هنا بقصد: ملف صديقك يعرض ما يقرؤه ويؤجله وأكمله
       case 'progress':
       case 'chapter_marks':
-      case 'collections':
       case 'settings':
       case 'notifications':
         return { sql: ' AND user_id = ?', values: [userId] };
@@ -367,6 +370,16 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
           ],
         };
 
+      // إيصالات المجلس لصاحبها ولمرسل الرسالة وحده: «من شاف فريمي» سؤال المرسل
+      case 'majlis_receipts':
+        return {
+          sql:
+            " AND (user_id = ?" +
+            " OR (target_kind = 'frame' AND target_id IN (SELECT id FROM frames WHERE from_id = ?))" +
+            " OR (target_kind = 'rec' AND target_id IN (SELECT id FROM recommendations WHERE from_id = ?)))",
+          values: [userId, userId, userId],
+        };
+
       // المشاهد يرى إيصالاته، والفاعل يرى إيصالات حدثه لعرض delivered/seen.
       case 'activity_receipts':
         return {
@@ -383,7 +396,10 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
     const scope = deltaScope(table);
     return env.DB.prepare(
       `SELECT ${columns} FROM ${table} WHERE rev > ?${scope.sql} ORDER BY rev LIMIT ${PAGE_SIZE}`,
-    ).bind(cursor, ...scope.values);
+    // سحبٌ كامل يبدأ من تحت الصفر: الحسابات الثلاثة وملفاتها زرعتها الهجرة
+    // بـrev = 0، و`rev > 0` كان يُسقطها من كل جهاز — فتظهر «صديق» مكان الاسم
+    // ويخلو المجلس من الوجوه حتى يعدّل صاحب الحساب ملفه
+    ).bind(cursor === 0 ? -1 : cursor, ...scope.values);
   });
   const results = await env.DB.batch<Record<string, unknown>>(statements);
 
@@ -518,6 +534,27 @@ function frameChapter(value: unknown) {
     scanlator: asString(v['scanlator'], 200),
     memo: typeof v['memo'] === 'string' ? v['memo'].slice(0, 4000) : '',
   };
+}
+
+/**
+ * نسخ العمل كما يرسلها العميل، مقصوصةً إلى ما يلزم لفتحها: المصدر ورابط
+ * العمل عنده وعنوانه وغلافه و`memo`. لا فصول ولا نبذة — تلك تُجلب من المصدر.
+ */
+export const MAX_WORK_EDITIONS = 24;
+export function workEditions(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const out: Array<{ sourceId: string; label: string; manga: ReturnType<typeof frameWork> }> = [];
+  const seen = new Set<string>();
+  for (const item of value.slice(0, MAX_WORK_EDITIONS)) {
+    if (!item || typeof item !== 'object') continue;
+    const v = item as Record<string, unknown>;
+    const sourceId = asString(v['sourceId'], 120);
+    const manga = frameWork(v['manga']);
+    if (!sourceId || !manga || seen.has(sourceId)) continue;
+    seen.add(sourceId);
+    out.push({ sourceId, label: asString(v['label'], 60) ?? sourceId, manga });
+  }
+  return out.length ? out : null;
 }
 
 function asNumber(value: unknown): number | null {
@@ -669,6 +706,9 @@ function workStatements(
     rev: number;
   },
 ): D1PreparedStatement[] {
+  // مرجعٌ داخلي ليس عنوانًا: جهازٌ لم يعرف اسم العمل لا يكتبه على الجميع
+  const title = input.title && !/^ext:/i.test(input.title) ? input.title : null;
+  input = { ...input, title };
   if (!input.title && !input.coverUrl && !input.sourceId) return [];
   return [
     db
@@ -776,6 +816,15 @@ export function statementsFor(
         return null;
       }
       return [
+        // القراءة وحدها تكفي ليعرف الأصدقاء العمل باسمه وغلافه: عملٌ لم يُضف
+        // للمكتبة كان يظهر في سجلّك عندهم بمرجعه الخام
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          now,
+          rev,
+        }),
         db
           .prepare(
             `INSERT INTO chapter_reads
@@ -903,6 +952,30 @@ export function statementsFor(
              ON CONFLICT (user_id, series_ref) DO UPDATE SET removed = 1, rev = excluded.rev`,
           )
           .bind(userId, seriesRef, now, rev),
+      ];
+    }
+
+    // «أكملته»: جدول مستقل، والوصف يرافقه كما يرافق القوائم
+    case 'completed.set': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      if (!seriesRef) return null;
+      return [
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          sourceId: asString(p['sourceId'], 120),
+          now,
+          rev,
+        }),
+        db
+          .prepare(
+            `INSERT INTO completions (user_id, series_ref, member, updated_at, rev)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, series_ref) DO UPDATE SET
+               member = excluded.member, updated_at = excluded.updated_at, rev = excluded.rev`,
+          )
+          .bind(userId, seriesRef, p['member'] === false ? 0 : 1, now, rev),
       ];
     }
 
@@ -1276,6 +1349,36 @@ export function statementsFor(
       return statements;
     }
 
+    /**
+     * وصلت الرسالة جهازي (`seen: false`)، أو ظهرت أمامي (`seen: true`).
+     *
+     * لا يرجع للخلف ولا يلمس `rev` حين لا جديد: جهازٌ يعيد الإيصال عند كل
+     * رسم لا يولّد فروقات لأحد. والمرسل لا يكتب إيصالًا على رسالته، ومن
+     * أُخفيت عنه لا يكتب شيئًا (نفس شرط الرؤية في SQL).
+     */
+    case 'majlis.receipt': {
+      const targetKind = p['targetKind'];
+      const targetId = asString(p['targetId'], 200);
+      if ((targetKind !== 'frame' && targetKind !== 'rec') || !targetId) return null;
+      const seenAt = p['seen'] === true ? now : null;
+      const visible = MAJLIS_VISIBLE_IDS[targetKind];
+      return [
+        db
+          .prepare(
+            `INSERT INTO majlis_receipts (target_kind, target_id, user_id, delivered_at, seen_at, rev)
+             SELECT ?, ?, ?, ?, ?, ?
+              WHERE ? IN (${visible})
+                AND NOT EXISTS (SELECT 1 FROM (${MAJLIS_OWNER[targetKind]}) WHERE owner = ?)
+             ON CONFLICT (target_kind, target_id, user_id) DO UPDATE SET
+               delivered_at = COALESCE(majlis_receipts.delivered_at, excluded.delivered_at),
+               seen_at = COALESCE(majlis_receipts.seen_at, excluded.seen_at),
+               rev = excluded.rev
+             WHERE majlis_receipts.seen_at IS NULL AND excluded.seen_at IS NOT NULL`,
+          )
+          .bind(targetKind, targetId, userId, now, seenAt, rev, targetId, ...majlisViewerValues(targetKind, userId), targetId, userId),
+      ];
+    }
+
     case 'frame.send': {
       // `toId` غائب = الجميع. والفريم يظهر في المجلس إلا لمن أُخفي عنه
       const toId = asString(p['toId'], 80);
@@ -1467,6 +1570,104 @@ export function statementsFor(
           )
           .bind(rev, id, userId),
       ];
+    }
+
+    /**
+     * فتحتُ عملًا أو قرأت فيه. العنوان والفصل آخر ما وصل، والوقت لا يرجع:
+     * جهازٌ متأخر يرسل فتحة أقدم لا يُنزل العمل في السجل. وفتحةٌ بعد الحذف
+     * تعيده، كأي فتحة جديدة.
+     */
+    case 'view.add': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      if (!seriesRef) return null;
+      const title = asString(p['seriesTitle'], 300);
+      const coverUrl = asString(p['coverUrl'], 600);
+      const at = Math.min(asNumber(p['at']) ?? now, now);
+      return [
+        ...workStatements(db, { seriesRef, title, coverUrl, now, rev }),
+        db
+          .prepare(
+            `INSERT INTO work_views
+               (user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+             ON CONFLICT (user_id, series_ref) DO UPDATE SET
+               series_title = COALESCE(excluded.series_title, work_views.series_title),
+               cover_url = COALESCE(excluded.cover_url, work_views.cover_url),
+               chapter_label = COALESCE(excluded.chapter_label, work_views.chapter_label),
+               chapter_number = COALESCE(excluded.chapter_number, work_views.chapter_number),
+               viewed_at = MAX(work_views.viewed_at, excluded.viewed_at),
+               removed = CASE WHEN excluded.viewed_at > work_views.viewed_at THEN 0 ELSE work_views.removed END,
+               rev = excluded.rev`,
+          )
+          .bind(
+            userId,
+            seriesRef,
+            title && !/^ext:/i.test(title) ? title : null,
+            coverUrl,
+            asString(p['chapterLabel'], 120),
+            asNumber(p['chapterNumber']),
+            at,
+            rev,
+          ),
+      ];
+    }
+
+    case 'view.remove': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      if (!seriesRef) return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO work_views (user_id, series_ref, viewed_at, removed, rev)
+             VALUES (?, ?, ?, 1, ?)
+             ON CONFLICT (user_id, series_ref) DO UPDATE SET removed = 1, viewed_at = MAX(work_views.viewed_at, excluded.viewed_at), rev = excluded.rev`,
+          )
+          .bind(userId, seriesRef, now, rev),
+      ];
+    }
+
+    /**
+     * وصف العمل ونسخه في المصادر، من جهاز فتحه.
+     *
+     * النسخ تُدمج لا تُستبدل: جهازٌ عرف ثلاث نسخ وآخر عرف خمسًا غيرها يبنيان
+     * معًا قائمة واحدة، والمصدر نفسه يأخذ آخر ما وصل عنه. `json_each` يفكّ
+     * القائمتين في SQL نفسه، فلا قراءة قبل الكتابة ولا سباق بين جهازين.
+     */
+    case 'work.describe': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      if (!seriesRef) return null;
+      const title = asString(p['title'], 300);
+      const coverUrl = asString(p['coverUrl'], 600);
+      const editions = workEditions(p['editions']);
+      if (!title && !coverUrl && !editions) return null;
+      const statements = [
+        ...workStatements(db, { seriesRef, title, coverUrl, sourceId: editions?.[0]?.sourceId ?? null, now, rev }),
+      ];
+      if (editions) {
+        const incoming = JSON.stringify(editions);
+        statements.push(
+          db
+            .prepare(
+              `UPDATE works SET
+                 editions_json = (
+                   SELECT json_group_array(json(value)) FROM (
+                     SELECT value FROM json_each(?)
+                     UNION ALL
+                     SELECT old.value FROM json_each(COALESCE(works.editions_json, '[]')) AS old
+                      WHERE json_extract(old.value, '$.sourceId') NOT IN (
+                        SELECT json_extract(value, '$.sourceId') FROM json_each(?)
+                      )
+                     LIMIT ${MAX_WORK_EDITIONS}
+                   )
+                 ),
+                 updated_at = MAX(updated_at, ?),
+                 rev = ?
+               WHERE series_ref = ?`,
+            )
+            .bind(incoming, incoming, now, rev, seriesRef),
+        );
+      }
+      return statements;
     }
 
     case 'activity.add': {
@@ -2212,6 +2413,9 @@ export default {
         response = await handleCollection(url, env, userId);
       }
       else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, now);
+      // نبض خفيف: رقم آخر كتابة فقط. الجهاز يسأله كل ثوانٍ ويسحب حين يتقدّم —
+      // رسالة صديقك تصلك في ثوانٍ لا بعد دقيقة، بلا سحب كامل كل مرة
+      else if (path === '/v1/pulse' && request.method === 'GET') response = json({ rev: await currentRev(env) });
       else if (path === '/v1/progress/pending' && request.method === 'GET') {
         response = await handlePendingProgress(env, userId);
       }
