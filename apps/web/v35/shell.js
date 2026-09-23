@@ -1744,8 +1744,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return showPage('notifications');
     if (key === 'profile') return openProfile(me());
-    const route = { friends: 'friends', activity: 'activity', recommendations: 'recommendations' }[key];
-    if (route) void deps.go({ name: route });
+    // التوصيات والنشاط صارا في المجلس نفسه: لا شاشة قديمة موازية
+    if (key === 'recommendations') return openMajlis('recs');
+    if (key === 'activity' || key === 'friends') return openMajlis();
   }
   function confirmSwitchAccount() {
     openSheet((body) => {
@@ -1793,6 +1794,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function navTo(id) {
     showPage(id === 'friends' ? 'majlis' : id);
   }
+  function openMajlis(only) {
+    showPage('majlis');
+    if (only) majlis.show(only);
+  }
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
     const prev = state.stack.pop();
@@ -1808,17 +1813,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return false;
   }
 
+  // الإعدادات كلها هنا بتصميم الواجهة: المزامنة وحالتها، والتنبيهات
+  // المنبثقة، والخادم، والبلاغ. الشاشة القديمة تبقى لحالة واحدة: لا عنوان
+  // خادم ولا حساب بعد (الإقلاع الأول)، وهناك لا واجهة أصلًا.
   function renderSettings() {
-    // حقائق هذا البناء لا نصوص النموذج: لا شيء هنا يدّعي خيارًا غير موجود
     const body = q('settingsBody');
     body.replaceChildren();
-    const group = (label, rows) => {
+    const api = deps.settings;
+    const group = (label, rows, note) => {
       body.append(el('div', 'settings-group-label', label));
       const list = el('div', 'settings-list');
-      list.append(...rows);
+      list.append(...rows.filter(Boolean));
       body.append(list);
+      if (note) body.append(el('p', 'settings-note', note));
     };
-    const row = (icon, title, sub, { value, run } = {}) => {
+    const row = (icon, title, sub, { value, run, tone } = {}) => {
       const d = el(run ? 'button' : 'div', 'setting');
       if (run) {
         d.type = 'button';
@@ -1829,19 +1838,184 @@ export function mountV35(deps, { page = 'home' } = {}) {
       t.append(el('strong', null, title));
       if (sub) t.append(el('small', null, sub));
       d.append(t);
-      if (value) d.append(el('span', 'value', value));
+      if (value) {
+        const v = el('span', `value${tone ? ` value--${tone}` : ''}`, value);
+        v.dir = 'auto';
+        d.append(v);
+      }
       if (run) d.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
       return d;
     };
+    const toggle = (icon, title, sub, checked, onChange) => {
+      const d = el('label', 'setting');
+      d.innerHTML = glyph(icon);
+      const t = el('div');
+      t.append(el('strong', null, title));
+      if (sub) t.append(el('small', null, sub));
+      const input = el('input');
+      input.type = 'checkbox';
+      input.className = 'switch-input';
+      input.setAttribute('role', 'switch');
+      input.checked = checked;
+      input.onchange = () => onChange(input.checked);
+      d.append(t, input);
+      return d;
+    };
+
     group('المحتوى', [
       row('layers', 'المصادر', 'مصادر عربية تعمل على جهازك. الكتالوج كاملًا، لا الرائج وحده.', { value: 'عربي' }),
       row('eye', 'عين الفصل', 'يتعلّم الفصل مقروءًا وحده بعد ٢٠٪ منه، وتقدر تغيّرها بيدك.'),
     ]);
-    group('الحساب والخادم', [
-      row('server', 'الخادم والتنبيهات', 'عنوان المزامنة، التنبيهات المنبثقة، تحديث التطبيق', { run: () => void deps.go({ name: 'settings' }) }),
-      row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
-    ]);
+
+    if (api) {
+      const health = api.health();
+      const bad = health.state !== 'ok' && health.state !== 'syncing';
+      group('المزامنة', [
+        row('refresh', 'الحالة', health.lastSyncAt ? `آخر سحب ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
+        health.pending ? row('clock', 'كتابات بانتظار الإرسال', null, { value: String(health.pending) }) : null,
+        health.quarantined
+          ? row('alert', 'عمليات معزولة', 'رفضها الخادم مرات. تقدر تعيد محاولتها.', {
+              value: String(health.quarantined),
+              tone: 'warn',
+              run: () => {
+                const n = api.retryQuarantined();
+                toast(`أُعيدت ${countLabel(n, 'op')} للطابور`);
+                renderSettings();
+              },
+            })
+          : null,
+        row('send', 'زامن الآن', null, {
+          run: async () => {
+            toast('جارٍ المزامنة…');
+            await api.syncNow().catch(() => {});
+            toast('تمّت المزامنة');
+            renderSettings();
+          },
+        }),
+        row('layers', 'أعد بناء البيانات المحلية', 'يسحب كل شي من الخادم من جديد. الكتابات المعلّقة تبقى.', {
+          run: async () => {
+            toast('جارٍ إعادة البناء…');
+            await api.resync().catch(() => {});
+            renderSettings();
+          },
+        }),
+      ]);
+
+      const popups = api.popups();
+      const kinds = Object.entries(api.labels);
+      group(
+        'التنبيهات داخل التطبيق',
+        [
+          toggle('bell', 'التنبيهات المنبثقة', null, popups.enabled, (enabled) => {
+            api.setPopups({ ...popups, enabled });
+            renderSettings();
+          }),
+          ...(popups.enabled
+            ? kinds.map(([kind, label]) =>
+                toggle(KIND_ICON[kind] ?? 'bell', label, null, popups.kinds[kind] !== false, (on) => {
+                  api.setPopups({ ...api.popups(), kinds: { ...api.popups().kinds, [kind]: on } });
+                }),
+              )
+            : []),
+        ],
+        'الإطفاء يمنع التنبيه المنبثق فقط. الإشعارات تبقى في صفحتها.',
+      );
+
+      const ep = api.endpoints();
+      group('الخادم', [
+        row('server', 'خادم المزامنة', null, { value: hostOf(ep.sync), run: () => openServerSheet() }),
+        row('server', 'خادم المحتوى', null, { value: hostOf(ep.api), run: () => openServerSheet() }),
+      ]);
+
+      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'يُرفق حالة التطبيق وحدها، بلا توكنات ولا روابط.', { run: () => openProblemSheet() })]);
+    }
+
+    group('الحساب', [row('switchUser', 'تبديل الحساب', sync.user?.username ? `@${sync.user.username}` : null, { run: confirmSwitchAccount })]);
     group('عن التطبيق', [row('info', 'الإصدار', null, { value: deps.version || '—' })]);
+  }
+
+  function hostOf(url) {
+    if (!url) return 'غير مضبوط';
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
+  function openServerSheet() {
+    const api = deps.settings;
+    const ep = api.endpoints();
+    openSheet((body) => {
+      body.append(el('h3', null, 'عناوين الخادم'));
+      body.append(el('p', null, 'التطبيق يُعاد تشغيله بعد الحفظ: العناوين تُقرأ عند الإقلاع.'));
+      const field = (label, value) => {
+        const wrap = el('label', 'field');
+        wrap.append(el('span', 'field-label', label));
+        const input = el('input', 'field-input');
+        input.value = value ?? '';
+        input.placeholder = 'https://…';
+        input.dir = 'ltr';
+        input.inputMode = 'url';
+        input.autocomplete = 'off';
+        wrap.append(input);
+        body.append(wrap);
+        return input;
+      };
+      const syncInput = field('خادم المزامنة (Cloudflare)', ep.sync);
+      const apiInput = field('خادم المحتوى', ep.api);
+      const save = el('button', 'btn btn-primary btn-block', 'احفظ وأعد التشغيل');
+      save.type = 'button';
+      save.onclick = () => {
+        const valid = (v) => !v || /^https?:\/\/[^\s]+$/i.test(v);
+        const next = { sync: syncInput.value.trim(), api: apiInput.value.trim() };
+        if (!valid(next.sync) || !valid(next.api)) return void toast('العنوان لازم يبدأ بـ https://');
+        api.setEndpoints(next);
+        save.disabled = true;
+        save.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
+        setTimeout(() => window.location.reload(), 400);
+      };
+      body.append(save);
+    });
+  }
+
+  function openProblemSheet() {
+    const api = deps.settings;
+    openSheet((body) => {
+      body.append(el('h3', null, 'بلّغ عن مشكلة'));
+      body.append(el('p', null, 'اختر نوعها واكتب اللي صار إن حبيت.'));
+      let kind = api.reportKinds[0]?.[0];
+      const chips = el('div', 'report-kinds');
+      for (const [value, label] of api.reportKinds) {
+        const c = el('button', 'chip-btn', label);
+        c.type = 'button';
+        c.setAttribute('aria-pressed', String(value === kind));
+        c.onclick = () => {
+          kind = value;
+          chips.querySelectorAll('.chip-btn').forEach((x) => x.setAttribute('aria-pressed', String(x === c)));
+        };
+        chips.append(c);
+      }
+      const note = el('textarea', 'search-input share-note');
+      note.rows = 3;
+      note.maxLength = 2000;
+      note.placeholder = 'وش صار؟ (اختياري)';
+      const send = el('button', 'btn btn-primary btn-block', 'أرسل البلاغ');
+      send.type = 'button';
+      send.onclick = async () => {
+        send.disabled = true;
+        send.textContent = 'جارٍ الإرسال…';
+        try {
+          await api.reportProblem(kind, note.value.trim());
+          closeSheet();
+          toast('وصل البلاغ، شكرًا');
+        } catch (error) {
+          send.disabled = false;
+          send.textContent = 'أرسل البلاغ';
+          toast(error?.status === 0 ? 'تعذّر الإرسال. حاول بعد شوي.' : 'تعذّر الإرسال. خادم المحتوى غير متاح.');
+        }
+      };
+      body.append(chips, note, send);
+    });
   }
 
   function paintNotifyDots() {
@@ -1995,6 +2169,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     root,
     showPage,
     openWork,
+    /** عمل من مرجعه وحده (إشعار، رابط): صفحته في الواجهة لا الشاشة القديمة. */
+    openRef: (ref, title, cover) => void openWork(workFromRef(ref, title, cover)),
+    openMajlis,
     openProfile,
     handleBack,
     pause() {

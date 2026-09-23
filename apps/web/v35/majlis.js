@@ -565,7 +565,9 @@ export function createMajlis(ctx) {
   }
 
   return {
-    show() {
+    /** `only`: يُفتح على مصفاة بعينها (التوصيات من القائمة تفتح «ترشيحات»). */
+    show(only) {
+      if (only && FILTERS.some(([k]) => k === only)) filter = only;
       render();
       void refreshPresence();
       clearInterval(timer);

@@ -542,20 +542,13 @@ export function followImage(img, onPalette) {
     const count = Math.min(decoder.tracks.selectedTrack?.frameCount ?? 1, 400);
     if (count < 2 || stopped) return stop();
 
+    // اللوحات تُحسب مع أول عرض لكل إطار ثم تُحفظ: التشغيل يبدأ فورًا بلا
+    // انتظار فكّ الإطارات كلها أولًا
     const sample = document.createElement('canvas');
     sample.width = 28;
     sample.height = 28;
     const sg = sample.getContext('2d', { willReadFrequently: true });
-    const palettes = [];
-    const delays = [];
-    for (let i = 0; i < count && !stopped; i++) {
-      const { image } = await decoder.decode({ frameIndex: i });
-      sg.clearRect(0, 0, 28, 28);
-      sg.drawImage(image, 0, 0, 28, 28);
-      palettes.push(paletteFromPixels(sg.getImageData(0, 0, 28, 28).data));
-      delays.push(Math.max(20, (image.duration ?? 100_000) / 1000));
-      image.close();
-    }
+    const palettes = new Array(count);
     if (stopped || !img.isConnected) return stop();
 
     const view = document.createElement('canvas');
@@ -578,9 +571,15 @@ export function followImage(img, onPalette) {
         view.height = image.displayHeight;
       }
       g.drawImage(image, 0, 0);
+      if (!palettes[frame]) {
+        sg.clearRect(0, 0, 28, 28);
+        sg.drawImage(image, 0, 0, 28, 28);
+        palettes[frame] = paletteFromPixels(sg.getImageData(0, 0, 28, 28).data);
+      }
+      const delay = Math.max(20, (image.duration ?? 100_000) / 1000);
       image.close();
       onPalette(palettes[frame]);
-      const wait = delays[frame] - (performance.now() - started);
+      const wait = delay - (performance.now() - started);
       frame = (frame + 1) % count;
       timer = setTimeout(play, Math.max(0, wait));
     };

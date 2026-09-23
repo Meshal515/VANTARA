@@ -85,6 +85,11 @@ export function createProfile(ctx) {
   let token = 0;
 
   let shown = null;
+  let shownSig = '';
+  const signature = (userId) => {
+    const p = profileOf(userId);
+    return JSON.stringify([p?.display_name, p?.bio, p?.avatar_key, p?.banner_key]);
+  };
   /** ما حفظته للتوّ ولم تُرجعه المزامنة بعد: الملف يُظهره فورًا بدل القديم. */
   let local = null;
   const COLUMN = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key' };
@@ -354,6 +359,7 @@ export function createProfile(ctx) {
   async function show(userId) {
     const my = ++token;
     shown = userId;
+    shownSig = signature(userId);
     const own = userId === me();
     const profile = profileOf(userId);
     const name = profile?.display_name || usernameOf(userId) || 'صديق';
@@ -497,7 +503,9 @@ export function createProfile(ctx) {
         const value = (k) => (k === 'avatarKey' && row?.default_avatar ? null : (row?.[COLUMN[k]] ?? null));
         if (row && Object.entries(local).every(([k, v]) => value(k) === (v ?? null))) local = null;
       }
-      if (shown && !host.closest('[hidden]')) void show(shown);
+      // يُعاد الرسم حين يتغيّر ما يُرى فقط: وصول ما حفظته للتوّ من الخادم لا
+      // يعيد بناء الصفحة (ولا يعيد فكّ صورة متحركة من أولها)
+      if (shown && !host.closest('[hidden]') && signature(shown) !== shownSig) void show(shown);
     },
     hide() {
       token += 1;

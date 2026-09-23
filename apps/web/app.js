@@ -671,19 +671,6 @@ async function renderSearch(host, q) {
 
 // ───────────────────────────── الأصدقاء ─────────────────────────────
 
-async function screenFriends() {
-  state.screen = 'FRIENDS';
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'الأصدقاء', back: () => go({ name: 'home' }) }));
-  const body = el('div', 'page__body');
-  const list = el('div', 'friends friends--column');
-  list.dataset.role = 'friends';
-  body.append(list);
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
-  paintFriends(list);
-  await refreshPresence();
-}
 
 function formatDuration(ms) {
   const minutes = Math.floor((ms ?? 0) / 60_000);
@@ -702,153 +689,10 @@ function relativeTime(at) {
   return days === 1 ? 'أمس' : `قبل ${days} يوم`;
 }
 
-async function screenFriend(userId) {
-  const person = state.presence.find((entry) => entry.userId === userId);
-  const profile = sync.row('profiles', userId);
-  const displayName = profile?.display_name ?? person?.displayName ?? '—';
-
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: displayName, back: () => go({ name: 'friends' }) }));
-  const body = el('div', 'page__body');
-
-  const header = el('section', 'profile');
-  const banner = el('div', 'profile__banner');
-  if (profile?.banner_key) banner.style.backgroundImage = `url(${profile.banner_key})`;
-  header.append(banner);
-  const identity = el('div', 'profile__identity');
-  identity.append(avatarNode({ ...person, avatarKey: profile?.avatar_key }, 'avatar avatar--xl'));
-  const names = el('div');
-  names.append(el('h1', 'profile__name', displayName));
-  names.append(el('div', 'profile__user', `@${person?.username ?? ''}`));
-  const live = el('div', 'profile__live');
-  live.append(
-    el('span', `dot dot--${String(person?.status ?? 'offline').toLowerCase()}`),
-    el('span', null, person ? activityLine(person) : 'غير متصل'),
-  );
-  names.append(live);
-  identity.append(names);
-  header.append(identity);
-  if (profile?.bio) header.append(el('p', 'profile__bio', profile.bio));
-  body.append(header);
-
-  const statsHost = el('section', 'stats');
-  body.append(statsHost);
-
-  const readsHost = el('div');
-  body.append(readsHost);
-
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
-
-  const stats = await sync.stats(userId);
-  if (stats) {
-    const cells = [
-      ['فصول فريدة', String(stats.uniqueChapters ?? 0)],
-      ['إجمالي القراءات', String(stats.totalReads ?? 0)],
-      ['إعادات', String(stats.rereads ?? 0)],
-      ['اليوم', formatDuration(stats.usage?.todayMs)],
-      ['هذا الأسبوع', formatDuration(stats.usage?.weekMs)],
-      ['الإجمالي', formatDuration(stats.usage?.totalMs)],
-    ];
-    statsHost.replaceChildren();
-    for (const [label, value] of cells) {
-      const cell = el('div', 'stats__cell');
-      cell.append(el('div', 'stats__value', value), el('div', 'stats__label', label));
-      statsHost.append(cell);
-    }
-  } else {
-    statsHost.replaceChildren(el('p', 'state', 'تعذّر تحميل الإحصائيات.'));
-  }
-
-  const reads = sync
-    .rows('chapter_reads', (row) => row.user_id === userId)
-    .sort((a, b) => (b.last_read_at ?? 0) - (a.last_read_at ?? 0))
-    .slice(0, 12);
-  if (reads.length > 0) {
-    const section = el('section', 'rail');
-    section.append(el('h2', 'rail__title', 'آخر ما قرأ'));
-    const strip = el('div', 'list');
-    for (const read of reads) {
-      const item = el('div', 'list__row');
-      item.append(el('span', null, read.series_ref));
-      item.append(el('span', 'pill', `الفصل ${read.chapter_number ?? '—'}`));
-      strip.append(item);
-    }
-    section.append(strip);
-    readsHost.replaceChildren(section);
-  }
-}
 
 // ───────────────────────────── الإشعارات والنشاط ─────────────────────────────
 
-async function screenNotifications() {
-  state.screen = 'NOTIFICATIONS';
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'الإشعارات', back: () => go({ name: 'home' }) }));
-  const body = el('div', 'page__body');
-  const list = el('div', 'list');
-  body.append(list);
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
 
-  const paint = () => {
-    const rows = sync
-      .rows('notifications', (row) => row.user_id === sync.user?.userId)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
-    list.replaceChildren();
-    if (rows.length === 0) {
-      list.append(el('p', 'state', 'لا إشعارات بعد.'));
-      return;
-    }
-    for (const row of rows) {
-      const item = el('button', `list__row${row.read ? '' : ' list__row--unread'}`);
-      item.type = 'button';
-      const text = el('span', null, row.body ?? NOTIFICATION_LABELS[row.kind] ?? row.kind);
-      item.append(text);
-      if (!row.read) item.append(el('span', 'pill pill--accent', 'جديد'));
-      item.addEventListener('click', () => {
-        if (!row.read) sync.enqueue('notification.read', { id: row.id });
-        // الرابط العميق يفتح المكان الصحيح لا الرئيسية
-        const frameId = frameIdFromLink(row.link);
-        if (frameId) void go({ name: 'frame', id: frameId });
-        else if (row.series_ref) void go({ name: 'series', id: row.series_ref });
-      });
-      list.append(item);
-    }
-    // فتح الصندوق = عُرض، لا مقروء: التنبيه لا يتكرر والعنصر يبقى غير مقروء
-    for (const row of rows) {
-      if (!row.seen && !row.read) sync.enqueue('notification.seen', { id: row.id });
-    }
-  };
-  paint();
-  await sync.pull();
-  paint();
-}
-
-async function screenActivity() {
-  state.screen = 'ACTIVITY';
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'النشاط', back: () => go({ name: 'home' }) }));
-  const body = el('div', 'page__body');
-  const list = el('div', 'list');
-  const rows = sync.rows('activity').sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
-  const VERBS = {
-    LIBRARY_ADD: 'أضاف عملًا',
-    CHAPTER_DONE: 'أنهى فصلًا',
-    RATED: 'قيّم عملًا',
-    FAVORITED: 'أضاف للمفضلة',
-  };
-  if (rows.length === 0) list.append(el('p', 'state', 'لا نشاط بعد.'));
-  for (const row of rows.slice(0, 80)) {
-    const who = sync.row('profiles', row.actor_id)?.display_name ?? '—';
-    const item = el('div', 'list__row');
-    item.append(el('span', null, `${who} ${VERBS[row.verb] ?? row.verb}`));
-    list.append(item);
-  }
-  body.append(list);
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
-}
 
 /** اسم المعروض من المرآة، وإلا اسم الحساب، وإلا المعرّف. */
 function nameOf(userId) {
@@ -876,142 +720,6 @@ const RECOMMENDATION_STATE_LABELS = {
   REJECTED: 'رفض',
 };
 
-/**
- * التوصيات الواردة والصادرة.
- *
- * كانت هذه الشاشة نصًّا ثابتًا يقول «ما وصلتك توصية بعد» مهما وصل — فالعميل
- * يرسل توصية ولا يعرض واحدة أبدًا، ولا يُصدر `recommendation.respond` قطّ.
- * وبوابة B8 نصّها أن يقرأها المستلم ويرفضها مستقلًا عن غيره، وهو ما لم يكن
- * ممكنًا رغم أن الخادم يدعمه كاملًا.
- *
- * وحالة كل مستلم مستقلة (§19): لذلك يرى المرسِل «منصور قبل · NGM رفض» في
- * سطر واحد، ولا تُطوى الحالات في حالة واحدة للتوصية.
- */
-async function screenRecommendations() {
-  state.screen = 'RECOMMENDATIONS';
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'التوصيات', back: () => go({ name: 'home' }) }));
-  const body = el('div', 'page__body');
-  const inbox = el('div', 'list');
-  const outbox = el('div', 'list');
-  body.append(el('h2', 'rail__title', 'وصلتك'), inbox, el('h2', 'rail__title', 'أرسلتها'), outbox);
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
-
-  const meId = () => sync.user?.userId;
-
-  function respond(id, nextState, intent) {
-    sync.enqueue('recommendation.respond', {
-      recommendationId: id,
-      state: nextState,
-      // العقد يرفض نيّةً مع رفض، فلا تُرسل إلا مع قبول
-      ...(nextState === 'ACCEPTED' && intent ? { intent } : {}),
-    });
-    paint();
-  }
-
-  function card(rec, mine) {
-    const row = el('div', 'rec');
-    const shot = el('div', 'rec__shot');
-    if (rec.cover_url) {
-      const cover = el('img', 'rec__cover');
-      cover.alt = '';
-      cover.loading = 'lazy';
-      cover.src = rec.cover_url;
-      cover.addEventListener('error', () => shot.classList.add('rec__shot--blank'), { once: true });
-      shot.append(cover);
-    } else {
-      shot.classList.add('rec__shot--blank');
-    }
-
-    const meta = el('div', 'rec__meta');
-    meta.append(el('div', 'rec__title', rec.series_title || rec.series_ref || '—'));
-    if (mine) meta.append(el('div', 'rec__from', `من ${nameOf(rec.from_id)}`));
-    if (rec.message) meta.append(el('p', 'rec__note', rec.message));
-
-    const everyone = sync.rows(
-      'recommendation_recipients',
-      (r) => r.recommendation_id === rec.id,
-    );
-
-    if (mine) {
-      const me = everyone.find((r) => r.user_id === meId());
-      const answered = me?.state && me.state !== 'PENDING';
-      if (answered) {
-        const chosen = RECOMMENDATION_INTENTS.find((i) => i.intent === me.intent);
-        meta.append(
-          el(
-            'div',
-            'rec__state',
-            me.state === 'REJECTED'
-              ? 'رفضتَها'
-              : `قبلتَها${chosen ? ` · ${chosen.label}` : ''}`,
-          ),
-        );
-      }
-      // الرفض نهائي عند الخادم، فلا تُعرض أزرار بعده تَعِد بما لا يقع
-      if (me?.state !== 'REJECTED') {
-        const actions = el('div', 'rec__actions');
-        for (const option of RECOMMENDATION_INTENTS) {
-          const button = el('button', 'btn btn--small', option.label);
-          button.type = 'button';
-          if (me?.intent === option.intent) button.classList.add('btn--on');
-          button.addEventListener('click', () => respond(rec.id, 'ACCEPTED', option.intent));
-          actions.append(button);
-        }
-        if (!answered) {
-          const no = el('button', 'btn btn--ghost btn--small', 'لا، شكرًا');
-          no.type = 'button';
-          no.addEventListener('click', () => respond(rec.id, 'REJECTED'));
-          actions.append(no);
-        }
-        meta.append(actions);
-      }
-    } else {
-      // «منصور قبل · NGM رفض» — حالة كل مستلم على حدة
-      const others = everyone
-        .filter((r) => r.user_id !== meId())
-        .map((r) => `${nameOf(r.user_id)} ${RECOMMENDATION_STATE_LABELS[r.state] ?? '—'}`);
-      meta.append(el('div', 'rec__state', others.length > 0 ? others.join(' · ') : 'لا مستلمين'));
-    }
-
-    row.append(shot, meta);
-    return row;
-  }
-
-  function paint() {
-    const id = meId();
-    const all = sync.rows('recommendations');
-    const mineIds = new Set(
-      sync.rows('recommendation_recipients', (r) => r.user_id === id).map((r) => r.recommendation_id),
-    );
-
-    const received = all
-      .filter((rec) => mineIds.has(rec.id) && rec.from_id !== id)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
-    const sent = all
-      .filter((rec) => rec.from_id === id)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
-
-    inbox.replaceChildren(
-      ...(received.length > 0
-        ? received.map((rec) => card(rec, true))
-        : [el('p', 'state', 'ما وصلتك توصية بعد.')]),
-    );
-    outbox.replaceChildren(
-      ...(sent.length > 0
-        ? sent.map((rec) => card(rec, false))
-        : [el('p', 'state', 'ما أرسلت توصية بعد.')]),
-    );
-  }
-
-  paint();
-  // الردّ يمرّ بالطابور ثم يعود في الفروقات؛ بلا هذا تبقى الشاشة على حالها
-  const stop = sync.onChange((tables) => {
-    if (tables.includes('recommendations') || tables.includes('recommendation_recipients')) paint();
-  });
-  state.teardown = () => stop();
-}
 
 async function screenPlaceholder(title, note) {
   const wrap = el('main', 'page');
@@ -1022,61 +730,6 @@ async function screenPlaceholder(title, note) {
   mount(wrap);
 }
 
-async function screenMe() {
-  state.screen = 'ME';
-  const me = myProfile();
-  const wrap = el('main', 'page');
-  wrap.append(topbar({ title: 'حسابي', back: () => go({ name: 'home' }) }));
-  const body = el('div', 'page__body');
-
-  const header = el('section', 'profile');
-  const banner = el('div', 'profile__banner');
-  if (me?.bannerKey) banner.style.backgroundImage = `url(${me.bannerKey})`;
-  header.append(banner);
-  const identity = el('div', 'profile__identity');
-  identity.append(avatarNode(me, 'avatar avatar--xl'));
-  const names = el('div');
-  names.append(el('h1', 'profile__name', me?.displayName ?? '—'));
-  names.append(el('div', 'profile__user', `@${me?.username ?? ''}`));
-  identity.append(names);
-  header.append(identity);
-  body.append(header);
-
-  // الهوية الداخلية لا تُعرض ولا تُكتب: الاسم والصورة والنبذة وحدها
-  const form = el('form', 'form');
-  const fields = [
-    ['displayName', 'الاسم', me?.displayName ?? ''],
-    ['avatarKey', 'رابط الصورة', me?.avatarKey ?? ''],
-    ['bannerKey', 'رابط البانر', me?.bannerKey ?? ''],
-    ['bio', 'نبذة', me?.bio ?? ''],
-  ];
-  const inputs = new Map();
-  for (const [key, label, value] of fields) {
-    const row = el('label', 'form__row');
-    row.append(el('span', 'form__label', label));
-    const input = el('input', 'form__input');
-    input.value = value ?? '';
-    row.append(input);
-    inputs.set(key, input);
-    form.append(row);
-  }
-  const save = el('button', 'btn', 'حفظ');
-  save.type = 'submit';
-  const note = el('p', 'form__note');
-  form.append(save, note);
-
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const patch = {};
-    for (const [key, input] of inputs) patch[key] = input.value.trim() || null;
-    sync.enqueue('profile.patch', { fields: patch });
-    note.textContent = 'حُفظ. سيظهر عند الأصدقاء بعد المزامنة.';
-  });
-  body.append(form);
-
-  wrap.append(body, bottomNav('home'));
-  mount(wrap);
-}
 
 // ───────────────────────────── العمل ─────────────────────────────
 
@@ -1750,6 +1403,41 @@ function screenV35(page) {
         // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
         report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),
         openReader: (target) => screenSmartReader(target),
+        settings: {
+          health: () => sync.health(),
+          ago: (at) => relativeTime(at),
+          retryQuarantined: () => sync.retryQuarantined(),
+          syncNow: async () => {
+            // ضغطة المستخدم تتجاوز التراجع الأُسّي: هو يعرف أن الشبكة عادت
+            await sync.push({ force: true });
+            await sync.pull();
+            await refreshPresence();
+          },
+          resync: () => sync.resync(),
+          popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
+          setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
+          labels: NOTIFICATION_LABELS,
+          endpoints: () => endpoints(),
+          setEndpoints: (next) => setEndpoints(next),
+          reportKinds: REPORT_KINDS.map((k) => [k, REPORT_KIND_LABELS[k] ?? k]),
+          reportProblem: (kind, description) => {
+            const health = sync.health();
+            return submitReport({
+              api,
+              kind,
+              description,
+              context: {
+                appVersion: appVersion(),
+                screen: 'settings',
+                health,
+                lastError: health.lastError,
+                online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+                viewport: `${window.innerWidth}x${window.innerHeight}`,
+                endpoint: endpoints().api,
+              },
+            });
+          },
+        },
         switchAccount: () => {
           dropV35();
           sync.signOut();
@@ -1877,7 +1565,9 @@ async function go(route) {
     case 'notifications':
       return screenV35('notifications');
     case 'activity':
-      return screenActivity();
+      screenV35(null);
+      v35.openMajlis();
+      return;
     case 'me':
       screenV35(null);
       v35.openProfile(sync.user?.userId);
@@ -1887,7 +1577,9 @@ async function go(route) {
     case 'reader':
       return screenReader(route);
     case 'recommendations':
-      return screenRecommendations();
+      screenV35(null);
+      v35.openMajlis('recs');
+      return;
     case 'favorites':
       return screenPlaceholder('المفضلة', 'لا مفضلة بعد.');
     case 'readLater':
@@ -1895,7 +1587,9 @@ async function go(route) {
     case 'downloads':
       return screenPlaceholder('التنزيلات', 'لا تنزيلات بعد.');
     case 'settings':
-      return screenSettings();
+      // بلا حساب (أول إقلاع أو عنوان خادم خاطئ) لا واجهة بعد: الشاشة البسيطة
+      if (!sync.user) return screenSettings();
+      return screenV35('settings');
     default:
       return screenHome();
   }
@@ -2244,21 +1938,32 @@ function toastNewNotifications() {
     // السحب التالي قد تصل فروقات أخرى، فبلا هذا الحرس يظهر نفس التنبيه مرتين
     if (toastedIds.has(row.id)) continue;
     toastedIds.add(row.id);
-    const actor = sync.row('profiles', row.actor_id)?.display_name ?? 'صديق';
-    const title =
-      row.kind === 'RECOMMENDATION'
-        ? `${actor} أوصى بعمل`
-        : row.kind === 'FRAME'
-          ? `${actor} أرسل لك فريم`
-          : NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    const actorRow = sync.row('profiles', row.actor_id);
+    const actor = actorRow?.display_name ?? 'صديق';
+    // نفس صياغة شاشة الإشعارات: «مشعل أرسل لك فريم» لا «إشعار جديد»
+    const frameId = frameIdFromLink(row.link);
+    const frame = frameId ? sync.row('frames', frameId) : null;
+    const majlisKind = String(row.link ?? '').startsWith('vantara://majlis/') ? row.link.split('/')[3] : null;
+    let title;
+    let body = row.body ?? '';
+    if (row.kind === 'FRAME') title = frame?.broadcast ? `${actor} شارك فريمًا مع الجميع` : `${actor} أرسل لك فريم`;
+    else if (row.kind === 'RECOMMENDATION') title = `${actor} رشّح لك`;
+    else if (row.kind === 'REACTION' && majlisKind) {
+      title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
+      body = '';
+    } else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
     showToast({
       title,
-      body: row.body ?? '',
+      body,
+      avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        const frameId = frameIdFromLink(row.link);
         if (frameId) void go({ name: 'frame', id: frameId });
-        else if (row.series_ref) void go({ name: 'series', id: row.series_ref });
+        else if (majlisKind) void go({ name: 'majlis' });
+        else if (row.series_ref) {
+          screenV35(null);
+          v35.openRef(row.series_ref, row.body ?? undefined);
+        }
         else void go({ name: 'notifications' });
       },
     });

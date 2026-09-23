@@ -97,16 +97,41 @@
   box-sizing: border-box;
 }
 .v35 button,
+/*
+ * لا تظليل أزرق عند اللمس، في أي مكان. أندرويد يرسمه فوق كل ما يُنقر (بطاقة،
+ * صف، بانر) ولون التطبيق ليس أزرق: الضغط يُرى من حالة :active لكل عنصر.
+ */
+html,
+body,
+.v35,
+.v35 * {
+  -webkit-tap-highlight-color: transparent;
+}
+/* مؤشر الكتابة والمنزلقات ومربعات الاختيار الأصلية بلون التطبيق، لا أزرق المتصفح */
+html,
+.v35 {
+  accent-color: #8f5cff;
+  caret-color: #bba2ff;
+}
+/* النص المحدَّد بلون التطبيق لا أزرق النظام */
+::selection {
+  background: rgba(143, 92, 255, 0.32);
+  color: inherit;
+}
 .v35 input,
 .v35 select,
 .v35 textarea {
   font: inherit;
   color: inherit;
 }
-.v35 button {
+.v35 button,
+.v35 [role='button'],
+.v35 label.setting {
   cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  /* الضغط المطوّل لا يحدّد نص الزر */
+  -webkit-user-select: none;
+  user-select: none;
 }
 .v35 button:disabled {
   cursor: default;
@@ -2338,4 +2363,80 @@
 .v35 .search-count bdi {
   color: var(--text-1);
   font-weight: 650;
+}
+
+/* ───────────────────────── الإعدادات: الحالة والحقول ───────────────────────── */
+
+.v35 .settings-note {
+  margin: 8px 4px 0;
+  font-size: var(--fs-caption);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+.v35 .setting .value--ok {
+  color: var(--success);
+}
+.v35 .setting .value--warn {
+  color: var(--warning);
+}
+.v35 label.setting {
+  cursor: pointer;
+}
+.v35 label.setting .switch-input {
+  margin-inline-start: auto;
+  flex: none;
+}
+.v35 .field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+.v35 .field-label {
+  font-size: var(--fs-meta);
+  font-weight: 650;
+  color: var(--text-2);
+}
+.v35 .field-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-body);
+  text-align: left;
+  outline: none;
+}
+.v35 .field-input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.v35 .sheet .field + .btn,
+.v35 .sheet .share-note + .btn {
+  margin-top: 18px;
+}
+.v35 .report-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 12px;
+}
+.v35 .chip-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+.v35 .chip-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+  color: var(--accent-text);
 }

@@ -1,3 +1,5 @@
+/* لا تظليل أزرق عند اللمس في أي شاشة، القديمة منها أيضًا */
+html, body, * { -webkit-tap-highlight-color: transparent; }
 /*
  * أنماط الشاشات القديمة (البوابة، الأصدقاء، الإشعارات، القارئ القديم…).
  *
@@ -646,7 +648,7 @@ h1:not(.v35 *), h2:not(.v35 *), h3:not(.v35 *), p:not(.v35 *) { margin: 0; }
   display: grid; gap: 2px;
   padding: 11px 14px;
   border: 0; border-radius: 14px;
-  background: rgba(30, 36, 48, .94); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  background: rgba(24, 22, 31, .94); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
   box-shadow: 0 16px 36px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(255, 255, 255, .08);
   color: #f3f4f8; text-align: start; font-family: inherit;
   opacity: 0; transform: translateY(-10px) scale(.98);
@@ -656,6 +658,20 @@ h1:not(.v35 *), h2:not(.v35 *), h3:not(.v35 *), p:not(.v35 *) { margin: 0; }
 .toast--in:not(.v35 *) { opacity: 1; transform: none; }
 .toast--out:not(.v35 *) { opacity: 0; transform: translateY(-10px) scale(.98); }
 .toast__title:not(.v35 *) { font-size: 13.5px; font-weight: 700; }
+.toast__copy:not(.v35 *) { display: grid; gap: 2px; min-width: 0; text-align: right; unicode-bidi: plaintext; }
+/* تنبيه من شخص: وجهه وسطر واحد، على سطح التطبيق الداكن */
+.toast--person:not(.v35 *) {
+  grid-template-columns: 38px 1fr; align-items: center; gap: 12px;
+  padding: 10px 14px 10px 12px; border-radius: 18px;
+  background: rgba(24, 22, 31, .94);
+  touch-action: pan-x;
+}
+.toast--person .toast__body:not(.v35 *) { -webkit-line-clamp: 1; }
+.toast__face:not(.v35 *) {
+  width: 38px; height: 38px; border-radius: 99px; object-fit: cover;
+  display: grid; place-items: center;
+  background: #211e2b; color: #bab6c6; font-weight: 700; font-size: 15px;
+}
 .toast__body:not(.v35 *) {
   font-size: 12.5px; color: #b7bdc9;
   /* سطران كحد أقصى: التنبيه إشارة لا رسالة */

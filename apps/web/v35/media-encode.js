@@ -14,7 +14,7 @@
 import { GIFEncoder, applyPalette, quantize } from '../vendor/gifenc.js';
 
 /** سقف الخادم للملف الواحد (`MAX_MEDIA_BYTES`)، بهامش صغير. */
-export const MAX_UPLOAD = 1_450_000;
+export const MAX_UPLOAD = 1_350_000;
 
 export const TARGETS = {
   avatar: { w: 512, h: 512, budget: 350_000 },

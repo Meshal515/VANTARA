@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMediaHash, sniffImageType } from './media.ts';
+import { MAX_MEDIA_BYTES, isMediaHash, sniffImageType } from './media.ts';
 
 const bytes = (...xs: number[]) => new Uint8Array(xs);
 const text = (s: string) => new TextEncoder().encode(s);
@@ -20,5 +20,12 @@ describe('sniffImageType', () => {
     expect(isMediaHash('a'.repeat(64))).toBe(true);
     expect(isMediaHash('../etc/passwd')).toBe(false);
     expect(isMediaHash('A'.repeat(64))).toBe(false);
+  });
+});
+
+describe('سقف الصورة وD1', () => {
+  it('الصورة بأقصى حجمها تدخل صفًّا واحدًا في D1 بعد base64', () => {
+    const base64 = Math.ceil(MAX_MEDIA_BYTES / 3) * 4;
+    expect(base64 + 1_000).toBeLessThan(2_000_000);
   });
 });
