@@ -15,9 +15,12 @@ import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
 import { available, browse, describe, detail, discoverEditions, editionRows, seriesRefOf, withEditions } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
+import { titlesMatch } from '../lib/catalog.js';
+import { cachedCover, coverCandidates, forgetCover, nativeCover } from './covers.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
+import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
@@ -85,7 +88,8 @@ function writeJson(key, value) {
 }
 
 const clean = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/[ \t]+/g, ' ').trim();
-const titleOf = (w) => w?.title?.english || w?.title?.romaji || w?.title || 'بدون عنوان';
+// المرجع الداخلي (`ext:…`) لا يصل للشاشة أبدًا، ولو غاب كل اسم آخر
+const titleOf = (w) => displayTitle(w?.id, w?.title?.english, w?.title?.romaji, typeof w?.title === 'string' ? w.title : null);
 const unique = (arr) => [...new Set(arr.filter(Boolean))];
 const uniqueById = (items) => {
   const seen = new Set();
@@ -180,21 +184,35 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // المزامنة تحفظ عنوان العمل وغلافه؛ ونُسخه (أي مصدر يحمله) تُحفظ هنا ليُفتح
   // العمل من المكتبة بلا بحث جديد.
 
+  const serverWork = (ref) => sync.rows('works', (x) => x.series_ref === ref)[0] ?? null;
+  /**
+   * يحفظ نسخ العمل في الجهاز، ويخبر الخادم بما لا يعرفه منها: عملٌ فتحتَه
+   * يُفتح بعدها على كل جهاز بنفس نسخه، بلا بحث.
+   */
   function rememberWork(w) {
     const all = readJson(WORKS_KEY, {});
-    all[w.id] = { key: w._work.key, title: w._work.title, thumbnailUrl: w._work.thumbnailUrl, editions: w._work.editions };
+    const editions = w._work.editions ?? [];
+    all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
     writeJson(WORKS_KEY, all);
+    const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
+    if (!editions.length || !describesMore(serverWork(String(w.id)), facts)) return;
+    sync.enqueue('work.describe', { seriesRef: String(w.id), ...facts, editions: compactEditions(editions) });
   }
   function workFromRef(ref, fallbackTitle, cover) {
     const saved = readJson(WORKS_KEY, {})[ref];
-    const base = saved ?? { key: ref.replace(/^ext:/, ''), title: fallbackTitle ?? ref, thumbnailUrl: cover ?? null, editions: [] };
+    const row = serverWork(ref);
+    const title = displayTitle(ref, row?.title, saved?.title, fallbackTitle);
+    const thumbnailUrl = saved?.thumbnailUrl ?? row?.cover_url ?? cover ?? null;
+    // نسخ الجهاز أولًا (تحمل تفاصيل آخر فتح)، ثم ما عرفه غيره عبر الخادم
+    const editions = mergeEditions(saved?.editions, serverEditions(row));
+    const base = { key: saved?.key ?? ref.replace(/^ext:/, ''), title, thumbnailUrl, editions };
     return {
       id: ref,
-      title: { english: base.title },
+      title: { english: title },
       genres: [],
       status: null,
-      coverImage: { large: base.thumbnailUrl, extraLarge: base.thumbnailUrl },
-      bannerImage: base.thumbnailUrl,
+      coverImage: { large: thumbnailUrl, extraLarge: thumbnailUrl },
+      bannerImage: thumbnailUrl,
       staff: { edges: [] },
       _work: base,
     };
@@ -242,12 +260,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sourceId: w._work?.editions?.[0]?.sourceId ?? null,
   });
 
-  const getHistory = () => readJson(HISTORY_KEY, []);
+  // «آخر المشاهدات»: سجلٌّ واحد في حسابك (`work_views`). المكتبة والرئيسية
+  // والملف ومتابعة القراءة تقرأ منه نفسه، فحذف عمل منه يحذفه من كل مكان.
+  const viewRows = (userId = me()) =>
+    sync.rows('work_views', (r) => r.user_id === userId && !r.removed).sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
   function pushHistory(w) {
-    const mini = { ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null };
-    writeJson(HISTORY_KEY, [mini, ...getHistory().filter((x) => x.ref !== mini.ref)].slice(0, 100));
+    sync.enqueue('view.add', { seriesRef: String(w.id), seriesTitle: titleOf(w), coverUrl: w.coverImage?.large ?? null, at: Date.now() });
   }
-  const historyWorks = () => getHistory().map((h) => workFromRef(h.ref, h.title, h.cover));
+  function removeView(ref) {
+    sync.enqueue('view.remove', { seriesRef: ref });
+  }
+  const historyWorks = () => viewRows().map((v) => workFromRef(v.series_ref, v.series_title, v.cover_url));
+  /** السجل القديم كان في الجهاز: يُنقل مرة إلى الحساب بترتيبه ثم يُترك. */
+  function migrateLocalHistory() {
+    const flag = `${HISTORY_KEY}.moved.${me()}`;
+    if (!me() || localStorage.getItem(flag)) return;
+    const local = readJson(HISTORY_KEY, []);
+    if (!viewRows().length) {
+      const t = Date.now();
+      local.slice(0, 60).forEach((h, i) => {
+        if (h?.ref) sync.enqueue('view.add', { seriesRef: h.ref, seriesTitle: h.title ?? null, coverUrl: h.cover ?? null, at: t - (i + 1) * 60_000 });
+      });
+    }
+    try {
+      localStorage.setItem(flag, '1');
+    } catch {
+      // يُعاد النقل مرة أخرى فقط، والخادم يدمج المكرر
+    }
+  }
 
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
@@ -256,16 +296,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     d.append(el('span', null, initialOf(label)));
     container.replaceChildren(d);
   }
-  const imageUrls = (work) => unique([work.coverImage?.extraLarge, work.coverImage?.large, work.bannerImage]);
-
   /**
    * الصورة بعد تحميلها فقط، ومكانها هيكلٌ لامع حتى ذلك. التسابق محروس
    * بعلامة: البطاقة المعاد استعمالها لا تعرض صورة طلبٍ قديم.
+   *
+   * الترتيب: الملف المحفوظ على الجهاز (فوري وبلا شبكة)، ثم المحرّك بترويسات
+   * المصدر (ويُحفظ)، ثم الرابط مباشرة، لكل غلاف من أغلفة نسخ العمل. والحرف
+   * الأول لا يظهر إلا إن فشل كل ذلك.
    */
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
-    container.replaceChildren(el('div', 'skeleton'));
     const tryUrl = (url, timeoutMs) =>
       new Promise((resolve) => {
         const img = new Image();
@@ -283,14 +324,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onerror = () => done(false);
         img.src = url;
       });
-    for (const url of imageUrls(work)) {
-      const img = await tryUrl(url, 9000);
+    const show = (img, url) => {
+      if (opts.position) img.style.objectPosition = opts.position;
+      container.replaceChildren(img);
+      return url;
+    };
+    const candidates = coverCandidates(work);
+    // المحفوظ أولًا وبلا هيكل لامع: الغلاف الذي رأيته أمس يظهر كما هو
+    for (const { url } of candidates) {
+      const local = cachedCover(url);
+      if (!local) continue;
+      const img = await tryUrl(local, 2500);
       if (container.dataset.imageToken !== token) return null;
-      if (img) {
-        if (opts.position) img.style.objectPosition = opts.position;
-        container.replaceChildren(img);
-        return url;
-      }
+      if (img) return show(img, local);
+      forgetCover(url);
+    }
+    container.replaceChildren(el('div', 'skeleton'));
+    for (const { url, sourceId } of candidates) {
+      const saved = await nativeCover(url, sourceId);
+      if (container.dataset.imageToken !== token) return null;
+      const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000));
+      if (container.dataset.imageToken !== token) return null;
+      if (img) return show(img, img.src);
     }
     if (container.dataset.imageToken === token) fallbackArt(container, titleOf(work));
     return null;
@@ -365,7 +420,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const reading = libraryWorks('reading');
     if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
     const history = historyWorks();
-    if (history.length) blocks.push(sectionBlock('آخر ما فتحت', 'history', history));
+    if (history.length) blocks.push(sectionBlock('آخر المشاهدات', 'history', history.slice(0, 20)));
     if (state.home.featured.length) blocks.push(sectionBlock('مقترحة لك', 'featured', state.home.featured));
     if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
     if (state.home.recent.length) blocks.push(sectionBlock('المضافة حديثًا', 'recent', state.home.recent));
@@ -599,6 +654,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── صفحة العمل ─────────────────────────
 
   async function openWork(work, { readNumber = null } = {}) {
+    // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
+    if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
+      work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
+    }
     state.current = work;
     state.nextRow = null;
     state.chapterSource = null;
@@ -612,11 +671,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
-        const found = (await browse({ query: titleOf(work) })).items.find((w) => w.id === work.id);
+        const { items } = await browse({ query: titleOf(work) });
+        const found = items.find((w) => w.id === work.id) ?? items.find((w) => titlesMatch(titleOf(w), titleOf(work)));
         if (found && state.current === work) {
-          work = found;
-          state.current = found;
-          rememberWork(found);
+          // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
+          const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
+          work = kept;
+          state.current = kept;
+          rememberWork(kept);
         }
       } catch {
         // يبقى العمل بلا نُسخ ويقول ذلك أدناه
@@ -624,7 +686,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (state.current !== work) return;
     if (!work._work?.editions?.length) {
-      chapterMessage('ما لقينا هذا العمل في مصادرنا الآن. جرّب البحث باسمه.');
+      emptyState(q('chapterPanel'), {
+        icon: 'search',
+        title: 'ما وصلنا للمصادر الحين',
+        text: 'نحاول مرة ثانية بعد لحظة، أو المسها الحين.',
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber }) },
+      });
       setReadCta(null);
       return;
     }
@@ -632,6 +699,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const full = await detail(work);
       if (state.current !== work) return;
       state.current = full;
+      // غلافٌ عرفناه من التفاصيل يُحفظ للبطاقات وللأصدقاء
+      if (full._work?.thumbnailUrl && full._work.thumbnailUrl !== work._work?.thumbnailUrl) rememberWork(full);
       renderDetail(full);
       renderSources(full);
       renderChapters(full);
@@ -1279,15 +1348,89 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── المكتبة ─────────────────────────
 
+  // ── «آخر المشاهدات»: قائمة لا شبكة — الغلاف، الاسم، آخر فصل ومتى، وحذف ──
+  function viewedLabel(at) {
+    const days = Math.floor((Date.now() - at) / 86_400_000);
+    if (days < 7) return timeAgo(at).replace(/^الآن$/, 'منذ أقل من دقيقة');
+    return new Date(at).toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' }).replace('، ', ' - ');
+  }
+  function chapterRatio(userId, ref, number) {
+    if (number == null) return null;
+    const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
+    const row = sync.rows('progress', (r) => r.user_id === userId && r.chapter_key === key)[0];
+    return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
+  }
+  /**
+   * @param {HTMLElement} target
+   * @param {{ userId?: string, own?: boolean, limit?: number }} [opts]
+   */
+  function renderHistoryList(target, { userId = me(), own = userId === me(), limit = Infinity } = {}) {
+    const rows = viewRows(userId);
+    if (!rows.length) {
+      emptyState(target, {
+        icon: 'history',
+        title: own ? 'ما فتحت شي بعد' : 'ما فيه مشاهدات',
+        text: own ? 'كل عمل تفتحه يظهر هنا بآخر فصل وصلته، على أجهزتك كلها.' : 'لما يفتح أعمالًا تظهر هنا.',
+      });
+      return;
+    }
+    const list = el('div', 'hist-list');
+    rows.slice(0, limit).forEach((v, i) => {
+      const work = workFromRef(v.series_ref, v.series_title, v.cover_url);
+      const item = el('div', 'hist-row');
+      const open = el('button', 'hist-open');
+      open.type = 'button';
+      const cover = el('span', 'hist-cover');
+      void mountImage(cover, work);
+      const copy = el('span', 'hist-copy');
+      const title = el('bdi', 'hist-title', titleOf(work));
+      const meta = el('span', 'hist-meta');
+      if (v.chapter_label || v.chapter_number != null) {
+        const ch = el('span', 'hist-chapter');
+        ch.innerHTML = glyph('book', { size: 15 });
+        ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
+        meta.append(ch, el('span', 'hist-dot', '·'));
+      }
+      meta.append(el('span', null, viewedLabel(v.viewed_at ?? Date.now())));
+      copy.append(title, meta);
+      open.append(cover, copy);
+      open.onclick = () => void openWork(work);
+      item.append(open);
+      const side = el('span', 'hist-side');
+      // الحلقة لآخر ما فتحت وحده، حين لم تُكمل فصله
+      const ratio = i === 0 ? chapterRatio(userId, v.series_ref, v.chapter_number) : null;
+      if (ratio !== null && ratio < 0.98) {
+        const ring = el('span', 'hist-ring');
+        ring.style.setProperty('--p', String(Math.round(ratio * 100)));
+        ring.append(el('b', null, `${Math.round(ratio * 100)}%`));
+        side.append(ring);
+      }
+      if (own) {
+        const del = el('button', 'hist-del');
+        del.type = 'button';
+        del.innerHTML = glyph('trash', { size: 20 });
+        del.setAttribute('aria-label', `احذف ${titleOf(work)} من السجل`);
+        del.onclick = () => {
+          item.classList.add('hist-row--gone');
+          setTimeout(() => removeView(v.series_ref), 180);
+        };
+        side.append(del);
+      }
+      item.append(side);
+      list.append(item);
+    });
+    target.replaceChildren(list);
+  }
+
   function renderLibrary() {
-    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['later', 'لاحقًا'], ['favorite', 'المفضلة']];
+    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['favorite', 'المفضلة']];
     q('libraryTabs').replaceChildren(
       ...tabs.map(([k, l]) => {
         const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
         b.type = 'button';
         b.setAttribute('role', 'tab');
         b.setAttribute('aria-selected', String(k === state.libraryFilter));
-        const n = libraryWorks(k).length;
+        const n = k === 'history' ? viewRows().length : libraryWorks(k).length;
         if (n) b.append(el('b', null, String(n)));
         b.onclick = () => {
           state.libraryFilter = k;
@@ -1296,6 +1439,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return b;
       }),
     );
+    if (state.libraryFilter === 'history') {
+      q('libraryToolbar').hidden = true;
+      q('libraryGrid').classList.remove('grid');
+      renderHistoryList(q('libraryGrid'));
+      return;
+    }
+    q('libraryGrid').classList.add('grid');
     const items = libraryWorks(state.libraryFilter);
     const sort = q('librarySort')?.value || 'added';
     if (sort === 'title') items.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ar'));
@@ -1331,10 +1481,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   async function openCollection(kind) {
     if (kind === 'history') {
-      showPage('collection');
-      q('collectionTitle').textContent = 'آخر ما فتحت';
-      q('collectionMore').hidden = true;
-      renderGrid(q('collectionGrid'), historyWorks());
+      state.libraryFilter = 'history';
+      navTo('library');
       return;
     }
     if (kind === 'libraryReading') {
@@ -1649,7 +1797,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
           text: 'رشّح لك',
           title: work?.title ?? row.body ?? null,
           cover: work?.cover_url ?? null,
-          open: () => row.series_ref && void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url)),
+          open: () => {
+            majlis.markSeen('rec', String(row.id).split(':')[0]);
+            if (row.series_ref) void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url));
+          },
         };
       case 'REACTION':
         if (String(row.link ?? '').startsWith('vantara://majlis/')) {
@@ -1679,7 +1830,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function notificationRow(row) {
     const copy = notificationCopy(row);
-    const b = el('button', `notif${row.read ? '' : ' notif--unread'}`);
+    // جديدُ هذه الزيارة يبقى مميّزًا حتى تغادر، ولو صار مقروءًا في الخادم
+    if (!row.read) (state.notifFresh ??= new Set()).add(row.id);
+    const fresh = !row.read || state.notifFresh?.has(row.id);
+    const b = el('button', `notif${fresh ? ' notif--unread' : ''}`);
     b.type = 'button';
     const face = el('span', 'notif-face');
     face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
@@ -1735,8 +1889,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       parts.push(list);
     }
     body.replaceChildren(...parts);
-    // فتح الصندوق = عُرض، لا مقروء: التنبيه لا يتكرر والعنصر يبقى غير مقروء
-    for (const r of rows) if (!r.seen && !r.read) sync.enqueue('notification.seen', { id: r.id });
+    // رأيتها في القائمة = قرأتها: النقطة تختفي الآن وعلى كل أجهزتك، والجديد
+    // يبقى مميّزًا في هذه الزيارة وحدها لتعرف ما وصل
+    clearTimeout(state.notifReadTimer);
+    state.notifReadTimer = setTimeout(() => {
+      if (currentPage() !== 'notifications') return;
+      for (const r of rows) if (!r.read) sync.enqueue('notification.read', { id: r.id });
+    }, 900);
   }
   function readAllNotifications() {
     for (const r of sync.rows('notifications', (x) => x.user_id === me() && !x.read)) sync.enqueue('notification.read', { id: r.id });
@@ -1842,8 +2001,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
     if (id === 'settings') renderSettings();
     if (id === 'notifications') renderNotifications();
-    if (id === 'majlis') majlis.show();
-    else majlis.hide();
+    if (from === 'notifications' && id !== 'notifications') state.notifFresh = null;
+    if (id === 'majlis') {
+      majlis.show();
+      // وصلتَ للمجلس = رأيت التفاعلات على رسائلك فيه
+      for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
+        sync.enqueue('notification.read', { id: n.id });
+      }
+    } else majlis.hide();
     if (id !== 'profile') profile?.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -2227,6 +2392,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {
+    if (tables.includes('work_views') || tables.includes('progress')) {
+      if (currentPage() === 'library' && state.libraryFilter === 'history') renderLibrary();
+      else if (currentPage() === 'home' && tables.includes('work_views')) renderHome();
+    }
     if (tables.some((t) => ['library', 'collections'].includes(t))) {
       refreshLibraryDetail();
       if (currentPage() === 'home') renderHome();
@@ -2237,7 +2406,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    majlis.onChange(tables);
+    majlis.onChange(tables, { visible: currentPage() === 'majlis' });
     profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
@@ -2265,6 +2434,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openShare: () => navTo('discover'),
     pageImage: available() ? deps.pageImage : null,
   });
+  // ما وصل هذا الجهاز قبل فتح الشاشة: المرسل يرى «وصله» الآن لا عند أول مجلس
+  setTimeout(() => {
+    majlis.acknowledgeDelivered();
+    migrateLocalHistory();
+  }, 0);
 
   const profile = createProfile({
     sync,

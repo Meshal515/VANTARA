@@ -15,6 +15,7 @@
 
 import { glyph } from './icons.js';
 import { countLabel } from './plural.js';
+import { displayTitle, refForTitle } from './work-ref.js';
 
 /** نفس القائمة المغلقة في الخادم (`MAJLIS_REACTIONS`). */
 export const REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
@@ -85,8 +86,92 @@ export function createMajlis(ctx) {
   const presenceOf = (userId) => presence.find((p) => p.userId === userId) ?? null;
   const workOf = (ref, title, cover) => {
     const row = ref ? sync.rows('works', (w) => w.series_ref === ref)[0] : null;
-    return ctx.workFromRef(ref ?? `ext:${String(title ?? '').toLowerCase()}`, row?.title ?? title, row?.cover_url ?? cover);
+    // فريمٌ بلا مرجع يُربط بعنوانه بنفس قاعدة المكتبة، فلا يصير العمل عملين
+    const id = ref ?? refForTitle(title) ?? 'ext:عمل';
+    const known = row ?? sync.rows('works', (w) => w.series_ref === id)[0];
+    return ctx.workFromRef(id, known?.title ?? title, known?.cover_url ?? cover);
   };
+
+  // ── الإيصالات ──
+  // «وصله» حين تصل الرسالة جهاز صاحبك، و«شافه» حين تظهر أمامه نصف ثانية.
+  // الخادم يحفظهما ولا يرجعان للخلف؛ والمرسل وحده يراهما.
+
+  const receiptOf = (kind, id, userId) =>
+    sync.rows('majlis_receipts', (r) => r.target_kind === kind && r.target_id === id && r.user_id === userId)[0] ?? null;
+  /** من يُفترض أن تصله الرسالة: المستلم، أو كل الأصدقاء إلا من أُخفيت عنه. */
+  function audienceOf(row, toId, broadcast) {
+    if (toId && !broadcast && toId !== row.from_id) return [toId];
+    const hidden = parse(row.hidden_json, []);
+    return members().filter((u) => u !== row.from_id && !hidden.includes(u));
+  }
+  const acked = new Set();
+  /** إيصالي على رسالة غيري. مرة لكل حالة في الجلسة، والخادم يتجاهل المكرّر. */
+  function acknowledge(kind, id, seen) {
+    const row = kind === 'frame' ? sync.rows('frames', (f) => f.id === id)[0] : sync.rows('recommendations', (r) => r.id === id)[0];
+    if (!row || row.from_id === me() || row._pending) return;
+    const mine = receiptOf(kind, id, me());
+    if (seen ? mine?.seen_at : mine) return;
+    const k = `${kind}/${id}/${seen ? 's' : 'd'}`;
+    if (acked.has(k)) return;
+    acked.add(k);
+    sync.enqueue('majlis.receipt', { targetKind: kind, targetId: id, seen });
+    // رأيتَ الرسالة = قرأت إشعارها: النقطة البنفسجية لا تبقى على ما رأيته
+    if (seen) {
+      const note = sync.rows('notifications', (n) => n.id === `${id}:${me()}` && !n.read)[0];
+      if (note) sync.enqueue('notification.read', { id: note.id });
+    }
+  }
+  /** كل رسالة وصلت هذا الجهاز ولم يُقَل عنها «وصلت». */
+  function acknowledgeDelivered() {
+    for (const f of sync.rows('frames', (x) => x.from_id !== me())) acknowledge('frame', f.id, false);
+    for (const r of sync.rows('recommendations', (x) => x.from_id !== me())) acknowledge('rec', r.id, false);
+  }
+  const seenTimers = new Map();
+  const seenObserver =
+    typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              const { kind, id } = e.target.dataset;
+              const k = `${kind}/${id}`;
+              if (e.isIntersecting) {
+                if (!seenTimers.has(k)) seenTimers.set(k, setTimeout(() => acknowledge(kind, id, true), 600));
+              } else {
+                clearTimeout(seenTimers.get(k));
+                seenTimers.delete(k);
+              }
+            }
+          },
+          { threshold: 0.5 },
+        );
+  function watchSeen(node, kind, id, fromId) {
+    if (fromId === me() || !seenObserver) return;
+    node.dataset.kind = kind;
+    node.dataset.id = id;
+    seenObserver.observe(node);
+  }
+  /** سطر الإيصالات تحت رسالتك: وجه كل مستلم وحالته. */
+  function receiptsRow(kind, row, toId, broadcast) {
+    const box = el('span', 'mj-receipts');
+    if (row._pending) {
+      const chip = el('span', 'mj-receipt mj-receipt--pending');
+      chip.append(el('i', 'spinner'), el('span', null, 'يُرسَل…'));
+      box.append(chip);
+      return box;
+    }
+    const people = audienceOf(row, toId, broadcast);
+    if (!people.length) return null;
+    for (const u of people) {
+      const r = receiptOf(kind, row.id, u);
+      const state = r?.seen_at ? 'seen' : r ? 'got' : 'sent';
+      const chip = el('span', `mj-receipt mj-receipt--${state}`);
+      chip.append(ctx.avatarNode(personOf(u), 18), el('span', null, state === 'seen' ? 'شافه' : state === 'got' ? 'وصله' : 'أُرسل'));
+      chip.setAttribute('aria-label', `${nameOf(u)}: ${state === 'seen' ? 'شاف الرسالة' : state === 'got' ? 'وصلته ولم يفتحها' : 'لم تصله بعد'}`);
+      box.append(chip);
+    }
+    return box;
+  }
 
   // ── التفاعلات ──
   // ضغطة مطوّلة على أي رسالة تُظهر شريط الرموز فوقها. واختيارك يظهر تحتها
@@ -348,12 +433,20 @@ export function createMajlis(ctx) {
     cta.innerHTML = `<span>افتح الفريم</span>${glyph('chevron', { size: 18 })}`;
     copy.append(cta);
     open.append(shot, copy);
-    open.onclick = () => ctx.openFrame(f.id);
+    open.onclick = () => {
+      acknowledge('frame', f.id, true);
+      ctx.openFrame(f.id);
+    };
     card.append(open);
+    if (f.from_id === me()) {
+      const receipts = receiptsRow('frame', f, f.to_id, f.broadcast);
+      if (receipts) card.append(receipts);
+    }
     const chips = reactionChips('frame', f.id);
     if (chips) card.append(chips);
     card.append(el('time', 'mj-time', timeLabel(e.at)));
     bindReact(card, 'frame', f.id);
+    watchSeen(card, 'frame', f.id, f.from_id);
     return card;
   }
 
@@ -406,27 +499,22 @@ export function createMajlis(ctx) {
       quote.dir = 'auto';
       copy.append(quote);
     }
-    // إيصالات حقيقية للمرسل وحده: من فتح ترشيحك ومن لم يفتحه
+    // إيصالات حقيقية للمرسل وحده: من وصله ترشيحك ومن شافه
     if (r.from_id === me()) {
-      const states = sync.rows('recommendation_recipients', (x) => x.recommendation_id === r.id);
-      if (states.length) {
-        const receipts = el('span', 'mj-receipts');
-        for (const s of states) {
-          const opened = s.state && s.state !== 'PENDING';
-          const chip = el('span', `mj-receipt${opened ? ' mj-receipt--seen' : ''}`);
-          chip.append(ctx.avatarNode(personOf(s.user_id), 18), el('span', null, opened ? 'شافه' : 'وصله'));
-          receipts.append(chip);
-        }
-        copy.append(receipts);
-      }
+      const receipts = receiptsRow('rec', r, r.to_id, !r.to_id);
+      if (receipts) copy.append(receipts);
     }
     b.append(cover, copy);
-    b.onclick = () => ctx.preview(work, chapter ? { chapter } : {});
+    b.onclick = () => {
+      acknowledge('rec', r.id, true);
+      ctx.preview(work, chapter ? { chapter } : {});
+    };
     card.append(b);
     const chips = reactionChips('rec', r.id);
     if (chips) card.append(chips);
     card.append(el('time', 'mj-time', timeLabel(e.at)));
     bindReact(card, 'rec', r.id);
+    watchSeen(card, 'rec', r.id, r.from_id);
     return card;
   }
 
@@ -443,7 +531,7 @@ export function createMajlis(ctx) {
     face.append(icon);
     const text = el('span', 'mj-line-text');
     text.append(el('bdi', 'mj-name', nameOf(e.actor)), document.createTextNode(` ${VERB_COPY[a.verb](payload)}`));
-    const title = work?.title?.english && !String(work.title.english).startsWith('ext:') ? work.title.english : null;
+    const title = work ? displayTitle(work.id, work.title?.english) : null;
     if (title) {
       text.append(document.createTextNode(' · '));
       text.append(el('bdi', 'mj-line-work', title));
@@ -475,6 +563,9 @@ export function createMajlis(ctx) {
   // ── الرسم ──
 
   function render() {
+    seenObserver?.disconnect();
+    for (const t of seenTimers.values()) clearTimeout(t);
+    seenTimers.clear();
     const parts = [];
 
     const strip = el('section', 'mj-members');
@@ -579,9 +670,14 @@ export function createMajlis(ctx) {
       closeBar();
     },
     closeBar,
-    onChange(tables) {
+    onChange(tables, { visible = true } = {}) {
       if (tables.includes('majlis_reactions')) pendingReaction.clear();
-      if (tables.some((t) => ['frames', 'recommendations', 'recommendation_recipients', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions'].includes(t))) render();
+      if (tables.some((t) => t === 'frames' || t === 'recommendations')) acknowledgeDelivered();
+      if (!visible) return;
+      if (tables.some((t) => ['frames', 'recommendations', 'majlis_receipts', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions'].includes(t))) render();
     },
+    acknowledgeDelivered,
+    /** فتح الرسالة من خارج المجلس (الإشعار، الرابط) = رآها. */
+    markSeen: (kind, id) => acknowledge(kind, id, true),
   };
 }

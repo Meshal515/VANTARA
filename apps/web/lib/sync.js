@@ -27,6 +27,7 @@ import {
   trimQueue,
 } from './queue.js';
 import { accountWithIdentity, withIdentity } from './identity.js';
+import { PROJECTIONS, projectQueue } from './optimistic.js';
 
 const TOKEN_KEY = 'vantara.token';
 const USER_KEY = 'vantara.user';
@@ -88,6 +89,10 @@ const KEYS = {
   activity: (row) => row.id,
   // إيصالات المشاهدة (§13–§15): بلا هذا لا تُعرف من شاهد شيئًا
   activity_receipts: (row) => `${row.event_id}/${row.user_id}`,
+  // وصله/شافه في المجلس: صف لكل شخص على كل رسالة
+  majlis_receipts: (row) => `${row.target_kind}/${row.target_id}/${row.user_id}`,
+  // «آخر المشاهدات»: صف لكل عمل في حسابك، والحذف شاهد قبر
+  work_views: (row) => `${row.user_id}/${row.series_ref}`,
   settings: (row) => row.user_id,
 };
 
@@ -142,6 +147,11 @@ export function createSync({ baseUrl }) {
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
   let quarantine = readJson(QUARANTINE_KEY, []);
+  /** أثر الكتابات التي لم يُقرّها الخادم بعد (`lib/optimistic.js`). يُحسب ولا يُحفظ. */
+  let overlay = {};
+  const refreshOverlay = () => {
+    overlay = projectQueue(queue, mirror, user?.userId ?? null);
+  };
   let pulling = false;
   let pullAgain = false;
   let sessionGeneration = 0;
@@ -190,6 +200,7 @@ export function createSync({ baseUrl }) {
    * وتُسحب من جديد، فهي أول ما يُفرَّغ لإفساح المكان لكتابة لا يملكها غيرنا.
    */
   const persistQueue = () => {
+    refreshOverlay();
     if (writeJson(QUEUE_KEY, queue)) {
       durable = true;
       return true;
@@ -274,6 +285,7 @@ export function createSync({ baseUrl }) {
   function persistSession(payload) {
     token = payload.token;
     user = accountWithIdentity(payload.user);
+    refreshOverlay();
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
     writeJson(USER_KEY, user);
@@ -520,6 +532,8 @@ export function createSync({ baseUrl }) {
         }
 
         persistMirror();
+        // ما لم يُرسل بعد يبقى ظاهرًا فوق ما وصل: سحبٌ أسبق من الكتابة لا يُرجع القلب
+        refreshOverlay();
         cursor = Number(payload.cursor ?? cursor) || cursor;
         localStorage.setItem(CURSOR_KEY, String(cursor));
         if (touched.length > 0) emit(touched);
@@ -538,6 +552,13 @@ export function createSync({ baseUrl }) {
         }
       }
       lastError = null;
+      // مرآةٌ بلا حسابات: سُحبت قبل أن يرسل الخادم صفوف rev = 0 (الحسابات
+      // المزروعة)، فالأسماء «صديق» والمجلس بلا وجوه. سحبٌ كامل مرة يصلحها
+      if (cursor > 0 && !Object.keys(mirror.accounts ?? {}).length && !localStorage.getItem('vantara.resync.accounts')) {
+        localStorage.setItem('vantara.resync.accounts', '1');
+        resyncMirror();
+        pullAgain = true;
+      }
     } catch (error) {
       lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
       emit(['sync']);
@@ -559,7 +580,7 @@ export function createSync({ baseUrl }) {
    * يمنع احتساب الفصل مرتين بعد انقطاع.
    */
   function enqueue(kind, payload = {}) {
-    const op = { opId: crypto.randomUUID(), kind, payload };
+    const op = { opId: crypto.randomUUID(), kind, payload, at: Date.now() };
     queue.push(op);
     if (queue.length > MAX_QUEUE) {
       const trimmed = trimQueue(queue, MAX_QUEUE);
@@ -568,6 +589,16 @@ export function createSync({ baseUrl }) {
       pruneAttempts();
     }
     persistQueue();
+    // الأثر يظهر الآن لا بعد الرحلة: القلب والنقطة والتفاعل يتغيرون تحت الإصبع
+    const touched = new Set();
+    try {
+      for (const change of PROJECTIONS[kind]?.(op, (t, k) => overlay[t]?.[k] ?? mirror[t]?.[k] ?? null, user?.userId) ?? []) {
+        touched.add(change.table);
+      }
+    } catch {
+      // إسقاطٌ معطوب لا يمنع الكتابة نفسها
+    }
+    if (touched.size) emit([...touched]);
     schedulePush();
     return op.opId;
   }
@@ -785,14 +816,28 @@ export function createSync({ baseUrl }) {
   };
 
   function rows(table, predicate) {
-    const bucket = mirror[table];
+    const bucket = overlay[table] ? { ...mirror[table], ...overlay[table] } : mirror[table];
     if (!bucket) return [];
     const all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
     return predicate ? all.filter(predicate) : all;
   }
 
   function row(table, key) {
-    return view(table, mirror[table]?.[key] ?? null);
+    return view(table, overlay[table]?.[key] ?? mirror[table]?.[key] ?? null);
+  }
+
+  /**
+   * هل عند الخادم جديد؟ رقم واحد لا فروقات: رخيص بما يكفي ليُسأل كل ثوانٍ
+   * والتطبيق مفتوح، فتصل رسالة صديقك وإيصاله في ثوانٍ.
+   */
+  async function pulse() {
+    if (!token || pulling) return;
+    try {
+      const out = await request('/v1/pulse');
+      if (Number(out?.rev) > cursor) await pull();
+    } catch {
+      // نبضة فائتة؛ السحب الدوري يلتقط ما فات
+    }
   }
 
   /**
@@ -839,6 +884,7 @@ export function createSync({ baseUrl }) {
     logoutDevice,
     logoutAll,
     pull,
+    pulse,
     push,
     enqueue,
     beat,

@@ -400,6 +400,69 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    /**
+     * غلاف عمل، يُحفظ على الجهاز ويُرجَع مساره.
+     *
+     * الغلاف كان `<img>` يطلب الرابط مباشرة من WebView: بلا `Referer` المصدر ولا
+     * كوكي Cloudflare، فمصادر مثل AriaToon تردّ 403 ويظهر الحرف الأول مكان
+     * الغلاف — ولا يظهر إلا بعد فتح العمل. هنا يُجلب بعميل المصدر وترويساته كما
+     * يفعل Mihon، ويُكتب في `files/covers` لا الكاش: ما نزل مرة يبقى ظاهرًا بلا
+     * شبكة، ولا يمسحه النظام عند ضيق الكاش.
+     */
+    @PluginMethod
+    fun cover(call: PluginCall) {
+        scope.launch {
+            try {
+                val url = call.getString("url")?.takeIf { it.startsWith("http") } ?: error("cover url is required")
+                val hit = withContext(Dispatchers.IO) { coverHit(url) }
+                if (hit != null) {
+                    call.resolve(JSObject().put("path", hit.absolutePath).put("cached", true))
+                    return@launch
+                }
+                val sourceId = call.getString("sourceId")
+                val source = sourceId?.let { runCatching { obtain(it) }.getOrNull() } as? HttpSource
+                val client = source?.client ?: network.client
+                val request = Request.Builder().url(url).apply {
+                    runCatching { source?.headers }.getOrNull()?.let { headers(it) }
+                }.build()
+                val (bytes, contentType) = withContext(Dispatchers.IO) {
+                    client.newCall(request).execute().use { res ->
+                        require(res.isSuccessful) { "cover HTTP ${res.code}" }
+                        res.body.bytes() to res.header("content-type")
+                    }
+                }
+                require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
+                val verdict = ImagePayloadPolicy.validate(contentType, bytes)
+                require(verdict.accepted) { "not an image: ${verdict.reason}" }
+                val type = contentType?.substringBefore(';')?.trim()?.takeIf { it.startsWith("image/") } ?: typeForUrl(url)
+                val file = java.io.File(coverDir, "${digestOf(url)}.${extensionForType(type)}")
+                withContext(Dispatchers.IO) {
+                    file.writeBytes(bytes)
+                    pruneCovers()
+                }
+                call.resolve(JSObject().put("path", file.absolutePath).put("cached", false))
+            } catch (t: Throwable) {
+                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+            }
+        }
+    }
+
+    private val coverDir by lazy {
+        java.io.File(context.filesDir, "covers").apply { mkdirs() }
+    }
+
+    private fun coverHit(url: String): java.io.File? {
+        val prefix = digestOf(url) + "."
+        return coverDir.listFiles { f -> f.name.startsWith(prefix) }?.firstOrNull { it.isFile && it.length() > 256 }
+    }
+
+    /** سقفٌ للأغلفة: ألفا غلاف تكفي مكتبة ثلاثة أصدقاء، والأقدم استعمالًا يُترك أولًا. */
+    private fun pruneCovers() {
+        val files = coverDir.listFiles() ?: return
+        if (files.size <= MAX_COVERS) return
+        files.sortedBy { it.lastModified() }.take(files.size - MAX_COVERS + 200).forEach { it.delete() }
+    }
+
     /** إفراغ كاش الصفحات. القارئ يناديه عند ضيق التخزين أو عند «امسح التنزيلات». */
     @PluginMethod
     fun clearImageCache(call: PluginCall) {
@@ -646,6 +709,7 @@ class ExtensionEnginePlugin : Plugin() {
 
     private companion object {
         val INJEKT_LOCK = Any()
+        const val MAX_COVERS = 2000
 
         @Volatile
         var injektReady = false

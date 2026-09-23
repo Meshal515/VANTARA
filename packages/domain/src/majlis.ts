@@ -54,16 +54,21 @@ export function hiddenToken(userId: string): string {
 }
 
 /**
- * تفاعلات المجلس: رموز محددة لا نص حر. القائمة مغلقة فلا يتحول التفاعل إلى
- * قناة رسائل، ولا تصل رموز لا تعرف الواجهة رسمها.
+ * تفاعلات المجلس: رمزٌ واحد لا نص حر، فلا يتحول التفاعل إلى قناة رسائل.
+ *
+ * الستة الأولى هي الشريط السريع؛ وزرّ «+» يفتح كل الرموز. فالتحقق بالشكل لا
+ * بالقائمة: رمز تعبيري واحد (مع مُعدِّلاته ووصلاته — 👍🏽 و❤️‍🔥 رمزٌ واحد)، لا
+ * حروف ولا أرقام ولا أكثر من رمز.
  */
 export const MAJLIS_REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'] as const;
-export type MajlisReaction = (typeof MAJLIS_REACTIONS)[number];
+export type MajlisReaction = string;
 export const MAJLIS_TARGETS = ['frame', 'rec', 'activity'] as const;
 export type MajlisTarget = (typeof MAJLIS_TARGETS)[number];
 
+const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2})(?:\uFE0F|\p{Emoji_Modifier}|\u200D(?:\p{Extended_Pictographic})\uFE0F?|\u20E3)*$/u;
+
 export function isMajlisReaction(value: unknown): value is MajlisReaction {
-  return typeof value === 'string' && (MAJLIS_REACTIONS as readonly string[]).includes(value);
+  return typeof value === 'string' && value.length <= 16 && EMOJI.test(value);
 }
 export function isMajlisTarget(value: unknown): value is MajlisTarget {
   return typeof value === 'string' && (MAJLIS_TARGETS as readonly string[]).includes(value);

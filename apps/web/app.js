@@ -1354,6 +1354,12 @@ async function screenFrameById(id) {
   if (!frame) return screenPlaceholder('فريم', 'الفريم ما وصل بعد — جرّب بعد شوي.');
   state.screen = 'FRAME';
   const meId = sync.user?.userId;
+  // فتحتَ الفريم: صاحبه يرى «شافه»، وإشعاره يصير مقروءًا على كل أجهزتك
+  if (frame.from_id !== meId) {
+    sync.enqueue('majlis.receipt', { targetKind: 'frame', targetId: id, seen: true });
+    const note = sync.rows('notifications', (n) => n.id === `${id}:${meId}` && !n.read)[0];
+    if (note) sync.enqueue('notification.read', { id: note.id });
+  }
   const toLabel = frame.broadcast ? 'للجميع' : frame.to_id === meId ? 'لك' : `إلى ${nameOf(frame.to_id)}`;
   const viewer = openFrameViewer(
     {
@@ -1978,6 +1984,9 @@ sync.onChange((tables) => {
   if (tables.includes('notifications')) toastNewNotifications();
 });
 setInterval(() => void sync.pull(), 60_000);
+// نبض كل 4 ثوانٍ والتطبيق أمامك: رقمٌ واحد، والسحب فقط حين يتقدّم. رسالة
+// صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
+setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4_000);
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {

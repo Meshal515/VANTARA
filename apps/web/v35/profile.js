@@ -13,7 +13,7 @@
  *   - الأعمال المتابعة: ما في مكتبته الآن (العدد وحده؛ المكتبة خاصة).
  *   - الفصول الفريدة: الفصل يُحسب أول مرة يُقرأ فيها كاملًا فقط.
  *   - القراءات: كل قراءة كاملة، والإعادة منها.
- * «كاملًا» = ٩٠٪ من الفصل ووقتٌ فعلي، والخادم يتحقق — فتح فصلٍ عشرين مرة
+ * «مقروء» = خُمس الفصل ووقتٌ فعلي، والخادم يتحقق — فتح فصلٍ عشرين مرة
  * لا يزيد شيئًا.
  */
 
@@ -22,6 +22,7 @@ import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
 import { DEFAULT_SILK, hexToRgb01, rgb01ToHex } from '../lib/silk-palette.js';
 import { withIdentity } from '../lib/identity.js';
+import { displayTitle, refForTitle } from './work-ref.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -111,8 +112,8 @@ export function createProfile(ctx) {
       (title ? sync.rows('works', (w) => String(w.title).toLowerCase() === String(title).toLowerCase())[0] : null);
     return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url);
   };
-  const titleOf = (w) => w?.title?.english || w?.title || '';
-  const knownTitle = (w) => titleOf(w) && !String(titleOf(w)).startsWith('ext:');
+  const titleOf = (w) => (w ? displayTitle(w.id, w.title?.english, typeof w.title === 'string' ? w.title : null) : '');
+  const knownTitle = (w) => Boolean(titleOf(w));
 
   function presenceLine(p) {
     if (!p) return { text: 'غير متصل', tone: 'off' };
@@ -150,7 +151,7 @@ export function createProfile(ctx) {
       body.append(el('h3', null, own ? 'قراءتك بالأرقام' : `قراءة ${name} بالأرقام`));
       const rows = [
         ['library', 'الأعمال المتابعة', fmt(stats.followedWorks), 'ما في المكتبة الآن.'],
-        ['book', 'الفصول الفريدة', fmt(stats.uniqueChapters), 'كل فصل يُحسب مرة واحدة، أول ما يُقرأ كاملًا.'],
+        ['book', 'الفصول الفريدة', fmt(stats.uniqueChapters), 'كل فصل يُحسب مرة واحدة، أول ما تقرؤه.'],
         ['refresh', 'إجمالي القراءات', fmt(stats.totalReads), `منها ${fmt(stats.rereads)} إعادة قراءة.`],
         ['clock', 'وقت القراءة اليوم', duration(stats.usage?.todayMs), null],
         ['history', 'هذا الأسبوع', duration(stats.usage?.weekMs), null],
@@ -168,7 +169,7 @@ export function createProfile(ctx) {
         list.append(r);
       }
       body.append(list);
-      const note = el('p', null, 'القراءة الكاملة = ٩٠٪ من الفصل مع وقت قراءة فعلي. فتح الفصل وحده لا يُحسب.');
+      const note = el('p', null, 'الفصل يُحسب مقروءًا حين تقرأ خُمسه مع وقت قراءة فعلي. فتح الفصل وحده لا يُحسب.');
       note.style.marginTop = '12px';
       body.append(note);
     });
@@ -242,8 +243,7 @@ export function createProfile(ctx) {
   }
 
   function nowCard(p, own) {
-    const work = workOf(p.seriesRef ?? `ext:${String(p.seriesTitle).toLowerCase()}`, p.seriesTitle);
-    if (!knownTitle(work)) work.title = { english: p.seriesTitle };
+    const work = workOf(p.seriesRef ?? refForTitle(p.seriesTitle) ?? 'ext:عمل', p.seriesTitle);
     const card = el('button', 'pf-now');
     card.type = 'button';
     const cover = el('span', 'pf-now-cover');

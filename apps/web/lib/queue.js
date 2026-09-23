@@ -70,6 +70,12 @@ const OPS = {
   // يحمل أسماء الحقول — رقعتان لنفس الحقول فقط تُضغطان
   'profile.patch': { class: STATE, key: (p) => `profile/${Object.keys(p.fields ?? {}).sort().join(',')}` },
   'settings.patch': { class: STATE, key: (p) => `settings/${Object.keys(p.fields ?? {}).sort().join(',')}` },
+  // آخر فتحة لكل عمل تكفي؛ والحذف بعدها يلغيها (نفس المفتاح)
+  'view.add': { class: STATE, key: (p) => `view/${p.seriesRef}` },
+  'view.remove': { class: STATE, key: (p) => `view/${p.seriesRef}` },
+  'work.describe': { class: STATE, key: (p) => `work/${p.seriesRef}` },
+  'majlis.receipt': { class: STATE, key: (p) => `receipt/${p.targetKind}/${p.targetId}/${p.seen ? 's' : 'd'}` },
+  'notification.seen': { class: STATE, key: (p) => `notification-seen/${p.id}` },
   'chapter.complete': { class: CUMULATIVE },
   'usage.add': { class: CUMULATIVE },
   'comment.add': { class: EVENT },

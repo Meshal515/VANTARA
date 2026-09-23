@@ -421,6 +421,9 @@
   gap: 6px;
   margin-top: 4px;
 }
+.v35 .mj-card > .mj-receipts {
+  margin-top: 10px;
+}
 .v35 .mj-receipt {
   display: inline-flex;
   align-items: center;

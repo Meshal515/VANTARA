@@ -19,7 +19,7 @@
 
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
-import { chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
+import { AUTO_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
 import { editionRows } from './works.js';
 import {
   PRELOAD_FROM_RATIO,
@@ -247,6 +247,15 @@ export function openSmartReader(deps, ctx) {
       seriesTitle: ctx.title,
       chapterLabel: chapterLabel(row),
       chapterNumber: Number.isFinite(row.number) && row.number >= 0 ? row.number : null,
+    });
+    // «آخر المشاهدات» بفصلها: نفس السجل في المكتبة والملف ومتابعة القراءة
+    sync.enqueue('view.add', {
+      seriesRef: ref,
+      seriesTitle: ctx.title,
+      coverUrl: ctx.work?.coverImage?.large ?? row.manga?.thumbnailUrl ?? null,
+      chapterLabel: chapterLabel(row),
+      chapterNumber: Number.isFinite(row.number) && row.number >= 0 ? row.number : null,
+      at: Date.now(),
     });
 
     scroll.replaceChildren(loadingBlock());
@@ -478,11 +487,14 @@ export function openSmartReader(deps, ctx) {
       markChapter(sync, ref, state.row, true);
     }
     // إحصاء القراءة الكاملة: الخادم يعيد التحقق من العتبة والوقت
-    if (!state.completed && ratio >= 0.9 && state.activeMs >= 5_000) {
+    if (!state.completed && ratio >= AUTO_READ_RATIO && state.activeMs >= 5_000) {
       state.completed = true;
       sync.enqueue('chapter.complete', {
         chapterKey: keyOf(state.row),
         seriesRef: ref,
+        // القراءة وحدها تعرّف العمل للأصدقاء باسمه وغلافه
+        seriesTitle: ctx.title,
+        coverUrl: ctx.work?.coverImage?.large ?? state.row.manga?.thumbnailUrl ?? null,
         chapterNumber: Number.isFinite(state.row.number) && state.row.number >= 0 ? state.row.number : null,
         ratio,
         activeMs: Math.round(state.activeMs),

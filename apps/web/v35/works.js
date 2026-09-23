@@ -126,8 +126,14 @@ export async function detail(v35work) {
   const main = values.find((v) => v.detail) ?? null;
   const chapters = mergeChapters(values);
   const answered = new Set(values.map((v) => v.sourceId));
+  // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
+  const cover = v35work.coverImage?.large || main?.detail?.thumbnailUrl || values.find((v) => v.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const covered = cover && !v35work.coverImage?.large
+    ? { coverImage: { extraLarge: cover, large: cover, medium: cover, color: null }, bannerImage: cover, _work: { ...work, thumbnailUrl: cover } }
+    : {};
   return {
     ...v35work,
+    ...covered,
     ...(main ? detailFields(main.detail) : {}),
     chapters: chapters.length || null,
     _chapters: chapters,

@@ -126,11 +126,22 @@ export async function pageImage(sourceId, page) {
 }
 
 /** إفراغ كاش الصفحات. يُنادى من «امسح التنزيلات» أو عند ضيق التخزين. */
+/**
+ * غلاف عمل بعميل مصدره، محفوظ على الجهاز. يرجع رابطًا يقرؤه `<img>`.
+ * `sourceId` اختياري: بدونه يُجلب بعميل عام (أفضل من لا شيء).
+ */
+export async function cover(sourceId, url) {
+	const result = await required().cover({ sourceId: sourceId ?? null, url });
+	const convert = globalThis.Capacitor?.convertFileSrc;
+	return convert ? convert(result.path) : result.path;
+}
+
 export async function clearImageCache() {
 	return required().clearImageCache();
 }
 
 export default {
+	cover,
 	isAvailable,
 	sources,
 	prepare,

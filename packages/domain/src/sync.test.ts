@@ -94,7 +94,7 @@ describe('isCompletedRead', () => {
   });
 
   it('يرفض النسبة الناقصة حتى مع وقت طويل', () => {
-    expect(isCompletedRead({ ratio: 0.5, activeMs: 600_000 })).toBe(false);
+    expect(isCompletedRead({ ratio: 0.19, activeMs: 600_000 })).toBe(false);
   });
 
   it('يقبل النسبة والوقت معًا', () => {

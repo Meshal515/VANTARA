@@ -2519,3 +2519,52 @@ html,
     transform: rotate(360deg);
   }
 }
+
+/* ── آخر المشاهدات: قائمة بغلاف واسم وفصل ووقت ── */
+.v35 .hist-list { display: flex; flex-direction: column; gap: 14px; padding-block: 4px 12px; }
+.v35 .hist-row {
+  display: flex; align-items: center; gap: 10px;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.v35 .hist-row--gone { opacity: 0; transform: translateX(-24px); }
+.v35 .hist-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px;
+  background: none; border: 0; padding: 0; color: inherit; text-align: start; cursor: pointer;
+}
+.v35 .hist-cover {
+  flex: none; width: 74px; aspect-ratio: 3 / 4; border-radius: var(--r-md); overflow: hidden;
+  background: var(--surface-2); position: relative;
+}
+.v35 .hist-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .hist-copy { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.v35 .hist-title {
+  font-size: var(--fs-title-sm); font-weight: 650; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+}
+.v35 .hist-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  color: var(--text-3); font-size: var(--fs-meta);
+}
+.v35 .hist-chapter { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
+.v35 .hist-chapter .icon { color: var(--text-3); }
+.v35 .hist-dot { color: var(--text-4); }
+.v35 .hist-side { flex: none; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.v35 .hist-ring {
+  --p: 0;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface-3) 0);
+  position: relative;
+}
+.v35 .hist-ring::before { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--bg); }
+.v35 .hist-ring b { position: relative; font-size: 10.5px; font-weight: 700; color: var(--accent-text); }
+.v35 .hist-del {
+  width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 50%;
+  background: none; border: 0; color: var(--text-4); cursor: pointer;
+}
+.v35 .hist-del:active { color: var(--danger); background: var(--danger-soft); }
+
+/* إيصالات المجلس */
+.v35 .mj-receipt--pending { color: var(--text-3); }
+.v35 .mj-receipt--pending .spinner { width: 12px; height: 12px; }
+.v35 .mj-receipt--got { opacity: .8; }
+.v35 .mj-receipt--sent { opacity: .55; }

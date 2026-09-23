@@ -50,7 +50,14 @@ describe('majlis reactions', () => {
   it('قائمة مغلقة من الرموز والأهداف', () => {
     expect(isMajlisReaction('🔥')).toBe(true);
     expect(isMajlisReaction('hello')).toBe(false);
-    expect(isMajlisReaction('🍕')).toBe(false);
+    // زرّ «+»: أي رمز واحد، بمعدّلاته
+    expect(isMajlisReaction('🍕')).toBe(true);
+    expect(isMajlisReaction('👍🏽')).toBe(true);
+    expect(isMajlisReaction('❤️‍🔥')).toBe(true);
+    expect(isMajlisReaction('🇸🇦')).toBe(true);
+    expect(isMajlisReaction('🔥🔥')).toBe(false);
+    expect(isMajlisReaction('a')).toBe(false);
+    expect(isMajlisReaction('1')).toBe(false);
     expect(isMajlisTarget('frame')).toBe(true);
     expect(isMajlisTarget('comment')).toBe(false);
   });
