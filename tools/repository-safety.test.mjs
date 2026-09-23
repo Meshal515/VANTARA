@@ -1121,6 +1121,9 @@ test('the reader app runs the exact engine the spike proved on device', () => {
     'dev/vantara/spike/ImagePayloadPolicy.kt',
     'dev/vantara/spike/BoundedPayloadReader.kt',
     'dev/vantara/spike/RxAwait.kt',
+    'dev/vantara/spike/CatalogueFilterPolicy.kt',
+    'dev/vantara/spike/HttpStopPolicy.kt',
+    'dev/vantara/spike/CatalogueListingResolver.kt',
     'eu/kanade/tachiyomi/network/NetworkHelper.kt',
     'eu/kanade/tachiyomi/network/interceptor/BrowserVerificationInterceptor.kt',
     'eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt',
@@ -1141,4 +1144,10 @@ test('the reader app runs the exact engine the spike proved on device', () => {
   assert.doesNotMatch(plugin, /source\.getPageList\(/, 'pages must go through the per-source repairs');
   // The reader solves Cloudflare by hand; only the spike batch fails fast.
   assert.match(plugin, /CloudflareInteractionMode\.batchProbe = false/);
+  // Explore browses the full catalogue, never a ranking or an all-language feed.
+  assert.match(plugin, /fun catalogue\(call: PluginCall\)/);
+  assert.match(plugin, /CatalogueFilterPolicy\.catalogueFilters\(source\)/);
+  const explore = read('apps/web/screens/sources.js');
+  assert.match(explore, /engine\.catalogue\(source\.id, page\)/);
+  assert.doesNotMatch(explore, /engine\.popular\(/);
 });

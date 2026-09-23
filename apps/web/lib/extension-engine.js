@@ -51,6 +51,16 @@ export async function prepare(sourceId) {
 	return required().prepare({ sourceId });
 }
 
+/**
+ * الكتالوج كاملًا لمصدر، صفحةً صفحة. `{ mangas, hasNextPage, page }`.
+ *
+ * هذا ما يتصفّحه «استكشاف»، لا `popular`: الرائج في Dilar عشرة أعمال من
+ * تسعة آلاف، وفي MangaDex كل اللغات لا العربي.
+ */
+export async function catalogue(sourceId, page = 1) {
+	return required().catalogue({ sourceId, page });
+}
+
 /** الرائج — الواجهة الأولى عند فتح مصدر. `{ mangas, hasNextPage, page }`. */
 export async function popular(sourceId, page = 1) {
 	return required().popular({ sourceId, page });
@@ -119,6 +129,7 @@ export default {
 	isAvailable,
 	sources,
 	prepare,
+	catalogue,
 	popular,
 	latest,
 	search,

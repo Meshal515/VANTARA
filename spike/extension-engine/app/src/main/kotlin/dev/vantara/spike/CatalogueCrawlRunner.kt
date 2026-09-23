@@ -74,7 +74,18 @@ class CatalogueCrawlRunner(
     ) -> SourceProbe.CatalogueReach,
     private val emit: suspend (CatalogueCrawlEvent) -> Unit = {},
 ) {
-    private class CrawlTarget(val spec: SourceSpec, val source: CatalogueSource, val key: String, val label: String)
+    /**
+     * `key` مفتاح نقطة الحفظ ويحمل وسم مسار التصفّح؛ `resultKey` مفتاح المصدر
+     * في جدول النتائج. مصدرٌ تغيّر مساره يبدأ نقطة حفظ جديدة، ويبقى صفًّا
+     * واحدًا في الجدول يحلّ رقمه الجديد محلّ القديم.
+     */
+    private class CrawlTarget(
+        val spec: SourceSpec,
+        val source: CatalogueSource,
+        val key: String,
+        val resultKey: String,
+        val label: String,
+    )
 
     suspend fun run(): CatalogueRunSummary {
         val eligible = specs.filter { shouldCrawlCatalogue(it.warning, it.blockedReason) }
@@ -97,7 +108,14 @@ class CatalogueCrawlRunner(
                 continue
             }
             sources.forEach { source ->
-                targets += CrawlTarget(spec, source, "${spec.pkg}|${source.id}", "${spec.label} / ${source.name}")
+                val base = "${spec.pkg}|${source.id}"
+                targets += CrawlTarget(
+                    spec,
+                    source,
+                    key = base + CatalogueFilterPolicy.traversalTag(source),
+                    resultKey = base,
+                    label = "${spec.label} / ${source.name}",
+                )
             }
         }
         stateStore.markStarted(snapshotKey, targets.size)
@@ -160,7 +178,7 @@ class CatalogueCrawlRunner(
                     val reason = describe(t)
                     stopped += StoppedSource(target.key, target.label, null, reason)
                     stateStore.recordResult(
-                        target.key,
+                        target.resultKey,
                         target.label,
                         uniqueWorks = checkpoint.load(target.key)?.seenKeys?.size ?: 0,
                         complete = false,
@@ -174,7 +192,7 @@ class CatalogueCrawlRunner(
                 notify(CatalogueCrawlEvent.SourceFinished(target.key, target.label, reach))
                 // الرقم يُسجَّل قبل `markComplete`: ذاك يمحو قائمة الأعمال
                 stateStore.recordResult(
-                    target.key,
+                    target.resultKey,
                     target.label,
                     uniqueWorks = reach.uniqueWorks,
                     complete = reach.reachedEnd,
@@ -244,7 +262,8 @@ class CatalogueCrawlRunner(
          */
         fun isRetryableInLaterPass(kind: SourceProbe.CatalogueStopKind): Boolean =
             kind == SourceProbe.CatalogueStopKind.TIME_BUDGET ||
-                kind == SourceProbe.CatalogueStopKind.TIMEOUT
+                kind == SourceProbe.CatalogueStopKind.TIMEOUT ||
+                kind == SourceProbe.CatalogueStopKind.TRANSIENT_HTTP
 
         private fun rethrowIfCancelled(t: Throwable) {
             // المهلة إلغاءٌ في نوعها لا في معناها: هي فشل صفحة، لا طلب إيقاف

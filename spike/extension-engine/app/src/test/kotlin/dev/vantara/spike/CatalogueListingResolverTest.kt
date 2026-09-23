@@ -3,7 +3,9 @@ package dev.vantara.spike
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.runBlocking
+import eu.kanade.tachiyomi.network.HttpException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
 
 class CatalogueListingResolverTest {
@@ -78,4 +80,24 @@ class CatalogueListingResolverTest {
         },
         hasNextPage = hasNext,
     )
+
+    @Test
+    fun `a temporary refusal on search is retried, never answered with the ranking`() = runBlocking {
+        // Dilar: POPULAR = ترتيب من عشرة بلا صفحة تالية. الرجوع إليه عند 429
+        // على البحث يعلن «اكتمل بعشرة» والكتالوج 8998
+        val asked = mutableListOf<CatalogueListingKind>()
+        try {
+            resolveFullCatalogueListing { kind ->
+                asked += kind
+                when (kind) {
+                    CatalogueListingKind.SEARCH_ALL -> throw HttpException(429)
+                    else -> MangasPage(listOf(SManga.create().apply { url = "/r"; title = "r" }), false)
+                }
+            }
+            fail("a temporary refusal must surface")
+        } catch (expected: HttpException) {
+            assertEquals(429, expected.code)
+        }
+        assertEquals(listOf(CatalogueListingKind.SEARCH_ALL), asked)
+    }
 }

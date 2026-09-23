@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import eu.kanade.tachiyomi.network.interceptor.BrowserVerificationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -101,6 +102,8 @@ class SourceProbe(private val http: OkHttpClient) {
         SOURCE_ERROR,
         TIME_BUDGET,
         PAGE_CAP,
+        /** خطأ HTTP عابر بعد إعادة المحاولة (429، 5xx، 403 حافة): يعود في جولة لاحقة. */
+        TRANSIENT_HTTP,
     }
 
     data class CatalogueReach(
@@ -548,8 +551,22 @@ class SourceProbe(private val http: OkHttpClient) {
         var reachedEnd = false
         val skippedPages = mutableListOf<Int>()
         val deadline = System.currentTimeMillis() + budgetMs
-        val catalogueFilters = source.getFilterList()
+        // الفلاتر التي تعني «كل الكتالوج» لهذا المصدر (Azora: ترتيب ثابت،
+        // MangaDex: العربي وحده). مصدرٌ تغيّرت فلاتره يتوقّف بسببٍ مكتوب
+        val catalogueFilters = try {
+            CatalogueFilterPolicy.catalogueFilters(source)
+        } catch (t: IllegalStateException) {
+            return CatalogueReach(
+                uniqueWorks = seen.size,
+                pagesFetched = 0,
+                lastPageAttempted = page - 1,
+                reachedEnd = false,
+                stopKind = CatalogueStopKind.SOURCE_ERROR,
+                stoppedBecause = "catalogue-policy: ${t.message}",
+            )
+        }
         var listing: ResolvedCatalogueListing? = null
+        var pageRetries = 0
 
         suspend fun fetchCataloguePage(kind: CatalogueListingKind, requestedPage: Int) =
             withTimeout(BROWSE_TIMEOUT_MS) {
@@ -580,6 +597,18 @@ class SourceProbe(private val http: OkHttpClient) {
                 if (page == 1) selected.firstPage else fetchCataloguePage(selected.kind, page)
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
+
+                // عابرٌ: نفس الصفحة بعد مهلة متزايدة، لا وقوف من أول رفض
+                if (HttpStopPolicy.isTemporary(t)) {
+                    if (pageRetries < HttpStopPolicy.PAGE_RETRIES) {
+                        delay(HttpStopPolicy.retryDelayMs(pageRetries))
+                        pageRetries += 1
+                        continue
+                    }
+                    stopKind = CatalogueStopKind.TRANSIENT_HTTP
+                    stoppedBecause = "${HttpStopPolicy.describe(t)}@p$page بعد $pageRetries محاولات"
+                    break
+                }
 
                 val hierarchyNames = generateSequence<Class<*>>(source.javaClass) { it.superclass }
                     .map { it.name }
@@ -617,13 +646,15 @@ class SourceProbe(private val http: OkHttpClient) {
                     }
                     else -> {
                         stopKind = CatalogueStopKind.SOURCE_ERROR
-                        stoppedBecause = "source-error@p$page: ${t.javaClass.simpleName}"
+                        // الرمز لا اسم الصنف وحده: «HttpException» لا يفرّق 404 عن 429
+                        stoppedBecause = "source-error@p$page: ${HttpStopPolicy.describe(t)}"
                     }
                 }
                 break
             }
 
             fetched += 1
+            pageRetries = 0
 
             val newKeys = ArrayList<String>(result.mangas.size)
             result.mangas.forEach { manga ->

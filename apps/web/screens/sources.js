@@ -208,7 +208,7 @@ export async function screenCatalog({ mount, topbar, bottomNav, go, setScreen, s
 				const result =
 					mode.kind === 'search'
 						? await engine.search(source.id, mode.query, page)
-						: await engine.popular(source.id, page);
+						: await engine.catalogue(source.id, page);
 				if (generation !== mine) return;
 				slot.page = page;
 				slot.hasNext = Boolean(result.hasNextPage);

@@ -8,7 +8,10 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import dev.vantara.spike.CatalogueFilterPolicy
+import dev.vantara.spike.CatalogueListingKind
 import dev.vantara.spike.CloudflareInteractionMode
+import dev.vantara.spike.resolveFullCatalogueListing
 import dev.vantara.spike.FileExtensionLoader
 import dev.vantara.spike.ImagePayloadPolicy
 import dev.vantara.spike.SPIKE_SOURCES
@@ -161,6 +164,36 @@ class ExtensionEnginePlugin : Plugin() {
             }
         }
     }
+
+    /**
+     * الكتالوج كاملًا: ما يتصفّحه «استكشاف».
+     *
+     * `popular` ليس كتالوجًا: Dilar يرجع ترتيبه من عشرة أعمال (والكتالوج 8998)،
+     * وMangaDex يتصفّح 85,664 عملًا بكل اللغات (العربي 990)، وAzora بترتيبه
+     * الافتراضي يكرّر ويُسقط خُمس أعماله. المسار يُحسم مرة لكل مصدر بنفس محلّل
+     * الـspike وبفلاتر `CatalogueFilterPolicy` نفسها.
+     */
+    @PluginMethod
+    fun catalogue(call: PluginCall) = paged(call) { source, page ->
+        val sourceId = requireSourceId(call)
+        val filters = CatalogueFilterPolicy.catalogueFilters(source)
+        suspend fun fetch(kind: CatalogueListingKind, at: Int) = when (kind) {
+            CatalogueListingKind.SEARCH_ALL -> source.getSearchManga(at, "", filters)
+            CatalogueListingKind.POPULAR -> source.getPopularManga(at)
+            CatalogueListingKind.LATEST -> source.getLatestUpdates(at)
+        }
+        val known = listings[sourceId]
+        if (known != null) {
+            fetch(known, page)
+        } else {
+            val resolved = resolveFullCatalogueListing { kind -> fetch(kind, 1) }
+            listings[sourceId] = resolved.kind
+            if (page == 1) resolved.firstPage else fetch(resolved.kind, page)
+        }
+    }
+
+    /** المسار الذي حُسم لكل مصدر؛ حسمه يكلّف حتى ثلاثة طلبات فلا يُعاد. */
+    private val listings = java.util.concurrent.ConcurrentHashMap<String, CatalogueListingKind>()
 
     /** الرائج: هذه هي الواجهة الأولى التي يراها القارئ عند فتح مصدر. */
     @PluginMethod
