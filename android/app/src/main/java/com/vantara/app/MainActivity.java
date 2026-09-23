@@ -4,6 +4,7 @@ import android.os.Bundle;
 
 import com.getcapacitor.BridgeActivity;
 import com.vantara.plugins.ExtensionEnginePlugin;
+import com.vantara.plugins.SystemUiPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -11,6 +12,7 @@ public class MainActivity extends BridgeActivity {
         // التسجيل قبل super: الجسر يبني قائمة الإضافات داخل onCreate، وما
         // يُسجَّل بعده لا تراه صفحة الويب.
         registerPlugin(ExtensionEnginePlugin.class);
+        registerPlugin(SystemUiPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

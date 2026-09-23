@@ -26,6 +26,7 @@ import {
   syncHealth,
   trimQueue,
 } from './queue.js';
+import { accountWithIdentity, withIdentity } from './identity.js';
 
 const TOKEN_KEY = 'vantara.token';
 const USER_KEY = 'vantara.user';
@@ -66,6 +67,8 @@ const KEYS = {
   library: (row) => `${row.user_id}/${row.series_ref}`,
   progress: (row) => `${row.user_id}/${row.chapter_key}`,
   chapter_reads: (row) => `${row.user_id}/${row.chapter_key}`,
+  // عين الفصل: علامة المالك وحده، آخر كتابة تفوز
+  chapter_marks: (row) => `${row.user_id}/${row.chapter_key}`,
   usage_daily: (row) => `${row.user_id}/${row.day}`,
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
   ratings: (row) => `${row.user_id}/${row.series_ref}`,
@@ -75,6 +78,10 @@ const KEYS = {
   works: (row) => row.series_ref,
   reactions: (row) => `${row.comment_id}/${row.user_id}/${row.emoji}`,
   recommendations: (row) => row.id,
+  // تفاعل المجلس: صف لكل شخص على كل هدف، والجديد يستبدل القديم
+  majlis_reactions: (row) => `${row.target_kind}/${row.target_id}/${row.user_id}`,
+  // الفريم: صف لكل مستلم. بلا مفتاح يُلقى ويعبر المؤشر فوقه فلا يصل أبدًا
+  frames: (row) => row.id,
   // حالة كل مستلم مستقلة (§19): بلا هذا لا يظهر «منصور قبل · NGM رفض»
   recommendation_recipients: (row) => `${row.recommendation_id}/${row.user_id}`,
   notifications: (row) => row.id,
@@ -130,7 +137,7 @@ function deviceProof() {
 export function createSync({ baseUrl }) {
   const listeners = new Set();
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
-  let user = readJson(USER_KEY, null);
+  let user = accountWithIdentity(readJson(USER_KEY, null));
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
@@ -242,7 +249,7 @@ export function createSync({ baseUrl }) {
 
   function persistSession(payload) {
     token = payload.token;
-    user = payload.user;
+    user = accountWithIdentity(payload.user);
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
     writeJson(USER_KEY, user);
@@ -379,7 +386,7 @@ export function createSync({ baseUrl }) {
     await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
-    return (await response.json()).content ?? [];
+    return ((await response.json()).content ?? []).map(accountWithIdentity);
   }
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
@@ -686,7 +693,7 @@ export function createSync({ baseUrl }) {
   async function presence() {
     if (!token) return [];
     try {
-      return (await request('/v1/presence'))?.content ?? [];
+      return ((await request('/v1/presence'))?.content ?? []).map(accountWithIdentity);
     } catch {
       return [];
     }
@@ -698,6 +705,38 @@ export function createSync({ baseUrl }) {
       return await request(`/v1/stats/${encodeURIComponent(userId)}`);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * رفع صورة ملف شخصي (الصورة أو البانر). يرجع `{ url, hash }`.
+   *
+   * جسمٌ ثنائي لا JSON، فلا يمرّ من `request`. والفشل يُرمى بحالته: الواجهة
+   * تفرّق بين «كبيرة» (413) و«ليست صورة» (415) و«لا اتصال».
+   */
+  async function uploadMedia(blob, attempt = 0) {
+    if (!token) throw Object.assign(new Error('unauthorized'), { status: 401 });
+    const response = await fetch(`${baseUrl}/v1/media`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': blob.type || 'application/octet-stream' },
+      body: blob,
+    });
+    if (response.status === 401 && attempt === 0 && user?.userId) {
+      await refreshSession();
+      return uploadMedia(blob, 1);
+    }
+    if (!response.ok) throw Object.assign(new Error(`http_${response.status}`), { status: response.status });
+    return response.json();
+  }
+
+  /** «أفضل 5» لأي حساب: واجهة الملف يراها الأصدقاء. */
+  async function topWorks(userId) {
+    if (!token) return [];
+    try {
+      const out = await request(`/v1/collections?kind=top&user=${encodeURIComponent(userId)}`);
+      return out?.content ?? [];
+    } catch {
+      return [];
     }
   }
 
@@ -715,15 +754,21 @@ export function createSync({ baseUrl }) {
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
   /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
+  /** الشاشات ترى الملفات بهويتها الأساسية مكان الفارغ؛ المرآة نفسها لا تتغير. */
+  const view = (table, value) => {
+    if (table !== 'profiles' || !value) return value;
+    return withIdentity(value, mirror.accounts?.[value.user_id]?.username);
+  };
+
   function rows(table, predicate) {
     const bucket = mirror[table];
     if (!bucket) return [];
-    const all = Object.values(bucket);
+    const all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
     return predicate ? all.filter(predicate) : all;
   }
 
   function row(table, key) {
-    return mirror[table]?.[key] ?? null;
+    return view(table, mirror[table]?.[key] ?? null);
   }
 
   /**
@@ -772,6 +817,8 @@ export function createSync({ baseUrl }) {
     enqueue,
     beat,
     presence,
+    uploadMedia,
+    topWorks,
     stats,
     pendingProgress,
     health,

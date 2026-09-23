@@ -119,6 +119,23 @@ abstract class HttpSource : CatalogueSource {
      */
     open suspend fun getImageUrl(page: Page): String = fetchImageUrl(page).awaitSingle()
 
+    /**
+     * Downloads an image using the source's real [imageRequest] without RxJava.
+     *
+     * Mihon/Aniyomi expose this as the reader contract. Returning the Response
+     * from the deprecated Observable path is unsafe for a streaming body: an
+     * await-first bridge unsubscribes after onNext, which cancels the OkHttp
+     * call before the caller has read the body. Image calls are cacheless like
+     * upstream so a large page is not simultaneously copied into the HTTP cache.
+     *
+     * [existingSize] is kept for signature compatibility with current Mihon;
+     * this lightweight host does not expose progress/resume accounting yet.
+     */
+    suspend fun getImage(page: Page, existingSize: Long = 0L): Response {
+        val imageClient = client.newBuilder().cache(null).build()
+        return imageClient.newCall(imageRequest(page)).awaitSuccess()
+    }
+
     // endregion
     // region Popular
 

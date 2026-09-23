@@ -23,6 +23,9 @@
  */
 
 import engine from '../lib/extension-engine.js';
+import { buildFramePayload, createFrameCapture, pageAtViewport, resolveFramePages } from '../lib/frame.js';
+import { icon } from '../lib/icons.js';
+import { showToast } from '../lib/toast.js';
 import { createWorkIndex, gather, mergeChapters } from '../lib/catalog.js';
 
 const el = (tag, className, text) => {
@@ -205,7 +208,7 @@ export async function screenCatalog({ mount, topbar, bottomNav, go, setScreen, s
 				const result =
 					mode.kind === 'search'
 						? await engine.search(source.id, mode.query, page)
-						: await engine.popular(source.id, page);
+						: await engine.catalogue(source.id, page);
 				if (generation !== mine) return;
 				slot.page = page;
 				slot.hasNext = Boolean(result.hasNextPage);
@@ -375,13 +378,16 @@ export async function screenExtReader({
 	manga,
 	chapter,
 	work,
+	frames,
+	back,
 }) {
 	setScreen?.('READER');
 	const wrap = el('main', 'page');
 	wrap.append(
 		topbar({
 			title: chapter.name || 'قراءة',
-			back: () => go({ name: 'work', work, standalone }),
+			// من فريمٍ جاء القارئ: الرجوع إليه، فالفريم لا يحمل «عملًا» من الكتالوج
+			back: () => go(back ?? { name: 'work', work, standalone }),
 		}),
 	);
 	const shell = el('div', 'reader');
@@ -398,7 +404,7 @@ export async function screenExtReader({
 	} catch (error) {
 		status.replaceChildren(
 			errorBox(error, () =>
-				void screenExtReader({ mount, topbar, go, setScreen, standalone, sourceId, manga, chapter, work }),
+				void screenExtReader({ mount, topbar, go, setScreen, standalone, sourceId, manga, chapter, work, frames, back }),
 			),
 		);
 		return;
@@ -417,6 +423,8 @@ export async function screenExtReader({
 		flow.append(frame);
 		return { page, frame };
 	});
+
+	if (frames) mountFrameBar({ wrap, slots, frames, sourceId, manga, chapter });
 
 	async function draw(slot) {
 		const image = await engine.pageImage(sourceId, slot.page);
@@ -449,4 +457,197 @@ export async function screenExtReader({
 	}
 
 	await Promise.all(Array.from({ length: PAGE_CONCURRENCY }, () => worker()));
+}
+
+/**
+ * شريط «فريم» في القارئ.
+ *
+ * «فريم» يلتقط الصفحة التي في منتصف الشاشة (ولمسة ثانية على نفس الصفحة
+ * تتركها)، و«إرسال» يفتح قائمة الأصدقاء. الصفحة الملتقطة تُعلَّم في مكانها
+ * فيرى القارئ ما اختاره وهو يمرّ.
+ */
+function mountFrameBar({ wrap, slots, frames, sourceId, manga, chapter }) {
+	const capture = createFrameCapture();
+	const bar = el('div', 'frame-bar');
+	const shoot = el('button', 'frame-bar__shoot');
+	shoot.type = 'button';
+	shoot.append(icon('frame', 20), el('span', null, 'فريم'));
+	const send = el('button', 'frame-bar__send');
+	send.type = 'button';
+	send.hidden = true;
+	bar.append(shoot, send);
+	wrap.append(bar);
+
+	const refresh = () => {
+		send.hidden = capture.size === 0;
+		send.replaceChildren(icon('send', 18), el('span', null, `إرسال ${capture.size}`));
+		for (const slot of slots) {
+			slot.frame.classList.toggle('reader__frame--captured', capture.has(slot.page.index));
+		}
+	};
+
+	shoot.addEventListener('click', () => {
+		const at = pageAtViewport(
+			slots.map((slot) => slot.frame.getBoundingClientRect()),
+			globalThis.innerHeight || 800,
+		);
+		const slot = slots[at];
+		if (!slot) return;
+		const outcome = capture.toggle(slot.page);
+		if (outcome === 'full') {
+			showToast({ title: 'الفريم ممتلئ', body: 'عشر صفحات حدّ الفريم الواحد.' });
+			return;
+		}
+		refresh();
+		showToast({
+			title: outcome === 'added' ? `التقطت صفحة ${at + 1}` : `تركت صفحة ${at + 1}`,
+			body: `${capture.size} من 10`,
+			lifetimeMs: 1600,
+		});
+	});
+
+	send.addEventListener('click', () => {
+		openFrameSheet({
+			friends: frames.friends(),
+			onSend: (friend, message) => {
+				frames.send(
+					buildFramePayload({
+						toId: friend.userId,
+						sourceId,
+						manga,
+						chapter,
+						pages: capture.list(),
+						message,
+					}),
+				);
+				showToast({ title: `انرسل الفريم لـ ${friend.displayName}`, body: `${capture.size} صفحات` });
+				capture.clear();
+				refresh();
+			},
+		});
+	});
+
+	refresh();
+}
+
+/** قائمة الأصدقاء ورسالة اختيارية. لمسة على صديق = إرسال. */
+function openFrameSheet({ friends, onSend }) {
+	const backdrop = el('div', 'frame-sheet');
+	const sheet = el('div', 'frame-sheet__panel');
+	sheet.append(el('div', 'frame-sheet__handle'), el('h2', 'frame-sheet__title', 'أرسل الفريم لـ'));
+	const message = el('textarea', 'frame-sheet__message');
+	message.placeholder = 'كلمة معه (اختياري)';
+	message.maxLength = 500;
+	message.rows = 2;
+	const list = el('div', 'frame-sheet__friends');
+	const close = () => backdrop.remove();
+
+	if (friends.length === 0) {
+		list.append(el('p', 'state', 'ما فيه أصدقاء ترسل لهم بعد.'));
+	}
+	for (const friend of friends) {
+		const row = el('button', 'frame-sheet__friend');
+		row.type = 'button';
+		const face = el('span', 'frame-sheet__avatar');
+		if (friend.avatarKey) {
+			const img = el('img');
+			img.src = friend.avatarKey;
+			img.alt = '';
+			face.append(img);
+		} else {
+			face.textContent = [...String(friend.displayName || '؟')][0] ?? '؟';
+		}
+		row.append(face, el('span', 'frame-sheet__name', friend.displayName));
+		row.addEventListener('click', () => {
+			onSend(friend, message.value);
+			close();
+		});
+		list.append(row);
+	}
+
+	sheet.append(message, list);
+	backdrop.append(sheet);
+	backdrop.addEventListener('click', (e) => {
+		if (e.target === backdrop) close();
+	});
+	document.body.append(backdrop);
+}
+
+function parseJson(text, fallback) {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return fallback;
+	}
+}
+
+/**
+ * قارئ الفريم الصغير: الصفحات التي أرسلها صديقك وحدها، بترتيبه.
+ *
+ * الصور تُجلب من المصدر بمحرّك هذا الجهاز، لا من خادمنا. وقائمة الفصل تُطلب
+ * من جديد لأن روابط الصور الموقّعة تنتهي؛ المحفوظ بديلٌ لا أصل.
+ */
+export async function screenFrame({ mount, topbar, go, setScreen, frame, fromName }) {
+	setScreen?.('FRAME');
+	const work = parseJson(frame.work_json, {});
+	const chapter = parseJson(frame.chapter_json, {});
+	const stored = parseJson(frame.pages_json, []);
+	const self = { name: 'frame', id: frame.id };
+
+	const wrap = el('main', 'page');
+	wrap.append(topbar({ title: 'فريم', back: () => go({ name: 'notifications' }) }));
+	const body = el('div', 'frame-view');
+	const head = el('header', 'frame-view__head');
+	head.append(
+		el('p', 'frame-view__from', `فريم من ${fromName}`),
+		el('h1', 'frame-view__title', frame.series_title || work.title || 'عمل'),
+		el('p', 'frame-view__chapter', `${frame.chapter_label || chapter.name || ''} · ${stored.length} صفحات`),
+	);
+	if (frame.message) head.append(el('blockquote', 'frame-view__message', frame.message));
+	const flow = el('div', 'reader__flow');
+	const status = el('div');
+	const full = el('button', 'frame-view__full', 'افتح الفصل كامل');
+	full.type = 'button';
+	full.addEventListener('click', () =>
+		void go({ name: 'extReader', sourceId: frame.source_id, manga: work, chapter, back: self }),
+	);
+	body.append(head, status, flow, full);
+	wrap.append(body);
+	mount(wrap);
+
+	if (!engine.isAvailable()) {
+		status.replaceChildren(el('div', 'state', 'الفريم يفتح داخل تطبيق أندرويد — الصفحات تُجلب من المصدر بمحرّكه.'));
+		full.hidden = true;
+		return;
+	}
+
+	status.replaceChildren(busy('جارٍ جلب الصفحات من المصدر…'));
+	let fresh = null;
+	try {
+		fresh = await engine.pages(frame.source_id, chapter);
+	} catch {
+		// القائمة تعذّرت: الروابط المحفوظة قد تكفي، وإلا تظهر كل صفحة بسببها
+	}
+	status.replaceChildren();
+
+	for (const page of resolveFramePages(stored, fresh)) {
+		const slot = el('div', 'reader__frame');
+		flow.append(slot);
+		const attempt = async () => {
+			try {
+				slot.classList.remove('reader__frame--error');
+				const image = await engine.pageImage(frame.source_id, page);
+				const img = el('img', 'reader__image');
+				img.alt = '';
+				img.decoding = 'async';
+				img.src = image.src;
+				slot.replaceChildren(img);
+			} catch (error) {
+				slot.classList.add('reader__frame--error');
+				slot.replaceChildren(errorBox(error, () => void attempt()));
+			}
+		};
+		// بالتتابع: فريمٌ من عشر صفحات لا يستحق ضغط المصدر بطلبات متوازية
+		await attempt();
+	}
 }

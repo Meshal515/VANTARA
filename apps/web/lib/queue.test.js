@@ -255,7 +255,10 @@ describe('syncHealth', () => {
   it('reports offline and still counts the pending writes', () => {
     const health = syncHealth({ pending: 2, online: false });
     expect(health.state).toBe('offline');
-    expect(health.message).toContain('2');
+    // العدد يبقى ظاهرًا بصيغته العربية: المثنى لفظًا، وما فوقه رقمًا ومعدودًا
+    expect(health.message).toBe('كتابتان تنتظر الاتصال');
+    expect(syncHealth({ pending: 5, online: false }).message).toBe('5 كتابات تنتظر الاتصال');
+    expect(syncHealth({ pending: 12, online: false }).message).toBe('12 كتابة تنتظر الاتصال');
   });
 
   it('reports stuck when nothing has landed for a long time', () => {

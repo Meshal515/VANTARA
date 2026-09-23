@@ -781,27 +781,160 @@ test('every XML the Android builds depend on actually parses', () => {
   }
 });
 
-test('the spike pins published artifact urls instead of building them', () => {
-  // أول تشغيل حقيقي سقط على الخمسة بـ404: الفهرس ينشر الـAPK والـJAR تحت
-  // **وسمَي إصدار مختلفين**، وبناءُ رابط الـAPK من وسم الـJAR يطلب ملفًا
-  // لا وجود له. وما ينشره المصدر يُنسخ، ولا يُعاد تركيبه من قاعدة نستنبطها.
-  const sources = read('spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/Sources.kt');
-
-  assert.doesNotMatch(
-    sources,
-    /apkUrl = "\$/,
-    'apkUrl must be a full literal url, never interpolated from a base',
+test('the all-Arabic spike pins an index snapshot and copies published APK urls verbatim', () => {
+  // أول تشغيل حقيقي سقط على الخمسة بـ404 لأن رابط APK بُني من قاعدة مستنبطة.
+  // النسخة الكلّية لا تعود لقائمة يدوية: workflow يثبّت commit للفهرس،
+  // والمولّد يأخذ resources.apkUrl نفسه ثم يحسب SHA-256 من البايتات المنشورة.
+  const workflow = read('.github/workflows/spike-extension-engine.yml');
+  const generator = read('spike/extension-engine/tools/generate_arabic_sources.py');
+  const fallback = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt',
   );
-  const urls = [...sources.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
-  assert.equal(urls.length, 5, 'all five sources must carry an apk url');
-  for (const url of urls) {
-    assert.match(url, /^https:\/\/github\.com\/keiyoushi\/extensions\/releases\/download\//, url);
-    assert.match(url, /\.apk$/, `${url} must point at an apk, not a jar`);
-  }
 
-  // وكل مصدر ببصمته: تحميل من ملف يتخلّى عن تحقّق التوقيع، فالبصمة هي الضمانة
-  const hashes = [...sources.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
-  assert.equal(hashes.length, 5, 'every pinned artifact needs its sha256');
+  assert.match(
+    workflow,
+    /^\s*KEIYOUSHI_INDEX_COMMIT:\s*[0-9a-f]{40}\s*$/m,
+    'the discovery spike must build from one exact Keiyoushi index commit',
+  );
+  assert.match(
+    generator,
+    /apk_url = resources\.get\("apkUrl"\)/,
+    'the generator must copy resources.apkUrl from index.json',
+  );
+  assert.doesNotMatch(
+    generator,
+    /apkUrl.*(?:versionName|packageName).*f["']/,
+    'the generator must never reconstruct apkUrl from metadata',
+  );
+  assert.match(
+    generator,
+    /hashlib\.sha256\(data\)\.hexdigest\(\)/,
+    'every downloaded APK in the generated snapshot needs a byte-level SHA-256',
+  );
+  assert.match(
+    generator,
+    /s\.get\("language"\) == "ar"/,
+    'Arabic discovery must use sources[].language, not directory naming',
+  );
+
+  // والـfallback المحلي هو نفس الدفعة التي نسلّمها: 16 حزمة محددة،
+  // MangaDex وحده من namespace العام، ولا مصدر NSFW.
+  const urls = [...fallback.matchAll(/apkUrl = "([^"]+)"/g)].map((match) => match[1]);
+  const hashes = [...fallback.matchAll(/sha256 = "([0-9a-f]{64})"/g)];
+  const packages = [...fallback.matchAll(/pkg = "([^"]+)"/g)].map((match) => match[1]);
+  const warnings = [...fallback.matchAll(/warning = ContentWarning\.(SAFE|MIXED|NSFW)/g)]
+    .map((match) => match[1]);
+  assert.equal(urls.length, 16, 'the delivered spike must contain exactly sixteen packages');
+  assert.equal(hashes.length, urls.length, 'every fallback artifact needs its sha256');
+  assert.deepEqual(
+    packages.filter((pkg) => pkg.includes('.extension.all.')),
+    ['eu.kanade.tachiyomi.extension.all.mangadex'],
+    'MangaDex must be the only foreign catalogue package',
+  );
+  assert.deepEqual(
+    packages.filter((pkg) => !pkg.includes('.extension.all.'))
+      .every((pkg) => pkg.includes('.extension.ar.')),
+    true,
+    'all remaining packages must be Arabic',
+  );
+  assert.equal(warnings.filter((warning) => warning === 'SAFE').length, 15);
+  assert.equal(warnings.filter((warning) => warning === 'MIXED').length, 1);
+  assert.equal(warnings.filter((warning) => warning === 'NSFW').length, 0);
+  assert.doesNotMatch(fallback, /goonscans|Goon Scans/i, 'Goon Scans was removed by owner request');
+  assert.doesNotMatch(
+    fallback,
+    /arabmanhwa|ArabManhwa/i,
+    'ArabManhwa routes currently return 404 and must not ship as a false-green source',
+  );
+  assert.doesNotMatch(
+    fallback,
+    /mangalink|Mangalink/i,
+    'MangaLink requires persistent browser verification and must not ship as an automatic source',
+  );
+  assert.doesNotMatch(
+    fallback,
+    /extension\.ar\.arabtoons/,
+    'the owner removed every NSFW source from the delivered spike',
+  );
+  assert.match(fallback, /extension\.ar\.mangatime/, 'MangaTime must replace the browser-gated MangaLink package');
+  for (const url of urls) assert.match(url, /^https:\/\/.*\.apk$/, url);
+});
+
+test('the safe spike installs beside older debug builds', () => {
+  const gradle = read('spike/extension-engine/app/build.gradle.kts');
+  const manifest = read('spike/extension-engine/app/src/main/AndroidManifest.xml');
+
+  assert.match(gradle, /applicationId\s*=\s*"dev\.vantara\.spike\.catalogue16"/);
+  assert.match(gradle, /versionCode\s*=\s*3/);
+  assert.match(manifest, /android:label="VANTARA Spike Catalogue 16"/);
+});
+
+test('catalogue counting covers every non-blocked source in the safe sixteen-package batch', () => {
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const runner = read(`${spike}CatalogueCrawlRunner.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
+  const ui = read(`${spike}CatalogueCrawlUiPolicy.kt`);
+
+  // The batch is filtered by policy only (blocked/NSFW), never by SAFE.
+  assert.match(runner, /specs\.filter \{ shouldCrawlCatalogue\(it\.warning, it\.blockedReason\) \}/);
+  assert.doesNotMatch(
+    runner,
+    /ContentWarning\.SAFE/,
+    'MIXED sources must not be silently omitted from catalogue counting',
+  );
+  assert.match(service, /specs = SPIKE_SOURCES,/);
+  assert.match(ui, /استأنف إحصاء كل المصادر/);
+  assert.match(ui, /احصِ كتالوج كل المصادر/);
+});
+
+test('the catalogue crawl is owned by the foreground service, not the screen', () => {
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const activity = read(`${spike}MainActivity.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
+
+  // A crawl inside lifecycleScope died with the screen; that is why counts
+  // looked far smaller than the sources are.
+  assert.doesNotMatch(activity, /crawlCatalogue\(/, 'MainActivity must not run the crawl itself');
+  assert.match(activity, /CatalogueCrawlService\.start\(this\)/);
+  assert.match(service, /probe\.crawlCatalogue\(/);
+  assert.match(service, /override fun onTimeout\(startId: Int, fgsType: Int\)/);
+});
+
+test('saved probe state is bound to the generated source snapshot', () => {
+  const spike = 'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/';
+  const activity = read(`${spike}MainActivity.kt`);
+  const snapshot = read(`${spike}ArabicSourceLoading.kt`);
+  const service = read(`${spike}CatalogueCrawlService.kt`);
+
+  assert.match(snapshot, /append\(SPIKE_INDEX_COMMIT\)/);
+  assert.match(activity, /checkpoint\.ensureSnapshot\(spikeBatchFingerprint\(\)\)/);
+  assert.match(
+    snapshot,
+    /fun catalogueSnapshotKey\(\): String = "\$\{spikeBatchFingerprint\(\)\}\|\$CATALOGUE_LISTING_SCHEMA"/,
+    'catalogue resume data must be invalidated when traversal semantics change',
+  );
+  // Screen and service must bind to the same key, or one wipes the other's pages.
+  assert.match(activity, /catalogueCheckpoint\.ensureSnapshot\(catalogueSnapshotKey\(\)\)/);
+  assert.match(service, /val snapshotKey = catalogueSnapshotKey\(\)/);
+  assert.match(service, /checkpoint\.ensureSnapshot\(snapshotKey\)/);
+
+  const probeStore = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/ProbeCheckpointStore.kt',
+  );
+  assert.doesNotMatch(
+    probeStore,
+    /fun clear\(\)[\s\S]*?snapshot\.delete\(\)/,
+    'manual report clearing must preserve the current snapshot binding',
+  );
+
+  const catalogueStore = read(
+    'spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/CatalogueCrawlCheckpointStore.kt',
+  );
+  assert.doesNotMatch(
+    catalogueStore,
+    /fun clear\(\)[\s\S]*?dir\.deleteRecursively\(\)/,
+    'manual catalogue clearing must preserve the current snapshot binding',
+  );
 });
 
 test('no spike probe step can run without a deadline or an announcement', () => {
@@ -968,4 +1101,75 @@ test('live D1 verifier cleans durable fixture op claims between runs', () => {
     /DELETE FROM op_claims WHERE op_id LIKE '__verify__%'/,
     're-running live verification must not collide with durable op_claims left by the previous run',
   );
+});
+
+test('the reader app runs the exact engine the spike proved on device', () => {
+  // The app once kept an older copy of the spike engine: five sources, no
+  // package/version identity check, no per-source repairs, and `first()`
+  // source selection that could hand MangaDex's English catalogue to an
+  // Arabic reader. Shared files must now be byte-identical.
+  const shared = [
+    'dev/vantara/spike/Sources.kt',
+    'dev/vantara/spike/GeneratedSources.kt',
+    'dev/vantara/spike/FileExtensionLoader.kt',
+    'dev/vantara/spike/SourceCompatRepairs.kt',
+    'dev/vantara/spike/DilarCryptoCompat.kt',
+    'dev/vantara/spike/ChromeUserAgent.kt',
+    'dev/vantara/spike/CloudflareInteractionPolicy.kt',
+    'dev/vantara/spike/ArabicSourceSelection.kt',
+    'dev/vantara/spike/ProbeResiliencePolicy.kt',
+    'dev/vantara/spike/ImagePayloadPolicy.kt',
+    'dev/vantara/spike/BoundedPayloadReader.kt',
+    'dev/vantara/spike/RxAwait.kt',
+    'dev/vantara/spike/CatalogueFilterPolicy.kt',
+    'dev/vantara/spike/HttpStopPolicy.kt',
+    'dev/vantara/spike/CatalogueListingResolver.kt',
+    'eu/kanade/tachiyomi/network/NetworkHelper.kt',
+    'eu/kanade/tachiyomi/network/interceptor/BrowserVerificationInterceptor.kt',
+    'eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt',
+  ];
+  for (const file of shared) {
+    assert.equal(
+      read(`android/app/src/main/kotlin/${file}`),
+      read(`spike/extension-engine/app/src/main/kotlin/${file}`),
+      `${file} drifted between the spike and the reader app`,
+    );
+  }
+
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+  assert.match(plugin, /selectArabicSources\(spec, all\)/);
+  assert.doesNotMatch(plugin, /filterIsInstance<CatalogueSource>\(\)\.firstOrNull\(\)/);
+  assert.match(plugin, /SourceCompatRepairs\.loadSeries\(/);
+  assert.match(plugin, /SourceCompatRepairs\.loadPages\(/);
+  assert.doesNotMatch(plugin, /source\.getPageList\(/, 'pages must go through the per-source repairs');
+  // The reader solves Cloudflare by hand; only the spike batch fails fast.
+  assert.match(plugin, /CloudflareInteractionMode\.batchProbe = false/);
+  // Explore browses the full catalogue, never a ranking or an all-language feed.
+  assert.match(plugin, /fun catalogue\(call: PluginCall\)/);
+  assert.match(plugin, /CatalogueFilterPolicy\.catalogueFilters\(source\)/);
+  const explore = read('apps/web/screens/sources.js');
+  assert.match(explore, /engine\.catalogue\(source\.id, page\)/);
+  assert.doesNotMatch(explore, /engine\.popular\(/);
+});
+
+test('every source extension ships inside the app and matches its pinned hash', () => {
+  // keiyoushi يحذف إصداراته القديمة مع كل بناء للفهرس: التنزيل وحده أسقط
+  // المصادر الستة عشر كلها (HTTP 404). فكل إضافة مضمّنة في التطبيق، وبصمتها
+  // هي نفسها المثبّتة في GeneratedSources.kt — لا نسخة قديمة تبقى بلا أن يُعرف.
+  const kotlin = read('android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt');
+  const specs = [...kotlin.matchAll(/pkg = "([^"]+)",[\s\S]*?sha256 = "([0-9a-f]{64})"/g)].map((m) => ({ pkg: m[1], sha: m[2] }));
+  assert.ok(specs.length >= 10, 'GeneratedSources.kt must list the Arabic sources');
+  const dir = 'android/app/src/main/assets/extensions';
+  const tracked = trackedFiles().filter((p) => p.startsWith(`${dir}/`));
+  const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
+  for (const { pkg, sha } of specs) {
+    const path = `${dir}/${pkg}.apk`;
+    assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-extensions.mjs`);
+    const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
+    assert.equal(actual, sha, `${path} does not match its pinned sha256`);
+  }
+  assert.equal(onDisk.length, specs.length, 'no stale extension APKs may remain in the bundle');
+  if (tracked.length) assert.equal(tracked.length, specs.length, 'every bundled extension must be tracked');
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+  assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
 });

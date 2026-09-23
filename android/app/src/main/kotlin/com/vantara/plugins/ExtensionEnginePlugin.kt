@@ -8,9 +8,16 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import dev.vantara.spike.CatalogueFilterPolicy
+import dev.vantara.spike.CatalogueListingKind
+import dev.vantara.spike.CloudflareInteractionMode
+import dev.vantara.spike.resolveFullCatalogueListing
 import dev.vantara.spike.FileExtensionLoader
+import dev.vantara.spike.ImagePayloadPolicy
 import dev.vantara.spike.SPIKE_SOURCES
+import dev.vantara.spike.SourceCompatRepairs
 import dev.vantara.spike.SourceSpec
+import dev.vantara.spike.selectArabicSources
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -85,6 +92,10 @@ class ExtensionEnginePlugin : Plugin() {
         // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
         // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
         WebViewActivityHolder.set(activity)
+        // المحرّك مشترك مع الـspike، والـspike يفشل سريعًا أمام تحدّي Cloudflare
+        // كي لا تُسرق شاشة الدفعة. القارئ هنا يقلّب بيده: التحدّي المرئي هو
+        // الطريق الوحيد، وإلا قرأ «محجوب» ما كان يكفيه أن يحلّه
+        CloudflareInteractionMode.batchProbe = false
         // الإضافات تطلب اعتمادياتها بـ`injectLazy()`. التسجيل قبل أول تحميل،
         // وإلا سقط أول مصدر بـIllegalStateException من injekt فيبدو عطل مصدر.
         //
@@ -106,16 +117,26 @@ class ExtensionEnginePlugin : Plugin() {
 
     // ───────────────────────────── النداءات ─────────────────────────────
 
-    /** بيان المصادر المتاحة. لا يلمس الشبكة ولا يحمّل شيئًا. */
+    /**
+     * بيان المصادر المتاحة. لا يلمس الشبكة ولا يحمّل شيئًا.
+     *
+     * `warning` يعبر إلى الواجهة كما في الفهرس (SAFE/MIXED): MangaDex مختلط،
+     * والقرار في عرضه قرار واجهة لا يُتّخذ هنا صامتًا. والمحظور بالسياسة لا
+     * يُعرض أصلًا.
+     */
     @PluginMethod
     fun sources(call: PluginCall) {
         val list = JSArray()
         for (spec in SPIKE_SOURCES) {
+            if (spec.blockedReason != null) continue
             list.put(
                 JSObject()
                     .put("id", spec.pkg)
                     .put("label", spec.label)
                     .put("lib", spec.expectedLib)
+                    .put("version", spec.versionName)
+                    .put("warning", spec.warning.name)
+                    .put("names", JSArray(spec.arabicSourceNames))
                     .put("ready", loaded.containsKey(spec.pkg)),
             )
         }
@@ -144,6 +165,36 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    /**
+     * الكتالوج كاملًا: ما يتصفّحه «استكشاف».
+     *
+     * `popular` ليس كتالوجًا: Dilar يرجع ترتيبه من عشرة أعمال (والكتالوج 8998)،
+     * وMangaDex يتصفّح 85,664 عملًا بكل اللغات (العربي 990)، وAzora بترتيبه
+     * الافتراضي يكرّر ويُسقط خُمس أعماله. المسار يُحسم مرة لكل مصدر بنفس محلّل
+     * الـspike وبفلاتر `CatalogueFilterPolicy` نفسها.
+     */
+    @PluginMethod
+    fun catalogue(call: PluginCall) = paged(call) { source, page ->
+        val sourceId = requireSourceId(call)
+        val filters = CatalogueFilterPolicy.catalogueFilters(source)
+        suspend fun fetch(kind: CatalogueListingKind, at: Int) = when (kind) {
+            CatalogueListingKind.SEARCH_ALL -> source.getSearchManga(at, "", filters)
+            CatalogueListingKind.POPULAR -> source.getPopularManga(at)
+            CatalogueListingKind.LATEST -> source.getLatestUpdates(at)
+        }
+        val known = listings[sourceId]
+        if (known != null) {
+            fetch(known, page)
+        } else {
+            val resolved = resolveFullCatalogueListing { kind -> fetch(kind, 1) }
+            listings[sourceId] = resolved.kind
+            if (page == 1) resolved.firstPage else fetch(resolved.kind, page)
+        }
+    }
+
+    /** المسار الذي حُسم لكل مصدر؛ حسمه يكلّف حتى ثلاثة طلبات فلا يُعاد. */
+    private val listings = java.util.concurrent.ConcurrentHashMap<String, CatalogueListingKind>()
+
     /** الرائج: هذه هي الواجهة الأولى التي يراها القارئ عند فتح مصدر. */
     @PluginMethod
     fun popular(call: PluginCall) = paged(call) { source, page ->
@@ -154,6 +205,21 @@ class ExtensionEnginePlugin : Plugin() {
     @PluginMethod
     fun latest(call: PluginCall) = paged(call) { source, page ->
         source.getLatestUpdates(page)
+    }
+
+    /**
+     * أعمال تصنيفٍ من مصدر، بفلتر المصدر نفسه لا بالبحث عن الكلمة.
+     * مصدرٌ بلا هذا التصنيف يرجع صفحة فارغة فتتجاوزه الواجهة.
+     */
+    @PluginMethod
+    fun genre(call: PluginCall) = paged(call) { source, page ->
+        val names = call.getArray("names")?.toList<String>().orEmpty()
+        val filters = dev.vantara.spike.GenreFilterPolicy.filters(source, names)
+        if (filters == null) {
+            eu.kanade.tachiyomi.source.model.MangasPage(emptyList(), false)
+        } else {
+            source.getSearchManga(page, "", filters)
+        }
     }
 
     @PluginMethod
@@ -185,19 +251,14 @@ class ExtensionEnginePlugin : Plugin() {
                 val source = obtain(requireSourceId(call))
                 val input = mangaFrom(call.getObject("manga"))
                 val update = try {
-                    source.getMangaUpdate(input, emptyList(), fetchDetails = true, fetchChapters = true)
+                    // إصلاحات المصادر (Hizo) تمرّ من هنا؛ الباقي نداءٌ جامع واحد
+                    SourceCompatRepairs.loadSeries(source, input)
                 } catch (cancel: CancellationException) {
                     // لا `runCatching` هنا: يبتلع الإلغاء فيطلق نداءً شبكيًّا
                     // ثانيًا بعد أن تكون الشاشة أُغلقت.
                     throw cancel
                 } catch (ignored: Throwable) {
-                    val only = source.getMangaUpdate(
-                        manga = input,
-                        chapters = emptyList(),
-                        fetchDetails = false,
-                        fetchChapters = true,
-                    )
-                    SMangaUpdate(input, only.chapters)
+                    SMangaUpdate(input, SourceCompatRepairs.loadChapters(source, input))
                 }
                 // محلّلات التفاصيل ترجع عادةً SManga جزئيًّا بلا url. المستضيف
                 // يعرف الرابط الأصلي من البحث ويجب أن يحمله معه.
@@ -231,12 +292,7 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val source = obtain(requireSourceId(call))
                 val manga = mangaFrom(call.getObject("manga"))
-                val list = source.getMangaUpdate(
-                    manga = manga,
-                    chapters = emptyList(),
-                    fetchDetails = false,
-                    fetchChapters = true,
-                ).chapters
+                val list = SourceCompatRepairs.loadChapters(source, manga)
                 val out = JSArray()
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("chapters", out).put("count", list.size))
@@ -252,7 +308,8 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val source = obtain(requireSourceId(call))
                 val chapter = chapterFrom(call.getObject("chapter"))
-                val list = source.getPageList(chapter)
+                // Dilar وMangaDar يحتاجان إصلاح صفحاتٍ أثبته الـspike على الجهاز
+                val list = SourceCompatRepairs.loadPages(source, chapter)
                 val out = JSArray()
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("pages", out).put("count", list.size))
@@ -294,19 +351,28 @@ class ExtensionEnginePlugin : Plugin() {
                     bytes = withContext(Dispatchers.IO) { hit.readBytes() }
                     type = typeForExtension(hit.extension)
                 } else {
-                    val request = Request.Builder().url(url)
-                        .apply { asHttp?.headers?.let { headers(it) } }
-                        .build()
-                    val caller = asHttp?.client ?: network.client
+                    page.imageUrl = url
                     val fetched = withContext(Dispatchers.IO) {
-                        caller.newCall(request).execute().use { res ->
-                            require(res.isSuccessful) { "image HTTP ${res.code} ← $url" }
-                            res.body.bytes() to res.header("content-type")
+                        if (asHttp != null) {
+                            // Preserve the extension's imageRequest override
+                            // (Referer/Origin/custom headers) and keep the
+                            // streaming response alive until its body is read.
+                            asHttp.getImage(page).use { res ->
+                                res.body.bytes() to res.header("content-type")
+                            }
+                        } else {
+                            network.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
+                                require(res.isSuccessful) { "image HTTP ${res.code} ← $url" }
+                                res.body.bytes() to res.header("content-type")
+                            }
                         }
                     }
                     bytes = fetched.first
-                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ صغيرة تُردّ بـ200
+                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: الحجم وحده لا
+                    // يكفي، فصفحة HTML كبيرة تمرّ منه. التوقيع يُفحص قبل الكاش
                     require(bytes.size > 1024) { "image too small: ${bytes.size} bytes" }
+                    val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
+                    require(verdict.accepted) { "not an image: ${verdict.reason}" }
                     // النوع من الاستجابة أولًا، فإن سكتت فمن امتداد الرابط
                     type = fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
@@ -437,8 +503,12 @@ class ExtensionEnginePlugin : Plugin() {
 
         val spec = SPIKE_SOURCES.firstOrNull { it.pkg == sourceId }
             ?: error("unknown sourceId: $sourceId")
+        spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
 
+        // الترتيب: نسخة الجهاز المتحقَّق منها، ثم المضمّنة في التطبيق، ثم التنزيل.
+        // keiyoushi يحذف إصداراته القديمة، فالتنزيل وحده أسقط كل المصادر مرة
         val apk = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
+            ?: withContext(Dispatchers.IO) { readBundled(spec) }
             ?: withContext(Dispatchers.IO) { download(spec) }
 
         when (val result = withContext(Dispatchers.IO) { loader.load(spec, apk) }) {
@@ -448,12 +518,28 @@ class ExtensionEnginePlugin : Plugin() {
                     result.cause,
                 )
             is FileExtensionLoader.Result.Ok -> {
-                val source = result.loaded.sources.filterIsInstance<CatalogueSource>().firstOrNull()
-                    ?: error("${spec.label}: الحزمة بلا CatalogueSource")
+                // لا `first()`: أول مصدر في MangaDex قد يكون إنجليزيًا
+                val all = result.loaded.sources.filterIsInstance<CatalogueSource>()
+                val source = selectArabicSources(spec, all).firstOrNull()
+                    ?: error("${spec.label}: لا مصدر عربي في الحزمة (catalogue=${all.size})")
                 loaded[sourceId] = source
                 source
             }
         }
+    }
+
+    /**
+     * الإضافة المضمّنة في `assets/extensions/` (`tools/bundle-extensions.mjs`).
+     * تُقبل فقط إن طابقت بصمتها المثبّتة: ملفٌّ قديم بقي من بناء سابق يُتجاهل
+     * ويُنزَّل البديل، بدل أن يُحمَّل كود لم يُتحقق منه.
+     */
+    private fun readBundled(spec: SourceSpec): ByteArray? {
+        val bytes = runCatching {
+            context.assets.open("extensions/${spec.pkg}.apk").use { it.readBytes() }
+        }.getOrNull() ?: return null
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+        return bytes.takeIf { spec.sha256.equals(digest, ignoreCase = true) }
     }
 
     /** ثلاث محاولات: انقطاع لحظي عن github لا يجب أن يُسقط مصدرًا. */

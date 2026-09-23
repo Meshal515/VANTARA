@@ -202,6 +202,16 @@ export function shouldQuarantine({ attempts, status }) {
 /** بعد هذا الصمت مع كتابات معلّقة، المزامنة عالقة لا بطيئة. */
 export const STUCK_AFTER_MS = 600_000;
 
+// «3 عملية» خطأ يلاحظه كل قارئ: العدد مع معدوده (مفرد، مثنى، جمع، تمييز)
+const OP_FORMS = ['عملية واحدة', 'عمليتان', 'عمليات', 'عملية'];
+const WRITE_FORMS = ['كتابة واحدة', 'كتابتان', 'كتابات', 'كتابة'];
+function arCount(n, [one, two, few, many]) {
+  if (n === 1) return one;
+  if (n === 2) return two;
+  const mod = n % 100;
+  return `${n} ${mod >= 3 && mod <= 10 ? few : many}`;
+}
+
 /**
  * حالة المزامنة كما تُعرض.
  *
@@ -229,19 +239,19 @@ export function syncHealth({
     return { ...base, state: 'degraded', message: 'تعذّر حفظ الكتابات على الجهاز' };
   }
   if (quarantined > 0) {
-    return { ...base, state: 'blocked', message: `${quarantined} عملية معزولة تحتاج مراجعة` };
+    return { ...base, state: 'blocked', message: `${arCount(quarantined, OP_FORMS)} معزولة تحتاج مراجعة` };
   }
   if (overflowing) {
     return { ...base, state: 'blocked', message: 'الطابور ممتلئ ولا يمكن إسقاط شيء بأمان' };
   }
   if (!online) {
-    return { ...base, state: 'offline', message: pending > 0 ? `${pending} كتابة تنتظر الاتصال` : 'بلا اتصال' };
+    return { ...base, state: 'offline', message: pending > 0 ? `${arCount(pending, WRITE_FORMS)} تنتظر الاتصال` : 'بلا اتصال' };
   }
   if (pending > 0 && lastSuccessAt > 0 && now - lastSuccessAt > STUCK_AFTER_MS) {
     return { ...base, state: 'stuck', message: 'الكتابات لم تصل منذ مدة' };
   }
   if (pending > 0) {
-    return { ...base, state: 'syncing', message: `${pending} كتابة قيد الإرسال` };
+    return { ...base, state: 'syncing', message: `${arCount(pending, WRITE_FORMS)} قيد الإرسال` };
   }
   // كل الكتابات وصلت، لكن القراءة لم تُستنزف بعد. «مُزامَن» هنا كذبة:
   // الجهاز يعرف أن عنده متأخّرًا ولا يقوله.

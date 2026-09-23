@@ -669,3 +669,110 @@ describe('relational social ops survive stale/off-series references', () => {
     ).toEqual([]);
   });
 });
+
+describe('frame.send', () => {
+  const work = { url: '/manga/1', title: 'ون بيس', thumbnailUrl: 'https://cdn.example/c.jpg', memo: '{"k":1}' };
+  const chapter = { url: '/manga/1/1100', name: 'الفصل 1100', memo: '' };
+  const base = {
+    toId: 'ngm',
+    sourceId: 'eu.kanade.tachiyomi.extension.ar.teamx',
+    work,
+    chapter,
+    pages: [{ index: 4, imageUrl: 'https://cdn.example/4.webp' }, { index: 5 }],
+    message: 'شوف هالمشهد',
+  };
+
+  it('stores page references for exactly one friend and notifies only them', () => {
+    const out = translate('frame.send', base);
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'));
+    expect(insert).toBeDefined();
+    // id, from, to, source ...
+    expect(insert!.values.slice(0, 4)).toEqual(['op-1', 'dahmi', 'ngm', base.sourceId]);
+    expect(JSON.parse(String(insert!.values.at(-6)))).toEqual([
+      { index: 4, url: '', imageUrl: 'https://cdn.example/4.webp' },
+      { index: 5, url: '', imageUrl: null },
+    ]);
+
+    const notes = out.filter((s) => s.sql.includes('INSERT INTO notifications'));
+    expect(notes).toHaveLength(1);
+    const [note] = notes;
+    expect(note?.values).toContain('ngm');
+    expect(note?.values).toContain('FRAME');
+    expect(note?.values).toContain('vantara://frame/op-1');
+  });
+
+  it('keeps the work memo intact for the recipient engine', () => {
+    const out = translate('frame.send', base);
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    const stored = insert.values.map(String).find((v) => v.includes('"memo"'))!;
+    expect(JSON.parse(stored).memo).toBe('{"k":1}');
+  });
+
+  it('a frame to one friend shows in the majlis, hidden from whoever the sender chose', () => {
+    const out = translate('frame.send', { ...base, hiddenFrom: ['mansour', 'ngm', 'dahmi', 'stranger'] });
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    expect(insert.sql).toContain("'MAJLIS'");
+    // المستلم والمرسل لا يُخفى عنهما، والغريب يسقط
+    expect(JSON.parse(String(insert.values.at(-2)))).toEqual(['mansour']);
+    expect(insert.values.at(-1)).toBe(0);
+    expect(out.filter((s) => s.sql.includes('INSERT INTO notifications'))).toHaveLength(1);
+  });
+
+  it('a frame to everyone notifies every friend except the hidden ones', () => {
+    const out = translate('frame.send', { ...base, toId: null, hiddenFrom: ['mansour'] });
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    // البثّ: to_id هو المرسل، والعلم الأخير يقول «للجميع»
+    expect(insert.values[2]).toBe('dahmi');
+    expect(insert.values.at(-1)).toBe(1);
+    const notes = out.filter((s) => s.sql.includes('INSERT INTO notifications'));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.values).toContain('ngm');
+    expect(notes.flatMap((n) => n.values)).not.toContain('mansour');
+  });
+
+  it('a frame to yourself or to a stranger is refused', () => {
+    expect(translate('frame.send', { ...base, toId: 'dahmi' })).toEqual([]);
+    expect(translate('frame.send', { ...base, toId: 'someone-else' })).toEqual([]);
+  });
+
+  it('a frame without valid pages or chapter is refused', () => {
+    expect(translate('frame.send', { ...base, pages: [] })).toEqual([]);
+    expect(translate('frame.send', { ...base, pages: [{ index: -2 }] })).toEqual([]);
+    expect(translate('frame.send', { ...base, chapter: null })).toEqual([]);
+    expect(translate('frame.send', { ...base, sourceId: '' })).toEqual([]);
+  });
+
+  it('retrying the same op does not send the frame twice', () => {
+    const out = translate('frame.send', base);
+    expect(out.find((s) => s.sql.includes('INSERT INTO frames'))!.sql).toMatch(/ON CONFLICT \(id\) DO NOTHING/);
+  });
+});
+
+describe('chapter.mark', () => {
+  it('marks one chapter read for its owner, last write wins', () => {
+    const out = translate('chapter.mark', { seriesRef: 'ext:ون بيس', chapterKey: 'ext:ون بيس#n:17', read: true });
+    expect(out).toHaveLength(1);
+    const [stmt] = out;
+    expect(stmt?.sql).toMatch(/INSERT INTO chapter_marks/);
+    expect(stmt?.sql).toMatch(/ON CONFLICT \(user_id, chapter_key\) DO UPDATE/);
+    expect(stmt?.values.slice(0, 4)).toEqual(['dahmi', 'ext:ون بيس#n:17', 'ext:ون بيس', 1]);
+  });
+
+  it('unmarking is a mark with read = 0, never a delete of real reads', () => {
+    const [stmt] = translate('chapter.mark', { seriesRef: 's', chapterKey: 's#n:1', read: false });
+    expect(stmt?.values[3]).toBe(0);
+    expect(stmt?.sql).not.toMatch(/chapter_reads/);
+  });
+
+  it('never announces anything to friends', () => {
+    // علامة شخصية: لا نشاط ولا إشعار
+    const out = translate('chapter.mark', { seriesRef: 's', chapterKey: 's#n:1', read: true });
+    expect(out.some((s) => /activity|notifications/.test(s.sql))).toBe(false);
+  });
+
+  it('a mark without a chapter or a boolean is refused', () => {
+    expect(translate('chapter.mark', { seriesRef: 's', read: true })).toEqual([]);
+    expect(translate('chapter.mark', { chapterKey: 'k', read: true })).toEqual([]);
+    expect(translate('chapter.mark', { seriesRef: 's', chapterKey: 'k', read: 'yes' })).toEqual([]);
+  });
+});

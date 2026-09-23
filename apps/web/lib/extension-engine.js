@@ -30,9 +30,11 @@ function required() {
 }
 
 /**
- * بيان المصادر: `{ id, label, lib, ready }`.
+ * بيان المصادر: `{ id, label, lib, version, warning, names, ready }`.
  *
  * `ready` يقول إن المصدر محمَّل في الذاكرة الآن، فالنداء التالي عليه فوري.
+ * `warning` تصنيف الفهرس كما هو: `SAFE` أو `MIXED` (MangaDex). المحظور
+ * بالسياسة لا يصل إلى هنا أصلًا.
  */
 export async function sources() {
 	const { sources: list } = await required().sources();
@@ -49,6 +51,16 @@ export async function prepare(sourceId) {
 	return required().prepare({ sourceId });
 }
 
+/**
+ * الكتالوج كاملًا لمصدر، صفحةً صفحة. `{ mangas, hasNextPage, page }`.
+ *
+ * هذا ما يتصفّحه «استكشاف»، لا `popular`: الرائج في Dilar عشرة أعمال من
+ * تسعة آلاف، وفي MangaDex كل اللغات لا العربي.
+ */
+export async function catalogue(sourceId, page = 1) {
+	return required().catalogue({ sourceId, page });
+}
+
 /** الرائج — الواجهة الأولى عند فتح مصدر. `{ mangas, hasNextPage, page }`. */
 export async function popular(sourceId, page = 1) {
 	return required().popular({ sourceId, page });
@@ -57,6 +69,11 @@ export async function popular(sourceId, page = 1) {
 /** آخر التحديثات — ومنه يأتي «الجلب التلقائي» للفصول الجديدة. */
 export async function latest(sourceId, page = 1) {
 	return required().latest({ sourceId, page });
+}
+
+/** أعمال تصنيف بفلتر المصدر. `names`: أسماء التصنيف بكل صيغها (عربي وإنجليزي). */
+export async function genre(sourceId, names, page = 1) {
+	return required().genre({ sourceId, names, page });
 }
 
 export async function search(sourceId, query, page = 1) {
@@ -117,8 +134,10 @@ export default {
 	isAvailable,
 	sources,
 	prepare,
+	catalogue,
 	popular,
 	latest,
+	genre,
 	search,
 	series,
 	chapters,

@@ -17,13 +17,15 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.vantara.spike"
+        // Separate install identity: CI debug signing keys are ephemeral, so an
+        // APK from a newer runner cannot update the old spike in-place.
+        applicationId = "dev.vantara.spike.catalogue16"
         // إضافات lib 1.6 تُشحن بـminSdk 26. وأجهزتنا كلها 13+، فلا مسار
         // خفض DEX مطلوب أصلًا — لكن الأرضية تبقى 26 حتى لا نَعِد بما لا نُثبت.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "spike-1"
+        versionCode = 3
+        versionName = "catalogue16-3"
     }
 
     buildTypes {
@@ -92,6 +94,10 @@ configurations.all {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    // Keep WebView's User-Agent Client Hints consistent with the UA string.
+    // Cloudflare compares both and rejects a WebView that claims to be Chrome
+    // in one surface while advertising Android WebView in the other.
+    implementation("androidx.webkit:webkit:1.17.0")
     // `ConfigurableSource.setupPreferenceScreen` يأخذ PreferenceScreen في
     // توقيعه. أي إضافة تنفّذه تشير إلى androidx.preference، فغيابه يعني
     // NoClassDefFoundError عند تحميل الصنف لا عند استعماله.
@@ -126,4 +132,6 @@ dependencies {
 
     // بعض المصادر تُقيّم JavaScript لفكّ روابط الصفحات
     implementation("com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597")
+
+    testImplementation("junit:junit:4.13.2")
 }

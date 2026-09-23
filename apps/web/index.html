@@ -24,20 +24,33 @@
     <link rel="icon" href="/icons/icon-512.png" sizes="512x512" />
 
     <link rel="stylesheet" href="/styles.css" />
-    <!-- الخط محلي: طلب خارجي في أول رسم يؤخّر أول نص مقروء -->
-    <link
-      rel="preload"
-      href="/fonts/NotoNaskhArabic-Regular.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
+    <link rel="stylesheet" href="/v35/core.css" />
+    <link rel="stylesheet" href="/v35.css" />
+    <link rel="stylesheet" href="/v35/reader.css" />
+    <link rel="stylesheet" href="/v35/majlis.css" />
+    <link rel="stylesheet" href="/v35/profile.css" />
+    <!--
+      الخطوط محلية: طلب خارجي في أول رسم يؤخّر أول نص مقروء. وكلاهما متغيّر
+      الوزن (400–800): الواجهة تطلب أوزانًا مثل 650 و760، وبلا خط متغيّر
+      يقرّبها المتصفح إلى 400 أو 700 فيضيع التدرّج بين العنوان والنص.
+      العربي Noto Sans (خط واجهة) لا Naskh (خط كتب)، واللاتيني Inter.
+    -->
+    <link rel="preload" href="/fonts/NotoSansArabic.var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/Inter-Latin.var.woff2" as="font" type="font/woff2" crossorigin />
     <style>
       @font-face {
-        font-family: 'Noto Naskh Arabic';
-        src: url('/fonts/NotoNaskhArabic-Regular.woff2') format('woff2');
-        font-weight: 400;
+        font-family: 'Vantara Sans';
+        src: url('/fonts/Inter-Latin.var.woff2') format('woff2');
+        font-weight: 400 800;
         font-display: swap;
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212;
+      }
+      @font-face {
+        font-family: 'Vantara Sans';
+        src: url('/fonts/NotoSansArabic.var.woff2') format('woff2');
+        font-weight: 400 800;
+        font-display: swap;
+        unicode-range: U+0600-06FF, U+0750-077F, U+0870-08FF, U+200C-200E, U+2010-2011, U+FB50-FDFF, U+FE70-FEFC;
       }
     </style>
   </head>

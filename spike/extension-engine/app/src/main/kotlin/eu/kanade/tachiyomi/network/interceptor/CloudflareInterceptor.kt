@@ -36,9 +36,16 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import dev.vantara.spike.ChromeUserAgent
+import dev.vantara.spike.CloudflareInteractiveAction
+import dev.vantara.spike.CloudflareInteractionMode
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -51,6 +58,8 @@ import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class CloudflareInterceptor(
     private val context: Context,
@@ -59,6 +68,11 @@ class CloudflareInterceptor(
 ) : Interceptor {
 
     private val handler = Handler(Looper.getMainLooper())
+
+    // The spike is an automated source batch probe: it must never replace the
+    // whole activity with a human Cloudflare challenge while dozens of sources
+    // are queued behind it. The reader app shares this file and opts into the
+    // visible challenge through CloudflareInteractionMode.
 
     /** Serializes WebView work and remembers what we've learned per host. */
     private val solveLock = Any()
@@ -111,6 +125,7 @@ class CloudflareInterceptor(
                     // A human is needed. The byte-fetch below would only sit in
                     // front of the same widget for another timeout.
                     SolveOutcome.INTERACTIVE -> throw interactiveError(request)
+                    SolveOutcome.RENDERER_GONE -> throw rendererGoneError(request)
                     SolveOutcome.NOT_A_CHALLENGE, SolveOutcome.TIMEOUT -> Unit
                 }
             }
@@ -139,6 +154,12 @@ class CloudflareInterceptor(
         CloudflareBypassException(
             "Cloudflare wants a human check for ${request.url.host}; open the site in the WebView to pass it",
             interactive = true,
+        )
+
+    private fun rendererGoneError(request: Request): IOException =
+        CloudflareBypassException(
+            "WebView renderer terminated while checking ${request.url.host}; source probe can resume safely",
+            interactive = false,
         )
 
     private fun hasClearance(url: HttpUrl): Boolean =
@@ -177,16 +198,16 @@ class CloudflareInterceptor(
      * not actually a challenge page (e.g. a bare 403 from an image-only CDN).
      */
     /** Why the WebView solve stopped, when it did not produce a cookie. */
-    private enum class SolveOutcome { SOLVED, NOT_A_CHALLENGE, INTERACTIVE, TIMEOUT }
+    private enum class SolveOutcome { SOLVED, NOT_A_CHALLENGE, INTERACTIVE, RENDERER_GONE, TIMEOUT }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun solveClearance(request: Request): SolveOutcome {
-        // latch.countDown() happens-before await() returns, so plain vars written
-        // on the main thread are visible here afterward.
         val latch = CountDownLatch(1)
-        var webView: WebView? = null
-        var outcome = SolveOutcome.TIMEOUT
+        val webView = AtomicReference<WebView?>(null)
+        val outcome = AtomicReference(SolveOutcome.TIMEOUT)
+        val active = AtomicBoolean(true)
         var challengeFound = false
+        val interactive = AtomicBoolean(false)
         val rootUrl = request.url.newBuilder()
             .encodedPath("/")
             .query(null)
@@ -201,7 +222,7 @@ class CloudflareInterceptor(
 
         fun isBypassed(): Boolean = cookieManager.get(cookieUrl).any { it.name == "cf_clearance" }
         fun finish(result: SolveOutcome) {
-            outcome = result
+            outcome.set(result)
             latch.countDown()
         }
 
@@ -215,8 +236,13 @@ class CloudflareInterceptor(
             }
         }
         handler.post {
+            if (!active.get()) return@post
             val view = newWebView(userAgent)
-            webView = view
+            webView.set(view)
+            if (!active.get()) {
+                destroyOnMain(webView.getAndSet(null))
+                return@post
+            }
             // Cloudflare's challenge script posts a message the moment it decides
             // it needs the user (checkbox / Turnstile). The JS interface callback
             // runs on a binder thread; latch.countDown() publishes the write.
@@ -225,7 +251,11 @@ class CloudflareInterceptor(
                     @JavascriptInterface
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
-                        finish(SolveOutcome.INTERACTIVE)
+                        interactive.set(true)
+                        when (CloudflareInteractionMode.action()) {
+                            CloudflareInteractiveAction.FAIL_FAST -> finish(SolveOutcome.INTERACTIVE)
+                            CloudflareInteractiveAction.SHOW_BROWSER -> showInteractive(view, request.url.host)
+                        }
                     }
                 },
                 "kagari",
@@ -264,21 +294,46 @@ class CloudflareInterceptor(
                     }
                     view.evaluateJavascript(INTERACTIVE_LISTENER_JS, null)
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: RenderProcessGoneDetail,
+                ): Boolean {
+                    Log.e(
+                        TAG,
+                        "WebView renderer gone during Cloudflare solve; didCrash=${detail.didCrash()} host=${request.url.host}",
+                    )
+                    webView.compareAndSet(view, null)
+                    outcome.set(SolveOutcome.RENDERER_GONE)
+                    latch.countDown()
+                    destroyOnMain(view)
+                    // Android's contract: returning true means the app handled
+                    // renderer death. Returning false lets WebView terminate us.
+                    return true
+                }
             }
             view.loadUrl(rootUrl, mapOf("User-Agent" to userAgent))
             handler.postDelayed(poller, POLL_MS)
         }
+        // التحدي الصامت يأخذ مهلة قصيرة. إذا طلب Cloudflare إنسانًا، فالـWebView
+        // يظهر بالحجم الكامل ونمنح المستخدم وقتًا واقعيًّا لإكمال التحقق.
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
+        if (outcome.get() == SolveOutcome.TIMEOUT && interactive.get()) {
+            latch.await(INTERACTIVE_TIMEOUT_SEC - TIMEOUT_SEC, TimeUnit.SECONDS)
+        }
+        active.set(false)
         // Cookie may have landed between the last poll and the timeout.
-        if (outcome == SolveOutcome.TIMEOUT && isBypassed()) outcome = SolveOutcome.SOLVED
-        destroyOnMain(webView) { handler.removeCallbacks(poller) }
-        if (outcome == SolveOutcome.SOLVED) {
+        if (outcome.get() == SolveOutcome.TIMEOUT && isBypassed()) outcome.set(SolveOutcome.SOLVED)
+        if (outcome.get() == SolveOutcome.TIMEOUT && interactive.get()) outcome.set(SolveOutcome.INTERACTIVE)
+        destroyOnMain(webView.getAndSet(null)) { handler.removeCallbacks(poller) }
+        val result = outcome.get()
+        if (result == SolveOutcome.SOLVED) {
             CookieManager.getInstance().flush()
             Log.i(TAG, "Cloudflare clearance obtained for ${request.url.host}")
         } else {
-            Log.i(TAG, "Cloudflare solve for ${request.url.host} ended: $outcome")
+            Log.i(TAG, "Cloudflare solve for ${request.url.host} ended: $result")
         }
-        return outcome
+        return result
     }
 
     /**
@@ -290,11 +345,10 @@ class CloudflareInterceptor(
     private fun byteFetchResponse(request: Request): Response? {
         if (request.method != "GET") return null
 
-        // The JS interface callback runs on a binder thread; its latch.countDown()
-        // happens-before await() returns here, making the write visible.
         val latch = CountDownLatch(1)
-        var webView: WebView? = null
-        var dataUrl: String? = null
+        val webView = AtomicReference<WebView?>(null)
+        val dataUrl = AtomicReference<String?>(null)
+        val active = AtomicBoolean(true)
 
         val url = request.url.toString()
         val userAgent = request.header("User-Agent") ?: defaultUserAgentProvider()
@@ -302,13 +356,18 @@ class CloudflareInterceptor(
         Log.d(TAG, "Fetching via WebView $url")
 
         handler.post {
+            if (!active.get()) return@post
             val view = newWebView(userAgent)
-            webView = view
+            webView.set(view)
+            if (!active.get()) {
+                destroyOnMain(webView.getAndSet(null))
+                return@post
+            }
             view.addJavascriptInterface(
                 object {
                     @JavascriptInterface
                     fun onData(data: String) {
-                        dataUrl = data
+                        dataUrl.set(data)
                         latch.countDown()
                     }
 
@@ -324,6 +383,20 @@ class CloudflareInterceptor(
                 override fun onPageFinished(view: WebView, url: String) {
                     view.evaluateJavascript(BYTE_FETCH_JS, null)
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: RenderProcessGoneDetail,
+                ): Boolean {
+                    Log.e(
+                        TAG,
+                        "WebView renderer gone during byte fetch; didCrash=${detail.didCrash()} host=${request.url.host}",
+                    )
+                    webView.compareAndSet(view, null)
+                    latch.countDown()
+                    destroyOnMain(view)
+                    return true
+                }
             }
             val headers = mutableMapOf("User-Agent" to userAgent)
             if (!referer.isNullOrBlank()) headers["Referer"] = referer
@@ -331,9 +404,10 @@ class CloudflareInterceptor(
         }
 
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
-        destroyOnMain(webView)
+        active.set(false)
+        destroyOnMain(webView.getAndSet(null))
 
-        val data = dataUrl ?: return null
+        val data = dataUrl.get() ?: return null
         val comma = data.indexOf(',')
         if (comma <= 0) return null
         val meta = data.substring(0, comma)
@@ -394,6 +468,7 @@ class CloudflareInterceptor(
             databaseEnabled = true
             userAgentString = userAgent
         }
+        setMatchingUserAgentMetadata(view, userAgent)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
@@ -404,6 +479,57 @@ class CloudflareInterceptor(
             decor.addView(view)
         }
         return view
+    }
+
+    /** Make a human-solvable Turnstile visible instead of failing a hidden 1×1 browser. */
+    private fun showInteractive(view: WebView, host: String) {
+        handler.post {
+            view.alpha = 1f
+            view.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            view.setBackgroundColor(android.graphics.Color.WHITE)
+            view.bringToFront()
+            Toast.makeText(
+                context,
+                "أكمل تحقق Cloudflare لـ $host، وسيعود الفحص تلقائيًا",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    /**
+     * `settings.userAgentString` وحده غير كافٍ في Chromium الحديث: Sec-CH-UA
+     * يبقى معلنًا عن Android WebView. Cloudflare يرى التناقض ويحجب الطلب.
+     */
+    private fun setMatchingUserAgentMetadata(view: WebView, userAgent: String) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
+        val chrome = ChromeUserAgent.parse(userAgent) ?: return
+        try {
+            val current = WebSettingsCompat.getUserAgentMetadata(view.settings)
+            val brands = current.brandVersionList.map { item ->
+                val brand = when (item.brand) {
+                    "Android WebView" -> "Google Chrome"
+                    "Chromium" -> "Chromium"
+                    else -> return@map item
+                }
+                UserAgentMetadata.BrandVersion.Builder()
+                    .setBrand(brand)
+                    .setMajorVersion(chrome.major)
+                    .setFullVersion(chrome.full)
+                    .build()
+            }
+            WebSettingsCompat.setUserAgentMetadata(
+                view.settings,
+                UserAgentMetadata.Builder(current)
+                    .setBrandVersionList(brands)
+                    .setFullVersion(chrome.full)
+                    .build(),
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to align WebView user-agent metadata", t)
+        }
     }
 
     private fun destroyOnMain(view: WebView?, also: () -> Unit = {}) {
@@ -422,8 +548,10 @@ class CloudflareInterceptor(
     companion object {
         private const val TAG = "CloudflareInterceptor"
         private const val TIMEOUT_SEC = 20L
+        private const val INTERACTIVE_TIMEOUT_SEC = 120L
         private const val POLL_MS = 400L
         private const val RECENT_SOLVE_MS = 15_000L
+        private const val MAX_WEBVIEW_IMAGE_BYTES = 12 * 1024 * 1024
         private val ERROR_CODES = listOf(403, 503)
         private val SERVER_CHECK = listOf("cloudflare-nginx", "cloudflare")
         private val COOKIE_NAMES = listOf("cf_clearance")
@@ -448,11 +576,13 @@ class CloudflareInterceptor(
          * block page, and handing that back as a 200 would put an HTML error page
          * where the app expects an image.
          */
-        private const val BYTE_FETCH_JS =
+        private val BYTE_FETCH_JS =
             "fetch(location.href).then(function(r){" +
                 "if(!r.ok){ImgFetch.onError('http '+r.status);return null}" +
                 "return r.blob()})" +
-                ".then(function(b){if(!b)return;var f=new FileReader();" +
+                ".then(function(b){if(!b)return;" +
+                "if(b.size>$MAX_WEBVIEW_IMAGE_BYTES){ImgFetch.onError('too-large '+b.size);return;}" +
+                "var f=new FileReader();" +
                 "f.onload=function(){ImgFetch.onData(f.result)};" +
                 "f.onerror=function(){ImgFetch.onError('read')};" +
                 "f.readAsDataURL(b)}).catch(function(e){ImgFetch.onError(''+e)})"

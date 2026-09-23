@@ -1,0 +1,905 @@
+/*
+ * الملف الشخصي. بانرٌ حريري بلون الصورة، والصورة على حافته بحلقة من نفس
+ * اللون (--pf-tint). اللون الشخصي لا يتجاوز الحلقة ولمعة الرأس وشارة
+ * «يقرأ الآن»: الصفحة تبقى على سطوح التطبيق الداكنة.
+ */
+
+.v35 #profile {
+  position: relative;
+  padding-bottom: 40px;
+}
+.v35 #profileBody {
+  --pf-tint: var(--accent);
+  --pf-tint-deep: #3d2c8d;
+}
+.v35 .pf-top {
+  position: absolute;
+  z-index: 6;
+  inset-inline: 0;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: calc(var(--safe-top) + 6px) 8px 0;
+  pointer-events: none;
+}
+.v35 .pf-top > * {
+  pointer-events: auto;
+}
+.v35 .pf-glass {
+  background: rgba(8, 7, 12, 0.42);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fff;
+}
+
+/* ── البانر ── */
+.v35 .pf-banner {
+  position: relative;
+  height: calc(168px + var(--safe-top));
+  overflow: hidden;
+  background: #0b0a12;
+}
+.v35 .pf-silk,
+.v35 .pf-banner-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.v35 .pf-banner-img {
+  animation: v35-fade var(--dur-slow) var(--ease);
+}
+.v35 .pf-shade {
+  position: absolute;
+  inset: 0;
+  /* يذوب في الخلفية على مسافة طويلة: لا خطّ يفصل البانر عن الصفحة */
+  background: linear-gradient(
+    180deg,
+    rgba(8, 7, 12, 0) 0%,
+    rgba(8, 7, 12, 0.12) 30%,
+    rgba(8, 7, 12, 0.45) 55%,
+    rgba(8, 7, 12, 0.8) 78%,
+    var(--bg) 100%
+  );
+  pointer-events: none;
+}
+
+/* ── الهوية ── */
+.v35 .pf-id {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  padding: 0 var(--gutter);
+}
+.v35 .pf-idrow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -40px;
+}
+.v35 .pf-face {
+  position: relative;
+  flex: none;
+  width: 84px;
+  height: 84px;
+  padding: 2.5px;
+  border-radius: 99px;
+  background: conic-gradient(from 200deg, var(--pf-tint), var(--pf-tint-deep), var(--pf-tint));
+  box-shadow: 0 0 0 3.5px var(--bg), 0 10px 24px rgba(0, 0, 0, 0.45);
+  transition: background 0.4s var(--ease);
+}
+.v35 .pf-face-img {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 99px;
+  object-fit: cover;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.v35 .pf-initial {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.v35 .pf-dot {
+  position: absolute;
+  bottom: 3px;
+  inset-inline-end: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 99px;
+  box-shadow: 0 0 0 3px var(--bg);
+  background: var(--text-4);
+}
+.v35 .pf-dot--online {
+  background: var(--success);
+}
+.v35 .pf-dot--reading {
+  background: var(--success);
+}
+.v35 .pf-dot--idle {
+  background: var(--warning);
+}
+.v35 .pf-dot--offline {
+  display: none;
+}
+.v35 .pf-edit {
+  min-height: 38px;
+  margin-bottom: 4px;
+  padding: 0 16px;
+  gap: 8px;
+  font-size: var(--fs-meta);
+}
+.v35 .pf-name {
+  margin: 12px 0 0;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 800;
+  text-align: right;
+  unicode-bidi: plaintext;
+  overflow-wrap: anywhere;
+}
+.v35 .pf-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 4px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .pf-handle {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.v35 .pf-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.v35 .pf-live:empty {
+  display: none;
+}
+.v35 .pf-live--on,
+.v35 .pf-live--reading {
+  color: var(--success);
+}
+.v35 .pf-live--idle {
+  color: var(--warning);
+}
+.v35 .pf-live--on::before,
+.v35 .pf-live--reading::before,
+.v35 .pf-live--idle::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: currentColor;
+}
+.v35 .pf-bio {
+  margin: 12px 0 0;
+  font-size: var(--fs-body);
+  line-height: 1.8;
+  color: var(--text-1);
+  text-align: right;
+  unicode-bidi: plaintext;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.v35 .pf-bio-add {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-meta);
+}
+.v35 .pf-bio-add:active {
+  color: var(--text-1);
+}
+
+/* ── يقرأ الآن ── */
+.v35 .pf-now-host:empty {
+  display: none;
+}
+.v35 .pf-now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px 12px 10px 10px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--pf-tint) 14%, var(--surface-1)), var(--surface-1) 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-tint) 22%, transparent);
+  color: var(--text-1);
+  text-align: start;
+  animation: v35-fade var(--dur) var(--ease);
+}
+.v35 .pf-now:active {
+  transform: scale(0.99);
+}
+.v35 .pf-now-cover {
+  position: relative;
+  flex: none;
+  width: 44px;
+  aspect-ratio: 0.7;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .pf-now-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .pf-now-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.v35 .pf-now-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  font-weight: 650;
+  color: var(--success);
+}
+.v35 .pf-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: currentColor;
+  animation: pf-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pf-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.v35 .pf-now-title {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.v35 .pf-now-chapter {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+.v35 .pf-chev {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--text-4);
+}
+
+/* ── الأرقام: بطاقة واحدة بثلاث خانات متساوية ── */
+.v35 .pf-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 16px;
+  padding: 14px 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: inherit;
+  font: inherit;
+}
+.v35 .pf-stats:active {
+  background: var(--surface-2);
+}
+.v35 .pf-stat {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+.v35 .pf-stat + .pf-stat {
+  border-inline-start: 1px solid var(--line);
+}
+.v35 .pf-stat strong {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .pf-stat span {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.v35 .pf-stats--loading strong {
+  color: var(--text-4);
+}
+.v35 .pf-stat-value {
+  font-size: var(--fs-body) !important;
+  font-weight: 700;
+  color: var(--text-1) !important;
+}
+
+/* ── الأقسام ── */
+.v35 .pf-body {
+  padding-top: 4px;
+}
+.v35 .pf-section {
+  padding-top: 28px;
+}
+.v35 .pf-meta {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+/* ── أفضل 5: الأول وحده، والأربعة صفٌّ واحد بلا تمرير ── */
+.v35 .pf-top5 {
+  display: grid;
+  gap: 14px;
+  padding: 0 var(--gutter);
+}
+.v35 .pf-first {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: inherit;
+  text-align: start;
+}
+.v35 .pf-first:active {
+  background: var(--surface-2);
+}
+.v35 .pf-first-frame {
+  position: relative;
+  flex: none;
+  display: block;
+  width: 84px;
+  aspect-ratio: 0.7;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .pf-first-frame .poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.v35 .pf-first-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .pf-first-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.v35 .pf-first-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.35;
+  text-align: right;
+  unicode-bidi: plaintext;
+}
+.v35 .pf-first-meta {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+.v35 .pf-rest {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.v35 .pf-card {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: start;
+}
+.v35 .pf-card-frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 0.7;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .pf-card-frame .poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.v35 .pf-card-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .pf-card:active .pf-card-frame {
+  transform: scale(0.97);
+}
+.v35 .pf-card-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-2);
+  text-align: right;
+  unicode-bidi: plaintext;
+}
+.v35 .pf-rank {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  inset-inline-start: 6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 99px;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 7, 12, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.v35 .pf-rank--gold {
+  background: var(--gold);
+  color: #2a1a00;
+  box-shadow: none;
+}
+.v35 .pf-skel {
+  background: var(--surface-2);
+  animation: pf-skel 1.4s ease-in-out infinite;
+}
+@keyframes pf-skel {
+  50% {
+    opacity: 0.55;
+  }
+}
+.v35 .pf-strip {
+  grid-auto-columns: calc((100% - var(--gutter) * 2 - 20px) / 3.2);
+}
+.v35 .pf-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 var(--gutter);
+  padding: 16px;
+  border-radius: var(--r-lg);
+  border: 1.5px dashed var(--line-strong);
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+}
+.v35 .pf-empty .icon {
+  flex: none;
+  color: var(--gold);
+}
+
+/* ── السجل ── */
+.v35 .pf-log {
+  margin: 0 var(--gutter);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .pf-log-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: start;
+}
+.v35 .pf-log-row:active {
+  background: var(--surface-2);
+}
+.v35 .pf-log-row + .pf-log-row::before,
+.v35 .pf-log-more::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline: 66px 0;
+  height: 1px;
+  background: var(--line);
+}
+.v35 .pf-log-cover {
+  position: relative;
+  flex: none;
+  width: 42px;
+  aspect-ratio: 0.7;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .pf-log-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .pf-log-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.v35 .pf-log-title {
+  font-size: var(--fs-body);
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.v35 .pf-log-meta {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+.v35 .pf-log-when {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--text-4);
+}
+.v35 .pf-log-more {
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+.v35 .pf-log-more::before {
+  inset-inline: 0;
+}
+
+/* ───────────────────────── تعديل الملف ─────────────────────────
+ * نفس هيكل الملف: البانر ثم الصورة فوقه ثم الاسم والنبذة مكانهما. كل صورة
+ * عليها شارة كاميرا صغيرة واضحة، والحقول بلا صناديق ثقيلة — خطّ سفلي يضيء
+ * عند الكتابة.
+ */
+.v35.pe {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font, 'Vantara Sans', system-ui, sans-serif);
+  animation: pe-in var(--dur) var(--ease);
+}
+.v35.pe--out {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
+}
+@keyframes pe-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35.pe,
+  .v35.pe--out {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
+.v35 .pe-top,
+.v35 .pe-crop-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: calc(var(--safe-top) + 4px) 8px 4px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.v35 .pe-top strong,
+.v35 .pe-crop-top strong {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 750;
+}
+.v35 .pe-save,
+.v35 .pe-crop-use {
+  min-height: 40px;
+  padding: 0 18px;
+}
+.v35 .pe-save:disabled {
+  background: var(--surface-3);
+  color: var(--text-4);
+  box-shadow: none;
+}
+.v35 .pe-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: calc(var(--safe-bottom) + 40vh);
+}
+
+.v35 .pe-banner {
+  position: relative;
+  height: 168px;
+  overflow: hidden;
+  background: var(--surface-1);
+  cursor: pointer;
+}
+.v35 .pe-banner-img {
+  position: absolute;
+  inset: 0;
+  background: center / cover no-repeat;
+}
+.v35 .pe-banner-img--empty {
+  background: radial-gradient(120% 90% at 80% 0%, rgba(143, 92, 255, 0.28), transparent 60%),
+    radial-gradient(90% 90% at 10% 100%, rgba(95, 212, 154, 0.08), transparent 60%), var(--surface-1);
+}
+.v35 .pe-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 45%, rgba(8, 7, 12, 0.72));
+  pointer-events: none;
+}
+.v35 .pe-cam {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 99px;
+  background: rgba(8, 7, 12, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.v35 .pe-cam--banner {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  inset-inline-end: 12px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+.v35 .pe-banner:active .pe-cam--banner,
+.v35 .pe-face:active .pe-cam--face {
+  background: var(--accent);
+}
+
+.v35 .pe-id {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 18px;
+  margin-top: -48px;
+  padding: 0 var(--gutter);
+}
+.v35 .pe-face {
+  position: relative;
+  justify-self: start;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 4px var(--bg), 0 14px 30px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+.v35 .pe-face-img,
+.v35 .pe-face-img img {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 99px;
+  overflow: hidden;
+  object-fit: cover;
+}
+.v35 .pe-initial {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.v35 .pe-cam--face {
+  position: absolute;
+  bottom: 0;
+  inset-inline-end: -2px;
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+  box-shadow: 0 0 0 3px var(--bg);
+  background: var(--surface-3);
+}
+.v35 .pe-field {
+  display: grid;
+  gap: 6px;
+}
+.v35 .pe-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+  color: var(--text-3);
+}
+.v35 .pe-label em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .pe-label em.pe-near {
+  color: var(--warning);
+}
+.v35 .pe-name,
+.v35 .pe-bio {
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1.5px solid var(--line-strong);
+  border-radius: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: right;
+  unicode-bidi: plaintext;
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+.v35 .pe-name {
+  font-size: 24px;
+  font-weight: 800;
+}
+.v35 .pe-bio {
+  font-size: var(--fs-body);
+  line-height: 1.8;
+  resize: none;
+}
+.v35 .pe-bio::placeholder {
+  color: var(--text-4);
+}
+.v35 .pe-name:focus,
+.v35 .pe-bio:focus {
+  border-bottom-color: var(--accent);
+}
+.v35 .pe-name[aria-invalid='true'] {
+  border-bottom-color: var(--danger);
+}
+.v35 .pe-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+}
+
+/* القصّ: الصورة تتحرك تحت إطارٍ ثابت، وما خارجه معتم */
+.v35.pe-crop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: var(--text-1);
+  font-family: var(--font, 'Vantara Sans', system-ui, sans-serif);
+}
+.v35 .pe-crop-top {
+  background: #000;
+  border-bottom: 0;
+}
+.v35 .pe-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.v35 .pe-stage img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  transform-origin: center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.v35 .pe-mask {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--frame-w, 0);
+  height: var(--frame-h, 0);
+  transform: translate(-50%, -50%);
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.62), inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+.v35 .pe-mask--round {
+  border-radius: 50%;
+}
+.v35 .pe-zoom {
+  /* التكبير مقدار لا اتجاه قراءة: الصغير يسار والكبير يمين كما في كل منزلق */
+  direction: ltr;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px 4px;
+  color: var(--text-3);
+}
+.v35 .pe-zoom input {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 28px;
+}
+.v35 .pe-hint {
+  margin: 0;
+  padding: 4px 24px calc(var(--safe-bottom) + 20px);
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+  text-align: center;
+}
+.v35 .pe-zoom > svg:first-child {
+  width: 16px;
+  height: 16px;
+}
+.v35 .pe-zoom > svg:last-child {
+  width: 26px;
+  height: 26px;
+}
+.v35 .pe-error.pe-note {
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}

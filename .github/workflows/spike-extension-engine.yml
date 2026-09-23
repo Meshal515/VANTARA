@@ -25,7 +25,29 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    env:
+      # لقطة ثابتة حديثة: تجدد الروابط المنشورة بدل الاعتماد على أصول إصدار محذوفة.
+      KEIYOUSHI_INDEX_COMMIT: aefdaeb21ab7e71e6b2c58f2262b2bcc1c9c3e12
+      # Owner-approved diagnostic batch: 15 Arabic SAFE and Arabic MangaDex.
+      # Dedicated NSFW packages are excluded from the delivered spike.
+      VANTARA_SOURCE_PACKAGES: >-
+        eu.kanade.tachiyomi.extension.ar.mangalek,
+        eu.kanade.tachiyomi.extension.ar.mangaspark,
+        eu.kanade.tachiyomi.extension.ar.azora,
+        eu.kanade.tachiyomi.extension.ar.mangaswat,
+        eu.kanade.tachiyomi.extension.ar.teamx,
+        eu.kanade.tachiyomi.extension.ar.manga3asq,
+        eu.kanade.tachiyomi.extension.ar.ariatoon,
+        eu.kanade.tachiyomi.extension.ar.comicverse,
+        eu.kanade.tachiyomi.extension.ar.dilar,
+        eu.kanade.tachiyomi.extension.ar.mangadar,
+        eu.kanade.tachiyomi.extension.ar.hijala,
+        eu.kanade.tachiyomi.extension.ar.mangastarz,
+        eu.kanade.tachiyomi.extension.ar.hizomanga,
+        eu.kanade.tachiyomi.extension.ar.mangatales,
+        eu.kanade.tachiyomi.extension.ar.mangatime,
+        eu.kanade.tachiyomi.extension.all.mangadex
     defaults:
       run:
         working-directory: spike/extension-engine
@@ -49,12 +71,40 @@ jobs:
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" || true
 
+      - name: Run source generator policy tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
+      - name: Generate pinned Arabic source snapshot
+        run: |
+          set -euo pipefail
+          python3 tools/generate_arabic_sources.py
+          python3 - <<'PY'
+          import json
+          p = json.load(open('build/arabic-source-snapshot.json', encoding='utf-8'))
+          print('index:', p['indexCommit'])
+          print('counts:', p['counts'])
+          print('packages:', len(p['packages']))
+          assert len(p['packages']) == 16, p['packages']
+          assert p['counts'] == {'SAFE': 15, 'MIXED': 1, 'NSFW': 0, 'BLOCKED': 0}, p['counts']
+          by_warning = {}
+          for package in p['packages']:
+              by_warning.setdefault(package['warning'], set()).add(package['packageName'])
+          assert by_warning['MIXED'] == {
+              'eu.kanade.tachiyomi.extension.all.mangadex',
+          }, by_warning['MIXED']
+          assert 'NSFW' not in by_warning, by_warning
+          assert all(package['arabicSourceIds'] for package in p['packages'])
+          PY
+
       - uses: gradle/actions/setup-gradle@v4
 
       # لا نشحن gradle-wrapper.jar في المستودع: ملف ثنائي في Git يُراجع
       # بالثقة لا بالقراءة. الـrunner يولّده من نسخة Gradle المثبّتة.
       - name: Generate the Gradle wrapper
         run: gradle wrapper --gradle-version 8.11.1 --no-daemon
+
+      - name: Run spike unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Build the debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
@@ -79,7 +129,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vantara-spike-engine-debug
-          path: ${{ steps.apk.outputs.path }}
+          name: vantara-spike-safe-sixteen-debug
+          path: |
+            ${{ steps.apk.outputs.path }}
+            spike/extension-engine/build/arabic-source-snapshot.json
           if-no-files-found: error
           retention-days: 14

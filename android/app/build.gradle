@@ -138,6 +138,9 @@ dependencies {
     // `ConfigurableSource.setupPreferenceScreen` يأخذ PreferenceScreen في
     // توقيعه، فغيابه NoClassDefFoundError عند تحميل الصنف لا عند استعماله
     implementation "androidx.preference:preference-ktx:1.2.1"
+    // اعتراض Cloudflare المشترك مع الـspike يطابق بصمة Chrome (UserAgentMetadata)
+    // عبر WebSettingsCompat؛ نفس الإصدار الذي مرّت به المصادر الست عشرة
+    implementation "androidx.webkit:webkit:1.17.0"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
 
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"

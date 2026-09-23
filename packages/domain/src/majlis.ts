@@ -1,0 +1,70 @@
+/**
+ * المجلس: من يرى ما يُرسَل بين الأصدقاء.
+ *
+ * لا رسائل خاصة في VANTARA. الفريم أو التوصية لشخص تصله هو (إشعارًا)، وتظهر
+ * في المجلس لبقية الأصدقاء: «مشعل أرسل إلى عبد الرحمن». والمرسل يختار من
+ * يُخفيها عنه، فلا يراها المُخفى عنه أبدًا — ولا حتى في سجل الفروقات، لأن
+ * الإخفاء يُطبَّق عند السحب لا في الواجهة.
+ *
+ * و«الجميع» يعني كل الأصدقاء إلا المرسل ومن أُخفيت عنه.
+ */
+
+export type MajlisAudience = {
+  /** من يصله الإشعار. */
+  recipients: string[];
+  /** من لا يرى الإرسال إطلاقًا. مرتّب وبلا تكرار، ولا يضم المرسل ولا المستلم. */
+  hidden: string[];
+};
+
+/**
+ * جمهور إرسالٍ في المجلس، أو `null` إن لم يكن له مستلم صالح.
+ *
+ * المستلم لا يُخفى عنه ما أُرسل إليه، والمرسل لا يُخفى عنه ما أرسله: قائمة
+ * إخفاء تضمّهما تُصحَّح بصمت لا تُرفض. وأي معرّف ليس صديقًا يسقط.
+ */
+export function majlisAudience(input: {
+  accounts: readonly string[];
+  actorId: string;
+  toId?: string | null;
+  hiddenFrom?: unknown;
+}): MajlisAudience | null {
+  const accounts = new Set(input.accounts);
+  const to = input.toId || null;
+  if (to && (to === input.actorId || !accounts.has(to))) return null;
+
+  const raw = Array.isArray(input.hiddenFrom) ? input.hiddenFrom : [];
+  const hidden = [
+    ...new Set(
+      raw.filter(
+        (id): id is string => typeof id === 'string' && accounts.has(id) && id !== input.actorId && id !== to,
+      ),
+    ),
+  ].sort();
+
+  const recipients = to
+    ? [to]
+    : [...accounts].filter((id) => id !== input.actorId && !hidden.includes(id)).sort();
+  if (recipients.length === 0) return null;
+  return { recipients, hidden };
+}
+
+/** شكل المعرّف داخل `hidden_json` كما يبحث عنه SQL (`instr`). */
+export function hiddenToken(userId: string): string {
+  return JSON.stringify(userId);
+}
+
+/**
+ * تفاعلات المجلس: رموز محددة لا نص حر. القائمة مغلقة فلا يتحول التفاعل إلى
+ * قناة رسائل، ولا تصل رموز لا تعرف الواجهة رسمها.
+ */
+export const MAJLIS_REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'] as const;
+export type MajlisReaction = (typeof MAJLIS_REACTIONS)[number];
+export const MAJLIS_TARGETS = ['frame', 'rec', 'activity'] as const;
+export type MajlisTarget = (typeof MAJLIS_TARGETS)[number];
+
+export function isMajlisReaction(value: unknown): value is MajlisReaction {
+  return typeof value === 'string' && (MAJLIS_REACTIONS as readonly string[]).includes(value);
+}
+export function isMajlisTarget(value: unknown): value is MajlisTarget {
+  return typeof value === 'string' && (MAJLIS_TARGETS as readonly string[]).includes(value);
+}
