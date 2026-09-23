@@ -66,6 +66,8 @@ const KEYS = {
   library: (row) => `${row.user_id}/${row.series_ref}`,
   progress: (row) => `${row.user_id}/${row.chapter_key}`,
   chapter_reads: (row) => `${row.user_id}/${row.chapter_key}`,
+  // عين الفصل: علامة المالك وحده، آخر كتابة تفوز
+  chapter_marks: (row) => `${row.user_id}/${row.chapter_key}`,
   usage_daily: (row) => `${row.user_id}/${row.day}`,
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
   ratings: (row) => `${row.user_id}/${row.series_ref}`,

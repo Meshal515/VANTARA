@@ -730,3 +730,32 @@ describe('frame.send', () => {
     expect(out.find((s) => s.sql.includes('INSERT INTO frames'))!.sql).toMatch(/ON CONFLICT \(id\) DO NOTHING/);
   });
 });
+
+describe('chapter.mark', () => {
+  it('marks one chapter read for its owner, last write wins', () => {
+    const out = translate('chapter.mark', { seriesRef: 'ext:ون بيس', chapterKey: 'ext:ون بيس#n:17', read: true });
+    expect(out).toHaveLength(1);
+    const [stmt] = out;
+    expect(stmt?.sql).toMatch(/INSERT INTO chapter_marks/);
+    expect(stmt?.sql).toMatch(/ON CONFLICT \(user_id, chapter_key\) DO UPDATE/);
+    expect(stmt?.values.slice(0, 4)).toEqual(['dahmi', 'ext:ون بيس#n:17', 'ext:ون بيس', 1]);
+  });
+
+  it('unmarking is a mark with read = 0, never a delete of real reads', () => {
+    const [stmt] = translate('chapter.mark', { seriesRef: 's', chapterKey: 's#n:1', read: false });
+    expect(stmt?.values[3]).toBe(0);
+    expect(stmt?.sql).not.toMatch(/chapter_reads/);
+  });
+
+  it('never announces anything to friends', () => {
+    // علامة شخصية: لا نشاط ولا إشعار
+    const out = translate('chapter.mark', { seriesRef: 's', chapterKey: 's#n:1', read: true });
+    expect(out.some((s) => /activity|notifications/.test(s.sql))).toBe(false);
+  });
+
+  it('a mark without a chapter or a boolean is refused', () => {
+    expect(translate('chapter.mark', { seriesRef: 's', read: true })).toEqual([]);
+    expect(translate('chapter.mark', { chapterKey: 'k', read: true })).toEqual([]);
+    expect(translate('chapter.mark', { seriesRef: 's', chapterKey: 'k', read: 'yes' })).toEqual([]);
+  });
+});

@@ -239,6 +239,7 @@ const DELTA_TABLES = [
   // `owner_synced` يسافر مع الصف: العميل يجب أن يعرف أن هذه القيمة لم يرها
   // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
   ['progress', 'user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced'],
+  ['chapter_marks', 'user_id, chapter_key, series_ref, read, updated_at, rev'],
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
@@ -284,6 +285,7 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
     switch (table) {
       case 'library':
       case 'progress':
+      case 'chapter_marks':
       case 'collections':
       case 'settings':
       case 'notifications':
@@ -747,6 +749,27 @@ export function statementsFor(
           now,
           rev,
         }),
+      ];
+    }
+
+    // عين الفصل: علامة شخصية تُلغى بلمسة. لا تمسّ chapter_reads (إحصاء
+    // القراءة الكاملة) ولا تُعلن شيئًا للأصدقاء.
+    case 'chapter.mark': {
+      const chapterKey = asString(p['chapterKey'], 200);
+      const seriesRef = asString(p['seriesRef'], 200);
+      const read = p['read'];
+      if (!chapterKey || !seriesRef || typeof read !== 'boolean') return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO chapter_marks (user_id, chapter_key, series_ref, read, updated_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, chapter_key) DO UPDATE SET
+               read = excluded.read,
+               updated_at = excluded.updated_at,
+               rev = excluded.rev`,
+          )
+          .bind(userId, chapterKey, seriesRef, read ? 1 : 0, now, rev),
       ];
     }
 

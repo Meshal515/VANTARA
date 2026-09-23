@@ -135,6 +135,7 @@ export type OpKind =
   | 'progress.set'
   | 'progress.confirm'
   | 'chapter.complete'
+  | 'chapter.mark'
   | 'usage.add'
   | 'profile.patch'
   | 'library.add'

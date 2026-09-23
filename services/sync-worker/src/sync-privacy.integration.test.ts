@@ -263,3 +263,16 @@ describe('frame privacy', () => {
     expect(ids(changes.frames, 'id')).toEqual(['from-viewer', 'to-viewer']);
   });
 });
+
+describe('chapter mark privacy', () => {
+  it('a reader sees only their own chapter marks', async () => {
+    const { env, db } = testEnv();
+    const insert = db.prepare(
+      `INSERT INTO chapter_marks (user_id, chapter_key, series_ref, read, updated_at, rev) VALUES (?, ?, 's', 1, ?, ?)`,
+    );
+    insert.run(VIEWER, 's#n:1', 20, 20);
+    insert.run(OTHER, 's#n:2', 21, 21);
+    const changes = await pull(env);
+    expect(ids(changes.chapter_marks, 'chapter_key')).toEqual(['s#n:1']);
+  });
+});

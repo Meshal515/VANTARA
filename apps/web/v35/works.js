@@ -1,0 +1,130 @@
+/**
+ * أعمال مصادرنا بشكل v35.
+ *
+ * واجهة v35 كُتبت على `Media` من AniList. هنا المصدر محرّك الإضافات: الكتالوج
+ * يُسأل من كل المصادر معًا ويُدمج العمل الواحد عبرها (`lib/catalog.js`)، ثم
+ * يُبنى نفس الشكل الذي تقرؤه البطاقات والبانر وصفحة العمل.
+ *
+ * ولا يُخترع ما لم يقله المصدر: لا تقييم ولا شعبية، فتختفي من البطاقة كما
+ * تختفي في v35 حين تغيب.
+ */
+
+import engine from '../lib/extension-engine.js';
+import { createWorkIndex, gather, mergeChapters } from '../lib/catalog.js';
+
+/** حالات `SManga` في tachiyomi إلى حالات v35. */
+export const STATUS_BY_SMANGA = {
+  1: 'RELEASING',
+  2: 'FINISHED',
+  3: 'FINISHED',
+  4: 'FINISHED',
+  5: 'CANCELLED',
+  6: 'HIATUS',
+};
+
+/** مرجع العمل في المزامنة: ثابت لنفس العنوان المطبَّع، وموسوم بمصدره. */
+export function seriesRefOf(work) {
+  return `ext:${work.key}`;
+}
+
+export function toV35Work(work) {
+  const cover = work.thumbnailUrl ?? null;
+  return {
+    id: seriesRefOf(work),
+    title: { english: work.title, romaji: null, native: null },
+    synonyms: [],
+    status: null,
+    format: null,
+    countryOfOrigin: null,
+    startDate: { year: null },
+    chapters: null,
+    volumes: null,
+    genres: [],
+    averageScore: null,
+    popularity: null,
+    coverImage: { extraLarge: cover, large: cover, medium: cover, color: null },
+    bannerImage: cover,
+    description: undefined,
+    staff: { edges: [] },
+    _work: work,
+  };
+}
+
+export function detailFields(manga) {
+  const genres = String(manga?.genre ?? '')
+    .split(',')
+    .map((g) => g.trim())
+    .filter(Boolean);
+  const edges = [];
+  if (manga?.author) edges.push({ role: 'Story', node: { name: { full: manga.author } } });
+  if (manga?.artist) edges.push({ role: 'Art', node: { name: { full: manga.artist } } });
+  return {
+    description: manga?.description ?? '',
+    genres,
+    status: STATUS_BY_SMANGA[manga?.status] ?? null,
+    staff: { edges },
+  };
+}
+
+// ───────────────────────── المحرّك ─────────────────────────
+
+let sourcesPromise = null;
+function sources() {
+  sourcesPromise ??= engine.sources().catch((error) => {
+    sourcesPromise = null;
+    throw error;
+  });
+  return sourcesPromise;
+}
+
+export const available = () => engine.isAvailable();
+
+/**
+ * صفحة من كل المصادر معًا، مدموجة أعمالًا.
+ *
+ * `kind`: `catalogue` (الكتالوج كاملًا)، `popular`، `latest`، أو بحث بنص.
+ * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
+ */
+export async function browse({ kind = 'catalogue', page = 1, query = '' } = {}) {
+  const list = await sources();
+  const { ok } = await gather(list, (source) =>
+    query
+      ? engine.search(source.id, query, page)
+      : kind === 'popular'
+        ? engine.popular(source.id, page)
+        : kind === 'latest'
+          ? engine.latest(source.id, page)
+          : engine.catalogue(source.id, page),
+  );
+  const index = createWorkIndex();
+  let hasNextPage = false;
+  for (const { source, value } of ok) {
+    hasNextPage ||= Boolean(value?.hasNextPage);
+    for (const manga of value?.mangas ?? []) index.add({ sourceId: source.id, label: source.label, manga });
+  }
+  return { items: index.list().map(toV35Work), hasNextPage, page };
+}
+
+/** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
+export async function detail(v35work) {
+  const work = v35work._work;
+  const [primary, ...rest] = work.editions;
+  const { ok } = await gather(work.editions, async (edition) => {
+    if (edition === primary) {
+      const out = await engine.series(edition.sourceId, edition.manga);
+      return { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters, detail: out.manga };
+    }
+    return { ...edition, chapters: await engine.chapters(edition.sourceId, edition.manga) };
+  });
+  const values = ok.map((r) => r.value);
+  const main = values.find((v) => v.detail) ?? null;
+  const chapters = mergeChapters(values);
+  return {
+    ...v35work,
+    ...(main ? detailFields(main.detail) : {}),
+    chapters: chapters.length || null,
+    _chapters: chapters,
+    _sources: values.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _failed: rest.length + 1 - values.length,
+  };
+}
