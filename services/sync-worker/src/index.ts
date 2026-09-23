@@ -23,6 +23,8 @@ import {
   type DeltaPage,
   notificationId,
   notificationTargets,
+  majlisAudience,
+  hiddenToken,
   isRecommendationState,
   isRecommendationIntent,
   socialLinkFor,
@@ -234,7 +236,7 @@ const DELTA_TABLES = [
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [
     'frames',
-    'id, from_id, to_id, source_id, series_title, chapter_label, cover_url, work_json, chapter_json, pages_json, message, created_at, rev',
+    'id, from_id, to_id, source_id, series_title, chapter_label, cover_url, work_json, chapter_json, pages_json, message, created_at, rev, audience, hidden_json, broadcast',
   ],
   // `owner_synced` يسافر مع الصف: العميل يجب أن يعرف أن هذه القيمة لم يرها
   // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
@@ -249,7 +251,7 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
@@ -298,16 +300,22 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
           values: [userId, userId],
         };
 
-      // الفريم بين اثنين فقط: لا «للجميع»، والثالث لا يرى حتى وجوده.
+      // المجلس: المرسل والمستلم دائمًا، وبقية الأصدقاء إن كان الإرسال
+      // للمجلس ولم يُخفَ عنهم. والفريم القديم (PRIVATE) يبقى بين اثنين.
       case 'frames':
-        return { sql: ' AND (from_id = ? OR to_id = ?)', values: [userId, userId] };
+        return {
+          sql: " AND (from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0))",
+          values: [userId, userId, hiddenToken(userId)],
+        };
 
-      // التوصية الموجّهة لا تخص الصديق الثالث. broadcast (to_id IS NULL)
-      // اجتماعية للجميع، والمرسل يرى دائمًا ما أرسله.
+      // التوصية: البثّ القديم للجميع كما كان، والموجّهة القديمة خاصة، والجديدة
+      // للمجلس إلا من أُخفيت عنه.
       case 'recommendations':
         return {
-          sql: ' AND (from_id = ? OR to_id IS NULL OR to_id = ?)',
-          values: [userId, userId],
+          sql:
+            " AND (from_id = ? OR to_id = ?" +
+            " OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0))",
+          values: [userId, userId, hiddenToken(userId)],
         };
 
       // النشاط الموجّه (رد/تفاعل/توصية لشخص) للفاعل والهدف فقط.
@@ -1093,12 +1101,9 @@ export function statementsFor(
       const seriesRef = asString(p['seriesRef'], 200);
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
-      const recipients = notificationTargets({
-        accounts: ctx.accounts,
-        actorId: userId,
-        to: toId,
-      });
-      if (recipients.length === 0) return null;
+      const audience = majlisAudience({ accounts: ctx.accounts, actorId: userId, toId, hiddenFrom: p['hiddenFrom'] });
+      if (!audience) return null;
+      const { recipients, hidden } = audience;
       const link = socialLinkFor({ kind: 'recommendation', seriesRef });
       const statements: D1PreparedStatement[] = [
         ...workStatements(db, {
@@ -1111,8 +1116,9 @@ export function statementsFor(
         db
           .prepare(
             `INSERT INTO recommendations
-               (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?)
+               (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev,
+                audience, hidden_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
@@ -1125,6 +1131,7 @@ export function statementsFor(
             asString(p['message'], 500),
             now,
             rev,
+            JSON.stringify(hidden),
           ),
       ];
 
@@ -1141,8 +1148,10 @@ export function statementsFor(
         );
       }
 
+      // سجل النشاط لا يعرف الإخفاء: بثٌّ أُخفي عن أحد لا يُعلَن فيه، والمجلس
+      // يقرأ التوصية نفسها بإخفائها
       statements.push(
-        ...socialActivityStatements(db, {
+        ...(hidden.length && !toId ? [] : socialActivityStatements(db, {
           opId: op.opId,
           actorId: userId,
           verb: 'RECOMMENDATION',
@@ -1153,7 +1162,7 @@ export function statementsFor(
           payload: { message: asString(p['message'], 500) },
           now,
           rev,
-        }),
+        })),
         ...notificationStatements(db, {
           opId: op.opId,
           kind: 'RECOMMENDATION',
@@ -1172,14 +1181,16 @@ export function statementsFor(
     // «فريم»: صفحات من فصل لصديق واحد. مراجع لا صور — المستلم يجلبها من
     // المصدر بمحرّكه. لا «للجميع» هنا بخلاف التوصية: الفريم لقطةٌ لشخص.
     case 'frame.send': {
+      // `toId` غائب = الجميع. والفريم يظهر في المجلس إلا لمن أُخفي عنه
       const toId = asString(p['toId'], 80);
       const sourceId = asString(p['sourceId'], 200);
       const work = frameWork(p['work']);
       const chapter = frameChapter(p['chapter']);
       const pages = normalizeFramePages(p['pages']);
-      if (!toId || !sourceId || !work || !chapter || !pages) return null;
-      const recipients = notificationTargets({ accounts: ctx.accounts, actorId: userId, to: toId });
-      if (recipients.length !== 1) return null;
+      if (!sourceId || !work || !chapter || !pages) return null;
+      const audience = majlisAudience({ accounts: ctx.accounts, actorId: userId, toId, hiddenFrom: p['hiddenFrom'] });
+      if (!audience) return null;
+      const { recipients, hidden } = audience;
       const link = frameLinkFor(op.opId);
       const message = asString(p['message'], 500);
       return [
@@ -1187,14 +1198,15 @@ export function statementsFor(
           .prepare(
             `INSERT INTO frames
                (id, from_id, to_id, source_id, series_title, chapter_label, cover_url,
-                work_json, chapter_json, pages_json, message, created_at, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                work_json, chapter_json, pages_json, message, created_at, rev, audience, hidden_json, broadcast)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MAJLIS', ?, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
             op.opId,
             userId,
-            toId,
+            // البثّ: `to_id` هو المرسل (القيد NOT NULL باقٍ)، و`broadcast` يقول «للجميع»
+            toId ?? userId,
             sourceId,
             work.title,
             chapter.name,
@@ -1205,6 +1217,8 @@ export function statementsFor(
             message,
             now,
             rev,
+            JSON.stringify(hidden),
+            toId ? 0 : 1,
           ),
         ...notificationStatements(db, {
           opId: op.opId,

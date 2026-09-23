@@ -16,6 +16,7 @@ import { glyph } from './icons.js';
 import { available, browse, detail, editionRows, seriesRefOf } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { countLabel } from './plural.js';
+import { frameIdFromLink } from '../lib/frame.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -906,7 +907,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (state.current && state.nextRow) openChapter(state.current, state.nextRow);
   }
   function openChapter(w, row) {
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows: w._chapters, row });
+    // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
+    const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row });
   }
 
   // ── المكتبة والتقييم (في حسابك) ──
@@ -1005,14 +1008,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
           toggleLaterCurrent();
         }, { pressed: !!e?.later }),
       );
-      if (deps.friends) {
-        body.append(
-          sheetItem('send', 'رشّحه لصديق', () => {
-            closeSheet();
-            openRecommend(w);
-          }),
-        );
-      }
       if (deps.report) {
         body.append(
           sheetItem('flag', 'بلّغ عن مشكلة في العمل', () => {
@@ -1035,34 +1030,116 @@ export function mountV35(deps, { page = 'home' } = {}) {
     s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
     return s;
   }
-  function openRecommend(w) {
+  /**
+   * مشاركة العمل: من؟ ثم رسالة.
+   *
+   * الخطوة الأولى وجوه أصدقائك و«الجميع»، والثانية غلاف العمل ورسالتك ومن
+   * تُخفيها عنه في المجلس. الرجوع خطوة لا يضيّع ما كتبت.
+   */
+  function openShare(w) {
     const friends = deps.friends?.() ?? [];
-    openSheet((body) => {
-      body.append(el('h3', null, 'رشّحه لـ'));
-      const note = el('textarea', 'search-input');
-      note.rows = 2;
-      note.maxLength = 300;
-      note.placeholder = 'كلمة معه (اختياري)';
-      note.style.cssText = 'width:100%;padding:12px 14px;margin:10px 0 6px;min-height:0;resize:none';
-      body.append(note);
-      if (!friends.length) body.append(el('p', null, 'ما عندك أصدقاء بعد.'));
-      for (const f of friends) {
-        const b = el('button', 'sheet-item');
+    const draft = { message: '' };
+    const pickStep = (body) => {
+      const head = el('div', 'share-head');
+      const title = el('h3', null, 'شارك العمل');
+      head.append(title);
+      const name = el('p', null, titleOf(w));
+      name.dir = 'auto';
+      head.append(name);
+      body.append(head);
+      const grid = el('div', 'share-grid');
+      const target = (person, onPick) => {
+        const b = el('button', 'share-person');
         b.type = 'button';
-        b.append(avatarNode(f, 36), el('span', null, f.displayName));
-        b.onclick = () => {
-          sync.enqueue('recommendation.send', {
-            toId: f.userId,
-            seriesRef: String(w.id),
-            seriesTitle: titleOf(w),
-            message: note.value.trim() || null,
-          });
-          closeSheet();
-          toast(`انرسل لـ ${f.displayName}`);
-        };
-        body.append(b);
+        b.append(person.everyone ? everyoneFace() : avatarNode(person, 58), el('span', null, person.displayName));
+        b.onclick = onPick;
+        return b;
+      };
+      grid.append(target({ displayName: 'الجميع', everyone: true }, () => composeStep(null)));
+      for (const f of friends) grid.append(target(f, () => composeStep(f)));
+      body.append(grid);
+      if (!friends.length) body.append(el('p', null, 'ما عندك أصدقاء بعد.'));
+    };
+    const composeStep = (person) => {
+      const body = q('sheetBody');
+      body.innerHTML = '<div class="sheet-handle"></div>';
+      const head = el('div', 'share-step-head');
+      const back = el('button', 'icon-btn');
+      back.type = 'button';
+      back.setAttribute('aria-label', 'رجوع');
+      back.title = 'رجوع';
+      back.innerHTML = glyph('back');
+      back.onclick = () => {
+        body.innerHTML = '<div class="sheet-handle"></div>';
+        pickStep(body);
+      };
+      const who = el('div', 'share-to');
+      who.append(person ? avatarNode(person, 32) : everyoneFace(32), el('strong', null, person ? person.displayName : 'الجميع'));
+      head.append(back, who);
+      body.append(head);
+
+      const work = el('div', 'share-work-card');
+      const cover = el('div', 'share-work-cover');
+      void mountImage(cover, w);
+      const copy = el('div');
+      const t = el('strong', null, titleOf(w));
+      t.dir = 'auto';
+      copy.append(t, el('span', null, 'يوصل غلاف العمل مع رسالتك'));
+      work.append(cover, copy);
+      body.append(work);
+
+      const note = el('textarea', 'search-input share-note');
+      note.rows = 3;
+      note.maxLength = 300;
+      note.placeholder = 'وش رأيك فيه؟ (اختياري)';
+      note.value = draft.message;
+      note.oninput = () => (draft.message = note.value);
+      body.append(note);
+
+      const hidden = new Set();
+      const others = friends.filter((f) => f.userId !== person?.userId);
+      if (others.length) {
+        const label = el('div', 'settings-group-label', 'يظهر في المجلس لأصدقائك');
+        body.append(label);
+        for (const f of others) {
+          const row = el('label', 'share-hide');
+          row.append(avatarNode(f, 32), el('span', null, `أخفِه عن ${f.displayName}`));
+          const input = el('input');
+          input.type = 'checkbox';
+          input.className = 'switch-input';
+          input.setAttribute('role', 'switch');
+          input.onchange = () => (input.checked ? hidden.add(f.userId) : hidden.delete(f.userId));
+          row.append(input);
+          body.append(row);
+        }
       }
-    });
+
+      const send = el('button', 'btn btn-primary btn-block share-send');
+      send.type = 'button';
+      send.innerHTML = `${glyph('send')}<span>أرسل</span>`;
+      send.onclick = () => {
+        // «الجميع» توصية واحدة بلا مستلم: الخادم يوصلها لكل الأصدقاء
+        sync.enqueue('recommendation.send', {
+          toId: person?.userId ?? null,
+          seriesRef: String(w.id),
+          seriesTitle: titleOf(w),
+          coverUrl: w.coverImage?.large ?? null,
+          message: draft.message.trim() || null,
+          hiddenFrom: [...hidden],
+        });
+        closeSheet();
+        toast(person ? `انرسل لـ ${person.displayName}` : 'انرسل للجميع');
+      };
+      body.append(send);
+      setTimeout(() => note.focus({ preventScroll: true }), 120);
+    };
+    openSheet(pickStep);
+  }
+  function everyoneFace(size = 58) {
+    const s = el('span', 'avatar-letter share-everyone');
+    s.innerHTML = glyph('users', { size: Math.round(size * 0.42) });
+    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
+    return s;
   }
   const REPORT_CHOICES = [
     ['DUPLICATE_WORK', 'العمل مكرر'],
@@ -1303,6 +1380,127 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }, 330);
   }
 
+  // ───────────────────────── الإشعارات ─────────────────────────
+  // سطرٌ واحد لكل إشعار: وجه المرسل، «مشعل أرسل لك فريم»، ومتى. والغلاف في
+  // الطرف الآخر يقول عن أي عمل بلا كلام زائد.
+
+  const nameOf = (userId) =>
+    sync.rows('profiles', (p) => p.user_id === userId)[0]?.display_name ||
+    sync.rows('accounts', (a) => a.user_id === userId)[0]?.username ||
+    'صديق';
+  const personOf = (userId) => ({
+    userId,
+    displayName: nameOf(userId),
+    avatarKey: sync.rows('profiles', (p) => p.user_id === userId)[0]?.avatar_key ?? null,
+  });
+  const KIND_ICON = { FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info' };
+
+  function notificationCopy(row) {
+    const frameId = frameIdFromLink(row.link);
+    const frame = frameId ? sync.rows('frames', (f) => f.id === frameId)[0] : null;
+    const work = row.series_ref ? sync.rows('works', (x) => x.series_ref === row.series_ref)[0] : null;
+    switch (row.kind) {
+      case 'FRAME':
+        return {
+          text: frame?.broadcast ? 'شارك فريمًا مع الجميع' : 'أرسل لك فريم',
+          cover: frame?.cover_url ?? null,
+          open: () => void deps.go({ name: 'frame', id: frameId }),
+        };
+      case 'RECOMMENDATION':
+        return {
+          text: 'رشّح لك',
+          title: work?.title ?? row.body ?? null,
+          cover: work?.cover_url ?? null,
+          open: () => row.series_ref && void openWork(workFromRef(row.series_ref, work?.title ?? row.body, work?.cover_url)),
+        };
+      case 'COMMENT_REPLY':
+        return { text: 'ردّ على تعليقك', cover: work?.cover_url ?? null };
+      case 'REACTION':
+        return { text: 'تفاعل مع تعليقك', cover: work?.cover_url ?? null };
+      case 'FRIEND_ACTIVITY':
+        return { text: row.body || 'عنده جديد', cover: work?.cover_url ?? null };
+      default:
+        return { text: row.body || 'تنبيه', cover: null, system: true };
+    }
+  }
+  function timeAgo(ms) {
+    const minutes = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+    if (minutes < 1) return 'الآن';
+    if (minutes < 60) return minutes === 1 ? 'قبل دقيقة' : minutes === 2 ? 'قبل دقيقتين' : `قبل ${minutes} ${minutes <= 10 ? 'دقائق' : 'دقيقة'}`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours === 1 ? 'قبل ساعة' : hours === 2 ? 'قبل ساعتين' : `قبل ${hours} ${hours <= 10 ? 'ساعات' : 'ساعة'}`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return 'أمس';
+    if (days < 7) return days === 2 ? 'قبل يومين' : `قبل ${days} أيام`;
+    return new Date(ms).toLocaleDateString('ar', { day: 'numeric', month: 'long', numberingSystem: 'latn' });
+  }
+  function notificationRow(row) {
+    const copy = notificationCopy(row);
+    const b = el('button', `notif${row.read ? '' : ' notif--unread'}`);
+    b.type = 'button';
+    const face = el('span', 'notif-face');
+    face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
+    const badge = el('span', `notif-kind notif-kind--${(row.kind || '').toLowerCase()}`);
+    badge.innerHTML = glyph(KIND_ICON[row.kind] ?? 'bell', { size: 12 });
+    face.append(badge);
+    const text = el('span', 'notif-text');
+    const line = el('span', 'notif-line');
+    // الاسم والعنوان معزولان: عنوان لاتيني لا يبتلع ما بعده في سطر عربي
+    if (!copy.system) line.append(el('bdi', 'notif-name', nameOf(row.actor_id)), document.createTextNode(' '));
+    line.append(document.createTextNode(copy.text));
+    if (copy.title) line.append(document.createTextNode(' '), el('bdi', 'notif-title', copy.title));
+    text.append(line, el('time', null, timeAgo(row.created_at ?? Date.now())));
+    b.append(face, text);
+    if (copy.cover) {
+      const c = el('span', 'notif-cover');
+      const img = el('img');
+      img.src = copy.cover;
+      img.alt = '';
+      img.onerror = () => c.remove();
+      c.append(img);
+      b.append(c);
+    }
+    b.onclick = () => {
+      if (!row.read) sync.enqueue('notification.read', { id: row.id });
+      copy.open?.();
+    };
+    return b;
+  }
+  function renderNotifications() {
+    const body = q('notificationsBody');
+    const rows = sync
+      .rows('notifications', (r) => r.user_id === me())
+      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+    root.querySelector('[data-act="readAllNotifications"]').hidden = !rows.some((r) => !r.read);
+    if (!rows.length) {
+      emptyState(body, { icon: 'bell', title: 'ما فيه إشعارات', text: 'لما يرسل لك صديق فريمًا أو يرشّح لك عملًا، يوصلك هنا.' });
+      return;
+    }
+    const startOfDay = new Date().setHours(0, 0, 0, 0);
+    const groups = [
+      ['اليوم', (t) => t >= startOfDay],
+      ['هذا الأسبوع', (t) => t < startOfDay && t >= startOfDay - 6 * 86_400_000],
+      ['أقدم', (t) => t < startOfDay - 6 * 86_400_000],
+    ];
+    const parts = [];
+    for (const [label, test] of groups) {
+      const inGroup = rows.filter((r) => test(r.created_at ?? 0));
+      if (!inGroup.length) continue;
+      parts.push(el('div', 'settings-group-label', label));
+      const list = el('div', 'notif-list');
+      list.append(...inGroup.map(notificationRow));
+      parts.push(list);
+    }
+    body.replaceChildren(...parts);
+    // فتح الصندوق = عُرض، لا مقروء: التنبيه لا يتكرر والعنصر يبقى غير مقروء
+    for (const r of rows) if (!r.seen && !r.read) sync.enqueue('notification.seen', { id: r.id });
+  }
+  function readAllNotifications() {
+    for (const r of sync.rows('notifications', (x) => x.user_id === me() && !x.read)) sync.enqueue('notification.read', { id: r.id });
+    toast('علّمتها كلها مقروءة');
+    setTimeout(renderNotifications, 400);
+  }
+
   // ───────────────────────── الدرج والتنقّل ─────────────────────────
 
   const unreadNotifications = () => sync.rows('notifications', (r) => r.user_id === me() && !r.read).length;
@@ -1356,7 +1554,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return navTo('library');
     }
     if (key === 'switchAccount') return confirmSwitchAccount();
-    const route = { friends: 'friends', activity: 'activity', notifications: 'notifications', recommendations: 'recommendations', profile: 'me' }[key];
+    if (key === 'notifications') return showPage('notifications');
+    const route = { friends: 'friends', activity: 'activity', recommendations: 'recommendations', profile: 'me' }[key];
     if (route) void deps.go({ name: route });
   }
   function confirmSwitchAccount() {
@@ -1396,6 +1595,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'library') renderLibrary();
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
     if (id === 'settings') renderSettings();
+    if (id === 'notifications') renderNotifications();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
@@ -1482,11 +1682,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openSearch,
     openUtility: (_e, t) => void deps.go({ name: t.dataset.arg }),
     openWorkMenu,
+    shareCurrent: () => state.current && openShare(state.current),
     readNow,
     flipChapterOrder,
     toggleSummary,
     toggleFavoriteCurrent,
     toggleLibraryCurrent,
+    readAllNotifications,
   };
   root.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act]');
@@ -1529,7 +1731,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    if (tables.includes('notifications')) paintNotifyDots();
+    if (tables.includes('notifications')) {
+      paintNotifyDots();
+      if (currentPage() === 'notifications') renderNotifications();
+    }
   });
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */

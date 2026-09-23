@@ -33,10 +33,13 @@ export function createFrameCapture(max = MAX_FRAME_PAGES) {
   };
 }
 
-export function buildFramePayload({ toId, sourceId, manga, chapter, pages, message }) {
+export function buildFramePayload({ toId, sourceId, manga, chapter, pages, message, hiddenFrom = [] }) {
   const text = typeof message === 'string' ? message.trim() : '';
   return {
-    toId,
+    // `null` = الجميع
+    toId: toId ?? null,
+    // يظهر في المجلس لكل الأصدقاء إلا هؤلاء
+    hiddenFrom: [...new Set((hiddenFrom ?? []).filter((id) => typeof id === 'string' && id))],
     sourceId,
     work: {
       url: manga.url,

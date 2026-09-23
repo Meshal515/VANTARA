@@ -688,7 +688,7 @@ describe('frame.send', () => {
     expect(insert).toBeDefined();
     // id, from, to, source ...
     expect(insert!.values.slice(0, 4)).toEqual(['op-1', 'dahmi', 'ngm', base.sourceId]);
-    expect(JSON.parse(String(insert!.values.at(-4)))).toEqual([
+    expect(JSON.parse(String(insert!.values.at(-6)))).toEqual([
       { index: 4, url: '', imageUrl: 'https://cdn.example/4.webp' },
       { index: 5, url: '', imageUrl: null },
     ]);
@@ -708,9 +708,26 @@ describe('frame.send', () => {
     expect(JSON.parse(stored).memo).toBe('{"k":1}');
   });
 
-  it('a frame without a single recipient is refused, never broadcast', () => {
-    // التوصية بلا مستلم تعني «للجميع»؛ الفريم لا: هو لقطة لشخص
-    expect(translate('frame.send', { ...base, toId: undefined })).toEqual([]);
+  it('a frame to one friend shows in the majlis, hidden from whoever the sender chose', () => {
+    const out = translate('frame.send', { ...base, hiddenFrom: ['mansour', 'ngm', 'dahmi', 'stranger'] });
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    expect(insert.sql).toContain("'MAJLIS'");
+    // المستلم والمرسل لا يُخفى عنهما، والغريب يسقط
+    expect(JSON.parse(String(insert.values.at(-2)))).toEqual(['mansour']);
+    expect(insert.values.at(-1)).toBe(0);
+    expect(out.filter((s) => s.sql.includes('INSERT INTO notifications'))).toHaveLength(1);
+  });
+
+  it('a frame to everyone notifies every friend except the hidden ones', () => {
+    const out = translate('frame.send', { ...base, toId: null, hiddenFrom: ['mansour'] });
+    const insert = out.find((s) => s.sql.includes('INSERT INTO frames'))!;
+    // البثّ: to_id هو المرسل، والعلم الأخير يقول «للجميع»
+    expect(insert.values[2]).toBe('dahmi');
+    expect(insert.values.at(-1)).toBe(1);
+    const notes = out.filter((s) => s.sql.includes('INSERT INTO notifications'));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.values).toContain('ngm');
+    expect(notes.flatMap((n) => n.values)).not.toContain('mansour');
   });
 
   it('a frame to yourself or to a stranger is refused', () => {

@@ -252,6 +252,35 @@ describe('frame privacy', () => {
     ).run(id, from, to, rev, rev);
   }
 
+  function insertMajlisFrame(
+    db: ReturnType<typeof testEnv>['db'],
+    id: string,
+    from: string,
+    to: string | null,
+    hidden: string[],
+    rev: number,
+  ) {
+    db.prepare(
+      `INSERT INTO frames
+         (id, from_id, to_id, source_id, series_title, chapter_label, cover_url,
+          work_json, chapter_json, pages_json, message, created_at, rev, audience, hidden_json, broadcast)
+       VALUES (?, ?, ?, 'pkg', 'عمل', 'الفصل 1', NULL, '{"url":"/w"}', '{"url":"/c"}', '[{"index":1}]', NULL, ?, ?, 'MAJLIS', ?, ?)`,
+    ).run(id, from, to ?? from, rev, rev, JSON.stringify(hidden), to ? 0 : 1);
+  }
+
+  it('a majlis frame between two friends reaches the third, unless hidden from them', async () => {
+    const { env, db } = testEnv();
+    insertMajlisFrame(db, 'majlis-visible', OTHER, THIRD, [], 21);
+    insertMajlisFrame(db, 'majlis-hidden', OTHER, THIRD, [VIEWER], 22);
+    insertMajlisFrame(db, 'everyone', OTHER, null, [], 23);
+    insertMajlisFrame(db, 'everyone-hidden', OTHER, null, [VIEWER], 24);
+    // فريم قبل المجلس: أُرسل على وعد «بين اثنين» ويبقى كذلك
+    insertFrame(db, 'old-private', OTHER, THIRD, 25);
+
+    const changes = await pull(env);
+    expect(ids(changes.frames, 'id')).toEqual(['everyone', 'majlis-visible']);
+  });
+
   it('a frame reaches only its sender and its recipient', async () => {
     const { env, db } = testEnv();
     insertFrame(db, 'to-viewer', OTHER, VIEWER, 11);
@@ -261,6 +290,25 @@ describe('frame privacy', () => {
 
     const changes = await pull(env);
     expect(ids(changes.frames, 'id')).toEqual(['from-viewer', 'to-viewer']);
+  });
+});
+
+describe('recommendation majlis privacy', () => {
+  it('a new recommendation shows in the majlis except to whoever it is hidden from; old directed ones stay private', async () => {
+    const { env, db } = testEnv();
+    const insert = db.prepare(
+      `INSERT INTO recommendations
+         (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json)
+       VALUES (?, ?, ?, 's', 'عمل', NULL, NULL, 'SENT', ?, ?, ?, ?)`,
+    );
+    insert.run('majlis-visible', OTHER, THIRD, 31, 31, 'MAJLIS', '[]');
+    insert.run('majlis-hidden', OTHER, THIRD, 32, 32, 'MAJLIS', JSON.stringify([VIEWER]));
+    insert.run('broadcast-hidden', OTHER, null, 33, 33, 'MAJLIS', JSON.stringify([VIEWER]));
+    insert.run('old-directed', OTHER, THIRD, 34, 34, 'PRIVATE', '[]');
+    insert.run('old-broadcast', OTHER, null, 35, 35, 'PRIVATE', '[]');
+
+    const changes = await pull(env);
+    expect(ids(changes.recommendations, 'id')).toEqual(['majlis-visible', 'old-broadcast']);
   });
 });
 

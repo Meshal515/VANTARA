@@ -17,3 +17,4 @@ export * from './read-together.ts';
 export * from './week.ts';
 export * from './correlation.ts';
 export * from './frames.ts';
+export * from './majlis.ts';

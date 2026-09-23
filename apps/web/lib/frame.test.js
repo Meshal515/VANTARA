@@ -54,12 +54,19 @@ describe('frame payload', () => {
     });
     expect(payload).toEqual({
       toId: 'ngm',
+      hiddenFrom: [],
       sourceId: 'pkg',
       work: { url: '/manga/1', title: 'ون بيس', thumbnailUrl: 'https://c/cover.jpg', memo: '{"k":1}' },
       chapter: { url: '/manga/1/1100', name: 'الفصل 1100', chapterNumber: 1100, scanlator: 'x', memo: '' },
       pages: [{ index: 3, url: '/p3', imageUrl: 'https://c/3.webp' }],
       message: 'شوف',
     });
+  });
+
+  it('to everyone is a null recipient, and the hidden list is deduplicated', () => {
+    const payload = buildFramePayload({ toId: null, sourceId: 'p', manga, chapter, pages: [{ index: 0 }], hiddenFrom: ['a', 'a', '', 7, 'b'] });
+    expect(payload.toId).toBeNull();
+    expect(payload.hiddenFrom).toEqual(['a', 'b']);
   });
 
   it('an empty message is not sent as text', () => {

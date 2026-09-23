@@ -16,7 +16,7 @@
 import { glyph, iconButton } from './icons.js';
 
 const bell = (extra = '') =>
-  `<button class="icon-btn has-dot" type="button" data-act="openUtility" data-arg="notifications" aria-label="الإشعارات" title="الإشعارات"${extra}>` +
+  `<button class="icon-btn has-dot" type="button" data-act="navTo" data-arg="notifications" aria-label="الإشعارات" title="الإشعارات"${extra}>` +
   `<span class="notify-dot"></span>${glyph('bell')}</button>`;
 
 /** ترويسة صفحة رئيسية: القائمة في البداية، العنوان، الجرس في النهاية. */
@@ -70,6 +70,7 @@ export const SHELL_HTML = `<div class="app">
       ${iconButton('back', 'رجوع', { act: 'backFromDetail' })}
       <div class="detail-top-title" id="detailTopTitle"></div>
       <div class="detail-actions">
+        ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
         ${iconButton('heart', 'المفضلة', { act: 'toggleFavoriteCurrent', cls: 'icon-btn icon-btn--fav' })}
         ${iconButton('more', 'خيارات', { act: 'openWorkMenu' })}
       </div>
@@ -171,6 +172,11 @@ export const SHELL_HTML = `<div class="app">
   <section class="page" id="settings">
     ${subTop('الإعدادات')}
     <div class="page-body" id="settingsBody"></div>
+  </section>
+
+  <section class="page" id="notifications">
+    ${subTop('الإشعارات', { end: iconButton('check', 'علّمها كلها مقروءة', { act: 'readAllNotifications' }) })}
+    <div class="page-body notif-body" id="notificationsBody"></div>
   </section>
 
   <section class="page" id="utility">

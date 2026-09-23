@@ -22,6 +22,8 @@ import { frameIdFromLink } from './lib/frame.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { mountV35 } from './v35/shell.js';
+import { openSmartReader } from './v35/reader.js';
+import engine from './lib/extension-engine.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
@@ -57,6 +59,8 @@ const state = {
   presence: [],
   screen: 'GATE',
   reading: null,
+  /** رجوع الشاشة الحالية: يرجع `true` إن تصرّف (أغلق ورقة، رجع صفحة). */
+  back: null,
 };
 
 function mount(node) {
@@ -1723,17 +1727,7 @@ function screenV35(page) {
         friends: () => frameCapability().friends(),
         // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
         report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),
-        openReader: (target) => {
-          const { row, work } = target;
-          void go({
-            name: 'extReader',
-            sourceId: row.sourceId,
-            manga: row.manga,
-            chapter: row.chapter,
-            work,
-            back: { name: 'v35', page: 'detail' },
-          });
-        },
+        openReader: (target) => screenSmartReader(target),
         switchAccount: () => {
           dropV35();
           sync.signOut();
@@ -1747,10 +1741,58 @@ function screenV35(page) {
     v35.resume(page);
   }
   state.teardown = () => v35?.pause();
+  state.back = () => v35?.handleBack() ?? false;
+}
+
+/** القارئ الذكي فوق الواجهة: الخروج منه يرجع لصفحة العمل كما تُركت. */
+function screenSmartReader(target) {
+  state.screen = 'READER';
+  const reader = openSmartReader(
+    {
+      sync,
+      engine,
+      mount,
+      exit: () => void go({ name: 'v35', page: 'detail' }),
+      friends: () => frameCapability().friends(),
+      sendFrame: (payload) => sync.enqueue('frame.send', payload),
+      report: (input) => submitReport({ api, ...input, context: { screen: 'READER' } }),
+      // الحضور: الأصدقاء يرون ما تقرؤه. لا معرّف عمل من خادم المحتوى هنا —
+      // شاشة الصديق تبني منه رابطًا، ومعرّفٌ ملفّق يفتح لا شيء
+      setReading: (info) => {
+        state.reading = info ? { ...info, seriesId: null, chapterId: null } : null;
+      },
+      immersive: (on) => void globalThis.Capacitor?.Plugins?.SystemUi?.immersive?.({ on }).catch?.(() => {}),
+    },
+    target,
+  );
+  state.teardown = () => reader.destroy();
+  state.back = () => reader.handleBack();
+}
+
+/**
+ * زرّ الرجوع في أندرويد.
+ *
+ * بلا مستمع يغلق Capacitor التطبيق من أي شاشة. الترتيب: ما تقوله الشاشة
+ * الحالية (ورقة، درج، صفحة سابقة، القارئ)، ثم الرئيسية، ثم الخروج منها فقط.
+ */
+function attachBackButton() {
+  const app = globalThis.Capacitor?.Plugins?.App;
+  if (!app?.addListener) return;
+  app.addListener('backButton', () => {
+    if (state.back?.()) return;
+    const { name } = state.route ?? {};
+    if (name === 'gate' || name === 'home' || name === 'v35') {
+      void app.exitApp?.();
+      return;
+    }
+    void go({ name: 'home' });
+  });
 }
 
 async function go(route) {
   state.route = route;
+  // كل شاشة تضع رجوعها؛ القديمة بلا رجوع خاص ترجع للرئيسية
+  state.back = null;
   switch (route.name) {
     case 'gate': {
       state.screen = 'GATE';
@@ -1807,7 +1849,7 @@ async function go(route) {
     case 'friend':
       return screenFriend(route.id);
     case 'notifications':
-      return screenNotifications();
+      return screenV35('notifications');
     case 'activity':
       return screenActivity();
     case 'me':
@@ -2206,6 +2248,7 @@ setInterval(() => void sync.pull(), 60_000);
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
+  attachBackButton();
   // Pair a clean APK before the account gate can issue /v1/session.
   // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
   await nativeLinksReady.catch(() => {});
