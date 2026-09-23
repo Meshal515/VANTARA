@@ -231,6 +231,27 @@ h1:not(.v35 *), h2:not(.v35 *), h3:not(.v35 *), p:not(.v35 *) { margin: 0; }
 
 .gate__message:not(.v35 *) { min-height: 18px; margin: 8px 0 0; color: #9897a3; font-size: 12px; }
 .gate__message--error:not(.v35 *) { color: var(--danger); }
+/* جوال جديد: رمز الاعتماد في بطاقة زجاجية فوق الحرير */
+.gate-approval:not(.v35 *) {
+  display: grid; justify-items: center; gap: 8px;
+  width: min(340px, calc(100% - 32px)); margin: 14px auto 0; padding: 16px 16px 14px;
+  border-radius: 20px; background: rgba(12, 11, 18, .72);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); text-align: center;
+}
+.gate-approval__title:not(.v35 *) { font-size: 16px; font-weight: 800; color: #fff; }
+.gate-approval__text:not(.v35 *) { margin: 0; font-size: 12.5px; line-height: 1.7; color: #bab6c6; }
+.gate-approval__code:not(.v35 *) {
+  margin-top: 4px; padding: 10px 18px; border: 0; border-radius: 14px;
+  background: rgba(255, 255, 255, .08); color: #fff;
+  font: 800 26px/1.2 ui-monospace, 'SFMono-Regular', Menlo, monospace; letter-spacing: 3px;
+  direction: ltr; -webkit-user-select: all; user-select: all;
+}
+.gate-approval__code:active:not(.v35 *) { background: rgba(255, 255, 255, .14); }
+.gate-approval__status:not(.v35 *) { margin: 0; font-size: 12px; color: #9897a3; }
+.gate-approval__again:not(.v35 *) {
+  border: 0; background: none; color: #bba2ff; font: inherit; font-weight: 700; padding: 4px;
+}
 .gate__hint:not(.v35 *) { margin: 10px 0 0; font-size: 11px; line-height: 1.35; color: #aaa7b2; opacity: .72; white-space: nowrap; }
 
 @media (max-width: 390px) {

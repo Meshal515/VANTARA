@@ -152,6 +152,112 @@ async function pairDevice(request: Request, env: Env, now: number): Promise<Resp
   return json({ paired: true, accounts: accounts.length });
 }
 
+/** أبجدية الرمز: بلا حروف تلتبس (0/O، 1/I/L، U/V) — يُقرأ بصوت ويُكتب بلا غلط. */
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTWXYZ23456789';
+const DEVICE_REQUEST_TTL_MS = 30 * 60_000;
+/** سقف الطلبات المفتوحة معًا: الطلب بلا جلسة، فلا يُترك بابًا لملء القاعدة. */
+const MAX_OPEN_DEVICE_REQUESTS = 30;
+
+export function normalizeDeviceCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const code = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 8 || [...code].some((c) => !CODE_ALPHABET.includes(c))) return null;
+  return code;
+}
+
+function newDeviceCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+}
+
+/**
+ * جهاز جديد يطلب الاعتماد. يرجع رمزًا يُعرض على الشاشة ويرسله صاحبه للمالك.
+ * طلبٌ جديد من نفس الجهاز يلغي ما قبله: رمز واحد حيّ لكل جهاز.
+ */
+async function requestDevice(request: Request, env: Env, now: number): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const deviceId = typeof body?.['deviceId'] === 'string' ? body['deviceId'] : '';
+  const deviceCredential = body?.['deviceCredential'];
+  if (deviceId.length < 8 || deviceId.length > 128 || !validSecretPart(deviceCredential)) {
+    return json({ error: 'bad_request' }, { status: 400 });
+  }
+  await env.DB.prepare('DELETE FROM device_requests WHERE expires_at <= ? OR (device_id = ? AND approved_at IS NULL)')
+    .bind(now, deviceId)
+    .run();
+  const open = await env.DB.prepare('SELECT COUNT(*) AS n FROM device_requests WHERE consumed_at IS NULL')
+    .first<{ n: number }>();
+  if (Number(open?.n ?? 0) >= MAX_OPEN_DEVICE_REQUESTS) {
+    return json({ error: 'too_many_requests' }, { status: 429 });
+  }
+  const code = newDeviceCode();
+  const credentialHash = await hashDeviceSecret(deviceCredential, env.VANTARA_DEVICE_PEPPER);
+  const codeHash = await hashDeviceSecret(`device-code:${code}`, env.VANTARA_DEVICE_PEPPER);
+  const expiresAt = now + DEVICE_REQUEST_TTL_MS;
+  await env.DB.prepare(
+    `INSERT INTO device_requests (code_hash, device_id, credential_hash, created_at, expires_at, approved_at, consumed_at)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+  )
+    .bind(codeHash, deviceId, credentialHash, now, expiresAt)
+    .run();
+  return json({ code: `${code.slice(0, 4)}-${code.slice(4)}`, expiresAt });
+}
+
+/**
+ * الجهاز يسأل: هل اعتُمد؟ عند الاعتماد يُثبَّت موثوقًا للحسابات الثلاثة
+ * (مثل رمز الربط بلا حساب) ويُستهلك الطلب. الـcredential نفسه شرط: من يعرف
+ * device_id وحده لا يأخذ اعتماد جهاز غيره.
+ */
+async function claimDevice(request: Request, env: Env, now: number): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const deviceId = typeof body?.['deviceId'] === 'string' ? body['deviceId'] : '';
+  const deviceCredential = body?.['deviceCredential'];
+  if (deviceId.length < 8 || deviceId.length > 128 || !validSecretPart(deviceCredential)) {
+    return json({ error: 'bad_request' }, { status: 400 });
+  }
+  const credentialHash = await hashDeviceSecret(deviceCredential, env.VANTARA_DEVICE_PEPPER);
+  const approved = await env.DB.prepare(
+    `SELECT code_hash FROM device_requests
+      WHERE device_id = ? AND credential_hash = ? AND approved_at IS NOT NULL
+        AND consumed_at IS NULL AND expires_at > ?`,
+  )
+    .bind(deviceId, credentialHash, now)
+    .first<{ code_hash: string }>();
+  if (!approved) {
+    const pending = await env.DB.prepare(
+      `SELECT 1 AS ok FROM device_requests
+        WHERE device_id = ? AND credential_hash = ? AND consumed_at IS NULL AND expires_at > ?`,
+    )
+      .bind(deviceId, credentialHash, now)
+      .first<{ ok: number }>();
+    return json({ paired: false, pending: Boolean(pending) });
+  }
+  const consumed = await env.DB.prepare(
+    'UPDATE device_requests SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL',
+  )
+    .bind(now, approved.code_hash)
+    .run();
+  if ((consumed.meta.changes ?? 0) !== 1) return json({ paired: false, pending: false });
+
+  const accounts = (
+    await env.DB.prepare('SELECT user_id FROM accounts ORDER BY created_at').all<{ user_id: string }>()
+  ).results;
+  if (accounts.length === 0) return json({ error: 'no_accounts' }, { status: 409 });
+  await env.DB.batch(
+    accounts.map((account) =>
+      env.DB.prepare(
+        `INSERT INTO trusted_devices
+           (device_id, user_id, credential_hash, created_at, last_used_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(device_id, user_id) DO UPDATE SET
+           credential_hash = excluded.credential_hash,
+           last_used_at = excluded.last_used_at,
+           revoked_at = NULL`,
+      ).bind(deviceId, account.user_id, credentialHash, now, now),
+    ),
+  );
+  return json({ paired: true, accounts: accounts.length });
+}
+
 async function issueSession(request: Request, env: Env, now: number): Promise<Response> {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const userId = typeof body?.['userId'] === 'string' ? body['userId'] : '';
@@ -259,6 +365,14 @@ export default {
           headers: { ...JSON_HEADERS, ...cors },
         });
       }
+      if ((path === '/v1/device/request' || path === '/v1/device/claim') && request.method === 'POST') {
+        const response =
+          path === '/v1/device/request' ? await requestDevice(request, env, now) : await claimDevice(request, env, now);
+        return new Response(response.body, {
+          status: response.status,
+          headers: { ...JSON_HEADERS, ...cors },
+        });
+      }
       if (path === '/v1/session' && request.method === 'POST') {
         const response = await issueSession(request, env, now);
         return new Response(response.body, {
@@ -278,8 +392,13 @@ export default {
         });
       }
 
-      // Health + account chooser stay public exactly as before.
-      if (path === '/health' || (path === '/v1/accounts' && request.method === 'GET')) {
+      // Health + account chooser stay public exactly as before. Profile images
+      // too: `<img>` sends no identity, and the id is an unguessable content hash.
+      if (
+        path === '/health' ||
+        (path === '/v1/accounts' && request.method === 'GET') ||
+        (path.startsWith('/v1/media/') && request.method === 'GET')
+      ) {
         return legacyWorker.fetch(request, env, ctx);
       }
 
