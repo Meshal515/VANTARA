@@ -187,6 +187,71 @@ describe('B2 browser trusted-device lifecycle', () => {
     setSpy.mockRestore();
   });
 
+  it('reuses the native Android id after reinstall and recovers active trust before signing in', async () => {
+    let sessionAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/session')) {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          return new Response(JSON.stringify({ error: 'device_untrusted' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({ token: 'recovered-token', user: { userId: 'user-1', username: 'meshal' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.endsWith('/v1/device/recover')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body['deviceId']).toBe('android:0123456789abcdef');
+        expect(typeof body['deviceCredential']).toBe('string');
+        return new Response(JSON.stringify({ recovered: true, accounts: 3 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const sync = createSync({
+      baseUrl: 'https://sync.example',
+      deviceIdProvider: async () => 'android:0123456789abcdef',
+    });
+
+    await expect(sync.signIn('user-1')).resolves.toMatchObject({ userId: 'user-1' });
+    expect(sessionAttempts).toBe(2);
+    expect(storage.getItem('vantara.device.id')).toBe('android:0123456789abcdef');
+  });
+
+  it('falls back to manual approval when a stable Android id has never been trusted', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/session')) {
+        return new Response(JSON.stringify({ error: 'device_untrusted' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/v1/device/recover')) {
+        return new Response(JSON.stringify({ recovered: false, accounts: 0 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const sync = createSync({
+      baseUrl: 'https://sync.example',
+      deviceIdProvider: async () => 'android:fedcba9876543210',
+    });
+
+    await expect(sync.signIn('user-1')).rejects.toMatchObject({ code: 'device_untrusted' });
+  });
+
   it('deletes the local device credential after logout-device', async () => {
     const sync = createSync({ baseUrl: 'https://sync.example' });
     await sync.signIn('user-1');
