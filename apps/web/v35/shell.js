@@ -2388,7 +2388,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   window.addEventListener('scroll', onScroll, { passive: true });
 
   const onKey = (e) => {
-    if (e.key === 'Escape') handleBack();
+    // القارئ فوق القشرة يعالج رجوعه وحده: بلا هذا يرجع Esc خطوتين
+    if (e.key === 'Escape' && !document.querySelector('.rd, .fv')) handleBack();
   };
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {

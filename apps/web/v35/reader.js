@@ -7,14 +7,14 @@
  *     واحدة تُظهر الشريط (رجوع، العمل والفصل، فريم، ⋮) ولمسة أخرى تخفيه،
  *     والتمرير يخفيه أيضًا.
  *   - التكبير مقفول افتراضيًا (لمسة مزدوجة وإصبعان)، ويُفتح من الإعدادات.
- *   - نهاية الفصل سطران هادئان بعد آخر صفحة: «الفصل 112 انتهى» و«الفصل
- *     التالي 113»، والرقم يفتحه.
- *   - القارئ يسبقك: من آخر ثلاثين بالمئة من الفصل يجهّز الفصل التالي في
- *     الخلفية (بياناته، قائمة صفحاته، ثم صوره) حسب الشبكة وإعدادك، ولا ينافس
- *     الصفحات التي تقرؤها الآن. وما جُهّز لا يُرمى: الفصل التالي يفتح منه.
+ *   - القراءة متواصلة: بعد آخر صفحة شريطٌ صغير («انتهى الفصل 620»، «الفصل
+ *     التالي 621») ثم صفحات 621 نفسها في نفس التمرير. الزرّ يقفز، والتمرير
+ *     يكمل، ولا حدّ إلا آخر فصل متاح فعلًا.
+ *   - القارئ يسبقك: من أول الفصل يُلحق التالي تحته (قائمة صفحاته، ثم صوره حسب
+ *     الشبكة وإعدادك) بأولوية لا تنافس ما تقرؤه الآن.
  *
- * القراءة تُحفظ في حسابك: الموضع، وعين الفصل عند ٢٠٪ منه — هذا الفصل وحده —
- * وإحصاء القراءة الكاملة عند نهايته.
+ * القراءة تُحفظ في حسابك: الموضع، والفصل مقروء عند خُمسه — هذا الفصل وحده —
+ * في العين والسجل والملف والإحصاء معًا.
  */
 
 import { glyph, iconButton } from './icons.js';
@@ -22,7 +22,6 @@ import { countLabel } from './plural.js';
 import { AUTO_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
 import { editionRows } from './works.js';
 import {
-  PRELOAD_FROM_RATIO,
   PRIORITY,
   chapterLabel,
   chapterSequence,
@@ -117,23 +116,31 @@ export function openSmartReader(deps, ctx) {
   const q = (id) => root.querySelector(`#${id}`);
   const scroll = q('rdScroll');
 
+  /**
+   * القراءة المتواصلة: الفصول قطعٌ متتالية في نفس التمرير (`segs`)، والفصل
+   * «الحالي» هو قطعة الصفحة الظاهرة. كل ما يخص الفصل (صفحاته، أبعد ما رأيت،
+   * العين، الإحصاء، وقت القراءة) يعيش في قطعته، و`state.row` وأخواتها تقرأ من
+   * القطعة الحالية — فالقائمة والفريم والمصدر والبلاغ تعمل على ما أمامك.
+   */
+  const segs = [];
+  let segSeq = 0;
   const state = {
-    row: ctx.row,
-    pages: [],
-    slots: [],
-    current: 0,
-    furthest: 0,
+    seg: null,
     chrome: false,
     frameMode: false,
     frame: new Map(),
-    marked: false,
-    completed: false,
-    preloaded: null,
-    activeMs: 0,
     lastTick: performance.now(),
     token: 0,
     progressTimer: null,
   };
+  for (const key of ['row', 'pages', 'slots', 'current', 'furthest', 'marked', 'completed', 'preloaded', 'activeMs']) {
+    Object.defineProperty(state, key, {
+      get: () => state.seg?.[key] ?? (key === 'slots' || key === 'pages' ? [] : key === 'row' ? ctx.row : key === 'current' || key === 'furthest' || key === 'activeMs' ? 0 : null),
+      set: (v) => {
+        if (state.seg) state.seg[key] = v;
+      },
+    });
+  }
 
   // ───────────────────────── الشريط والإعدادات ─────────────────────────
 
@@ -193,6 +200,7 @@ export function openSmartReader(deps, ctx) {
 
   const keyOf = (row) => chapterKeyOf(ref, row);
   const nav = () => neighbors(sequence, state.row);
+  const sameRow = (a, b) => a === b || (a && b && chapterId(a) === chapterId(b));
 
   function pagesOf(row) {
     const id = chapterId(row);
@@ -215,49 +223,19 @@ export function openSmartReader(deps, ctx) {
     return Math.max(0, Math.floor(saved.page ?? 0));
   }
 
+  /** فتحٌ من الصفر: أول فصل، أو قفزة (الفصل السابق من الشريط، مصدر آخر، إعادة المحاولة). */
   async function openChapter(row, { startAt = null } = {}) {
     flushProgress();
-    const previous = state.row;
     state.token += 1;
     const token = state.token;
-    // صفحات الفصل السابق التي لم تبدأ لا تزاحم الجديد
-    if (previous && previous !== row) {
-      const old = chapterId(previous);
-      scheduler.cancel((key, job) => key.startsWith(old + '#') && job.priority < PRIORITY.NEXT_CHAPTER);
-    }
-    Object.assign(state, {
-      row,
-      pages: [],
-      slots: [],
-      current: 0,
-      furthest: 0,
-      marked: isChapterRead(sync, ref, keyOf(row)),
-      completed: false,
-      preloaded: null,
-      activeMs: 0,
-      lastTick: performance.now(),
-    });
+    // كل ما لم يبدأ من الفصول المعروضة لا يزاحم ما ستقرؤه الآن
+    const leaving = new Set(segs.map((x) => chapterId(x.row)));
+    scheduler.cancel((key, job) => leaving.has(key.split('#')[0]) && job.priority < PRIORITY.NEXT_CHAPTER);
+    observer?.disconnect();
+    segs.length = 0;
+    state.seg = null;
     exitFrameMode();
-    q('rdWork').textContent = ctx.title;
-    q('rdChapter').textContent = [chapterLabel(row), row.label].filter(Boolean).join(' · ');
-    const { prev, next } = nav();
-    root.querySelector('.rd-prev').disabled = !prev;
-    root.querySelector('.rd-next').disabled = !next;
-    deps.setReading?.({
-      seriesTitle: ctx.title,
-      chapterLabel: chapterLabel(row),
-      chapterNumber: Number.isFinite(row.number) && row.number >= 0 ? row.number : null,
-    });
-    // «آخر المشاهدات» بفصلها: نفس السجل في المكتبة والملف ومتابعة القراءة
-    sync.enqueue('view.add', {
-      seriesRef: ref,
-      seriesTitle: ctx.title,
-      coverUrl: ctx.work?.coverImage?.large ?? row.manga?.thumbnailUrl ?? null,
-      chapterLabel: chapterLabel(row),
-      chapterNumber: Number.isFinite(row.number) && row.number >= 0 ? row.number : null,
-      at: Date.now(),
-    });
-
+    announce(row);
     scroll.replaceChildren(loadingBlock());
     scroll.scrollTo({ top: 0, left: 0, behavior: 'instant' });
 
@@ -271,8 +249,156 @@ export function openSmartReader(deps, ctx) {
       return;
     }
     if (token !== state.token) return;
-    state.pages = pages;
-    renderPages(row, pages, startAt ?? savedPage(row));
+    const seg = makeSegment(row, pages);
+    segs.push(seg);
+    scroll.replaceChildren(seg.el);
+    observePages();
+    const start = Math.min(startAt ?? savedPage(row), pages.length - 1);
+    requestSegment(seg, start);
+    seg.current = start;
+    seg.furthest = start;
+    enterSegment(seg);
+    if (start > 0) {
+      requestAnimationFrame(() => {
+        jumpTo(start, false);
+        toast(`كمّلت من صفحة ${start + 1}`);
+      });
+    }
+  }
+
+  /** العنوان في الشريط، والحضور، والسجل: ما يُعلن حين يصير فصلٌ أمامك. */
+  function announce(row) {
+    q('rdWork').textContent = ctx.title;
+    q('rdChapter').textContent = [chapterLabel(row), row.label].filter(Boolean).join(' · ');
+    const { prev, next } = neighbors(sequence, row);
+    root.querySelector('.rd-prev').disabled = !prev;
+    root.querySelector('.rd-next').disabled = !next;
+    const number = Number.isFinite(row.number) && row.number >= 0 ? row.number : null;
+    deps.setReading?.({ seriesTitle: ctx.title, chapterLabel: chapterLabel(row), chapterNumber: number });
+    // «آخر المشاهدات» بفصلها: نفس السجل في المكتبة والملف ومتابعة القراءة
+    sync.enqueue('view.add', {
+      seriesRef: ref,
+      seriesTitle: ctx.title,
+      coverUrl: ctx.work?.coverImage?.large ?? row.manga?.thumbnailUrl ?? null,
+      chapterLabel: chapterLabel(row),
+      chapterNumber: number,
+      at: Date.now(),
+    });
+  }
+
+  function makeSegment(row, pages) {
+    const seg = {
+      id: ++segSeq,
+      row,
+      pages,
+      slots: [],
+      current: 0,
+      furthest: 0,
+      marked: isChapterRead(sync, ref, keyOf(row)),
+      completed: false,
+      preloaded: null,
+      activeMs: 0,
+      requested: false,
+      next: null,
+      nextError: null,
+      el: el('div', 'rd-chapter'),
+      end: null,
+    };
+    seg.el.dataset.seg = String(seg.id);
+    seg.slots = pages.map((page, index) => {
+      const frame = el('div', 'rd-page');
+      frame.dataset.index = String(index);
+      frame.dataset.seg = String(seg.id);
+      frame.setAttribute('aria-label', `${chapterLabel(row)} — صفحة ${index + 1} من ${pages.length}`);
+      frame.append(el('div', 'skeleton'));
+      seg.el.append(frame);
+      return { page, frame, loaded: false };
+    });
+    seg.end = el('section', 'rd-end');
+    seg.el.append(seg.end);
+    paintBoundary(seg);
+    return seg;
+  }
+
+  /** كل صفحات الفصل في الطابور: ما تبدأ منه، ثم ما يليه، ثم البقية. */
+  function requestSegment(seg, start = 0, priority = null) {
+    seg.slots.forEach((_, i) => {
+      const p = priority ?? (i === start ? PRIORITY.VISIBLE : i > start && i <= start + 3 ? PRIORITY.NEAR : PRIORITY.CHAPTER);
+      void loadSlot(seg, i, p);
+    });
+    if (priority === null) seg.requested = true;
+  }
+
+  /** صار هذا الفصل أمامك: الشريط والسجل له، وما بعده يُجهَّز من الآن. */
+  function enterSegment(seg) {
+    if (state.seg === seg) return;
+    if (state.seg) {
+      tickActive();
+      flushProgress();
+    }
+    state.seg = seg;
+    announce(seg.row);
+    if (!seg.requested) requestSegment(seg, seg.current);
+    updateProgress();
+    // من أول الفصل لا من آخره: التالي يصل قبل أن تصل إليه
+    appendNext(seg);
+    trimSegments();
+  }
+
+  /**
+   * الفصل التالي يُلحق تحت هذا مباشرة: قائمة صفحاته الآن، وصوره حسب الشبكة
+   * وإعدادك وبأولوية لا تنافس ما تقرؤه. التمرير يدخل فيه بلا زرّ.
+   */
+  function appendNext(seg) {
+    const { next } = neighbors(sequence, seg.row);
+    if (!next || seg.next || seg.appending) return;
+    const plan = nextChapterPlan({ mode: settings.prefetch, network: readNetwork() });
+    seg.appending = true;
+    seg.nextError = null;
+    paintBoundary(seg);
+    const token = state.token;
+    pagesOf(next)
+      .then((pages) => {
+        if (token !== state.token || !segs.includes(seg)) return;
+        const nseg = makeSegment(next, pages);
+        seg.next = nseg;
+        segs.splice(segs.indexOf(seg) + 1, 0, nseg);
+        seg.el.after(nseg.el);
+        for (const s of nseg.slots) observer?.observe(s.frame);
+        const count = plan.pageList ? Math.min(pages.length, plan.images) : 0;
+        for (let i = 0; i < count; i++) void loadSlot(nseg, i, PRIORITY.NEXT_CHAPTER);
+        scheduler.trim(MAX_CACHED_IMAGES);
+        paintBoundary(seg);
+      })
+      .catch((error) => {
+        if (token !== state.token) return;
+        seg.nextError = error;
+        paintBoundary(seg);
+      })
+      .finally(() => {
+        seg.appending = false;
+      });
+  }
+
+  /**
+   * ثلاثة فصول قبلك تكفي للرجوع بالتمرير. الأقدم يُترك (صوره تبقى في الطابور
+   * فرجوعك إليه بالزرّ سريع)، والتمرير يثبت على ما أمامك.
+   */
+  function trimSegments() {
+    const at = segs.indexOf(state.seg);
+    while (at > 3 && segs.indexOf(state.seg) > 3) {
+      const old = segs.shift();
+      const anchor = state.seg.slots[state.seg.current]?.frame;
+      const before = anchor?.getBoundingClientRect().top ?? 0;
+      for (const sl of old.slots) observer?.unobserve(sl.frame);
+      old.el.remove();
+      const after = anchor?.getBoundingClientRect().top ?? 0;
+      if (settings.mode !== 'paged' && Math.abs(after - before) > 1) scroll.scrollTop += after - before;
+    }
+  }
+
+  function segById(id) {
+    return segs.find((x) => x.id === Number(id)) ?? null;
   }
 
   function loadingBlock() {
@@ -312,41 +438,10 @@ export function openSmartReader(deps, ctx) {
     return text.slice(0, 140) || 'خطأ من المصدر.';
   }
 
-  function renderPages(row, pages, startAt) {
-    const fragment = document.createDocumentFragment();
-    state.slots = pages.map((page, index) => {
-      const frame = el('div', 'rd-page');
-      frame.dataset.index = String(index);
-      frame.setAttribute('aria-label', `صفحة ${index + 1} من ${pages.length}`);
-      frame.append(el('div', 'skeleton'));
-      fragment.append(frame);
-      return { page, frame, loaded: false };
-    });
-    fragment.append(chapterEnd(row));
-    scroll.replaceChildren(fragment);
-    observePages();
-
-    const start = Math.min(startAt, pages.length - 1);
-    // الأولويات: الصفحة التي تبدأ منها، ثم ما يليها، ثم بقية الفصل
-    state.slots.forEach((_, i) => {
-      const priority = i === start ? PRIORITY.VISIBLE : i > start && i <= start + 3 ? PRIORITY.NEAR : PRIORITY.CHAPTER;
-      void loadSlot(i, priority);
-    });
-    state.current = start;
-    state.furthest = start;
-    if (start > 0) {
-      requestAnimationFrame(() => {
-        jumpTo(start, false);
-        toast(`كمّلت من صفحة ${start + 1}`);
-      });
-    }
-    updateProgress();
-  }
-
-  async function loadSlot(index, priority) {
-    const slot = state.slots[index];
+  async function loadSlot(seg, index, priority) {
+    const slot = seg.slots[index];
     if (!slot || slot.loaded) return;
-    const row = state.row;
+    const row = seg.row;
     const token = state.token;
     try {
       const src = await scheduler.request(imageKey(row, index), { sourceId: row.sourceId, page: slot.page }, priority);
@@ -354,7 +449,7 @@ export function openSmartReader(deps, ctx) {
       await placeImage(slot, src);
     } catch (error) {
       if (error?.cancelled || token !== state.token) return;
-      slot.frame.replaceChildren(pageError(index, error));
+      slot.frame.replaceChildren(pageError(seg, index, error));
       slot.frame.classList.add('rd-page--error');
     }
   }
@@ -383,7 +478,7 @@ export function openSmartReader(deps, ctx) {
     slot.loaded = true;
     slot.src = src;
   }
-  function pageError(index, error) {
+  function pageError(seg, index, error) {
     const box = el('div', 'rd-page-error');
     box.innerHTML = glyph('image');
     box.append(el('span', null, `صفحة ${index + 1} ما تحمّلت`));
@@ -393,77 +488,121 @@ export function openSmartReader(deps, ctx) {
     retry.innerHTML = `${glyph('refresh')}<span>أعد</span>`;
     retry.onclick = (e) => {
       e.stopPropagation();
-      state.slots[index].frame.replaceChildren(el('div', 'skeleton'));
-      void loadSlot(index, PRIORITY.VISIBLE);
+      seg.slots[index].frame.replaceChildren(el('div', 'skeleton'));
+      void loadSlot(seg, index, PRIORITY.VISIBLE);
     };
     box.append(retry);
     return box;
   }
 
   /**
-   * نهاية الفصل: سطران بعد آخر صفحة، مندمجان مع القارئ. لا شاشة ولا أزرار
-   * كثيرة: «الفصل 112 انتهى» ثم «الفصل التالي 113» والرقم يفتحه.
+   * الحدّ بين فصلين: شريط واحد بارتفاع ثابت، لا شاشة. «انتهى الفصل 620» ثم
+   * «الفصل التالي 621» — والتمرير يكمل فيه مباشرة، واللمس يقفز إليه.
+   *
+   * يُرسم من حالة الفصل التالي نفسها: يُجهَّز، جاهز، تعذّر (مع إعادة)، أو لا
+   * شيء بعده — وعندها وحدها يقول «وصلت إلى آخر فصل متاح حاليًا».
    */
-  function chapterEnd(row) {
-    const { next } = nav();
-    const end = el('section', 'rd-end');
-    end.setAttribute('aria-label', 'نهاية الفصل');
-    const done = el('div', 'rd-end-done');
-    done.append(el('span', null, 'الفصل'));
-    const doneNo = el('strong', null, `${chapterShort(row)} انتهى`);
-    doneNo.dir = 'auto';
-    done.append(doneNo);
+  function paintBoundary(seg) {
+    const { next } = neighbors(sequence, seg.row);
+    const end = seg.end;
+    end.replaceChildren();
+    end.classList.toggle('rd-end--last', !next);
+    end.setAttribute('aria-label', next ? `نهاية ${chapterLabel(seg.row)}، التالي ${chapterLabel(next)}` : 'آخر فصل متاح');
+    const done = el('p', 'rd-end-done');
+    done.innerHTML = glyph('check', { size: 16 });
+    done.append(document.createTextNode('انتهى '), el('bdi', null, chapterLabel(seg.row)));
     end.append(done);
-    if (next) {
-      const go = el('button', 'rd-end-next');
-      go.type = 'button';
-      go.append(el('span', null, 'الفصل التالي'));
-      const no = el('strong', null, chapterShort(next));
-      no.dir = 'auto';
-      go.append(no);
-      go.setAttribute('aria-label', `افتح ${chapterLabel(next)}`);
-      go.onclick = (e) => {
+    if (!next) {
+      end.append(el('strong', 'rd-end-last', 'وصلت إلى آخر فصل متاح حاليًا'));
+      const back = el('button', 'btn btn-secondary rd-end-back');
+      back.type = 'button';
+      back.innerHTML = `${glyph('back')}<span>صفحة العمل</span>`;
+      back.onclick = (e) => {
         e.stopPropagation();
-        void openChapter(next, { startAt: 0 });
+        exit();
       };
-      end.append(go);
-    } else {
-      end.append(el('p', 'rd-end-last', 'هذا آخر فصل متوفر'));
+      end.append(back);
+      return;
     }
-    return end;
+    const go = el('button', 'rd-end-next');
+    go.type = 'button';
+    go.append(el('span', 'rd-end-kicker', 'الفصل التالي'));
+    const no = el('bdi', 'rd-end-no', chapterShort(next));
+    go.append(no);
+    const name = next.chapter?.name?.trim();
+    if (name && name !== chapterLabel(next) && !/^\s*(ال)?فصل\s*[\d.]+\s*$/.test(name)) go.append(el('bdi', 'rd-end-name', name));
+    if (seg.nextError) {
+      go.append(el('span', 'rd-end-state rd-end-state--error', 'ما تجهّز. المس لإعادة المحاولة'));
+    } else if (!seg.next) {
+      const wait = el('span', 'rd-end-state');
+      wait.append(el('i', 'rd-spinner rd-spinner--sm'), document.createTextNode('يتجهّز…'));
+      go.append(wait);
+    }
+    go.setAttribute('aria-label', `افتح ${chapterLabel(next)}`);
+    go.onclick = (e) => {
+      e.stopPropagation();
+      if (seg.nextError) return void appendNext(seg);
+      goNext(seg);
+    };
+    end.append(go);
+  }
+
+  /** «التالي» باللمس: إلى أول صفحته إن كان تحتك، وإلا يُفتح من الصفر. */
+  function goNext(seg = state.seg) {
+    if (!seg) return;
+    const { next } = neighbors(sequence, seg.row);
+    if (!next) return;
+    if (seg.next) {
+      seg.next.current = 0;
+      scrollToFrame(seg.next.slots[0]?.frame, true);
+      return;
+    }
+    void openChapter(next, { startAt: 0 });
   }
 
   // ───────────────────────── التمرير والتقدّم ─────────────────────────
 
   let observer = null;
+  /** مراقبٌ واحد لصفحات كل الفصول المعروضة: الأكثر ظهورًا هي «أنت هنا». */
   function observePages() {
     observer?.disconnect();
     const visible = new Map();
     observer = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) visible.set(Number(e.target.dataset.index), e.intersectionRatio);
-        let best = state.current;
-        let bestRatio = -1;
-        for (const [i, r] of visible) {
+        for (const e of entries) visible.set(`${e.target.dataset.seg}:${e.target.dataset.index}`, e.intersectionRatio);
+        let best = null;
+        let bestRatio = 0;
+        for (const [k, r] of visible) {
           if (r > bestRatio) {
-            best = i;
+            best = k;
             bestRatio = r;
           }
         }
-        if (bestRatio > 0) onPage(best);
+        if (!best) return;
+        const [segId, index] = best.split(':');
+        const seg = segById(segId);
+        if (seg) onPage(seg, Number(index));
       },
       { root: scroll, threshold: [0, 0.25, 0.5, 0.75, 1] },
     );
-    for (const s of state.slots) observer.observe(s.frame);
+    for (const seg of segs) for (const sl of seg.slots) observer.observe(sl.frame);
   }
-  function onPage(index) {
-    if (index === state.current && index <= state.furthest) return;
-    state.current = index;
-    state.furthest = Math.max(state.furthest, index);
+  function onPage(seg, index) {
+    if (seg !== state.seg) {
+      seg.current = index;
+      seg.furthest = Math.max(seg.furthest, index);
+      enterSegment(seg);
+    } else if (index === seg.current && index <= seg.furthest) return;
+    seg.current = index;
+    seg.furthest = Math.max(seg.furthest, index);
     // ما أمامك يسبق: الصفحة الحالية والثلاث التي بعدها
     for (let i = index; i <= index + 3; i++) {
-      const s = state.slots[i];
-      if (s && !s.loaded) scheduler.bump(imageKey(state.row, i), i === index ? PRIORITY.VISIBLE : PRIORITY.NEAR);
+      const sl = seg.slots[i];
+      if (sl && !sl.loaded) scheduler.bump(imageKey(seg.row, i), i === index ? PRIORITY.VISIBLE : PRIORITY.NEAR);
+    }
+    // آخر صفحات الفصل: أول صفحات التالي تصعد قبلك
+    if (index >= seg.slots.length - 3 && seg.next) {
+      for (let i = 0; i < 3; i++) if (seg.next.slots[i] && !seg.next.slots[i].loaded) void loadSlot(seg.next, i, PRIORITY.NEAR);
     }
     updateProgress();
     afterProgress();
@@ -475,81 +614,59 @@ export function openSmartReader(deps, ctx) {
   }
   function tickActive() {
     const now = performance.now();
-    if (document.visibilityState === 'visible') state.activeMs += Math.min(now - state.lastTick, 30_000);
+    if (document.visibilityState === 'visible' && state.seg) state.seg.activeMs += Math.min(now - state.lastTick, 30_000);
     state.lastTick = now;
   }
   function afterProgress() {
     tickActive();
-    const ratio = readRatio(state.furthest, state.pages.length);
-    // العين عند ٢٠٪ — هذا الفصل وحده
-    if (shouldAutoMark({ ratio, alreadyRead: state.marked })) {
-      state.marked = true;
-      markChapter(sync, ref, state.row, true);
+    const seg = state.seg;
+    if (!seg) return;
+    const ratio = readRatio(seg.furthest, seg.pages.length);
+    // خُمس الفصل = قرأته: العين والسجل والملف والإحصاء كلها من هذه العلامة
+    if (shouldAutoMark({ ratio, alreadyRead: seg.marked })) {
+      seg.marked = true;
+      markChapter(sync, ref, seg.row, true);
     }
-    // إحصاء القراءة الكاملة: الخادم يعيد التحقق من العتبة والوقت
-    if (!state.completed && ratio >= AUTO_READ_RATIO && state.activeMs >= 5_000) {
-      state.completed = true;
+    if (!seg.completed && ratio >= AUTO_READ_RATIO && seg.activeMs >= 5_000) {
+      seg.completed = true;
       sync.enqueue('chapter.complete', {
-        chapterKey: keyOf(state.row),
+        chapterKey: keyOf(seg.row),
         seriesRef: ref,
         // القراءة وحدها تعرّف العمل للأصدقاء باسمه وغلافه
         seriesTitle: ctx.title,
-        coverUrl: ctx.work?.coverImage?.large ?? state.row.manga?.thumbnailUrl ?? null,
-        chapterNumber: Number.isFinite(state.row.number) && state.row.number >= 0 ? state.row.number : null,
+        coverUrl: ctx.work?.coverImage?.large ?? seg.row.manga?.thumbnailUrl ?? null,
+        chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
         ratio,
-        activeMs: Math.round(state.activeMs),
+        activeMs: Math.round(seg.activeMs),
       });
     }
-    if (ratio >= PRELOAD_FROM_RATIO) preloadNext();
     clearTimeout(state.progressTimer);
     state.progressTimer = setTimeout(flushProgress, 1500);
   }
   function flushProgress() {
     clearTimeout(state.progressTimer);
     state.progressTimer = null;
-    if (!state.row || !state.pages.length) return;
+    const seg = state.seg;
+    if (!seg || !seg.pages.length) return;
     sync.enqueue('progress.set', {
-      chapterKey: keyOf(state.row),
+      chapterKey: keyOf(seg.row),
       seriesRef: ref,
-      page: state.current,
-      ratio: readRatio(state.furthest, state.pages.length),
+      page: seg.current,
+      ratio: readRatio(seg.furthest, seg.pages.length),
     });
   }
 
-  /**
-   * تجهيز الفصل التالي في الخلفية.
-   *
-   * مرة واحدة لكل فصل، وحسب الشبكة وإعدادك (`nextChapterPlan`). الصور بأولوية
-   * `NEXT_CHAPTER`: الطابور لا يبدأها وفي الفصل الحالي صفحة لم تُحمّل.
-   */
-  function preloadNext() {
-    const { next } = nav();
-    if (!next || state.preloaded === chapterId(next)) return;
-    state.preloaded = chapterId(next);
-    const plan = nextChapterPlan({ mode: settings.prefetch, network: readNetwork() });
-    if (!plan.pageList) return;
-    pagesOf(next)
-      .then((pages) => {
-        const count = Math.min(pages.length, plan.images);
-        for (let i = 0; i < count; i++) {
-          void scheduler.request(imageKey(next, i), { sourceId: next.sourceId, page: pages[i] }, PRIORITY.NEXT_CHAPTER).catch(() => {});
-        }
-        scheduler.trim(MAX_CACHED_IMAGES);
-      })
-      .catch(() => {
-        // فشل التجهيز لا يُقال: الفصل التالي سيحاول من جديد حين يُفتح
-        state.preloaded = null;
-      });
-  }
-
-  function jumpTo(index, smooth = true) {
-    const slot = state.slots[index];
-    if (!slot) return;
+  function scrollToFrame(frame, smooth = true) {
+    if (!frame) return;
     if (settings.mode === 'paged') {
-      slot.frame.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', inline: 'start', block: 'nearest' });
+      frame.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', inline: 'start', block: 'nearest' });
     } else {
-      scroll.scrollTo({ top: slot.frame.offsetTop, behavior: smooth ? 'smooth' : 'instant' });
+      const top = frame.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
+      scroll.scrollTo({ top, behavior: smooth ? 'smooth' : 'instant' });
     }
+  }
+  function jumpTo(index, smooth = true) {
+    scrollToFrame(state.slots[index]?.frame, smooth);
   }
 
   // ───────────────────────── اللمس ─────────────────────────
@@ -583,7 +700,8 @@ export function openSmartReader(deps, ctx) {
   });
   function onTap(e, frame) {
     if (state.frameMode) {
-      if (frame) toggleFramePage(Number(frame.dataset.index));
+      // الفريم من فصلٍ واحد: صفحات الفصل المجاور لا تُضاف إليه
+      if (frame && Number(frame.dataset.seg) === state.seg?.id) toggleFramePage(Number(frame.dataset.index));
       return;
     }
     if (settings.mode === 'paged') {
@@ -1062,12 +1180,15 @@ export function openSmartReader(deps, ctx) {
     menu: () => openMenu(),
     prevChapter: () => {
       const { prev } = nav();
-      if (prev) void openChapter(prev, { startAt: 0 });
+      if (!prev) return;
+      // الفصل السابق ما زال فوقك؟ إلى أوله بلا تحميل
+      const above = segs[segs.indexOf(state.seg) - 1];
+      if (above && neighbors(sequence, above.row).next && sameRow(above.row, prev)) {
+        above.current = 0;
+        scrollToFrame(above.slots[0]?.frame, false);
+      } else void openChapter(prev, { startAt: 0 });
     },
-    nextChapter: () => {
-      const { next } = nav();
-      if (next) void openChapter(next, { startAt: 0 });
-    },
+    nextChapter: () => goNext(),
     sheetBackdrop: (e) => {
       if (e.target === q('rdSheet')) closeSheet();
     },
