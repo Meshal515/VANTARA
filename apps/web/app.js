@@ -21,6 +21,7 @@ import { screenCatalog, screenExtReader, screenFrame, screenWork } from './scree
 import { frameIdFromLink } from './lib/frame.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
+import { mountV35 } from './v35/shell.js';
 import { checkForUpdate, dismissUpdate } from './lib/update.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
@@ -360,6 +361,7 @@ function openSidebar() {
   out.type = 'button';
   out.addEventListener('click', () => {
     closeSidebar();
+    dropV35();
     sync.signOut();
     void go({ name: 'gate' });
   });
@@ -1695,6 +1697,58 @@ async function screenFrameById(id) {
   return screenFrame({ ...screenDeps(), frame, fromName: nameOf(frame.from_id) });
 }
 
+/**
+ * واجهة v35: نسخة واحدة تعيش طول الجلسة.
+ *
+ * الخروج منها إلى الأصدقاء أو القارئ ثم الرجوع لا يعيد بناءها: الرئيسية
+ * تبقى محمّلة، وصفحة العمل على الفصل الذي تركته، والتمرير في مكانه. وتُهدم
+ * فقط عند تبديل الحساب، فمكتبة الحساب السابق لا تظهر للتالي.
+ */
+let v35 = null;
+
+function dropV35() {
+  v35?.destroy();
+  v35 = null;
+}
+
+function screenV35(page) {
+  state.screen = page === 'detail' ? 'SERIES' : 'HOME';
+  if (!v35) {
+    v35 = mountV35(
+      {
+        sync,
+        mount,
+        go,
+        version: appVersion(),
+        friends: () => frameCapability().friends(),
+        // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
+        report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),
+        openReader: (target) => {
+          const { row, work } = target;
+          void go({
+            name: 'extReader',
+            sourceId: row.sourceId,
+            manga: row.manga,
+            chapter: row.chapter,
+            work,
+            back: { name: 'v35', page: 'detail' },
+          });
+        },
+        switchAccount: () => {
+          dropV35();
+          sync.signOut();
+          void go({ name: 'gate' });
+        },
+      },
+      { page },
+    );
+  } else {
+    mount(v35.root);
+    v35.resume(page);
+  }
+  state.teardown = () => v35?.pause();
+}
+
 async function go(route) {
   state.route = route;
   switch (route.name) {
@@ -1714,15 +1768,20 @@ async function go(route) {
       return;
     }
     case 'home':
-      return screenHome();
+      return screenV35('home');
     case 'library':
-      return screenHome();
+      return screenV35('library');
+    case 'v35':
+      return screenV35(route.page ?? 'home');
     // «استكشاف» هو مدخل المصادر: من هنا تُقرأ المانجا والمانهوا مباشرة من
     // إضافات Keiyoushi عبر المحرّك المحلي، بلا خادم محتوى في الطريق. والمصادر
     // لا تظهر للقارئ: تُسأل كلها معًا وتُعرض نتائجها ككتالوج واحد.
     // `standalone` يعني: دخلنا من شاشة «اضبط عنوان الخادم» بلا حساب. عندها
     // يُخفى الشريط السفلي، فتبويباته تفتح شاشات تفترض حسابًا قائمًا.
     case 'explore':
+    case 'discover':
+      if (!route.standalone) return screenV35('discover');
+    // falls through
     case 'sources':
       return screenCatalog({ ...screenDeps(), standalone: route.standalone });
     case 'work':

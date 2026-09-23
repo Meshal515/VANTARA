@@ -29,17 +29,20 @@ export function seriesRefOf(work) {
 
 export function toV35Work(work) {
   const cover = work.thumbnailUrl ?? null;
+  // القوائم تحمل أحيانًا التصنيف والحالة؛ ما لم تحمله يأتي مع التفاصيل
+  const listed = work.editions?.map((e) => e.manga).find((m) => m?.genre || m?.status) ?? null;
+  const fields = listed ? detailFields(listed) : null;
   return {
     id: seriesRefOf(work),
     title: { english: work.title, romaji: null, native: null },
     synonyms: [],
-    status: null,
+    status: fields?.status ?? null,
     format: null,
     countryOfOrigin: null,
     startDate: { year: null },
     chapters: null,
     volumes: null,
-    genres: [],
+    genres: fields?.genres ?? [],
     averageScore: null,
     popularity: null,
     coverImage: { extraLarge: cover, large: cover, medium: cover, color: null },
@@ -108,7 +111,7 @@ export async function browse({ kind = 'catalogue', page = 1, query = '' } = {}) 
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
 export async function detail(v35work) {
   const work = v35work._work;
-  const [primary, ...rest] = work.editions;
+  const [primary] = work.editions;
   const { ok } = await gather(work.editions, async (edition) => {
     if (edition === primary) {
       const out = await engine.series(edition.sourceId, edition.manga);
@@ -119,12 +122,27 @@ export async function detail(v35work) {
   const values = ok.map((r) => r.value);
   const main = values.find((v) => v.detail) ?? null;
   const chapters = mergeChapters(values);
+  const answered = new Set(values.map((v) => v.sourceId));
   return {
     ...v35work,
     ...(main ? detailFields(main.detail) : {}),
     chapters: chapters.length || null,
     _chapters: chapters,
+    _editions: values,
     _sources: values.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
-    _failed: rest.length + 1 - values.length,
+    // المصدر الذي لم يردّ يُقال إنه لم يردّ، لا يختفي كأنه غير موجود
+    _failedSources: work.editions.filter((e) => !answered.has(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
   };
+}
+
+/**
+ * فصول نسخةٍ واحدة كما هي عند مصدرها، بنفس شكل صفوف `mergeChapters`.
+ *
+ * اختيار مصدر في صفحة العمل يعرض هذه: رقم الفصل نفسه يبقى نفس مفتاح العين،
+ * فما علّمته من مصدر يظهر مقروءًا في غيره.
+ */
+export function editionRows(v35work, sourceId) {
+  const edition = v35work._editions?.find((e) => e.sourceId === sourceId);
+  if (!edition) return [];
+  return mergeChapters([edition]);
 }

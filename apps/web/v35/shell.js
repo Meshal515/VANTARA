@@ -1,53 +1,41 @@
 /**
- * واجهة VANTARA بتصميم v35 — نفس الصفحات والأصناف والحركة.
+ * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
  *
- * منطق العرض منقولٌ من ملف v35 كما هو (البانر الدائري، الشرائط، صفحة العمل،
- * المكتبة، الاستكشاف، الدرج). ما تغيّر هو مصدر الحقيقة وحده:
+ * هوية v35 كما هي (البانر الدائري، الاختصارات، الشرائط، الدرج)، ومصدر
+ * الحقيقة منّا:
  *
- *   - الأعمال من مصادرنا الست عشرة عبر المحرّك (`works.js`)، لا AniList.
- *   - المكتبة والمفضلة و«أقرأ لاحقًا» والتقييم في حسابك عبر المزامنة، لا
- *     في localStorage — فتظهر على أجهزتك كلها ويراها أصدقاؤك.
+ *   - الأعمال من مصادرنا عبر المحرّك (`works.js`)، مدموجةً عبر المصادر.
+ *   - المكتبة والمفضلة و«أقرأ لاحقًا» والتقييم وعين الفصل في حسابك عبر
+ *     المزامنة — تظهر على أجهزتك كلها ويراها أصدقاؤك.
  *
- * والشاشات التي لم تُنقل بعد (الأصدقاء، الإشعارات، ملفي…) تُفتح من هنا عبر
- * `deps.go` كما كانت.
+ * والشاشات التي لم تُنقل بعد (الإشعارات، ملفي…) تُفتح عبر `deps.go`.
  */
 
 import { SHELL_HTML } from './markup.js';
-import { available, browse, detail, seriesRefOf } from './works.js';
+import { glyph } from './icons.js';
+import { available, browse, detail, editionRows, seriesRefOf } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
+import { countLabel } from './plural.js';
 
-const LOGO = '/icons/icon-512.png';
-const AR_GENRE = { Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي', Supernatural: 'قوى خارقة', 'Sci-Fi': 'خيال علمي', Mystery: 'غموض', Thriller: 'إثارة', Horror: 'رعب', Sports: 'رياضة', Psychological: 'نفسي', Mecha: 'ميكا', Music: 'موسيقى' };
+const AR_GENRE = {
+  Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
+  Supernatural: 'قوى خارقة', 'Sci-Fi': 'خيال علمي', Mystery: 'غموض', Thriller: 'إثارة', Horror: 'رعب', Sports: 'رياضة',
+  Psychological: 'نفسي', Mecha: 'ميكا', Music: 'موسيقى', 'Slice of Life': 'حياة يومية', Isekai: 'إيسيكاي',
+  Historical: 'تاريخي', Superhero: 'أبطال خارقون', Tragedy: 'مأساة', Medical: 'طبي', Philosophical: 'فلسفي',
+  Crime: 'جريمة', 'Magical Girls': 'فتيات سحريات', Wuxia: 'ووشيا',
+};
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', HIATUS: 'متوقف مؤقتًا', CANCELLED: 'ملغي', NOT_YET_RELEASED: 'لم يبدأ' };
-const GENRES = ['أكشن', 'مغامرة', 'كوميديا', 'دراما', 'فانتازيا', 'رعب', 'غموض', 'نفسي', 'رومانسي', 'خيال علمي', 'رياضة', 'قوى خارقة', 'إثارة'];
+const GENRES = ['أكشن', 'مغامرة', 'كوميديا', 'دراما', 'فانتازيا', 'رعب', 'غموض', 'نفسي', 'رومانسي', 'خيال علمي', 'رياضة', 'قوى خارقة', 'إثارة', 'حياة يومية'];
+
+/** كم فصلًا يُرسم أول مرة. عمل بألف فصل لا يرسم ألف صف قبل أن يظهر شيء. */
+const CHAPTER_BATCH = 60;
 
 const drawerGroups = [
-  ['الأساسي', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'bookmark'], ['استكشف', 'discover', 'compass']]],
-  ['الاجتماعي', [['الأصدقاء', 'friends', 'users'], ['النشاط', 'activity', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
-  ['مكتبتي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
-  ['الحساب', [['ملفي', 'profile', 'user'], ['تغيير الحساب', 'switchAccount', 'switch']]],
-  ['النظام', [['الإعدادات', 'settings', 'settings'], ['إعدادات الخادم', 'server', 'settings']]],
+  ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
+  ['الأصدقاء', [['الأصدقاء', 'friends', 'users'], ['النشاط', 'activity', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
+  ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
+  ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
-const SVG_ICONS = {
-  home: '<path d="m12 3 8 7v10a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1V10Z"/>',
-  bookmark: '<path d="M6 3.5h12v17L12 17l-6 3.5Z"/>',
-  compass: '<circle cx="12" cy="12" r="8"/><path d="m14.7 9.3-1.6 3.8-3.8 1.6 1.6-3.8Z"/>',
-  users: '<circle cx="9" cy="8" r="3"/><path d="M3.8 19c.5-3.3 2.2-5 5.2-5s4.7 1.7 5.2 5"/><path d="M16 6a3 3 0 0 1 0 5.8M16.5 14c2.2.4 3.5 2 3.8 4.5"/>',
-  activity: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
-  bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4.5 2 5.5 2 5.5H4S6 14.5 6 10Z"/><path d="M9.5 19a2.8 2.8 0 0 0 5 0"/>',
-  spark: '<path d="m12 3 2.2 4.7L19 10l-4.8 2.3L12 17l-2.2-4.7L5 10l4.8-2.3Z"/>',
-  heart: '<path d="M20.6 5.1a5.1 5.1 0 0 0-7.2 0L12 6.5l-1.4-1.4a5.1 5.1 0 0 0-7.2 7.2L12 20.7l8.6-8.4a5.1 5.1 0 0 0 0-7.2Z"/>',
-  clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
-  user: '<circle cx="12" cy="8" r="3.3"/><path d="M5.8 20c.5-4 2.6-6 6.2-6s5.7 2 6.2 6"/>',
-  switch: '<path d="M6 7h12l-2.5-2.5M18 7l-2.5 2.5M18 17H6l2.5 2.5M6 17l2.5-2.5"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19 14.7a1.7 1.7 0 0 0 .4 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.4A1.7 1.7 0 0 0 14 20.6V21h-4v-.4A1.7 1.7 0 0 0 9 19a1.7 1.7 0 0 0-1.9.4l-.1.1-2.8-2.8.1-.1a1.7 1.7 0 0 0 .4-1.9A1.7 1.7 0 0 0 3.1 14H3v-4h.1A1.7 1.7 0 0 0 4.7 9a1.7 1.7 0 0 0-.4-1.9l-.1-.1L7 4.2l.1.1A1.7 1.7 0 0 0 9 4.7 1.7 1.7 0 0 0 10 3.1V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.4l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.4 1.9 1.7 1.7 0 0 0 1.6 1h.1v4h-.1a1.7 1.7 0 0 0-1.9.7Z"/>',
-};
-const EYE_SVG =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
-const CHECK_SVG =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4L19 7"/></svg>';
-const iconSvg = (k) =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${SVG_ICONS[k] || SVG_ICONS.spark}</svg>`;
 
 const WORKS_KEY = 'vantara.v35.works';
 const HISTORY_KEY = 'vantara.v35.history';
@@ -67,23 +55,27 @@ function writeJson(key, value) {
   }
 }
 
-const clean = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-const safe = (v, f = '—') => (v === null || v === undefined || v === '' ? f : String(v));
+const clean = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/[ \t]+/g, ' ').trim();
 const titleOf = (w) => w?.title?.english || w?.title?.romaji || w?.title || 'بدون عنوان';
 const unique = (arr) => [...new Set(arr.filter(Boolean))];
 const uniqueById = (items) => {
   const seen = new Set();
   return items.filter((x) => x && x.id && !seen.has(x.id) && seen.add(x.id));
 };
-const el = (tag, cls) => {
+const el = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
   return n;
 };
+const genreAr = (g) => AR_GENRE[g] || g;
+const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?? '؟';
 
 /**
  * @param {{ sync: any, mount: (node: Element) => void, go: (route: object) => Promise<void>,
- *           openReader: (route: object) => void, switchAccount: () => void, version: string }} deps
+ *           openReader: (route: object) => void, switchAccount: () => void, version: string,
+ *           friends?: () => Array<{userId: string, displayName: string, avatarKey: string|null}>,
+ *           report?: (input: object) => Promise<unknown> }} deps
  */
 export function mountV35(deps, { page = 'home' } = {}) {
   const { sync } = deps;
@@ -95,12 +87,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const state = {
     home: { trending: [], featured: [], recent: [], popular: [] },
     current: null,
-    previousPage: 'home',
+    nextRow: null,
+    stack: [],
     catalog: [],
     catalogPage: 0,
     catalogHasNext: true,
-    collection: { kind: 'trending', page: 0, hasNext: true, items: [] },
+    discoverQuery: '',
+    collection: { kind: 'catalogue', page: 0, hasNext: true, items: [] },
     searchTimer: null,
+    eyeTimer: null,
     heroItems: [],
     heroPhysicalIndex: 1,
     heroTimer: null,
@@ -108,15 +103,48 @@ export function mountV35(deps, { page = 'home' } = {}) {
     heroDeltaX: 0,
     heroDragging: false,
     libraryFilter: 'all',
-    pendingRating: 0,
+    chapterSource: null,
+    chapterNewestFirst: true,
+    chapterShown: CHAPTER_BATCH,
   };
+
+  // ───────────────────────── الرسائل والأوراق ─────────────────────────
 
   function toast(msg) {
     const t = q('toast');
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(t._x);
-    t._x = setTimeout(() => t.classList.remove('show'), 1800);
+    t._x = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  let sheetClose = null;
+  /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
+  function openSheet(build) {
+    closeSheet();
+    const body = q('sheetBody');
+    body.innerHTML = '<div class="sheet-handle"></div>';
+    sheetClose = build(body) ?? null;
+    q('sheet').classList.add('show');
+  }
+  function closeSheet() {
+    if (!q('sheet').classList.contains('show')) return false;
+    q('sheet').classList.remove('show');
+    sheetClose?.();
+    sheetClose = null;
+    return true;
+  }
+  function sheetItem(icon, label, run, { pressed, danger } = {}) {
+    const b = el('button', `sheet-item${danger ? ' sheet-item--danger' : ''}`);
+    b.type = 'button';
+    b.innerHTML = glyph(icon);
+    b.append(el('span', null, label));
+    if (pressed !== undefined) {
+      b.setAttribute('aria-pressed', String(pressed));
+      if (pressed) b.insertAdjacentHTML('beforeend', `<span class="trail">${glyph('check', { size: 20 })}</span>`);
+    }
+    b.onclick = run;
+    return b;
   }
 
   // ───────────────────────── الأعمال المحفوظة ─────────────────────────
@@ -134,12 +162,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return {
       id: ref,
       title: { english: base.title },
-      synonyms: [],
       genres: [],
+      status: null,
       coverImage: { large: base.thumbnailUrl, extraLarge: base.thumbnailUrl },
       bannerImage: base.thumbnailUrl,
       staff: { edges: [] },
-      averageScore: null,
       _work: base,
     };
   }
@@ -147,14 +174,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const me = () => sync.user?.userId;
   const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed);
   const inCollection = (kind, ref) =>
-    sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member)
-      .length > 0;
+    sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
   function libraryEntry(ref) {
     const row = libraryRows().find((r) => r.series_ref === ref);
     const later = inCollection('read_later', ref);
     const favorite = inCollection('favorite', ref);
     if (!row && !later && !favorite) return null;
-    return { row, state: later ? 'later' : row ? 'reading' : null, favorite, addedAt: row?.added_at ?? 0 };
+    return { row, later, favorite, addedAt: row?.added_at ?? 0 };
   }
   function libraryWorks(filter = 'all') {
     const refs = new Set([
@@ -164,15 +190,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return [...refs]
       .map((ref) => {
         const row = libraryRows().find((r) => r.series_ref === ref);
+        const col = sync.rows('collections', (r) => r.user_id === me() && r.series_ref === ref)[0];
         const work = sync.rows('works', (w) => w.series_ref === ref)[0];
-        return { ref, entry: libraryEntry(ref), work: workFromRef(ref, row?.series_title ?? work?.title, row?.cover_url ?? work?.cover_url) };
+        return {
+          entry: libraryEntry(ref),
+          work: workFromRef(ref, row?.series_title ?? col?.series_title ?? work?.title, row?.cover_url ?? col?.cover_url ?? work?.cover_url),
+        };
       })
       .filter(({ entry }) => {
         if (!entry) return false;
-        if (filter === 'reading') return entry.state === 'reading';
-        if (filter === 'later') return entry.state === 'later';
+        if (filter === 'reading') return Boolean(entry.row);
+        if (filter === 'later') return entry.later;
         if (filter === 'favorite') return entry.favorite;
-        if (filter === 'completed') return false;
         return true;
       })
       .map(({ work }) => work);
@@ -184,36 +213,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sourceId: w._work?.editions?.[0]?.sourceId ?? null,
   });
 
-  function getHistory() {
-    return readJson(HISTORY_KEY, []);
-  }
+  const getHistory = () => readJson(HISTORY_KEY, []);
   function pushHistory(w) {
     const mini = { ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null };
     writeJson(HISTORY_KEY, [mini, ...getHistory().filter((x) => x.ref !== mini.ref)].slice(0, 100));
   }
   const historyWorks = () => getHistory().map((h) => workFromRef(h.ref, h.title, h.cover));
 
-  // ───────────────────────── الصور والبطاقات (v35) ─────────────────────────
+  // ───────────────────────── الصور والبطاقات ─────────────────────────
 
-  function fallbackArt(container, label = 'VANTARA') {
-    container.innerHTML = '';
+  function fallbackArt(container, label) {
     const d = el('div', 'image-fallback');
-    const img = new Image();
-    img.src = LOGO;
-    img.alt = 'VANTARA';
-    const s = el('span');
-    s.textContent = label;
-    d.append(img, s);
-    container.appendChild(d);
+    d.append(el('span', null, initialOf(label)));
+    container.replaceChildren(d);
   }
-  async function mountImage(container, work, kind = 'cover', opts = {}) {
-    const token = String(Date.now()) + Math.random();
+  const imageUrls = (work) => unique([work.coverImage?.extraLarge, work.coverImage?.large, work.bannerImage]);
+
+  /**
+   * الصورة بعد تحميلها فقط، ومكانها هيكلٌ لامع حتى ذلك. التسابق محروس
+   * بعلامة: البطاقة المعاد استعمالها لا تعرض صورة طلبٍ قديم.
+   */
+  async function mountImage(container, work, opts = {}) {
+    const token = String(Math.random());
     container.dataset.imageToken = token;
-    container.innerHTML = '<div class="skeleton"></div>';
-    const urls =
-      kind === 'banner'
-        ? unique([work.bannerImage, work.coverImage?.extraLarge, work.coverImage?.large])
-        : unique([work.coverImage?.extraLarge, work.coverImage?.large, work.bannerImage]);
+    container.replaceChildren(el('div', 'skeleton'));
     const tryUrl = (url, timeoutMs) =>
       new Promise((resolve) => {
         const img = new Image();
@@ -225,111 +248,126 @@ export function mountV35(deps, { page = 'home' } = {}) {
           resolve(ok ? img : null);
         };
         const timer = setTimeout(() => done(false), timeoutMs);
-        img.alt = titleOf(work);
+        img.alt = '';
         img.decoding = 'async';
-        img.loading = 'eager';
         img.onload = () => done(true);
         img.onerror = () => done(false);
         img.src = url;
       });
-    for (const url of urls) {
-      const img = await tryUrl(url, kind === 'banner' ? 4000 : 6000);
-      if (img && container.dataset.imageToken === token) {
-        container.innerHTML = '';
+    for (const url of imageUrls(work)) {
+      const img = await tryUrl(url, 9000);
+      if (container.dataset.imageToken !== token) return null;
+      if (img) {
         if (opts.position) img.style.objectPosition = opts.position;
-        container.appendChild(img);
-        return;
+        container.replaceChildren(img);
+        return url;
       }
     }
-    if (container.dataset.imageToken === token) fallbackArt(container);
+    if (container.dataset.imageToken === token) fallbackArt(container, titleOf(work));
+    return null;
   }
 
-  function card(work) {
+  function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
+    a.tabIndex = 0;
+    a.setAttribute('role', 'link');
+    a.setAttribute('aria-label', titleOf(work));
     const p = el('div', 'poster');
-    const t = el('div', 'work-title');
-    const m = el('div', 'work-meta');
-    t.textContent = titleOf(work);
-    m.textContent = [work.averageScore ? `${work.averageScore}%` : null, STATUS_AR[work.status]].filter(Boolean).join(' · ');
-    mountImage(p, work, 'cover', { eager: true });
+    const t = el('div', 'work-title', titleOf(work));
+    t.dir = 'auto';
+    const m = el('div', 'work-meta', meta ?? (STATUS_AR[work.status] || ''));
+    void mountImage(p, work);
     a.append(p, t, m);
     a.onclick = () => void openWork(work);
+    a.onkeydown = (e) => {
+      if (e.key === 'Enter') void openWork(work);
+    };
     return a;
   }
-  const renderStrip = (target, items) => {
-    target.innerHTML = '';
-    items.slice(0, 12).forEach((w) => target.appendChild(card(w)));
-  };
-  const renderGrid = (target, items) => {
-    target.innerHTML = '';
-    items.forEach((w) => target.appendChild(card(w)));
-  };
-  function emptyState(target, title, text, action) {
-    target.innerHTML = `<div class="empty" style="grid-column:1/-1"><div><img src="${LOGO}" alt=""><h3></h3><p></p></div></div>`;
-    target.querySelector('h3').textContent = title;
-    target.querySelector('p').textContent = text;
+  const renderStrip = (target, items) => target.replaceChildren(...items.slice(0, 14).map((w) => card(w)));
+  const renderGrid = (target, items) => target.replaceChildren(...items.map((w) => card(w)));
+  const skeletonCards = (n) =>
+    Array.from({ length: n }, () => {
+      const x = el('div', 'work-card');
+      x.setAttribute('aria-hidden', 'true');
+      x.innerHTML = '<div class="poster"><div class="skeleton"></div></div><span class="skeleton-line"></span><span class="skeleton-line"></span>';
+      return x;
+    });
+
+  /** حالة فارغة: رمز الموقف لا شعار التطبيق، وجملة تقول ما العمل. */
+  function emptyState(target, { icon = 'library', title, text, action, error = false }) {
+    const box = el('div', `empty${error ? ' empty--error' : ''}`);
+    const inner = el('div');
+    inner.innerHTML = `<div class="empty-art">${glyph(icon)}</div>`;
+    inner.append(el('h3', null, title));
+    if (text) inner.append(el('p', null, text));
     if (action) {
-      const b = el('button', 'load-more');
-      b.textContent = action.label;
+      const b = el('button', 'btn btn-secondary', action.label);
+      b.type = 'button';
+      if (action.icon) b.insertAdjacentHTML('afterbegin', glyph(action.icon));
       b.onclick = action.run;
-      target.querySelector('.empty > div').appendChild(b);
+      inner.append(b);
     }
+    box.append(inner);
+    target.replaceChildren(box);
   }
 
-  // ───────────────────────── الرئيسية (v35) ─────────────────────────
+  // ───────────────────────── الرئيسية ─────────────────────────
 
   function sectionBlock(title, kind, items) {
     const s = el('section', 'section');
     const h = el('div', 'section-head');
-    const h2 = el('h2');
-    h2.textContent = title;
-    const b = el('button', 'link');
-    b.textContent = 'عرض الكل';
-    b.onclick = () => void openCollection(kind);
-    h.append(h2, b);
+    h.append(el('h2', null, title));
+    if (kind) {
+      const b = el('button', 'link');
+      b.type = 'button';
+      b.innerHTML = `<span>الكل</span>${glyph('chevron')}`;
+      b.setAttribute('aria-label', `عرض الكل: ${title}`);
+      b.onclick = () => void openCollection(kind);
+      h.append(b);
+    }
     const strip = el('div', 'card-strip');
     renderStrip(strip, items);
     s.append(h, strip);
     return s;
   }
   function renderHome() {
-    const home = q('homeSections');
-    home.innerHTML = '';
+    const blocks = [];
     const reading = libraryWorks('reading');
-    if (reading.length) home.appendChild(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
+    if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
     const history = historyWorks();
-    if (history.length) home.appendChild(sectionBlock('آخر ما شاهدت', 'history', history));
-    if (state.home.featured.length) home.appendChild(sectionBlock('مقترحة لك', 'featured', state.home.featured));
-    if (state.home.trending.length) home.appendChild(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
-    if (state.home.recent.length) home.appendChild(sectionBlock('المضافة حديثًا', 'recent', state.home.recent));
-    if (state.home.popular.length) home.appendChild(sectionBlock('المميزة', 'popular', state.home.popular));
+    if (history.length) blocks.push(sectionBlock('آخر ما فتحت', 'history', history));
+    if (state.home.featured.length) blocks.push(sectionBlock('مقترحة لك', 'featured', state.home.featured));
+    if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
+    if (state.home.recent.length) blocks.push(sectionBlock('المضافة حديثًا', 'recent', state.home.recent));
+    if (state.home.popular.length) blocks.push(sectionBlock('المميزة', 'popular', state.home.popular));
+    if (blocks.length) q('homeSections').replaceChildren(...blocks);
   }
   function renderHomeSkeleton() {
-    const home = q('homeSections');
-    home.innerHTML = '';
-    for (const title of ['مقترحة لك', 'الأكثر رواجًا', 'المضافة حديثًا']) {
-      const s = el('section', 'section');
-      s.innerHTML = `<div class="section-head"><h2>${title}</h2><span class="link">...</span></div>`;
-      const strip = el('div', 'card-strip');
-      for (let i = 0; i < 5; i++) {
-        const x = el('div', 'work-card');
-        x.innerHTML = '<div class="poster"><div class="skeleton"></div></div><div class="work-title">&nbsp;</div>';
-        strip.appendChild(x);
-      }
-      s.appendChild(strip);
-      home.appendChild(s);
-    }
+    q('homeSections').replaceChildren(
+      ...['مقترحة لك', 'الأكثر رواجًا', 'المضافة حديثًا'].map((title) => {
+        const s = el('section', 'section');
+        s.setAttribute('aria-busy', 'true');
+        const h = el('div', 'section-head');
+        h.append(el('h2', null, title));
+        const strip = el('div', 'card-strip');
+        strip.append(...skeletonCards(5));
+        s.append(h, strip);
+        return s;
+      }),
+    );
   }
   async function loadHome() {
     if (!available()) {
       renderHeroFallback();
-      renderHome();
       const box = el('div');
-      emptyState(box, 'المصادر داخل تطبيق أندرويد', 'الكتالوج يُقرأ من مصادرنا العربية بمحرّك التطبيق — افتح VANTARA على الجوال.');
-      q('homeSections').appendChild(box.firstElementChild);
+      emptyState(box, { icon: 'layers', title: 'المصادر داخل تطبيق أندرويد', text: 'الكتالوج يُقرأ من مصادرنا العربية بمحرّك التطبيق — افتح VANTARA على الجوال.' });
+      renderHome();
+      q('homeSections').append(box.firstElementChild);
       return;
     }
     renderHomeSkeleton();
+    renderHeroSkeleton();
     try {
       // ثلاث مسارات متوازية تكفي البداية؛ «المميزة» تُكمل بعدها فلا تُحمّل
       // ستة عشر مصدرًا بأربعة طلبات دفعةً واحدة
@@ -341,73 +379,94 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.home.featured = fe.items;
       state.home.trending = tr.items;
       state.home.recent = re.items;
-      state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.bannerImage).slice(0, 6);
+      state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
       renderHero();
       renderHome();
       browse({ kind: 'popular', page: 2 })
         .then((po) => {
-          state.home.popular = po.items;
+          state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
           renderHome();
         })
         .catch(() => {});
     } catch {
       renderHeroFallback();
-      const home = q('homeSections');
-      home.innerHTML = '';
       const box = el('div');
-      emptyState(box, 'تعذر الوصول إلى المصادر', 'جرّب إعادة المحاولة بعد لحظة.', { label: 'إعادة المحاولة', run: () => void loadHome() });
-      home.appendChild(box.firstElementChild);
+      emptyState(box, {
+        icon: 'offline',
+        error: true,
+        title: 'تعذّر الوصول إلى المصادر',
+        text: 'تحقّق من الاتصال ثم أعد المحاولة.',
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void loadHome() },
+      });
+      q('homeSections').replaceChildren(box.firstElementChild);
     }
   }
 
-  // البانر الدائري — منقول حرفيًّا من v35
+  // ── البانر الدائري: حركة v35 كما هي، وتركيبٌ يناسب الأغلفة الطولية ──
+
+  function heroSlide(w) {
+    const s = el('div', 'hero-slide');
+    s.setAttribute('role', 'group');
+    s.setAttribute('aria-label', titleOf(w));
+    const back = el('div', 'hero-backdrop');
+    const cover = w.coverImage?.large;
+    if (cover) back.style.backgroundImage = `url("${cover.replace(/"/g, '%22')}")`;
+    const poster = el('div', 'hero-poster');
+    void mountImage(poster, w);
+    const copy = el('div', 'hero-copy');
+    const editions = w._work?.editions ?? [];
+    const kicker = [
+      (w.genres || []).slice(0, 2).map(genreAr).join(' · '),
+      editions.length > 1 ? countLabel(editions.length, 'source') : editions[0]?.label,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    copy.append(el('div', 'hero-kicker', kicker));
+    const name = el('h3', 'hero-name', titleOf(w));
+    name.dir = 'auto';
+    copy.append(name);
+    s.append(back, poster, copy);
+    s.onclick = () => {
+      if (Math.abs(state.heroDeltaX) < 8) void openWork(w);
+    };
+    return s;
+  }
   function renderHero() {
     const items = state.heroItems;
     if (!items.length) return renderHeroFallback();
-    const track = q('heroTrack');
-    const dots = q('heroDots');
-    track.innerHTML = '';
-    dots.innerHTML = '';
     const physical = [items[items.length - 1], ...items, items[0]];
-    physical.forEach((w) => {
-      const s = el('div', 'hero-slide');
-      const im = el('div', 'hero-image');
-      mountImage(im, w, 'banner', { eager: true, position: '50% 30%' });
-      s.appendChild(im);
-      s.onclick = () => {
-        if (Math.abs(state.heroDeltaX) < 8) void openWork(w);
-      };
-      track.appendChild(s);
-    });
-    items.forEach((_, i) => {
-      const d = document.createElement('button');
-      d.className = `hero-dot${i === 0 ? ' active' : ''}`;
-      d.setAttribute('aria-label', `البانر ${i + 1}`);
-      d.onclick = (e) => {
-        e.stopPropagation();
-        heroGoLogical(i);
-      };
-      dots.appendChild(d);
-    });
+    q('heroTrack').replaceChildren(...physical.map(heroSlide));
+    q('heroDots').replaceChildren(
+      ...items.map((_, i) => {
+        const d = el('button', `hero-dot${i === 0 ? ' active' : ''}`);
+        d.type = 'button';
+        d.setAttribute('aria-label', `العمل ${i + 1} من ${items.length}`);
+        d.onclick = (e) => {
+          e.stopPropagation();
+          heroGoLogical(i);
+        };
+        return d;
+      }),
+    );
     state.heroPhysicalIndex = 1;
     heroPosition(false);
     bindHero();
     restartHero();
   }
+  function renderHeroSkeleton() {
+    q('heroTrack').replaceChildren(el('div', 'skeleton'));
+    q('heroDots').replaceChildren();
+  }
   function renderHeroFallback() {
     state.heroItems = [];
-    const track = q('heroTrack');
-    track.innerHTML = '';
     const s = el('div', 'hero-slide');
-    const im = el('div', 'hero-image');
-    fallbackArt(im);
-    s.appendChild(im);
-    track.appendChild(s);
-    q('heroDots').innerHTML = '';
-    q('heroInfoTitle').textContent = 'VANTARA';
-    q('heroInfoGenre').textContent = 'مانجا · مانهوا';
-    q('heroInfoStatus').textContent = 'مصادر عربية';
-    q('heroInfoIndex').textContent = '';
+    const copy = el('div', 'hero-copy');
+    copy.style.insetInlineStart = '20px';
+    copy.append(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
+    s.append(copy);
+    q('heroTrack').replaceChildren(s);
+    q('heroTrack').style.transform = 'none';
+    q('heroDots').replaceChildren();
   }
   function logicalIndex() {
     const n = state.heroItems.length;
@@ -418,16 +477,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function heroPosition(anim = true) {
     const tr = q('heroTrack');
-    tr.style.transition = anim ? 'transform .35s var(--ease)' : 'none';
+    tr.style.transition = anim ? 'transform .38s var(--ease-out)' : 'none';
     tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
     const li = logicalIndex();
     root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
-    const w = state.heroItems[li];
-    if (!w) return;
-    q('heroInfoTitle').textContent = titleOf(w);
-    q('heroInfoGenre').textContent = (w.genres || []).slice(0, 2).join(' · ') || (w._work?.editions?.[0]?.label ?? 'مانجا');
-    q('heroInfoStatus').textContent = STATUS_AR[w.status] || `${w._work?.editions?.length ?? 1} مصدر`;
-    q('heroInfoIndex').textContent = `${li + 1}/${state.heroItems.length}`;
   }
   function heroNext() {
     if (!state.heroItems.length) return;
@@ -467,7 +520,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clearInterval(state.heroTimer);
     };
     const move = (x) => {
-      if (state.heroDragging) state.heroDeltaX = x - state.heroStartX;
+      if (!state.heroDragging) return;
+      state.heroDeltaX = x - state.heroStartX;
+      // الشريط يتبع الإصبع: بلا هذا يبدو البانر صورةً ثابتة حتى يُفلت
+      tr.style.transform = `translateX(calc(${-state.heroPhysicalIndex * 100}% + ${state.heroDeltaX}px))`;
     };
     const end = () => {
       if (!state.heroDragging) return;
@@ -476,53 +532,58 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (state.heroDeltaX < -42) heroNext();
       else if (state.heroDeltaX > 42) heroPrev();
       else heroPosition(true);
-      state.heroDeltaX = 0;
+      setTimeout(() => (state.heroDeltaX = 0), 0);
       restartHero();
     };
     hero.addEventListener('touchstart', (e) => start(e.touches[0].clientX), { passive: true });
     hero.addEventListener('touchmove', (e) => move(e.touches[0].clientX), { passive: true });
     hero.addEventListener('touchend', end);
+    hero.addEventListener('touchcancel', end);
     hero.addEventListener('pointerdown', (e) => {
-      if (e.pointerType !== 'touch') {
-        start(e.clientX);
-        hero.setPointerCapture?.(e.pointerId);
-      }
+      if (e.pointerType !== 'touch') start(e.clientX);
     });
-    hero.addEventListener('pointermove', (e) => move(e.clientX));
-    hero.addEventListener('pointerup', end);
-    hero.addEventListener('pointercancel', end);
+    hero.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'touch') move(e.clientX);
+    });
+    hero.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch') end();
+    });
   }
   function restartHero() {
     clearInterval(state.heroTimer);
-    state.heroTimer = setInterval(heroNext, 4800);
+    if (state.heroItems.length > 1) state.heroTimer = setInterval(heroNext, 5200);
   }
 
-  // ───────────────────────── صفحة العمل (v35 + الفصول الحقيقية) ─────────────────────────
+  // ───────────────────────── صفحة العمل ─────────────────────────
 
   async function openWork(work) {
-    state.previousPage = root.querySelector('.page.active')?.id || 'home';
     state.current = work;
+    state.nextRow = null;
+    state.chapterSource = null;
+    state.chapterNewestFirst = true;
+    state.chapterShown = CHAPTER_BATCH;
     if (work._work?.editions?.length) rememberWork(work);
     pushHistory(work);
     showPage('detail');
-    resetDetailTabs();
     renderDetail(work);
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
         const found = (await browse({ query: titleOf(work) })).items.find((w) => w.id === work.id);
-        if (found) {
+        if (found && state.current === work) {
           work = found;
           state.current = found;
           rememberWork(found);
         }
       } catch {
-        // يبقى العمل بلا نُسخ ويقول ذلك في قائمة الفصول
+        // يبقى العمل بلا نُسخ ويقول ذلك أدناه
       }
     }
+    if (state.current !== work) return;
     if (!work._work?.editions?.length) {
-      q('chapterPanel').innerHTML = '<div class="no-data">ما لقينا هذا العمل في مصادرنا الآن. جرّب البحث باسمه.</div>';
+      chapterMessage('ما لقينا هذا العمل في مصادرنا الآن. جرّب البحث باسمه.');
+      setReadCta(null);
       return;
     }
     try {
@@ -530,146 +591,325 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (state.current !== work) return;
       state.current = full;
       renderDetail(full);
+      renderSources(full);
       renderChapters(full);
     } catch {
-      q('chapterPanel').innerHTML = '<div class="no-data">تعذّر جلب الفصول من المصادر. جرّب بعد لحظة.</div>';
+      if (state.current !== work) return;
+      emptyState(q('chapterPanel'), {
+        icon: 'offline',
+        error: true,
+        title: 'تعذّر جلب الفصول',
+        text: 'المصادر لم تردّ الآن.',
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
+      });
+      setReadCta(null);
     }
   }
-  function backFromDetail() {
-    showPage(state.previousPage === 'detail' ? 'home' : state.previousPage);
-  }
-  function resetDetailTabs() {
-    root.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.panel === 'summary'));
-    root.querySelectorAll('.panel').forEach((x) => x.classList.toggle('active', x.id === 'summary'));
-  }
   function renderDetail(w) {
-    q('detailTitle').textContent = titleOf(w);
-    q('detailNative').textContent = (w._sources ?? w._work?.editions ?? []).map((s) => s.label).filter(Boolean).join(' · ');
-    const g = q('detailGenres');
-    g.innerHTML = '';
-    (w.genres || []).slice(0, 5).forEach((x) => {
-      const c = el('span', 'chip');
-      c.textContent = AR_GENRE[x] || x;
-      g.appendChild(c);
+    const title = titleOf(w);
+    const h1 = q('detailTitle');
+    h1.textContent = title;
+    h1.dir = 'auto';
+    q('detailTopTitle').textContent = title;
+    q('detailTopTitle').dir = 'auto';
+
+    const sub = q('detailSub');
+    sub.replaceChildren();
+    if (w.status && STATUS_AR[w.status]) {
+      const s = el('span', 'status-dot', STATUS_AR[w.status]);
+      s.dataset.status = w.status;
+      sub.append(s);
+    }
+    if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
+    const editions = w._sources ?? w._work?.editions ?? [];
+    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
+    else if (editions[0]?.label) sub.append(el('span', null, editions[0].label));
+
+    q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
+
+    const cover = q('detailCover');
+    if (cover.dataset.for !== String(w.id)) {
+      cover.dataset.for = String(w.id);
+      const glow = q('detailGlow');
+      glow.classList.remove('ready');
+      glow.style.backgroundImage = '';
+      void mountImage(cover, w).then((url) => {
+        if (!url || state.current?.id !== w.id) return;
+        glow.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
+        glow.classList.add('ready');
+      });
+    }
+
+    const text = clean(w.description);
+    const d = q('description');
+    d.textContent = text || (w.description === undefined ? '' : 'لا توجد نبذة من المصدر.');
+    d.classList.add('clamped');
+    q('summaryBlock').hidden = w.description === undefined && !text;
+    requestAnimationFrame(() => {
+      q('moreToggle').hidden = d.scrollHeight <= d.clientHeight + 2;
+      q('moreToggle').textContent = 'المزيد';
     });
-    q('sourceRating').textContent = w.averageScore ? `${w.averageScore}%` : '—';
-    const rating = userRating(w.id);
-    q('userRating').textContent = rating ? `${rating}/5` : '—';
-    mountImage(q('detailCover'), w, 'cover', { eager: true });
-    q('description').textContent = clean(w.description) || (w.description === undefined ? 'جارٍ جلب النبذة…' : 'لا توجد نبذة متاحة من المصدر.');
     refreshLibraryDetail();
+    renderRating();
     renderInfo(w);
+  }
+  function toggleSummary() {
+    const d = q('description');
+    const clamped = d.classList.toggle('clamped');
+    q('moreToggle').textContent = clamped ? 'المزيد' : 'أقل';
   }
   function renderInfo(w) {
     const role = (needle) =>
-      unique((w.staff?.edges || []).filter((e) => (e.role || '').toLowerCase().includes(needle)).map((e) => e.node?.name?.full)).join('، ') || '—';
-    const sources = (w._sources ?? []).map((s) => `${s.label} (${s.count})`).join('، ');
+      unique((w.staff?.edges || []).filter((e) => (e.role || '').toLowerCase().includes(needle)).map((e) => e.node?.name?.full)).join('، ');
     const pairs = [
       ['المؤلف', role('story')],
       ['الرسام', role('art')],
-      ['الحالة', STATUS_AR[w.status] || safe(w.status)],
-      ['الفصول', safe(w.chapters)],
-      ['المصادر', sources || safe(w._work?.editions?.map((e) => e.label).join('، '))],
-    ];
+      ['الحالة', STATUS_AR[w.status]],
+      ['الفصول', w._chapters ? String(w._chapters.length) : null],
+      ['المصادر', (w._sources ?? w._work?.editions ?? []).map((s) => s.label).join('، ')],
+      ['التصنيفات', (w.genres || []).map(genreAr).join('، ')],
+    ].filter(([, v]) => v);
     const grid = q('infoGrid');
-    grid.innerHTML = '';
-    pairs.forEach(([a, b]) => {
-      const d = el('div', 'info-box');
-      d.innerHTML = '<div class="info-label"></div><div class="info-value"></div>';
-      d.firstElementChild.textContent = a;
-      d.lastElementChild.textContent = b;
-      grid.appendChild(d);
-    });
+    grid.replaceChildren(
+      ...pairs.map(([a, b]) => {
+        const d = el('div', 'info-box');
+        d.append(el('div', 'info-label', a), el('div', 'info-value', b));
+        return d;
+      }),
+    );
+    // خانة وحيدة في شبكة من عمودين تترك نصفها فارغًا
+    if (pairs.length % 2) grid.append(el('div', 'info-box'));
+    grid.parentElement.hidden = pairs.length === 0;
+  }
+  function chapterMessage(text) {
+    q('chapterPanel').replaceChildren(el('div', 'no-data', text));
   }
   function renderChaptersLoading() {
-    q('chapterPanel').innerHTML = '<div class="no-data">جارٍ جمع الفصول من المصادر…</div>';
+    q('chapterCount').textContent = '';
+    q('sourcesBlock').hidden = true;
+    q('detailProgress').hidden = true;
+    const list = el('div', 'chapter-list');
+    list.setAttribute('aria-busy', 'true');
+    for (let i = 0; i < 6; i++) {
+      const row = el('div', 'chapter-row');
+      row.innerHTML =
+        '<div class="chapter-open"><span class="skeleton-line" style="width:40%;margin:0"></span><span class="skeleton-line" style="width:24%"></span></div>';
+      list.append(row);
+    }
+    q('chapterPanel').replaceChildren(list);
+    setReadCta(undefined);
   }
 
   /**
-   * الفصول: «تابع القراءة» ثم القائمة، ولكل فصل عين قراءته.
-   *
-   * العين رمادية هادئة لما لم يُقرأ، وبنفسجية بعلامة صح لما قُرئ. لمستها تعلّم
-   * الفصل أو تُلغي تعليمه، والقارئ يعلّمه وحده عند ٢٠٪ منه — هذا الفصل وحده،
-   * لا ما قبله ولا العمل كله.
+   * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح.
+   * `undefined` = الفصول تُجمع، `null` = لا فصول.
    */
+  function setReadCta(next, { started = false } = {}) {
+    const btn = q('readCta');
+    const label = q('readCtaLabel');
+    const sub = q('readCtaSub');
+    btn.disabled = !next;
+    sub.textContent = '';
+    if (next === undefined) label.textContent = 'جارٍ جمع الفصول';
+    else if (next === null) label.textContent = 'لا فصول متاحة';
+    else {
+      label.textContent = started ? 'تابع القراءة' : 'ابدأ القراءة';
+      sub.textContent = next.chapter.name || `الفصل ${next.number}`;
+      sub.dir = 'auto';
+    }
+  }
+
+  /**
+   * المصدر تحت زرّ القراءة: «القارئ الذكي» أولًا (يدمج أفضل نسخة لكل فصل ولا
+   * يفرض مصدرًا بعينه)، ثم مصدران، والباقي في ورقة «كل المصادر».
+   *
+   * المصدران الظاهران: المختار إن كان أحد المصادر، ثم الأكثر فصولًا.
+   */
+  function renderSources(w) {
+    const sources = [...(w._sources ?? [])].sort((a, b) => b.count - a.count);
+    const failed = w._failedSources ?? [];
+    q('sourcesBlock').hidden = sources.length + failed.length < 2;
+    const pick = (value) => {
+      state.chapterSource = value;
+      state.chapterShown = CHAPTER_BATCH;
+      renderSources(w);
+      renderChapters(w);
+    };
+    const chip = (label, count, value, extra = '') => {
+      const b = el('button', `source-chip${extra}`);
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(state.chapterSource === value));
+      b.setAttribute('aria-pressed', String(state.chapterSource === value));
+      b.append(el('span', null, label));
+      if (count !== null) b.append(el('b', null, String(count)));
+      b.onclick = () => pick(value);
+      return b;
+    };
+    const smart = chip('القارئ الذكي', null, null, ' source-chip--smart');
+    smart.insertAdjacentHTML('afterbegin', glyph('spark'));
+    const selected = sources.find((x) => x.sourceId === state.chapterSource);
+    const shown = selected ? [selected, ...sources.filter((x) => x !== selected)].slice(0, 2) : sources.slice(0, 2);
+    const chips = [smart, ...shown.map((x) => chip(x.label, x.count, x.sourceId))];
+    const hiddenCount = sources.length - shown.length + failed.length;
+    if (hiddenCount > 0 || failed.length) {
+      const all = el('button', 'source-chip source-chip--all');
+      all.type = 'button';
+      all.innerHTML = glyph('layers');
+      all.append(el('span', null, 'كل المصادر'), el('b', null, String(sources.length + failed.length)));
+      all.setAttribute('aria-label', `كل المصادر المتوفرة لهذا العمل: ${countLabel(sources.length + failed.length, 'source')}`);
+      all.onclick = () => openSourcesSheet(w, sources, failed, pick);
+      chips.push(all);
+    }
+    q('sourceRow').replaceChildren(...chips);
+  }
+  function openSourcesSheet(w, sources, failed, pick) {
+    openSheet((body) => {
+      body.append(el('h3', null, 'المصادر المتوفرة'));
+      const note = el('p', null, 'القارئ الذكي يختار لكل فصل أكمل نسخة. اختر مصدرًا لتقرأ فصوله كما هي عنده.');
+      note.style.marginBottom = '8px';
+      body.append(note);
+      const row = (icon, label, count, value) => {
+        const b = sheetItem(icon, label, () => {
+          closeSheet();
+          pick(value);
+        }, { pressed: state.chapterSource === value });
+        if (count !== null) {
+          const c = el('span', 'value', countLabel(count, 'chapter'));
+          c.style.cssText = 'margin-inline-start:auto;color:var(--text-3);font-size:var(--fs-meta)';
+          b.querySelector('.trail')?.before(c) ?? b.append(c);
+        }
+        return b;
+      };
+      body.append(row('spark', 'القارئ الذكي', w._chapters?.length ?? 0, null));
+      for (const x of sources) body.append(row('layers', x.label, x.count, x.sourceId));
+      for (const f of failed) {
+        const b = el('div', 'sheet-item');
+        b.innerHTML = glyph('alert');
+        b.querySelector('.icon').style.color = 'var(--warning)';
+        b.append(el('span', null, f.label));
+        const c = el('span', null, 'ما ردّ الآن');
+        c.style.cssText = 'margin-inline-start:auto;color:var(--text-3);font-size:var(--fs-meta)';
+        b.append(c);
+        b.style.opacity = '.7';
+        body.append(b);
+      }
+    });
+  }
+
+  function visibleRows(w) {
+    const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters ?? [];
+    return state.chapterNewestFirst ? rows : [...rows].reverse();
+  }
+
   function renderChapters(w) {
-    const panel = q('chapterPanel');
-    panel.innerHTML = '';
-    const rows = w._chapters ?? [];
-    if (!rows.length) {
-      panel.innerHTML = '<div class="no-data">المصادر لم تُرجع فصولًا لهذا العمل.</div>';
+    const all = w._chapters ?? [];
+    if (!all.length) {
+      q('chapterCount').textContent = '';
+      chapterMessage('المصادر لم تُرجع فصولًا لهذا العمل.');
+      setReadCta(null);
       return;
     }
     const ref = String(w.id);
-    const readCount = rows.filter((r) => isChapterRead(sync, ref, chapterKeyOf(ref, r))).length;
-    // أول فصل غير مقروء من الأقدم: القائمة مرتّبة من الأحدث
-    const next = [...rows].reverse().find((r) => !isChapterRead(sync, ref, chapterKeyOf(ref, r))) ?? rows[0];
+    const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
+    const readCount = all.filter(read).length;
+    // أول فصل غير مقروء من الأقدم، من المصدر المختار (أو الذكي)
+    const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
+    const next = [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
+    state.nextRow = next;
+    setReadCta(next, { started: readCount > 0 });
 
-    const summary = el('div', 'chapter-summary');
-    summary.innerHTML = '<strong></strong><p></p>';
-    summary.querySelector('strong').textContent = String(rows.length);
-    summary.querySelector('p').textContent =
-      `${readCount} مقروء من ${rows.length}` + (w._sources?.length > 1 ? ` · من ${w._sources.length} مصادر` : '');
-    panel.appendChild(summary);
+    q('detailProgress').hidden = false;
+    q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
+    q('progressText').textContent = readCount ? `قرأت ${readCount} من ${all.length}` : 'لم تبدأ بعد';
 
-    const cont = el('button', 'load-more reader-continue');
-    cont.textContent = readCount ? `تابع القراءة · ${next.chapter.name || 'الفصل'}` : `ابدأ القراءة · ${next.chapter.name || 'الفصل الأول'}`;
-    cont.onclick = () => openChapter(w, next);
-    panel.appendChild(cont);
-
+    const rows = visibleRows(w);
+    q('chapterCount').textContent = String(rows.length);
     const list = el('div', 'chapter-list');
     const fragment = document.createDocumentFragment();
-    for (const r of rows) {
-      const row = el('div', 'chapter-row');
-      const info = el('div');
-      const no = el('div', 'chapter-no');
-      no.textContent = r.chapter.name || '—';
-      const note = el('div', 'chapter-note');
-      note.textContent = [r.label, r.chapter.scanlator].filter(Boolean).join(' · ');
-      info.append(no, note);
-      info.onclick = () => openChapter(w, r);
-      const eye = el('button', 'chapter-eye');
-      eye.type = 'button';
-      const paint = () => {
-        const read = isChapterRead(sync, ref, chapterKeyOf(ref, r));
-        eye.classList.toggle('chapter-eye--read', read);
-        eye.innerHTML = EYE_SVG + (read ? `<span class="chapter-eye__check">${CHECK_SVG}</span>` : '');
-        eye.setAttribute('aria-label', read ? 'مقروء — المس لإلغاء' : 'غير مقروء — المس للتعليم');
-      };
-      paint();
-      eye.onclick = (e) => {
-        e.stopPropagation();
-        markChapter(sync, ref, r, !isChapterRead(sync, ref, chapterKeyOf(ref, r)));
-        paint();
-      };
-      row.append(info, eye);
-      fragment.appendChild(row);
+    const nextKey = chapterKeyOf(ref, next);
+    for (const r of rows.slice(0, state.chapterShown)) {
+      fragment.append(chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
     }
-    list.appendChild(fragment);
-    panel.appendChild(list);
+    list.append(fragment);
+    const parts = [list];
+    const rest = rows.length - state.chapterShown;
+    if (rest > 0) {
+      const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
+      more.type = 'button';
+      more.onclick = () => {
+        state.chapterShown += 400;
+        renderChapters(w);
+      };
+      parts.push(more);
+    }
+    q('chapterPanel').replaceChildren(...parts);
   }
-  function openChapter(w, row) {
+  function chapterRow(w, r, isRead, isNext) {
     const ref = String(w.id);
-    deps.openReader({
-      seriesRef: ref,
-      title: titleOf(w),
-      work: w,
-      rows: w._chapters,
-      row,
-      back: () => {
-        showPage('detail');
-        renderChapters(state.current);
-      },
+    const row = el('div', `chapter-row${isRead ? ' is-read' : ''}${isNext ? ' is-next' : ''}`);
+    const open = el('button', 'chapter-open');
+    open.type = 'button';
+    const no = el('div', 'chapter-no', r.chapter.name || `الفصل ${r.number}`);
+    no.dir = 'auto';
+    const note = el(
+      'div',
+      'chapter-note',
+      [dateLabel(r.chapter.dateUpload), r.chapter.scanlator].filter(Boolean).join(' · '),
+    );
+    open.append(no, note);
+    open.onclick = () => openChapter(w, r);
+    const eye = el('button', 'chapter-eye');
+    eye.type = 'button';
+    const paint = (on) => {
+      eye.classList.toggle('chapter-eye--read', on);
+      eye.setAttribute('aria-pressed', String(on));
+      eye.innerHTML = glyph('eye') + (on ? `<span class="chapter-eye__check">${glyph('check')}</span>` : '');
+      const label = on ? 'مقروء — المس لإلغاء التعليم' : 'علّمه مقروءًا';
+      eye.setAttribute('aria-label', label);
+      eye.title = label;
+      row.classList.toggle('is-read', on);
+    };
+    paint(isRead);
+    eye.onclick = (e) => {
+      e.stopPropagation();
+      const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
+      markChapter(sync, ref, r, on);
+      paint(on);
+      // التقدّم وزرّ «تابع» يتبعان العين بعد لحظة، لا بعد المزامنة
+      clearTimeout(state.eyeTimer);
+      state.eyeTimer = setTimeout(() => state.current === w && renderChapters(w), 450);
+    };
+    row.append(open, eye);
+    return row;
+  }
+  function dateLabel(ms) {
+    if (!ms) return '';
+    const days = Math.floor((Date.now() - ms) / 86_400_000);
+    if (days < 1) return 'اليوم';
+    if (days < 2) return 'أمس';
+    if (days < 7) return `قبل ${countLabel(days, 'day')}`;
+    return new Date(ms).toLocaleDateString('ar', {
+      day: 'numeric',
+      month: 'short',
+      year: days > 330 ? 'numeric' : undefined,
+      numberingSystem: 'latn',
     });
   }
-  function switchTab(btn) {
-    root.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
-    root.querySelectorAll('.panel').forEach((x) => x.classList.remove('active'));
-    btn.classList.add('active');
-    q(btn.dataset.panel).classList.add('active');
+  function flipChapterOrder() {
+    if (!state.current?._chapters) return;
+    state.chapterNewestFirst = !state.chapterNewestFirst;
+    toast(state.chapterNewestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا');
+    renderChapters(state.current);
+  }
+  function readNow() {
+    if (state.current && state.nextRow) openChapter(state.current, state.nextRow);
+  }
+  function openChapter(w, row) {
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows: w._chapters, row });
   }
 
-  // ───────────────────────── المكتبة والتقييم (في حسابك) ─────────────────────────
+  // ── المكتبة والتقييم (في حسابك) ──
 
   function toggleLibraryCurrent() {
     if (!state.current) return;
@@ -683,18 +923,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     afterLibraryChange();
   }
-  function setLibraryState(v) {
+  function toggleLaterCurrent() {
     if (!state.current) return;
     const d = descriptorOf(state.current);
-    if (v === 'later') {
-      const member = !inCollection('read_later', d.seriesRef);
-      sync.enqueue('readLater.set', { ...d, member });
-      toast('تم تحديث «أقرأ لاحقًا»');
-    } else {
-      if (!libraryEntry(d.seriesRef)?.row) sync.enqueue('library.add', d);
-      if (inCollection('read_later', d.seriesRef)) sync.enqueue('readLater.set', { ...d, member: false });
-      toast('تم تحديث حالة القراءة');
-    }
+    const member = !inCollection('read_later', d.seriesRef);
+    sync.enqueue('readLater.set', { ...d, member });
+    toast(member ? 'في «أقرأ لاحقًا»' : 'أزيل من «أقرأ لاحقًا»');
     afterLibraryChange();
   }
   function toggleFavoriteCurrent() {
@@ -706,82 +940,197 @@ export function mountV35(deps, { page = 'home' } = {}) {
     afterLibraryChange();
   }
   function afterLibraryChange() {
-    // الكتابة في الطابور والمرآة تتحدّث مع الدفع؛ الشاشة تتحدّث الآن ثم بعده
     refreshLibraryDetail();
-    setTimeout(() => {
-      refreshLibraryDetail();
-      renderHome();
-    }, 900);
+    // الطابور يكتب في المرآة مع الدفع؛ onChange يعيد الرسم حين يعود
+    setTimeout(refreshLibraryDetail, 700);
   }
   function refreshLibraryDetail() {
     if (!state.current) return;
     const e = libraryEntry(String(state.current.id));
     const btn = q('libraryBtn');
-    btn.classList.toggle('added', !!e?.row);
-    btn.querySelector('span').textContent = e?.row ? 'مضاف إلى مكتبتي' : 'إضافة إلى مكتبتي';
-    q('readingChip').classList.toggle('on', e?.state === 'reading');
-    q('laterChip').classList.toggle('on', e?.state === 'later');
-    q('favChip').classList.toggle('on', !!e?.favorite);
-    q('detailHeart')?.setAttribute('fill', e?.favorite ? 'currentColor' : 'none');
-  }
-  function initLibraryTabs() {
-    const tabs = [['all', 'الكل'], ['reading', 'أقرأ حاليًا'], ['later', 'أقرأ لاحقًا'], ['favorite', 'المفضلة']];
-    const tabsRoot = q('libraryTabs');
-    tabsRoot.innerHTML = '';
-    tabs.forEach(([k, l]) => {
-      const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`);
-      b.textContent = l;
-      b.onclick = () => {
-        state.libraryFilter = k;
-        renderLibrary();
-      };
-      tabsRoot.appendChild(b);
-    });
-  }
-  function renderLibrary() {
-    initLibraryTabs();
-    const items = libraryWorks(state.libraryFilter);
-    const sort = q('librarySort')?.value || 'added';
-    if (sort === 'title') items.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ar'));
-    else items.sort((a, b) => (libraryEntry(b.id)?.addedAt || 0) - (libraryEntry(a.id)?.addedAt || 0));
-    const grid = q('libraryGrid');
-    if (!items.length) return emptyState(grid, 'لا توجد أعمال هنا', 'أضف الأعمال من صفحة التفاصيل ثم نظّمها كما تريد.');
-    renderGrid(grid, items);
+    const inLib = !!e?.row;
+    btn.setAttribute('aria-pressed', String(inLib));
+    btn.innerHTML = glyph('library', { filled: inLib });
+    const label = inLib ? 'في مكتبتي — المس للإزالة' : 'أضف إلى مكتبتي';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    const fav = root.querySelector('.icon-btn--fav');
+    fav.setAttribute('aria-pressed', String(!!e?.favorite));
+    fav.innerHTML = glyph('heart', { filled: !!e?.favorite });
   }
   function userRating(ref) {
     const row = sync.rows('ratings', (r) => r.user_id === me() && r.series_ref === String(ref))[0];
     return row?.score ? Math.round(row.score / 2) : 0;
   }
-  function openRating() {
-    state.pendingRating = userRating(state.current?.id);
-    renderRatingStars();
-    q('ratingModal').classList.add('show');
+  let pendingRating = null;
+  /** التقييم نجومٌ في مكانها: لمسة واحدة، بلا نافذة. */
+  function renderRating() {
+    const box = q('rateStars');
+    const current = pendingRating?.ref === state.current?.id ? pendingRating.stars : state.current ? userRating(state.current.id) : 0;
+    box.replaceChildren(
+      ...[1, 2, 3, 4, 5].map((i) => {
+        const b = el('button', i <= current ? 'on' : '');
+        b.type = 'button';
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(i === current));
+        b.setAttribute('aria-label', `تقييمك ${i} من 5`);
+        b.innerHTML = glyph('star', { filled: i <= current, size: 20 });
+        b.onclick = () => {
+          if (!state.current) return;
+          // الخادم يحفظ من 10؛ النجوم خمس
+          sync.enqueue('rating.set', { ...descriptorOf(state.current), score: i * 2 });
+          pendingRating = { ref: state.current.id, stars: i };
+          toast(`قيّمته ${i} من 5`);
+          renderRating();
+        };
+        return b;
+      }),
+    );
   }
-  function closeRating() {
-    q('ratingModal').classList.remove('show');
+
+  // ── قائمة ⋮ في صفحة العمل ──
+
+  function openWorkMenu() {
+    if (!state.current) return;
+    const w = state.current;
+    const e = libraryEntry(String(w.id));
+    openSheet((body) => {
+      const title = el('h3', null, titleOf(w));
+      title.dir = 'auto';
+      title.style.marginBottom = '8px';
+      body.append(title);
+      body.append(
+        sheetItem('clock', 'أقرأ لاحقًا', () => {
+          closeSheet();
+          toggleLaterCurrent();
+        }, { pressed: !!e?.later }),
+      );
+      if (deps.friends) {
+        body.append(
+          sheetItem('send', 'رشّحه لصديق', () => {
+            closeSheet();
+            openRecommend(w);
+          }),
+        );
+      }
+      if (deps.report) {
+        body.append(
+          sheetItem('flag', 'بلّغ عن مشكلة في العمل', () => {
+            closeSheet();
+            openReport(w);
+          }),
+        );
+      }
+    });
   }
-  function renderRatingStars() {
-    const stars = q('ratingStars');
-    stars.innerHTML = '';
-    for (let i = 1; i <= 5; i++) {
-      const b = el('button', `star${i <= state.pendingRating ? ' on' : ''}`);
-      b.innerHTML =
-        '<svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6 .9-4.35 4.24 1.03 5.98L12 16.8l-5.38 2.82 1.03-5.98L3.3 9.4l6-.9Z"/></svg>';
-      b.onclick = () => {
-        state.pendingRating = i;
-        renderRatingStars();
-      };
-      stars.appendChild(b);
+  function avatarNode(person, size = 44) {
+    if (person.avatarKey) {
+      const img = el('img');
+      img.src = person.avatarKey;
+      img.alt = '';
+      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
+      return img;
     }
+    const s = el('span', 'avatar-letter', initialOf(person.displayName));
+    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
+    return s;
   }
-  function saveRating() {
-    if (state.current && state.pendingRating) {
-      // الخادم يحفظ من 10؛ النجوم خمس
-      sync.enqueue('rating.set', { ...descriptorOf(state.current), score: state.pendingRating * 2 });
+  function openRecommend(w) {
+    const friends = deps.friends?.() ?? [];
+    openSheet((body) => {
+      body.append(el('h3', null, 'رشّحه لـ'));
+      const note = el('textarea', 'search-input');
+      note.rows = 2;
+      note.maxLength = 300;
+      note.placeholder = 'كلمة معه (اختياري)';
+      note.style.cssText = 'width:100%;padding:12px 14px;margin:10px 0 6px;min-height:0;resize:none';
+      body.append(note);
+      if (!friends.length) body.append(el('p', null, 'ما عندك أصدقاء بعد.'));
+      for (const f of friends) {
+        const b = el('button', 'sheet-item');
+        b.type = 'button';
+        b.append(avatarNode(f, 36), el('span', null, f.displayName));
+        b.onclick = () => {
+          sync.enqueue('recommendation.send', {
+            toId: f.userId,
+            seriesRef: String(w.id),
+            seriesTitle: titleOf(w),
+            message: note.value.trim() || null,
+          });
+          closeSheet();
+          toast(`انرسل لـ ${f.displayName}`);
+        };
+        body.append(b);
+      }
+    });
+  }
+  const REPORT_CHOICES = [
+    ['DUPLICATE_WORK', 'العمل مكرر'],
+    ['WRONG_CHAPTER_NUMBER', 'أرقام الفصول خطأ'],
+    ['LOW_QUALITY', 'جودة الصور ضعيفة'],
+    ['OTHER', 'شيء ثاني'],
+  ];
+  function openReport(w) {
+    openSheet((body) => {
+      body.append(el('h3', null, 'وش المشكلة؟'));
+      for (const [kind, label] of REPORT_CHOICES) {
+        body.append(
+          sheetItem('flag', label, async () => {
+            closeSheet();
+            try {
+              await deps.report({ kind, seriesRef: String(w.id), sourceId: w._work?.editions?.[0]?.sourceId ?? null });
+              toast('وصل البلاغ، شكرًا');
+            } catch {
+              toast('ما قدرنا نرسل البلاغ الآن');
+            }
+          }),
+        );
+      }
+    });
+  }
+
+  // ───────────────────────── المكتبة ─────────────────────────
+
+  function renderLibrary() {
+    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['later', 'لاحقًا'], ['favorite', 'المفضلة']];
+    q('libraryTabs').replaceChildren(
+      ...tabs.map(([k, l]) => {
+        const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
+        b.type = 'button';
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', String(k === state.libraryFilter));
+        const n = libraryWorks(k).length;
+        if (n) b.append(el('b', null, String(n)));
+        b.onclick = () => {
+          state.libraryFilter = k;
+          renderLibrary();
+        };
+        return b;
+      }),
+    );
+    const items = libraryWorks(state.libraryFilter);
+    const sort = q('librarySort')?.value || 'added';
+    if (sort === 'title') items.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ar'));
+    else items.sort((a, b) => (libraryEntry(b.id)?.addedAt || 0) - (libraryEntry(a.id)?.addedAt || 0));
+    const grid = q('libraryGrid');
+    q('libraryToolbar').hidden = items.length < 2;
+    q('libraryCount').textContent = countLabel(items.length, 'work');
+    if (!items.length) {
+      const copy = {
+        all: ['مكتبتك فاضية', 'المس رمز المكتبة في صفحة أي عمل، ويظهر هنا على أجهزتك كلها.'],
+        reading: ['ما تتابع شي الحين', 'الأعمال اللي تضيفها لمكتبتك تظهر هنا.'],
+        later: ['القائمة فاضية', 'من قائمة الخيارات في صفحة العمل اختر «أقرأ لاحقًا».'],
+        favorite: ['ما عندك مفضلة', 'القلب في صفحة العمل يضيفه هنا.'],
+      }[state.libraryFilter];
+      emptyState(grid, {
+        icon: { favorite: 'heart', later: 'clock' }[state.libraryFilter] ?? 'library',
+        title: copy[0],
+        text: copy[1],
+        action: state.libraryFilter === 'all' ? { label: 'اكتشف أعمالًا', icon: 'compass', run: () => navTo('discover') } : undefined,
+      });
+      return;
     }
-    closeRating();
-    q('userRating').textContent = state.pendingRating ? `${state.pendingRating}/5` : '—';
-    toast('حُفظ تقييمك');
+    renderGrid(grid, items);
   }
 
   // ───────────────────────── المجموعات والاستكشاف والبحث ─────────────────────────
@@ -793,25 +1142,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
     popular: { title: 'المميزة', kind: 'popular' },
   };
   async function openCollection(kind) {
-    const sortSelect = q('collectionSort');
-    if (sortSelect) sortSelect.style.display = 'none';
     if (kind === 'history') {
       showPage('collection');
-      q('collectionTitle').textContent = 'آخر ما شاهدت';
-      q('collectionMore').style.display = 'none';
+      q('collectionTitle').textContent = 'آخر ما فتحت';
+      q('collectionMore').hidden = true;
       renderGrid(q('collectionGrid'), historyWorks());
       return;
     }
     if (kind === 'libraryReading') {
       state.libraryFilter = 'reading';
-      showPage('library');
+      navTo('library');
       return;
     }
     const c = COLLECTIONS[kind] || COLLECTIONS.trending;
     state.collection = { kind: c.kind, page: 0, hasNext: true, items: [], genre: null };
     q('collectionTitle').textContent = c.title;
-    q('collectionGrid').innerHTML = '';
-    q('collectionMore').style.display = 'block';
+    q('collectionGrid').replaceChildren(...skeletonCards(9));
+    q('collectionMore').hidden = true;
     showPage('collection');
     await loadMoreCollection();
   }
@@ -819,7 +1166,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!state.collection.hasNext) return;
     const btn = q('collectionMore');
     btn.disabled = true;
-    btn.textContent = 'جاري التحميل...';
+    btn.textContent = 'جارٍ التحميل…';
     try {
       const r = state.collection.genre
         ? await browse({ query: state.collection.genre, page: state.collection.page + 1 })
@@ -827,211 +1174,317 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.collection.page = r.page;
       state.collection.hasNext = r.hasNextPage;
       state.collection.items = uniqueById([...state.collection.items, ...r.items]);
-      renderGrid(q('collectionGrid'), state.collection.items);
-      btn.style.display = state.collection.hasNext ? 'block' : 'none';
+      if (!state.collection.items.length) {
+        emptyState(q('collectionGrid'), { icon: 'search', title: 'ما فيه نتائج', text: 'المصادر ما رجّعت أعمالًا هنا.' });
+      } else {
+        renderGrid(q('collectionGrid'), state.collection.items);
+      }
+      btn.hidden = !state.collection.hasNext;
     } catch {
-      toast('تعذر تحميل المزيد');
+      if (!state.collection.items.length) {
+        emptyState(q('collectionGrid'), {
+          icon: 'offline',
+          error: true,
+          title: 'تعذّر التحميل',
+          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void loadMoreCollection() },
+        });
+      } else toast('تعذّر تحميل المزيد');
     } finally {
       btn.disabled = false;
       btn.textContent = 'تحميل المزيد';
     }
   }
-  function reloadCollection() {
-    state.collection.page = 0;
-    state.collection.hasNext = true;
-    state.collection.items = [];
-    q('collectionGrid').innerHTML = '';
-    void loadMoreCollection();
-  }
   function openCategories() {
     showPage('categories');
-    const grid = q('categoryGrid');
-    grid.innerHTML = '';
-    GENRES.forEach((g) => {
-      const b = el('button', 'category');
-      b.innerHTML = '<strong></strong><span>ابحث في كل المصادر</span>';
-      b.querySelector('strong').textContent = g;
-      b.onclick = () => void openGenre(g);
-      grid.appendChild(b);
-    });
+    q('categoryGrid').replaceChildren(
+      ...GENRES.map((g) => {
+        const b = el('button', 'category');
+        b.type = 'button';
+        b.append(el('strong', null, g));
+        b.insertAdjacentHTML('beforeend', glyph('chevron'));
+        b.onclick = () => void openGenre(g);
+        return b;
+      }),
+    );
   }
   async function openGenre(g) {
     // المصادر لا تشترك في فلتر تصنيف واحد؛ الاسم العربي يُسأل كبحث في كلها
     state.collection = { kind: 'search', page: 0, hasNext: true, items: [], genre: g };
     q('collectionTitle').textContent = g;
-    q('collectionGrid').innerHTML = '';
-    q('collectionMore').style.display = 'block';
+    q('collectionGrid').replaceChildren(...skeletonCards(9));
+    q('collectionMore').hidden = true;
     showPage('collection');
     await loadMoreCollection();
   }
+
   async function loadMoreDiscover() {
-    if (!state.catalogHasNext || !available()) {
-      if (!available()) emptyState(q('discoverGrid'), 'المصادر داخل تطبيق أندرويد', 'الاستكشاف يقرأ كتالوج مصادرنا كاملًا من محرّك التطبيق.');
+    const btn = q('discoverMore');
+    if (!available()) {
+      emptyState(q('discoverGrid'), { icon: 'layers', title: 'المصادر داخل تطبيق أندرويد', text: 'الاستكشاف يقرأ كتالوج مصادرنا كاملًا من محرّك التطبيق.' });
+      btn.hidden = true;
       return;
     }
-    const btn = q('discoverMore');
+    if (!state.catalogHasNext) return;
     btn.disabled = true;
-    btn.textContent = 'جاري تحميل المزيد...';
+    btn.textContent = 'جارٍ التحميل…';
+    if (!state.catalog.length) {
+      btn.hidden = true;
+      q('discoverGrid').replaceChildren(...skeletonCards(12));
+    }
     try {
       const r = await browse({ kind: 'catalogue', page: state.catalogPage + 1 });
       state.catalogPage = r.page;
       state.catalogHasNext = r.hasNextPage;
       state.catalog = uniqueById([...state.catalog, ...r.items]);
-      renderGrid(q('discoverGrid'), state.catalog);
-      btn.style.display = state.catalogHasNext ? 'block' : 'none';
+      if (!state.discoverQuery) renderGrid(q('discoverGrid'), state.catalog);
+      btn.hidden = !state.catalogHasNext || !!state.discoverQuery;
     } catch {
-      toast('تعذر تحميل الكتالوج');
+      if (!state.catalog.length) {
+        emptyState(q('discoverGrid'), {
+          icon: 'offline',
+          error: true,
+          title: 'تعذّر تحميل الكتالوج',
+          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void loadMoreDiscover() },
+        });
+      } else toast('تعذّر تحميل المزيد');
     } finally {
       btn.disabled = false;
-      btn.textContent = 'تحميل أعمال أكثر';
+      btn.textContent = 'أعمال أكثر';
     }
   }
-  function localDiscoverSearch(term) {
-    term = term.trim().toLowerCase();
-    if (!term) return renderGrid(q('discoverGrid'), state.catalog);
-    renderGrid(q('discoverGrid'), state.catalog.filter((w) => titleOf(w).toLowerCase().includes(term)));
+  /** البحث في الاستكشاف يسأل كل المصادر، لا ما حُمّل منها في الصفحة فقط. */
+  function discoverSearch(term) {
+    state.discoverQuery = term.trim();
+    root.querySelector('#discover .search-clear').hidden = !state.discoverQuery;
+    clearTimeout(state.searchTimer);
+    if (!state.discoverQuery) {
+      renderGrid(q('discoverGrid'), state.catalog);
+      q('discoverMore').hidden = !state.catalogHasNext;
+      return;
+    }
+    q('discoverMore').hidden = true;
+    const term0 = state.discoverQuery;
+    state.searchTimer = setTimeout(() => void runSearch(term0, q('discoverGrid'), () => state.discoverQuery), 380);
   }
-  async function runDiscoverSearch() {
-    const term = q('discoverSearch').value.trim();
-    if (!term) return;
+  function clearDiscoverSearch() {
+    q('discoverSearch').value = '';
+    discoverSearch('');
+    q('discoverSearch').focus();
+  }
+  async function runSearch(term, grid, stillWanted) {
+    grid.replaceChildren(...skeletonCards(6));
     try {
-      renderGrid(q('discoverGrid'), (await browse({ query: term })).items);
+      const { items } = await browse({ query: term });
+      if (stillWanted() !== term) return;
+      if (items.length) renderGrid(grid, items);
+      else emptyState(grid, { icon: 'search', title: 'لا نتائج', text: 'جرّب اسمًا آخر، أو الاسم بالإنجليزي.' });
     } catch {
-      toast('تعذر البحث');
+      if (stillWanted() !== term) return;
+      emptyState(grid, {
+        icon: 'offline',
+        error: true,
+        title: 'تعذّر البحث الآن',
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void runSearch(term, grid, stillWanted) },
+      });
     }
   }
   function openSearch() {
     showPage('search');
-    setTimeout(() => q('searchInput')?.focus(), 80);
+    setTimeout(() => q('searchInput')?.focus(), 60);
   }
+  let searchTerm = '';
   function debouncedSearch(term) {
+    searchTerm = term.trim();
     clearTimeout(state.searchTimer);
-    state.searchTimer = setTimeout(async () => {
-      const grid = q('searchGrid');
-      if (!term.trim()) {
-        grid.innerHTML = '';
-        return;
-      }
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1">جاري البحث...</div>';
-      try {
-        const { items } = await browse({ query: term });
-        if (items.length) renderGrid(grid, items);
-        else emptyState(grid, 'لا نتائج', 'جرّب اسمًا آخر أو كتابة مختلفة.');
-      } catch {
-        grid.innerHTML = '<div class="empty" style="grid-column:1/-1">تعذر البحث الآن.</div>';
-      }
+    state.searchTimer = setTimeout(() => {
+      if (!searchTerm) return q('searchGrid').replaceChildren();
+      const t = searchTerm;
+      void runSearch(t, q('searchGrid'), () => searchTerm);
     }, 330);
   }
 
-  // ───────────────────────── الدرج والتنقّل (v35) ─────────────────────────
+  // ───────────────────────── الدرج والتنقّل ─────────────────────────
 
+  const unreadNotifications = () => sync.rows('notifications', (r) => r.user_id === me() && !r.read).length;
   function buildDrawer() {
-    const drawer = q('drawerContent');
-    drawer.innerHTML = '';
-    drawerGroups.forEach(([label, items]) => {
-      const g = el('div', 'drawer-group');
-      g.innerHTML = '<div class="drawer-label"></div>';
-      g.firstElementChild.textContent = label;
-      items.forEach(([name, key, ic]) => {
-        const b = el('button', 'drawer-item');
-        b.innerHTML = `${iconSvg(ic)}<span></span>`;
-        b.querySelector('span').textContent = name;
-        b.onclick = () => drawerNavigate(key);
-        g.appendChild(b);
-      });
-      drawer.appendChild(g);
-    });
+    const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
+    const who = q('drawerMe');
+    const name = profile?.display_name || sync.user?.displayName || sync.user?.username || 'حسابي';
+    const texts = el('div');
+    texts.append(el('strong', null, name), el('small', null, 'ملفّك الشخصي'));
+    who.replaceChildren(avatarNode({ avatarKey: profile?.avatar_key, displayName: name }), texts);
+    who.setAttribute('aria-label', `ملفّك: ${name}`);
+    q('drawerVersion').textContent = deps.version ? `VANTARA ${deps.version}` : 'VANTARA';
+
+    const unread = unreadNotifications();
+    const here = currentPage();
+    q('drawerContent').replaceChildren(
+      ...drawerGroups.map(([label, items]) => {
+        const g = el('div', 'drawer-group');
+        if (label) g.append(el('div', 'drawer-label', label));
+        for (const [text, key, ic] of items) {
+          const b = el('button', 'drawer-item');
+          b.type = 'button';
+          b.innerHTML = glyph(ic);
+          b.append(el('span', null, text));
+          if (key === 'notifications' && unread) b.append(el('span', 'badge', unread > 99 ? '99+' : String(unread)));
+          if (key === here) {
+            b.classList.add('active');
+            b.setAttribute('aria-current', 'page');
+          }
+          b.onclick = () => drawerNavigate(key);
+          g.append(b);
+        }
+        return g;
+      }),
+    );
   }
   function openDrawer() {
+    buildDrawer();
     q('drawerBackdrop').classList.add('open');
-    document.body.style.overflow = 'hidden';
   }
   function closeDrawer() {
+    if (!q('drawerBackdrop').classList.contains('open')) return false;
     q('drawerBackdrop').classList.remove('open');
-    document.body.style.overflow = '';
+    return true;
   }
   function drawerNavigate(key) {
     closeDrawer();
     if (['home', 'library', 'discover', 'settings'].includes(key)) return navTo(key);
     if (key === 'favorites' || key === 'later') {
       state.libraryFilter = key === 'favorites' ? 'favorite' : 'later';
-      return showPage('library');
+      return navTo('library');
     }
-    if (key === 'switchAccount') return deps.switchAccount();
-    const route = { friends: 'friends', activity: 'activity', notifications: 'notifications', recommendations: 'recommendations', profile: 'me', server: 'settings' }[key];
+    if (key === 'switchAccount') return confirmSwitchAccount();
+    const route = { friends: 'friends', activity: 'activity', notifications: 'notifications', recommendations: 'recommendations', profile: 'me' }[key];
     if (route) void deps.go({ name: route });
   }
-  function showPage(id) {
+  function confirmSwitchAccount() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'تبديل الحساب؟'));
+      body.append(el('p', null, 'ترجع لشاشة «من يتابع؟». قراءتك محفوظة في حسابك.'));
+      const row = el('div', 'sheet-actions');
+      const cancel = el('button', 'btn btn-secondary', 'إلغاء');
+      cancel.type = 'button';
+      cancel.onclick = () => closeSheet();
+      const ok = el('button', 'btn btn-primary', 'بدّل');
+      ok.type = 'button';
+      ok.onclick = () => {
+        closeSheet();
+        deps.switchAccount();
+      };
+      row.append(cancel, ok);
+      body.append(row);
+    });
+  }
+
+  const MAIN_PAGES = ['home', 'library', 'discover'];
+  const currentPage = () => root.querySelector('.page.active')?.id ?? 'home';
+  function showPage(id, { push = true } = {}) {
+    const from = currentPage();
+    if (MAIN_PAGES.includes(id)) state.stack = [];
+    else if (push && from !== id) state.stack.push(from);
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
-    const mainPages = ['home', 'library', 'discover', 'settings'];
-    q('bottomNav').style.display = mainPages.includes(id) ? 'grid' : 'none';
-    root.querySelectorAll('.nav').forEach((n) => n.classList.toggle('active', n.dataset.page === id));
+    q('bottomNav').hidden = !MAIN_PAGES.includes(id);
+    root.querySelectorAll('.nav').forEach((n) => {
+      const on = n.dataset.page === id;
+      n.classList.toggle('active', on);
+      if (on) n.setAttribute('aria-current', 'page');
+      else n.removeAttribute('aria-current');
+    });
+    q('detailTop').classList.remove('scrolled');
     if (id === 'library') renderLibrary();
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
+    if (id === 'settings') renderSettings();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
-  const navTo = (id) => showPage(id);
+  function navTo(id) {
+    if (id === 'friends') return void deps.go({ name: 'friends' });
+    showPage(id);
+  }
+  /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
+  function goBack() {
+    const prev = state.stack.pop();
+    if (prev) {
+      showPage(prev, { push: false });
+      if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
+      return true;
+    }
+    if (currentPage() !== 'home') {
+      showPage('home');
+      return true;
+    }
+    return false;
+  }
 
   function renderSettings() {
-    // نفس بطاقات v35، بحقائق هذا البناء لا بنصوص النموذج (AniList، «بلا قارئ»)
-    const list = root.querySelector('#settings .settings-list');
-    if (!list) return;
-    const rows = [
-      ['المظهر', 'تصميم VANTARA الداكن', 'داكن'],
-      ['المصادر', 'مصادر عربية بمحرّك التطبيق · كل الكتالوج لا الرائج وحده', 'عربي'],
-      ['القراءة', 'الصفحات من المصادر مباشرة · القارئ الذكي', 'متاح'],
-      ['الإصدار', deps.version || 'VANTARA', 'v35'],
-    ];
-    list.innerHTML = '';
-    for (const [title, sub, pill] of rows) {
-      const d = el('div', 'setting');
-      d.innerHTML = '<div><strong></strong><small></small></div><span class="pill"></span>';
-      d.querySelector('strong').textContent = title;
-      d.querySelector('small').textContent = sub;
-      d.querySelector('.pill').textContent = pill;
-      list.appendChild(d);
-    }
-    const server = el('button', 'load-more');
-    server.textContent = 'إعدادات الخادم والتنبيهات';
-    server.onclick = () => void deps.go({ name: 'settings' });
-    list.appendChild(server);
+    // حقائق هذا البناء لا نصوص النموذج: لا شيء هنا يدّعي خيارًا غير موجود
+    const body = q('settingsBody');
+    body.replaceChildren();
+    const group = (label, rows) => {
+      body.append(el('div', 'settings-group-label', label));
+      const list = el('div', 'settings-list');
+      list.append(...rows);
+      body.append(list);
+    };
+    const row = (icon, title, sub, { value, run } = {}) => {
+      const d = el(run ? 'button' : 'div', 'setting');
+      if (run) {
+        d.type = 'button';
+        d.onclick = run;
+      }
+      d.innerHTML = glyph(icon);
+      const t = el('div');
+      t.append(el('strong', null, title));
+      if (sub) t.append(el('small', null, sub));
+      d.append(t);
+      if (value) d.append(el('span', 'value', value));
+      if (run) d.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
+      return d;
+    };
+    group('المحتوى', [
+      row('layers', 'المصادر', 'مصادر عربية تعمل على جهازك. الكتالوج كاملًا، لا الرائج وحده.', { value: 'عربي' }),
+      row('eye', 'عين الفصل', 'يتعلّم الفصل مقروءًا وحده بعد ٢٠٪ منه، وتقدر تغيّرها بيدك.'),
+    ]);
+    group('الحساب والخادم', [
+      row('server', 'الخادم والتنبيهات', 'عنوان المزامنة، التنبيهات المنبثقة، تحديث التطبيق', { run: () => void deps.go({ name: 'settings' }) }),
+      row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
+    ]);
+    group('عن التطبيق', [row('info', 'الإصدار', null, { value: deps.version || '—' })]);
   }
 
   function paintNotifyDots() {
-    const unread = sync.rows('notifications', (r) => r.user_id === me() && !r.read).length;
-    root.querySelectorAll('.has-dot').forEach((b) => b.classList.toggle('has-dot--off', unread === 0));
-    root.querySelectorAll('.notify-dot').forEach((d) => (d.style.display = unread ? '' : 'none'));
+    const unread = unreadNotifications();
+    root.querySelectorAll('.notify-dot').forEach((d) => (d.hidden = unread === 0));
+    root.querySelectorAll('.has-dot').forEach((b) => b.setAttribute('aria-label', unread ? `الإشعارات، ${countLabel(unread, 'new')}` : 'الإشعارات'));
   }
 
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   const actions = {
-    backFromDetail,
+    backFromDetail: () => goBack(),
+    goBack: () => goBack(),
     closeDrawer,
-    closeRating,
     drawerBackdropClick: (e) => {
       if (e.target === q('drawerBackdrop')) closeDrawer();
     },
-    ratingBackdrop: (e) => {
-      if (e.target === q('ratingModal')) closeRating();
+    drawerNavigate: (_e, t) => drawerNavigate(t.dataset.arg),
+    sheetBackdrop: (e) => {
+      if (e.target === q('sheet')) closeSheet();
     },
     loadMoreCollection: () => void loadMoreCollection(),
     loadMoreDiscover: () => void loadMoreDiscover(),
+    clearDiscoverSearch,
     navTo: (_e, t) => navTo(t.dataset.arg),
-    showPage: (_e, t) => showPage(t.dataset.arg),
     openCategories,
     openCollection: (_e, t) => void openCollection(t.dataset.arg),
     openDrawer,
-    openRating,
     openSearch,
     openUtility: (_e, t) => void deps.go({ name: t.dataset.arg }),
-    reloadCollection,
-    renderLibrary,
-    runDiscoverSearch: () => void runDiscoverSearch(),
-    saveRating,
-    setLibraryState: (_e, t) => setLibraryState(t.dataset.arg),
-    shareCurrent: () => toast('المشاركة من صفحة العمل قريبًا — أرسل فريمًا من القارئ'),
-    switchTab: (_e, t) => switchTab(t),
+    openWorkMenu,
+    readNow,
+    flipChapterOrder,
+    toggleSummary,
     toggleFavoriteCurrent,
     toggleLibraryCurrent,
   };
@@ -1044,40 +1497,78 @@ export function mountV35(deps, { page = 'home' } = {}) {
   root.addEventListener('input', (e) => {
     const t = e.target.closest('[data-input]');
     if (t?.dataset.input === 'debouncedSearch') debouncedSearch(t.value);
-    if (t?.dataset.input === 'localDiscoverSearch') localDiscoverSearch(t.value);
+    if (t?.dataset.input === 'discoverSearch') discoverSearch(t.value);
+  });
+  root.addEventListener('submit', (e) => {
+    e.preventDefault();
+    // «بحث» في لوحة المفاتيح يخفيها: النتائج تحتها لا فوقها
+    e.target.querySelector('input')?.blur();
   });
   root.addEventListener('change', (e) => {
     if (e.target.closest('[data-change="renderLibrary"]')) renderLibrary();
   });
+
+  // ترويسة صفحة العمل تكتسي خلفية عند التمرير، وعنوان العمل يظهر فيها
+  const onScroll = () => {
+    if (currentPage() === 'detail') q('detailTop').classList.toggle('scrolled', window.scrollY > 170);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+
   const onKey = (e) => {
-    if (e.key === 'Escape') {
-      closeDrawer();
-      closeRating();
-    }
+    if (e.key === 'Escape') handleBack();
   };
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {
-    if (tables.some((t) => ['library', 'collections', 'ratings'].includes(t))) {
+    if (tables.some((t) => ['library', 'collections'].includes(t))) {
       refreshLibraryDetail();
-      if (root.querySelector('#home.active')) renderHome();
-      if (root.querySelector('#library.active')) renderLibrary();
+      if (currentPage() === 'home') renderHome();
+      if (currentPage() === 'library') renderLibrary();
     }
+    if (tables.includes('ratings')) {
+      pendingRating = null;
+      renderRating();
+    }
+    if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
     if (tables.includes('notifications')) paintNotifyDots();
   });
 
-  buildDrawer();
-  renderSettings();
+  /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
+  function handleBack() {
+    return closeSheet() || closeDrawer() || goBack();
+  }
+
   paintNotifyDots();
   void loadHome();
-  if (page !== 'home') showPage(page);
+  showPage(page);
 
+  // الرجوع من القارئ أو الأصدقاء يعيد الصفحة كما تُركت، بتمريرها
+  let savedScroll = 0;
   return {
+    root,
     showPage,
     openWork,
-    teardown() {
+    handleBack,
+    pause() {
+      savedScroll = window.scrollY;
+      clearInterval(state.heroTimer);
+      closeDrawer();
+      closeSheet();
+    },
+    resume(target) {
+      const current = currentPage();
+      if (target && target !== current && target !== 'detail') {
+        showPage(target);
+      } else {
+        if (current === 'detail' && state.current?._chapters) renderChapters(state.current);
+        paintNotifyDots();
+        requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
+      }
+      if (state.heroItems.length) restartHero();
+    },
+    destroy() {
       clearInterval(state.heroTimer);
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      window.removeEventListener('scroll', onScroll);
       unsubscribe?.();
     },
   };

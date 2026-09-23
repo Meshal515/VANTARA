@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '8db4f5ff302ab3c2f0b8d439d69466c2c05396d060f17ed89801a00925a19b4d';
+const SHELL_DIGEST = '9de28419703f3c92ff5ef9649ff10751903fc9a79975344966b2b17d51afe956';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -82,8 +82,17 @@ const SHELL = [
   '/screens/sources.js',
   '/lib/extension-engine.js',
   '/lib/catalog.js',
+  '/v35.css',
+  '/v35/core.css',
+  '/v35/shell.js',
+  '/v35/markup.js',
+  '/v35/icons.js',
+  '/v35/plural.js',
+  '/v35/works.js',
+  '/v35/reading.js',
   '/manifest.webmanifest',
-  '/fonts/NotoNaskhArabic-Regular.woff2',
+  '/fonts/NotoSansArabic.var.woff2',
+  '/fonts/Inter-Latin.var.woff2',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   // قناع شعار «من يتابع؟»: بدونه يظهر مربّعٌ ملوّن مكان الشعار دون اتصال
