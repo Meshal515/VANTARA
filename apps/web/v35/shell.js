@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { available, browse, describe, detail, editionRows, seriesRefOf } from './works.js';
+import { available, browse, describe, detail, discoverEditions, editionRows, seriesRefOf, withEditions } from './works.js';
 import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
@@ -623,9 +623,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       // من «اقرأ الفصل 110» في المجلس: الفصل نفسه يُفتح حين تصل الفصول
-      if (readNumber !== null) {
-        const row = full._chapters?.find((r) => r.number === readNumber);
-        if (row) openChapter(full, row);
+      let wanted = readNumber;
+      if (wanted !== null) {
+        const row = full._chapters?.find((r) => r.number === wanted);
+        if (row) {
+          openChapter(full, row);
+          wanted = null;
+        }
+      }
+      // ثم باقي المصادر: العمل نفسه عندها قد يبدأ من الفصل الأول
+      const expanded = await expandEditions(full);
+      if (wanted !== null && state.current === expanded) {
+        const row = expanded._chapters?.find((r) => r.number === wanted);
+        if (row) openChapter(expanded, row);
         else toast('هالفصل مو متوفر في مصادرنا الحين');
       }
     } catch {
@@ -638,6 +648,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
         action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
       });
       setReadCta(null);
+    }
+  }
+  /**
+   * يسأل المصادر التي لم نعرف أن العمل فيها، ويضم ما يطابقه. الصفحة تبقى
+   * صالحة أثناءه: شريحة «نبحث في المصادر» فقط، ثم تتحدّث الفصول والمصادر.
+   */
+  async function expandEditions(w) {
+    if (!available()) return w;
+    state.discovering = w;
+    renderSources(w);
+    try {
+      const found = await discoverEditions(w);
+      if (state.current !== w) return w;
+      const next = await withEditions(w, found);
+      if (state.current !== w) return w;
+      if (next !== w) {
+        state.current = next;
+        rememberWork(next);
+        renderDetail(next);
+        renderChapters(next);
+      }
+      return next;
+    } catch {
+      return w;
+    } finally {
+      if (state.discovering === w) state.discovering = null;
+      if (state.current) renderSources(state.current);
     }
   }
   function renderDetail(w) {
@@ -796,7 +833,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       all.onclick = () => openSourcesSheet(w, sources, failed, pick);
       chips.push(all);
     }
+    if (state.discovering === w) {
+      const busy = el('span', 'source-chip source-chip--busy');
+      busy.append(el('i', 'spinner'), el('span', null, 'نبحث في باقي المصادر…'));
+      chips.push(busy);
+    }
     q('sourceRow').replaceChildren(...chips);
+    if (state.discovering === w) q('sourcesBlock').hidden = false;
   }
   function openSourcesSheet(w, sources, failed, pick) {
     openSheet((body) => {

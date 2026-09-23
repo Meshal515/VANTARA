@@ -222,3 +222,20 @@ describe('اتحاد الفصول', () => {
 		expect(mergeChapters([{ sourceId: 'a', label: 'a', manga: manga('X') }])).toEqual([]);
 	});
 });
+
+describe('titlesMatch — نفس العمل في مصدر آخر', async () => {
+	const { titlesMatch } = await import('./catalog.js');
+	it('يطابق نفس العنوان بصيغ مختلفة', () => {
+		expect(titlesMatch('WISTORIA: WAND AND SWORD', 'Wistoria: Wand and Sword')).toBe(true);
+		expect(titlesMatch('One-Punch Man', 'One Punch Man')).toBe(true);
+		expect(titlesMatch('OnePunch Man', 'One Punch Man')).toBe(true);
+		expect(titlesMatch('Solo Leveling (مانهوا)', 'solo leveling')).toBe(true);
+		expect(titlesMatch('وان بيس', 'ون بيس')).toBe(false);
+	});
+	it('لا يدمج عملين مختلفين', () => {
+		expect(titlesMatch('Solo Leveling', 'Solo Leveling: Ragnarok')).toBe(false);
+		expect(titlesMatch('Naruto', 'Boruto')).toBe(false);
+		expect(titlesMatch('The Beginning After the End', 'The End')).toBe(false);
+		expect(titlesMatch('', 'x')).toBe(false);
+	});
+});

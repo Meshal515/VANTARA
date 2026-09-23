@@ -10,7 +10,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
-import { createWorkIndex, gather, mergeChapters } from '../lib/catalog.js';
+import { createWorkIndex, gather, mergeChapters, normalizeTitle, titlesMatch } from '../lib/catalog.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -134,6 +134,92 @@ export async function detail(v35work) {
     _sources: values.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
     // المصدر الذي لم يردّ يُقال إنه لم يردّ، لا يختفي كأنه غير موجود
     _failedSources: work.editions.filter((e) => !answered.has(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
+  };
+}
+
+// ───────────────── نسخ العمل في كل المصادر ─────────────────
+//
+// الدمج بالعنوان لا يجمع إلا ما صادف أنه في نفس صفحة الكتالوج: عملٌ في
+// الصفحة الأولى عند «العاشق» والعاشرة عند «مانجا ليك» كان يُفتح بنسخة واحدة
+// وفصولها وحدها (37 إلى 68 مثلًا). فعند فتح العمل يُسأل كل مصدر عنه بعنوانه،
+// وتُضم كل نسخة يطابق عنوانها، وتُجمع فصولها مع ما عندنا.
+
+const SEARCH_TIMEOUT_MS = 15_000;
+const discovered = new Map();
+
+const withTimeout = (promise, ms) =>
+  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+
+/** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
+function titleVariants(v35work) {
+  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).map((e) => e.manga?.title)];
+  const seen = new Set();
+  return raw.filter((t) => {
+    if (typeof t !== 'string' || !t.trim() || t.startsWith('ext:')) return false;
+    const key = normalizeTitle(t);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * نسخ العمل في المصادر التي لم نعرف أنه فيها. تُحفظ للجلسة؛ والمصدر الذي لا
+ * يردّ خلال 15 ثانية يُتجاوز بلا أن يؤخّر غيره.
+ * @returns {Promise<Array<{sourceId, label, manga}>>}
+ */
+export function discoverEditions(v35work) {
+  const key = v35work.id;
+  if (discovered.has(key)) return discovered.get(key);
+  const promise = (async () => {
+    const variants = titleVariants(v35work);
+    if (!variants.length) return [];
+    const known = new Set((v35work._work?.editions ?? []).map((e) => e.sourceId));
+    const others = (await sources()).filter((s) => !known.has(s.id));
+    // العنوان كما يُكتب أولًا (بعض المواقع تطابق النص حرفيًّا)، ثم بلا رموز،
+    // ثم عنوان النسخة الثانية إن اختلف — ثلاثة أسئلة على الأكثر لكل مصدر
+    const queries = [...new Set([variants[0].trim(), normalizeTitle(variants[0]), variants[1]?.trim()].filter(Boolean))].slice(0, 3);
+    const { ok } = await gather(others, async (source) => {
+      for (const query of queries) {
+        const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
+        const hit = (page?.mangas ?? []).find((m) => variants.some((v) => titlesMatch(m.title, v)));
+        if (hit) return { sourceId: source.id, label: source.label, manga: hit };
+      }
+      return null;
+    });
+    return ok.map((r) => r.value).filter(Boolean);
+  })();
+  promise.catch(() => discovered.delete(key));
+  discovered.set(key, promise);
+  return promise;
+}
+
+/**
+ * يضيف نسخًا مكتشفة إلى عملٍ فُتح: فصولها تُجلب ثم يُعاد جمع الفصول كلها.
+ * يرجع العمل كما هو إن لم تضف النسخ الجديدة شيئًا.
+ */
+export async function withEditions(full, found) {
+  // ما صار نسخةً معروفة (من فتحة سابقة حُفظت) لا يُجلب مرتين
+  const have = new Set((full._editions ?? []).map((e) => e.sourceId));
+  found = found.filter((e) => !have.has(e.sourceId));
+  if (!found.length) return full;
+  const { ok, failed } = await gather(found, async (edition) => ({
+    ...edition,
+    chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), 30_000),
+  }));
+  const fresh = ok.map((r) => r.value).filter((v) => v.chapters?.length);
+  if (!fresh.length) return full;
+  const editions = [...(full._editions ?? []), ...fresh];
+  const chapters = mergeChapters(editions);
+  const work = { ...full._work, editions: [...(full._work?.editions ?? []), ...fresh.map(({ chapters: _c, ...e }) => e)] };
+  return {
+    ...full,
+    _work: work,
+    chapters: chapters.length || null,
+    _chapters: chapters,
+    _editions: editions,
+    _sources: editions.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _failedSources: [...(full._failedSources ?? []), ...failed.map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
   };
 }
 
