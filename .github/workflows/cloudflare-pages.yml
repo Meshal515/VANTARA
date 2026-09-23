@@ -21,11 +21,14 @@ env:
 
 jobs:
   deploy:
+    # VANTARA تطبيق APK لا موقع: النشر على Pages مطفأ ما لم يُفعَّل صراحةً
+    # بمتغيّر المستودع VANTARA_WEB_ENABLED=true. البوابات تحته كما هي.
     if: >-
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main') ||
-      github.event_name == 'release'
+      vars.VANTARA_WEB_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main') ||
+       github.event_name == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -1813,22 +1813,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return false;
   }
 
-  // الإعدادات كلها هنا بتصميم الواجهة: المزامنة وحالتها، والتنبيهات
-  // المنبثقة، والخادم، والبلاغ. الشاشة القديمة تبقى لحالة واحدة: لا عنوان
-  // خادم ولا حساب بعد (الإقلاع الأول)، وهناك لا واجهة أصلًا.
+  // الإعدادات لكل واحد من العيال: ما يفهمه أي أحد فوق، والتقني تحت «النظام»
+  // مطويًّا، وما قد يفصل التطبيق عن الخادم في «منطقة الخطر» بتأكيد صريح.
+  // الشاشة القديمة تبقى لحالة واحدة: لا حساب بعد (أول إقلاع)، ولا واجهة أصلًا.
+  let systemOpen = false;
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
     const api = deps.settings;
-    const group = (label, rows, note) => {
-      body.append(el('div', 'settings-group-label', label));
-      const list = el('div', 'settings-list');
+    const group = (label, rows, { note, cls } = {}) => {
+      if (label) body.append(el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}`, label));
+      const list = el('div', `settings-list${cls ? ` ${cls}` : ''}`);
       list.append(...rows.filter(Boolean));
       body.append(list);
       if (note) body.append(el('p', 'settings-note', note));
+      return list;
     };
-    const row = (icon, title, sub, { value, run, tone } = {}) => {
-      const d = el(run ? 'button' : 'div', 'setting');
+    const row = (icon, title, sub, { value, run, tone, danger } = {}) => {
+      const d = el(run ? 'button' : 'div', `setting${danger ? ' setting--danger' : ''}`);
       if (run) {
         d.type = 'button';
         d.onclick = run;
@@ -1862,76 +1864,137 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return d;
     };
 
-    group('المحتوى', [
-      row('layers', 'المصادر', 'مصادر عربية تعمل على جهازك. الكتالوج كاملًا، لا الرائج وحده.', { value: 'عربي' }),
-      row('eye', 'عين الفصل', 'يتعلّم الفصل مقروءًا وحده بعد ٢٠٪ منه، وتقدر تغيّرها بيدك.'),
+    group('حسابك', [
+      row('user', 'ملفّك الشخصي', 'اسمك وصورتك والبانر', { run: () => openProfile(me()) }),
+      row('switchUser', 'تبديل الحساب', null, { value: sync.user?.username ? `@${sync.user.username}` : null, run: confirmSwitchAccount }),
     ]);
 
     if (api) {
-      const health = api.health();
-      const bad = health.state !== 'ok' && health.state !== 'syncing';
-      group('المزامنة', [
-        row('refresh', 'الحالة', health.lastSyncAt ? `آخر سحب ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
-        health.pending ? row('clock', 'كتابات بانتظار الإرسال', null, { value: String(health.pending) }) : null,
-        health.quarantined
-          ? row('alert', 'عمليات معزولة', 'رفضها الخادم مرات. تقدر تعيد محاولتها.', {
-              value: String(health.quarantined),
-              tone: 'warn',
-              run: () => {
-                const n = api.retryQuarantined();
-                toast(`أُعيدت ${countLabel(n, 'op')} للطابور`);
-                renderSettings();
-              },
-            })
-          : null,
-        row('send', 'زامن الآن', null, {
-          run: async () => {
-            toast('جارٍ المزامنة…');
-            await api.syncNow().catch(() => {});
-            toast('تمّت المزامنة');
-            renderSettings();
-          },
-        }),
-        row('layers', 'أعد بناء البيانات المحلية', 'يسحب كل شي من الخادم من جديد. الكتابات المعلّقة تبقى.', {
-          run: async () => {
-            toast('جارٍ إعادة البناء…');
-            await api.resync().catch(() => {});
-            renderSettings();
-          },
-        }),
-      ]);
-
       const popups = api.popups();
-      const kinds = Object.entries(api.labels);
+      const on = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
       group(
-        'التنبيهات داخل التطبيق',
+        'التنبيهات',
         [
-          toggle('bell', 'التنبيهات المنبثقة', null, popups.enabled, (enabled) => {
-            api.setPopups({ ...popups, enabled });
+          toggle('bell', 'التنبيهات المنبثقة', 'تطلع فوق الشاشة لما يرسل لك أحد فريم أو ترشيح', popups.enabled, (enabled) => {
+            api.setPopups({ ...api.popups(), enabled });
             renderSettings();
           }),
-          ...(popups.enabled
-            ? kinds.map(([kind, label]) =>
-                toggle(KIND_ICON[kind] ?? 'bell', label, null, popups.kinds[kind] !== false, (on) => {
-                  api.setPopups({ ...api.popups(), kinds: { ...api.popups().kinds, [kind]: on } });
-                }),
-              )
-            : []),
+          popups.enabled
+            ? row('sliders', 'وش يطلع لك', null, { value: on === Object.keys(api.labels).length ? 'الكل' : `${on} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
+            : null,
         ],
-        'الإطفاء يمنع التنبيه المنبثق فقط. الإشعارات تبقى في صفحتها.',
+        { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
-
-      const ep = api.endpoints();
-      group('الخادم', [
-        row('server', 'خادم المزامنة', null, { value: hostOf(ep.sync), run: () => openServerSheet() }),
-        row('server', 'خادم المحتوى', null, { value: hostOf(ep.api), run: () => openServerSheet() }),
-      ]);
-
-      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'يُرفق حالة التطبيق وحدها، بلا توكنات ولا روابط.', { run: () => openProblemSheet() })]);
+      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'صار شي غلط؟ قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
-    group('الحساب', [row('switchUser', 'تبديل الحساب', sync.user?.username ? `@${sync.user.username}` : null, { run: confirmSwitchAccount })]);
-    group('عن التطبيق', [row('info', 'الإصدار', null, { value: deps.version || '—' })]);
+    group('عن التطبيق', [
+      row('layers', 'المصادر', 'مصادر عربية تشتغل على جهازك', { value: 'عربي' }),
+      row('info', 'الإصدار', null, { value: deps.version || '—' }),
+    ]);
+
+    if (!api) return;
+    // ── النظام: مطويّ. من يفتحه يعرف أنه دخل مكانًا تقنيًّا ──
+    const toggleSystem = el('button', `system-toggle${systemOpen ? ' open' : ''}`);
+    toggleSystem.type = 'button';
+    toggleSystem.setAttribute('aria-expanded', String(systemOpen));
+    toggleSystem.innerHTML = `${glyph('settings')}<span><strong>النظام</strong><small>للمسؤول فقط: المزامنة والخادم</small></span>${glyph('chevron', { cls: 'icon chev' })}`;
+    toggleSystem.onclick = () => {
+      systemOpen = !systemOpen;
+      renderSettings();
+      if (systemOpen) q('settingsBody').querySelector('.system-toggle')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    body.append(toggleSystem);
+    if (!systemOpen) return;
+
+    const health = api.health();
+    const bad = health.state !== 'ok' && health.state !== 'syncing';
+    group('', [
+      row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
+      row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
+        run: async () => {
+          toast('جارٍ المزامنة…');
+          await api.syncNow().catch(() => {});
+          toast('تمّت المزامنة');
+          renderSettings();
+        },
+      }),
+    ]);
+
+    group(
+      'منطقة الخطر',
+      [
+        row('server', 'عنوان الخادم', 'غلط فيه يفصل التطبيق عن حساباتكم', { value: hostOf(api.endpoints().sync), danger: true, run: () => confirmDanger('serverUrl') }),
+        row('layers', 'أعد بناء البيانات المحلية', 'يمسح ما على الجهاز ويجيبه من الخادم من جديد', { danger: true, run: () => confirmDanger('rebuild') }),
+        health.quarantined
+          ? row('alert', 'عمليات رفضها الخادم', null, { value: String(health.quarantined), danger: true, run: () => confirmDanger('retry') })
+          : null,
+      ],
+      { cls: 'danger-zone', note: 'لا تلمس شي هنا إلا إذا طُلب منك. كل خيار يسألك قبل ما يسوي شي.' },
+    );
+  }
+
+  function openPopupKinds() {
+    const api = deps.settings;
+    openSheet((body) => {
+      body.append(el('h3', null, 'وش يطلع لك'));
+      const list = el('div', 'settings-list');
+      list.style.marginTop = '12px';
+      for (const [kind, label] of Object.entries(api.labels)) {
+        const d = el('label', 'setting');
+        d.innerHTML = glyph(KIND_ICON[kind] ?? 'bell');
+        const t = el('div');
+        t.append(el('strong', null, label));
+        const input = el('input');
+        input.type = 'checkbox';
+        input.className = 'switch-input';
+        input.setAttribute('role', 'switch');
+        input.checked = api.popups().kinds[kind] !== false;
+        input.onchange = () => {
+          const cur = api.popups();
+          api.setPopups({ ...cur, kinds: { ...cur.kinds, [kind]: input.checked } });
+        };
+        d.append(t, input);
+        list.append(d);
+      }
+      body.append(list);
+      return () => renderSettings();
+    });
+  }
+
+  /** كل ما في منطقة الخطر يمرّ بسؤال واحد واضح قبل أن يفعل شيئًا. */
+  function confirmDanger(what) {
+    const api = deps.settings;
+    const copy = {
+      serverUrl: ['تغيّر عنوان الخادم؟', 'لو كتبت عنوانًا غلط ينفصل التطبيق عن حساباتكم ومزامنتكم. غيّره بس إذا طُلب منك.', 'أبغى أغيّره', () => openServerSheet()],
+      rebuild: ['تعيد بناء البيانات؟', 'يمسح النسخة اللي على جهازك ويجيب كل شي من الخادم من جديد. تحتاج اتصال، وتاخذ دقيقة.', 'أعد البناء', async () => {
+        toast('جارٍ إعادة البناء…');
+        await api.resync().catch(() => {});
+        toast('خلصت');
+        renderSettings();
+      }],
+      retry: ['تعيد محاولة المرفوض؟', 'يرجع العمليات اللي رفضها الخادم للطابور ويحاول يرسلها مرة ثانية.', 'أعد المحاولة', () => {
+        const n = api.retryQuarantined();
+        toast(`أُعيدت ${countLabel(n, 'op')} للطابور`);
+        renderSettings();
+      }],
+    }[what];
+    const [title, text, label, run] = copy;
+    openSheet((body) => {
+      body.append(el('h3', null, title), el('p', null, text));
+      const actions = el('div', 'sheet-actions');
+      const cancel = el('button', 'btn btn-secondary', 'لا، خلّه');
+      cancel.type = 'button';
+      cancel.onclick = () => closeSheet();
+      const go = el('button', 'btn btn-danger', label);
+      go.type = 'button';
+      go.onclick = () => {
+        closeSheet();
+        void run();
+      };
+      actions.append(cancel, go);
+      body.append(actions);
+    });
   }
 
   function hostOf(url) {
@@ -1965,16 +2028,37 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const apiInput = field('خادم المحتوى', ep.api);
       const save = el('button', 'btn btn-primary btn-block', 'احفظ وأعد التشغيل');
       save.type = 'button';
-      save.onclick = () => {
-        const valid = (v) => !v || /^https?:\/\/[^\s]+$/i.test(v);
-        const next = { sync: syncInput.value.trim(), api: apiInput.value.trim() };
-        if (!valid(next.sync) || !valid(next.api)) return void toast('العنوان لازم يبدأ بـ https://');
-        api.setEndpoints(next);
+      const status = el('p', 'settings-note');
+      save.onclick = async () => {
+        const valid = (v) => !v || /^https:\/\/[^\s]+$/i.test(v);
+        const next = { sync: syncInput.value.trim().replace(/\/+$/, ''), api: apiInput.value.trim().replace(/\/+$/, '') };
+        if (!next.sync) return void (status.textContent = 'عنوان خادم المزامنة مطلوب.');
+        if (!valid(next.sync) || !valid(next.api)) return void (status.textContent = 'العنوان لازم يبدأ بـ https://');
+        // لا يُحفظ عنوان لا يردّ: غلطة كتابة واحدة كانت تفصل الجهاز عن حساباته
         save.disabled = true;
+        save.textContent = 'نتأكد من الخادم…';
+        const reachable = async (url, path, check) => {
+          try {
+            const r = await fetch(`${url}${path}`, { cache: 'no-store' });
+            return r.ok && check(await r.json().catch(() => null));
+          } catch {
+            return false;
+          }
+        };
+        const syncOk = await reachable(next.sync, '/health', (j) => j?.ok === true);
+        // خادم المحتوى قد لا يرسل CORS لهذا المسار: يكفي أنه يردّ أصلًا
+        const apiOk = !next.api || (await fetch(`${next.api}/healthz`, { mode: 'no-cors', cache: 'no-store' }).then(() => true, () => false));
+        if (!syncOk || !apiOk) {
+          save.disabled = false;
+          save.textContent = 'احفظ وأعد التشغيل';
+          status.textContent = !syncOk ? 'خادم المزامنة ما ردّ. ما حفظنا شي، والعنوان القديم باقي.' : 'خادم المحتوى ما ردّ. ما حفظنا شي.';
+          return;
+        }
+        api.setEndpoints(next);
         save.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
         setTimeout(() => window.location.reload(), 400);
       };
-      body.append(save);
+      body.append(save, status);
     });
   }
 

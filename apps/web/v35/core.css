@@ -2440,3 +2440,60 @@ html,
   box-shadow: inset 0 0 0 1.5px var(--accent-line);
   color: var(--accent-text);
 }
+
+/* ───────────────────────── الإعدادات: النظام ومنطقة الخطر ───────────────────────── */
+
+.v35 .system-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  margin-top: 28px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  text-align: start;
+}
+.v35 .system-toggle > .icon:first-child {
+  flex: none;
+  color: var(--text-3);
+}
+.v35 .system-toggle > span {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.v35 .system-toggle strong {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.v35 .system-toggle small {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+.v35 .system-toggle .chev {
+  transform: rotate(-90deg);
+  transition: transform var(--dur) var(--ease);
+}
+.v35 .system-toggle.open .chev {
+  transform: rotate(90deg);
+}
+.v35 .system-toggle:active {
+  background: var(--surface-1);
+}
+.v35 .settings-group-label.danger-zone-label {
+  color: var(--danger);
+}
+.v35 .settings-list.danger-zone {
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.v35 .setting--danger > .icon:first-child,
+.v35 .setting--danger strong {
+  color: var(--danger);
+}
