@@ -308,7 +308,7 @@ export function openSmartReader(deps, ctx) {
     }
   }
 
-  /** العنوان في الشريط، والحضور، والسجل: ما يُعلن حين يصير فصلٌ أمامك. */
+  /** العنوان في الشريط والحضور: مجرد فتح الفصل لا يضيفه لآخر المشاهدات. */
   function announce(row) {
     q('rdWork').textContent = ctx.title;
     q('rdChapter').textContent = [chapterLabel(row), row.label].filter(Boolean).join(' · ');
@@ -317,15 +317,6 @@ export function openSmartReader(deps, ctx) {
     root.querySelector('.rd-next').disabled = !next;
     const number = Number.isFinite(row.number) && row.number >= 0 ? row.number : null;
     deps.setReading?.({ seriesTitle: ctx.title, chapterLabel: chapterLabel(row), chapterNumber: number });
-    // «آخر المشاهدات» بفصلها: نفس السجل في المكتبة والملف ومتابعة القراءة
-    sync.enqueue('view.add', {
-      seriesRef: ref,
-      seriesTitle: ctx.title,
-      coverUrl: ctx.work?.coverImage?.large ?? row.manga?.thumbnailUrl ?? null,
-      chapterLabel: chapterLabel(row),
-      chapterNumber: number,
-      at: Date.now(),
-    });
   }
 
   function makeSegment(row, pages) {
@@ -337,6 +328,7 @@ export function openSmartReader(deps, ctx) {
       current: 0,
       furthest: 0,
       marked: isChapterRead(sync, ref, keyOf(row)),
+      historyRecorded: false,
       completed: false,
       preloaded: null,
       activeMs: 0,
@@ -371,7 +363,7 @@ export function openSmartReader(deps, ctx) {
     if (priority === null) seg.requested = true;
   }
 
-  /** صار هذا الفصل أمامك: الشريط والسجل له، وما بعده يُجهَّز من الآن. */
+  /** صار هذا الفصل أمامك: الشريط له، وما بعده يُجهَّز من الآن. */
   function enterSegment(seg) {
     if (state.seg === seg) return;
     if (state.seg) {
@@ -664,10 +656,21 @@ export function openSmartReader(deps, ctx) {
     const seg = state.seg;
     if (!seg) return;
     const ratio = readRatio(seg.furthest, seg.pages.length);
-    // خُمس الفصل = قرأته: العين والسجل والملف والإحصاء كلها من هذه العلامة
+    // خُمس الفصل = قرأته. عندها فقط يدخل العمل «آخر المشاهدات».
     if (shouldAutoMark({ ratio, alreadyRead: seg.marked })) {
       seg.marked = true;
       markChapter(sync, ref, seg.row, true);
+    }
+    if (!seg.historyRecorded && ratio >= AUTO_READ_RATIO) {
+      seg.historyRecorded = true;
+      sync.enqueue('view.add', {
+        seriesRef: ref,
+        seriesTitle: ctx.title,
+        coverUrl: ctx.work?.coverImage?.large ?? seg.row.manga?.thumbnailUrl ?? null,
+        chapterLabel: chapterLabel(seg.row),
+        chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
+        at: Date.now(),
+      });
     }
     if (!seg.completed && ratio >= AUTO_READ_RATIO && seg.activeMs >= 5_000) {
       seg.completed = true;
