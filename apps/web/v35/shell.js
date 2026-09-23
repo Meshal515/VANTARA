@@ -268,12 +268,36 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sourceId: w._work?.editions?.[0]?.sourceId ?? null,
   });
 
-  // «آخر المشاهدات»: سجلٌّ واحد في حسابك (`work_views`). المكتبة والرئيسية
-  // والملف ومتابعة القراءة تقرأ منه نفسه، فحذف عمل منه يحذفه من كل مكان.
+  // «آخر المشاهدات»: لا يكفي فتح بطاقة العمل. للعمل مكان هنا فقط بعد
+  // قراءة 20% من فصل واحد أو تعليم فصل كمقروء. الفلتر ينظّف أيضًا السجلات
+  // القديمة التي كانت تُنشأ بمجرد فتح صفحة العمل.
+  function qualifiesOwnView(row) {
+    if (row.chapter_number == null) return Boolean(row.chapter_label);
+    const chapterKey = chapterKeyOf(String(row.series_ref), {
+      sourceId: '',
+      chapter: { chapterNumber: Number(row.chapter_number), name: row.chapter_label ?? '' },
+    });
+    const marked = sync.rows('chapter_marks', (r) => r.user_id === me() && r.chapter_key === chapterKey)[0];
+    if (marked?.read) return true;
+    const progress = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === chapterKey)[0];
+    return Number(progress?.ratio) >= 0.2;
+  }
   const viewRows = (userId = me()) =>
-    sync.rows('work_views', (r) => r.user_id === userId && !r.removed).sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
-  function pushHistory(w) {
-    sync.enqueue('view.add', { seriesRef: String(w.id), seriesTitle: titleOf(w), coverUrl: w.coverImage?.large ?? null, at: Date.now() });
+    sync
+      .rows('work_views', (r) => r.user_id === userId && !r.removed)
+      .filter((r) => userId !== me() || qualifiesOwnView(r))
+      .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
+  function recordChapterView(w, row) {
+    if (!w || !row) return;
+    const number = Number.isFinite(row.number) && row.number >= 0 ? row.number : null;
+    sync.enqueue('view.add', {
+      seriesRef: String(w.id),
+      seriesTitle: titleOf(w),
+      coverUrl: w.coverImage?.large ?? null,
+      chapterLabel: row.chapter?.name?.trim() || (number !== null ? `الفصل ${number}` : null),
+      chapterNumber: number,
+      at: Date.now(),
+    });
   }
   function removeView(ref) {
     sync.enqueue('view.remove', { seriesRef: ref });
@@ -740,7 +764,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
     if (work._work?.editions?.length) rememberWork(work);
-    pushHistory(work);
     showPage('detail');
     renderDetail(work);
     renderChaptersLoading();
@@ -1112,6 +1135,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       e.stopPropagation();
       const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
       markChapter(sync, ref, r, on);
+      if (on) recordChapterView(w, r);
       paint(on);
       // التقدّم وزرّ «تابع» يتبعان العين بعد لحظة، لا بعد المزامنة
       clearTimeout(state.eyeTimer);
@@ -1385,6 +1409,87 @@ export function mountV35(deps, { page = 'home' } = {}) {
     s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
     return s;
   }
+  function latestChapter(rows) {
+    return rows.reduce((best, row) => {
+      if (!best) return row;
+      const a = Number(best.number);
+      const b = Number(row.number);
+      if (!Number.isFinite(a)) return row;
+      return Number.isFinite(b) && b > a ? row : best;
+    }, null);
+  }
+  function markRowsRead(w, rows, historyRow = null) {
+    const ref = String(w.id);
+    for (const row of rows) {
+      const key = chapterKeyOf(ref, row);
+      if (!isChapterRead(sync, ref, key)) markChapter(sync, ref, row, true);
+    }
+    if (historyRow) recordChapterView(w, historyRow);
+    clearTimeout(state.eyeTimer);
+    state.eyeTimer = setTimeout(() => state.current?.id === w.id && renderChapters(w), 50);
+  }
+  function openPreviousReadingRange(w) {
+    openSheet((body) => {
+      body.append(el('h3', null, 'حدد الفصول التي قرأتها'));
+      const fromField = el('label', 'field');
+      fromField.append(el('span', 'field-label', 'من'));
+      const from = el('input', 'field-input');
+      from.type = 'number';
+      from.inputMode = 'decimal';
+      from.step = 'any';
+      from.placeholder = 'رقم الفصل';
+      fromField.append(from);
+      const toField = el('label', 'field');
+      toField.append(el('span', 'field-label', 'إلى'));
+      const to = el('input', 'field-input');
+      to.type = 'number';
+      to.inputMode = 'decimal';
+      to.step = 'any';
+      to.placeholder = 'رقم الفصل';
+      toField.append(to);
+      const save = el('button', 'btn btn-primary btn-block', 'علّمها مقروءة');
+      save.type = 'button';
+      save.onclick = () => {
+        const start = Number(from.value);
+        const end = Number(to.value);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+          toast('اكتب نطاقًا صحيحًا من فصل إلى فصل');
+          return;
+        }
+        const rows = (w._chapters ?? []).filter((row) => Number.isFinite(row.number) && row.number >= start && row.number <= end);
+        if (!rows.length) {
+          toast('ما لقينا فصولًا داخل هذا النطاق');
+          return;
+        }
+        const historyRow = rows.reduce((best, row) => (!best || Math.abs(row.number - end) < Math.abs(best.number - end) ? row : best), null);
+        closeSheet();
+        markRowsRead(w, rows, historyRow);
+        toast(`علّمت ${countLabel(rows.length, 'chapter')} مقروءة`);
+      };
+      body.append(fromField, toField, save);
+      requestAnimationFrame(() => from.focus());
+    });
+  }
+  function markPreviousReading() {
+    const w = state.current;
+    const rows = w?._chapters ?? [];
+    if (!w || !rows.length) {
+      toast('انتظر لين تجهز الفصول');
+      return;
+    }
+    openSheet((body) => {
+      body.append(
+        el('h3', null, 'هل قرأت هذا العمل من قبل؟'),
+        sheetItem('check', 'نعم، كله', () => {
+          closeSheet();
+          markRowsRead(w, rows, latestChapter(rows));
+          toast('علّمت كل الفصول مقروءة');
+        }),
+        sheetItem('eye', 'نعم، من فصل إلى فصل', () => openPreviousReadingRange(w)),
+      );
+    });
+  }
+
   /** مشاركة العمل (أو فصلٍ منه): الورقة المشتركة مع القارئ في `share.js`. */
   function openShare(w, chapter = null) {
     openShareSheet({
@@ -1452,8 +1557,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!rows.length) {
       emptyState(target, {
         icon: 'history',
-        title: own ? 'ما فتحت شي بعد' : 'ما فيه مشاهدات',
-        text: own ? 'كل عمل تفتحه يظهر هنا بآخر فصل وصلته، على أجهزتك كلها.' : 'لما يفتح أعمالًا تظهر هنا.',
+        title: own ? 'ما قريت شي بعد' : 'ما فيه مشاهدات',
+        text: own ? 'يظهر العمل هنا بعد قراءة 20% من فصل أو تعليم فصل كمقروء.' : 'لما يقرأ فصلًا يظهر هنا.',
       });
       return;
     }
@@ -2640,6 +2745,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openUtility: (_e, t) => void deps.go({ name: t.dataset.arg }),
     openWorkMenu,
     shareCurrent: () => state.current && openShare(state.current),
+    markPreviousReading,
     readNow,
     flipChapterOrder,
     toggleSummary,
