@@ -56,7 +56,18 @@ export function createProfile(ctx) {
   let silk = null;
   let token = 0;
 
-  const profileOf = (userId) => sync.rows('profiles', (p) => p.user_id === userId)[0] ?? null;
+  let shown = null;
+  /** ما حفظته للتوّ ولم تُرجعه المزامنة بعد: الملف يُظهره فورًا بدل القديم. */
+  let local = null;
+  const COLUMN = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key' };
+  const serverProfileOf = (userId) => sync.rows('profiles', (p) => p.user_id === userId)[0] ?? null;
+  const profileOf = (userId) => {
+    const row = serverProfileOf(userId);
+    if (!local || userId !== me()) return row;
+    const merged = { ...(row ?? { user_id: userId }) };
+    for (const [key, value] of Object.entries(local)) merged[COLUMN[key]] = value;
+    return merged;
+  };
   const usernameOf = (userId) => sync.rows('accounts', (a) => a.user_id === userId)[0]?.username ?? '';
   const workOf = (ref) => {
     const row = sync.rows('works', (w) => w.series_ref === ref)[0];
@@ -172,6 +183,7 @@ export function createProfile(ctx) {
 
   async function show(userId) {
     const my = ++token;
+    shown = userId;
     const own = userId === me();
     const profile = profileOf(userId);
     const name = profile?.display_name || usernameOf(userId) || 'صديق';
@@ -299,6 +311,29 @@ export function createProfile(ctx) {
 
   return {
     show,
+    /** نسخة الملف التي يبدأ منها المحرّر، بما لم يُزامَن بعد. */
+    editable() {
+      const p = profileOf(me());
+      return {
+        displayName: p?.display_name || usernameOf(me()) || '',
+        bio: p?.bio ?? null,
+        avatarKey: p?.avatar_key ?? null,
+        bannerKey: p?.banner_key ?? null,
+      };
+    },
+    applyLocal(fields) {
+      local = { ...(local ?? {}), ...fields };
+      if (shown === me()) void show(me());
+    },
+    onChange(tables) {
+      if (!tables.includes('profiles')) return;
+      // تُمسح النسخة المحلية حين يطابقها الخادم، لا قبلها: سحبٌ سبق الإرسال لا يُرجع القديم
+      if (local) {
+        const row = serverProfileOf(me());
+        if (row && Object.entries(local).every(([k, v]) => (row[COLUMN[k]] ?? null) === (v ?? null))) local = null;
+      }
+      if (shown && !host.closest('[hidden]')) void show(shown);
+    },
     hide() {
       token += 1;
       silk?.destroy();

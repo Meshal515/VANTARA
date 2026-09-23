@@ -20,6 +20,7 @@ import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
+import { openProfileEditor } from './profile-editor.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -1022,6 +1023,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
     toast(member ? 'أضيف إلى المفضلة' : 'أزيل من المفضلة');
     afterLibraryChange();
   }
+  /** أفضل 5: قائمة قصيرة مرتبة. حين تمتلئ تختار ما يخرج بدل أن يُرفض الطلب. */
+  const TOP_MAX = 5;
+  function topRows() {
+    return sync
+      .rows('collections', (r) => r.user_id === me() && r.kind === 'top' && r.member)
+      .sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || a.updated_at - b.updated_at);
+  }
+  function toggleTopCurrent() {
+    if (!state.current) return;
+    const d = descriptorOf(state.current);
+    const rows = topRows();
+    if (inCollection('top', d.seriesRef)) {
+      sync.enqueue('top.set', { ...d, member: false });
+      toast('أُزيل من أفضل 5');
+      return afterLibraryChange();
+    }
+    if (rows.length < TOP_MAX) {
+      sync.enqueue('top.set', { ...d, member: true, position: rows.length + 1 });
+      toast(`صار رقم ${rows.length + 1} في أفضل 5`);
+      return afterLibraryChange();
+    }
+    openSheet((body) => {
+      body.append(el('h3', null, 'قائمة أفضل 5 مكتملة'));
+      body.append(el('p', null, 'اختر العمل اللي يطلع ويأخذ هذا مكانه.'));
+      rows.forEach((row, i) => {
+        const work = sync.rows('works', (w) => w.series_ref === row.series_ref)[0];
+        const item = sheetItem('star', `${i + 1}. ${work?.title || row.series_ref.replace(/^ext:/, '')}`, () => {
+          sync.enqueue('top.set', { seriesRef: row.series_ref, member: false });
+          sync.enqueue('top.set', { ...d, member: true, position: row.position ?? i + 1 });
+          closeSheet();
+          toast(`صار رقم ${i + 1} في أفضل 5`);
+          afterLibraryChange();
+        });
+        item.querySelector('span').dir = 'auto';
+        body.append(item);
+      });
+    });
+  }
   function afterLibraryChange() {
     refreshLibraryDetail();
     // الطابور يكتب في المرآة مع الدفع؛ onChange يعيد الرسم حين يعود
@@ -1087,6 +1126,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
           closeSheet();
           toggleLaterCurrent();
         }, { pressed: !!e?.later }),
+        sheetItem('star', 'ضمن أفضل 5', () => {
+          closeSheet();
+          toggleTopCurrent();
+        }, { pressed: inCollection('top', String(w.id)) }),
       );
       if (deps.report) {
         body.append(
@@ -1728,6 +1771,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
     majlis.onChange(tables);
+    profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
       if (currentPage() === 'notifications') renderNotifications();
@@ -1736,6 +1780,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
+    if (editor?.open) return editor.handleBack();
     return majlis.closeBar() || closeSheet() || closeDrawer() || goBack();
   }
 
@@ -1764,9 +1809,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openWork: (w) => previewWork(w),
     openSheet,
     back: () => goBack(),
-    edit: () => deps.editProfile?.(),
+    edit: () => editProfile(),
     libraryWorks,
   });
+  let editor = null;
+  function editProfile() {
+    if (editor?.open) return;
+    editor = openProfileEditor({
+      sync,
+      profile: profile.editable(),
+      openSheet,
+      closeSheet,
+      toast,
+      onSaved: (fields) => profile.applyLocal(fields),
+      onClose: () => {
+        editor = null;
+      },
+    });
+  }
   function openProfile(userId = me()) {
     showPage('profile');
     void profile.show(userId);

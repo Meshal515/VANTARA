@@ -318,3 +318,305 @@
   height: 18px;
   color: var(--text-4);
 }
+
+/* ───────────────────────── تعديل الملف ─────────────────────────
+ * نفس هيكل الملف: البانر ثم الصورة فوقه ثم الاسم والنبذة مكانهما. كل صورة
+ * عليها شارة كاميرا صغيرة واضحة، والحقول بلا صناديق ثقيلة — خطّ سفلي يضيء
+ * عند الكتابة.
+ */
+.v35.pe {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font, 'Vantara Sans', system-ui, sans-serif);
+  animation: pe-in var(--dur) var(--ease);
+}
+.v35.pe--out {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
+}
+@keyframes pe-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35.pe,
+  .v35.pe--out {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
+.v35 .pe-top,
+.v35 .pe-crop-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: calc(var(--safe-top) + 4px) 8px 4px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.v35 .pe-top strong,
+.v35 .pe-crop-top strong {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 750;
+}
+.v35 .pe-save,
+.v35 .pe-crop-use {
+  min-height: 40px;
+  padding: 0 18px;
+}
+.v35 .pe-save:disabled {
+  background: var(--surface-3);
+  color: var(--text-4);
+  box-shadow: none;
+}
+.v35 .pe-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: calc(var(--safe-bottom) + 40vh);
+}
+
+.v35 .pe-banner {
+  position: relative;
+  height: 168px;
+  overflow: hidden;
+  background: var(--surface-1);
+  cursor: pointer;
+}
+.v35 .pe-banner-img {
+  position: absolute;
+  inset: 0;
+  background: center / cover no-repeat;
+}
+.v35 .pe-banner-img--empty {
+  background: radial-gradient(120% 90% at 80% 0%, rgba(143, 92, 255, 0.28), transparent 60%),
+    radial-gradient(90% 90% at 10% 100%, rgba(95, 212, 154, 0.08), transparent 60%), var(--surface-1);
+}
+.v35 .pe-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 45%, rgba(8, 7, 12, 0.72));
+  pointer-events: none;
+}
+.v35 .pe-cam {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 99px;
+  background: rgba(8, 7, 12, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.v35 .pe-cam--banner {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  inset-inline-end: 12px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+.v35 .pe-banner:active .pe-cam--banner,
+.v35 .pe-face:active .pe-cam--face {
+  background: var(--accent);
+}
+
+.v35 .pe-id {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 18px;
+  margin-top: -48px;
+  padding: 0 var(--gutter);
+}
+.v35 .pe-face {
+  position: relative;
+  justify-self: start;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 4px var(--bg), 0 14px 30px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+.v35 .pe-face-img,
+.v35 .pe-face-img img {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 99px;
+  overflow: hidden;
+  object-fit: cover;
+}
+.v35 .pe-initial {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.v35 .pe-cam--face {
+  position: absolute;
+  bottom: 0;
+  inset-inline-end: -2px;
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+  box-shadow: 0 0 0 3px var(--bg);
+  background: var(--surface-3);
+}
+.v35 .pe-field {
+  display: grid;
+  gap: 6px;
+}
+.v35 .pe-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+  color: var(--text-3);
+}
+.v35 .pe-label em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .pe-label em.pe-near {
+  color: var(--warning);
+}
+.v35 .pe-name,
+.v35 .pe-bio {
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1.5px solid var(--line-strong);
+  border-radius: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: right;
+  unicode-bidi: plaintext;
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+.v35 .pe-name {
+  font-size: 24px;
+  font-weight: 800;
+}
+.v35 .pe-bio {
+  font-size: var(--fs-body);
+  line-height: 1.8;
+  resize: none;
+}
+.v35 .pe-bio::placeholder {
+  color: var(--text-4);
+}
+.v35 .pe-name:focus,
+.v35 .pe-bio:focus {
+  border-bottom-color: var(--accent);
+}
+.v35 .pe-name[aria-invalid='true'] {
+  border-bottom-color: var(--danger);
+}
+.v35 .pe-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+}
+
+/* القصّ: الصورة تتحرك تحت إطارٍ ثابت، وما خارجه معتم */
+.v35.pe-crop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: var(--text-1);
+  font-family: var(--font, 'Vantara Sans', system-ui, sans-serif);
+}
+.v35 .pe-crop-top {
+  background: #000;
+  border-bottom: 0;
+}
+.v35 .pe-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.v35 .pe-stage img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  transform-origin: center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.v35 .pe-mask {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--frame-w, 0);
+  height: var(--frame-h, 0);
+  transform: translate(-50%, -50%);
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.62), inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+.v35 .pe-mask--round {
+  border-radius: 99px;
+}
+.v35 .pe-zoom {
+  /* التكبير مقدار لا اتجاه قراءة: الصغير يسار والكبير يمين كما في كل منزلق */
+  direction: ltr;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px 4px;
+  color: var(--text-3);
+}
+.v35 .pe-zoom input {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 28px;
+}
+.v35 .pe-hint {
+  margin: 0;
+  padding: 4px 24px calc(var(--safe-bottom) + 20px);
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+  text-align: center;
+}
+.v35 .pe-zoom > svg:first-child {
+  width: 16px;
+  height: 16px;
+}
+.v35 .pe-zoom > svg:last-child {
+  width: 26px;
+  height: 26px;
+}
