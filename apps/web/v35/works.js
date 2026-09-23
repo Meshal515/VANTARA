@@ -88,10 +88,12 @@ export const available = () => engine.isAvailable();
  * `kind`: `catalogue` (الكتالوج كاملًا)، `popular`، `latest`، أو بحث بنص.
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
-export async function browse({ kind = 'catalogue', page = 1, query = '' } = {}) {
+export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null } = {}) {
   const list = await sources();
   const { ok } = await gather(list, (source) =>
-    query
+    genre
+      ? engine.genre(source.id, genre, page)
+      : query
       ? engine.search(source.id, query, page)
       : kind === 'popular'
         ? engine.popular(source.id, page)

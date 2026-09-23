@@ -26,6 +26,7 @@ import {
   syncHealth,
   trimQueue,
 } from './queue.js';
+import { accountWithIdentity, withIdentity } from './identity.js';
 
 const TOKEN_KEY = 'vantara.token';
 const USER_KEY = 'vantara.user';
@@ -136,7 +137,7 @@ function deviceProof() {
 export function createSync({ baseUrl }) {
   const listeners = new Set();
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
-  let user = readJson(USER_KEY, null);
+  let user = accountWithIdentity(readJson(USER_KEY, null));
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
@@ -248,7 +249,7 @@ export function createSync({ baseUrl }) {
 
   function persistSession(payload) {
     token = payload.token;
-    user = payload.user;
+    user = accountWithIdentity(payload.user);
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
     writeJson(USER_KEY, user);
@@ -385,7 +386,7 @@ export function createSync({ baseUrl }) {
     await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
-    return (await response.json()).content ?? [];
+    return ((await response.json()).content ?? []).map(accountWithIdentity);
   }
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
@@ -692,7 +693,7 @@ export function createSync({ baseUrl }) {
   async function presence() {
     if (!token) return [];
     try {
-      return (await request('/v1/presence'))?.content ?? [];
+      return ((await request('/v1/presence'))?.content ?? []).map(accountWithIdentity);
     } catch {
       return [];
     }
@@ -753,15 +754,21 @@ export function createSync({ baseUrl }) {
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
   /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
+  /** الشاشات ترى الملفات بهويتها الأساسية مكان الفارغ؛ المرآة نفسها لا تتغير. */
+  const view = (table, value) => {
+    if (table !== 'profiles' || !value) return value;
+    return withIdentity(value, mirror.accounts?.[value.user_id]?.username);
+  };
+
   function rows(table, predicate) {
     const bucket = mirror[table];
     if (!bucket) return [];
-    const all = Object.values(bucket);
+    const all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
     return predicate ? all.filter(predicate) : all;
   }
 
   function row(table, key) {
-    return mirror[table]?.[key] ?? null;
+    return view(table, mirror[table]?.[key] ?? null);
   }
 
   /**

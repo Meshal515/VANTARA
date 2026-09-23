@@ -12,13 +12,10 @@
  */
 
 import { glyph, iconButton } from './icons.js';
+import { MediaError, TARGETS, drawCrop, encodeAnimated, encodeStatic, sniffAnimated } from './media-encode.js';
 
 const NAME_MAX = 40;
 const BIO_MAX = 160;
-const AVATAR_SIZE = 512;
-const BANNER = { w: 1500, h: 600 };
-/** سقف الخادم للصورة الواحدة. GIF يُرفع كما هو فيُفحص قبل الرفع. */
-const MAX_UPLOAD = 1_500_000;
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -27,33 +24,16 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-function canvasBlob(canvas) {
-  return new Promise((resolve) => {
-    canvas.toBlob((webp) => {
-      if (webp && webp.type === 'image/webp') return resolve(webp);
-      canvas.toBlob((jpeg) => resolve(jpeg), 'image/jpeg', 0.9);
-    }, 'image/webp', 0.88);
-  });
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('الصورة ما انفتحت'));
-    img.src = src;
-  });
-}
-
 /**
  * القصّ: الصورة تتحرك تحت إطارٍ ثابت (دائرة للصورة، مستطيل للبانر).
- * يرجع Blob مقصوصًا مضغوطًا، أو `null` إن ألغيت.
+ * يرجع مستطيل القصّ بإحداثيات الصورة الأصلية مع الصورة نفسها، أو `null`
+ * إن ألغيت، أو `{error}` إن لم يفتحها الجهاز. الترميز بعده في media-encode.
  */
-function openCropper(file, kind) {
+function openCropper(file, kind, { animated = false } = {}) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const round = kind === 'avatar';
-    const aspect = round ? 1 : BANNER.w / BANNER.h;
+    const aspect = TARGETS[kind].w / TARGETS[kind].h;
     const root = el('div', 'v35 pe-crop');
     root.innerHTML = `
       <header class="pe-crop-top">
@@ -63,7 +43,7 @@ function openCropper(file, kind) {
       </header>
       <div class="pe-stage"><img alt="" draggable="false"><div class="pe-mask${round ? ' pe-mask--round' : ''}"></div></div>
       <div class="pe-zoom">${glyph('image', { size: 18 })}<input type="range" min="1" max="4" step="0.01" value="1" aria-label="التكبير">${glyph('image', { size: 26 })}</div>
-      <p class="pe-hint">اسحب لتحريك الصورة، وافتح إصبعيك للتكبير</p>`;
+      <p class="pe-hint">${animated ? 'متحركة وتبقى متحركة. ' : ''}اسحب لتحريك الصورة، وافتح إصبعيك للتكبير</p>`;
     document.body.append(root);
     const stage = root.querySelector('.pe-stage');
     const img = root.querySelector('.pe-stage img');
@@ -141,33 +121,27 @@ function openCropper(file, kind) {
 
     const done = (value) => {
       window.removeEventListener('resize', layout);
-      URL.revokeObjectURL(url);
+      // الرابط يبقى حيًّا مع الصورة: الترميز يرسم منها بعد الإغلاق
+      if (!value?.img) URL.revokeObjectURL(url);
       root.remove();
       resolve(value);
     };
     root.querySelector('[data-act="cancel"]').onclick = () => done(null);
-    root.querySelector('[data-act="use"]').onclick = async () => {
-      const out = round ? { w: AVATAR_SIZE, h: AVATAR_SIZE } : BANNER;
-      const canvas = document.createElement('canvas');
-      canvas.width = out.w;
-      canvas.height = out.h;
-      const g = canvas.getContext('2d');
+    root.querySelector('[data-act="use"]').onclick = () => {
       // ما داخل الإطار بإحداثيات الصورة الأصلية
       const k = view.base * view.scale;
       const sw = frame.w / k;
       const sh = frame.h / k;
       const sx = img.naturalWidth / 2 - view.x / k - sw / 2;
       const sy = img.naturalHeight / 2 - view.y / k - sh / 2;
-      g.imageSmoothingQuality = 'high';
-      g.drawImage(img, sx, sy, sw, sh, 0, 0, out.w, out.h);
-      done(await canvasBlob(canvas));
+      done({ rect: { sx, sy, sw, sh }, img, url });
     };
     root.cropper = { cancel: () => done(null) };
     img.onload = () => {
       layout();
       window.addEventListener('resize', layout);
     };
-    img.onerror = () => done(null);
+    img.onerror = () => done({ error: 'decode' });
     img.src = url;
   });
 }
@@ -175,7 +149,7 @@ function openCropper(file, kind) {
 /**
  * @param {{
  *   sync: any,
- *   profile: { displayName: string, bio: string|null, avatarKey: string|null, bannerKey: string|null },
+ *   profile: { displayName: string, bio: string|null, avatarKey: string|null, defaultAvatar?: string|null, bannerKey: string|null },
  *   openSheet: (build: (body: HTMLElement) => (void|(() => void))) => void,
  *   closeSheet: () => boolean,
  *   toast: (text: string) => void,
@@ -188,6 +162,7 @@ export function openProfileEditor(ctx) {
   const draft = { ...ctx.profile, avatarBlob: null, bannerBlob: null };
   let saving = false;
   let cropping = false;
+  let preparing = false;
 
   const root = el('div', 'v35 pe');
   root.setAttribute('role', 'dialog');
@@ -240,7 +215,7 @@ export function openProfileEditor(ctx) {
     banner.style.backgroundImage = bannerSrc ? `url("${bannerSrc}")` : '';
     banner.classList.toggle('pe-banner-img--empty', !bannerSrc);
     const face = root.querySelector('.pe-face-img');
-    const faceSrc = draft.avatarBlob ? preview(draft.avatarBlob) : draft.avatarKey;
+    const faceSrc = draft.avatarBlob ? preview(draft.avatarBlob) : draft.avatarKey || draft.defaultAvatar;
     face.replaceChildren();
     if (faceSrc) {
       const img = el('img');
@@ -263,12 +238,22 @@ export function openProfileEditor(ctx) {
     q('peBioCount').textContent = `${bioInput.value.length}/${BIO_MAX}`;
     q('peNameCount').classList.toggle('pe-near', nameInput.value.length > NAME_MAX - 6);
     q('peBioCount').classList.toggle('pe-near', bioInput.value.length > BIO_MAX - 20);
-    root.querySelector('.pe-save').disabled = saving || !dirty() || !name;
+    root.querySelector('.pe-save').disabled = saving || preparing || !dirty() || !name;
     nameInput.setAttribute('aria-invalid', String(!name));
-    if (!draft.avatarKey && !draft.avatarBlob) paintImages();
+    if (!draft.avatarKey && !draft.avatarBlob && !draft.defaultAvatar) paintImages();
   }
   function showError(text) {
     const e = q('peError');
+    e.classList.remove('pe-note');
+    e.setAttribute('role', 'alert');
+    e.textContent = text;
+    e.hidden = !text;
+  }
+  /** حالة لا خطأ: تجهيز صورة متحركة يأخذ ثواني، والصمت يبدو تعليقًا. */
+  function showNote(text) {
+    const e = q('peError');
+    e.classList.toggle('pe-note', Boolean(text));
+    e.setAttribute('role', 'status');
     e.textContent = text;
     e.hidden = !text;
   }
@@ -291,7 +276,13 @@ export function openProfileEditor(ctx) {
   function confirmRemove(kind) {
     ctx.openSheet((body) => {
       body.append(el('h3', null, kind === 'avatar' ? 'تحذف صورتك؟' : 'تحذف البانر؟'));
-      body.append(el('p', null, kind === 'avatar' ? 'يرجع مكانها أول حرف من اسمك.' : 'يرجع البانر الحريري بلون صورتك.'));
+      body.append(
+        el(
+          'p',
+          null,
+          kind === 'banner' ? 'يرجع البانر الحريري بلون صورتك.' : draft.defaultAvatar ? 'ترجع صورتك الأساسية.' : 'يرجع مكانها أول حرف من اسمك.',
+        ),
+      );
       const row = el('div', 'sheet-actions');
       const keep = el('button', 'btn btn-secondary', 'خلّها');
       keep.type = 'button';
@@ -323,17 +314,36 @@ export function openProfileEditor(ctx) {
     const file = q('peFile').files?.[0];
     const kind = pendingKind;
     if (!file || !kind) return;
-    if (!file.type.startsWith('image/')) return void ctx.toast('اختر صورة');
+    if (file.type && !file.type.startsWith('image/')) return void showError('هذا الملف مو صورة.');
+    showError('');
+    const animated = await sniffAnimated(file).catch(() => null);
+    cropping = true;
+    const crop = await openCropper(file, kind, { animated: Boolean(animated) });
+    cropping = false;
+    if (!crop) return;
+    if (crop.error) return void showError('الجهاز ما قدر يفتح هالصورة. جرّب صيغة ثانية مثل JPG أو PNG أو GIF.');
     let blob;
-    if (file.type === 'image/gif') {
-      // المتحرّكة تُرفع كما هي: القصّ على canvas يجمّدها
-      if (file.size > MAX_UPLOAD) return void showError('الصورة المتحركة أكبر من ١٫٥ ميغا.');
-      blob = file;
-    } else {
-      cropping = true;
-      blob = await openCropper(file, kind);
-      cropping = false;
-      if (!blob) return;
+    preparing = true;
+    refresh();
+    try {
+      if (animated) {
+        showNote('نجهّز الصورة المتحركة…');
+        blob = await encodeAnimated(file, animated, crop.rect, kind, (p) => showNote(`نجهّز الصورة المتحركة… ${Math.round(p * 100)}٪`));
+      } else {
+        blob = await encodeStatic(drawCrop(crop.img, crop.rect, TARGETS[kind]), TARGETS[kind].budget);
+      }
+    } catch (error) {
+      showError(
+        error instanceof MediaError && error.code === 'too_large'
+          ? 'الصورة كبيرة حتى بعد الضغط. جرّب مقطعًا أقصر أو صورة أصغر.'
+          : 'ما قدرنا نجهّز الصورة. جرّب صورة ثانية.',
+      );
+      return;
+    } finally {
+      URL.revokeObjectURL(crop.url);
+      preparing = false;
+      showNote('');
+      refresh();
     }
     if (kind === 'avatar') draft.avatarBlob = blob;
     else draft.bannerBlob = blob;

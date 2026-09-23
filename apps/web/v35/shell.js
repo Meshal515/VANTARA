@@ -30,7 +30,31 @@ const AR_GENRE = {
   Crime: 'جريمة', 'Magical Girls': 'فتيات سحريات', Wuxia: 'ووشيا',
 };
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', HIATUS: 'متوقف مؤقتًا', CANCELLED: 'ملغي', NOT_YET_RELEASED: 'لم يبدأ' };
-const GENRES = ['أكشن', 'مغامرة', 'كوميديا', 'دراما', 'فانتازيا', 'رعب', 'غموض', 'نفسي', 'رومانسي', 'خيال علمي', 'رياضة', 'قوى خارقة', 'إثارة', 'حياة يومية'];
+/**
+ * التصنيفات وأسماؤها في المصادر. كل مصدر يسمّي تصنيفه بطريقته، فتُرسل
+ * الصيغ كلها ويطابقها المحرّك بعد التطبيع (`GenreFilterPolicy`).
+ * `hue` لون البلاطة: ثابت لكل تصنيف فتُعرف بلونها قبل اسمها.
+ */
+const GENRES = [
+  { ar: 'أكشن', en: 'Action', hue: 8, names: ['أكشن', 'اكشن', 'Action'] },
+  { ar: 'مغامرة', en: 'Adventure', hue: 28, names: ['مغامرة', 'مغامرات', 'Adventure'] },
+  { ar: 'فانتازيا', en: 'Fantasy', hue: 265, names: ['فانتازيا', 'فنتازيا', 'خيال', 'Fantasy'] },
+  { ar: 'رومانسي', en: 'Romance', hue: 335, names: ['رومانسي', 'رومانسية', 'رومانس', 'Romance'] },
+  { ar: 'كوميديا', en: 'Comedy', hue: 45, names: ['كوميديا', 'كوميدي', 'Comedy'] },
+  { ar: 'دراما', en: 'Drama', hue: 215, names: ['دراما', 'Drama'] },
+  { ar: 'غموض', en: 'Mystery', hue: 190, names: ['غموض', 'Mystery'] },
+  { ar: 'رعب', en: 'Horror', hue: 355, names: ['رعب', 'Horror'] },
+  { ar: 'نفسي', en: 'Psychological', hue: 290, names: ['نفسي', 'نفسية', 'Psychological'] },
+  { ar: 'خيال علمي', en: 'Sci-Fi', hue: 175, names: ['خيال علمي', 'Sci-Fi', 'Science Fiction', 'SciFi'] },
+  { ar: 'قوى خارقة', en: 'Supernatural', hue: 245, names: ['قوى خارقة', 'خارق للطبيعة', 'خوارق', 'Supernatural'] },
+  { ar: 'إثارة', en: 'Thriller', hue: 0, names: ['إثارة', 'اثارة', 'تشويق', 'Thriller'] },
+  { ar: 'رياضة', en: 'Sports', hue: 140, names: ['رياضة', 'رياضي', 'Sports', 'Sport'] },
+  { ar: 'حياة يومية', en: 'Slice of Life', hue: 95, names: ['حياة يومية', 'شريحة من الحياة', 'Slice of Life'] },
+  { ar: 'إيسيكاي', en: 'Isekai', hue: 205, names: ['إيسيكاي', 'ايسيكاي', 'عالم آخر', 'Isekai'] },
+  { ar: 'فنون قتالية', en: 'Martial Arts', hue: 18, names: ['فنون قتالية', 'فنون القتال', 'Martial Arts'] },
+  { ar: 'تاريخي', en: 'Historical', hue: 38, names: ['تاريخي', 'تاريخ', 'Historical'] },
+  { ar: 'مدرسي', en: 'School Life', hue: 225, names: ['مدرسي', 'حياة مدرسية', 'مدرسة', 'School Life', 'School'] },
+];
 
 /** كم فصلًا يُرسم أول مرة. عمل بألف فصل لا يرسم ألف صف قبل أن يظهر شيء. */
 const CHAPTER_BATCH = 60;
@@ -1277,13 +1301,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     btn.textContent = 'جارٍ التحميل…';
     try {
       const r = state.collection.genre
-        ? await browse({ query: state.collection.genre, page: state.collection.page + 1 })
+        ? await browse({ genre: state.collection.genre.names, page: state.collection.page + 1 })
         : await browse({ kind: state.collection.kind, page: state.collection.page + 1 });
       state.collection.page = r.page;
       state.collection.hasNext = r.hasNextPage;
       state.collection.items = uniqueById([...state.collection.items, ...r.items]);
       if (!state.collection.items.length) {
-        emptyState(q('collectionGrid'), { icon: 'search', title: 'ما فيه نتائج', text: 'المصادر ما رجّعت أعمالًا هنا.' });
+        emptyState(q('collectionGrid'), {
+          icon: 'search',
+          title: 'ما فيه نتائج',
+          text: state.collection.genre ? `ما لقينا مصدرًا فيه تصنيف «${state.collection.genre.ar}».` : 'المصادر ما رجّعت أعمالًا هنا.',
+        });
       } else {
         renderGrid(q('collectionGrid'), state.collection.items);
       }
@@ -1302,23 +1330,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
       btn.textContent = 'تحميل المزيد';
     }
   }
+  /** أغلفة من أعمال التصنيف مما حمّلته الرئيسية: البلاطة تُري التصنيف لا تسمّيه فقط. */
+  function genreCovers(g, used) {
+    const pool = uniqueById([...(state.home.trending || []), ...(state.home.featured || []), ...(state.home.popular || []), ...(state.home.recent || [])]);
+    const match = pool.filter((w) => w.coverImage?.large && (w.genres || []).some((x) => x === g.en || x === g.ar));
+    // غلاف لم تأخذه بلاطة قبلها أولًا: لا تتشابه البلاطات
+    const picked = [...match.filter((w) => !used.has(w.id)), ...match.filter((w) => used.has(w.id))].slice(0, 2);
+    for (const w of picked) used.add(w.id);
+    return picked;
+  }
   function openCategories() {
     showPage('categories');
+    const used = new Set();
     q('categoryGrid').replaceChildren(
       ...GENRES.map((g) => {
         const b = el('button', 'category');
         b.type = 'button';
-        b.append(el('strong', null, g));
-        b.insertAdjacentHTML('beforeend', glyph('chevron'));
+        b.style.setProperty('--hue', String(g.hue));
+        b.append(el('strong', null, g.ar));
+        const art = el('span', 'category-art');
+        for (const w of genreCovers(g, used)) {
+          const img = el('img');
+          img.alt = '';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.onerror = () => img.remove();
+          img.src = w.coverImage.large;
+          art.append(img);
+        }
+        b.append(art);
         b.onclick = () => void openGenre(g);
         return b;
       }),
     );
   }
   async function openGenre(g) {
-    // المصادر لا تشترك في فلتر تصنيف واحد؛ الاسم العربي يُسأل كبحث في كلها
-    state.collection = { kind: 'search', page: 0, hasNext: true, items: [], genre: g };
-    q('collectionTitle').textContent = g;
+    // فلتر التصنيف في كل مصدر، لا البحث بالكلمة: «مغامرة» في العنوان ليست مغامرة
+    state.collection = { kind: 'genre', page: 0, hasNext: true, items: [], genre: g };
+    q('collectionTitle').textContent = g.ar;
     q('collectionGrid').replaceChildren(...skeletonCards(9));
     q('collectionMore').hidden = true;
     showPage('collection');
@@ -1383,11 +1432,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     grid.replaceChildren(...skeletonCards(6));
     try {
       const { items } = await browse({ query: term });
-      if (stillWanted() !== term) return;
+      if (stillWanted() !== term) return 0;
       if (items.length) renderGrid(grid, items);
       else emptyState(grid, { icon: 'search', title: 'لا نتائج', text: 'جرّب اسمًا آخر، أو الاسم بالإنجليزي.' });
+      return items.length;
     } catch {
-      if (stillWanted() !== term) return;
+      if (stillWanted() !== term) return 0;
       emptyState(grid, {
         icon: 'offline',
         error: true,
@@ -1396,19 +1446,120 @@ export function mountV35(deps, { page = 'home' } = {}) {
       });
     }
   }
+  // البحث قبل أن تكتب ليس صفحة فارغة: آخر ما بحثت عنه، والتصنيفات، والرائج
+  const SEARCHES_KEY = 'vantara.v35.searches';
+  const recentSearches = () => readJson(SEARCHES_KEY, []).filter((x) => typeof x === 'string').slice(0, 8);
+  function rememberSearch(term) {
+    const t = term.trim();
+    if (t.length < 2) return;
+    writeJson(SEARCHES_KEY, [t, ...recentSearches().filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8));
+  }
+  function searchFor(term) {
+    q('searchInput').value = term;
+    debouncedSearch(term, { now: true });
+  }
+  function renderSearchIdle() {
+    const host = q('searchIdle');
+    host.replaceChildren();
+    const recent = recentSearches();
+    if (recent.length) {
+      const head = el('div', 'search-head');
+      head.append(el('h2', null, 'آخر ما بحثت عنه'));
+      const clear = el('button', 'text-btn', 'امسح');
+      clear.type = 'button';
+      clear.onclick = () => {
+        writeJson(SEARCHES_KEY, []);
+        renderSearchIdle();
+      };
+      head.append(clear);
+      const row = el('div', 'search-recent');
+      for (const t of recent) {
+        const b = el('button', 'search-chip');
+        b.type = 'button';
+        b.innerHTML = glyph('history', { size: 16 });
+        const label = el('bdi', null, t);
+        b.append(label);
+        b.onclick = () => searchFor(t);
+        row.append(b);
+      }
+      host.append(head, row);
+    }
+    const genresHead = el('div', 'search-head');
+    genresHead.append(el('h2', null, 'تصفّح بالتصنيف'));
+    const all = el('button', 'text-btn', 'الكل');
+    all.type = 'button';
+    all.onclick = () => openCategories();
+    genresHead.append(all);
+    const genres = el('div', 'search-genres');
+    for (const g of GENRES.slice(0, 10)) {
+      const b = el('button', 'search-genre', g.ar);
+      b.type = 'button';
+      b.style.setProperty('--hue', String(g.hue));
+      b.onclick = () => void openGenre(g);
+      genres.append(b);
+    }
+    host.append(genresHead, genres);
+    const trending = (state.home.trending || []).slice(0, 6);
+    if (trending.length) {
+      const head = el('div', 'search-head');
+      head.append(el('h2', null, 'الرائج الآن'));
+      const list = el('div', 'search-trend');
+      trending.forEach((w, i) => {
+        const b = el('button', 'search-trend-row');
+        b.type = 'button';
+        const cover = el('span', 'search-trend-cover');
+        void mountImage(cover, w);
+        const copy = el('span', 'search-trend-copy');
+        copy.append(el('bdi', 'search-trend-title', titleOf(w)));
+        const meta = (w.genres || []).slice(0, 2).map(genreAr).join(' · ');
+        if (meta) copy.append(el('span', 'search-trend-meta', meta));
+        b.append(el('span', 'search-trend-rank', String(i + 1)), cover, copy);
+        b.onclick = () => void openWork(w);
+        list.append(b);
+      });
+      host.append(head, list);
+    }
+  }
+  function showSearchIdle(idle) {
+    q('searchIdle').hidden = !idle;
+    q('searchGrid').hidden = idle;
+    if (idle) {
+      q('searchCount').hidden = true;
+      renderSearchIdle();
+    }
+  }
   function openSearch() {
     showPage('search');
+    if (!q('searchInput').value.trim()) showSearchIdle(true);
     setTimeout(() => q('searchInput')?.focus(), 60);
   }
+  function clearSearch() {
+    q('searchInput').value = '';
+    debouncedSearch('');
+    q('searchInput').focus();
+  }
   let searchTerm = '';
-  function debouncedSearch(term) {
+  function debouncedSearch(term, { now = false } = {}) {
     searchTerm = term.trim();
+    root.querySelector('#search .search-clear').hidden = !searchTerm;
     clearTimeout(state.searchTimer);
-    state.searchTimer = setTimeout(() => {
-      if (!searchTerm) return q('searchGrid').replaceChildren();
-      const t = searchTerm;
-      void runSearch(t, q('searchGrid'), () => searchTerm);
-    }, 330);
+    if (!searchTerm) return showSearchIdle(true);
+    state.searchTimer = setTimeout(
+      async () => {
+        const t = searchTerm;
+        showSearchIdle(false);
+        q('searchCount').hidden = true;
+        const found = await runSearch(t, q('searchGrid'), () => searchTerm);
+        if (searchTerm !== t) return;
+        if (found) {
+          rememberSearch(t);
+          // الكلمة معزولة بـbdi: بحثٌ إنجليزي لا يقلب ترتيب السطر العربي
+          q('searchCount').replaceChildren(document.createTextNode(`${countLabel(found, 'work')} لـ `), el('bdi', null, t));
+          q('searchCount').hidden = false;
+        }
+      },
+      now ? 0 : 330,
+    );
   }
 
   // ───────────────────────── الإشعارات ─────────────────────────
@@ -1547,6 +1698,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const texts = el('div');
     texts.append(el('strong', null, name), el('small', null, 'ملفّك الشخصي'));
     who.replaceChildren(avatarNode({ avatarKey: profile?.avatar_key, displayName: name }), texts);
+    who.insertAdjacentHTML('beforeend', glyph('chevron'));
     who.setAttribute('aria-label', `ملفّك: ${name}`);
     q('drawerVersion').textContent = deps.version ? `VANTARA ${deps.version}` : 'VANTARA';
 
@@ -1714,6 +1866,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     loadMoreCollection: () => void loadMoreCollection(),
     loadMoreDiscover: () => void loadMoreDiscover(),
     clearDiscoverSearch,
+    clearSearch,
     navTo: (_e, t) => navTo(t.dataset.arg),
     openCategories,
     openCollection: (_e, t) => void openCollection(t.dataset.arg),

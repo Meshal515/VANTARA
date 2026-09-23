@@ -207,6 +207,21 @@ class ExtensionEnginePlugin : Plugin() {
         source.getLatestUpdates(page)
     }
 
+    /**
+     * أعمال تصنيفٍ من مصدر، بفلتر المصدر نفسه لا بالبحث عن الكلمة.
+     * مصدرٌ بلا هذا التصنيف يرجع صفحة فارغة فتتجاوزه الواجهة.
+     */
+    @PluginMethod
+    fun genre(call: PluginCall) = paged(call) { source, page ->
+        val names = call.getArray("names")?.toList<String>().orEmpty()
+        val filters = dev.vantara.spike.GenreFilterPolicy.filters(source, names)
+        if (filters == null) {
+            eu.kanade.tachiyomi.source.model.MangasPage(emptyList(), false)
+        } else {
+            source.getSearchManga(page, "", filters)
+        }
+    }
+
     @PluginMethod
     fun search(call: PluginCall) = paged(call) { source, page ->
         val query = call.getString("query").orEmpty()

@@ -151,7 +151,7 @@ export const SHELL_HTML = `<div class="app">
       <form class="search-bar" data-submit="discoverSearch" role="search">
         ${glyph('search')}
         <input class="search-input" id="discoverSearch" type="search" enterkeyhint="search" autocomplete="off" placeholder="ابحث في كل المصادر" data-input="discoverSearch" aria-label="ابحث في كل المصادر">
-        ${iconButton('close', 'امسح البحث', { act: 'clearDiscoverSearch', cls: 'icon-btn search-clear' })}
+        ${iconButton('close', 'امسح البحث', { act: 'clearDiscoverSearch', cls: 'icon-btn search-clear' }).replace('<button', '<button hidden')}
       </form>
       <div class="grid" id="discoverGrid"></div>
       <button class="btn btn-secondary load-more" type="button" id="discoverMore" data-act="loadMoreDiscover">أعمال أكثر</button>
@@ -164,7 +164,10 @@ export const SHELL_HTML = `<div class="app">
       <form class="search-bar" data-submit="noop" role="search">
         ${glyph('search')}
         <input class="search-input" id="searchInput" type="search" enterkeyhint="search" autocomplete="off" placeholder="اسم العمل بالعربي أو الإنجليزي" data-input="debouncedSearch" aria-label="بحث">
+        ${iconButton('close', 'امسح البحث', { act: 'clearSearch', cls: 'icon-btn search-clear' }).replace('<button', '<button hidden')}
       </form>
+      <div class="search-idle" id="searchIdle"></div>
+      <p class="search-count" id="searchCount" hidden></p>
       <div class="grid" id="searchGrid"></div>
     </div>
   </section>

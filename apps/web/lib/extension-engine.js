@@ -71,6 +71,11 @@ export async function latest(sourceId, page = 1) {
 	return required().latest({ sourceId, page });
 }
 
+/** أعمال تصنيف بفلتر المصدر. `names`: أسماء التصنيف بكل صيغها (عربي وإنجليزي). */
+export async function genre(sourceId, names, page = 1) {
+	return required().genre({ sourceId, names, page });
+}
+
 export async function search(sourceId, query, page = 1) {
 	return required().search({ sourceId, query, page });
 }
@@ -132,6 +137,7 @@ export default {
 	catalogue,
 	popular,
 	latest,
+	genre,
 	search,
 	series,
 	chapters,

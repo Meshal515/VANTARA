@@ -13,7 +13,7 @@
  */
 
 import { gateEntry, rememberGateAccount, rememberedGateAccount } from '../lib/gate-policy.js';
-import { cachedSilkPalette, createSilk, silkPaletteForSrc } from '../lib/silk.js';
+import { cachedSilkPalette, createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
 import { logoColorFromPalette, rgb01ToHex, silkPaletteFor } from '../lib/silk-palette.js';
 
 const el = (tag, className, text) => {
@@ -45,6 +45,15 @@ const LOCK_SVG =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.85" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect>' +
   '<path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>';
+
+function readableSrc(src) {
+  try {
+    const u = new URL(src, location.href);
+    return u.origin === location.origin || u.pathname.startsWith('/v1/media/');
+  } catch {
+    return false;
+  }
+}
 
 /** اللوحة الفورية: المحفوظة من تحليل سابق للصورة، وإلا لون الحساب أو اسمه. */
 function immediatePalette(account) {
@@ -115,6 +124,7 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
 
   // ───────────────────────── البطاقات ─────────────────────────
 
+  const followers = [];
   const faces = accounts.map((account, index) => {
     const card = el('div', 'gate-card');
     card.dataset.index = String(index);
@@ -133,7 +143,15 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
       img.decoding = 'async';
       img.draggable = false;
       img.addEventListener('error', fallbackFace, { once: true });
+      // صورة تُقرأ بكسلاتها (أصلنا أو خادم الوسائط): الحرير يتبعها إن تحركت
+      if (readableSrc(account.avatarKey)) img.crossOrigin = 'anonymous';
       img.src = account.avatarKey;
+      // متحركة: تتحرك في بطاقتها دائمًا، والحرير يتبعها وهي المختارة فقط
+      if (img.crossOrigin) {
+        followers.push(followImage(img, (palette) => {
+          if (accounts[currentIndex] === account) tint(palette);
+        }));
+      }
       void silkPaletteForSrc(account.avatarKey).then((palette) => {
         if (palette && accounts[currentIndex] === account) tint(palette);
       });
@@ -305,6 +323,7 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
   return () => {
     if (raf !== null) cancelAnimationFrame(raf);
     resizeObserver.disconnect();
+    for (const stop of followers) stop();
     silk.destroy();
   };
 }

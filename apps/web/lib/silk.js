@@ -504,3 +504,88 @@ export function silkPaletteForSrc(src) {
     image.src = src;
   });
 }
+
+/**
+ * صورة متحركة يشغّلها التطبيق بنفسه، والحرير يتبعها إطارًا بإطار.
+ *
+ * `drawImage` على صورة متحركة يرسم إطارها الأول دائمًا (هكذا المواصفة)،
+ * فقراءة الصورة الظاهرة لا ترى الحركة. لذا تُفكّ الإطارات بـ`ImageDecoder`
+ * وتُرسم على canvas مكان الصورة، ولكل إطار لوحته محسوبة مسبقًا — الوجه
+ * والحرير على نفس الساعة، لا يسبق أحدهما الآخر.
+ *
+ * صورة ثابتة، أو متصفح بلا `ImageDecoder`، تبقى كما هي بلا أي تكلفة.
+ * يتوقف حين تخرج الصورة من الصفحة، ويستريح والتطبيق في الخلفية.
+ */
+export function followImage(img, onPalette) {
+  let stopped = false;
+  let timer = 0;
+  let decoder = null;
+  const stop = () => {
+    stopped = true;
+    clearTimeout(timer);
+    try {
+      decoder?.close();
+    } catch {
+      // مغلق أصلًا
+    }
+  };
+  void (async () => {
+    if (typeof ImageDecoder === 'undefined') return;
+    const response = await fetch(img.currentSrc || img.src, { mode: 'cors' }).catch(() => null);
+    if (!response?.ok || stopped) return;
+    const type = (response.headers.get('content-type') || '').split(';')[0].trim();
+    if (!['image/gif', 'image/webp', 'image/png', 'image/apng', 'image/avif'].includes(type)) return;
+    if (!(await ImageDecoder.isTypeSupported(type).catch(() => false))) return;
+    decoder = new ImageDecoder({ data: await response.arrayBuffer(), type });
+    await decoder.tracks.ready;
+    await decoder.completed;
+    const count = Math.min(decoder.tracks.selectedTrack?.frameCount ?? 1, 400);
+    if (count < 2 || stopped) return stop();
+
+    const sample = document.createElement('canvas');
+    sample.width = 28;
+    sample.height = 28;
+    const sg = sample.getContext('2d', { willReadFrequently: true });
+    const palettes = [];
+    const delays = [];
+    for (let i = 0; i < count && !stopped; i++) {
+      const { image } = await decoder.decode({ frameIndex: i });
+      sg.clearRect(0, 0, 28, 28);
+      sg.drawImage(image, 0, 0, 28, 28);
+      palettes.push(paletteFromPixels(sg.getImageData(0, 0, 28, 28).data));
+      delays.push(Math.max(20, (image.duration ?? 100_000) / 1000));
+      image.close();
+    }
+    if (stopped || !img.isConnected) return stop();
+
+    const view = document.createElement('canvas');
+    view.className = img.className;
+    view.setAttribute('aria-hidden', 'true');
+    const g = view.getContext('2d');
+    let frame = 0;
+    const play = async () => {
+      if (stopped) return;
+      if (!view.isConnected) return stop();
+      if (document.hidden) {
+        timer = setTimeout(play, 500);
+        return;
+      }
+      const started = performance.now();
+      const { image } = await decoder.decode({ frameIndex: frame }).catch(() => ({ image: null }));
+      if (!image || stopped) return stop();
+      if (view.width !== image.displayWidth) {
+        view.width = image.displayWidth;
+        view.height = image.displayHeight;
+      }
+      g.drawImage(image, 0, 0);
+      image.close();
+      onPalette(palettes[frame]);
+      const wait = delays[frame] - (performance.now() - started);
+      frame = (frame + 1) % count;
+      timer = setTimeout(play, Math.max(0, wait));
+    };
+    img.replaceWith(view);
+    await play();
+  })().catch(stop);
+  return stop;
+}

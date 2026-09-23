@@ -1,9 +1,13 @@
 /**
  * الملف الشخصي — لك ولأصدقائك.
  *
- * شخصيٌّ أولًا والأرقام ثانيًا: البانر الحريري بلون صورتك (أو صورة بانرك)،
- * الصورة فوقه، الاسم والحالة والنبذة. ثم سطرٌ هادئ بثلاثة أرقام، يُفتح
- * بلمسة على تعريفها ووقت القراءة. ثم «أفضل 5»، وما يقرؤه الآن، وسجلّ قراءته.
+ * صفحة شخص لا لوحة أرقام. البانر الحريري يأخذ ألوانه من صورتك (ويتبعها
+ * إطارًا بإطار إن كانت متحركة)، والصورة تجلس على حافته بحلقة من نفس اللون.
+ * ثم الاسم والحالة والنبذة، وما يقرؤه الآن إن كان يقرأ، ثم الأرقام الثلاثة
+ * في بطاقة واحدة تُفتح بلمسة على تعريفها.
+ *
+ * «أفضل 5» تُعرض كاملة بلا تمرير: الأول بطاقة كبيرة وحده، والأربعة بعده
+ * صفٌّ واحد. ثم سجلّ القراءة، و«أقرأ لاحقًا» لصاحب الملف وحده.
  *
  * الأرقام من الخادم (`/v1/stats`) وتعريفاتها منفصلة عمدًا:
  *   - الأعمال المتابعة: ما في مكتبته الآن (العدد وحده؛ المكتبة خاصة).
@@ -15,8 +19,9 @@
 
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
-import { createSilk, silkPaletteForSrc } from '../lib/silk.js';
-import { DEFAULT_SILK, hexToRgb01 } from '../lib/silk-palette.js';
+import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
+import { DEFAULT_SILK, hexToRgb01, rgb01ToHex } from '../lib/silk-palette.js';
+import { withIdentity } from '../lib/identity.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -25,6 +30,7 @@ const el = (tag, cls, text) => {
   return n;
 };
 const fmt = (n) => (Number(n) || 0).toLocaleString('en-US');
+const LOG_PREVIEW = 5;
 
 function duration(ms) {
   const minutes = Math.round((ms ?? 0) / 60_000);
@@ -33,6 +39,27 @@ function duration(ms) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} س ${rest} د` : `${hours} ساعة`;
+}
+
+/** «اليوم»، «أمس»، ثم التاريخ: السجل يُقرأ بالأيام لا بالساعات. */
+function dayLabel(at) {
+  const d = new Date(at);
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(new Date()) - start(d)) / 86_400_000);
+  if (days <= 0) return 'اليوم';
+  if (days === 1) return 'أمس';
+  if (days < 7) return `قبل ${countLabel(days, 'day')}`;
+  return d.toLocaleDateString('ar', { day: 'numeric', month: 'short', numberingSystem: 'latn' });
+}
+
+/** صورة تُقرأ بكسلاتها بلا أن تختفي: أصلنا وخادم الوسائط يرسلان CORS، وغيرهما لا يُضمن. */
+function readable(src) {
+  try {
+    const u = new URL(src, location.href);
+    return u.origin === location.origin || u.pathname.startsWith('/v1/media/');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -54,6 +81,7 @@ export function createProfile(ctx) {
   const { sync, host } = ctx;
   const me = () => sync.user?.userId;
   let silk = null;
+  let stopFollow = null;
   let token = 0;
 
   let shown = null;
@@ -61,32 +89,38 @@ export function createProfile(ctx) {
   let local = null;
   const COLUMN = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key' };
   const serverProfileOf = (userId) => sync.rows('profiles', (p) => p.user_id === userId)[0] ?? null;
+  const usernameOf = (userId) => sync.rows('accounts', (a) => a.user_id === userId)[0]?.username ?? '';
   const profileOf = (userId) => {
     const row = serverProfileOf(userId);
     if (!local || userId !== me()) return row;
+    // المحلي فوق الأصل ثم الهوية الأساسية من جديد: حذف صورتك يُرجع صورتك الأساسية
     const merged = { ...(row ?? { user_id: userId }) };
+    if (merged.default_avatar) merged.avatar_key = null;
+    delete merged.default_avatar;
     for (const [key, value] of Object.entries(local)) merged[COLUMN[key]] = value;
-    return merged;
+    return withIdentity(merged, usernameOf(userId));
   };
-  const usernameOf = (userId) => sync.rows('accounts', (a) => a.user_id === userId)[0]?.username ?? '';
-  const workOf = (ref) => {
-    const row = sync.rows('works', (w) => w.series_ref === ref)[0];
-    return ctx.workFromRef(ref, row?.title, row?.cover_url);
+  const workOf = (ref, title) => {
+    const row =
+      sync.rows('works', (w) => w.series_ref === ref)[0] ??
+      (title ? sync.rows('works', (w) => String(w.title).toLowerCase() === String(title).toLowerCase())[0] : null);
+    return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url);
   };
   const titleOf = (w) => w?.title?.english || w?.title || '';
   const knownTitle = (w) => titleOf(w) && !String(titleOf(w)).startsWith('ext:');
 
   function presenceLine(p) {
-    if (!p) return { text: 'غير متصل', live: false };
-    if (p.status === 'READING' && p.seriesTitle) return { text: `يقرأ ${p.seriesTitle}${p.chapterLabel ? ` · ${p.chapterLabel}` : ''}`, live: true, reading: true };
-    if (p.status === 'ONLINE') return { text: 'متصل الآن', live: true };
-    if (p.status === 'IDLE') return { text: 'خامل', live: false };
-    if (!p.lastSeenAt) return { text: 'غير متصل', live: false };
+    if (!p) return { text: 'غير متصل', tone: 'off' };
+    // «يقرأ الآن» تقولها بطاقة القراءة تحت، بعنوانها وفصلها
+    if (p.status === 'READING') return { text: 'متصل الآن', tone: 'on' };
+    if (p.status === 'ONLINE') return { text: 'متصل الآن', tone: 'on' };
+    if (p.status === 'IDLE') return { text: 'خامل', tone: 'idle' };
+    if (!p.lastSeenAt) return { text: 'غير متصل', tone: 'off' };
     const m = Math.floor((Date.now() - p.lastSeenAt) / 60_000);
-    if (m < 60) return { text: `آخر ظهور قبل ${Math.max(1, m)} دقيقة`, live: false };
+    if (m < 60) return { text: `آخر ظهور قبل ${Math.max(1, m)} دقيقة`, tone: 'off' };
     const h = Math.floor(m / 60);
-    if (h < 24) return { text: `آخر ظهور قبل ${h} ساعة`, live: false };
-    return { text: `آخر ظهور قبل ${countLabel(Math.floor(h / 24), 'day')}`, live: false };
+    if (h < 24) return { text: `آخر ظهور قبل ${h} ساعة`, tone: 'off' };
+    return { text: `آخر ظهور قبل ${countLabel(Math.floor(h / 24), 'day')}`, tone: 'off' };
   }
 
   /** سجلّ القراءة: عملٌ لكل صف، بآخر فصل قُرئ منه. */
@@ -94,17 +128,16 @@ export function createProfile(ctx) {
     const byWork = new Map();
     for (const r of sync.rows('chapter_reads', (x) => x.user_id === userId && x.read_count > 0)) {
       const cur = byWork.get(r.series_ref);
-      if (!cur || r.last_read_at > cur.at) {
-        byWork.set(r.series_ref, { ref: r.series_ref, at: r.last_read_at, chapter: r.chapter_number, count: (cur?.count ?? 0) + 1 });
-      } else cur.count += 1;
+      if (!cur) byWork.set(r.series_ref, { ref: r.series_ref, at: r.last_read_at, chapter: r.chapter_number, count: 1 });
+      else {
+        cur.count += 1;
+        if (r.last_read_at > cur.at) {
+          cur.at = r.last_read_at;
+          cur.chapter = r.chapter_number;
+        }
+      }
     }
     return [...byWork.values()].sort((a, b) => b.at - a.at);
-  }
-
-  function stat(value, label) {
-    const d = el('div', 'pf-stat');
-    d.append(el('strong', null, value), el('span', null, label));
-    return d;
   }
 
   function openStatsSheet(stats, name, own) {
@@ -136,35 +169,47 @@ export function createProfile(ctx) {
     });
   }
 
-  function mediaCard(work, rank) {
-    const a = el('button', 'pf-card');
-    a.type = 'button';
-    const frame = el('span', 'pf-card-frame');
-    const c = el('span', 'poster');
-    void ctx.mountImage(c, work);
-    frame.append(c);
-    // الرقم خارج الغلاف: تحميل الصورة يستبدل ما داخله
-    if (rank) frame.append(el('span', 'pf-rank', String(rank)));
-    const t = el('bdi', 'work-title', titleOf(work));
-    a.append(frame, t);
-    a.onclick = () => ctx.openWork(work);
-    return a;
-  }
-
-  function section(title, content, { meta, action } = {}) {
+  function section(title, content, { meta } = {}) {
     const s = el('section', 'pf-section');
     const h = el('div', 'section-head');
     h.append(el('h2', null, title));
-    if (action) h.append(action);
-    else if (meta) h.append(el('span', 'pf-meta', meta));
+    if (meta) h.append(el('span', 'pf-meta', meta));
     s.append(h, content);
     return s;
   }
 
-  async function paintBanner(banner, profile, avatarSrc) {
+  // ───────────────────────── الرأس ─────────────────────────
+
+  /** اللون الشخصي: أفتح طبقة في الحرير. يلوّن حلقة الصورة ولمعة الرأس لا غير. */
+  function tint(palette) {
+    if (palette?.[3]) host.style.setProperty('--pf-tint', rgb01ToHex(palette[3]));
+    if (palette?.[2]) host.style.setProperty('--pf-tint-deep', rgb01ToHex(palette[2]));
+  }
+
+  function avatar(profile, name) {
+    const face = el('div', 'pf-face');
+    const src = profile?.avatar_key;
+    if (src) {
+      const img = el('img', 'pf-face-img');
+      img.alt = '';
+      img.decoding = 'async';
+      if (readable(src)) img.crossOrigin = 'anonymous';
+      img.onerror = () => img.replaceWith(el('span', 'pf-face-img pf-initial', [...name][0] ?? '؟'));
+      img.src = src;
+      face.append(img);
+    } else {
+      face.append(el('span', 'pf-face-img pf-initial', [...name][0] ?? '؟'));
+    }
+    return face;
+  }
+
+  async function paintBanner(banner, profile, faceImg) {
+    stopFollow?.();
+    stopFollow = null;
     silk?.destroy();
     silk = null;
     banner.replaceChildren();
+    const avatarSrc = profile?.avatar_key;
     if (profile?.banner_key) {
       const img = el('img', 'pf-banner-img');
       img.alt = '';
@@ -175,11 +220,135 @@ export function createProfile(ctx) {
       const canvas = el('canvas', 'pf-silk');
       banner.append(canvas);
       silk = createSilk(canvas, DEFAULT_SILK.map(hexToRgb01));
-      const palette = avatarSrc ? await silkPaletteForSrc(avatarSrc) : null;
-      if (palette) silk?.setPalette(palette);
     }
     banner.append(el('div', 'pf-shade'));
+    const palette = avatarSrc ? await silkPaletteForSrc(avatarSrc) : null;
+    if (palette) {
+      silk?.setPalette(palette);
+      tint(palette);
+    }
+    // صورة متحركة: الحرير والحلقة يتبعانها إطارًا بإطار
+    if (faceImg?.crossOrigin && faceImg.isConnected) {
+      stopFollow = followImage(faceImg, (p) => {
+        silk?.setPalette(p);
+        tint(p);
+      });
+    }
   }
+
+  function nowCard(p, own) {
+    const work = workOf(p.seriesRef ?? `ext:${String(p.seriesTitle).toLowerCase()}`, p.seriesTitle);
+    if (!knownTitle(work)) work.title = { english: p.seriesTitle };
+    const card = el('button', 'pf-now');
+    card.type = 'button';
+    const cover = el('span', 'pf-now-cover');
+    void ctx.mountImage(cover, work);
+    const copy = el('span', 'pf-now-copy');
+    const label = el('span', 'pf-now-label');
+    label.append(el('i', 'pf-pulse'), document.createTextNode(own ? 'تقرأ الآن' : 'يقرأ الآن'));
+    copy.append(label, el('bdi', 'pf-now-title', p.seriesTitle));
+    if (p.chapterLabel) copy.append(el('span', 'pf-now-chapter', p.chapterLabel));
+    card.append(cover, copy);
+    card.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon pf-chev' }));
+    card.onclick = () => ctx.openWork(work);
+    return card;
+  }
+
+  function statCell(value, label) {
+    const d = el('span', 'pf-stat');
+    d.append(el('strong', null, value), el('span', null, label));
+    return d;
+  }
+  function statsCard(numbers) {
+    const card = el('button', 'pf-stats');
+    card.type = 'button';
+    card.setAttribute('aria-label', 'تفاصيل القراءة');
+    const v = (k) => (numbers ? fmt(numbers[k]) : '—');
+    card.append(
+      statCell(v('followedWorks'), 'أعمال متابَعة'),
+      statCell(v('uniqueChapters'), 'فصول فريدة'),
+      statCell(v('totalReads'), 'قراءات كاملة'),
+    );
+    card.classList.toggle('pf-stats--loading', !numbers);
+    return card;
+  }
+
+  // ───────────────────────── أفضل 5 ─────────────────────────
+
+  function poster(work, cls) {
+    const c = el('span', `poster ${cls}`);
+    void ctx.mountImage(c, work);
+    return c;
+  }
+  function topFive(items, name, own) {
+    const wrap = el('div', 'pf-top5');
+    const [first, ...rest] = items;
+    const lead = el('button', 'pf-first');
+    lead.type = 'button';
+    const frame = el('span', 'pf-first-frame');
+    frame.append(poster(first, 'pf-first-poster'));
+    const copy = el('span', 'pf-first-copy');
+    copy.append(el('span', 'pf-first-rank', '1'), el('bdi', 'pf-first-title', titleOf(first)), el('span', 'pf-first-meta', own ? 'الأول عندك' : `الأول عند ${name}`));
+    lead.append(frame, copy);
+    lead.onclick = () => ctx.openWork(first);
+    wrap.append(lead);
+    if (rest.length) {
+      const grid = el('div', 'pf-rest');
+      rest.forEach((w, i) => {
+        const b = el('button', 'pf-card');
+        b.type = 'button';
+        const f = el('span', 'pf-card-frame');
+        f.append(poster(w, ''), el('span', 'pf-rank', String(i + 2)));
+        b.append(f, el('bdi', 'pf-card-title', titleOf(w)));
+        b.onclick = () => ctx.openWork(w);
+        grid.append(b);
+      });
+      wrap.append(grid);
+    }
+    return wrap;
+  }
+  function topSkeleton() {
+    const wrap = el('div', 'pf-top5 pf-top5--loading');
+    const lead = el('div', 'pf-first');
+    lead.append(el('span', 'pf-first-frame pf-skel'));
+    const grid = el('div', 'pf-rest');
+    grid.append(...Array.from({ length: 4 }, () => el('span', 'pf-card-frame pf-skel')));
+    wrap.append(lead, grid);
+    return wrap;
+  }
+
+  // ───────────────────────── السجل ─────────────────────────
+
+  function logList(log) {
+    const list = el('div', 'pf-log');
+    const row = (item) => {
+      const work = workOf(item.ref);
+      const r = el('button', 'pf-log-row');
+      r.type = 'button';
+      const cover = el('span', 'pf-log-cover');
+      void ctx.mountImage(cover, work);
+      const copy = el('span', 'pf-log-copy');
+      copy.append(el('bdi', 'pf-log-title', knownTitle(work) ? titleOf(work) : 'عمل'));
+      copy.append(el('span', 'pf-log-meta', [item.chapter != null ? `الفصل ${item.chapter}` : null, countLabel(item.count, 'chapter')].filter(Boolean).join(' · ')));
+      r.append(cover, copy, el('span', 'pf-log-when', dayLabel(item.at)));
+      r.onclick = () => ctx.openWork(work);
+      return r;
+    };
+    list.append(...log.slice(0, LOG_PREVIEW).map(row));
+    if (log.length > LOG_PREVIEW) {
+      const more = el('button', 'pf-log-more');
+      more.type = 'button';
+      more.textContent = `اعرض السجل كامل · ${countLabel(log.length, 'work')}`;
+      more.onclick = () => {
+        more.remove();
+        list.append(...log.slice(LOG_PREVIEW, 40).map(row));
+      };
+      list.append(more);
+    }
+    return list;
+  }
+
+  // ───────────────────────── الصفحة ─────────────────────────
 
   async function show(userId) {
     const my = ++token;
@@ -188,71 +357,77 @@ export function createProfile(ctx) {
     const profile = profileOf(userId);
     const name = profile?.display_name || usernameOf(userId) || 'صديق';
     host.replaceChildren();
+    host.style.removeProperty('--pf-tint');
+    host.style.removeProperty('--pf-tint-deep');
 
     const top = el('div', 'pf-top');
     top.innerHTML = iconButton('back', 'رجوع', { act: 'profileBack', cls: 'icon-btn pf-glass' });
-    if (own) top.insertAdjacentHTML('beforeend', iconButton('edit', 'عدّل ملفك', { act: 'profileEdit', cls: 'icon-btn pf-glass' }));
     top.querySelector('[data-act="profileBack"]').onclick = ctx.back;
-    top.querySelector('[data-act="profileEdit"]')?.addEventListener('click', ctx.edit);
 
     const banner = el('div', 'pf-banner');
     const id = el('section', 'pf-id');
-    const face = el('div', 'pf-face');
-    face.append(ctx.avatarNode({ displayName: name, avatarKey: profile?.avatar_key }, 96));
+    const row = el('div', 'pf-idrow');
+    const face = avatar(profile, name);
     const dot = el('span', 'pf-dot');
     face.append(dot);
+    row.append(face);
+    if (own) {
+      const edit = el('button', 'btn btn-secondary pf-edit');
+      edit.type = 'button';
+      edit.innerHTML = `${glyph('edit', { size: 18 })}<span>تعديل الملف</span>`;
+      edit.onclick = ctx.edit;
+      row.append(edit);
+    }
     const nameEl = el('h1', 'pf-name', name);
     nameEl.dir = 'auto';
-    const handle = el('div', 'pf-handle', usernameOf(userId) ? `@${usernameOf(userId)}` : '');
-    const live = el('div', 'pf-live');
-    const bio = el('p', `pf-bio${profile?.bio ? '' : ' pf-bio--empty'}`, profile?.bio || (own ? 'اكتب نبذة قصيرة عنك' : ''));
-    bio.dir = 'auto';
-    if (!profile?.bio && own) bio.onclick = ctx.edit;
-    const stats = el('button', 'pf-stats');
-    stats.type = 'button';
-    stats.setAttribute('aria-label', 'تفاصيل القراءة');
-    stats.append(stat('—', 'أعمال'), el('i'), stat('—', 'فصول فريدة'), el('i'), stat('—', 'قراءة'));
-    id.append(face, nameEl, handle, live);
-    if (profile?.bio || own) id.append(bio);
-    id.append(stats);
+    const sub = el('div', 'pf-sub');
+    const handle = usernameOf(userId);
+    if (handle) {
+      const h = el('span', 'pf-handle', `@${handle}`);
+      sub.append(h);
+    }
+    const live = el('span', 'pf-live');
+    sub.append(live);
+    id.append(row, nameEl, sub);
+    if (profile?.bio) {
+      const bio = el('p', 'pf-bio', profile.bio);
+      bio.dir = 'auto';
+      id.append(bio);
+    } else if (own) {
+      const add = el('button', 'pf-bio-add');
+      add.type = 'button';
+      add.innerHTML = `${glyph('plus', { size: 16 })}<span>أضف نبذة قصيرة عنك</span>`;
+      add.onclick = ctx.edit;
+      id.append(add);
+    }
+    const nowHost = el('div', 'pf-now-host');
+    let stats = statsCard(null);
+    id.append(nowHost, stats);
     host.append(top, banner, id);
 
-    void paintBanner(banner, profile, profile?.avatar_key);
+    void paintBanner(banner, profile, face.querySelector('img'));
 
     // ما يُعرض فورًا من المرآة؛ الحضور والأرقام وأفضل 5 تصل بعدها
     const body = el('div', 'pf-body');
     host.append(body);
-    const topHost = el('div', 'card-strip pf-strip');
-    topHost.append(...Array.from({ length: 5 }, () => el('div', 'work-card pf-skel')));
+    let topHost = topSkeleton();
     body.append(section('أفضل 5', topHost, { meta: own ? null : `اختيارات ${name}` }));
-    const nowHost = el('div');
-    body.append(nowHost);
 
     const log = readingLog(userId);
-    if (log.length) {
-      const list = el('div', 'pf-log');
-      for (const item of log.slice(0, 6)) {
-        const work = workOf(item.ref);
-        const row = el('button', 'pf-log-row');
-        row.type = 'button';
-        const cover = el('span', 'pf-log-cover');
-        void ctx.mountImage(cover, work);
-        const copy = el('span', 'pf-log-copy');
-        copy.append(el('bdi', 'pf-log-title', knownTitle(work) ? titleOf(work) : 'عمل'));
-        const when = new Date(item.at).toLocaleDateString('ar', { day: 'numeric', month: 'short', numberingSystem: 'latn' });
-        copy.append(el('span', 'pf-log-meta', [item.chapter != null ? `آخر فصل ${item.chapter}` : null, countLabel(item.count, 'chapter'), when].filter(Boolean).join(' · ')));
-        row.append(cover, copy);
-        row.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon pf-chev' }));
-        row.onclick = () => ctx.openWork(work);
-        list.append(row);
-      }
-      body.append(section(own ? 'سجلّ قراءتك' : 'سجلّ القراءة', list, { meta: countLabel(log.length, 'work') }));
-    }
+    if (log.length) body.append(section(own ? 'سجلّ قراءتك' : 'سجلّ القراءة', logList(log)));
     if (own) {
       const later = ctx.libraryWorks('later');
       if (later.length) {
         const strip = el('div', 'card-strip pf-strip');
-        strip.append(...later.slice(0, 12).map((w) => mediaCard(w)));
+        for (const w of later.slice(0, 12)) {
+          const b = el('button', 'pf-card');
+          b.type = 'button';
+          const f = el('span', 'pf-card-frame');
+          f.append(poster(w, ''));
+          b.append(f, el('bdi', 'pf-card-title', titleOf(w)));
+          b.onclick = () => ctx.openWork(w);
+          strip.append(b);
+        }
         body.append(section('أقرأ لاحقًا', strip, { meta: countLabel(later.length, 'work') }));
       }
     }
@@ -267,45 +442,31 @@ export function createProfile(ctx) {
     const p = (presence ?? []).find((x) => x.userId === userId) ?? (own ? { status: 'ONLINE' } : null);
     const line = presenceLine(p);
     live.textContent = line.text;
-    live.classList.toggle('pf-live--on', line.live);
-    live.classList.toggle('pf-live--reading', Boolean(line.reading));
+    live.className = `pf-live pf-live--${line.tone}`;
     dot.className = `pf-dot pf-dot--${String(p?.status ?? 'offline').toLowerCase()}`;
+    if (p?.status === 'READING' && p.seriesTitle) nowHost.append(nowCard(p, own));
 
     if (numbers) {
-      stats.replaceChildren(
-        stat(fmt(numbers.followedWorks), 'أعمال'),
-        el('i'),
-        stat(fmt(numbers.uniqueChapters), 'فصول فريدة'),
-        el('i'),
-        stat(fmt(numbers.totalReads), 'قراءة'),
-      );
-      stats.onclick = () => openStatsSheet(numbers, name, own);
+      const next = statsCard(numbers);
+      next.onclick = () => openStatsSheet(numbers, name, own);
+      stats.replaceWith(next);
+      stats = next;
     } else {
-      stats.hidden = true;
+      stats.remove();
     }
 
-    if (top5.length) {
-      topHost.replaceChildren(
-        ...top5.slice(0, 5).map((t, i) => mediaCard(ctx.workFromRef(t.seriesRef, t.title, t.coverUrl), i + 1)),
-      );
-    } else {
-      const empty = el('p', 'pf-empty', own ? 'اختر أفضل خمسة أعمال عندك من قائمة ⋮ في صفحة أي عمل.' : `${name} ما اختار أفضل 5 بعد.`);
+    const items = top5.slice(0, 5).map((t) => ctx.workFromRef(t.seriesRef, t.title, t.coverUrl));
+    if (items.length) {
+      const next = topFive(items, name, own);
+      topHost.replaceWith(next);
+      topHost = next;
+    } else if (own) {
+      const empty = el('div', 'pf-empty');
+      empty.innerHTML = glyph('star', { size: 22 });
+      empty.append(el('span', null, 'اختر أفضل خمسة أعمال عندك من قائمة ⋮ في صفحة أي عمل، وتطلع هنا لأصدقائك.'));
       topHost.replaceWith(empty);
-    }
-
-    if (line.reading && p.seriesTitle) {
-      const work = workOf(p.seriesRef ?? `ext:${p.seriesTitle.toLowerCase()}`);
-      if (!knownTitle(work)) work.title = { english: p.seriesTitle };
-      const card = el('button', 'mj-now pf-now');
-      card.type = 'button';
-      const cover = el('span', 'mj-now-cover');
-      void ctx.mountImage(cover, work);
-      const copy = el('span', 'mj-now-copy');
-      copy.append(el('span', 'mj-now-who', own ? 'تقرأ الآن' : 'يقرأ الآن'), el('bdi', 'mj-now-title', p.seriesTitle));
-      if (p.chapterLabel) copy.append(el('span', 'mj-now-chapter', p.chapterLabel));
-      card.append(cover, copy, el('span', 'mj-live'));
-      card.onclick = () => ctx.openWork(work);
-      nowHost.replaceWith(section(own ? 'الآن' : 'يقرأ الآن', card));
+    } else {
+      topHost.closest('.pf-section')?.remove();
     }
   }
 
@@ -317,7 +478,9 @@ export function createProfile(ctx) {
       return {
         displayName: p?.display_name || usernameOf(me()) || '',
         bio: p?.bio ?? null,
-        avatarKey: p?.avatar_key ?? null,
+        // الصورة الأساسية ليست «صورتك»: المحرّر يعرضها ولا يحذفها
+        avatarKey: p?.default_avatar ? null : (p?.avatar_key ?? null),
+        defaultAvatar: p?.default_avatar ? p.avatar_key : null,
         bannerKey: p?.banner_key ?? null,
       };
     },
@@ -330,12 +493,15 @@ export function createProfile(ctx) {
       // تُمسح النسخة المحلية حين يطابقها الخادم، لا قبلها: سحبٌ سبق الإرسال لا يُرجع القديم
       if (local) {
         const row = serverProfileOf(me());
-        if (row && Object.entries(local).every(([k, v]) => (row[COLUMN[k]] ?? null) === (v ?? null))) local = null;
+        const value = (k) => (k === 'avatarKey' && row?.default_avatar ? null : (row?.[COLUMN[k]] ?? null));
+        if (row && Object.entries(local).every(([k, v]) => value(k) === (v ?? null))) local = null;
       }
       if (shown && !host.closest('[hidden]')) void show(shown);
     },
     hide() {
       token += 1;
+      stopFollow?.();
+      stopFollow = null;
       silk?.destroy();
       silk = null;
     },
