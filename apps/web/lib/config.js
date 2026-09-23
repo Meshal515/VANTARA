@@ -34,6 +34,14 @@ const BAKED = {
 /** نسخة هذا البناء. يُستبدل عند بناء الـAPK. */
 const BAKED_VERSION = '__VANTARA_VERSION__';
 
+/**
+ * خادم المزامنة الحقيقي، لأي بناء لم يُخبز فيه عنوان (بناء debug، أو APK
+ * مرسل مباشرة). VANTARA تطبيق لثلاثة حسابات على خادم واحد: بلا هذا يفتح
+ * التطبيق على «اضبط عنوان الخادم»، وهي شاشة لا يفهمها أحد من العيال.
+ * ليس سرًّا: عنوان عام، والدخول يحتاج إثبات الجهاز.
+ */
+const PRODUCTION_SYNC = 'https://vantara-sync.ngm-309.workers.dev';
+
 function unreplaced(value) {
   return !value || value.startsWith('__VANTARA_');
 }
@@ -53,7 +61,7 @@ function trimSlash(url) {
 export function endpoints() {
   const override = stored();
   return {
-    sync: trimSlash(override.sync || (unreplaced(BAKED.sync) ? '' : BAKED.sync)),
+    sync: trimSlash(override.sync || (unreplaced(BAKED.sync) ? PRODUCTION_SYNC : BAKED.sync)),
     api: trimSlash(override.api || (unreplaced(BAKED.api) ? '' : BAKED.api)),
     updates: trimSlash(override.updates || (unreplaced(BAKED.updates) ? '' : BAKED.updates)),
   };

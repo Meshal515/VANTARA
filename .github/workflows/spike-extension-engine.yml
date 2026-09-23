@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       # لقطة ثابتة حديثة: تجدد الروابط المنشورة بدل الاعتماد على أصول إصدار محذوفة.
-      KEIYOUSHI_INDEX_COMMIT: e38245f4ecc7bd1858551c2ea149dbf8129dbad4
+      KEIYOUSHI_INDEX_COMMIT: aefdaeb21ab7e71e6b2c58f2262b2bcc1c9c3e12
       # Owner-approved diagnostic batch: 15 Arabic SAFE and Arabic MangaDex.
       # Dedicated NSFW packages are excluded from the delivered spike.
       VANTARA_SOURCE_PACKAGES: >-

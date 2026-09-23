@@ -505,7 +505,10 @@ class ExtensionEnginePlugin : Plugin() {
             ?: error("unknown sourceId: $sourceId")
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
 
+        // الترتيب: نسخة الجهاز المتحقَّق منها، ثم المضمّنة في التطبيق، ثم التنزيل.
+        // keiyoushi يحذف إصداراته القديمة، فالتنزيل وحده أسقط كل المصادر مرة
         val apk = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
+            ?: withContext(Dispatchers.IO) { readBundled(spec) }
             ?: withContext(Dispatchers.IO) { download(spec) }
 
         when (val result = withContext(Dispatchers.IO) { loader.load(spec, apk) }) {
@@ -523,6 +526,20 @@ class ExtensionEnginePlugin : Plugin() {
                 source
             }
         }
+    }
+
+    /**
+     * الإضافة المضمّنة في `assets/extensions/` (`tools/bundle-extensions.mjs`).
+     * تُقبل فقط إن طابقت بصمتها المثبّتة: ملفٌّ قديم بقي من بناء سابق يُتجاهل
+     * ويُنزَّل البديل، بدل أن يُحمَّل كود لم يُتحقق منه.
+     */
+    private fun readBundled(spec: SourceSpec): ByteArray? {
+        val bytes = runCatching {
+            context.assets.open("extensions/${spec.pkg}.apk").use { it.readBytes() }
+        }.getOrNull() ?: return null
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+        return bytes.takeIf { spec.sha256.equals(digest, ignoreCase = true) }
     }
 
     /** ثلاث محاولات: انقطاع لحظي عن github لا يجب أن يُسقط مصدرًا. */
