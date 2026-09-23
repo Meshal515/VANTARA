@@ -242,8 +242,32 @@ export function createSync({ baseUrl }) {
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
+      // «جهاز غير موثوق» يختلف عن انقطاع: الشاشة تعرض رمز الاعتماد بدل «حاول مرة أخرى»
+      error.code = (await response.json().catch(() => null))?.error ?? null;
       throw error;
     }
+    return response.json();
+  }
+
+  /** جهاز جديد يطلب الاعتماد: رمز يُعرض على الشاشة ويعتمده المالك. */
+  async function requestDevice() {
+    const response = await fetch(`${baseUrl}/v1/device/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(deviceProof()),
+    });
+    if (!response.ok) throw Object.assign(new Error(`request_${response.status}`), { status: response.status });
+    return response.json();
+  }
+
+  /** هل اعتُمد؟ `{ paired, pending }`. عند الاعتماد يصير الجهاز موثوقًا للحسابات كلها. */
+  async function claimDevice() {
+    const response = await fetch(`${baseUrl}/v1/device/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(deviceProof()),
+    });
+    if (!response.ok) throw Object.assign(new Error(`claim_${response.status}`), { status: response.status });
     return response.json();
   }
 
@@ -804,6 +828,8 @@ export function createSync({ baseUrl }) {
       return queue.length;
     },
     accounts,
+    requestDevice,
+    claimDevice,
     pairDevice,
     consumePairingUrl,
     attachNativeLinkBridge,

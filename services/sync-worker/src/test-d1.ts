@@ -38,8 +38,9 @@ export function sqliteEnv(overrides: Partial<Env> = {}): { env: Env; db: Databas
         };
       },
       async run<T>() {
-        db.prepare(sql).run(...(statement.values as SqliteValue[]));
-        return { results: [] as T[], success: true, meta: {} };
+        // مثل D1: عدد الصفوف المتأثرة يعود في meta — كود «استهلك مرة واحدة» يعتمد عليه
+        const outcome = db.prepare(sql).run(...(statement.values as SqliteValue[]));
+        return { results: [] as T[], success: true, meta: { changes: Number(outcome.changes) } };
       },
     } satisfies SqliteStatement;
     return statement;

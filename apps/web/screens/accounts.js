@@ -308,12 +308,84 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
       const user = await sync.signIn(account.userId);
       rememberGateAccount(account.userId);
       await onSignedIn(user);
-    } catch {
-      message.classList.add('gate__message--error');
-      message.textContent = 'تعذّر الدخول. حاول مرة أخرى.';
+    } catch (error) {
       busy = false;
       enter.disabled = false;
+      if (error?.code === 'device_untrusted' && sync.requestDevice) return void showApproval(account);
+      message.classList.add('gate__message--error');
+      message.textContent = error?.status ? 'تعذّر الدخول. حاول مرة أخرى.' : 'ما فيه اتصال بالخادم. تأكد من النت وحاول مرة ثانية.';
     }
+  }
+
+  // ─────────────── جوال جديد: رمز يُعتمد مرة، ثم الدخول وحده ───────────────
+  //
+  // السيرفر لا يقبل إلا جوالًا اعتُمد. الجوال الجديد يطلب رمزًا قصيرًا، صاحبه
+  // يرسله لمشعل، ومشعل يعتمده (سير «اعتماد جوال» في GitHub). التطبيق يسأل كل
+  // بضع ثوانٍ، وأول ما يُعتمد يدخل بلا أي لمسة. الرمز وحده لا يفتح شيئًا: مربوط
+  // بهذا الجوال.
+  let approvalTimer = 0;
+  let approval = null;
+  async function showApproval(account) {
+    clearTimeout(approvalTimer);
+    approval?.remove();
+    approval = el('div', 'gate-approval');
+    approval.setAttribute('role', 'status');
+    approval.append(el('strong', 'gate-approval__title', 'هالجوال جديد'));
+    approval.append(el('p', 'gate-approval__text', 'أرسل هالرمز لمشعل عشان يعتمد الجوال. أول ما يعتمده تدخل على طول.'));
+    const codeEl = el('button', 'gate-approval__code', '····-····');
+    codeEl.type = 'button';
+    codeEl.setAttribute('aria-label', 'انسخ الرمز');
+    const status = el('p', 'gate-approval__status', 'نجهّز الرمز…');
+    approval.append(codeEl, status);
+    message.textContent = '';
+    message.classList.remove('gate__message--error');
+    message.after(approval);
+    enter.hidden = true;
+
+    let code = '';
+    let expiresAt = 0;
+    try {
+      ({ code, expiresAt } = await sync.requestDevice());
+    } catch {
+      status.textContent = 'ما قدرنا نطلب رمز. تأكد من النت.';
+      enter.hidden = false;
+      return;
+    }
+    codeEl.textContent = code;
+    codeEl.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        status.textContent = 'انسخ ✓ — الصقه لمشعل';
+      } catch {
+        status.textContent = 'اضغط مطوّلًا على الرمز وانسخه';
+      }
+    };
+    status.textContent = 'ننتظر الاعتماد…';
+    const poll = async () => {
+      if (!approval?.isConnected) return;
+      if (Date.now() > expiresAt) {
+        status.textContent = 'انتهت مدة الرمز.';
+        const again = el('button', 'gate-approval__again', 'رمز جديد');
+        again.type = 'button';
+        again.onclick = () => void showApproval(account);
+        status.append(' ', again);
+        return;
+      }
+      try {
+        const { paired } = await sync.claimDevice();
+        if (paired) {
+          status.textContent = 'اعتُمد ✓ — ندخلك…';
+          approval.remove();
+          approval = null;
+          enter.hidden = false;
+          return void chooseCurrent();
+        }
+      } catch {
+        // انقطاع لحظي: السؤال التالي يكفي
+      }
+      approvalTimer = setTimeout(poll, 4000);
+    };
+    approvalTimer = setTimeout(poll, 4000);
   }
   enter.addEventListener('click', () => void chooseCurrent());
 
@@ -324,6 +396,7 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     if (raf !== null) cancelAnimationFrame(raf);
     resizeObserver.disconnect();
     for (const stop of followers) stop();
+    clearTimeout(approvalTimer);
     silk.destroy();
   };
 }
