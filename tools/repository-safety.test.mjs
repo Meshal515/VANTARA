@@ -1191,15 +1191,62 @@ test('every source extension ships inside the app and matches its pinned hash', 
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
 });
 
-test('one-button updates: native updater registered, manifest published from the CI-gated stable build', () => {
+test('hybrid updates: web bundles only on matching native code, APKs only if official and newer', async () => {
+  const { nativeInputs, capacitorVersions } = await import('./native-fingerprint.mjs');
+  const { buildManifest, changelogFrom } = await import('./update-manifest.mjs');
+
+  // البصمة تغطي الكود الأصلي كله ولا تلمس الواجهة: تعديل واجهة لا يطلب APK،
+  // وتعديل أصلي لا يُطبَّق كواجهة فوق كود لا يعرفه
+  const inputs = nativeInputs();
+  for (const path of [
+    'android/app/src/main/AndroidManifest.xml',
+    'android/app/build.gradle',
+    'android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt',
+    'capacitor.config.ts',
+  ]) {
+    assert.ok(inputs.includes(path), `native fingerprint must cover ${path}`);
+  }
+  assert.ok(inputs.some((p) => p.startsWith('android/app/src/main/assets/extensions/')), 'bundled source extensions are native');
+  assert.ok(!inputs.some((p) => p.startsWith('apps/') || p.includes('assets/public/')), 'web files must not change the native fingerprint');
+  assert.ok(capacitorVersions(read('pnpm-lock.yaml')).length >= 3, 'installed @capacitor versions are part of the fingerprint');
+
   const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/AppUpdatePlugin.kt');
-  assert.match(plugin, /const val NATIVE_API = \d+/, 'NATIVE_API must be a literal the workflow can read');
-  assert.match(plugin, /sha256 mismatch/, 'every update download must be checksum-verified');
+  assert.match(plugin, /BuildConfig\.VANTARA_NATIVE/, 'the APK must know its own native fingerprint');
+  assert.match(plugin, /bundle built for other native code/, 'a web bundle for other native code must be refused');
+  assert.match(plugin, /sha256 mismatch/, 'every download must be checksum-verified');
   assert.match(plugin, /canonicalPath\.startsWith\(base\)/, 'web bundles must be unzipped without zip-slip');
+  assert.match(plugin, /ApkCheck\.verify/, 'an APK must pass the package/key/version check before the installer opens');
+  assert.match(plugin, /PackageInstaller\.SessionParams/, 'APKs install through a PackageInstaller session');
+  assert.match(plugin, /USER_ACTION_REQUIRED/, 'never a silent install');
+  assert.doesNotMatch(plugin, /FileProvider/, 'the installer reads the session, not a shared file');
+  assert.match(read('android/app/build.gradle'), /buildConfigField "String", "VANTARA_NATIVE"/);
+  assert.match(read('android/app/src/main/AndroidManifest.xml'), /InstallResultReceiver"\s+android:exported="false"/);
+  assert.doesNotMatch(read('android/app/src/main/res/xml/file_paths.xml'), /name="updates"/);
   assert.match(read('android/app/src/main/java/com/vantara/app/MainActivity.java'), /registerPlugin\(AppUpdatePlugin\.class\)/);
-  assert.match(read('android/app/src/main/res/xml/file_paths.xml'), /<cache-path name="updates" path="updates\/" \/>/);
+
+  // CI: نفس المفتاح المثبّت في التطبيق، ونفس البصمة في الـAPK وحزمة الواجهة
+  const pinned = read('android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt').match(/STABLE_CERT_SHA256 = "([0-9a-f]{64})"/)?.[1];
+  assert.ok(pinned, 'the official signing certificate must be pinned');
   const workflow = read('.github/workflows/android-stable.yml');
-  assert.match(workflow, /vantara-update\.json/, 'the stable build must publish the update manifest');
+  assert.match(workflow, /STABLE_CERT_SHA256 = /, 'the stable build must refuse any other signing key');
+  assert.match(workflow, /VANTARA_NATIVE: \$\{\{ steps\.native\.outputs\.fingerprint \}\}/);
+  assert.match(workflow, /vantara-bundle\.json/, 'the web bundle carries its version and native fingerprint');
+  assert.match(workflow, /node tools\/update-manifest\.mjs/);
   assert.match(workflow, /--latest/, 'the manifest must be reachable at releases/latest');
+  assert.ok(workflow.indexOf('node tools/native-fingerprint.mjs') < workflow.indexOf('npx cap sync android'), 'fingerprint the committed files, before cap sync rewrites any');
   assert.match(read('apps/web/lib/updater.js'), /releases\/latest\/download\/vantara-update\.json/);
+
+  assert.deepEqual(
+    changelogFrom('Merge pull request #40 from x/y\x1fFaster reader\n\nbody\x1e\nFix typo\x1f\x1e\nMerge branch main\x1f\x1e'),
+    ['Faster reader', 'Fix typo'],
+  );
+  const manifest = buildManifest({
+    version: '0.0.9', code: '9', native: 'a'.repeat(24), base: 'https://x',
+    apk: 'tools/update-policy.json', web: 'tools/update-policy.json', changelog: ['x'], policy: { minimumSupportedVersionCode: 4 },
+  });
+  for (const key of ['versionName', 'versionCode', 'native', 'minimumSupportedVersionCode', 'changelog', 'apk', 'web']) {
+    assert.ok(key in manifest, `manifest needs ${key}`);
+  }
+  assert.equal(manifest.nativeApi, 2, '0.0.3 reads nativeApi: anything but 1 sends it to the APK');
+  assert.throws(() => buildManifest({ ...manifest, native: 'dev' }), /native fingerprint/);
 });

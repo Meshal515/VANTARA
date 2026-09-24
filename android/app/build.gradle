@@ -25,6 +25,9 @@ def keyPasswordValue = System.getenv('ANDROID_KEY_PASSWORD') ?: keystorePassword
 // فيتلقّى AGP سلسلة بدل رقم ويفشل التقييم بـ«Value is null».
 def appVersionCode = (System.getenv('VANTARA_VERSION_CODE') ?: '1').toInteger()
 def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
+// بصمة الكود الأصلي (tools/native-fingerprint.mjs). حزمة واجهة تُعرض فقط فوق
+// الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
+def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 
 android {
     namespace "com.vantara.app"
@@ -50,6 +53,7 @@ android {
         versionCode appVersionCode
         versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "String", "VANTARA_NATIVE", "\"${nativeFingerprint}\""
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -79,6 +83,8 @@ android {
     // محرّك الإضافات مكتوب بـKotlin ويسكن في `src/main/kotlin`، وإضافة
     // kotlin-android تضمّ هذا المجلد افتراضيًّا فلا يحتاج تصريحًا.
     kotlinOptions { jvmTarget = '17' }
+
+    buildFeatures { buildConfig true }
 
     packaging {
         // اعتماديات المحرك تشحن كلٌّ نسختها من ملفات META-INF نفسها، ودامج

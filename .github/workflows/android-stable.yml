@@ -71,6 +71,17 @@ jobs:
           echo "name=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      # بصمة كل ما يُبنى في الـAPK ولا تحمله الواجهة (Kotlin، Manifest،
+      # الصلاحيات، المحرك، Capacitor). تُحسب قبل `cap sync` من ملفات git نفسها.
+      # الواجهة تُطبَّق فقط فوق APK بالبصمة نفسها؛ اختلافها يعرض تحديث الـAPK.
+      - name: Native fingerprint
+        id: native
+        run: |
+          set -euo pipefail
+          fp=$(node tools/native-fingerprint.mjs)
+          echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
+          echo "native fingerprint: $fp"
+
       - name: Resolve endpoint URLs
         id: urls
         env:
@@ -113,6 +124,16 @@ jobs:
       - name: Copy web assets into Android
         run: npx cap sync android
 
+      # هوية حزمة الواجهة: التطبيق يرفض حزمةً إصدارها أو بصمتها لا يطابقان
+      - name: Stamp the web bundle
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          NATIVE: ${{ steps.native.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          printf '{"version":"%s","native":"%s"}\n' "$VERSION_NAME" "$NATIVE" > android/app/src/main/assets/public/vantara-bundle.json
+          cat android/app/src/main/assets/public/vantara-bundle.json
+
       - name: Decode stable signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -129,12 +150,15 @@ jobs:
           ANDROID_KEY_ALIAS: vantara
           VANTARA_VERSION_NAME: ${{ steps.version.outputs.name }}
           VANTARA_VERSION_CODE: ${{ steps.version.outputs.code }}
+          VANTARA_NATIVE: ${{ steps.native.outputs.fingerprint }}
         run: |
           set -euo pipefail
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleRelease
 
       - name: Verify signature and stage artifact
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           set -euo pipefail
           apk=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
@@ -142,6 +166,13 @@ jobs:
           tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$tools/apksigner" verify --verbose --print-certs "$apk" | tee /tmp/apksigner.txt
           grep -qE 'v2 scheme \(APK Signature Scheme v2\): true' /tmp/apksigner.txt             || { echo 'v2 signature missing'; exit 1; }
+          # نفس المفتاح في كل إصدار، وإلا رفض أندرويد التثبيت فوق السابق. البصمة
+          # المثبّتة هي نفسها التي يتحقق منها التطبيق قبل أي تثبيت (ApkCheck)
+          pinned=$(grep -oE 'STABLE_CERT_SHA256 = "[0-9a-f]{64}"' android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt | grep -oE '[0-9a-f]{64}')
+          grep -q "Signer #1 certificate SHA-256 digest: $pinned" /tmp/apksigner.txt             || { echo 'stable APK is not signed with the pinned VANTARA key'; exit 1; }
+          test "$(grep -c 'certificate SHA-256 digest' /tmp/apksigner.txt)" = 1             || { echo 'stable APK must have exactly one signer'; exit 1; }
+          "$tools/aapt2" dump badging "$apk" | head -1 | tee /tmp/badging.txt
+          grep -q "package: name='com.vantara.app' versionCode='${VERSION_CODE}' " /tmp/badging.txt             || { echo 'unexpected package id or versionCode'; exit 1; }
           mkdir -p dist
           cp "$apk" dist/VANTARA-stable.apk
           sha256sum dist/VANTARA-stable.apk > dist/VANTARA-stable.apk.sha256
@@ -164,32 +195,19 @@ jobs:
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
+          NATIVE: ${{ steps.native.outputs.fingerprint }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          native=$(grep -oE 'const val NATIVE_API = [0-9]+' android/app/src/main/kotlin/com/vantara/plugins/AppUpdatePlugin.kt | grep -oE '[0-9]+$')
-          test -n "$native"
           tag="stable-${VERSION_CODE}"
           (cd android/app/src/main/assets/public && zip -qr "$GITHUB_WORKSPACE/dist/VANTARA-web.zip" .)
-          apk_sha=$(sha256sum dist/VANTARA-stable.apk | cut -d' ' -f1)
-          web_sha=$(sha256sum dist/VANTARA-web.zip | cut -d' ' -f1)
-          notes=$(git log -1 --format=%s "$HEAD_SHA" | head -c 200)
-          base="https://github.com/${REPO}/releases/download/${tag}"
-          python3 - "$native" "$apk_sha" "$web_sha" "$base" "$notes" <<'PY'
-          import json, os, sys
-          native, apk_sha, web_sha, base, notes = sys.argv[1:6]
-          manifest = {
-              'versionName': os.environ['VERSION_NAME'],
-              'versionCode': int(os.environ['VERSION_CODE']),
-              'nativeApi': int(native),
-              'notes': notes,
-              'apk': {'url': f'{base}/VANTARA-stable.apk', 'sha256': apk_sha, 'size': os.path.getsize('dist/VANTARA-stable.apk')},
-              'web': {'url': f'{base}/VANTARA-web.zip', 'sha256': web_sha, 'size': os.path.getsize('dist/VANTARA-web.zip')},
-          }
-          open('dist/vantara-update.json', 'w').write(json.dumps(manifest, ensure_ascii=False, indent=2))
-          PY
-          cat dist/vantara-update.json
+          # سجل التغييرات: طلبات الدمج منذ الإصدار المستقر السابق
+          prev=$(git describe --tags --abbrev=0 --match 'stable-*' "${HEAD_SHA}^" 2>/dev/null || true)
+          node tools/update-manifest.mjs --out dist/vantara-update.json \
+            --version "$VERSION_NAME" --code "$VERSION_CODE" --native "$NATIVE" \
+            --base "https://github.com/${REPO}/releases/download/${tag}" \
+            --apk dist/VANTARA-stable.apk --web dist/VANTARA-web.zip ${prev:+--since "$prev"}
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Publish the update release
