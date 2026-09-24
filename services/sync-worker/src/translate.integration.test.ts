@@ -87,6 +87,9 @@ describe('translation engine (server)', () => {
     expect(headers.get('authorization')).toBe('Bearer test-key');
     expect(body.model).toBe('gpt-6-luna');
     expect(body.instructions).toBe(SYSTEM_PROMPT);
+    // فصحى بترتيب الجملة العربية، لا الإنجليزية
+    expect(SYSTEM_PROMPT).toContain('«قلتُ لك انتظرني!»');
+    expect(SYSTEM_PROMPT).toContain('«لن أخسر أمام شخصٍ مثلك!»');
     expect(body.store).toBe(false);
     expect(body.reasoning).toEqual({ effort: 'low' });
     expect(body.text).toMatchObject({ format: { type: 'json_schema', name: 'page_translation', strict: true } });
