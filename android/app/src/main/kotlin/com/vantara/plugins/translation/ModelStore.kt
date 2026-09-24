@@ -20,17 +20,26 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class ModelStore(context: Context) {
 
-    data class Spec(val name: String, val url: String, val sha256: String, val file: String, val bytes: Long)
+    /**
+     * `legacy`: ملف أقدم يؤدي العمل نفسه بالناتج نفسه (اسمه وحجمه). يكفي إلى أن
+     * يصل الجديد، فلا تتوقف الترجمة عند تحديث الملفات، ويُحذف بعد وصوله.
+     */
+    data class Legacy(val file: String, val bytes: Long, val sha256: String)
+
+    data class Spec(val name: String, val url: String, val sha256: String, val file: String, val bytes: Long, val legacy: Legacy? = null)
 
     companion object {
-        const val VERSION = "2026.09.24"
+        const val VERSION = "2026.09.25"
         private const val HF = "https://huggingface.co"
 
         val SPECS: List<Spec> = listOf(
             Spec("rtdetr", "$HF/ogkalu/comic-text-and-bubble-detector/resolve/main/detector-v4-s_int8.onnx",
                 "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79", "rtdetr-v4-s_int8.onnx", 11_120_765),
-            Spec("ctd", "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx",
-                "1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f", "comictextdetector.onnx", 94_669_756),
+            // comic-text-detector برأس قناع الحروف وحده (tools/ctd_seg_only.py، سير «ملفات الترجمة»):
+            // نفس العقد والأوزان، خرج seg مطابق بتًّا بتًّا، وأسرع ~40% لأن رأسي blk/det لا يُحسبان
+            Spec("ctd", "https://github.com/Meshal515/VANTARA/releases/download/models-ctd-seg-1/comictextdetector-seg.onnx",
+                "143f5aedd9d2f1362449852bf5d58718836ff16b87f3681b52ebd0bc7c8464d4", "comictextdetector-seg.onnx", 65_568_440,
+                legacy = Legacy("comictextdetector.onnx", 94_669_756, "1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f")),
             Spec("bubbleseg", "$HF/kitsumed/yolov8m_seg-speech-bubble/resolve/main/model_dynamic.onnx",
                 "36c26bdefe150226acd9669772e9ff5a011fa0dd4622469b49d3d5e359f3251c", "yolov8m-seg-speech-bubble.onnx", 108_982_949),
             Spec("lama", "$HF/ogkalu/lama-manga-onnx-dynamic/resolve/main/lama-manga-dynamic.onnx",
@@ -50,19 +59,107 @@ class ModelStore(context: Context) {
     private val versionFile = File(dir, "version")
     private val cancelled = AtomicBoolean(false)
 
-    fun file(name: String): File = File(dir, SPECS.first { it.name == name }.file)
+    // ── التحقق: البصمة لا الحجم ──
+    // كل ملف يُحسب sha256 له مرة، ويُحفظ «تحقّقتُ منه» مع حجمه ووقت تعديله في `verified`.
+    // ملف تغيّر بعدها (حجمًا أو وقتًا) يُعاد التحقق منه؛ وبصمة مختلفة = غير مثبّت.
+    private val verifiedFile = File(dir, "verified")
+    private val verified = HashMap<String, String>() // اسم الملف → "حجم:وقت:بصمة"
+    private var verifiedLoaded = false
 
-    fun isInstalled(): Boolean = SPECS.all { File(dir, it.file).let { f -> f.exists() && f.length() == it.bytes } }
+    @Synchronized
+    private fun loadVerified() {
+        if (verifiedLoaded) return
+        verifiedLoaded = true
+        verifiedFile.takeIf { it.exists() }?.readLines()?.forEach { line ->
+            val parts = line.split(" ")
+            if (parts.size == 2) verified[parts[0]] = parts[1]
+        }
+    }
+
+    @Synchronized
+    private fun saveVerified() {
+        dir.mkdirs()
+        verifiedFile.writeText(verified.entries.joinToString("\n") { "${it.key} ${it.value}" })
+    }
+
+    private fun stamp(f: File) = "${f.length()}:${f.lastModified()}"
+
+    /** بصمة الملف مطابقة؟ (تُحسب مرة لكل نسخة من الملف.) `hashNow=false`: لا حساب، المعروف فقط. */
+    @Synchronized
+    private fun matches(f: File, bytes: Long, sha: String, hashNow: Boolean): Boolean {
+        if (!f.exists() || f.length() != bytes) return false
+        loadVerified()
+        val known = verified[f.name]
+        if (known != null && known.startsWith(stamp(f) + ":")) return known.endsWith(":$sha")
+        if (!hashNow) return false
+        val actual = sha256File(f)
+        verified[f.name] = "${stamp(f)}:$actual"
+        saveVerified()
+        return actual == sha
+    }
+
+    private fun sha256File(f: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(1024 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun present(spec: Spec, hashNow: Boolean = false): Boolean = matches(File(dir, spec.file), spec.bytes, spec.sha256, hashNow)
+
+    private fun legacyFile(spec: Spec, hashNow: Boolean = false): File? =
+        spec.legacy?.let { l -> File(dir, l.file).takeIf { matches(it, l.bytes, l.sha256, hashNow) } }
+
+    /** ملف بالحجم الصحيح لم تُحسب بصمته بعد (نزل قبل هذا التحقق). */
+    private fun unchecked(spec: Spec): Boolean {
+        val f = File(dir, spec.file)
+        return f.exists() && f.length() == spec.bytes && !present(spec) ||
+            spec.legacy?.let { l -> File(dir, l.file).let { it.exists() && it.length() == l.bytes && legacyFile(spec) == null } } == true
+    }
+
+    /** الملف الحالي، أو الأقدم المكافئ له إن لم يصل الجديد بعد. */
+    fun file(name: String): File {
+        val spec = SPECS.first { it.name == name }
+        if (present(spec)) return File(dir, spec.file)
+        return legacyFile(spec) ?: File(dir, spec.file)
+    }
+
+    /** المعروف فقط (سريع، لا يحسب بصمات): للإعدادات. ما لم يُتحقق منه بعد يُحسب مثبّتًا حتى يُفحص. */
+    fun isInstalled(): Boolean = SPECS.all { present(it) || legacyFile(it) != null || unchecked(it) }
 
     fun installedVersion(): String? = versionFile.takeIf { it.exists() }?.readText()?.trim()
 
-    fun installedBytes(): Long = SPECS.sumOf { File(dir, it.file).takeIf { f -> f.exists() }?.length() ?: 0L }
+    fun installedBytes(): Long = SPECS.sumOf { s ->
+        (File(dir, s.file).takeIf { f -> f.exists() }?.length() ?: 0L) + (s.legacy?.let { File(dir, it.file).takeIf { f -> f.exists() }?.length() } ?: 0L)
+    }
 
     data class FileStatus(val name: String, val bytes: Long, val present: Boolean)
 
     fun files(): List<FileStatus> = SPECS.map { s ->
         val f = File(dir, s.file)
         FileStatus(s.file, s.bytes, f.exists() && f.length() == s.bytes)
+    }
+
+    /**
+     * قبل أي استعمال: كل ملف ببصمته الصحيحة (يُحسب مرة لكل ملف جديد). ملف تالف
+     * أو مبدَّل يُحذف فيطلب التطبيق تنزيله من جديد.
+     */
+    @Synchronized
+    fun verifyAll(): Boolean {
+        var ok = true
+        for (spec in SPECS) {
+            if (present(spec, hashNow = true) || legacyFile(spec, hashNow = true) != null) continue
+            File(dir, spec.file).takeIf { it.exists() }?.delete()
+            spec.legacy?.let { File(dir, it.file).takeIf { f -> f.exists() }?.delete() }
+            ok = false
+        }
+        return ok
     }
 
     fun cancel() = cancelled.set(true)
@@ -75,10 +172,11 @@ class ModelStore(context: Context) {
         cancelled.set(false)
         dir.mkdirs()
         val total = EXPECTED_BYTES
-        var done = SPECS.filter { File(dir, it.file).let { f -> f.exists() && f.length() == it.bytes } }.sumOf { it.bytes }
+        // الموجود يُتحقق ببصمته قبل تخطّيه: ملف بالحجم نفسه ومحتوى مختلف يُنزَّل من جديد
+        var done = SPECS.filter { present(it, hashNow = true) }.sumOf { it.bytes }
         for (spec in SPECS) {
             val target = File(dir, spec.file)
-            if (target.exists() && target.length() == spec.bytes) continue
+            if (present(spec, hashNow = true)) continue
             val tmp = File(dir, "${spec.file}.part")
             val digest = MessageDigest.getInstance("SHA-256")
             client.newCall(Request.Builder().url(spec.url).header("User-Agent", "vantara-android").build()).execute().use { res ->
@@ -115,6 +213,13 @@ class ModelStore(context: Context) {
                 tmp.delete()
                 error("cannot place ${spec.file}")
             }
+            synchronized(this) {
+                loadVerified()
+                verified[target.name] = "${stamp(target)}:$actual"
+                saveVerified()
+            }
+            // وصل الجديد: الأقدم المكافئ لم يعد لازمًا
+            spec.legacy?.let { File(dir, it.file).delete() }
             onProgress(done, total, spec.file)
         }
         versionFile.writeText(VERSION)
@@ -123,10 +228,14 @@ class ModelStore(context: Context) {
     fun remove() {
         dir.listFiles()?.forEach { it.delete() }
         dir.delete()
+        synchronized(this) { verified.clear() }
     }
 
-    /** يرمي إن غاب ملف: الخط لا يعمل بنصف نماذجه. */
+    /**
+     * يرمي إن غاب ملف أو اختلفت بصمته: الخط لا يعمل بنصف نماذجه ولا بنموذج مبدَّل.
+     * البصمة تُحسب مرة لكل ملف (ثم تُحفظ)، فلا كلفة بعد أول صفحة.
+     */
     fun requireInstalled() {
-        if (!isInstalled()) error("models_missing")
+        if (!verifyAll()) error("models_missing")
     }
 }

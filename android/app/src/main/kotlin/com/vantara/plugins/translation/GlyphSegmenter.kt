@@ -12,13 +12,19 @@ class GlyphSegmenter(file: File) {
     private val session: OrtSession = Ort.open(file)
     private val size = 1024
 
+    /** عدد المربعات في آخر صفحة (للقياس). */
+    var tiles = 0
+        private set
+
     /** يرجع احتمال «حرف» لكل بكسل. */
     fun probabilities(img: RgbImage): FloatArray {
         val acc = FloatArray(img.width * img.height)
         val cnt = FloatArray(img.width * img.height)
         val tileH = img.width
         val overlap = (img.width * 0.12).toInt()
-        for ((y0, y1) in verticalTiles(img.height, tileH, overlap)) {
+        val spans = verticalTiles(img.height, tileH, overlap)
+        tiles = spans.size
+        for ((y0, y1) in spans) {
             val crop = img.crop(0, y0, img.width, y1)
             val (chw, r) = crop.toChwPadded(size, 0)
             val nw = Math.round(crop.width * r)

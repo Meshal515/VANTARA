@@ -13,11 +13,20 @@ import java.util.Base64
 /**
  * الخط على الجهاز، مرحلتان يفصل بينهما نداء Luna من JavaScript:
  *
- *   analyze(page)  → كشف + حروف + فقاعات + OCR → مناطق بمعرّفات ثابتة (+ مصغّرة للسياق)
+ *   analyze(page)  → كشف + حروف + فقاعات + OCR → مناطق بمعرّفات ثابتة
  *   render(page, {id → عربي}) → تخطيط → مسح آمن → رسم → ملف WebP
  *
- * النماذج تُحمَّل عند أول استعمال وتبقى في الذاكرة ما دام التطبيق حيًّا.
- * القاعدة الصلبة نفسها: بلا عربي لا مسح، وبلا مسح لا عربي؛ المؤثرات لا تُمس.
+ * لا عمل مكرر:
+ *   - الصفحة تُفك مرة (ذاكرة آخر ثلاث صور)، والمصغّرة لـLuna من البكسلات نفسها،
+ *     ولا مصغّرة أصلًا لصفحة لا شيء فيها يُسأل عنه.
+ *   - التحليل يُحفظ مضغوطًا (الأقنعة بمستطيلاتها)، فالرسم وإكمال الفقاعات
+ *     الناقصة لا يعيدان الكشف وOCR. وكل رسم يأخذ مناطق جديدة منه: حالة رسمٍ
+ *     سابق (فقاعة بقيت بلا عربي) لا تمنع رسمها حين يصل عربيّها.
+ *   - النماذج تُحمَّل حين تلزم: الكاشف أولًا؛ الحروف والفقاعات وOCR إن وُجد نص؛
+ *     LaMa إن احتاجته فقاعة. وتبقى في الذاكرة ما دام التطبيق حيًّا.
+ *
+ * كل مرحلة تُقاس (`Perf`) وتعود مع النتيجة. القاعدة الصلبة نفسها: بلا عربي لا
+ * مسح، وبلا مسح لا عربي؛ المؤثرات لا تُمس.
  */
 class Pipeline(private val context: Context, private val store: ModelStore) {
     private var detector: Detector? = null
@@ -27,92 +36,236 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private var ocr: LatinOcr? = null
     private val typeface: Typeface by lazy { Typeface.createFromAsset(context.assets, "fonts/BalooBhaijaan2.ttf") }
     private val layout by lazy { ArabicLayout(typeface) }
-    private val analyses = HashMap<String, Analysis>()
+    private val analyses = lru<Analysis>(24)
+    private val images = lru<Decoded>(3)
 
-    class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Region>)
+    /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
+    class Snapshot(
+        val id: String,
+        val box: Box,
+        val score: Float,
+        val kind: String,
+        val bubble: Int, // فهرس في `Analysis.bubbles`، أو -1
+        val bubbleBox: Box?,
+        val glyph: PackedMask,
+        val glyphPixels: Int,
+        val inkLight: Boolean,
+        val ocr: OcrResult?,
+        val source: String,
+        val status: String,
+    )
 
-    @Synchronized
-    private fun load() {
-        store.requireInstalled()
-        if (detector == null) detector = Detector(store.file("rtdetr"))
-        if (glyphs == null) glyphs = GlyphSegmenter(store.file("ctd"))
-        if (bubbles == null) bubbles = BubbleSegmenter(store.file("bubbleseg"))
-        if (inpainter == null) inpainter = Inpainter(store.file("lama"))
-        if (ocr == null) ocr = LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict"))
+    class BubbleSnapshot(val box: Box, val score: Float, val mask: PackedMask)
+
+    class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>)
+
+    /** الصورة مفكوكة. `exact`: بكسلاتها هي بكسلات الملف (لم تُصغَّر ولا شفافية). */
+    private class Decoded(val img: RgbImage, val exact: Boolean)
+
+    private fun <T> lru(max: Int) = object : LinkedHashMap<String, T>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, T>?) = size > max
     }
+
+    // ── النماذج، كلٌّ حين يلزم ──
+
+    private inline fun <T> load(perf: Perf, name: String, make: () -> T): T {
+        val t = System.nanoTime()
+        val m = make()
+        perf.add("load", System.nanoTime() - t)
+        perf.count("load:$name")
+        return m
+    }
+
+    private fun detector(perf: Perf) = detector ?: load(perf, "rtdetr") { Detector(store.file("rtdetr")) }.also { detector = it }
+    private fun glyphs(perf: Perf) = glyphs ?: load(perf, "ctd") { GlyphSegmenter(store.file("ctd")) }.also { glyphs = it }
+    private fun bubbles(perf: Perf) = bubbles ?: load(perf, "bubbleseg") { BubbleSegmenter(store.file("bubbleseg")) }.also { bubbles = it }
+    private fun inpainter(perf: Perf) = inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it }
+    private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict")) }.also { ocr = it }
+
+    /** ملف قناع الحروف المستعمل: `seg` (الرأس وحده) أو `full` (الأصل، إلى أن يصل تحديث الملفات). */
+    fun ctdVariant(): String = if (store.file("ctd").name.contains("-seg")) "seg" else "full"
 
     @Synchronized
     fun unload() {
         detector?.close(); glyphs?.close(); bubbles?.close(); inpainter?.close(); ocr?.close()
         detector = null; glyphs = null; bubbles = null; inpainter = null; ocr = null
         analyses.clear()
+        images.clear()
     }
 
-    private fun decode(file: File): Pair<RgbImage, String> {
-        val bytes = file.readBytes()
-        val hash = ModelStore.sha256Hex(bytes)
+    // ── الصورة: قراءة وبصمة ثم فكّ مرة ──
+
+    private fun read(file: File, perf: Perf): Pair<ByteArray, String> {
+        val bytes = perf.time("read") { file.readBytes() }
+        val hash = perf.time("hash") { ModelStore.sha256Hex(bytes) }
+        return bytes to hash
+    }
+
+    private fun decode(bytes: ByteArray, perf: Perf): Decoded = perf.time("decode") {
         val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
         var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: error("not an image")
+        val opaque = !bmp.hasAlpha()
         val maxEdge = 4096
+        var scaled = false
         if (maxOf(bmp.width, bmp.height) > maxEdge) {
             val s = maxEdge.toFloat() / maxOf(bmp.width, bmp.height)
             bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true)
+            scaled = true
         }
-        return ArabicLayout.rgbOf(bmp) to hash
+        Decoded(ArabicLayout.rgbOf(bmp), opaque && !scaled)
     }
 
-    /** الهندسة وOCR. يحتفظ بالتحليل ليستعمله `render` لاحقًا بنفس المعرّفات. */
+    private fun image(bytes: ByteArray, hash: String, perf: Perf, useCache: Boolean): Decoded {
+        if (useCache) images[hash]?.let { perf.count("imageReused"); return it }
+        val d = decode(bytes, perf)
+        if (useCache) images[hash] = d
+        return d
+    }
+
+    // ── التحليل ──
+
+    /** الهندسة وOCR. يُحفظ التحليل ليستعمله `render` وأي إكمال لاحق بنفس المعرّفات. */
     @Synchronized
-    fun analyze(file: File): Analysis {
-        load()
-        val (img, hash) = decode(file)
-        val gray = img.gray()
-        val dets = detector!!.detect(img)
-        // كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_SCORE: بلا صندوق كهذا لا منطقة مهما قالت
-        // بقية النماذج. فصفحة بلا نص (مشهد، صفحة فاصلة) تتخطى الحروف والفقاعات وOCR، والنتيجة نفسها تمامًا.
+    fun analyze(file: File, perf: Perf = Perf()): Analysis = analyzeImpl(file, perf, useCache = true)
+
+    private fun analyzeImpl(file: File, perf: Perf, useCache: Boolean): Analysis {
+        store.requireInstalled()
+        val (bytes, hash) = read(file, perf)
+        if (useCache) analyses[hash]?.let { perf.count("analysisReused"); return it }
+        val img = image(bytes, hash, perf, useCache).img
+        val det = detector(perf)
+        val dets = perf.time("detect") { det.detect(img) }
+        perf.count("detectTiles", det.tiles)
+        // بوابة «هل في الصفحة نص؟»: كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_SCORE، فبلا صندوق
+        // كهذا لا منطقة مهما قالت بقية النماذج. صفحة بلا نص تتخطى الحروف والفقاعات وOCR
+        // وتحميل نماذجها، والنتيجة نفسها تمامًا (لا تخمين: أي صندوق نص يكمل المعالجة).
         if (dets.none { it.label.startsWith("text") && it.score >= Regions.MIN_SCORE }) {
-            val empty = Analysis(hash, img.width, img.height, emptyList())
-            analyses[hash] = empty
-            if (analyses.size > 12) analyses.remove(analyses.keys.first())
-            return empty
+            perf.count("textless")
+            return Analysis(hash, img.width, img.height, emptyList(), emptyList()).also { if (useCache) analyses[hash] = it }
         }
-        val prob = glyphs!!.probabilities(img)
-        val glyphFull = ByteMask(img.width, img.height)
-        for (i in prob.indices) if (prob[i] > 0.3f) glyphFull.data[i] = 1
-        val bubbleList = bubbles!!.segment(img)
-        val regions = Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull)
-        for (r in regions) {
-            if (r.kind == "sfx") { r.status = "skipped:sfx"; continue }
-            val res = ocr!!.read(img, r.glyph, r.box)
-            r.ocr = res
-            r.source = res.text
-            if (res.text.isEmpty() || res.confidence < Regions.MIN_OCR_CONF) r.status = "skipped:unreadable"
+        val gray = perf.time("gray") { img.gray() }
+        val gs = glyphs(perf)
+        val prob = perf.time("glyphs") { gs.probabilities(img) }
+        perf.count("glyphTiles", gs.tiles)
+        val glyphFull = perf.time("glyphMask") {
+            val m = ByteMask(img.width, img.height)
+            for (i in prob.indices) if (prob[i] > 0.3f) m.data[i] = 1
+            m
         }
-        val analysis = Analysis(hash, img.width, img.height, regions)
-        analyses[hash] = analysis
-        if (analyses.size > 12) analyses.remove(analyses.keys.first())
+        val bs = bubbles(perf)
+        val bubbleList = perf.time("bubbles") { bs.segment(img) }
+        perf.count("bubbleTiles", bs.tiles)
+        perf.count("bubbles", bubbleList.size)
+        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
+        perf.count("regions", regions.size)
+        // كل منطقة تُقرأ، ومنها «نص حر بثقة منخفضة» (تلميح sfx): قد يكون سردًا فوق الرسم،
+        // وLuna ترى الصفحة وتقرر؛ المؤثر الحقيقي يعود منها sfx فلا يُرسم
+        val reader = if (regions.isNotEmpty()) ocr(perf) else null
+        perf.time("ocr") {
+            for (r in regions) {
+                val res = reader!!.read(img, r.glyph, r.box)
+                perf.count("ocrLines", res.lines.size)
+                r.ocr = res
+                r.source = res.text
+                if (res.text.isEmpty() || res.confidence < Regions.MIN_OCR_CONF) r.status = "skipped:unreadable"
+            }
+        }
+        val analysis = perf.time("pack") { freeze(hash, img.width, img.height, regions) }
+        if (useCache) analyses[hash] = analysis
         return analysis
     }
 
-    /** مصغّرة JPEG base64 للسياق عند Luna (عرض ≤ 1400). */
-    fun thumbnail(file: File, maxWidth: Int = 1400): String {
-        val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return ""
+    private fun freeze(hash: String, width: Int, height: Int, regions: List<Region>): Analysis {
+        // فقاعة واحدة قد تحمل منطقتين: تُحفظ مرة وتبقى مشتركة (siblings تعتمد هويتها)
+        val seen = ArrayList<Bubble>()
+        val packed = ArrayList<BubbleSnapshot>()
+        val snaps = regions.map { r ->
+            val bi = r.bubble?.let { b ->
+                val i = seen.indexOfFirst { it === b }
+                if (i >= 0) i else {
+                    seen.add(b)
+                    packed.add(BubbleSnapshot(b.box, b.score, PackedMask.of(b.mask)))
+                    seen.size - 1
+                }
+            } ?: -1
+            Snapshot(r.id, r.box, r.score, r.kind, bi, r.bubbleBox, PackedMask.of(r.glyph), r.glyphPixels, r.inkLight, r.ocr, r.source, r.status)
+        }
+        return Analysis(hash, width, height, snaps, packed)
+    }
+
+    /** مناطق جديدة من التحليل المحفوظ، بحالتها كما خرجت من التحليل. */
+    private fun thaw(a: Analysis): List<Region> {
+        val bs = a.bubbles.map { Bubble(it.box, it.score, it.mask.unpack()) }
+        return a.regions.map { s ->
+            Region(s.id, s.box, s.score, s.kind, if (s.bubble >= 0) bs[s.bubble] else null, s.bubbleBox, s.glyph.unpack(), s.glyphPixels, s.inkLight).also {
+                it.ocr = s.ocr
+                it.source = s.source
+                it.status = s.status
+            }
+        }
+    }
+
+    /**
+     * مصغّرة JPEG base64 للسياق عند Luna (عرض ≤ 1400). من البكسلات المفكوكة إن
+     * كانت هي بكسلات الملف نفسها، وإلا من الملف كما كانت.
+     */
+    fun thumbnail(file: File, pageHash: String?, maxWidth: Int = 1400): String {
+        val cached = pageHash?.let { synchronized(this) { images[it] } }?.takeIf { it.exact }
+        val bmp = if (cached != null) ArabicLayout.bitmapOf(cached.img) else BitmapFactory.decodeFile(file.absolutePath) ?: return ""
         val scaled = if (bmp.width > maxWidth) Bitmap.createScaledBitmap(bmp, maxWidth, bmp.height * maxWidth / bmp.width, true) else bmp
         val out = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 86, out)
         return Base64.getEncoder().encodeToString(out.toByteArray())
     }
 
+    // ── الرسم ──
+
     /**
      * التبييض والرسم. `arabicById`: ما ردّت به Luna (المعرّف → العربي). يرجع ملف WebP.
      * منطقة بلا عربي تبقى كما هي؛ عربي لا يدخل بحجم مقروء لا يُمسح أصله.
      */
     @Synchronized
-    fun render(file: File, arabicById: Map<String, String>, outDir: File): Pair<File, Int> {
-        load()
-        val (img, hash) = decode(file)
-        val analysis = analyses[hash] ?: analyze(file)
-        val regions = analysis.regions
+    fun render(file: File, arabicById: Map<String, String>, outDir: File, perf: Perf = Perf()): Pair<File, Int> {
+        val (encoded, hash, translated) = renderImpl(file, arabicById, perf, useCache = true)
+        val out = perf.time("write") { publish(outDir, hash, encoded) }
+        return out to translated
+    }
+
+    /**
+     * نشر الصورة المترجمة: اسم جديد لكل محتوى (`<بصمة الصفحة>-<بصمة الناتج>.webp`)
+     * فالقارئ يرى الإكمال فورًا (الرابط تغيّر) ولا يُكتب فوق ملف معروض. والكتابة
+     * ذرّية: ملف مؤقت يُكتب ويُزامَن ثم يُعاد تسميته؛ انقطاع في المنتصف لا يترك
+     * ملفًا نهائيًّا ناقصًا أبدًا. النسخ الأقدم للصفحة نفسها تُحذف بعده.
+     */
+    private fun publish(outDir: File, hash: String, encoded: ByteArray): File {
+        outDir.mkdirs()
+        val name = "$hash-${ModelStore.sha256Hex(encoded).substring(0, 12)}.webp"
+        val out = File(outDir, name)
+        if (!(out.exists() && out.length() == encoded.size.toLong())) {
+            val tmp = File(outDir, "$name.part")
+            java.io.FileOutputStream(tmp).use { s ->
+                s.write(encoded)
+                s.fd.sync()
+            }
+            if (!tmp.renameTo(out)) {
+                tmp.delete()
+                error("cannot publish translated page")
+            }
+        }
+        outDir.listFiles()?.forEach { f ->
+            if (f.name != name && f.name.startsWith(hash) && (f.name.endsWith(".webp") || f.name.endsWith(".part"))) f.delete()
+        }
+        return out
+    }
+
+    /** يرجع (WebP، بصمة الصفحة، عدد المرسوم). */
+    private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean): Triple<ByteArray, String, Int> {
+        store.requireInstalled()
+        val (bytes, hash) = read(file, perf)
+        val analysis = (if (useCache) analyses[hash] else null) ?: analyzeImpl(file, perf, useCache)
+        val regions = perf.time("unpack") { thaw(analysis) }
+        // الصورة المحفوظة تبقى نظيفة: المسح على نسخة
+        val img = image(bytes, hash, perf, useCache).img.let { src -> perf.time("copy") { src.copy() } }
         val sibs = Regions.siblings(regions)
         for (r in regions) {
             val ar = arabicById[r.id]?.trim()
@@ -122,39 +275,117 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             r.status = "translated"
         }
         // ١. التخطيط أولًا: ما لا يدخل لا يُمسح
-        for (r in regions) {
-            if (r.status != "translated") continue
-            val l = layout.layoutRegion(img, r, r.arabic!!, sibs[r.id])
-            if (l == null) { r.status = "skipped:no_fit"; continue }
-            r.layout = l
+        perf.time("layout") {
+            for (r in regions) {
+                if (r.status != "translated") continue
+                val l = layout.layoutRegion(img, r, r.arabic!!, sibs[r.id])
+                if (l == null) { r.status = "skipped:no_fit"; perf.count("noFit"); continue }
+                r.layout = l
+            }
         }
         // ٢. المسح
-        for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id])
-        val original = img.copy()
-        Cleaner.applyErase(img, regions, inpainter!!)
-        // ٣. الرسم
-        val bmp = ArabicLayout.bitmapOf(img)
-        val canvas = Canvas(bmp)
-        for (r in regions) {
-            if (r.status != "translated") continue
-            layout.draw(canvas, r.layout!!, r.inkLight, r.bubble == null && r.bubbleBox == null)
+        perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
+        val original = perf.time("copy") { img.copy() }
+        val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
+        perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
+        // ٣. الرسم: بلون الحبر الأصلي، إلا إن كان سيختفي في خلفيته بعد المسح
+        val bmp = perf.time("draw") {
+            val b = ArabicLayout.bitmapOf(img)
+            val canvas = Canvas(b)
+            for (r in regions) {
+                if (r.status != "translated") continue
+                val l = r.layout!!
+                val light = Visibility.inkLight(img, l, r.inkLight)
+                if (light != r.inkLight) perf.count("inkFlipped")
+                layout.draw(canvas, l, light, r.bubble == null && r.bubbleBox == null)
+            }
+            b
+        }
+        // ٣ب. لا مسح بلا عربي ظاهر: منطقة لم يظهر عربيّها فعلًا (خط بلا حروف، لون مطابق)
+        // تعود لأصلها بالكامل بدل فقاعة مبيّضة فارغة
+        val drawn = perf.time("visible") { ArabicLayout.rgbOf(bmp) }
+        perf.time("visible") {
+            for (r in regions) {
+                if (r.status != "translated") continue
+                if (!Visibility.textShows(img, drawn, r.layout!!)) {
+                    r.status = "skipped:invisible"
+                    perf.count("invisible")
+                }
+            }
         }
         // ٤. التحقق: لا بكسل خارج (قناع المسح ∪ حدود العربي) يتغير
-        val allowed = ByteMask(img.width, img.height)
-        for (r in regions) {
-            if (r.status != "translated") continue
-            r.eraseMask?.let { allowed.data.indices.forEach { i -> if (it.data[i].toInt() != 0) allowed.data[i] = 1 } }
-            r.layout?.let { l -> val p = (l.size / 2).toInt(); allowed.fillRect(l.bounds.x1 - p, l.bounds.y1 - p, l.bounds.x2 + p, l.bounds.y2 + p) }
+        val final = perf.time("verify") {
+            val allowed = ByteMask(img.width, img.height)
+            for (r in regions) {
+                if (r.status != "translated") continue
+                r.eraseMask?.let { m ->
+                    val w = m.scanWindow()
+                    if (w != null) for (y in w[1] until w[3]) for (x in w[0] until w[2]) {
+                        val i = y * img.width + x
+                        if (m.data[i].toInt() != 0) allowed.data[i] = 1
+                    }
+                }
+                r.layout?.let { l -> val p = (l.size / 2).toInt(); allowed.fillRect(l.bounds.x1 - p, l.bounds.y1 - p, l.bounds.x2 + p, l.bounds.y2 + p) }
+            }
+            val f = drawn
+            for (i in allowed.data.indices) if (allowed.data[i].toInt() == 0) {
+                f.data[i * 3] = original.data[i * 3]; f.data[i * 3 + 1] = original.data[i * 3 + 1]; f.data[i * 3 + 2] = original.data[i * 3 + 2]
+            }
+            f
         }
-        val final = ArabicLayout.rgbOf(bmp)
-        for (i in allowed.data.indices) if (allowed.data[i].toInt() == 0) {
-            final.data[i * 3] = original.data[i * 3]; final.data[i * 3 + 1] = original.data[i * 3 + 1]; final.data[i * 3 + 2] = original.data[i * 3 + 2]
+        // بلا فقد: ما خارج المسح والعربي يبقى بكسلات الأصل نفسها في الملف المحفوظ
+        val encoded = perf.time("encode") {
+            val out = ByteArrayOutputStream()
+            val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
+            // WEBP_LOSSLESS: الرقم جهد الضغط (أسرع بحجم أكبر قليلًا)؛ WEBP القديم: 100 = بلا فقد
+            ArabicLayout.bitmapOf(final).compress(format, if (android.os.Build.VERSION.SDK_INT >= 30) 10 else 100, out)
+            out.toByteArray()
         }
-        val outBmp = ArabicLayout.bitmapOf(final)
-        outDir.mkdirs()
-        val out = File(outDir, "$hash.webp")
-        out.outputStream().use { outBmp.compress(Bitmap.CompressFormat.WEBP, 90, it) }
-        return out to regions.count { it.status == "translated" }
+        val translated = regions.count { it.status == "translated" }
+        perf.count("translated", translated)
+        lastPixels = final.data
+        return Triple(encoded, hash, translated)
+    }
+
+    /** بكسلات آخر صفحة رُسمت (لمقارنة القديم بالجديد وحدها). */
+    private var lastPixels: ByteArray? = null
+
+    // ── القديم مقابل الجديد، على الجوال نفسه ──
+
+    class Benchmark(val legacy: Perf, val current: Perf, val identical: Boolean)
+
+    /**
+     * يعالج الصفحة نفسها مرتين من الصفر، بلا أي ذاكرة محفوظة: بالطريق القديم
+     * (أقنعة على الصفحة كلها، فكّ الصورة لكل مرحلة، مصغّرة دائمًا) ثم الجديد،
+     * ويقارن بكسلات الناتج. النماذج نفسها في الحالتين (محمّلة مسبقًا).
+     */
+    @Synchronized
+    fun benchmark(file: File, arabicById: Map<String, String>): Benchmark {
+        val warm = Perf()
+        detector(warm); glyphs(warm); bubbles(warm); ocr(warm); inpainter(warm)
+        val before = ByteMask.windowed
+        try {
+            val legacy = Perf()
+            ByteMask.windowed = false
+            analyzeImpl(file, legacy, useCache = false)
+            legacy.time("thumbnail") { thumbnail(file, null) }
+            renderImpl(file, arabicById, legacy, useCache = false)
+            val a = lastPixels
+            val current = Perf()
+            ByteMask.windowed = true
+            val analysis = analyzeImpl(file, current, useCache = false)
+            if (analysis.regions.any { it.status == "pending" && it.source.isNotEmpty() }) {
+                current.time("thumbnail") { thumbnail(file, null) }
+            }
+            renderImpl(file, arabicById, current, useCache = false)
+            val b = lastPixels
+            return Benchmark(legacy, current, a != null && b != null && a.contentEquals(b))
+        } finally {
+            ByteMask.windowed = before
+            lastPixels = null
+        }
     }
 
     companion object {

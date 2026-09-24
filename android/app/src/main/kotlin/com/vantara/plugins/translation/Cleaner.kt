@@ -26,7 +26,8 @@ object Cleaner {
     /** لون الفقاعة حول النص ومدى تجانسه (متوسط البعد عن الوسيط). */
     private fun flatColor(img: RgbImage, inner: ByteMask, nearText: ByteMask): Pair<IntArray?, Double> {
         val rs = ArrayList<Int>(); val gs = ArrayList<Int>(); val bs = ArrayList<Int>()
-        for (y in 0 until img.height) for (x in 0 until img.width) {
+        val w = inner.scanWindow() ?: return null to 999.0
+        for (y in w[1] until w[3]) for (x in w[0] until w[2]) {
             if (inner[x, y].toInt() == 0 || nearText[x, y].toInt() != 0) continue
             rs.add(img.r(x, y)); gs.add(img.g(x, y)); bs.add(img.b(x, y))
         }
@@ -56,7 +57,8 @@ object Cleaner {
             if (color != null && spread < 7.0) {
                 val halo = core.dilate(grow * 2)
                 val mask = ByteMask(img.width, img.height)
-                for (y in 0 until img.height) for (x in 0 until img.width) {
+                val w = inner.scanWindow()
+                if (w != null) for (y in w[1] until w[3]) for (x in w[0] until w[2]) {
                     if (inner[x, y].toInt() == 0) continue
                     val deviant = maxOf(Math.abs(img.r(x, y) - color[0]), Math.abs(img.g(x, y) - color[1]), Math.abs(img.b(x, y) - color[2])) > 12
                     if (near[x, y].toInt() != 0 || (deviant && halo[x, y].toInt() != 0)) mask[x, y] = 1
@@ -78,21 +80,26 @@ object Cleaner {
         region.cleanMode = "inpaint"
     }
 
-    /** ينفّذ المسح المخطَّط على `img` في مكانها. */
-    fun applyErase(img: RgbImage, regions: List<Region>, inpainter: Inpainter) {
+    /** هل تحتاج الصفحة LaMa؟ (يُحمَّل النموذج حينها فقط.) */
+    fun needsInpaint(regions: List<Region>): Boolean =
+        regions.any { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true }
+
+    /** ينفّذ المسح المخطَّط على `img` في مكانها. `inpainter` لازم متى [needsInpaint]. */
+    fun applyErase(img: RgbImage, regions: List<Region>, inpainter: Inpainter?) {
         for (r in regions) {
             if (r.status != "translated") continue
             val mask = r.eraseMask ?: continue
             if (!mask.any()) continue
             if (r.cleanMode == "fill") {
                 val c = r.fillColor ?: continue
-                for (y in 0 until img.height) for (x in 0 until img.width) if (mask[x, y].toInt() != 0) {
+                val w = mask.scanWindow() ?: continue
+                for (y in w[1] until w[3]) for (x in w[0] until w[2]) if (mask[x, y].toInt() != 0) {
                     val i = (y * img.width + x) * 3
                     img.data[i] = c[0].toByte(); img.data[i + 1] = c[1].toByte(); img.data[i + 2] = c[2].toByte()
                 }
             } else {
                 val b = mask.bounds() ?: continue
-                inpainter.inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
+                (inpainter ?: error("lama not loaded")).inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
             }
         }
     }

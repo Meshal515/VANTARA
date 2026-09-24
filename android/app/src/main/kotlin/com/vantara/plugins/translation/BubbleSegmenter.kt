@@ -52,11 +52,16 @@ class BubbleSegmenter(file: File) {
                 val sx = mw.toFloat() / size
                 val sy = mh.toFloat() / size
                 val mask = ByteMask(img.width, img.height)
-                for (y in 0 until img.height) {
+                // الصفوف والأعمدة التي يقع مركزها داخل صندوق المرشّح وحدها (خارجها يُتخطى أصلًا)
+                val ys = if (ByteMask.windowed) maxOf(0, Math.floor(bx.y1 / r.toDouble()).toInt() - 1) else 0
+                val ye = if (ByteMask.windowed) minOf(img.height, Math.ceil(bx.y2 / r.toDouble()).toInt() + 2) else img.height
+                val xs = if (ByteMask.windowed) maxOf(0, Math.floor(bx.x1 / r.toDouble()).toInt() - 1) else 0
+                val xe = if (ByteMask.windowed) minOf(img.width, Math.ceil(bx.x2 / r.toDouble()).toInt() + 2) else img.width
+                for (y in ys until ye) {
                     val py = y * r // في فضاء 1024
                     if (py >= nh) break
                     val my = (py * sy).toInt().coerceIn(0, mh - 1)
-                    for (x in 0 until img.width) {
+                    for (x in xs until xe) {
                         val px = x * r
                         if (px >= nw) break
                         if (px < bx.x1 || px > bx.x2 || py < bx.y1 || py > bx.y2) continue
@@ -74,12 +79,21 @@ class BubbleSegmenter(file: File) {
         return out
     }
 
+    /** عدد المربعات في آخر صفحة (للقياس). */
+    var tiles = 0
+        private set
+
     fun segment(img: RgbImage): List<Bubble> {
-        if (img.height <= img.width * 2.6) return infer(img)
+        if (img.height <= img.width * 2.6) {
+            tiles = 1
+            return infer(img)
+        }
         val tile = (img.width * 2.2).toInt()
         val overlap = (img.width * 0.4).toInt()
         val found = ArrayList<Bubble>()
-        for ((y0, y1) in verticalTiles(img.height, tile, overlap)) {
+        val spans = verticalTiles(img.height, tile, overlap)
+        tiles = spans.size
+        for ((y0, y1) in spans) {
             for (b in infer(img.crop(0, y0, img.width, y1))) {
                 val mask = ByteMask(img.width, img.height)
                 System.arraycopy(b.mask.data, 0, mask.data, y0 * img.width, b.mask.data.size)

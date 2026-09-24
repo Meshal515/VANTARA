@@ -74,11 +74,17 @@ class Detector(file: File) {
         return out
     }
 
+    /** عدد المربعات في آخر صفحة (للقياس). */
+    var tiles = 0
+        private set
+
     fun detect(img: RgbImage): List<Detection> {
         val tileH = (img.width * 2.2).toInt()
         val overlap = (img.width * 0.35).toInt()
         val all = ArrayList<Detection>()
-        for ((y0, y1) in verticalTiles(img.height, tileH, overlap)) {
+        val spans = verticalTiles(img.height, tileH, overlap)
+        tiles = spans.size
+        for ((y0, y1) in spans) {
             for (d in tile(img.crop(0, y0, img.width, y1))) {
                 all.add(Detection(Box(d.box.x1, d.box.y1 + y0, d.box.x2, d.box.y2 + y0), d.score, d.label))
             }

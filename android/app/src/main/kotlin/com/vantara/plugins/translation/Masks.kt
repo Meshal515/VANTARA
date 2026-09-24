@@ -56,10 +56,60 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
     }
 
     /** توسيع مربّع بنصف قطر `r` (مرشّح أقصى قابل للفصل: صفوف ثم أعمدة). */
-    fun dilate(r: Int): ByteMask = if (r <= 0) copy() else separable(r, true)
+    fun dilate(r: Int): ByteMask = if (r <= 0) copy() else if (windowed) slidingWindow(r, true) else separable(r, true)
 
-    fun erode(r: Int): ByteMask = if (r <= 0) copy() else separable(r, false)
+    fun erode(r: Int): ByteMask = if (r <= 0) copy() else if (windowed) slidingWindow(r, false) else separable(r, false)
 
+    /**
+     * التوسيع والتآكل حول البكسلات المضاءة وحدها، بمجاميع منزلقة: الزمن بحجم
+     * القناع لا بحجم الصفحة، ولا يتبع نصف القطر. الناتج مطابق لـ[separable]
+     * بكسلًا بكسلًا (يختبره `MaskWindowTest`): خارج `bounds ± r` كل شيء صفر في
+     * الحالتين، وخارج الصورة خلفية للتآكل كما كان.
+     */
+    private fun slidingWindow(r: Int, max: Boolean): ByteMask {
+        val out = ByteMask(width, height)
+        val b = bounds() ?: return out
+        // التوسيع يمتد r حول الحدود؛ التآكل لا يُنبت شيئًا خارجها
+        val xs = if (max) maxOf(0, b[0] - r) else b[0]
+        val xe = if (max) minOf(width, b[2] + r) else b[2]
+        val ys = if (max) maxOf(0, b[1] - r) else b[1]
+        val ye = if (max) minOf(height, b[3] + r) else b[3]
+        val span = 2 * r + 1
+        val tmp = ByteMask(width, height)
+        for (y in b[1] until b[3]) {
+            val row = y * width
+            // مجموع المضاء في [x-r, x+r] داخل الصورة
+            var sum = 0
+            for (i in maxOf(0, xs - r) until minOf(width, xs + r + 1)) if (data[row + i].toInt() != 0) sum++
+            for (x in xs until xe) {
+                if (x > xs) {
+                    val add = x + r
+                    val drop = x - r - 1
+                    if (add < width && data[row + add].toInt() != 0) sum++
+                    if (drop >= 0 && data[row + drop].toInt() != 0) sum--
+                }
+                val v = if (max) sum > 0 else (sum == span && x - r >= 0 && x + r < width)
+                if (v) tmp.data[row + x] = 1
+            }
+        }
+        for (x in xs until xe) {
+            var sum = 0
+            for (j in maxOf(0, ys - r) until minOf(height, ys + r + 1)) if (tmp.data[j * width + x].toInt() != 0) sum++
+            for (y in ys until ye) {
+                if (y > ys) {
+                    val add = y + r
+                    val drop = y - r - 1
+                    if (add < height && tmp.data[add * width + x].toInt() != 0) sum++
+                    if (drop >= 0 && tmp.data[drop * width + x].toInt() != 0) sum--
+                }
+                val v = if (max) sum > 0 else (sum == span && y - r >= 0 && y + r < height)
+                if (v) out.data[y * width + x] = 1
+            }
+        }
+        return out
+    }
+
+    /** المسار الأصلي على الصفحة كلها: يبقى مرجعًا للاختبار ولقياس «القديم مقابل الجديد». */
     private fun separable(r: Int, max: Boolean): ByteMask {
         val tmp = ByteMask(width, height)
         val bg: Byte = if (max) 0 else 1
@@ -107,7 +157,10 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
         val out = ArrayList<Component>()
         val queue = ArrayDeque<Int>()
         var next = 0
-        for (start in data.indices) {
+        // البحث عن بدايات المكوّنات داخل الحدود وحدها (خارجها لا بكسل مضاء)؛ الترتيب نفسه
+        val win = scanWindow() ?: return labels to out
+        for (sy in win[1] until win[3]) for (sx in win[0] until win[2]) {
+            val start = sy * width + sx
             if (data[start].toInt() == 0 || labels[start] != 0) continue
             next++
             var x0 = width; var y0 = height; var x1 = -1; var y1 = -1; var area = 0
@@ -141,12 +194,16 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
         val (labels, comps) = components(true)
         val best = comps.maxByOrNull { it.area } ?: return ByteMask(width, height)
         val out = ByteMask(width, height)
-        for (i in labels.indices) if (labels[i] == best.label) out.data[i] = 1
+        for (y in best.y0 until best.y1) for (x in best.x0 until best.x1) {
+            val i = y * width + x
+            if (labels[i] == best.label) out.data[i] = 1
+        }
         return out
     }
 
     /** ملء الثقوب: كل ما لا يصل إلى حافة الصورة عبر الخلفية يُعدّ داخلًا. */
     fun filledHoles(): ByteMask {
+        if (windowed) return filledHolesWindowed()
         val outside = ByteMask(width, height)
         val queue = ArrayDeque<Int>()
         fun seed(p: Int) {
@@ -163,6 +220,37 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
         for (i in data.indices) if (outside.data[i].toInt() == 0) out.data[i] = 1
         return out
     }
+
+    /**
+     * نفس [filledHoles] داخل حدود القناع موسّعة بكسلًا: كل ما خارج الحدود خلفية
+     * يصل الحافة بخط مستقيم، فحلقة النافذة كلها «خارج»، والملء داخلها وحدها.
+     */
+    private fun filledHolesWindowed(): ByteMask {
+        val result = ByteMask(width, height)
+        val b = bounds() ?: return result
+        val x0 = maxOf(0, b[0] - 1); val y0 = maxOf(0, b[1] - 1)
+        val x1 = minOf(width, b[2] + 1); val y1 = minOf(height, b[3] + 1)
+        val outside = ByteMask(width, height)
+        val queue = ArrayDeque<Int>()
+        fun seed(p: Int) {
+            if (data[p].toInt() == 0 && outside.data[p].toInt() == 0) { outside.data[p] = 1; queue.add(p) }
+        }
+        for (x in x0 until x1) { seed(y0 * width + x); seed((y1 - 1) * width + x) }
+        for (y in y0 until y1) { seed(y * width + x0); seed(y * width + x1 - 1) }
+        while (queue.isNotEmpty()) {
+            val p = queue.poll()
+            val x = p % width; val y = p / width
+            if (x > x0) seed(p - 1); if (x < x1 - 1) seed(p + 1); if (y > y0) seed(p - width); if (y < y1 - 1) seed(p + width)
+        }
+        for (y in y0 until y1) for (x in x0 until x1) {
+            val i = y * width + x
+            if (outside.data[i].toInt() == 0) result.data[i] = 1
+        }
+        return result
+    }
+
+    /** نافذة المسح: حدود المضاء (المسار المحصور) أو الصفحة كلها (القديم). */
+    fun scanWindow(): IntArray? = if (windowed) bounds() else intArrayOf(0, 0, width, height)
 
     fun bounds(): IntArray? {
         var x0 = width; var y0 = height; var x1 = -1; var y1 = -1
@@ -190,6 +278,14 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
     }
 
     companion object {
+        /**
+         * المسار المحصور حول البكسلات المضاءة (افتراضي). `false` = المسار الأصلي على
+         * الصفحة كلها، لقياس «القديم مقابل الجديد» على الجوال نفسه. الناتج واحد.
+         */
+        @Volatile
+        @JvmStatic
+        var windowed: Boolean = true
+
         /** عتبة Otsu على صورة رمادية داخل مستطيل؛ `light` = الحبر فاتح (فوق العتبة). */
         fun otsu(gray: ByteArray, width: Int, x0: Int, y0: Int, x1: Int, y1: Int): Int {
             val hist = IntArray(256)
@@ -211,6 +307,38 @@ class ByteMask(val width: Int, val height: Int, val data: ByteArray = ByteArray(
                 if (between > best) { best = between; thr = i }
             }
             return thr
+        }
+    }
+}
+
+/**
+ * قناع محفوظ بمستطيله وحده: ذاكرة بحجم الفقاعة لا الصفحة. التحليل المحفوظ
+ * بين `analyze` و`render` (وبين محاولات الإكمال) يحمل أقنعته هكذا، ويُفرَد
+ * قناعًا كاملًا مطابقًا حين يُرسم.
+ */
+class PackedMask private constructor(
+    val width: Int,
+    val height: Int,
+    private val x0: Int,
+    private val y0: Int,
+    private val w: Int,
+    private val h: Int,
+    private val data: ByteArray,
+) {
+    fun unpack(): ByteMask {
+        val m = ByteMask(width, height)
+        for (y in 0 until h) System.arraycopy(data, y * w, m.data, (y0 + y) * width + x0, w)
+        return m
+    }
+
+    companion object {
+        fun of(m: ByteMask): PackedMask {
+            val b = m.bounds() ?: return PackedMask(m.width, m.height, 0, 0, 0, 0, ByteArray(0))
+            val w = b[2] - b[0]
+            val h = b[3] - b[1]
+            val d = ByteArray(w * h)
+            for (y in 0 until h) System.arraycopy(m.data, (b[1] + y) * m.width + b[0], d, y * w, w)
+            return PackedMask(m.width, m.height, b[0], b[1], w, h, d)
         }
     }
 }
