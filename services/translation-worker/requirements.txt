@@ -1,23 +1,15 @@
 # VANTARA translation worker — production dependencies.
-# الرسم العربي يأتي من Pillow/RAQM: الويل الرسمي يحمل HarfBuzz + FriBidi + libraqm.
+# الرسم العربي من Pillow/RAQM (الويل الرسمي يحمل HarfBuzz + FriBidi + libraqm).
+# كل نماذج الرؤية وOCR تعمل بـonnxruntime + OpenCV DNN: لا torch ولا paddle في الإنتاج.
+# النسخ هي ما جرى عليه القياس على الصفحات الحقيقية (2026-09-24).
 
-# الرسم العربي — طبقتنا. هذه النسخة اختُبرت فعليًا في الـspike.
 Pillow==12.3.0
+numpy==2.4.6
+opencv-python-headless==5.0.0.93
+onnxruntime==1.30.0
 
-# OCR الأساسي:
-# - manga-ocr للياباني (والنص العمودي)
-# - PaddleOCR للكوري/الصيني/الإنجليزي
-manga-ocr==0.1.16
-paddleocr==3.7.0
-
-# ملاحظة: Surya وIOPaint لا يعيشان في نفس بيئة الرسم العربي الحالية بسبب قيود Pillow.
-# IOPaint 1.6.0 يفرض Pillow==9.5.0، بينما manga-ocr يحتاج Pillow>=10
-# وVANTARA يعتمد Pillow 12.3.0 للرسم العربي/RAQM. لذلك inpainting معزول في
-# requirements-inpaint.txt إلى أن يعمل كخدمة/حاوية مستقلة.
-
-# القاعدة والوظائف
-psycopg[binary]==3.2.3
-
-# التشغيل
+# الخادم والعميل
+fastapi==0.141.1
+uvicorn==0.53.0
 httpx==0.28.1
-pydantic==2.10.6
+pydantic==2.13.5

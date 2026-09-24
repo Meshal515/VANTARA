@@ -74,7 +74,7 @@ Keiyoushi كود JVM مُصرَّف، وأندرويد يشغّله. وهذا ي
 | `apps/web/screens/` | الشاشات: `sources.js` (الكتالوج والعمل والقراءة) · `accounts.js` |
 | `apps/api/` | خادم المحتوى. Fastify + Postgres، طبقة فوق Uchiyomi |
 | `services/sync-worker/` | Cloudflare Worker + D1: الحسابات والأصدقاء والحضور والتقدّم |
-| `services/translation-worker/` | الترجمة العربية. Python + Pillow/RAQM للرسم العربي |
+| `services/translation-worker/` | الترجمة العربية المرئية: كشف الفقاعات والنص (RT-DETR، comic-text-detector، YOLOv8-seg) → OCR → Luna → تبييض آمن (LaMa) → عربي داخل الفقاعة (Pillow/RAQM). التفصيل والقياس في [`docs/TRANSLATION_PIPELINE.md`](docs/TRANSLATION_PIPELINE.md) |
 | `packages/domain/` | العقود والقواعد المشتركة (zod). **مصدر الحقيقة** لمصفوفة الملكية |
 | `packages/db/` | Postgres والهجرات |
 | `packages/uchiyomi/` | عميل Uchiyomi REST |

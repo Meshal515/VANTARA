@@ -14,9 +14,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Iterable, Literal, Sequence
+from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFont, features
 

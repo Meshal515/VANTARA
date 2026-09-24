@@ -20,6 +20,7 @@ import { reportRoutes } from './routes/reports.ts';
 import { libraryRoutes } from './routes/library.ts';
 import { mediaRoutes } from './routes/media.ts';
 import { sourceRoutes } from './routes/sources.ts';
+import { translateRoutes } from './routes/translate.ts';
 
 export interface BuiltApp {
   app: FastifyInstance;
@@ -163,6 +164,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   await discoveryRoutes(app, ctx);
   // صور القارئ برابط موقَّع: `<img src>` لا يحمل ترويسة، والكوكي لا يعبر الأصول
   await mediaRoutes(app, ctx);
+  // الترجمة المرئية: وكيل إلى عامل جهاز البيت (D-04)
+  await translateRoutes(app, ctx);
   await libraryRoutes(app, ctx);
 
   // الواجهة تُقدَّم من نفس الأصل هنا أيضًا (الويب)، لكن الـAPK أصل آخر —

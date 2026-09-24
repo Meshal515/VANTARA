@@ -73,6 +73,9 @@ const KEPT: [string, string][] = [
   ['GET', '/v1/deleted-works'],
   ['POST', '/v1/merges/1/split'],
   ['POST', '/v1/media/pages'],
+  // الترجمة المرئية: وكيل إلى عامل جهاز البيت، بجلسة
+  ['POST', '/v1/translate/page'],
+  ['GET', '/v1/translate/health'],
 ];
 
 describe('route surface after the data ownership freeze', () => {

@@ -54,6 +54,9 @@ android {
         versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "VANTARA_NATIVE", "\"${nativeFingerprint}\""
+        // أجهزة المالكين كلها arm64؛ حصر المكتبات الأصلية (ONNX Runtime، QuickJS)
+        // فيه يُبقي الـAPK بحجمه تقريبًا بدل أن يحمل أربع نسخ من كل مكتبة
+        ndk { abiFilters 'arm64-v8a' }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -148,6 +151,11 @@ dependencies {
     // عبر WebSettingsCompat؛ نفس الإصدار الذي مرّت به المصادر الست عشرة
     implementation "androidx.webkit:webkit:1.17.0"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+
+    // ── الترجمة على الجوال: ONNX Runtime يشغّل نماذج الرؤية وOCR داخل الجهاز ──
+    // الأوزان (~430MB) ليست هنا: تُنزَّل عند الطلب (ModelStore). المكتبة نفسها
+    // ~12MB لـarm64 فقط (انظر abiFilters أدناه).
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.20.0"
 
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
     // `okhttp3.JavaNetCookieJar` يسكن هذه القطعة لا في okhttp نفسه

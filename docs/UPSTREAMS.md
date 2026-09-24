@@ -52,21 +52,31 @@
 
 ## 3. الترجمة — الخط المعالجي
 
+> مُقاس على 11 صفحة حقيقية (2026‑09‑24)؛ التفصيل في [`TRANSLATION_PIPELINE.md`](TRANSLATION_PIPELINE.md).
+> الأوزان تُنزَّل ببصمة sha256 مثبَّتة في `services/translation-worker/vantara_worker/models.py`.
+
 | # | المستودع | الربط | التثبيت |
 |---|---|---|---|
-| 14 | [ArbenApura/xianscan-rust](https://github.com/ArbenApura/xianscan-rust) | `SERVICE` — كشف + OCR + inpaint. **لا نطلب منه رسم العربية** | يحتاج تحقق (‎`v0.5.0-beta.*`) |
-| 15 | [zyddnys/manga-image-translator](https://github.com/zyddnys/manga-image-translator) | `SERVICE` بديل — يُختبر Benchmark مقابل 14 | يحتاج تحقق |
-| 16 | [meangrinch/MangaTranslator](https://github.com/meangrinch/MangaTranslator) | `REFERENCE` — مرشح ثالث في الـBenchmark | يحتاج تحقق |
-| 17 | [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) | `REFERENCE` — معالجة الصفحة والتحرير | يحتاج تحقق |
-| 18 | [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) | `REFERENCE` — شاشة `NEEDS_REVIEW` اليدوية | يحتاج تحقق |
-| 19 | [CoSciBlog/BallonsTranslator-vibe](https://github.com/CoSciBlog/BallonsTranslator-vibe) | `REFERENCE` — ثبات المصطلحات | يحتاج تحقق |
-| 20 | [uncial-exchangetransfusion381/kotoba-manga-translator](https://github.com/uncial-exchangetransfusion381/kotoba-manga-translator) | `REFERENCE` — ذاكرة الشخصيات. ⚠️ **المالك في المخطط القديم (`andrey231`) خطأ**، واسم المالك الحقيقي عشوائي الشكل: يُقرأ ولا يُشغَّل كوده | يحتاج تحقق |
-| 21 | [joyeli/Yakuyomi](https://github.com/joyeli/Yakuyomi) | `REFERENCE` — دمج القارئ بالترجمة. Kotlin/Android، صفر كود قابل للنقل | يحتاج تحقق |
-| 22 | [PineappleTwilight/houri-engine](https://github.com/PineappleTwilight/houri-engine) | `REFERENCE` — محرك Yakuyomi الفعلي. ⚠️ المخطط القديم سماه `joyeli/yakuyomi-engine` | يحتاج تحقق |
+| 14 | [ogkalu/comic-text-and-bubble-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) | `MODEL` — RT-DETR-v2: فقاعات + صناديق نص (Apache-2.0) | `detector-v4-s_int8.onnx` · `sha256:5fe9e4f5…ea79` **مُتحقَّق** |
+| 15 | [dmMaze/comic-text-detector](https://github.com/dmMaze/comic-text-detector) | `MODEL` — قناع الحروف (UNet) + خرائط الأسطر؛ **أوزان فقط، GPL-3.0، تُشغَّل على خادم البيت؛ صفر كود منه** | `comictextdetector.pt.onnx` (إصدار manga-image-translator beta-0.3) · `sha256:1a86ace7…718f` **مُتحقَّق** |
+| 16 | [kitsumed/yolov8m_seg-speech-bubble](https://huggingface.co/kitsumed/yolov8m_seg-speech-bubble) | `MODEL` — مضلّع الفقاعة بكسلًا بكسلًا؛ أوزان فقط، GPL-3.0، خادم البيت | `model_dynamic.onnx` · `sha256:36c26bde…251c` **مُتحقَّق** |
+| 17 | [ogkalu/lama-manga-onnx-dynamic](https://huggingface.co/ogkalu/lama-manga-onnx-dynamic) | `MODEL` — LaMa المدرَّب على الأنمي/المانجا (anime-manga-big-lama) للترميم فوق الرسم (Apache-2.0) | `lama-manga-dynamic.onnx` · `sha256:de31ffa5…15f9` **مُتحقَّق** |
+| 18 | [ogkalu/ppocr-v5-onnx](https://huggingface.co/ogkalu/ppocr-v5-onnx) | `MODEL` — PP-OCRv5 en mobile (PaddleOCR، Apache-2.0) لقراءة اللاتيني سطرًا سطرًا | `en_PP-OCRv5_rec_mobile_infer.onnx` · `sha256:c3461add…4be8` **مُتحقَّق** |
+| 19 | [kha-white/manga-ocr](https://github.com/kha-white/manga-ocr) عبر [ogkalu/manga-ocr-onnx](https://huggingface.co/ogkalu/manga-ocr-onnx) | `MODEL` — الياباني (يفهم العمودي)، Apache-2.0، اختياري | `encoder/decoder_model_int8.onnx` **مُتحقَّق** |
+| 20 | [google/fonts — Baloo Bhaijaan 2](https://github.com/google/fonts/tree/main/ofl/baloobhaijaan2) | `BUNDLED` — الخط العربي للرسم (OFL-1.1) | `services/translation-worker/fonts/` |
+| 21 | [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) | `REFERENCE` — قُرئت شفرة الكشف والترميم والتنزيل لاختيار الطرق؛ **صفر كود مأخوذ** | — |
+| 22 | [zyddnys/manga-image-translator](https://github.com/zyddnys/manga-image-translator) | `REFERENCE` — تنقية القناع بـOtsu، تشغيل CTD عبر OpenCV DNN؛ **صفر كود مأخوذ** | — |
+| 23 | [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) | `REFERENCE` — مقارنة فقط | — |
+| 24 | [ArbenApura/xianscan-rust](https://github.com/ArbenApura/xianscan-rust) | `DEFERRED` — كان المرشح الأول في D‑04؛ لم يُدخل لأن المكوّنات المفتوحة أعلاه قِيست وكفت | — |
+| 25 | [advimman/lama](https://github.com/advimman/lama) | `BUNDLED` — يأتي داخل 17 | — |
+| 25b | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) | `LIBRARY` — يشغّل النماذج على الجوال (`onnxruntime-android`، arm64، ~12MB) وفي العامل (`onnxruntime` Python) | `1.20.0` (Android) · `1.30.0` (Python) **مُتحقَّق** |
 
 ---
 
 ## 4. الكشف والـOCR
+
+> **تنبيه (2026‑09‑24):** ما في هذا القسم كان الخطة قبل القياس. الخط الفعلي للترجمة في §3؛
+> ما هنا يبقى مرجعًا لبدائل قِيست أو أُجّلت ولا يُثبَّت في العامل.
 
 | # | المستودع | الربط | التثبيت |
 |---|---|---|---|

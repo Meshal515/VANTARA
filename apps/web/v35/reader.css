@@ -573,35 +573,9 @@
   font-size: var(--fs-caption);
 }
 
-/* ── الترجمة العربية فوق الصفحة (translate-layer.js) ──
-   الإطار حاوية: حجم الخط بـcqw يتبع عرض الصفحة مهما تغيّر */
-.v35 .rd-page { container-type: inline-size; }
-.v35 .rd-tl { position: absolute; inset: 0; pointer-events: none; }
-.v35.rd-tl-off .rd-tl { display: none; }
-.v35 .rd-tl-clean { position: absolute; display: block; }
-.v35 .rd-tl-box {
-  position: absolute;
-  display: flex; align-items: center; justify-content: center;
-  padding: 2% 4%;
-  box-sizing: border-box;
-  text-align: center;
-}
-/* فوق الرسم: خلفية بلون المكان وأطراف ذائبة (box-shadow من لونها) لا حافة حادّة */
-.v35 .rd-tl-onart { border-radius: 30%; }
-.v35 .rd-tl-onart.rd-tl-narration, .v35 .rd-tl-onart.rd-tl-sign { border-radius: 6px; }
-.v35 .rd-tl-text {
-  font-family: 'Noto Sans Arabic', system-ui, sans-serif;
-  font-weight: 700;
-  line-height: 1.22;
-  /* الكلمة العربية لا تنكسر أبدًا (حروفٌ مقطّعة لا تُقرأ): يصغر الخط بدلها،
-     والأسطر متوازنة فلا تبقى كلمة وحدها في سطر */
-  overflow-wrap: normal;
-  word-break: keep-all;
-  text-wrap: balance;
-  max-width: 100%;
-  text-shadow: 0 0 2px var(--tl-halo, transparent), 0 0 3px var(--tl-halo, transparent), 0 0 5px var(--tl-halo, transparent);
-}
-.v35 .rd-tl-thought .rd-tl-text, .v35 .rd-tl-narration .rd-tl-text { font-weight: 600; }
+/* ── الترجمة العربية: الصفحة المترجمة صورة من عامل الترجمة، تبدّل الأصل ──
+   لا طبقة فوق الصفحة ولا رسم على الجوال (انظر reader-translate.js) */
+.v35 .rd-page > img.rd-page--translated { transition: opacity var(--dur, 160ms) var(--ease, ease); }
 
 /* «نجهّز الفصل بالعربي»: فوق الصفحات، لا يحجب الشريط */
 .v35 .rd-tl-gate {
@@ -644,39 +618,6 @@
   background: var(--accent, #7c5cff);
   color: #fff;
 }
-.v35 .rd-tl-btn[hidden],
-.v35 .rd-tl-fab[hidden] { display: none; }
-.v35 .rd-tl-fab {
-  position: absolute;
-  z-index: 6;
-  inset-inline-end: 14px;
-  bottom: calc(18px + var(--safe-bottom));
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 44px;
-  padding: 0 14px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-  background: rgba(10, 9, 14, 0.72);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  color: var(--text-1);
-  font: inherit;
-  font-size: var(--fs-caption);
-  font-weight: 700;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transition: bottom var(--dur) var(--ease-out), background var(--dur) var(--ease);
-}
-.v35 .rd-tl-fab[aria-pressed='true'] {
-  background: var(--accent, #7c5cff);
-  border-color: transparent;
-  color: #fff;
-}
+.v35 .rd-tl-btn[hidden] { display: none; }
 /* الشريط السفلي ظاهر: الزر فوقه لا تحته */
-.v35.rd--chrome .rd-tl-fab { bottom: calc(72px + var(--safe-bottom)); }
-.v35.rd--frame .rd-tl-fab { display: none; }
 /* زر الترجمة العائم جزءٌ من الشريط: يظهر معه ويختفي معه، لا فوق الصفحة وأنت تقرأ */
-.v35 .rd-tl-fab { opacity: 0; pointer-events: none; transition: opacity var(--dur) var(--ease), bottom var(--dur) var(--ease-out); }
-.v35.rd--chrome .rd-tl-fab { opacity: 1; pointer-events: auto; }

@@ -21,6 +21,8 @@ import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
+import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-settings.js';
+import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable, removeModels } from '../lib/translation-native.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
@@ -535,6 +537,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function sectionBlock(title, kind, items) {
     const s = el('section', 'section');
+    s.dataset.signature = `${title}:${items.map((w) => String(w?.id ?? w?.title ?? '')).join(',')}`;
     const h = el('div', 'section-head');
     h.append(el('h2', null, title));
     if (kind) {
@@ -578,6 +581,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - آخر التحديثات: «الأحدث» عند كل المصادر، بأقرب موضع.
    * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
    */
+  // آخر ما عُرض: إعادة البناء لنفس القوائم تُسقط الصور لحظةً ثم تعيدها
+  // (وميض مع كل نبض مزامنة). نفس الأعمال بنفس الترتيب = لا شيء يُلمس.
+  let homeSignature = '';
   function renderHome() {
     const blocks = [];
     const history = historyWorks();
@@ -588,7 +594,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (friends.length) blocks.push(sectionBlock('يقرأها أصدقاؤك', null, friends.slice(0, 20)));
     if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
     if (state.home.recent.length) blocks.push(sectionBlock('آخر التحديثات', 'recent', state.home.recent));
-    if (blocks.length) q('homeSections').replaceChildren(...blocks);
+    if (!blocks.length) return;
+    const signature = blocks.map((b) => b.dataset.signature ?? '').join('|');
+    if (signature === homeSignature && q('homeSections').childElementCount === blocks.length) return;
+    homeSignature = signature;
+    q('homeSections').replaceChildren(...blocks);
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
@@ -1190,6 +1200,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return state.chapterNewestFirst ? rows : [...rows].reverse();
   }
 
+  /**
+   * الفصل الذي يُكمَل منه: صف التقدم الأحدث لهذا العمل. لم ينتهِ (< 98%) →
+   * هو نفسه؛ انتهى → الذي يليه بالترتيب. الفصول من المصدر المعروض نفسه، فلا
+   * يُبدَّل المصدر على المستخدم.
+   */
+  function continueRow(ref, base) {
+    const userId = sync.user?.userId;
+    const rows = sync.rows('progress', (r) => r.user_id === userId && r.series_ref === ref);
+    if (!rows.length || !base.length) return null;
+    const latest = rows.reduce((a, b) => ((b.updated_at ?? 0) > (a.updated_at ?? 0) ? b : a));
+    // الترتيب من الأقدم للأحدث
+    const ordered = [...base].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+    const at = ordered.findIndex((r) => chapterKeyOf(ref, r) === latest.chapter_key);
+    if (at < 0) return null;
+    if ((latest.ratio ?? 0) < 0.98) return ordered[at];
+    return ordered[at + 1] ?? ordered[at];
+  }
+
   function renderChapters(w) {
     const all = w._chapters ?? [];
     if (!all.length) {
@@ -1201,9 +1229,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const ref = String(w.id);
     const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
     const readCount = all.filter(read).length;
-    // أول فصل غير مقروء من الأقدم، من المصدر المختار (أو الذكي)
     const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
-    const next = [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
+    // «تابع» = آخر فصل كنت فيه فعلًا (آخر تقدم محفوظ)، ولو لم تُعلَّم الفصول قبله
+    // مقروءة؛ أنهيته؟ فالذي بعده. ولا تقدم؟ فأول فصل غير مقروء من الأقدم.
+    const next = continueRow(ref, base) ?? [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
     state.nextRow = next;
     setReadCta(next, { started: readCount > 0 });
     // الفصل الذي سيفتحه «ابدأ/تابع» يُجهَّز الآن، لا بعد الضغطة
@@ -1304,7 +1333,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openChapter(w, row) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row });
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource) });
   }
 
   // ── ورقة المعاينة ──
@@ -2579,6 +2608,108 @@ export function mountV35(deps, { page = 'home' } = {}) {
   let systemOpen = false;
   let apkVersion = null;
   let apkVersionAsked = false;
+  /**
+   * إعدادات > الترجمة.
+   *
+   *   - تشغيل/إيقاف: مغلقة افتراضيًا. مغلقة = لا زرّ ترجمة في أي مكان.
+   *   - تلقائي / عند الطلب.
+   *   - ملفات الترجمة على الجوال: تحميل (بالحجم) / حذف / تحديث إن نزل إصدار أحدث.
+   *   - ملاحظة: الصفحات المترجمة تُحفظ عندك، فلا تُعاد ترجمتها.
+   */
+  let modelsInfo = null;
+  let modelsBusy = null; // { received, total } أثناء التحميل
+  function renderTranslationSettings(group, row, toggle) {
+    const s = readTranslateSettings();
+    const rows = [
+      toggle('translateAr', 'الترجمة العربية', 'تترجم فصول التكملة الإنجليزية إلى العربية', s.enabled, (enabled) => {
+        writeTranslateSettings({ enabled });
+        renderSettings();
+      }),
+    ];
+    if (s.enabled) {
+      const modeRow = el('div', 'setting');
+      modeRow.innerHTML = glyph('sliders');
+      const t = el('div');
+      t.append(el('strong', null, 'متى تُترجم'));
+      t.append(el('small', null, s.mode === 'auto' ? 'تلقائيًا حين تفتح فصلًا إنجليزيًا' : 'حين تضغط «ترجم» في القارئ، وتستمر حتى تخرج من العمل'));
+      const seg = el('div', 'segmented');
+      for (const [value, label] of [['auto', 'تلقائي'], ['manual', 'عند الطلب']]) {
+        const b = el('button', null, label);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(s.mode === value));
+        b.onclick = () => {
+          writeTranslateSettings({ mode: value });
+          renderSettings();
+        };
+        seg.append(b);
+      }
+      modeRow.append(t, seg);
+      rows.push(modeRow);
+    }
+    const note = s.enabled ? 'الصفحات المترجمة تُحفظ عندك: ما تُرجم مرة ما يُعاد تحميله ولا ترجمته.' : null;
+    group('الترجمة', rows, { note });
+
+    if (!s.enabled) return;
+    if (!nativeTranslationAvailable()) {
+      group('', [row('info', 'ملفات الترجمة', 'الترجمة على الجهاز متاحة في تطبيق أندرويد', {})]);
+      return;
+    }
+    if (!modelsInfo) {
+      void modelsStatus().then((info) => {
+        modelsInfo = info;
+        if (currentPage() === 'settings') renderSettings();
+      });
+      group('', [row('download', 'ملفات الترجمة', 'جارٍ فحص الملفات…', {})]);
+      return;
+    }
+    const m = modelsInfo;
+    const list = [];
+    if (modelsBusy) {
+      list.push(row('download', 'جارٍ تحميل ملفات الترجمة', `${formatBytes(modelsBusy.received)} من ${formatBytes(modelsBusy.total)}`, {}));
+    } else if (!m.installed) {
+      list.push(
+        row('download', 'تحميل ملفات الترجمة', `مرة واحدة، ${formatBytes(m.expectedBytes)}. بعدها الترجمة تشتغل على الجهاز بلا خادم.`, {
+          run: () => void runModelsDownload(),
+        }),
+      );
+    } else {
+      list.push(row('check', 'ملفات الترجمة منزّلة', `الإصدار ${m.version ?? '—'}`, { value: formatBytes(m.bytes) }));
+      if (m.latestVersion && m.latestVersion !== m.version) {
+        list.push(row('refresh', 'تحديث ملفات الترجمة', `نزل إصدار أحدث (${m.latestVersion})`, { run: () => void runModelsDownload() }));
+      }
+      list.push(
+        row('trash', 'حذف ملفات الترجمة', `يحرّر ${formatBytes(m.bytes)}؛ الصفحات المترجمة المحفوظة تبقى`, {
+          danger: true,
+          run: async () => {
+            await removeModels().catch(() => {});
+            modelsInfo = null;
+            renderSettings();
+          },
+        }),
+      );
+    }
+    group('ملفات الترجمة على الجوال', list);
+  }
+  async function runModelsDownload() {
+    if (modelsBusy) return;
+    modelsBusy = { received: 0, total: modelsInfo?.expectedBytes ?? 0 };
+    renderSettings();
+    try {
+      await downloadModels(({ received, total }) => {
+        modelsBusy = { received, total };
+        const sub = q('settingsBody')?.querySelector('.setting small');
+        if (sub && currentPage() === 'settings') renderSettings();
+      });
+      toast('ملفات الترجمة جاهزة');
+    } catch {
+      toast('ما اكتمل التحميل — جرّب مرة ثانية');
+    } finally {
+      modelsBusy = null;
+      modelsInfo = null;
+      if (currentPage() === 'settings') renderSettings();
+    }
+  }
+
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -2657,6 +2788,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ],
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
+      renderTranslationSettings(group, row, toggle);
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'صار شي غلط؟ قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 

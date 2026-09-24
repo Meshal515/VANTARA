@@ -37,6 +37,12 @@ const schema = z.object({
    */
   ALLOWED_ORIGINS: z.string().optional(),
 
+  /**
+   * عامل الترجمة المرئية (Python) على نفس الجهاز، مثل `http://127.0.0.1:8765`.
+   * بلا قيمة: `/v1/translate/page` يرجع 503 والقارئ يقول إن الترجمة غير مفعّلة.
+   */
+  TRANSLATION_WORKER_URL: z.string().url().optional(),
+
   UPLOAD_DIR: z.string().default('/data/uploads'),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(8 * 1024 * 1024),
 
