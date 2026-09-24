@@ -84,13 +84,35 @@ function sources() {
 export const available = () => engine.isAvailable();
 
 /**
+ * مصدر «تكملة» (`<pkg>@<lang>`، الإنجليزي من MangaDex): العربي أولًا دائمًا.
+ * لا يبني قوائم ولا يظهر في شرائح المصادر؛ يملأ فقط فصول عملٍ له نسخة عربية،
+ * والفصل العربي بنفس الرقم يغلبه متى نزل.
+ */
+export const isFiller = (sourceId) => String(sourceId ?? '').includes('@');
+const listingSources = async ({ query = '' } = {}) => (await sources()).filter((s) => query || !s.filler);
+/**
+ * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
+ * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
+ */
+export function localizeFiller(rows) {
+  return rows.map((row) =>
+    isFiller(row.sourceId) && row.number >= 0
+      ? { ...row, label: null, lang: 'en', chapter: { ...row.chapter, name: `الفصل ${row.number}`, originalName: row.chapter?.name ?? null } }
+      : row,
+  );
+}
+
+/** عملٌ كل نسخه تكملة ليس عملًا نعرضه: لا فصل عربي فيه. */
+const hasArabic = (work) => work.editions.some((e) => !isFiller(e.sourceId));
+
+/**
  * صفحة من كل المصادر معًا، مدموجة أعمالًا.
  *
  * `kind`: `catalogue` (الكتالوج كاملًا)، `popular`، `latest`، أو بحث بنص.
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null } = {}) {
-  const list = await sources();
+  const list = await listingSources({ query });
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
     withTimeout(genre
@@ -125,7 +147,7 @@ function addPage(index, positions, source, value) {
   });
 }
 function ranked(index, positions, kind) {
-  const works = index.list();
+  const works = index.list().filter(hasArabic);
   for (const w of works) {
     w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
     // العنوان والغلاف من أوثق نسخة، لا من أول مصدر ردّ
@@ -141,7 +163,7 @@ function ranked(index, positions, kind) {
  * يبقى العمل «عاشقيًّا» لأن العاشق ردّ أولًا.
  */
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}) {
-  const list = await sources();
+  const list = await listingSources({ query });
   const index = createWorkIndex();
   const positions = new Map();
   const mode = query || genre ? 'search' : kind;
@@ -189,7 +211,7 @@ export async function detail(v35work) {
   });
   const values = ok.map((r) => r.value);
   const main = values.find((v) => v.detail) ?? null;
-  const chapters = mergeChapters(values, { rank: sourceRank });
+  const chapters = localizeFiller(mergeChapters(values, { rank: sourceRank }));
   const answered = new Set(values.map((v) => v.sourceId));
   // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
   const cover = v35work.coverImage?.large || main?.detail?.thumbnailUrl || values.find((v) => v.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
@@ -222,6 +244,8 @@ export async function detail(v35work) {
 /** أولوية الثقة. من ليس هنا يأتي بعدها بعدد فصوله. */
 const TRUSTED = ['mangalek', 'mangastarz', 'teamx', 'mangaswat', 'azora', 'mangaspark'];
 export function sourceRank(sourceId) {
+  // التكملة بعد كل مصدر عربي، مهما كان عدد فصوله
+  if (isFiller(sourceId)) return 1000;
   const id = String(sourceId ?? '').toLowerCase();
   const i = TRUSTED.findIndex((t) => id.endsWith(`.${t}`) || id === t);
   return i < 0 ? TRUSTED.length : i;
@@ -234,7 +258,7 @@ const FIRST_OPEN_HOLD_MS = 3500;
 
 /** العمل كاملًا من نسخٍ بفصولها: ما تعرضه صفحة العمل ويقرؤه القارئ. */
 function assemble(v35work, editions, detail, failed = []) {
-  const chapters = mergeChapters(editions, { rank: sourceRank });
+  const chapters = localizeFiller(mergeChapters(editions, { rank: sourceRank }));
   const cover = v35work.coverImage?.large || detail?.thumbnailUrl || editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
   const base = v35work._work ?? { key: String(v35work.id).replace(/^ext:/, ''), title: v35work.title?.english, editions: [] };
   const work = {
@@ -250,8 +274,8 @@ function assemble(v35work, editions, detail, failed = []) {
     chapters: chapters.length || null,
     _chapters: chapters,
     _editions: editions,
-    _sources: editions.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
-    _failedSources: failed,
+    _sources: editions.filter((v) => !isFiller(v.sourceId)).map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _failedSources: failed.filter((f) => !isFiller(f.sourceId)),
   };
 }
 
@@ -330,7 +354,12 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
       emit();
     }, FIRST_OPEN_HOLD_MS);
   }
-  const due = discover && available() && Date.now() - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
+  // مصدرٌ جديد (التكملة الإنجليزية بعد تحديث) يُسأل عن العمل فورًا لا بعد 12 ساعة
+  const sourceIds = available() ? (await sources().catch(() => [])).map((s) => s.id) : [];
+  // (نسخةٌ محفوظة قبل هذا الحقل تُعامل كأنها لم تُسأل عن أي مصدر: تُكتشف مرة)
+  const askedBefore = cached ? cached.discoveredSources ?? [] : sourceIds;
+  const newSource = sourceIds.some((sid) => !askedBefore.includes(sid));
+  const due = discover && available() && (newSource || Date.now() - (cached?.discoveredAt ?? 0) > REDISCOVER_MS);
   const discovery = due
     ? (async () => {
         try {
@@ -350,7 +379,13 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
   await Promise.all([refresh(editions), discovery]);
   held = false;
   const full = emit(true);
-  await writeWork(id, { editions, detail, discoveredAt: (await discovery) ? Date.now() : cached?.discoveredAt ?? 0 });
+  const discoveredNow = await discovery;
+  await writeWork(id, {
+    editions,
+    detail,
+    discoveredAt: discoveredNow ? Date.now() : cached?.discoveredAt ?? 0,
+    discoveredSources: discoveredNow ? sourceIds : cached?.discoveredSources ?? (cached ? [] : sourceIds),
+  });
   return full;
 }
 
@@ -457,7 +492,7 @@ export async function withEditions(full, found) {
   const fresh = ok.map((r) => r.value).filter((v) => v.chapters?.length);
   if (!fresh.length) return full;
   const editions = [...(full._editions ?? []), ...fresh];
-  const chapters = mergeChapters(editions, { rank: sourceRank });
+  const chapters = localizeFiller(mergeChapters(editions, { rank: sourceRank }));
   const work = { ...full._work, editions: [...(full._work?.editions ?? []), ...fresh.map(({ chapters: _c, ...e }) => e)] };
   return {
     ...full,
@@ -465,8 +500,8 @@ export async function withEditions(full, found) {
     chapters: chapters.length || null,
     _chapters: chapters,
     _editions: editions,
-    _sources: editions.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
-    _failedSources: [...(full._failedSources ?? []), ...failed.map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
+    _sources: editions.filter((v) => !isFiller(v.sourceId)).map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
   };
 }
 
