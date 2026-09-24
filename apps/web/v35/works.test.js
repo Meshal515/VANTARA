@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { STATUS_BY_SMANGA, detailFields, seriesRefOf, toV35Work } from './works.js';
+import { STATUS_BY_SMANGA, detailFields, isFiller, localizeFiller, seriesRefOf, sourceRank, toV35Work } from './works.js';
+import { mergeChapters } from '../lib/catalog.js';
 
 /**
  * أعمال المحرّك بشكل v35.
@@ -63,5 +64,52 @@ describe('v35 work shape', () => {
     expect(d.genres).toEqual([]);
     expect(d.status).toBeNull();
     expect(d.staff.edges).toEqual([]);
+  });
+});
+
+/**
+ * العربي أولًا. عملٌ عنده 22 فصلًا بالعربي و72 بالإنجليزي: الفصول 1–22 عربية
+ * دائمًا، و23–72 تملؤها الإنجليزية، ونزول الفصل العربي 23 بعدها يغلبها.
+ * خطأٌ هنا يقلب العمل فوق تحت، فالقاعدة مختبرة رقمًا رقمًا.
+ */
+describe('English fills only what Arabic lacks', () => {
+  const chapters = (from, to, tag) => Array.from({ length: to - from + 1 }, (_, i) => ({ name: `${tag} ${from + i}`, chapterNumber: from + i, url: `/${tag}/${from + i}` }));
+  const english = { sourceId: 'eu.kanade.tachiyomi.extension.all.mangadex@en', label: 'MangaDex', chapters: chapters(1, 72, 'en') };
+  const arabic = (to) => ({ sourceId: 'eu.kanade.tachiyomi.extension.ar.teamx', label: 'Team X', chapters: chapters(1, to, 'ar') });
+  const from = (list, n) => list.find((c) => c.number === n).sourceId;
+
+  it('filler ids are recognised and always rank after every Arabic source', () => {
+    expect(isFiller(english.sourceId)).toBe(true);
+    expect(isFiller('eu.kanade.tachiyomi.extension.all.mangadex')).toBe(false);
+    expect(sourceRank(english.sourceId)).toBeGreaterThan(sourceRank('some.unknown.arabic.source'));
+  });
+
+  it('Arabic 1–22 stay Arabic even though English has more chapters; 23–72 come from English', () => {
+    const merged = mergeChapters([english, arabic(22)], { rank: sourceRank });
+    expect(merged).toHaveLength(72);
+    for (let n = 1; n <= 22; n += 1) expect(from(merged, n)).toBe(arabic(22).sourceId);
+    for (let n = 23; n <= 72; n += 1) expect(from(merged, n)).toBe(english.sourceId);
+  });
+
+  it('an Arabic chapter released later replaces the English one with the same number', () => {
+    const merged = mergeChapters([english, arabic(30)], { rank: sourceRank });
+    expect(from(merged, 23)).toBe(arabic(30).sourceId);
+    expect(from(merged, 30)).toBe(arabic(30).sourceId);
+    expect(from(merged, 31)).toBe(english.sourceId);
+    expect(merged).toHaveLength(72);
+  });
+
+  it('an English chapter reads as «الفصل 23», with no source name, and keeps its language for translation', () => {
+    const row = localizeFiller(mergeChapters([english, arabic(22)], { rank: sourceRank })).find((c) => c.number === 23);
+    expect(row.chapter.name).toBe('الفصل 23');
+    expect(row.chapter.originalName).toBe('en 23');
+    expect(row.label).toBeNull();
+    expect(row.lang).toBe('en');
+    const ar = localizeFiller(mergeChapters([english, arabic(22)], { rank: sourceRank })).find((c) => c.number === 5);
+    expect(ar.chapter.name).toBe('ar 5');
+  });
+
+  it('with no English edition nothing changes', () => {
+    expect(mergeChapters([arabic(22)], { rank: sourceRank })).toHaveLength(22);
   });
 });

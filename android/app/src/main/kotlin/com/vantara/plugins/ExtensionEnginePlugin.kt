@@ -145,7 +145,25 @@ class ExtensionEnginePlugin : Plugin() {
                     .put("version", spec.versionName)
                     .put("warning", spec.warning.name)
                     .put("names", JSArray(spec.arabicSourceNames))
+                    .put("lang", "ar")
                     .put("ready", loaded.containsKey(spec.pkg)),
+            )
+        }
+        // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
+        for (filler in FILLER_SOURCES) {
+            val spec = SPIKE_SOURCES.firstOrNull { it.pkg == filler.pkg && it.blockedReason == null } ?: continue
+            val id = "${filler.pkg}@${filler.lang}"
+            list.put(
+                JSObject()
+                    .put("id", id)
+                    .put("label", filler.label)
+                    .put("lib", spec.expectedLib)
+                    .put("version", spec.versionName)
+                    .put("warning", spec.warning.name)
+                    .put("names", JSArray(listOf(filler.label)))
+                    .put("lang", filler.lang)
+                    .put("filler", true)
+                    .put("ready", loaded.containsKey(id)),
             )
         }
         call.resolve(JSObject().put("sources", list))
@@ -584,22 +602,42 @@ class ExtensionEnginePlugin : Plugin() {
         // المحمَّل لا ينتظر أحدًا: قفلٌ واحد للكل كان يُوقف صور الفصل والأغلفة
         // خلف تحميل خمسة عشر مصدرًا آخر عند فتح التطبيق
         loaded[sourceId]?.let { return it }
-        val lock = loadLocks.getOrPut(sourceId) { Mutex() }
+        // القفل للحزمة لا للمعرّف: العربي والتكملة من حزمة واحدة يُفكّان مرة
+        val lock = loadLocks.getOrPut(splitSourceId(sourceId).first) { Mutex() }
         return lock.withLock {
             loaded[sourceId]?.let { return@withLock it }
             loadSlots.withPermit { load(sourceId) }
         }
     }
 
+    /** مصادر الحزمة كلها بعد تحميلها مرة، لكل لغاتها. */
+    private val packages = java.util.concurrent.ConcurrentHashMap<String, List<CatalogueSource>>()
+
     /** مصدرٌ لكل قفل، وأربعة تُفكّ معًا على الأكثر: توازٍ بلا خنق الجهاز. */
     private val loadLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private val loadSlots = kotlinx.coroutines.sync.Semaphore(4)
 
-    private suspend fun load(sourceId: String): CatalogueSource = run {
-
-        val spec = SPIKE_SOURCES.firstOrNull { it.pkg == sourceId }
+    private suspend fun load(sourceId: String): CatalogueSource {
+        val (pkg, lang) = splitSourceId(sourceId)
+        val spec = SPIKE_SOURCES.firstOrNull { it.pkg == pkg }
             ?: error("unknown sourceId: $sourceId")
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
+        if (lang != null && FILLER_SOURCES.none { it.pkg == pkg && it.lang == lang }) error("unknown sourceId: $sourceId")
+
+        val all = packages[pkg] ?: loadPackage(spec).also { packages[pkg] = it }
+        val source = if (lang == null) {
+            // لا `first()`: أول مصدر في MangaDex قد يكون إنجليزيًا
+            selectArabicSources(spec, all).firstOrNull()
+                ?: error("${spec.label}: لا مصدر عربي في الحزمة (catalogue=${all.size})")
+        } else {
+            all.firstOrNull { it.lang.equals(lang, ignoreCase = true) }
+                ?: error("${spec.label}: لا مصدر بلغة $lang في الحزمة")
+        }
+        loaded[sourceId] = source
+        return source
+    }
+
+    private suspend fun loadPackage(spec: dev.vantara.spike.SourceSpec): List<CatalogueSource> = run {
 
         // الترتيب: نسخة الجهاز المتحقَّق منها، ثم المضمّنة في التطبيق، ثم التنزيل.
         // keiyoushi يحذف إصداراته القديمة، فالتنزيل وحده أسقط كل المصادر مرة
@@ -613,14 +651,7 @@ class ExtensionEnginePlugin : Plugin() {
                     "${spec.label}: ${result.stage} — ${result.reason}",
                     result.cause,
                 )
-            is FileExtensionLoader.Result.Ok -> {
-                // لا `first()`: أول مصدر في MangaDex قد يكون إنجليزيًا
-                val all = result.loaded.sources.filterIsInstance<CatalogueSource>()
-                val source = selectArabicSources(spec, all).firstOrNull()
-                    ?: error("${spec.label}: لا مصدر عربي في الحزمة (catalogue=${all.size})")
-                loaded[sourceId] = source
-                source
-            }
+            is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
         }
     }
 
