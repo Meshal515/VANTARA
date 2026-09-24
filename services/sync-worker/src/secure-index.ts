@@ -358,6 +358,39 @@ async function requireIdentity(request: Request, env: Env, now: number) {
   return verifyIdentityToken(token, env.VANTARA_IDENTITY_SECRET, now);
 }
 
+/**
+ * جوال معتمد يعتمد جوالًا جديدًا برمزه، من داخل التطبيق. نفس أثر سير «اعتماد
+ * جوال»: الرمز مربوط بالجهاز الذي طلبه ويُستهلك مرة. يكفي أي حساب داخل
+ * بجهاز موثوق؛ والخطأ في الرمز لا يكشف شيئًا.
+ */
+async function approveDeviceCode(request: Request, env: Env, now: number): Promise<Response> {
+  const claims = await requireIdentity(request, env, now);
+  if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const code = normalizeDeviceCode(body?.['code']);
+  if (!code) return json({ approved: false, error: 'code_invalid' }, { status: 400 });
+  const codeHash = await hashDeviceSecret(`device-code:${code}`, env.VANTARA_DEVICE_PEPPER);
+  const result = await env.DB.prepare(
+    `UPDATE device_requests SET approved_at = ?
+      WHERE code_hash = ? AND approved_at IS NULL AND consumed_at IS NULL AND expires_at > ?`,
+  )
+    .bind(now, codeHash, now)
+    .run();
+  return json({ approved: (result.meta.changes ?? 0) === 1 });
+}
+
+/** كم جوال ينتظر الاعتماد الآن: لتنبيه من في الإعدادات. */
+async function pendingDevices(request: Request, env: Env, now: number): Promise<Response> {
+  const claims = await requireIdentity(request, env, now);
+  if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
+  const row = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM device_requests WHERE approved_at IS NULL AND consumed_at IS NULL AND expires_at > ?',
+  )
+    .bind(now)
+    .first<{ n: number }>();
+  return json({ pending: Number(row?.n ?? 0) });
+}
+
 async function logoutDevice(request: Request, env: Env, now: number): Promise<Response> {
   const claims = await requireIdentity(request, env, now);
   if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
@@ -422,6 +455,14 @@ export default {
           status: response.status,
           headers: { ...JSON_HEADERS, ...cors },
         });
+      }
+      if (path === '/v1/device/approve' && request.method === 'POST') {
+        const response = await approveDeviceCode(request, env, now);
+        return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
+      }
+      if (path === '/v1/device/pending' && request.method === 'GET') {
+        const response = await pendingDevices(request, env, now);
+        return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
       }
       if (path === '/v1/device/logout' && request.method === 'POST') {
         const response = await logoutDevice(request, env, now);

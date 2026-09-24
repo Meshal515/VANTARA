@@ -322,6 +322,26 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return response.json();
   }
 
+  /** من جوال معتمد: يعتمد جوالًا جديدًا برمزه. `{ approved }` أو يرمي عند انقطاع النت. */
+  async function approveDevice(code) {
+    try {
+      return await request('/v1/device/approve', { method: 'POST', body: { code } });
+    } catch (error) {
+      if (error?.status === 400) return { approved: false, invalid: true };
+      throw error;
+    }
+  }
+
+  /** عدد الجوالات التي تنتظر الاعتماد الآن؛ 0 عند أي خطأ. */
+  async function pendingDevices() {
+    if (!token) return 0;
+    try {
+      return Number((await request('/v1/device/pending'))?.pending ?? 0);
+    } catch {
+      return 0;
+    }
+  }
+
   /** يعيد تدوير السر بعد reinstall فقط إن كان Android نفسه موثوقًا من قبل. */
   async function recoverDevice() {
     const response = await fetch(`${baseUrl}/v1/device/recover`, {
@@ -964,6 +984,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     accounts,
     requestDevice,
     claimDevice,
+    approveDevice,
+    pendingDevices,
     pairDevice,
     consumePairingUrl,
     attachNativeLinkBridge,

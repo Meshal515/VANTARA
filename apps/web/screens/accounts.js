@@ -331,7 +331,7 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     approval = el('div', 'gate-approval');
     approval.setAttribute('role', 'status');
     approval.append(el('strong', 'gate-approval__title', 'هالجوال جديد'));
-    approval.append(el('p', 'gate-approval__text', 'أرسل هالرمز لمشعل عشان يعتمد الجوال. أول ما يعتمده تدخل على طول.'));
+    approval.append(el('p', 'gate-approval__text', 'من أي جوال داخل VANTARA: الإعدادات ← اعتماد جوال جديد، واكتب هالرمز. أول ما يُعتمد تدخل على طول.'));
     const codeEl = el('button', 'gate-approval__code', '····-····');
     codeEl.type = 'button';
     codeEl.setAttribute('aria-label', 'انسخ الرمز');
