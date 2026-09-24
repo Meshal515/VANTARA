@@ -13,6 +13,7 @@
  *   analyzePage({ path, sourceLang, priority })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
  *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
+ *   benchmarkEngines({ path }) → { engines: [{ name, loadMs, glyphsMs, bubblesMs, glyphDiff, glyphPixels, bubblesSame, bubbles }], cores, thermal }
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
  *   notificationPermission() → { granted }
  *
@@ -77,6 +78,13 @@ export async function renderPage({ path, regions, leave = [], priority = 'high' 
  * يرجع `{ legacy, current, identical }` (زمن كل مرحلة، وهل الناتج متطابق بكسلًا).
  * APK أقدم بلا هذه الدالة: null.
  */
+/** إعدادات المحرك على هذا الجوال: زمن قناع الحروف والفقاعات ومطابقة ناتجها لكل إعداد. */
+export async function benchmarkEngines({ path }) {
+  const p = plugin();
+  if (!p?.benchmarkEngines) return null;
+  return p.benchmarkEngines({ path });
+}
+
 export async function benchmarkPage({ path, regions }) {
   const p = plugin();
   if (!p?.benchmarkPage) return null;

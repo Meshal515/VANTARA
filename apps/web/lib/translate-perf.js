@@ -120,7 +120,18 @@ export function summarize(entries) {
 const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
 
 /** تقرير نصي يُنسخ ويُرسل كما هو. */
-export function formatReport(entries, benchmarks = []) {
+/** سطر لكل إعداد محرك: زمن الحروف والفقاعات، ومطابقة ناتجه للإعداد الحالي. */
+export function engineLines(run) {
+  if (!run?.engines?.length) return [];
+  const lines = [`إعدادات المحرك (${run.cores} أنوية، حرارة ${run.thermal}):`];
+  for (const e of run.engines) {
+    const same = e.glyphDiff === 0 && e.bubblesSame ? 'مطابق' : `مختلف: ${e.glyphDiff} بكسل حروف من ${e.glyphPixels}${e.bubblesSame ? '' : '، فقاعات مختلفة'}`;
+    lines.push(`  ${e.name}: حروف ${sec(e.glyphsMs)} · فقاعات ${sec(e.bubblesMs)} · تحميل ${sec(e.loadMs)} · ${same}`);
+  }
+  return lines;
+}
+
+export function formatReport(entries, benchmarks = [], engines = null) {
   const s = summarize(entries);
   const lines = [`أداء الترجمة — ${s.pages} صفحة جديدة، ${s.cached} من المحفوظ`];
   // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
@@ -147,6 +158,8 @@ export function formatReport(entries, benchmarks = []) {
     for (const k of keys) lines.push(`  ${k}: ${sec(b.legacy?.stages?.[k] ?? 0)} ← ${sec(b.current?.stages?.[k] ?? 0)}`);
     lines.push(`  المجموع: ${sec(totalOf(b.legacy))} ← ${sec(totalOf(b.current))}`);
   }
+  const eng = engineLines(engines);
+  if (eng.length) lines.push('', ...eng);
   return lines.join('\n');
 }
 

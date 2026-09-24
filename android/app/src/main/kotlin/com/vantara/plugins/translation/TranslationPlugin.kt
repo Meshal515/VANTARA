@@ -196,6 +196,29 @@ class TranslationPlugin : Plugin() {
         }
     }
 
+    /** إعدادات المحرك على هذا الجوال: الزمن ومطابقة الناتج لكل إعداد (انظر [Pipeline.engineBenchmark]). */
+    @PluginMethod
+    fun benchmarkEngines(call: PluginCall) {
+        val path = call.getString("path") ?: return call.reject("path required")
+        scope.launch {
+            try {
+                val file = File(path)
+                require(file.exists()) { "page file missing" }
+                val results = gate.run(PriorityGate.BACKGROUND, Perf()) { pipeline.engineBenchmark(file) }
+                val arr = JSArray()
+                for (r in results) {
+                    arr.put(
+                        JSObject().put("name", r.name).put("loadMs", r.loadMs).put("glyphsMs", r.glyphsMs).put("bubblesMs", r.bubblesMs)
+                            .put("glyphDiff", r.glyphDiff).put("glyphPixels", r.glyphPixels).put("bubblesSame", r.bubblesSame).put("bubbles", r.bubbles),
+                    )
+                }
+                call.resolve(JSObject().put("engines", arr).put("cores", Runtime.getRuntime().availableProcessors()).put("thermal", thermal()))
+            } catch (t: Throwable) {
+                call.reject(t.message ?: "benchmark failed", t.javaClass.simpleName)
+            }
+        }
+    }
+
     /** حرارة الجوال (0 لا شيء … 6 إيقاف). */
     private fun thermal(): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return -1
