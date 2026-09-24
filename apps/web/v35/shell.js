@@ -2515,6 +2515,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مطويًّا، وما قد يفصل التطبيق عن الخادم في «منطقة الخطر» بتأكيد صريح.
   // الشاشة القديمة تبقى لحالة واحدة: لا حساب بعد (أول إقلاع)، ولا واجهة أصلًا.
   let systemOpen = false;
+  let apkVersion = null;
+  let apkVersionAsked = false;
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -2527,6 +2529,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (note) body.append(el('p', 'settings-note', note));
       return list;
     };
+    if (!apkVersionAsked && api?.apkVersion) {
+      apkVersionAsked = true;
+      api
+        .apkVersion()
+        .then((version) => {
+          apkVersion = version;
+          if (version && version !== deps.version) renderSettings();
+        })
+        .catch(() => {});
+    }
     const row = (icon, title, sub, { value, run, tone, danger } = {}) => {
       const d = el(run ? 'button' : 'div', `setting${danger ? ' setting--danger' : ''}`);
       if (run) {
@@ -2588,7 +2600,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     group('عن التطبيق', [
       row('layers', 'المصادر', 'مصادر عربية تشتغل على جهازك', { value: 'عربي' }),
-      row('info', 'الإصدار', null, { value: deps.version || '—' }),
+      // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
+      row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || '—' }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث ويثبّتها بزرّ واحد', {
             run: async () => {
