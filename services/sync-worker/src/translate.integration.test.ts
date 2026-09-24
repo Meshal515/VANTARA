@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { handleTranslateCached, handleTranslatePage, SYSTEM_PROMPT } from './translate.ts';
+import { handleTranslateCached, handleTranslatePage, SYSTEM_PROMPT, weekOf } from './translate.ts';
 import { sqliteEnv } from './test-d1.ts';
 
 const A = '9e4b51d9-4ca0-4da2-9b1f-2205e67134ed';
@@ -134,13 +134,13 @@ describe('translation engine (server)', () => {
     expect(db.prepare("SELECT arabic FROM translation_terms WHERE term = 'Shadow Monarch'").get()).toEqual({ arabic: 'ملك الظلال' });
   });
 
-  it('no key: 503 and nothing is stored; the daily limit stops paid calls but not cached pages', async () => {
+  it('no key: 503 and nothing is stored; the weekly limit stops paid calls but not cached pages', async () => {
     const noKey = testEnv({ OPENAI_API_KEY: '' });
     const res = await handleTranslatePage(page(), noKey.env, A, 1, { fetch: fakeGpt(() => firstPage).fetch });
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toBe('translation_not_configured');
 
-    const { env } = testEnv({ TRANSLATE_DAILY_PAGES: '1' });
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1' });
     await handleTranslatePage(page(), env, A, 1, { fetch: fakeGpt(() => firstPage).fetch });
     const over = await handleTranslatePage(page({ pageHash: hash('c') }), env, A, 2, { fetch: fakeGpt(() => firstPage).fetch });
     expect(over.status).toBe(429);
@@ -159,12 +159,24 @@ describe('translation engine (server)', () => {
     expect(((await busy.json()) as { error: string }).error).toBe('busy');
   });
 
-  it('defaults: 150 paid pages per account per day', async () => {
+  it('defaults: 1000 paid pages per account per week, renewed Thursday 5 pm Mecca time', async () => {
+    // الخميس 24 سبتمبر 2026: 4:59 عصرًا بمكة ثم 5:00
+    const before = Date.UTC(2026, 8, 24, 13, 59);
+    const after = Date.UTC(2026, 8, 24, 14, 0);
+    expect(weekOf(before)).toBe('w:2026-09-17');
+    expect(weekOf(after)).toBe('w:2026-09-24');
+    expect(weekOf(Date.UTC(2026, 8, 30, 23))).toBe('w:2026-09-24'); // الأربعاء التالي: نفس الأسبوع
+    expect(weekOf(Date.UTC(2026, 9, 1, 14))).toBe('w:2026-10-01');
+
     const { env, db } = testEnv();
-    db.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 150)').run(A, new Date(5).toISOString().slice(0, 10));
-    const over = await handleTranslatePage(page(), env, A, 5, { fetch: fakeGpt(() => firstPage).fetch });
+    db.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 999)').run(A, weekOf(before));
+    const last = await handleTranslatePage(page(), env, A, before, { fetch: fakeGpt(() => firstPage).fetch });
+    expect(last.status).toBe(200);
+    const over = await handleTranslatePage(page({ pageHash: hash('d') }), env, A, before, { fetch: fakeGpt(() => firstPage).fetch });
     expect(over.status).toBe(429);
-    expect(((await over.json()) as { limit: number }).limit).toBe(150);
+    expect(await over.json()).toMatchObject({ error: 'weekly_limit', limit: 1000 });
+    const renewed = await handleTranslatePage(page({ pageHash: hash('d') }), env, A, after, { fetch: fakeGpt(() => firstPage).fetch });
+    expect(renewed.status).toBe(200);
   });
 
   it('a refusal or a broken image is an error, never a stored empty translation', async () => {

@@ -280,7 +280,7 @@ export async function translatePage(sync, src, meta) {
 /** رسالة لسبب الرفض، بكلام الناس. */
 export const TRANSLATE_ERRORS = {
   translation_not_configured: 'الترجمة غير مفعّلة على الخادم بعد',
-  daily_limit: 'وصلت حد الترجمة اليومي — يرجع بكرة',
+  weekly_limit: 'خلّصت ترجمة هالأسبوع — تتجدد الخميس 5 العصر بتوقيت مكة',
   no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',
   offline: 'ما فيه اتصال — الصفحات المترجمة قبل تشتغل',

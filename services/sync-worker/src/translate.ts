@@ -21,7 +21,7 @@ export const PROMPT_VERSION = 1;
 export const DEFAULT_MODEL = 'gpt-6-luna';
 const OPENAI_RESPONSES = 'https://api.openai.com/v1/responses';
 /** حدّ الصفحات المدفوعة لكل حساب في اليوم (المحفوظ لا يُحسب). قرار المالك: توفير أولًا. */
-const DEFAULT_DAILY_PAGES = 150;
+const DEFAULT_WEEKLY_PAGES = 1000;
 /** ~3.4MB بعد فكّ base64؛ الجوال يصغّر الصفحة قبل الإرسال أصلًا. */
 const MAX_IMAGE_BASE64 = 4_500_000;
 const MAX_IMAGE_EDGE = 2576;
@@ -62,6 +62,17 @@ export const engineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAU
 //
 // ثابتة حرفًا حرفًا بين الطلبات: هي البادئة التي يخزّنها OpenAI تلقائيًا (أرخص
 // بعشر مرات). ما يتغير (ذاكرة العمل، الصفحة) يأتي بعدها في رسالة المستخدم.
+
+/**
+ * مفتاح الأسبوع في `translation_usage.day`: «w:» + تاريخ الخميس الذي بدأ به.
+ * الحد يتجدد كل خميس الساعة 5 مساءً بتوقيت مكة (UTC+3 = 14:00 UTC).
+ */
+export function weekOf(now: number): string {
+  const since = new Date(now - 14 * 3600_000); // الخميس 14:00 UTC يصير منتصف ليلٍ هنا
+  const back = (since.getUTCDay() - 4 + 7) % 7;
+  const thursday = new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate() - back));
+  return `w:${thursday.toISOString().slice(0, 10)}`;
+}
 
 export const SYSTEM_PROMPT = `You are the lead translator and letterer of VANTARA's Arabic team: a fan-translation group that has followed this work from its first chapter and knows its characters, running jokes and terminology by heart. You translate one comic page at a time (manga, manhwa, manhua, webtoon strips) into Arabic that reads as if it had been written in Arabic.
 
@@ -289,11 +300,11 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 
   if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
 
-  // ٢. الحد اليومي: الترجمة تكلّف، والمحفوظ مجاني
-  const day = new Date(now).toISOString().slice(0, 10);
-  const limit = Number(env.TRANSLATE_DAILY_PAGES) || DEFAULT_DAILY_PAGES;
+  // ٢. الحد الأسبوعي: الترجمة تكلّف، والمحفوظ مجاني
+  const day = weekOf(now);
+  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
   const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  if ((used?.pages ?? 0) >= limit) return reply({ error: 'daily_limit', limit }, 429);
+  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
 
   const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
   // «low» افتراضيًا: أقل توكنات تفكير = أرخص. `TRANSLATE_EFFORT` يرفعه إن احتجنا جودة أعلى
