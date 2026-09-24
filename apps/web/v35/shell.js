@@ -73,7 +73,7 @@ const CHAPTER_BATCH = 60;
 const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
   ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
-  ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock']]],
+  ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock'], ['آخر المشاهدات', 'history', 'history']]],
   ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
 
@@ -2730,8 +2730,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function drawerNavigate(key) {
     closeDrawer();
     if (['home', 'library', 'discover', 'settings', 'majlis'].includes(key)) return navTo(key);
-    if (key === 'favorites' || key === 'later') {
-      state.libraryFilter = key === 'favorites' ? 'favorite' : 'later';
+    if (key === 'favorites' || key === 'later' || key === 'history') {
+      state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
     if (key === 'switchAccount') return confirmSwitchAccount();
