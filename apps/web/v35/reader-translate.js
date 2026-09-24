@@ -6,24 +6,26 @@
  *   ويستمر للعمل إلى أن تخرج من بطاقته.
  * - أول تفعيل بلا نماذج على الجهاز: بطاقة «تحميل ملفات الترجمة» بالحجم، مرة
  *   واحدة، ثم تعمل محليًّا.
- * - فتحت الفصل: الحالي أولًا، والتالي بعده، والسابق احتياطًا — طابور حيّ يتبع
- *   موضعك (`createQueue`). تقترب من صفحة غير جاهزة؟ تعود للمقدّمة.
- * - «نجهّز الفصل بالعربي» حتى يجهز أقل عدد يضمن ألا تلحق بالترجمة
- *   (`entryPages`)، ثم تقرأ والباقي يكمل خلفك. «اقرأ الآن» يتخطى الانتظار.
+ * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من صفحتك للأمام بالترتيب، ثلاث
+ *   صفحات معًا، ثم ما عبرته خلفك، ثم الفصل التالي. صفحة تفشل لسبب عابر تُعاد.
+ * - «نجهّز الفصل بالعربي» حتى تجهز أول ثلاث صفحات، ثم تقرأ والباقي يكمل
+ *   أمامك. «اقرأ الآن» يتخطى الانتظار.
  * - الصفحة المترجمة **صورة** جاهزة؛ القارئ يبدّل `<img src>` ويحتفظ بالأصل.
  */
 
 import { isFiller } from './works.js';
-import { TRANSLATE_ERRORS, createQueue, entryPages, readingRate, translatePage } from '../lib/translate.js';
+import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings } from '../lib/translate-settings.js';
 import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
-const MIN_READY = 0.3;
-const RATE_KEY = 'vantara.translate.readRate';
-const TL_RATE_KEY = 'vantara.translate.speed';
+const ENTRY_PAGES = 3;
+/** إعادة الصفحة بعد فشل عابر. */
+const RETRY_DELAYS_MS = [3_000, 10_000, 30_000, 90_000];
+/** أخطاء لا يحلّها الانتظار: توقف الترجمة وتُقال مرة. */
+const BLOCKING = new Set(['models_missing', 'device_only', 'translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'no_credit']);
 /** الأعمال التي فعّلتها بنفسك في وضع «عند الطلب»: للجلسة، وتُنسى بالخروج من العمل. */
 const sessionWorks = new Set();
 
@@ -46,7 +48,8 @@ const store = {
 };
 
 // صفحة كاملة تُحلَّل وتُرسم على الجهاز: طلبان متزامنان يكفيان ولا يخنقان الجوال
-const queue = createQueue({ concurrency: 2 });
+// ثلاث صفحات معًا: الرؤية على الجوال واحدة تلو الأخرى، وLuna تتداخل معها
+const queue = createQueue({ concurrency: 3 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -80,12 +83,22 @@ const el = (tag, cls, text) => {
  * يبدّل صورة الصفحة بين الأصل والمترجم. يحتفظ بالأصل في `img.dataset.original`
  * فالعودة له لا تعيد التحميل. صفحة بلا ترجمة (لا نص، مؤثرات فقط) تبقى الأصل.
  */
-export function swapPageImage(img, result, on) {
+export function swapPageImage(img, result, on, onBroken = null) {
   if (!img) return;
   if (!img.dataset.original) img.dataset.original = img.src;
-  const target = on && result?.image ? result.image : img.dataset.original;
+  const translated = on && Boolean(result?.image);
+  const target = translated ? result.image : img.dataset.original;
+  // ملف الترجمة المحفوظ قد يختفي (أندرويد ينظّف الكاش): الأصل فورًا، ثم ترجمة جديدة
+  img.onerror = translated
+    ? () => {
+        img.onerror = null;
+        img.src = img.dataset.original;
+        img.classList.remove('rd-page--translated');
+        onBroken?.();
+      }
+    : null;
   if (img.src !== target) img.src = target;
-  img.classList.toggle('rd-page--translated', on && Boolean(result?.image));
+  img.classList.toggle('rd-page--translated', translated);
 }
 
 /**
@@ -99,7 +112,6 @@ export function createReaderTranslation(deps) {
   let disabledReason = null;
   let gate = null;
   let modelsCard = null;
-  const last = { seg: null, index: 0, at: 0 };
   let currentSegs = [];
   let currentSeg = null;
 
@@ -116,14 +128,19 @@ export function createReaderTranslation(deps) {
 
   function attach(seg) {
     if (!needsTranslation(seg.row)) return;
-    seg.tl = { results: new Map(), queued: false, failed: new Set() };
+    seg.tl = { results: new Map(), queued: false, failed: new Set(), tries: new Map() };
   }
 
   function paint(seg, index) {
     const result = seg.tl?.results.get(index);
     const slot = seg.slots[index];
     const img = slot?.frame.querySelector(':scope > img');
-    if (result && img) swapPageImage(img, result, isOn());
+    if (result && img) {
+      swapPageImage(img, result, isOn(), () => {
+        seg.tl?.results.delete(index);
+        void forgetPage(result.hash).then(() => enqueuePage(seg, index));
+      });
+    }
   }
 
   /** الصورة وُضعت: إن سبقتها الترجمة تُبدَّل الآن. */
@@ -134,55 +151,64 @@ export function createReaderTranslation(deps) {
   function enqueue(seg) {
     if (!seg.tl || seg.tl.queued || stopped || disabledReason || !isOn()) return;
     seg.tl.queued = true;
+    seg.slots.forEach((_slot, index) => enqueuePage(seg, index));
+  }
+
+  /** صفحة واحدة في الطابور. تُعاد بعد فشل عابر، فلا تبقى صفحة إنجليزية لأنك مررت عليها بسرعة. */
+  function enqueuePage(seg, index) {
+    if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
-    seg.slots.forEach((slot, index) => {
-      const run = async () => {
-        if (stopped || disabledReason || !isOn()) return null;
-        const src = await getImage(seg, index);
-        return translatePage({ api, sync }, src, {
-          seriesRef: ref,
-          seriesTitle: title,
-          chapterKey,
-          chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
-          pageIndex: index,
-          sourceLang: seg.row.lang ?? 'en',
-        });
-      };
-      queue
-        .add({ key: `${chapterKey}#${index}`, chapterKey, index, run })
-        .then((result) => {
-          if (!result) return;
-          if (result.error) return failed(seg, index, result.error);
-          seg.tl.results.set(index, result);
-          paint(seg, index);
-          updateGate();
-        })
-        .catch(() => failed(seg, index, 'offline'));
-    });
+    const run = async () => {
+      if (stopped || disabledReason || !isOn()) return null;
+      const src = await getImage(seg, index);
+      return translatePage({ api, sync }, src, {
+        seriesRef: ref,
+        seriesTitle: title,
+        chapterKey,
+        chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
+        pageIndex: index,
+        sourceLang: seg.row.lang ?? 'en',
+      });
+    };
+    queue
+      .add({ key: `${chapterKey}#${index}`, chapterKey, index, run })
+      .then((result) => {
+        if (!result) return;
+        if (result.error) return failed(seg, index, result.error);
+        seg.tl.failed.delete(index);
+        seg.tl.results.set(index, result);
+        paint(seg, index);
+        updateGate();
+      })
+      .catch(() => failed(seg, index, 'offline'));
   }
 
   function failed(seg, index, code) {
-    seg.tl?.failed.add(index);
+    if (!seg.tl) return;
     // خطأ عام (لا نماذج، لا مفتاح، حد أسبوعي) يوقف الطابور مرة ويقال مرة
-    if (['models_missing', 'device_only', 'translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'no_credit'].includes(code)) {
+    if (BLOCKING.has(code)) {
+      seg.tl.failed.add(index);
       if (!disabledReason) toast(TRANSLATE_ERRORS[code]);
       disabledReason = code;
       if (code === 'models_missing') void offerModels();
+      updateGate();
+      return;
     }
+    // عابر (صورة لم تصل بعد، نت، انشغال): يُعاد بعد مهلة تكبر، حتى أربع مرات
+    const tries = (seg.tl.tries.get(index) ?? 0) + 1;
+    seg.tl.tries.set(index, tries);
+    if (tries <= RETRY_DELAYS_MS.length) {
+      setTimeout(() => enqueuePage(seg, index), RETRY_DELAYS_MS[tries - 1]);
+      return;
+    }
+    seg.tl.failed.add(index);
     updateGate();
   }
 
-  /** موضعك: يعيد ترتيب الطابور (الحالي 0، التالي 1، السابق 2) ويقيس سرعة قراءتك. */
+  /** موضعك: يعيد ترتيب الطابور (الحالي 0، التالي 1، السابق 2). */
   function focus(seg, index, segs) {
     currentSegs = segs;
     currentSeg = seg;
-    const now = Date.now();
-    if (last.seg === seg && index > last.index && now - last.at < 5 * 60_000) {
-      const samples = store.get(RATE_KEY, []);
-      samples.push({ pages: index - last.index, ms: now - last.at });
-      store.set(RATE_KEY, samples.slice(-30));
-    }
-    Object.assign(last, { seg, index, at: now });
     const i = segs.indexOf(seg);
     const ranks = {};
     if (segs[i + 1]) ranks[keyOf(segs[i + 1].row)] = 1;
@@ -286,13 +312,9 @@ export function createReaderTranslation(deps) {
     }
     return n;
   }
+  /** ثابت: ثلاث صفحات جاهزة من حيث تبدأ (أو الفصل كله إن كان أقصر)، والباقي يكمل أمامك. */
   function needed(seg, from) {
-    const measured = queue.rate();
-    const speed = measured || store.get(TL_RATE_KEY, 4);
-    if (measured) store.set(TL_RATE_KEY, measured);
-    const total = seg.slots.length - from;
-    const adaptive = entryPages({ total, translatePerMin: speed, readPerMin: readingRate(store.get(RATE_KEY, [])) });
-    return Math.min(total, Math.max(Math.ceil(total * MIN_READY), adaptive));
+    return Math.min(seg.slots.length - from, ENTRY_PAGES);
   }
 
   /** فتح فصل يحتاج ترجمة: الانتظار حتى أقل جاهز يكفي، أو «اقرأ الآن». */

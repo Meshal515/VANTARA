@@ -26,41 +26,10 @@ import { analyzePage, nativeTranslationAvailable, renderPage } from './translati
 export const MAX_UPLOAD_EDGE = 4096;
 /** أعرض من هذا لا يزيد الدقة المفيدة للكشف والقراءة، ويثقل الرفع. */
 export const MAX_UPLOAD_WIDTH = 1600;
-// tl4: صفحات tl3 حُفظت قبل معرفة «ناقصة»؛ تُسأل مرة، والخادم يصلح الناقص منها مجانًا
+// لا يُغيَّر اسم الكاش مرة أخرى: تغييره يُخفي كل صفحة مترجمة محفوظة (tl3 → tl4 فعلها مرة).
 const CACHE_PREFIX = 'tl4:';
+const OLD_CACHE_PREFIX = 'tl3:';
 const RETRY_INCOMPLETE_MS = 5 * 60 * 1000;
-
-// ───────────────────────── العتبة: متى تدخل ─────────────────────────
-
-/**
- * أقل عدد صفحات جاهزة لتبدأ القراءة بلا أن تلحق بالترجمة فتتوقف.
- *
- * `N` صفحات الفصل، `R` سرعة قراءتك (صفحة/دقيقة)، `T` سرعة الترجمة الآن.
- * تلحق بها حين `k + T·t = R·t`، والترجمة تنتهي عند `(N − k)/T`؛ لا توقّف ما
- * دام `k ≥ N·(1 − T/R)`. بهامش 20%، وبين 10% و60% من الفصل، وثلاث صفحات على
- * الأقل. `T ≥ R` ← الترجمة أسرع منك: ثلاث صفحات تكفي.
- */
-export function entryPages({ total, translatePerMin, readPerMin }) {
-  const n = Math.max(0, Math.floor(total));
-  if (!n) return 0;
-  const floor = Math.min(n, Math.max(3, Math.ceil(n * 0.1)));
-  const ceiling = Math.max(floor, Math.ceil(n * 0.6));
-  const T = Number(translatePerMin);
-  const R = Number(readPerMin);
-  if (!(T > 0) || !(R > 0)) return ceiling;
-  if (T >= R) return Math.min(n, 3);
-  const k = Math.ceil(n * (1 - T / R) * 1.2);
-  return Math.min(ceiling, Math.max(floor, k));
-}
-
-/** سرعة قراءة المستخدم: من سجلّه إن وُجد، وإلا تقدير محافظ. */
-export function readingRate(history = []) {
-  const recent = history.filter((h) => h.pages > 0 && h.ms > 0).slice(-10);
-  if (!recent.length) return 8;
-  const pages = recent.reduce((t, h) => t + h.pages, 0);
-  const ms = recent.reduce((t, h) => t + h.ms, 0);
-  return Math.max(1, Math.min(60, (pages / ms) * 60_000));
-}
 
 // ───────────────────────── الإرسال (مسار الخادم) ─────────────────────────
 
@@ -89,12 +58,13 @@ export function createQueue({ concurrency = 3 } = {}) {
   let focusIndex = 0;
   const ranks = new Map();
   const listeners = new Set();
-  const done = [];
 
+  // ترتيب ثابت لا يتبع سرعتك: من صفحتك للأمام بالترتيب، ثم ما خلفك (الأقرب أولًا)،
+  // فلا تُترك صفحة عبرتها بسرعة. الفصل الحالي، ثم التالي، ثم السابق.
   const priority = (job) => {
     const rank = ranks.get(job.chapterKey) ?? 3;
     const d = job.chapterKey === focusKey ? job.index - focusIndex : job.index;
-    return rank * 100_000 + (d >= 0 ? d : -d * 3);
+    return rank * 100_000 + (d >= 0 ? d : 50_000 - d);
   };
   const next = () => {
     let best = null;
@@ -107,14 +77,10 @@ export function createQueue({ concurrency = 3 } = {}) {
       if (!job) return;
       job.started = true;
       running += 1;
-      const t0 = Date.now();
       Promise.resolve()
         .then(job.run)
         .then(
-          (value) => {
-            done.push({ at: Date.now(), ms: Date.now() - t0 });
-            job.resolve(value);
-          },
+          (value) => job.resolve(value),
           (error) => job.reject(error),
         )
         .finally(() => {
@@ -150,13 +116,6 @@ export function createQueue({ concurrency = 3 } = {}) {
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
     order: () => [...jobs.values()].filter((j) => !j.started).sort((a, b) => priority(a) - priority(b)).map((j) => j.key),
     pending: () => jobs.size,
-    /** صفحات مترجمة في الدقيقة، من آخر عشر. */
-    rate() {
-      const recent = done.slice(-10);
-      if (recent.length < 2) return 0;
-      const span = Math.max(1, recent.at(-1).at - recent[0].at + recent[0].ms);
-      return (recent.length / span) * 60_000;
-    },
     onDone(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -253,7 +212,7 @@ export function renderPlan(analysis, reply) {
  */
 export async function translatePage(deps, src, meta) {
   const hash = await pageHashOf(src);
-  const local = (await readKv(CACHE_PREFIX + hash))?.value;
+  const local = (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash));
   // صفحة ناقصة (فقاعة لم تُترجم) لا تُحفظ للأبد: تُعاد بعد مهلة، والخادم يسأل عن الناقص وحده
   const stale = local?.incomplete && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
   if (local && typeof local.translated === 'number' && !stale) return { ...local, hash, from: 'device' };
@@ -305,6 +264,26 @@ async function translateOnDevice(deps, hash, meta) {
     incomplete,
     error: null,
   };
+}
+
+/**
+ * صفحة حُفظت بالاسم القديم (tl3) قبل أن تُعرف «الناقصة». تُعرض فورًا بلا
+ * ترجمة جديدة، وتُنقل للاسم الحالي. وإن كان فيها فقاعة مقروءة بلا عربي تُعلَّم
+ * ناقصة قديمة، فتُسأل مرة (والخادم يعيد المحفوظ ويصلح الناقص مجانًا).
+ */
+async function fromOldCache(hash) {
+  const old = (await readKv(OLD_CACHE_PREFIX + hash))?.value;
+  if (!old || typeof old.translated !== 'number') return null;
+  const incomplete = (old.regions ?? []).some((r) => r.status === 'pending' && r.source && !(typeof r.arabic === 'string' && r.arabic.trim()));
+  const value = { ...old, incomplete, at: incomplete ? 0 : Date.now() };
+  void writeKv(CACHE_PREFIX + hash, value);
+  return incomplete ? null : value;
+}
+
+/** صورة مترجمة محفوظة اختفت من الجهاز (أندرويد ينظّف مجلد الكاش): تُنسى فتُترجم من جديد. */
+export async function forgetPage(hash) {
+  if (!hash) return;
+  await Promise.all([writeKv(CACHE_PREFIX + hash, null), writeKv(OLD_CACHE_PREFIX + hash, null)]);
 }
 
 /** فقاعات مقروءة لم تأخذ عربيًا من Luna (المؤثر واللافتة والحقوق بلا عربي جواب صحيح). */

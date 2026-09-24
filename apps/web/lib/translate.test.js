@@ -1,31 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, entryPages, readingRate, resultOf, unansweredIds, uploadPlan } from './translate.js';
-
-describe('entry threshold: enter with the least ready that never makes you wait', () => {
-  it('translation faster than you read: three pages are enough', () => {
-    expect(entryPages({ total: 100, translatePerMin: 12, readPerMin: 8 })).toBe(3);
-  });
-
-  it('translation slower than you: k = N(1 − T/R) with a 20% margin, within 10–60%', () => {
-    // 100 صفحة، الترجمة 6/د، أنت 8/د: 100 × (1 − 0.75) × 1.2 = 30
-    expect(entryPages({ total: 100, translatePerMin: 6, readPerMin: 8 })).toBe(30);
-    // بطيء جدًا: لا أكثر من 60%
-    expect(entryPages({ total: 100, translatePerMin: 1, readPerMin: 10 })).toBe(60);
-    // قريب من سرعتك: لا أقل من 10%
-    expect(entryPages({ total: 100, translatePerMin: 7.9, readPerMin: 8 })).toBe(10);
-  });
-
-  it('no measurement yet: waits conservatively; tiny chapters never ask for more than they have', () => {
-    expect(entryPages({ total: 40, translatePerMin: 0, readPerMin: 8 })).toBe(24);
-    expect(entryPages({ total: 2, translatePerMin: 1, readPerMin: 10 })).toBe(2);
-    expect(entryPages({ total: 0, translatePerMin: 1, readPerMin: 1 })).toBe(0);
-  });
-
-  it('reading speed comes from your own history', () => {
-    expect(readingRate([])).toBe(8);
-    expect(readingRate([{ pages: 20, ms: 120_000 }, { pages: 10, ms: 60_000 }])).toBe(10);
-  });
-});
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, resultOf, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -65,14 +39,14 @@ describe('worker reply → what the reader keeps', () => {
   });
 });
 
-describe('queue: current chapter first, then next, then previous; nearest to you first', () => {
+describe('queue: a fixed order, forward from your page, never leaving a page behind', () => {
   const job = (chapterKey, index) => ({ key: `${chapterKey}#${index}`, chapterKey, index, run: () => new Promise(() => {}) });
-  it('orders by chapter rank then distance from the page you are on', () => {
+  it('every page ahead in order, then the pages you passed (nearest first), then the next chapter', () => {
     const q = createQueue({ concurrency: 0 });
     for (const i of [0, 5, 10]) q.add(job('c2', i));
     for (const i of [0, 12, 30, 95]) q.add(job('c1', i));
     q.focus('c1', 30, { c1: 0, c2: 1 });
-    expect(q.order()).toEqual(['c1#30', 'c1#12', 'c1#95', 'c1#0', 'c2#0', 'c2#5', 'c2#10']);
+    expect(q.order()).toEqual(['c1#30', 'c1#95', 'c1#12', 'c1#0', 'c2#0', 'c2#5', 'c2#10']);
   });
 
   it('moving ahead re-prioritises instantly: you reached 30, so 30–33 go before 95', () => {
@@ -81,7 +55,7 @@ describe('queue: current chapter first, then next, then previous; nearest to you
     q.focus('c1', 0, { c1: 0 });
     expect(q.order()[0]).toBe('c1#30');
     q.focus('c1', 33, { c1: 0 });
-    expect(q.order()).toEqual(['c1#33', 'c1#31', 'c1#30', 'c1#95']);
+    expect(q.order()).toEqual(['c1#33', 'c1#95', 'c1#31', 'c1#30']);
   });
 
   it('the same page is queued once', async () => {
