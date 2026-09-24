@@ -112,7 +112,7 @@ export function createReaderTranslation(deps) {
   function failed(seg, index, code) {
     seg.tl?.failed.add(index);
     // خطأ عام (لا مفتاح، حد يومي) يوقف الطابور مرة ويقال مرة
-    if (code === 'translation_not_configured' || code === 'daily_limit') {
+    if (code === 'translation_not_configured' || code === 'daily_limit' || code === 'no_credit') {
       if (!disabledReason) toast(TRANSLATE_ERRORS[code]);
       disabledReason = code;
     }

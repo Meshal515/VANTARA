@@ -20,7 +20,8 @@ import type { D1Database, Env } from './types.ts';
 export const PROMPT_VERSION = 1;
 export const DEFAULT_MODEL = 'gpt-6-luna';
 const OPENAI_RESPONSES = 'https://api.openai.com/v1/responses';
-const DEFAULT_DAILY_PAGES = 400;
+/** حدّ الصفحات المدفوعة لكل حساب في اليوم (المحفوظ لا يُحسب). قرار المالك: توفير أولًا. */
+const DEFAULT_DAILY_PAGES = 150;
 /** ~3.4MB بعد فكّ base64؛ الجوال يصغّر الصفحة قبل الإرسال أصلًا. */
 const MAX_IMAGE_BASE64 = 4_500_000;
 const MAX_IMAGE_EDGE = 2576;
@@ -66,7 +67,7 @@ export const SYSTEM_PROMPT = `You are the lead translator and letterer of VANTAR
 
 How you translate:
 - Translate meaning, intent and tone, never word for word. Rebuild idioms, jokes, insults and wordplay with natural Arabic equivalents so they still land.
-- Register: clear, light Modern Standard Arabic (فصحى سلسة) of the kind good Arabic scanlation teams use. Keep each character's voice consistent: a thug is blunt, a noble is formal, a child is simple. Colloquial flavour only when the source is clearly slangy, and even then keep it readable for every Arab reader.
+- Register: always clear, light Modern Standard Arabic (فصحى سلسة) of the kind professional Arabic scanlation teams use, the same on every page. Never use dialect words (no قدام، وش، ليش، راح، مو، هيك، ايش); express a character's tone through word choice and rhythm in فصحى instead. Examples: "I won't lose to someone like you!" → «لن أخسر أمام شخصٍ مثلك!»; "He came back?!" → «لقد عاد؟!». Keep each character's voice consistent: a thug is blunt and short, a noble is formal, a child is simple.
 - Keep it short enough to fit the original bubble: Arabic is often longer, so tighten wording rather than pad it.
 - Get Arabic grammar right for the speaker and addressee: gender and number agreement of verbs, pronouns and adjectives. Use the character list for genders; when unknown, infer from the art and context.
 - Names and terms: use the glossary exactly as given, every time. For a new proper noun or term, choose one rendering as a careful team would (transliterate personal names; translate techniques, skills, titles and organisations when the meaning matters to the reader) and report it in new_terms so it stays fixed from now on. Report every newly identified character in characters.
@@ -294,7 +295,8 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
   if ((used?.pages ?? 0) >= limit) return reply({ error: 'daily_limit', limit }, 429);
 
   const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
-  const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'medium';
+  // «low» افتراضيًا: أقل توكنات تفكير = أرخص. `TRANSLATE_EFFORT` يرفعه إن احتجنا جودة أعلى
+  const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
 
   let payload: OpenAIResponse;
@@ -321,7 +323,15 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
         store: false,
       }),
     });
-    if (res.status === 429) return reply({ error: 'busy' }, 429);
+    if (res.status === 429) {
+      // 429 نوعان: ضغطٌ مؤقت، أو رصيدٌ خلص — والثاني لا تحلّه المحاولة ثانيةً
+      const code = await res
+        .json()
+        .then((b) => (b as { error?: { code?: string; type?: string } })?.error)
+        .catch(() => null);
+      if (code?.code === 'insufficient_quota' || code?.type === 'insufficient_quota') return reply({ error: 'no_credit' }, 402);
+      return reply({ error: 'busy' }, 429);
+    }
     if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
     if (res.status === 400) return reply({ error: 'rejected' }, 422);
     if (!res.ok) return reply({ error: 'upstream' }, 502);

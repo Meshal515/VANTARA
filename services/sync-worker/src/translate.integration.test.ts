@@ -88,7 +88,7 @@ describe('translation engine (server)', () => {
     expect(body.model).toBe('gpt-6-luna');
     expect(body.instructions).toBe(SYSTEM_PROMPT);
     expect(body.store).toBe(false);
-    expect(body.reasoning).toEqual({ effort: 'medium' });
+    expect(body.reasoning).toEqual({ effort: 'low' });
     expect(body.text).toMatchObject({ format: { type: 'json_schema', name: 'page_translation', strict: true } });
     const content = (body.input as Array<{ content: Array<Record<string, unknown>> }>)[0]?.content ?? [];
     expect(content[0]).toEqual({ type: 'input_image', image_url: 'data:image/jpeg;base64,AAAA', detail: 'original' });
@@ -143,6 +143,25 @@ describe('translation engine (server)', () => {
     expect(over.status).toBe(429);
     const again = await handleTranslatePage(page(), env, A, 3, { fetch: fakeGpt(() => firstPage).fetch });
     expect(again.status).toBe(200);
+  });
+
+  it('no credit left is its own error, not "busy"; a real rate limit stays "busy"', async () => {
+    const { env } = testEnv();
+    const answer = (code: string): typeof fetch => async () =>
+      new Response(JSON.stringify({ error: { code, type: code, message: 'x' } }), { status: 429, headers: { 'content-type': 'application/json' } });
+    const broke = await handleTranslatePage(page(), env, A, 1, { fetch: answer('insufficient_quota') });
+    expect(broke.status).toBe(402);
+    expect(((await broke.json()) as { error: string }).error).toBe('no_credit');
+    const busy = await handleTranslatePage(page(), env, A, 1, { fetch: answer('rate_limit_exceeded') });
+    expect(((await busy.json()) as { error: string }).error).toBe('busy');
+  });
+
+  it('defaults: 150 paid pages per account per day', async () => {
+    const { env, db } = testEnv();
+    db.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 150)').run(A, new Date(5).toISOString().slice(0, 10));
+    const over = await handleTranslatePage(page(), env, A, 5, { fetch: fakeGpt(() => firstPage).fetch });
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { limit: number }).limit).toBe(150);
   });
 
   it('a refusal or a broken image is an error, never a stored empty translation', async () => {

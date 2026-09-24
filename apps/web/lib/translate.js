@@ -281,6 +281,7 @@ export async function translatePage(sync, src, meta) {
 export const TRANSLATE_ERRORS = {
   translation_not_configured: 'الترجمة غير مفعّلة على الخادم بعد',
   daily_limit: 'وصلت حد الترجمة اليومي — يرجع بكرة',
+  no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',
   offline: 'ما فيه اتصال — الصفحات المترجمة قبل تشتغل',
   refused: 'هالصفحة ما انترجمت',

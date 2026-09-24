@@ -578,23 +578,28 @@
 .v35 .rd-page { container-type: inline-size; }
 .v35 .rd-tl { position: absolute; inset: 0; pointer-events: none; }
 .v35.rd-tl-off .rd-tl { display: none; }
+.v35 .rd-tl-clean { position: absolute; display: block; }
 .v35 .rd-tl-box {
   position: absolute;
   display: flex; align-items: center; justify-content: center;
-  padding: 3% 5%;
+  padding: 2% 4%;
   box-sizing: border-box;
-  overflow: hidden;
-  border-radius: 38%;
   text-align: center;
 }
-.v35 .rd-tl-narration, .v35 .rd-tl-sign { border-radius: 3px; }
-.v35 .rd-tl-thought { border-radius: 50%; }
+/* فوق الرسم: خلفية بلون المكان وأطراف ذائبة (box-shadow من لونها) لا حافة حادّة */
+.v35 .rd-tl-onart { border-radius: 30%; }
+.v35 .rd-tl-onart.rd-tl-narration, .v35 .rd-tl-onart.rd-tl-sign { border-radius: 6px; }
 .v35 .rd-tl-text {
   font-family: 'Noto Sans Arabic', system-ui, sans-serif;
   font-weight: 700;
   line-height: 1.22;
-  overflow-wrap: anywhere;
+  /* الكلمة العربية لا تنكسر أبدًا (حروفٌ مقطّعة لا تُقرأ): يصغر الخط بدلها،
+     والأسطر متوازنة فلا تبقى كلمة وحدها في سطر */
+  overflow-wrap: normal;
+  word-break: keep-all;
+  text-wrap: balance;
   max-width: 100%;
+  text-shadow: 0 0 2px var(--tl-halo, transparent), 0 0 3px var(--tl-halo, transparent), 0 0 5px var(--tl-halo, transparent);
 }
 .v35 .rd-tl-thought .rd-tl-text, .v35 .rd-tl-narration .rd-tl-text { font-weight: 600; }
 
