@@ -22,8 +22,8 @@ import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapte
 import { titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-settings.js';
-import { benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
-import { clearPerf, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
+import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
+import { clearPerf, engineLines, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
 import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
 import { cachedPage, translatePage } from '../lib/translate.js';
 import { countLabel } from './plural.js';
@@ -1171,6 +1171,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function openPerfSheet() {
     let benchmarks = [];
+    let engines = null;
     const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
     const build = (body) => {
       body.append(el('h3', null, 'أداء الترجمة'));
@@ -1212,12 +1213,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
         refresh();
       };
       body.append(bench);
+      for (const line of engineLines(engines)) body.append(el('p', null, line));
+      const tune = el('button', 'btn btn-secondary btn-block', 'قِس إعدادات المحرك');
+      tune.type = 'button';
+      tune.onclick = async () => {
+        // أطول صفحة فيها حوار ترجمتها (فيها أكثر مربعات، والفرق يظهر أوضح)
+        const page = readPerf()
+          .filter((e) => e.path && e.translated > 0)
+          .slice(-20)
+          .sort((a, b) => (b.native?.analyze?.counts?.glyphTiles ?? 0) - (a.native?.analyze?.counts?.glyphTiles ?? 0))[0];
+        if (!page) return toast('ترجم صفحة فيها حوار أولًا');
+        tune.disabled = true;
+        tune.textContent = 'نقيس… (دقيقتان تقريبًا، خلّ الشاشة مفتوحة)';
+        engines = await benchmarkEngines({ path: page.path }).catch(() => null);
+        if (!engines) toast('القياس يحتاج تحديث التطبيق، أو ملف الصفحة انمسح');
+        refresh();
+      };
+      body.append(tune);
       const copy = el('button', 'btn btn-secondary btn-block');
       copy.type = 'button';
       copy.innerHTML = `${glyph('share')}<span>انسخ التقرير</span>`;
       copy.onclick = async () => {
         try {
-          await navigator.clipboard.writeText(formatReport(readPerf(), benchmarks));
+          await navigator.clipboard.writeText(formatReport(readPerf(), benchmarks, engines));
           toast('انسخ. ألصقه لي');
         } catch {
           toast('ما قدرت أنسخ');

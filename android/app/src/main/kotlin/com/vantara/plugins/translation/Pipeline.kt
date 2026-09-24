@@ -431,6 +431,58 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     class Benchmark(val legacy: Perf, val current: Perf, val identical: Boolean)
 
+    class EngineResult(val name: String, val loadMs: Long, val glyphsMs: Long, val bubblesMs: Long, val glyphDiff: Int, val glyphPixels: Int, val bubblesSame: Boolean, val bubbles: Int)
+
+    /**
+     * قناع الحروف والفقاعات على صفحة واحدة بكل إعداد للمحرك: زمن كلٍّ منهما، وكم بكسلًا
+     * يختلف قناع الحروف عن الإعداد الحالي، وهل الفقاعات هي نفسها. الحالي أولًا وآخرًا
+     * (يكشف تسخّن الجوال أثناء القياس). الإعدادات الأخرى تُفتح وتُغلق هنا.
+     */
+    @Synchronized
+    fun engineBenchmark(file: File): List<EngineResult> {
+        store.requireInstalled()
+        val (bytes, hash) = read(file, Perf())
+        val img = image(bytes, hash, Perf(), false).img
+        val texts = detect(img, Perf()).filter { it.label.startsWith("text") }
+        val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
+        val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
+        val cores = Runtime.getRuntime().availableProcessors()
+        val wide = maxOf(4, minOf(6, cores - 2))
+        val engines = listOf(
+            Ort.CURRENT,
+            Ort.Engine("split", 1, 4, spin = false),
+            Ort.Engine("split-$wide", 1, wide, spin = false),
+            Ort.Engine("cpu-4", 4, 0, spin = false),
+            Ort.Engine("cpu-$wide", wide, 0, spin = false),
+            Ort.CURRENT.copy(name = "current-again"),
+        )
+        var baseMask: ByteArray? = null
+        var baseBubbles: List<Bubble>? = null
+        val out = ArrayList<EngineResult>()
+        for (e in engines) {
+            val t0 = System.nanoTime()
+            val gs = GlyphSegmenter(store.file("ctd"), e)
+            val bs = BubbleSegmenter(store.file("bubbleseg"), e)
+            val t1 = System.nanoTime()
+            try {
+                val prob = gs.probabilities(img, glyphRows)
+                val t2 = System.nanoTime()
+                val bl = bs.segment(img, bubbleRows)
+                val t3 = System.nanoTime()
+                val mask = ByteArray(prob.size) { if (prob[it] > 0.3f) 1 else 0 }
+                val ref = baseMask ?: mask.also { baseMask = it }
+                val refB = baseBubbles ?: bl.also { baseBubbles = it }
+                var diff = 0
+                for (i in mask.indices) if (mask[i] != ref[i]) diff++
+                val same = bl.size == refB.size && bl.zip(refB).all { (a, b) -> a.box == b.box && a.mask.data.contentEquals(b.mask.data) }
+                out.add(EngineResult(e.name, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000, (t3 - t2) / 1_000_000, diff, mask.count { it.toInt() != 0 }, same, bl.size))
+            } finally {
+                gs.close(); bs.close()
+            }
+        }
+        return out
+    }
+
     /**
      * يعالج الصفحة نفسها مرتين من الصفر، بلا أي ذاكرة محفوظة: بالطريق القديم
      * (أقنعة على الصفحة كلها، فكّ الصورة لكل مرحلة، مصغّرة دائمًا) ثم الجديد،

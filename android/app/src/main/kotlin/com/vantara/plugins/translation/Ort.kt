@@ -16,11 +16,21 @@ import java.nio.FloatBuffer
 object Ort {
     val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
 
-    fun open(file: File, threads: Int = 4): OrtSession {
+    /**
+     * إعداد المحرك: خيوط ONNX Runtime، وخيوط XNNPACK (0 = بلاه)، وهل تدور الخيوط
+     * الفارغة. «قِس إعدادات المحرك» يقارنها على الجوال نفسه (الزمن والناتج).
+     */
+    data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true)
+
+    val CURRENT = Engine("current", 4, 4)
+
+    fun open(file: File, threads: Int = 4, engine: Engine? = null): OrtSession {
+        val e = engine ?: Engine("default", threads, threads)
         val opts = OrtSession.SessionOptions()
-        opts.setIntraOpNumThreads(threads)
+        opts.setIntraOpNumThreads(e.ortThreads)
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-        runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to threads.toString())) }
+        if (!e.spin) opts.addConfigEntry("session.intra_op.allow_spinning", "0")
+        if (e.xnnThreads > 0) runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to e.xnnThreads.toString())) }
         return env.createSession(file.absolutePath, opts)
     }
 

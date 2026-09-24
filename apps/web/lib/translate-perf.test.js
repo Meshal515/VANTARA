@@ -46,3 +46,26 @@ describe('translation performance log (on the phone)', () => {
     expect(report).toContain('متطابق');
   });
 });
+
+describe('engine settings measured on the phone', () => {
+  it('lists each setting with its times and whether the output matches the current one', async () => {
+    const { engineLines, formatReport } = await import('./translate-perf.js');
+    const run = {
+      cores: 8,
+      thermal: 0,
+      engines: [
+        { name: 'current', loadMs: 900, glyphsMs: 9700, bubblesMs: 7800, glyphDiff: 0, glyphPixels: 5000, bubblesSame: true, bubbles: 3 },
+        { name: 'split', loadMs: 800, glyphsMs: 6100, bubblesMs: 5200, glyphDiff: 0, glyphPixels: 5000, bubblesSame: true, bubbles: 3 },
+        { name: 'cpu-4', loadMs: 700, glyphsMs: 12000, bubblesMs: 9000, glyphDiff: 14, glyphPixels: 5010, bubblesSame: false, bubbles: 3 },
+      ],
+    };
+    const lines = engineLines(run);
+    expect(lines[0]).toContain('8 أنوية');
+    expect(lines[2]).toContain('split');
+    expect(lines[2]).toContain('مطابق');
+    expect(lines[3]).toContain('مختلف: 14 بكسل');
+    expect(lines[3]).toContain('فقاعات مختلفة');
+    expect(formatReport([], [], run)).toContain('إعدادات المحرك');
+    expect(engineLines(null)).toEqual([]);
+  });
+});

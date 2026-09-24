@@ -8,8 +8,8 @@ import java.io.File
  * المدخل 1024×1024 ثابت؛ الصفحة تُقسَّم شرائح مربعة بعرضها، والمتوسط في التداخل.
  * الخرج خريطة احتمال [0,1] بحجم الصورة.
  */
-class GlyphSegmenter(file: File) {
-    private val session: OrtSession = Ort.open(file)
+class GlyphSegmenter(file: File, engine: Ort.Engine? = null) {
+    private val session: OrtSession = Ort.open(file, engine = engine)
     private val size = 1024
 
     /** عدد المربعات في آخر صفحة (للقياس). */
