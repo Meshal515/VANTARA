@@ -189,6 +189,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export function createJobRunner(deps) {
   const { sync, engine, translatePage, native } = deps;
+  // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
+  const readerQuiet = deps.readerQuiet ?? (async () => {});
   const storage = deps.storage ?? globalThis.localStorage;
   const now = deps.now ?? (() => Date.now());
   let jobs = readJobs(storage);
@@ -297,6 +299,7 @@ export function createJobRunner(deps) {
             }
             const tag = `${next.chapter}:${next.page}`;
             busy.add(tag);
+            await readerQuiet();
             let code = null;
             try {
               code = await translateOne(job, next.chapter, next.page);

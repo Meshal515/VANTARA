@@ -25,7 +25,7 @@ import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-
 import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
 import { clearPerf, engineLines, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
 import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
-import { cachedPage, translatePage } from '../lib/translate.js';
+import { cachedPage, readerQuiet, translatePage } from '../lib/translate.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
@@ -230,7 +230,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const me = () => sync.user?.userId;
 
   // ترجمة الفصول مقدمًا: الطابور المحفوظ (lib/translate-jobs.js)، يُنشأ مبكرًا فكل من يسأله يجده
-  const translationJobs = createJobRunner({ sync, engine, translatePage, native: { jobProgress, jobFinished, jobStop } });
+  const translationJobs = createJobRunner({ sync, engine, translatePage, readerQuiet, native: { jobProgress, jobFinished, jobStop } });
   const jobStatus = new Map(translationJobs.jobs().map((j) => [j.id, j.status]));
   let jobSheetRefresh = null;
   translationJobs.subscribe((list) => {

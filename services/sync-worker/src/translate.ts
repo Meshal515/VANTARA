@@ -719,7 +719,8 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   const data = typeof image.data === 'string' ? image.data : '';
   const width = clampInt(image.width, 0, 100_000);
   const height = clampInt(image.height, 0, 100_000);
-  if (!mediaType || !data || data.length > MAX_IMAGE_BASE64 || !width || !height) return reply({ error: 'bad_image' }, 400);
+  // بلا صورة = سؤال «هل ترجمتها محفوظة؟»: المحفوظ يرجع بلا رفع، وإلا need_image فيعيد الجوال الطلب بها
+  if (!mediaType || data.length > MAX_IMAGE_BASE64 || !width || !height) return reply({ error: 'bad_image' }, 400);
   const regionsIn = cleanTextRegionsIn(body.regions, width, height);
   if (!regionsIn.length) return reply({ engine: textEngineOf(env), cached: false, regions: [], summary: null });
   const chapterKey = typeof body.chapterKey === 'string' ? body.chapterKey.slice(0, 250) : null;
@@ -751,6 +752,7 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
     return reply({ engine, cached: true, regions: saved, summary: cached.summary });
   }
 
+  if (!data) return reply({ error: 'need_image' }, 409);
   const repairing = Boolean(cached && saved.length);
   if (!env.OPENAI_API_KEY) {
     return repairing ? reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null }) : reply({ error: 'translation_not_configured' }, 503);
