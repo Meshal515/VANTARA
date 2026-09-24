@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createQueue, entryPages, mergeTiles, OVERLAP, readingRate, tilePlan } from './translate.js';
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, entryPages, readingRate, resultOf, uploadPlan } from './translate.js';
 
 describe('entry threshold: enter with the least ready that never makes you wait', () => {
   it('translation faster than you read: three pages are enough', () => {
@@ -27,73 +27,74 @@ describe('entry threshold: enter with the least ready that never makes you wait'
   });
 });
 
-describe('tiling: pages go whole, webtoon strips go in overlapping tiles', () => {
-  it('a normal manga page is one tile, scaled to a readable width', () => {
-    const plan = tilePlan(1600, 2400);
-    expect(plan.tiles).toHaveLength(1);
-    expect(plan.width).toBe(1200);
-    expect(plan.height).toBe(1800);
+describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
+  it('a normal manga page is sent as is', () => {
+    expect(uploadPlan(1080, 2316)).toEqual({ scale: 1, width: 1080, height: 2316 });
   });
 
-  it('a double spread keeps its long edge under the model limit', () => {
-    const plan = tilePlan(3000, 2000);
-    expect(Math.max(plan.width, plan.height)).toBeLessThanOrEqual(2400);
-    expect(plan.tiles).toHaveLength(1);
+  it('a very wide scan is narrowed to the detection width, keeping its ratio', () => {
+    const plan = uploadPlan(3200, 4800);
+    expect(plan.width).toBe(MAX_UPLOAD_WIDTH);
+    expect(plan.height).toBe(2400);
+    expect(plan.scale).toBeCloseTo(0.5);
   });
 
-  it('a long strip is cut into overlapping tiles that cover it exactly', () => {
-    const plan = tilePlan(800, 12_000);
-    expect(plan.tiles.length).toBeGreaterThan(5);
-    for (const t of plan.tiles) expect(t.h).toBeLessThanOrEqual(2400);
-    for (let i = 1; i < plan.tiles.length; i++) expect(plan.tiles[i - 1].y + plan.tiles[i - 1].h - plan.tiles[i].y).toBe(OVERLAP);
-    const last = plan.tiles.at(-1);
-    expect(last.y + last.h).toBe(plan.height);
+  it('a long webtoon strip keeps its width; only its longest edge is capped', () => {
+    const strip = uploadPlan(800, 12_000);
+    expect(strip.height).toBe(MAX_UPLOAD_EDGE);
+    expect(strip.width).toBe(Math.round((800 * MAX_UPLOAD_EDGE) / 12_000));
+    expect(uploadPlan(800, 3000)).toEqual({ scale: 1, width: 800, height: 3000 });
   });
 
-  it('merging maps boxes back to the original pixels and keeps a bubble in the overlap once', () => {
-    const plan = tilePlan(800, 4000); // عرض 800 بلا تصغير، قطعتان
-    expect(plan.scale).toBe(1);
-    const second = plan.tiles[1];
-    const inOverlapY = second.y + 100; // داخل التداخل: تراها القطعتان
-    const results = [
-      { regions: [
-        { x: 10, y: 50, w: 100, h: 60, arabic: 'أ' },
-        { x: 20, y: inOverlapY, w: 100, h: 80, arabic: 'ب' },
-        { x: 30, y: 2400 - 20, w: 100, h: 20, arabic: 'مقطوعة' }, // تلمس خط القطع: القطعة التالية تراها كاملة
-      ] },
-      { regions: [
-        { x: 20, y: 100, w: 100, h: 80, arabic: 'ب' },
-        { x: 30, y: 2400 - 20 - second.y, w: 100, h: 60, arabic: 'كاملة' },
-      ] },
-    ];
-    const merged = mergeTiles(plan, results);
-    expect(merged.map((r) => r.arabic)).toEqual(['أ', 'ب', 'كاملة']);
-    expect(merged[1].y).toBe(inOverlapY);
+  it('never produces a zero-sized upload', () => {
+    expect(uploadPlan(0, 0)).toEqual({ scale: 1, width: 1, height: 1 });
+  });
+});
+
+describe('worker reply → what the reader keeps', () => {
+  it('a translated page carries its image; the original stays when nothing was translated', () => {
+    const body = { translated: 2, image: 'data:image/webp;base64,AAAA', regions: [{ id: 'r1' }, { id: 'r2' }], engine: 'gpt-6-luna:t1', cached: true };
+    expect(resultOf(body)).toEqual({ image: 'data:image/webp;base64,AAAA', regions: body.regions, translated: 2, engine: 'gpt-6-luna:t1', cached: true, error: null });
+    // مؤثرات فقط: صورة الأصل تُعرض، ولا نحفظ صورة بلا فائدة
+    expect(resultOf({ translated: 0, image: 'data:...', regions: [] }).image).toBeNull();
+  });
+
+  it('carries Luna errors (weekly limit, no credit) so the reader can explain them', () => {
+    expect(resultOf({ translated: 0, error: 'weekly_limit', regions: [] })).toMatchObject({ error: 'weekly_limit', translated: 0, image: null });
+    expect(resultOf(null)).toEqual({ image: null, regions: [], translated: 0, engine: null, cached: false, error: null });
   });
 });
 
 describe('queue: current chapter first, then next, then previous; nearest to you first', () => {
-  const idle = () => new Promise(() => {});
+  const job = (chapterKey, index) => ({ key: `${chapterKey}#${index}`, chapterKey, index, run: () => new Promise(() => {}) });
   it('orders by chapter rank then distance from the page you are on', () => {
     const q = createQueue({ concurrency: 0 });
-    q.focus('c11', 10, { c11: 0, c12: 1, c10: 2 });
-    for (const [c, i] of [['c12', 0], ['c11', 30], ['c10', 5], ['c11', 11], ['c11', 9], ['c11', 12]]) q.add({ key: `${c}/${i}`, chapterKey: c, index: i, run: idle });
-    expect(q.order()).toEqual(['c11/11', 'c11/12', 'c11/9', 'c11/30', 'c12/0', 'c10/5']);
+    for (const i of [0, 5, 10]) q.add(job('c2', i));
+    for (const i of [0, 12, 30, 95]) q.add(job('c1', i));
+    q.focus('c1', 30, { c1: 0, c2: 1 });
+    expect(q.order()).toEqual(['c1#30', 'c1#12', 'c1#95', 'c1#0', 'c2#0', 'c2#5', 'c2#10']);
   });
 
   it('moving ahead re-prioritises instantly: you reached 30, so 30–33 go before 95', () => {
     const q = createQueue({ concurrency: 0 });
-    q.focus('c11', 0, { c11: 0 });
-    for (const i of [95, 31, 30, 33, 32]) q.add({ key: `p${i}`, chapterKey: 'c11', index: i, run: idle });
-    q.focus('c11', 30);
-    expect(q.order()).toEqual(['p30', 'p31', 'p32', 'p33', 'p95']);
+    for (const i of [95, 30, 31, 33]) q.add(job('c1', i));
+    q.focus('c1', 0, { c1: 0 });
+    expect(q.order()[0]).toBe('c1#30');
+    q.focus('c1', 33, { c1: 0 });
+    expect(q.order()).toEqual(['c1#33', 'c1#31', 'c1#30', 'c1#95']);
   });
 
   it('the same page is queued once', async () => {
     const q = createQueue({ concurrency: 1 });
     let runs = 0;
-    const run = async () => { runs += 1; return runs; };
-    const [a, b] = await Promise.all([q.add({ key: 'x', chapterKey: 'c', index: 0, run }), q.add({ key: 'x', chapterKey: 'c', index: 0, run })]);
-    expect([a, b, runs]).toEqual([1, 1, 1]);
+    const run = async () => {
+      runs += 1;
+      return 'ok';
+    };
+    const a = q.add({ key: 'c1#1', chapterKey: 'c1', index: 1, run });
+    const b = q.add({ key: 'c1#1', chapterKey: 'c1', index: 1, run });
+    expect(a).toBe(b);
+    expect(await a).toBe('ok');
+    expect(runs).toBe(1);
   });
 });

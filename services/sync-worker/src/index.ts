@@ -10,7 +10,7 @@
  * تُستدعى دالة المجال للتحقق من المدخل، وتعليق يربط الاثنين.
  */
 
-import { handleTranslateCached, handleTranslateGlossary, handleTranslatePage, type TranslationEnv } from './translate.ts';
+import { handleTranslateCached, handleTranslateGlossary, handleTranslatePage, handleTranslateText, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
   clampUsageCredit,
@@ -2476,6 +2476,10 @@ export default {
       // الترجمة: المحفوظ لأي حساب، وما لم يُترجم يمرّ بالنموذج (المفتاح هنا وحده)
       else if (path === '/v1/translate/page' && request.method === 'POST') {
         response = await handleTranslatePage(request, env as TranslationEnv, userId, now);
+      }
+      // خط الرؤية: عامل جهاز البيت يرسل النصوص بمعرّفاتها، وLuna تردّ بالمعرّف
+      else if (path === '/v1/translate/text' && request.method === 'POST') {
+        response = await handleTranslateText(request, env as TranslationEnv, userId, now);
       }
       else if (path === '/v1/translate/cached' && request.method === 'GET') {
         response = await handleTranslateCached(url, env as TranslationEnv);

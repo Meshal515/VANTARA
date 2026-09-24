@@ -7,12 +7,13 @@
  * - لا ننتظر الفصل كله: «نجهّز الفصل بالعربي» حتى يجهز أقل عدد يضمن ألا
  *   تلحق بالترجمة (`entryPages`)، ثم تقرأ والباقي يكمل خلفك. «اقرأ الآن»
  *   يتخطى الانتظار دائمًا.
- * - كل صفحة تُرسم فوقها طبقتها حين تجهز الصورة والترجمة معًا، أيّهما سبق.
+ * - الصفحة المترجمة **صورة** جاهزة من عامل الترجمة (فقاعات مكتشفة، نص
+ *   مبيَّض، عربي في مكانه). القارئ يبدّل `<img src>` بها ويحتفظ بالأصل، فالتبديل
+ *   بين العربي والأصل فوري وبلا رسم على الجوال.
  */
 
 import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, entryPages, readingRate, translatePage } from '../lib/translate.js';
-import { paintTranslation } from './translate-layer.js';
 
 /** الأعمال التي فعّلت فيها الترجمة. الافتراضي: مقفلة — الإنجليزي يُعرض كما هو. */
 const WORKS_KEY = 'vantara.translate.works';
@@ -39,7 +40,8 @@ const store = {
   },
 };
 
-const queue = createQueue({ concurrency: 4 });
+// صفحة كاملة تُرفع وتُعالج: طلبان متزامنان يكفيان ولا يخنقان جهاز البيت
+const queue = createQueue({ concurrency: 2 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 const onWorks = () => new Set(store.get(WORKS_KEY, []));
@@ -61,11 +63,23 @@ const el = (tag, cls, text) => {
 };
 
 /**
- * @param {{ sync, ref: string, title: string, root: HTMLElement, toast: (t: string) => void,
+ * يبدّل صورة الصفحة بين الأصل والمترجم. يحتفظ بالأصل في `img.dataset.original`
+ * فالعودة له لا تعيد التحميل. صفحة بلا ترجمة (لا نص، مؤثرات فقط) تبقى الأصل.
+ */
+export function swapPageImage(img, result, on) {
+  if (!img) return;
+  if (!img.dataset.original) img.dataset.original = img.src;
+  const target = on && result?.image ? result.image : img.dataset.original;
+  if (img.src !== target) img.src = target;
+  img.classList.toggle('rd-page--translated', on && Boolean(result?.image));
+}
+
+/**
+ * @param {{ api, ref: string, title: string, root: HTMLElement, toast: (t: string) => void,
  *   getImage: (seg, index) => Promise<string>, keyOf: (row) => string }} deps
  */
 export function createReaderTranslation(deps) {
-  const { sync, ref, title, root, toast, getImage, keyOf } = deps;
+  const { api, ref, title, root, toast, getImage, keyOf } = deps;
   let stopped = false;
   let disabledReason = null;
   let gate = null;
@@ -83,10 +97,10 @@ export function createReaderTranslation(deps) {
     const result = seg.tl?.results.get(index);
     const slot = seg.slots[index];
     const img = slot?.frame.querySelector(':scope > img');
-    if (result && img) paintTranslation(slot.frame, img, result);
+    if (result && img) swapPageImage(img, result, isOn());
   }
 
-  /** الصورة وُضعت: إن سبقتها الترجمة تُرسم الآن. */
+  /** الصورة وُضعت: إن سبقتها الترجمة تُبدَّل الآن. */
   function onImage(seg, index) {
     if (seg.tl) paint(seg, index);
   }
@@ -99,7 +113,7 @@ export function createReaderTranslation(deps) {
       const run = async () => {
         if (stopped || disabledReason) return null;
         const src = await getImage(seg, index);
-        const result = await translatePage(sync, src, {
+        return translatePage(api, src, {
           seriesRef: ref,
           seriesTitle: title,
           chapterKey,
@@ -107,7 +121,6 @@ export function createReaderTranslation(deps) {
           pageIndex: index,
           sourceLang: seg.row.lang ?? 'en',
         });
-        return result;
       };
       queue
         .add({ key: `${chapterKey}#${index}`, chapterKey, index, run })
@@ -124,8 +137,8 @@ export function createReaderTranslation(deps) {
 
   function failed(seg, index, code) {
     seg.tl?.failed.add(index);
-    // خطأ عام (لا مفتاح، حد أسبوعي) يوقف الطابور مرة ويقال مرة
-    if (code === 'translation_not_configured' || code === 'weekly_limit' || code === 'no_credit') {
+    // خطأ عام (لا مفتاح، جهاز البيت مطفّى، حد أسبوعي) يوقف الطابور مرة ويقال مرة
+    if (['translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'no_credit'].includes(code)) {
       if (!disabledReason) toast(TRANSLATE_ERRORS[code]);
       disabledReason = code;
     }
@@ -163,7 +176,7 @@ export function createReaderTranslation(deps) {
   }
   function needed(seg, from) {
     const measured = queue.rate();
-    const speed = measured || store.get(TL_RATE_KEY, 6);
+    const speed = measured || store.get(TL_RATE_KEY, 4);
     if (measured) store.set(TL_RATE_KEY, measured);
     const total = seg.slots.length - from;
     const adaptive = entryPages({ total, translatePerMin: speed, readPerMin: readingRate(store.get(RATE_KEY, [])) });
@@ -207,11 +220,19 @@ export function createReaderTranslation(deps) {
     gate = null;
   }
 
-  /** تشغيل/إيقاف من القائمة: الطبقات تختفي فورًا، والطابور يقف أو يكمل. */
+  /** تشغيل/إيقاف من القائمة: الصور تتبدّل فورًا، والطابور يقف أو يكمل. */
   function toggle(segs, current) {
     const on = !isOn();
     setTranslation(ref, on);
     root.classList.toggle('rd-tl-off', !on);
+    for (const s of segs) {
+      if (!s.tl) continue;
+      s.slots.forEach((slot, index) => {
+        const img = slot?.frame.querySelector(':scope > img');
+        const result = s.tl.results.get(index);
+        if (img && result) swapPageImage(img, result, on);
+      });
+    }
     if (on) {
       disabledReason = null;
       for (const s of segs) if (s.tl) s.tl.queued = false;

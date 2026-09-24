@@ -406,6 +406,269 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
   return reply({ engine, cached: false, width, height, regions, summary, model: payload.model ?? model });
 }
 
+// ───────────────────────── الترجمة بالمعرّفات (خط الرؤية) ─────────────────────────
+//
+// عامل الترجمة على جهاز البيت يكشف الفقاعات ويقرأ النص (RT-DETR + comic-text-detector
+// + PP-OCR) ويرسل هنا النصوص بمعرّفات ثابتة وصورة الصفحة للسياق. Luna تصحّح القراءة
+// وتترجم وتصنّف (مؤثر صوتي؟ حقوق؟) وترد بالمعرّف نفسه. لا إحداثيات تخرج من النموذج:
+// الهندسة كلها عند العامل، واللغة والسياق هنا مع القاموس وذاكرة الفصل.
+
+/** يُرفع حين تتغير تعليمات الترجمة النصية تغييرًا يستحق ترجمة جديدة. */
+export const TEXT_PROMPT_VERSION = 1;
+export const textEngineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:t${TEXT_PROMPT_VERSION}`;
+const MAX_TEXT_REGIONS = 60;
+const REGION_ID = /^[a-z0-9_-]{1,32}$/;
+
+export const TEXT_SYSTEM_PROMPT = `You are the lead translator of VANTARA's Arabic team: a fan-translation group that has followed this work from its first chapter and knows its characters, running jokes and terminology by heart. You translate one comic page at a time (manga, manhwa, manhua, webtoon strips) into Arabic that reads as if it had been written in Arabic.
+
+How you translate:
+- Translate meaning, intent and tone, never word for word. Rebuild idioms, jokes, insults and wordplay with natural Arabic equivalents so they still land.
+- Register: always clear, light Modern Standard Arabic (فصحى سلسة) of the kind professional Arabic scanlation teams use, the same on every page. Never use dialect words (no قدام، وش، ليش، راح، مو، هيك، ايش); express a character's tone through word choice and rhythm in فصحى instead. Keep each character's voice consistent: a thug is blunt and short, a noble is formal, a child is simple.
+- Rebuild each sentence in the order an Arabic speaker would say it, never the English clause order. Examples: "Wait for me, I told you!" → «قلتُ لك انتظرني!»; "You're late, you know." → «لقد تأخرت.»; "It's over, isn't it?" → «انتهى الأمر، أليس كذلك؟».
+- Keep it short enough to fit the original bubble: Arabic is often longer, so tighten wording rather than pad it.
+- Get Arabic grammar right for the speaker and addressee: gender and number agreement. Use the character list for genders; when unknown, infer from the art and context.
+- Names and terms: use the glossary exactly as given, every time. For a new proper noun or term, choose one rendering as a careful team would (transliterate personal names; translate techniques, skills, titles and organisations when the meaning matters) and report it in new_terms so it stays fixed. Report every newly identified character in characters.
+- Honorifics: drop or adapt them naturally.
+- Arabic punctuation (، ؛ ؟) with ! and … kept where they carry emotion. No diacritics except to prevent a real misreading. Western digits stay as they are.
+
+What you receive: the page image, and a list of text regions the detector found, each with an id, a draft OCR reading (may contain small mistakes), a geometry guess and a box. What you return, one entry per region id, ids exactly as given, never invented, never merged:
+- id: the region id.
+- source: the original text exactly as written on the page (fix the OCR draft by reading the image).
+- kind: speech, thought, narration (caption boxes), sign (text drawn in the scene), sfx (sound effects and onomatopoeia drawn into the art: BOOM, CLANG, 쾅, ドン), credit (scanlator credits, watermarks, site names, page numbers, ads).
+- arabic: the translation. null for sfx and credit: the art keeps its sound effects. Signs are translated only when the reader needs them to follow the story; otherwise null.
+- speaker: the character speaking, by the name used in the character list, or null when unclear.
+
+Also return summary: one or two Arabic sentences on what happens on this page, used as context for the next pages. Return empty arrays when there is nothing new.`;
+
+export const TEXT_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['regions', 'new_terms', 'characters', 'summary'],
+  properties: {
+    regions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'source', 'kind', 'arabic', 'speaker'],
+        properties: {
+          id: { type: 'string' },
+          source: { type: 'string' },
+          kind: { type: 'string', enum: [...KINDS] },
+          arabic: { type: ['string', 'null'] },
+          speaker: { type: ['string', 'null'] },
+        },
+      },
+    },
+    new_terms: OUTPUT_SCHEMA.properties.new_terms,
+    characters: OUTPUT_SCHEMA.properties.characters,
+    summary: { type: 'string' },
+  },
+} as const;
+
+export interface TextRegionIn {
+  id: string;
+  source: string;
+  kind: string;
+  box: [number, number, number, number];
+}
+export interface TextRegionOut {
+  id: string;
+  source: string;
+  kind: (typeof KINDS)[number];
+  arabic: string | null;
+  speaker: string | null;
+}
+
+/** مناطق الطلب: معرّف صالح، نص، صندوق داخل الصورة. ما لا يصلح يُهمل. */
+export function cleanTextRegionsIn(raw: unknown, width: number, height: number): TextRegionIn[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TextRegionIn[] = [];
+  const seen = new Set<string>();
+  for (const r of raw.slice(0, MAX_TEXT_REGIONS) as Array<Record<string, unknown>>) {
+    const id = typeof r?.id === 'string' && REGION_ID.test(r.id) ? r.id : null;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const box = Array.isArray(r.box) && r.box.length === 4 ? (r.box.map((v) => clampInt(v, 0, Math.max(width, height))) as [number, number, number, number]) : ([0, 0, 0, 0] as [number, number, number, number]);
+    out.push({ id, source: typeof r.source === 'string' ? r.source.trim().slice(0, 2000) : '', kind: typeof r.kind === 'string' ? r.kind.slice(0, 20) : 'speech', box });
+  }
+  return out;
+}
+
+/** ردّ النموذج: معرّفات نعرفها فقط، نوع معروف، ولا عربي للمؤثرات والحقوق. */
+export function cleanTextRegionsOut(raw: unknown, known: Set<string>): TextRegionOut[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TextRegionOut[] = [];
+  const seen = new Set<string>();
+  for (const r of raw as Array<Record<string, unknown>>) {
+    const id = typeof r?.id === 'string' ? r.id : '';
+    if (!known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const kind = KINDS.includes(r.kind as Region['kind']) ? (r.kind as Region['kind']) : 'speech';
+    const arabic = kind === 'sfx' || kind === 'credit' ? null : typeof r.arabic === 'string' && r.arabic.trim() ? r.arabic.trim() : null;
+    out.push({ id, source: typeof r.source === 'string' ? r.source.trim() : '', kind, arabic, speaker: typeof r.speaker === 'string' && r.speaker.trim() ? r.speaker.trim() : null });
+  }
+  return out;
+}
+
+export function textContext(input: { seriesTitle: string | null; chapterNumber: number | null; pageIndex: number; sourceLang: string; memory: WorkMemory; regions: TextRegionIn[] }): string {
+  const base = contextText(input).replace(/\n\nTranslate this page\.$/, '');
+  const list = input.regions.map((r) => `- ${r.id} [${r.kind}] box=${r.box.join(',')}: ${JSON.stringify(r.source)}`).join('\n');
+  return `${base}\n\nRegions found on this page (id, geometry guess, box x1,y1,x2,y2, draft OCR):\n${list}\n\nTranslate this page.`;
+}
+
+/**
+ * `POST /v1/translate/text`: نصوص بمعرّفات + الصورة للسياق → عربي بالمعرّف.
+ * المحفوظ بالبصمة أولًا (لأي حساب)، ثم الحد الأسبوعي، ثم النموذج. الحفظ في
+ * `translation_pages` نفسه بمحرّك `…:tN` فلا يختلط بالمسار القديم.
+ */
+export async function handleTranslateText(request: Request, env: TranslationEnv, userId: string, now: number, deps: TranslateDeps = {}): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return reply({ error: 'bad_json' }, 400);
+  }
+  const pageHash = typeof body.pageHash === 'string' && HASH.test(body.pageHash) ? body.pageHash : null;
+  const image = body.image as { mediaType?: unknown; data?: unknown; width?: unknown; height?: unknown } | undefined;
+  const seriesRef = typeof body.seriesRef === 'string' ? body.seriesRef.slice(0, 200) : null;
+  if (!pageHash || !image || !seriesRef) return reply({ error: 'bad_request' }, 400);
+  const mediaType = typeof image.mediaType === 'string' && MEDIA_TYPES.has(image.mediaType) ? image.mediaType : null;
+  const data = typeof image.data === 'string' ? image.data : '';
+  const width = clampInt(image.width, 0, 100_000);
+  const height = clampInt(image.height, 0, 100_000);
+  if (!mediaType || !data || data.length > MAX_IMAGE_BASE64 || !width || !height) return reply({ error: 'bad_image' }, 400);
+  const regionsIn = cleanTextRegionsIn(body.regions, width, height);
+  if (!regionsIn.length) return reply({ engine: textEngineOf(env), cached: false, regions: [], summary: null });
+  const chapterKey = typeof body.chapterKey === 'string' ? body.chapterKey.slice(0, 250) : null;
+  const pageIndex = clampInt(body.pageIndex, 0, 100_000);
+  const chapterNumber = Number.isFinite(Number(body.chapterNumber)) && body.chapterNumber !== null ? Number(body.chapterNumber) : null;
+  const sourceLang = typeof body.sourceLang === 'string' && LANGS.has(body.sourceLang) ? body.sourceLang : 'auto';
+  const seriesTitle = typeof body.seriesTitle === 'string' ? body.seriesTitle.slice(0, 200) : null;
+  const engine = textEngineOf(env);
+
+  const cached = await env.DB.prepare('SELECT regions_json, summary FROM translation_pages WHERE page_hash = ? AND engine = ?')
+    .bind(pageHash, engine)
+    .first<{ regions_json: string; summary: string | null }>();
+  if (cached) {
+    // المحفوظ صالح ما دامت المعرّفات نفسها (نفس الصورة = نفس الكشف = نفس المعرّفات)
+    const saved = JSON.parse(cached.regions_json) as TextRegionOut[];
+    const known = new Set(regionsIn.map((r) => r.id));
+    if (saved.some((r) => known.has(r.id))) return reply({ engine, cached: true, regions: saved.filter((r) => known.has(r.id)), summary: cached.summary });
+  }
+
+  if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
+  const day = weekOf(now);
+  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
+  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
+  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+
+  const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
+  const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
+  const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
+
+  let payload: OpenAIResponse;
+  try {
+    const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        instructions: TEXT_SYSTEM_PROMPT,
+        input: [
+          {
+            role: 'user',
+            content: [
+              // الصورة للسياق وتصحيح OCR لا للإحداثيات: «high» يكفي ولا يحتاج الدقة الأصلية
+              { type: 'input_image', image_url: `data:${mediaType};base64,${data}`, detail: 'high' },
+              { type: 'input_text', text: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions: regionsIn }) },
+            ],
+          },
+        ],
+        reasoning: { effort },
+        text: { format: { type: 'json_schema', name: 'page_text_translation', schema: TEXT_OUTPUT_SCHEMA, strict: true } },
+        max_output_tokens: 16000,
+        store: false,
+      }),
+    });
+    if (res.status === 429) {
+      const code = await res
+        .json()
+        .then((b) => (b as { error?: { code?: string; type?: string } })?.error)
+        .catch(() => null);
+      if (code?.code === 'insufficient_quota' || code?.type === 'insufficient_quota') return reply({ error: 'no_credit' }, 402);
+      return reply({ error: 'busy' }, 429);
+    }
+    if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
+    if (res.status === 400) return reply({ error: 'rejected' }, 422);
+    if (!res.ok) return reply({ error: 'upstream' }, 502);
+    payload = (await res.json()) as OpenAIResponse;
+  } catch {
+    return reply({ error: 'upstream' }, 502);
+  }
+
+  const content = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
+  if (content.some((c) => c.type === 'refusal') || payload.incomplete_details?.reason === 'content_filter') return reply({ error: 'refused' }, 422);
+  if (payload.status === 'incomplete') return reply({ error: 'too_long' }, 502);
+  const text = content.find((c) => c.type === 'output_text')?.text ?? '';
+  let parsed: { regions?: unknown; new_terms?: unknown; characters?: unknown; summary?: unknown };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return reply({ error: 'bad_output' }, 502);
+  }
+  const regions = cleanTextRegionsOut(parsed.regions, new Set(regionsIn.map((r) => r.id)));
+  const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null;
+
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (page_hash, engine) DO NOTHING`,
+    ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(regions), summary, userId, now),
+    env.DB.prepare(
+      `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
+       ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
+    ).bind(userId, day),
+    ...memoryStatements(env.DB, seriesRef, parsed, now),
+  ];
+  await env.DB.batch(statements);
+  return reply({ engine, cached: false, regions, summary, model: payload.model ?? model });
+}
+
+/** المصطلحات والشخصيات الجديدة من ردّ النموذج → ذاكرة العمل (أول قرار يثبت). */
+function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms?: unknown; characters?: unknown }, now: number) {
+  const statements = [];
+  for (const t of Array.isArray(parsed.new_terms) ? (parsed.new_terms as Array<Record<string, unknown>>).slice(0, 40) : []) {
+    const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
+    const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
+    if (!term || !arabic) continue;
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'model', ?)
+           ON CONFLICT (series_ref, term) DO NOTHING`,
+        )
+        .bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
+    );
+  }
+  for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 20) : []) {
+    const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
+    const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
+    if (!name || !arabic) continue;
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+           ON CONFLICT (series_ref, name) DO UPDATE SET
+             gender = CASE WHEN translation_characters.gender IS NULL OR translation_characters.gender = 'unknown' THEN excluded.gender ELSE translation_characters.gender END`,
+        )
+        .bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
+    );
+  }
+  return statements;
+}
+
 /** مصطلحات العمل وشخصياته — لعرضها وتعديلها. */
 export async function handleTranslateGlossary(url: URL, env: TranslationEnv): Promise<Response> {
   const seriesRef = url.searchParams.get('seriesRef')?.slice(0, 200);

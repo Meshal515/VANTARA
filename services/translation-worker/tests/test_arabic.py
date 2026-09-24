@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
@@ -24,8 +26,12 @@ from vantara_worker.arabic import (
     wrap,
 )
 
-ARABIC_FONT = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"
-LATIN_FONT = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+# خطوط Noto من النظام (CI يثبتها)؛ وإلا الخط المرفق مع العامل (Baloo Bhaijaan 2 يحمل العربي واللاتيني)
+_BUNDLED = str(Path(__file__).resolve().parent.parent / "fonts" / "BalooBhaijaan2.ttf")
+_NOTO_ARABIC = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"
+_NOTO_LATIN = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+ARABIC_FONT = _NOTO_ARABIC if Path(_NOTO_ARABIC).exists() else _BUNDLED
+LATIN_FONT = _NOTO_LATIN if Path(_NOTO_LATIN).exists() else _BUNDLED
 
 pytestmark = pytest.mark.skipif(not raqm_available(), reason="needs libraqm")
 
@@ -98,6 +104,7 @@ class TestRuns:
 
 
 class TestMeasuring:
+    @pytest.mark.skipif(ARABIC_FONT == LATIN_FONT, reason="needs two distinct fonts")
     def test_mixed_measurement_uses_both_fonts(self, fonts: FontSet) -> None:
         text = "اسم Sung Jin-Woo"
         both = measure(text, fonts, 24)

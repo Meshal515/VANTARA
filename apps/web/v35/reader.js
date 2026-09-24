@@ -115,7 +115,7 @@ export function warmChapter(engine, row, images = 3) {
  * @param {{ work: any, seriesRef: string, title: string, rows: any[], row: any }} ctx
  */
 export function openSmartReader(deps, ctx) {
-  const { sync, engine } = deps;
+  const { sync, engine, api } = deps;
   ensureScheduler(engine);
 
   const settings = loadSettings();
@@ -244,7 +244,7 @@ export function openSmartReader(deps, ctx) {
 
   // الترجمة العربية للفصول غير العربية (التكملة الإنجليزية): طابورها يتبع موضعك
   const tl = createReaderTranslation({
-    sync,
+    api,
     ref,
     title: ctx.title,
     root,

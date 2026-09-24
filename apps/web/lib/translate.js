@@ -2,25 +2,24 @@
  * محرّك الترجمة — جانب الجوال.
  *
  * الصفحة → بصمة من بايتات صورتها الأصلية (نفس الصورة عند صديقك = نفس البصمة =
- * نفس الترجمة، بلا تكلفة ثانية) → الذاكرة المحلية → ذاكرة الخادم → وإلا
- * تُصغَّر وتُقسَّم (الويبتون شرائط طويلة) وتُرسل قطعةً قطعة لـ`/v1/translate/page`.
- * الناتج مناطق نص بإحداثيات الصورة الأصلية، والقارئ يرسمها طبقةً فوقها.
+ * نفس الترجمة) → الذاكرة المحلية → وإلا تُرسل كاملةً إلى خادم المحتوى
+ * `/v1/translate/page`، حيث عامل الترجمة على جهاز البيت يكشف الفقاعات ويقرأ
+ * النص ويبيّضه ويكتب العربي في مكانه، ويرجع **الصفحة المترجمة صورةً** مع
+ * المناطق. القارئ يبدّل الصورة لا يرسم فوقها: لا هندسة على الجوال.
  *
- * والجدولة طابور أولويات حيّ: الفصل الحالي ثم التالي ثم السابق، والصفحات
+ * الجدولة طابور أولويات حيّ: الفصل الحالي ثم التالي ثم السابق، والصفحات
  * بقربها من موضعك لا بترتيبها. تقترب من صفحة لم تُترجم؟ تعود للمقدّمة.
  *
- * الدوال الخالصة (العتبة، التقسيم، الدمج، الطابور) تُختبر بلا جهاز.
+ * الدوال الخالصة (العتبة، الطابور، تصغير الإرسال) تُختبر بلا جهاز.
  */
 
 import { readKv, writeKv } from './chapter-store.js';
 
-/** أطول ضلع يقبله النموذج بدقته الكاملة؛ نبقى تحته بهامش. */
-export const MAX_EDGE = 2400;
-/** عرض كافٍ لقراءة أصغر خط، ولا يزيد التكلفة بلا فائدة. */
-export const MAX_WIDTH = 1200;
-/** تداخل القطع: فقاعة على خط القطع تبقى كاملة في إحدى القطعتين. */
-export const OVERLAP = 420;
-const CACHE_PREFIX = 'tl1:';
+/** أطول ضلع يُرسل: العامل يقصّ أكبر من هذا أصلًا، فلا نرفع ما سيُصغَّر. */
+export const MAX_UPLOAD_EDGE = 4096;
+/** أعرض من هذا لا يزيد الدقة المفيدة للكشف والقراءة، ويثقل الرفع. */
+export const MAX_UPLOAD_WIDTH = 1600;
+const CACHE_PREFIX = 'tl2:';
 
 // ───────────────────────── العتبة: متى تدخل ─────────────────────────
 
@@ -54,61 +53,18 @@ export function readingRate(history = []) {
   return Math.max(1, Math.min(60, (pages / ms) * 60_000));
 }
 
-// ───────────────────────── التقسيم والدمج ─────────────────────────
+// ───────────────────────── الإرسال ─────────────────────────
 
 /**
- * كيف تُرسل صورة: مقياس التصغير، وقطع رأسية بارتفاعات ≤ MAX_EDGE متداخلة.
- * صفحة مانجا عادية = قطعة واحدة؛ شريط ويبتون 800×12000 = ست قطع تقريبًا.
+ * أبعاد الصورة كما تُرسل: العرض ≤ MAX_UPLOAD_WIDTH وأطول ضلع ≤ MAX_UPLOAD_EDGE،
+ * بنسبة ثابتة. شريط ويبتون 800×12000 يُرسل كما هو عرضًا ويُقصّ طولًا عند
+ * العامل بشرائح، فالطول لا يُصغَّر إلا حين يتجاوز الحدّ.
  */
-export function tilePlan(width, height, { maxEdge = MAX_EDGE, maxWidth = MAX_WIDTH, overlap = OVERLAP } = {}) {
-  // صفحة طولية: العرض ≤ maxWidth. صفحة عريضة (صفحتان متقابلتان): أطول ضلع ≤ maxEdge
-  const scale = width >= height ? Math.min(1, maxEdge / width) : Math.min(1, maxWidth / width);
-  const w = Math.max(1, Math.round(width * scale));
-  const h = Math.max(1, Math.round(height * scale));
-  if (h <= maxEdge) return { scale, width: w, height: h, tiles: [{ y: 0, h }] };
-  const tiles = [];
-  const step = maxEdge - overlap;
-  for (let y = 0; ; y += step) {
-    const th = Math.min(maxEdge, h - y);
-    tiles.push({ y, h: th });
-    if (y + th >= h) break;
-  }
-  return { scale, width: w, height: h, tiles };
-}
-
-const iou = (a, b) => {
-  const x1 = Math.max(a.x, b.x);
-  const y1 = Math.max(a.y, b.y);
-  const x2 = Math.min(a.x + a.w, b.x + b.w);
-  const y2 = Math.min(a.y + a.h, b.y + b.h);
-  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-  return inter / Math.max(1, a.w * a.h + b.w * b.h - inter);
-};
-
-/**
- * نتائج القطع → مناطق بإحداثيات الصورة الأصلية، بلا تكرار في التداخل.
- * منطقة تلمس خط القطع السفلي تُترك إن كانت بعدها قطعة: هناك تظهر كاملة.
- */
-export function mergeTiles(plan, results) {
-  const out = [];
-  plan.tiles.forEach((tile, i) => {
-    const regions = results[i]?.regions ?? [];
-    const last = i === plan.tiles.length - 1;
-    for (const r of regions) {
-      if (!last && r.y + r.h >= tile.h - 6) continue;
-      if (i > 0 && r.y <= 6 && r.y + r.h < OVERLAP) continue;
-      const mapped = {
-        ...r,
-        x: r.x / plan.scale,
-        y: (r.y + tile.y) / plan.scale,
-        w: r.w / plan.scale,
-        h: r.h / plan.scale,
-      };
-      if (out.some((o) => iou(o, mapped) > 0.5)) continue;
-      out.push(mapped);
-    }
-  });
-  return out;
+export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge = MAX_UPLOAD_EDGE } = {}) {
+  const w = Math.max(1, Number(width) || 1);
+  const h = Math.max(1, Number(height) || 1);
+  const scale = Math.min(1, maxWidth / w, maxEdge / Math.max(w, h));
+  return { scale, width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
 
 // ───────────────────────── الطابور ─────────────────────────
@@ -225,61 +181,71 @@ export async function pageHashOf(src) {
   return sha256Hex(bytes);
 }
 
-/** القطعة `i` مصغّرةً كـJPEG base64. */
-function encodeTile(img, plan, tile) {
+/** الصفحة مصغّرةً (إن لزم) كـJPEG base64 بلا بادئة. */
+function encodePage(img, plan) {
   const canvas = document.createElement('canvas');
   canvas.width = plan.width;
-  canvas.height = tile.h;
-  const g = canvas.getContext('2d');
-  g.drawImage(img, 0, tile.y / plan.scale, img.naturalWidth, tile.h / plan.scale, 0, 0, plan.width, tile.h);
-  return canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
+  canvas.height = plan.height;
+  canvas.getContext('2d').drawImage(img, 0, 0, plan.width, plan.height);
+  return canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
 }
 
 /**
- * يترجم صفحة. `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
- * @returns {Promise<{ regions, width, height, summary, hash } | { error: string }>}
+ * ما يعود من العامل إلى ما يحفظه القارئ: صورة الصفحة المترجمة (data URL)
+ * والمناطق وعدد المترجَم. صفحة بلا أي منطقة مترجمة (لا نص، أو مؤثرات فقط)
+ * تبقى صورتها الأصلية: `image` فارغ يعني «اعرض الأصل».
  */
-export async function translatePage(sync, src, meta) {
+export function resultOf(body) {
+  const translated = Number(body?.translated) || 0;
+  return {
+    image: translated > 0 && typeof body?.image === 'string' ? body.image : null,
+    regions: Array.isArray(body?.regions) ? body.regions : [],
+    translated,
+    engine: body?.engine ?? null,
+    cached: Boolean(body?.cached),
+    error: body?.error ?? null,
+  };
+}
+
+/**
+ * يترجم صفحة عبر خادم المحتوى. `api(path, options)` نداء JSON بجلسة.
+ * `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
+ * @returns {Promise<{ image: string | null, regions, translated, hash, from } | { error: string }>}
+ */
+export async function translatePage(api, src, meta) {
   const hash = await pageHashOf(src);
   const local = (await readKv(CACHE_PREFIX + hash))?.value;
-  if (local?.regions) return { ...local, hash, from: 'device' };
+  if (local && typeof local.translated === 'number') return { ...local, hash, from: 'device' };
 
   const img = await loadImage(src);
-  const plan = tilePlan(img.naturalWidth, img.naturalHeight);
-  const results = [];
-  for (let i = 0; i < plan.tiles.length; i += 1) {
-    // صفحة من قطعة واحدة = بصمتها؛ قطعة من شريط: بصمتها من بصمة الصفحة وموضعها
-    const h = plan.tiles.length === 1 ? hash : await sha256Hex(new TextEncoder().encode(`${hash}:${i}:${plan.width}:${plan.tiles[i].y}:${plan.tiles[i].h}`));
-    const cached = await sync.translation(`/v1/translate/cached?hashes=${h}`);
-    const hit = cached.status === 200 ? cached.body?.pages?.[h] : null;
-    if (hit) {
-      results.push(hit);
-      continue;
-    }
-    const res = await sync.translation('/v1/translate/page', {
+  const plan = uploadPlan(img.naturalWidth, img.naturalHeight);
+  let body;
+  try {
+    body = await api('/v1/translate/page', {
       method: 'POST',
       body: {
         ...meta,
-        pageHash: h,
-        image: { mediaType: 'image/jpeg', data: encodeTile(img, plan, plan.tiles[i]), width: plan.width, height: plan.tiles[i].h },
+        pageHash: hash,
+        image: { mediaType: 'image/jpeg', data: encodePage(img, plan) },
       },
     });
-    if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}` };
-    results.push(res.body);
+  } catch (error) {
+    if (!error?.status) return { error: 'offline' };
+    return { error: error.code ?? `http_${error.status}` };
   }
-  const value = {
-    width: img.naturalWidth,
-    height: img.naturalHeight,
-    regions: mergeTiles(plan, results),
-    summary: results.map((r) => r.summary).filter(Boolean).join(' '),
-  };
+  const result = resultOf(body);
+  // خطأ من Luna (حدّ أسبوعي، رصيد، مفتاح): الصورة عادت بلا ترجمة؛ لا نحفظها كنتيجة
+  if (result.error && !result.translated) return { error: result.error };
+  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine };
   void writeKv(CACHE_PREFIX + hash, value);
-  return { ...value, hash, from: results.every((r) => r.cached) ? 'friends' : 'model' };
+  return { ...value, hash, from: result.cached ? 'friends' : 'model' };
 }
 
 /** رسالة لسبب الرفض، بكلام الناس. */
 export const TRANSLATE_ERRORS = {
   translation_not_configured: 'الترجمة غير مفعّلة على الخادم بعد',
+  translation_worker_offline: 'جهاز الترجمة مطفّى الحين — الصفحات المترجمة قبل تشتغل',
+  translation_worker: 'الترجمة تعثّرت على الخادم، نحاول بعد شوي',
   weekly_limit: 'خلّصت ترجمة هالأسبوع — تتجدد الخميس 5 العصر بتوقيت مكة',
   no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',

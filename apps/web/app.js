@@ -1497,6 +1497,8 @@ function screenSmartReader(target) {
     {
       sync,
       engine,
+      // الترجمة المرئية تمرّ من خادم المحتوى (وكيل إلى عامل جهاز البيت)
+      api,
       mount,
       exit: () => void go({ name: 'v35' }),
       friends: () => frameCapability().friends(),

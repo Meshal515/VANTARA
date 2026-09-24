@@ -283,7 +283,7 @@ jobs:
   translation-worker:
     name: Translation worker
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: services/translation-worker
@@ -298,8 +298,8 @@ jobs:
             services/translation-worker/requirements.txt
             services/translation-worker/requirements-dev.txt
 
-      - name: Install Python test dependencies
-        run: pip install Pillow==12.3.0 pytest==8.3.4
+      - name: Install worker dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Install Noto test fonts
         run: |
@@ -316,5 +316,22 @@ jobs:
           print('RAQM OK')
           PY
 
-      - name: Run translation tests
+      - name: Lint worker
+        run: ruff check vantara_worker tests
+
+      # الأوزان (~430MB) ببصماتها في models.py: تُنزَّل مرة وتُخزَّن بمفتاح البصمات
+      - name: Cache model weights
+        id: models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vantara/models
+          key: vantara-models-${{ hashFiles('services/translation-worker/vantara_worker/models.py') }}
+
+      - name: Download model weights
+        if: steps.models.outputs.cache-hit != 'true'
+        run: python -m vantara_worker.cli models
+
+      - name: Run translation tests (11 real pages are mandatory)
+        env:
+          VANTARA_REQUIRE_MODELS: '1'
         run: pytest -q
