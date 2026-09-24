@@ -37,6 +37,7 @@ import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
 import { createReaderTranslation } from './reader-translate.js';
+import { createTapRecognizer } from './tap-gesture.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -795,39 +796,27 @@ export function openSmartReader(deps, ctx) {
 
   // ───────────────────────── اللمس ─────────────────────────
 
-  let lastTap = 0;
-  let tapTimer = null;
-  let down = null;
-  // لمسةٌ توقف التمرير ليست طلبًا للشريط: كان يظهر كلما أوقفت الصفحة بإصبعك
-  let lastScrollAt = 0;
-  scroll.addEventListener('scroll', () => {
-    lastScrollAt = performance.now();
-  }, { passive: true });
+  // اللمسة: `tap-gesture.js` يقرر هل هي ضغطة فعلًا (قواعد Android/Mihon) —
+  // لا تمرير، ولا لمسةٌ أوقفت تمريرًا، ولا إصبعان
+  const scrollPos = () => (settings.mode === 'paged' ? scroll.scrollLeft : scroll.scrollTop);
+  const taps = createTapRecognizer({
+    scrollPos,
+    doubleTap: () => settings.doubleTapZoom,
+    onTap: ({ x, y, target }) => onTap({ clientX: x, clientY: y }, target?.closest?.('.rd-page') ?? null),
+    onDoubleTap: ({ x, y, target }) => {
+      const frame = target?.closest?.('.rd-page');
+      if (frame) openZoom(frame, x, y);
+    },
+  });
+  const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
+  scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
   scroll.addEventListener('pointerdown', (e) => {
-    down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, scrolling: performance.now() - lastScrollAt < 400 };
+    if (e.target.closest('button, a, input')) return;
+    taps.down(pointer(e));
   });
-  scroll.addEventListener('pointerup', (e) => {
-    if (!down || down.id !== e.pointerId) return;
-    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-    const quick = performance.now() - down.t < 260;
-    const scrolling = down.scrolling;
-    down = null;
-    if (moved > 6 || !quick || scrolling) return;
-    if (e.target.closest('button')) return;
-    const frame = e.target.closest('.rd-page');
-    const now = performance.now();
-    if (settings.doubleTapZoom && now - lastTap < 280 && frame) {
-      clearTimeout(tapTimer);
-      lastTap = 0;
-      openZoom(frame, e.clientX, e.clientY);
-      return;
-    }
-    lastTap = now;
-    const act = () => onTap(e, frame);
-    // مع اللمسة المزدوجة ننتظر لنعرف: بدونها الاستجابة فورية
-    if (settings.doubleTapZoom) tapTimer = setTimeout(act, 260);
-    else act();
-  });
+  scroll.addEventListener('pointermove', (e) => taps.move(pointer(e)), { passive: true });
+  scroll.addEventListener('pointerup', (e) => taps.up(pointer(e)));
+  scroll.addEventListener('pointercancel', (e) => taps.cancel(pointer(e)));
   function onTap(e, frame) {
     if (state.frameMode) {
       // الفريم من فصلٍ واحد: صفحات الفصل المجاور لا تُضاف إليه
@@ -1381,6 +1370,7 @@ export function openSmartReader(deps, ctx) {
   function destroy() {
     observer?.disconnect();
     document.removeEventListener('keydown', onKey);
+    taps.reset();
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('touchmove', onZoomMove);
     clearTimeout(state.progressTimer);

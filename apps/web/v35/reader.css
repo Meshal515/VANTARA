@@ -677,3 +677,6 @@
 /* الشريط السفلي ظاهر: الزر فوقه لا تحته */
 .v35.rd--chrome .rd-tl-fab { bottom: calc(72px + var(--safe-bottom)); }
 .v35.rd--frame .rd-tl-fab { display: none; }
+/* زر الترجمة العائم جزءٌ من الشريط: يظهر معه ويختفي معه، لا فوق الصفحة وأنت تقرأ */
+.v35 .rd-tl-fab { opacity: 0; pointer-events: none; transition: opacity var(--dur) var(--ease), bottom var(--dur) var(--ease-out); }
+.v35.rd--chrome .rd-tl-fab { opacity: 1; pointer-events: auto; }
