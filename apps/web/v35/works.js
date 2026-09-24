@@ -664,12 +664,16 @@ export async function checkSource(source, onStep = () => {}) {
     return out[key].ok;
   };
   let manga = null;
+  let candidates = [];
   let chapter = null;
   let page = null;
   if (
     !(await step('list', async () => {
-      const res = await engine.popular(source.id, 1).catch(() => engine.catalogue(source.id, 1));
-      manga = res?.mangas?.[0] ?? null;
+      // «استكشاف» يتصفح الكتالوج لا الرائج: رائج MangaDex العربي فارغ وكتالوجه ~990 عملًا
+      let res = await engine.popular(source.id, 1).catch(() => null);
+      if (!res?.mangas?.length) res = await engine.catalogue(source.id, 1);
+      candidates = res?.mangas ?? [];
+      manga = candidates[0] ?? null;
       if (!manga) throw new Error('القائمة فاضية');
       return `${res.mangas.length} عمل`;
     }))
@@ -683,10 +687,15 @@ export async function checkSource(source, onStep = () => {}) {
   });
   if (
     await step('chapters', async () => {
-      const list = await engine.chapters(source.id, manga);
-      if (!list?.length) throw new Error('بلا فصول');
-      chapter = list[list.length - 1];
-      return `${list.length} فصل`;
+      // عملٌ واحد بلا فصول (ون شوت محجوب، أو أُضيف للتو) لا يعني أن المصدر معطّل: حتى ثلاثة أعمال
+      for (const candidate of candidates.slice(0, 3)) {
+        const list = await engine.chapters(source.id, candidate);
+        if (!list?.length) continue;
+        manga = candidate;
+        chapter = list[list.length - 1];
+        return `${list.length} فصل`;
+      }
+      throw new Error('بلا فصول');
     })
   ) {
     if (

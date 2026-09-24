@@ -59,5 +59,7 @@
         <domain includeSubdomains="true">teamxnovel.com</domain>
         <!-- MangaSpark -->
         <domain includeSubdomains="true">mangaspark.com</domain>
+        <!-- Hijala — صور الفصول على http من hijala.com نفسه -->
+        <domain includeSubdomains="true">hijala.com</domain>
     </domain-config>
 </network-security-config>
