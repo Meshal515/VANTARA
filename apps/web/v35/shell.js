@@ -857,7 +857,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
-        const { items } = await browse({ query: titleOf(work) });
+        const { items } = await browse({ query: titleOf(work), keepWestern: true });
         const found = items.find((w) => w.id === work.id) ?? items.find((w) => titlesMatch(titleOf(w), titleOf(work)));
         if (found && state.current === work) {
           // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة

@@ -117,13 +117,69 @@ export function localizeFiller(rows, { keepLabel = false } = {}) {
 /** عملٌ كل نسخه تكملة ليس عملًا نعرضه: لا فصل عربي فيه. */
 const hasArabic = (work) => work.editions.some((e) => !isFiller(e.sourceId));
 
+// ───────────────── مانجا ومانهوا ومانها فقط ─────────────────
+//
+// لا كوميكس غربية ولا كرتون. أغلبها يأتي من مصادر عربية (Comic Verse يوسمها
+// DC وMARVEL وIMAGE، وDilar «كوميك»، وMangaTime «comic»)، وبعض المصادر لا
+// تعطي تصنيفًا في القوائم أصلًا (مانجا ستارز ومانجا سبارك) فيُعرف بعنوانه.
+// وما كشفته صفحة تفاصيله يُحفظ على الجهاز فلا يعود للقوائم.
+
+/** وسوم تصنيف تعني عملًا غربيًا. مطابقة كاملة للوسم: «كوميدي» ليس «كوميك». */
+const WESTERN_TAGS = new Set([
+  'comic', 'comics', 'western', 'western comic', 'american', 'oel', 'cartoon', 'cartoons', 'superhero comic',
+  'marvel', 'marvel comics', 'dc', 'dc comics', 'image', 'image comics', 'dark horse', 'idw', 'boom! studios',
+  'كوميك', 'كوميكس', 'كومكس', 'كوميكس غربي', 'كوميك غربي', 'غربي', 'غربية', 'امريكي', 'أمريكي', 'كرتون', 'كارتون', 'مارفل', 'دي سي',
+]);
+/** أعمال غربية لا تخطئها العين، لمصادر بلا تصنيف في القوائم. */
+const WESTERN_TITLE = new RegExp(
+  '\\b(' +
+    [
+      'batman', 'superman', 'spider[- ]?man', 'spider[- ]?verse', 'avengers', 'x-?men', 'deadpool', 'wolverine', 'iron man', 'captain america',
+      'justice league', 'wonder woman', 'catwoman', 'harley quinn', 'teen titans', 'suicide squad', 'green lantern', 'aquaman',
+      'fantastic four', 'guardians of the galaxy', 'doctor strange', 'black panther', 'hellboy', 'star wars', 'transformers',
+      'walking dead', 'adventure time', 'simpsons', 'scooby[- ]?doo', 'ninja turtles', 'tmnt', 'lore olympus', 'gotham',
+    ].join('|') +
+    ')\\b',
+  'i',
+);
+const tagsOf = (manga) =>
+  String(manga?.genre ?? '')
+    .split(',')
+    .map((g) => g.trim().toLowerCase())
+    .filter(Boolean);
+/** نسخة عملٍ غربية: بوسمها أو بعنوانها. */
+export function isWesternManga(manga) {
+  if (!manga) return false;
+  if (tagsOf(manga).some((t) => WESTERN_TAGS.has(t))) return true;
+  return WESTERN_TITLE.test(String(manga.title ?? ''));
+}
+const WESTERN_KEY = 'vantara.western.v1';
+const learnedWestern = (() => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(WESTERN_KEY) ?? '[]'));
+  } catch {
+    return new Set();
+  }
+})();
+function learnWestern(key) {
+  if (!key || learnedWestern.has(key)) return;
+  learnedWestern.add(key);
+  try {
+    localStorage.setItem(WESTERN_KEY, JSON.stringify([...learnedWestern].slice(-3000)));
+  } catch {
+    // تفضيل جهاز لا حقيقة
+  }
+}
+/** عملٌ لا نعرضه في القوائم: أي نسخة منه غربية، أو كشفته تفاصيله قبل. */
+export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editions ?? []).some((e) => isWesternManga(e.manga));
+
 /**
  * صفحة من كل المصادر معًا، مدموجة أعمالًا.
  *
  * `kind`: `catalogue` (الكتالوج كاملًا)، `popular`، `latest`، أو بحث بنص.
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
-export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null } = {}) {
+export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
   const list = await listingSources({ query });
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
@@ -145,7 +201,7 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
     hasNextPage ||= Boolean(value?.hasNextPage);
     addPage(index, positions, source, value);
   }
-  return { items: ranked(index, positions, query || genre ? 'search' : kind).map(toV35Work), hasNextPage, page };
+  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern }).map(toV35Work), hasNextPage, page };
 }
 
 function addPage(index, positions, source, value) {
@@ -158,8 +214,9 @@ function addPage(index, positions, source, value) {
     positions.set(hit.work.key, list);
   });
 }
-function ranked(index, positions, kind) {
-  const works = index.list().filter(hasArabic);
+function ranked(index, positions, kind, { keepWestern = false } = {}) {
+  // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
+  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)));
   for (const w of works) {
     w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
     // العنوان والغلاف من أوثق نسخة، لا من أول مصدر ردّ
@@ -346,6 +403,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
           if (edition === primary && !detail) {
             const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
             detail = out.manga ?? detail;
+            // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
+            if (isWesternManga(detail)) learnWestern(v35work._work?.key);
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
             edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS) };
@@ -554,7 +613,7 @@ export function describe(v35work) {
     if (!work._work?.editions?.length) {
       const title = work.title?.english ?? '';
       if (!title || title.startsWith('ext:')) return work;
-      const { items } = await browse({ query: title });
+      const { items } = await browse({ query: title, keepWestern: true });
       work = items.find((x) => x.id === work.id) ?? items[0] ?? work;
     }
     const primary = work._work?.editions?.[0];

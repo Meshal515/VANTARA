@@ -130,9 +130,11 @@ export function openSmartReader(deps, ctx) {
     <header class="rd-top" id="rdTop">
       ${iconButton('back', 'رجوع', { act: 'exit' })}
       <div class="rd-titles"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></div>
+      <button class="rd-tl-btn" type="button" data-act="translate" id="rdTlBtn" hidden aria-pressed="false">${glyph('translateAr', { size: 20 })}<span>ترجمة</span></button>
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
     </header>
+    <button class="rd-tl-fab" type="button" data-act="translate" id="rdTlFab" hidden aria-pressed="false">${glyph('translateAr', { size: 22 })}<span id="rdTlFabLabel">عربي</span></button>
     <header class="rd-top rd-top--frame" id="rdFrameTop" hidden>
       ${iconButton('close', 'إلغاء الفريم', { act: 'frameCancel' })}
       <div class="rd-titles"><strong>فريم</strong><span id="rdFrameCount"></span></div>
@@ -379,6 +381,23 @@ export function openSmartReader(deps, ctx) {
     if (priority === null) seg.requested = true;
   }
 
+  /**
+   * زرّ الترجمة الظاهر: في الشريط العلوي بنصّه، وعائمٌ صغير في الزاوية يبقى
+   * أثناء القراءة. يظهر فقط في فصل يحتاج ترجمة (إنجليزي)، ويقول حالته:
+   * «عربي» والترجمة شغّالة، «الأصل» وهي موقفة.
+   */
+  function syncTranslateButtons() {
+    const needs = Boolean(state.row) && tl.needs(state.row);
+    const on = tl.isOn();
+    for (const id of ['rdTlBtn', 'rdTlFab']) {
+      const b = q(id);
+      b.hidden = !needs;
+      b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', on ? 'الترجمة العربية شغّالة — اضغط لعرض الأصل' : 'اعرض الترجمة العربية');
+    }
+    q('rdTlFabLabel').textContent = on ? 'عربي' : 'الأصل';
+  }
+
   /** صار هذا الفصل أمامك: الشريط له، وما بعده يُجهَّز من الآن. */
   function enterSegment(seg) {
     if (state.seg === seg) return;
@@ -389,6 +408,7 @@ export function openSmartReader(deps, ctx) {
     state.seg = seg;
     announce(seg.row);
     tl.focus(seg, seg.current, segs);
+    syncTranslateButtons();
     if (!seg.requested) requestSegment(seg, seg.current);
     updateProgress();
     // من أول الفصل لا من آخره: التالي يصل قبل أن تصل إليه
@@ -1067,8 +1087,9 @@ export function openSmartReader(deps, ctx) {
       body.append(sheetItem('info', 'معلومات الفصل', openInfo));
       if (tl.needs(state.row)) {
         body.append(
-          sheetItem('translate', 'الترجمة العربية', () => {
+          sheetItem('translateAr', 'الترجمة العربية', () => {
             tl.toggle(segs, state.seg);
+            syncTranslateButtons();
             closeSheet();
           }, { pressed: tl.isOn() }),
         );
@@ -1263,6 +1284,10 @@ export function openSmartReader(deps, ctx) {
     frameCancel: () => exitFrameMode(),
     frameNext: () => openFrameSend(),
     menu: () => openMenu(),
+    translate: () => {
+      tl.toggle(segs, state.seg);
+      syncTranslateButtons();
+    },
     prevChapter: () => {
       const { prev } = nav();
       if (!prev) return;
