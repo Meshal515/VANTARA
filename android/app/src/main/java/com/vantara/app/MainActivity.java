@@ -6,6 +6,7 @@ import com.getcapacitor.BridgeActivity;
 import com.vantara.plugins.AppUpdatePlugin;
 import com.vantara.plugins.ExtensionEnginePlugin;
 import com.vantara.plugins.SystemUiPlugin;
+import com.vantara.plugins.translation.TranslationPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -15,6 +16,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ExtensionEnginePlugin.class);
         registerPlugin(SystemUiPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(TranslationPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

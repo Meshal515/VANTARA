@@ -69,6 +69,7 @@
 | 23 | [dmMaze/BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) | `REFERENCE` — مقارنة فقط | — |
 | 24 | [ArbenApura/xianscan-rust](https://github.com/ArbenApura/xianscan-rust) | `DEFERRED` — كان المرشح الأول في D‑04؛ لم يُدخل لأن المكوّنات المفتوحة أعلاه قِيست وكفت | — |
 | 25 | [advimman/lama](https://github.com/advimman/lama) | `BUNDLED` — يأتي داخل 17 | — |
+| 25b | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) | `LIBRARY` — يشغّل النماذج على الجوال (`onnxruntime-android`، arm64، ~12MB) وفي العامل (`onnxruntime` Python) | `1.20.0` (Android) · `1.30.0` (Python) **مُتحقَّق** |
 
 ---
 
