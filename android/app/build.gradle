@@ -182,7 +182,6 @@ dependencies {
     implementation "com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597"
 
     testImplementation "junit:junit:$junitVersion"
-    testImplementation "com.microsoft.onnxruntime:onnxruntime:1.20.0"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
