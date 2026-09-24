@@ -37,6 +37,7 @@ const MIRROR_KEY = 'vantara.mirror';
 const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
+const TRANSLATION_TIMEOUT_MS = 240_000;
 
 /**
  * سقف الطابور.
@@ -852,7 +853,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   async function translation(path, options = {}) {
     if (!token) return { status: 401, body: { error: 'unauthorized' } };
     try {
-      return { status: 200, body: await request(path, options) };
+      // طلب معلّق على نت ضعيف لا ينتظر للأبد: يُقطع فيُعاد كعطل عابر
+      const signal = globalThis.AbortSignal?.timeout ? AbortSignal.timeout(TRANSLATION_TIMEOUT_MS) : undefined;
+      return { status: 200, body: await request(path, { ...options, signal }) };
     } catch (error) {
       if (!error?.status) return { status: 0, body: { error: 'offline' } };
       return { status: error.status, body: { error: error.translationError ?? `http_${error.status}` } };

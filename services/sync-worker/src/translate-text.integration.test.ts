@@ -125,6 +125,21 @@ describe('translate by region id (vision pipeline)', () => {
     expect(prompt).toContain('يوريا تكشف');
   });
 
+  it('a request without the image returns a saved page with no upload, and asks for the image otherwise', async () => {
+    const { env } = testEnv();
+    const gpt = fakeGpt(() => answer);
+    const probe = { image: { mediaType: 'image/jpeg', data: '', width: 800, height: 1200 } };
+    const first = await handleTranslateText(req(probe), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    expect(first.status).toBe(409);
+    expect(((await first.json()) as { error: string }).error).toBe('need_image');
+    expect(gpt.calls).toHaveLength(0);
+    await handleTranslateText(req(), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    const again = await handleTranslateText(req(probe), env, B, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { cached: boolean }).cached).toBe(true);
+    expect(gpt.calls).toHaveLength(1);
+  });
+
   it('counts against the weekly limit and refuses without a key', async () => {
     const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
     const gpt = fakeGpt(() => answer);

@@ -28,6 +28,10 @@ import java.util.Base64
  * كل مرحلة تُقاس (`Perf`) وتعود مع النتيجة. القاعدة الصلبة نفسها: بلا عربي لا
  * مسح، وبلا مسح لا عربي؛ المؤثرات لا تُمس.
  */
+private const val OUT_CAP = 2_500L * 1024 * 1024
+private const val OUT_KEEP = 2_000L * 1024 * 1024
+private const val THUMB_PIXELS = 3_200_000.0
+
 class Pipeline(private val context: Context, private val store: ModelStore) {
     private var detector: Detector? = null
     private var glyphs: GlyphSegmenter? = null
@@ -262,15 +266,18 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     }
 
     /**
-     * مصغّرة JPEG base64 للسياق عند Luna (عرض ≤ 1400). من البكسلات المفكوكة إن
+     * مصغّرة JPEG base64 للسياق عند Luna (عرض ≤ 1080، ≤ 3.2 مليون بكسل). من البكسلات المفكوكة إن
      * كانت هي بكسلات الملف نفسها، وإلا من الملف كما كانت.
      */
-    fun thumbnail(file: File, pageHash: String?, maxWidth: Int = 1400): String {
+    fun thumbnail(file: File, pageHash: String?, maxWidth: Int = 1080): String {
         val cached = pageHash?.let { synchronized(this) { images[it] } }?.takeIf { it.exact }
         val bmp = if (cached != null) ArabicLayout.bitmapOf(cached.img) else BitmapFactory.decodeFile(file.absolutePath) ?: return ""
-        val scaled = if (bmp.width > maxWidth) Bitmap.createScaledBitmap(bmp, maxWidth, bmp.height * maxWidth / bmp.width, true) else bmp
+        // سياق لـLuna (من يتكلم، النبرة) والنص نفسه يصلها مقروءًا: عرض ≤ 1080 وبكسلات ≤ 3.2 مليون
+        // تكفي، والرفع على نت ضعيف أصغر بكثير (وأرخص عند Luna)
+        val s = minOf(1.0, maxWidth.toDouble() / bmp.width, Math.sqrt(THUMB_PIXELS / (bmp.width.toDouble() * bmp.height)))
+        val scaled = if (s < 1.0) Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * s).toInt()), maxOf(1, (bmp.height * s).toInt()), true) else bmp
         val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 86, out)
+        scaled.compress(Bitmap.CompressFormat.JPEG, 78, out)
         return Base64.getEncoder().encodeToString(out.toByteArray())
     }
 
@@ -311,7 +318,22 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         outDir.listFiles()?.forEach { f ->
             if (f.name != name && f.name.startsWith(hash) && (f.name.endsWith(".webp") || f.name.endsWith(".part"))) f.delete()
         }
+        if (++published % 25 == 0) prune(outDir)
         return out
+    }
+
+    private var published = 0
+
+    /** الصفحات المترجمة فوق ٢٫٥ جيجا: الأقدم كتابةً يُحذف حتى ٢ جيجا (يُترجم من جديد إن عدت له). */
+    private fun prune(outDir: File) {
+        val files = outDir.listFiles { f -> f.name.endsWith(".webp") }?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= OUT_CAP) return
+        for (f in files) {
+            if (total <= OUT_KEEP) break
+            total -= f.length()
+            f.delete()
+        }
     }
 
     /** يرجع (WebP، بصمة الصفحة، عدد المرسوم). */

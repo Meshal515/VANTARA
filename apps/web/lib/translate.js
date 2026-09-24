@@ -232,7 +232,27 @@ export function renderPlan(analysis, reply) {
  *   `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
  * @returns {Promise<{ image: string | null, regions, translated, hash, from } | { error: string }>}
  */
+/** صفحات القارئ الجارية: الترجمة المقدّمة لا تبدأ صفحة جديدة وهي تعمل (النت للصفحة أمامك). */
+let readerBusy = 0;
+let readerLastAt = 0;
+
+/** ينتظر حتى يهدأ القارئ (لا صفحة له منذ ثانيتين). تناديه الترجمة المقدّمة قبل كل صفحة. */
+export async function readerQuiet({ sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now() } = {}) {
+  while (readerBusy > 0 || now() - readerLastAt < 2000) await sleep(500);
+}
+
 export async function translatePage(deps, src, meta) {
+  if (deps.via !== 'reader') return translatePageNow(deps, src, meta);
+  readerBusy += 1;
+  try {
+    return await translatePageNow(deps, src, meta);
+  } finally {
+    readerBusy -= 1;
+    readerLastAt = Date.now();
+  }
+}
+
+async function translatePageNow(deps, src, meta) {
   const clock = stopwatch();
   const hash = await clock.time('hash', pageHashOf(src));
   const local = await clock.time('cacheRead', (async () => (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash)))());
@@ -324,15 +344,22 @@ async function translateOnDevice(deps, hash, meta, clock) {
   const textless = !(analysis.regions ?? []).length;
   if (!readable.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
-  const res = await clock.time('luna', deps.sync.translation('/v1/translate/text', {
-    method: 'POST',
-    body: {
-      ...meta,
-      pageHash: hash,
-      image: { mediaType: 'image/jpeg', data: analysis.thumbnail ?? '', width: analysis.width, height: analysis.height },
-      regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
-    },
-  }));
+  // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
+  // الخادم يردّ need_image (أو bad_image الأقدم) لصفحة جديدة، فتُرسل بمصغّرتها
+  const ask = (data) =>
+    deps.sync.translation('/v1/translate/text', {
+      method: 'POST',
+      body: {
+        ...meta,
+        pageHash: hash,
+        image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
+        regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
+      },
+    });
+  let res = await clock.time('luna', ask(''));
+  if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
+    res = await clock.time('luna', ask(analysis.thumbnail ?? ''));
+  }
   if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
   const plan = renderPlan(analysis, res.body);
   const incomplete = unansweredIds(readable, res.body).length > 0;

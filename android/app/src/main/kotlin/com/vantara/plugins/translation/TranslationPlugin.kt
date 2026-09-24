@@ -44,7 +44,9 @@ class TranslationPlugin : Plugin() {
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
-    private val outDir by lazy { File(context.cacheDir, "translated-pages") }
+    // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
+    // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
+    private val outDir by lazy { File(context.filesDir, "translated-pages") }
 
     private fun status(): JSObject {
         val files = JSArray()
