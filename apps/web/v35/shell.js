@@ -610,17 +610,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     let heroDone = hasCache;
     let paintTimer = null;
+    let saveTimer = null;
     const paint = () => {
       clearTimeout(paintTimer);
       paintTimer = setTimeout(() => {
-        if (!heroDone && state.home.trending.length) {
-          state.heroItems = heroFrom(state.home.trending);
-          if (state.heroItems.length >= 3) {
-            heroDone = true;
-            renderHero();
-          }
+        // البانر من أول عمل له غلاف، ويكتمل مع وصول الباقي. كان ينتظر ثلاثة ثم
+        // الستة عشر كلها، فمصدرٌ بطيء يُبقي مكانه مربعًا أسود
+        const next = heroFrom(state.home.trending);
+        if (!heroDone && next.length > state.heroItems.length && !state.heroDragging) {
+          state.heroItems = next;
+          renderHero();
+          if (next.length >= 6) heroDone = true;
         }
         if (currentPage() === 'home') renderHome();
+        // يُحفظ ما وصل فورًا: الفتحة القادمة تبدأ منه ولو علق مصدر للنهاية
+        if (!hasCache && !saveTimer) {
+          saveTimer = setTimeout(() => {
+            saveTimer = null;
+            void writeKv('home.v2', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+          }, 1500);
+        }
       }, 120);
     };
     const live = (key) => ({ items }) => {
@@ -636,8 +645,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
       state.home.trending = tr.items;
       state.home.recent = re.items;
-      state.heroItems = heroFrom(tr.items);
-      renderHero();
+      clearTimeout(saveTimer);
+      const finalHero = heroFrom(tr.items);
+      // لا يُعاد بناء بانرٍ يلفّ أمام المستخدم بنفس الأعمال
+      if (finalHero.length && (finalHero.length !== state.heroItems.length || finalHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
+        state.heroItems = finalHero;
+        renderHero();
+      } else if (!state.heroItems.length) {
+        renderHeroFallback();
+      }
       renderHome();
       if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
       void writeKv('home.v2', { trending: tr.items.slice(0, 40), recent: re.items.slice(0, 40) });

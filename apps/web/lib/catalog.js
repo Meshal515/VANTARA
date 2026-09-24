@@ -60,6 +60,14 @@ const NOISE = new Set(
 );
 
 /**
+ * لغة النسخة بين قوسين: «One Piece (English)» و«One Piece (French)» عند بعض
+ * المصادر هي One Piece نفسه، لا أعمال أخرى. تُحذف من مفتاح المطابقة وحده،
+ * والعنوان المعروض لا يتغيّر. القوسان شرط: «English Teacher» عنوان لا لغة.
+ */
+const LANGUAGE_TAG =
+	/[([【]\s*(?:english|eng|en|french|fr|français|francais|arabic|ar|spanish|español|espanol|portuguese|pt-br|indonesian|vietnamese|raw|عربي|العربية|عربية|انجليزي|إنجليزي|الإنجليزية|الانجليزية|فرنسي|الفرنسية)(?:\s+(?:version|ver|translation|نسخة|ترجمة))?\s*[)\]】]/giu;
+
+/**
  * مفتاح مطابقة عملٍ عبر المصادر.
  *
  * وحدُّه معروف ومقصود: المطابقة على الحروف، فعملٌ يسمّيه مصدرٌ
@@ -69,7 +77,7 @@ const NOISE = new Set(
  */
 export function normalizeTitle(raw) {
 	if (typeof raw !== 'string') return '';
-	const folded = fold(raw);
+	const folded = fold(raw.replace(LANGUAGE_TAG, ' '));
 	const kept = folded
 		.split(' ')
 		.filter((word) => word && !NOISE.has(word))
