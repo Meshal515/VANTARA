@@ -84,20 +84,32 @@ function sources() {
 export const available = () => engine.isAvailable();
 
 /**
- * مصدر «تكملة» (`<pkg>@<lang>`، الإنجليزي من MangaDex): العربي أولًا دائمًا.
- * لا يبني قوائم ولا يظهر في شرائح المصادر؛ يملأ فقط فصول عملٍ له نسخة عربية،
- * والفصل العربي بنفس الرقم يغلبه متى نزل.
+ * مصدر «تكملة» (`<pkg>@<lang>`، الإنجليزية: MangaDex وWeeb Central وغيرهما):
+ * العربي أولًا دائمًا. لا يبني قوائم؛ يملأ فقط فصول عملٍ له نسخة عربية، والفصل
+ * العربي بنفس الرقم يغلبه متى نزل. ويظهر في المصادر بعد العربي، بوسم «إنجليزي».
  */
 export const isFiller = (sourceId) => String(sourceId ?? '').includes('@');
+/** اسم المصدر كما يُعرض: الإنجليزي موسوم، فلا يلتبس MangaDex العربي بالإنجليزي. */
+export const sourceLabel = (s) => (isFiller(s?.sourceId) ? `${s.label} · إنجليزي` : s?.label);
+/** شرائح المصادر: العربي أولًا ثم الإنجليزي، وداخل كلٍّ بالأوثق. */
+const sourceList = (editions) =>
+  [...editions]
+    .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)))
+    .map((v) => ({ sourceId: v.sourceId, label: sourceLabel(v), count: v.chapters?.length ?? 0, lang: isFiller(v.sourceId) ? 'en' : 'ar' }));
 const listingSources = async ({ query = '' } = {}) => (await sources()).filter((s) => query || !s.filler);
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
  * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
  */
-export function localizeFiller(rows) {
+export function localizeFiller(rows, { keepLabel = false } = {}) {
   return rows.map((row) =>
     isFiller(row.sourceId) && row.number >= 0
-      ? { ...row, label: null, lang: 'en', chapter: { ...row.chapter, name: `الفصل ${row.number}`, originalName: row.chapter?.name ?? null } }
+      ? {
+          ...row,
+          label: keepLabel ? sourceLabel(row) : null,
+          lang: 'en',
+          chapter: { ...row.chapter, name: `الفصل ${row.number}`, originalName: row.chapter?.name ?? null },
+        }
       : row,
   );
 }
@@ -225,9 +237,9 @@ export async function detail(v35work) {
     chapters: chapters.length || null,
     _chapters: chapters,
     _editions: values,
-    _sources: values.map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _sources: sourceList(values),
     // المصدر الذي لم يردّ يُقال إنه لم يردّ، لا يختفي كأنه غير موجود
-    _failedSources: work.editions.filter((e) => !answered.has(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
+    _failedSources: work.editions.filter((e) => !answered.has(e.sourceId) && !isFiller(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
   };
 }
 
@@ -243,9 +255,17 @@ export async function detail(v35work) {
 
 /** أولوية الثقة. من ليس هنا يأتي بعدها بعدد فصوله. */
 const TRUSTED = ['mangalek', 'mangastarz', 'teamx', 'mangaswat', 'azora', 'mangaspark'];
+/**
+ * والإنجليزي بعد كل العربي، وبينه بالجودة: Weeb Central (نسخ رسمية وفرق
+ * معروفة)، ثم Asura للمانهوا، ثم MangaDex، ثم الأرشيفات الكبيرة.
+ */
+const TRUSTED_EN = ['weebcentral', 'asurascans', 'mangadex', 'mangafire', 'mangakakalot', 'mangahere'];
 export function sourceRank(sourceId) {
-  // التكملة بعد كل مصدر عربي، مهما كان عدد فصوله
-  if (isFiller(sourceId)) return 1000;
+  if (isFiller(sourceId)) {
+    const pkg = String(sourceId).split('@')[0].toLowerCase();
+    const i = TRUSTED_EN.findIndex((t) => pkg.endsWith(`.${t}`));
+    return 1000 + (i < 0 ? TRUSTED_EN.length : i);
+  }
   const id = String(sourceId ?? '').toLowerCase();
   const i = TRUSTED.findIndex((t) => id.endsWith(`.${t}`) || id === t);
   return i < 0 ? TRUSTED.length : i;
@@ -274,7 +294,7 @@ function assemble(v35work, editions, detail, failed = []) {
     chapters: chapters.length || null,
     _chapters: chapters,
     _editions: editions,
-    _sources: editions.filter((v) => !isFiller(v.sourceId)).map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _sources: sourceList(editions),
     _failedSources: failed.filter((f) => !isFiller(f.sourceId)),
   };
 }
@@ -500,7 +520,7 @@ export async function withEditions(full, found) {
     chapters: chapters.length || null,
     _chapters: chapters,
     _editions: editions,
-    _sources: editions.filter((v) => !isFiller(v.sourceId)).map((v) => ({ sourceId: v.sourceId, label: v.label, count: v.chapters?.length ?? 0 })),
+    _sources: sourceList(editions),
     _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
   };
 }
@@ -514,7 +534,8 @@ export async function withEditions(full, found) {
 export function editionRows(v35work, sourceId) {
   const edition = v35work._editions?.find((e) => e.sourceId === sourceId);
   if (!edition) return [];
-  return mergeChapters([edition]);
+  // فصول مصدر إنجليزي بعينه: «الفصل 23» واسم مصدرها، والقارئ يعرف أنها تُترجم
+  return localizeFiller(mergeChapters([edition]), { keepLabel: true });
 }
 
 const described = new Map();
