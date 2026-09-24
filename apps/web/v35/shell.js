@@ -2784,7 +2784,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('detailTop').classList.remove('scrolled');
     if (id === 'library') renderLibrary();
     if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
-    if (id === 'settings') renderSettings();
+    if (id === 'settings') {
+      usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
+      renderSettings();
+    }
 
     if (id !== 'majlis' || state.socialTab !== 'notifications') state.notifFresh = null;
     if (id === 'majlis') {
@@ -2962,6 +2965,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   let modelsInfo = null;
   let modelsBusy = null; // { received, total } أثناء التحميل
+  let translateUsage = null;
+  let usageAsked = false;
   function renderTranslationSettings(group, row, toggle) {
     const s = readTranslateSettings();
     const rows = [
@@ -3010,6 +3015,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
       rows.push(speedRow);
     }
     if (s.enabled) {
+      // الصرف الفعلي (من توكنات كل ردّ) وحصتك هذا الأسبوع: للمراقبة
+      if (!usageAsked) {
+        usageAsked = true;
+        void sync
+          .translation('/v1/translate/usage')
+          .then((res) => {
+            if (res.status !== 200) return;
+            translateUsage = res.body;
+            if (currentPage() === 'settings') renderSettings();
+          })
+          .catch(() => {});
+      }
+      if (translateUsage?.budgetUsd) {
+        const sar = (usd) => (usd * 3.75).toFixed(usd * 3.75 < 10 ? 1 : 0);
+        rows.push(
+          row('activity', 'صرف الترجمة هالشهر', `للتطبيق كله من السقف ${sar(translateUsage.budgetUsd)} ريال. حصتك هالأسبوع: ${translateUsage.used} صفحة و${translateUsage.chapters ?? 0} فصل`, {
+            value: `${sar(translateUsage.spentUsd ?? 0)} ريال`,
+            tone: (translateUsage.spentUsd ?? 0) >= translateUsage.budgetUsd * 0.8 ? 'warn' : undefined,
+          }),
+        );
+      }
       const all = translationJobs.jobs();
       const runningCount = all.filter((j) => j.status === 'running').length;
       rows.push(
