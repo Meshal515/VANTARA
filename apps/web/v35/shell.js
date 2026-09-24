@@ -22,7 +22,9 @@ import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapte
 import { titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-settings.js';
-import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable, removeModels } from '../lib/translation-native.js';
+import { downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
+import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
+import { translatePage } from '../lib/translate.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
@@ -225,6 +227,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   const me = () => sync.user?.userId;
+
+  // ترجمة الفصول مقدمًا: الطابور المحفوظ (lib/translate-jobs.js)، يُنشأ مبكرًا فكل من يسأله يجده
+  const translationJobs = createJobRunner({ sync, engine, translatePage, native: { jobProgress, jobFinished, jobStop } });
+  const jobStatus = new Map(translationJobs.jobs().map((j) => [j.id, j.status]));
+  let jobSheetRefresh = null;
+  translationJobs.subscribe((list) => {
+    for (const j of list) {
+      const was = jobStatus.get(j.id);
+      if (was && was !== j.status) {
+        if (j.status === 'done') toast(`جاهزة للقراءة: ${j.title} ✓`);
+        else if (j.status === 'paused' && j.reason) toast(BLOCK_TEXT[j.reason] ?? 'توقفت الترجمة');
+      }
+      jobStatus.set(j.id, j.status);
+    }
+    jobSheetRefresh?.();
+    if (state.current) renderTranslateToggle(state.current);
+    if (currentPage() === 'settings') renderSettings();
+  });
+  // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
+  (function resumeJobsWhenSignedIn(tries = 0) {
+    if (sync.user) return void translationJobs.resumeAll();
+    if (tries < 60) setTimeout(() => resumeJobsWhenSignedIn(tries + 1), 5000);
+  })();
+
   const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed);
   const inCollection = (kind, ref) =>
     kind === 'completed'
@@ -1042,17 +1068,328 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const on = translationOn(String(w?.id ?? ''));
     b.setAttribute('aria-pressed', String(on));
     b.classList.toggle('detail-tl--on', on);
-    const label = on ? 'الترجمة التلقائية شغّالة لهذا العمل' : 'ترجمة تلقائية للفصول الإنجليزية (مقفلة)';
+    const running = translationJobs.forWork(String(w?.id ?? '')).some((j) => j.status === 'running');
+    b.classList.toggle('detail-tl--busy', running);
+    const label = running ? 'الترجمة العربية: فصول تُترجم الحين' : on ? 'الترجمة العربية: شغّالة لهذا العمل' : 'الترجمة العربية';
     b.setAttribute('aria-label', label);
     b.title = label;
   }
-  function toggleTranslateCurrent() {
-    const w = state.current;
-    if (!w) return;
+  function toggleReadingTranslation(w) {
     const on = !translationOn(String(w.id));
     setTranslation(String(w.id), on);
     renderTranslateToggle(w);
-    toast(on ? 'الترجمة التلقائية شغّالة: كل فصل إنجليزي يجهز 30% منه بالعربي قبل ما تبدأ' : 'الترجمة التلقائية مقفلة — الإنجليزي يُعرض كما هو');
+    toast(on ? 'الترجمة أثناء القراءة شغّالة لهذا العمل' : 'الترجمة أثناء القراءة مقفلة: الإنجليزي يُعرض كما هو');
+  }
+
+  // ───────────────── ترجمة الفصول مقدمًا ─────────────────
+  // زر الترجمة في صفحة العمل: الترجمة أثناء القراءة، أو تجهيز فصول كاملة في
+  // الخلفية (الطابور في lib/translate-jobs.js، والإشعار من خدمة أندرويد).
+
+  const chaptersWord = (n) => (n === 1 ? 'فصل واحد' : n === 2 ? 'فصلين' : `${n} فصول`);
+  const pagesWord = (n) => (n === 1 ? 'صفحة واحدة' : n === 2 ? 'صفحتين' : `${n} صفحة`);
+
+  /** بطاقة مهمة: التقدّم، والحالة، وإيقاف/استئناف/إلغاء. */
+  function jobCard(job) {
+    const card = el('div', 'tl-job');
+    const p = progressOf(job);
+    const head = el('div', 'tl-job__head');
+    head.append(el('strong', null, job.title));
+    const first = job.chapters[0]?.number;
+    const last = job.chapters[job.chapters.length - 1]?.number;
+    head.append(el('small', null, `${first === last ? `الفصل ${first}` : `الفصول ${first}–${last}`} · ${job.mode === 'fast' ? 'أسرع' : 'أعلى جودة'}`));
+    const bar = el('div', 'tl-job__bar');
+    const fill = el('span');
+    fill.style.width = `${Math.round((job.status === 'done' ? 1 : p.ratio) * 100)}%`;
+    bar.append(fill);
+    const state_ =
+      job.status === 'done'
+        ? `اكتملت: ${chaptersWord(job.chapters.length)} جاهزة للقراءة`
+        : job.status === 'paused'
+          ? job.reason
+            ? BLOCK_TEXT[job.reason] ?? 'متوقفة'
+            : `متوقفة · ${p.done}/${p.total || '…'} صفحة`
+          : p.total
+            ? `${p.done}/${p.total} صفحة · ${chaptersWord(p.chaptersDone)} من ${job.chapters.length}${p.unknown ? ' (نحسب الباقي)' : ''}`
+            : 'نجهّز الفصول…';
+    const actions = el('div', 'tl-job__actions');
+    const act = (label, run, cls = 'btn btn-secondary') => {
+      const b = el('button', cls, label);
+      b.type = 'button';
+      b.onclick = run;
+      actions.append(b);
+    };
+    if (job.status === 'running') act('إيقاف مؤقت', () => translationJobs.pause(job.id));
+    if (job.status === 'paused') act('استئناف', () => translationJobs.resume(job.id), 'btn btn-primary');
+    if (job.status !== 'done') act('إلغاء', () => translationJobs.cancel(job.id));
+    else act('إزالة من القائمة', () => translationJobs.cancel(job.id));
+    card.append(head, bar, el('p', 'tl-job__state', state_), actions);
+    return card;
+  }
+
+  function openTranslateMenu() {
+    const w = state.current;
+    if (!w) return;
+    const ref = String(w.id);
+    const build = (body) => {
+      body.append(el('h3', null, 'الترجمة العربية'));
+      const on = translationOn(ref);
+      body.append(
+        sheetItem('translateAr', 'الترجمة أثناء القراءة', () => {
+          toggleReadingTranslation(w);
+          body.replaceChildren(el('div', 'sheet-handle'));
+          build(body);
+        }, { pressed: on }),
+      );
+      body.append(sheetItem('download', 'ترجم فصولًا مقدمًا', () => openTranslateAhead(w)));
+      const list = translationJobs.forWork(ref);
+      if (list.length) {
+        body.append(el('div', 'settings-group-label', 'فصول تُترجم لهذا العمل'));
+        for (const job of list) body.append(jobCard(job));
+      }
+    };
+    openSheet((body) => {
+      build(body);
+      jobSheetRefresh = () => {
+        body.replaceChildren(el('div', 'sheet-handle'));
+        build(body);
+      };
+      return () => {
+        jobSheetRefresh = null;
+      };
+    });
+  }
+  const toggleTranslateCurrent = openTranslateMenu;
+
+  /** الإعدادات ← قائمة الترجمة: كل المهام، بتقدّمها وأزرارها. */
+  function openJobsSheet() {
+    const build = (body) => {
+      body.append(el('h3', null, 'قائمة الترجمة'));
+      const list = translationJobs.jobs();
+      if (!list.length) {
+        body.append(el('p', null, 'ما فيه فصول تُترجم الحين. افتح أي عمل واضغط زر الترجمة ← «ترجم فصولًا مقدمًا».'));
+        return;
+      }
+      for (const job of list) body.append(jobCard(job));
+      if (list.some((j) => j.status === 'done')) {
+        const clear = el('button', 'btn btn-block btn-secondary', 'إزالة المكتملة من القائمة');
+        clear.type = 'button';
+        clear.onclick = () => translationJobs.clearFinished();
+        body.append(clear);
+      }
+    };
+    openSheet((body) => {
+      build(body);
+      jobSheetRefresh = () => {
+        body.replaceChildren(el('div', 'sheet-handle'));
+        build(body);
+      };
+      return () => {
+        jobSheetRefresh = null;
+      };
+    });
+  }
+
+  /**
+   * «ترجم فصولًا مقدمًا»: المصدر (إنجليزي)، من فصل إلى فصل، عدد الصفحات
+   * والحصة والوقت المتوقع، والوضع (أعلى جودة / أسرع)، ثم ابدأ.
+   */
+  function openTranslateAhead(w) {
+    const ref = String(w.id);
+    const sources = (w._sources ?? []).filter((x) => x.lang === 'en');
+    let alive = true;
+    openSheet((body) => {
+      body.append(el('h3', null, 'ترجم فصولًا مقدمًا'));
+      if (!sources.length) {
+        body.append(el('p', null, 'هالعمل ما له مصدر إنجليزي. الترجمة تكون من الإنجليزي فقط.'));
+        return () => (alive = false);
+      }
+      const intro = el('p', 'tl-ahead__note', 'اختر الفصول، وروح اقرأ شي ثاني. ترجع تلاقيها جاهزة بلا انتظار.');
+      body.append(intro);
+
+      let sourceId = sources[0].sourceId;
+      let mode = 'quality';
+      const rowsOf = (sid) => editionRows(w, sid);
+      const range = (sid) => englishSources(rowsOf(sid))[0] ?? { min: 0, max: 0, count: 0 };
+
+      // المصدر
+      body.append(el('div', 'field-label tl-ahead__label', 'المصدر'));
+      const srcSeg = el('div', 'segmented tl-ahead__sources');
+      body.append(srcSeg);
+
+      // من / إلى
+      const field = (label) => {
+        const f = el('label', 'field');
+        f.append(el('span', 'field-label', label));
+        const input = el('input', 'field-input');
+        input.type = 'number';
+        input.inputMode = 'decimal';
+        input.step = 'any';
+        f.append(input);
+        return { f, input };
+      };
+      const from = field('من الفصل');
+      const to = field('إلى الفصل');
+      const pair = el('div', 'tl-ahead__range');
+      pair.append(from.f, to.f);
+      body.append(pair);
+
+      // الوضع
+      body.append(el('div', 'field-label tl-ahead__label', 'الوضع'));
+      const modeSeg = el('div', 'segmented');
+      const modeNote = el('p', 'tl-ahead__note');
+      for (const [value, label] of [['quality', 'أعلى جودة'], ['fast', 'أسرع']]) {
+        const b = el('button', null, label);
+        b.type = 'button';
+        b.onclick = () => {
+          mode = value;
+          paintMode();
+          void recount();
+        };
+        modeSeg.append(b);
+      }
+      const paintMode = () => {
+        for (const b of modeSeg.children) b.setAttribute('aria-pressed', String(b.textContent === (mode === 'fast' ? 'أسرع' : 'أعلى جودة')));
+        modeNote.textContent =
+          mode === 'fast'
+            ? 'نفس لونا بدون تفكير: أسرع، وأحيانًا أخطاء أكثر. زين لفصول الأكشن قليلة الكلام.'
+            : 'لونا بكامل تركيزها: أدق ترجمة، وتاخذ وقت أطول شوي.';
+      };
+      body.append(modeSeg, modeNote);
+
+      // الملخص: الفصول، الصفحات، الحصة، الوقت
+      const summary = el('div', 'tl-ahead__summary');
+      body.append(summary);
+      const keep = el('p', 'tl-ahead__note', 'تقدر تطفي الشاشة وتستخدم تطبيقات ثانية. بس لا تسكّر VANTARA من قائمة التطبيقات. بيطلع لك إشعار بالتقدّم، ولو انقطع شي يكمل من نفس الصفحة بدون ما يعيد شي.');
+      body.append(keep);
+      const start = el('button', 'btn btn-block btn-primary', 'ابدأ الترجمة');
+      start.type = 'button';
+      body.append(start);
+
+      const counts = {};
+      let usage = null;
+      let counting = 0;
+      void sync
+        .translation('/v1/translate/usage')
+        .then((res) => {
+          if (res.status === 200) usage = res.body;
+          paintSummary();
+        })
+        .catch(() => {});
+
+      const chosen = () => pickChapters(rowsOf(sourceId), sourceId, from.input.value, to.input.value);
+      function paintSummary() {
+        if (!alive) return;
+        const rows = chosen();
+        summary.replaceChildren();
+        if (!rows.length) {
+          summary.append(el('p', null, 'ما فيه فصول بهالنطاق عند هالمصدر.'));
+          start.disabled = true;
+          return;
+        }
+        start.disabled = false;
+        const known = rows.filter((r) => Number.isFinite(counts[chapterKeyOf(ref, r)]));
+        const pages = known.reduce((n, r) => n + counts[chapterKeyOf(ref, r)], 0);
+        const allKnown = known.length === rows.length;
+        const approx = allKnown ? pages : known.length ? Math.round((pages / known.length) * rows.length) : null;
+        summary.append(el('strong', null, `${chaptersWord(rows.length)} · ${approx === null ? 'نحسب الصفحات…' : `${allKnown ? '' : 'تقريبًا '}${pagesWord(approx)}`}`));
+        if (usage?.limit) {
+          const left = Math.max(0, usage.limit - usage.used);
+          const line = el('small', null, `من حصتك هالأسبوع: باقي ${left} من ${usage.limit} صفحة. الصفحات المترجمة من قبل ما تنحسب.`);
+          summary.append(line);
+          if (approx !== null && approx > left) summary.append(el('small', 'tl-ahead__warn', `الحصة ما تكفي كل الصفحات: يترجم ${left} ويوقف، ويكمل بعد تجدد الحصة الخميس.`));
+        }
+        const pace = readPace()[mode];
+        const minutes = approx === null ? null : estimateMinutes(approx, pace);
+        summary.append(el('small', null, minutes === null ? 'الوقت المتوقع يتضح بعد أول صفحات تترجمها.' : `الوقت المتوقع: حوالي ${minutes < 60 ? `${minutes} دقيقة` : `${Math.round(minutes / 6) / 10} ساعة`}.`));
+      }
+
+      /** عدد صفحات الفصول المختارة، أربعة فصول معًا، والملخص يتحدّث أولًا بأول. */
+      async function recount() {
+        const ticket = ++counting;
+        paintSummary();
+        const queue = chosen().filter((r) => !Number.isFinite(counts[chapterKeyOf(ref, r)])).slice(0, 200);
+        const worker = async () => {
+          while (alive && ticket === counting && queue.length) {
+            const r = queue.shift();
+            try {
+              const list = await engine.pages(r.sourceId, r.chapter);
+              counts[chapterKeyOf(ref, r)] = list?.length ?? 0;
+            } catch {
+              // يُحسب وقت الترجمة
+            }
+            paintSummary();
+          }
+        };
+        await Promise.all([worker(), worker(), worker(), worker()]);
+      }
+
+      function paintSources() {
+        srcSeg.replaceChildren();
+        for (const x of sources) {
+          const b = el('button', null, x.label.replace(' · إنجليزي', ''));
+          b.type = 'button';
+          b.setAttribute('aria-pressed', String(x.sourceId === sourceId));
+          b.onclick = () => {
+            sourceId = x.sourceId;
+            paintSources();
+            setRange();
+          };
+          srcSeg.append(b);
+        }
+      }
+      function setRange() {
+        const r = range(sourceId);
+        // من أول فصل ما قرأته عند هالمصدر، عشرة فصول
+        const unread = rowsOf(sourceId)
+          .filter((row) => Number.isFinite(row.number) && row.number >= 0 && !isChapterRead(sync, ref, chapterKeyOf(ref, row)))
+          .sort((a, b) => a.number - b.number)[0];
+        const lo = unread?.number ?? r.min;
+        const ordered = rowsOf(sourceId).map((row) => row.number).filter((n) => Number.isFinite(n) && n >= lo).sort((a, b) => a - b);
+        from.input.value = String(lo);
+        to.input.value = String(ordered[Math.min(ordered.length - 1, 9)] ?? r.max);
+        from.input.min = to.input.min = String(r.min);
+        from.input.max = to.input.max = String(r.max);
+        void recount();
+      }
+      let debounce = 0;
+      for (const input of [from.input, to.input]) {
+        input.oninput = () => {
+          clearTimeout(debounce);
+          debounce = setTimeout(() => void recount(), 350);
+        };
+      }
+
+      start.onclick = async () => {
+        const rows = chosen();
+        if (!rows.length) return;
+        const models = await modelsStatus().catch(() => null);
+        if (!models?.installed) {
+          toast('حمّل ملفات الترجمة أول: الإعدادات ← الترجمة');
+          return;
+        }
+        await notificationPermission();
+        const label = sources.find((x) => x.sourceId === sourceId)?.label ?? sourceId;
+        const pageCounts = {};
+        for (const r of rows) {
+          const key = chapterKeyOf(ref, r);
+          if (Number.isFinite(counts[key])) pageCounts[key] = counts[key];
+        }
+        translationJobs.add(createJob({ ref, title: titleOf(w), sourceId, sourceLabel: label, mode, rows, keyOf: (r) => chapterKeyOf(ref, r), pageCounts }));
+        // الفصول المجهّزة تُعرض عربية في القارئ حتى في وضع «عند الطلب»
+        if (!translationOn(ref)) setTranslation(ref, true);
+        renderTranslateToggle(w);
+        closeSheet();
+        toast(`بدأت ترجمة ${chaptersWord(rows.length)} في الخلفية. بيطلع لك إشعار بالتقدّم`);
+      };
+
+      paintSources();
+      paintMode();
+      setRange();
+      return () => {
+        alive = false;
+        counting += 1;
+      };
+    });
   }
   function renderInfo(w) {
     renderTranslateToggle(w);
@@ -2646,7 +2983,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       modeRow.append(t, seg);
       rows.push(modeRow);
     }
-    const note = s.enabled ? 'الصفحات المترجمة تُحفظ عندك: ما تُرجم مرة ما يُعاد تحميله ولا ترجمته.' : null;
+    if (s.enabled) {
+      const all = translationJobs.jobs();
+      const runningCount = all.filter((j) => j.status === 'running').length;
+      rows.push(
+        row('download', 'قائمة الترجمة', 'الفصول اللي تُترجم مقدمًا: إيقاف، استئناف، إلغاء', {
+          value: runningCount ? `${runningCount} شغّالة` : all.length ? String(all.length) : null,
+          tone: runningCount ? 'ok' : undefined,
+          run: openJobsSheet,
+        }),
+      );
+    }
+    const note = s.enabled ? 'الصفحات المترجمة تُحفظ عندك: ما تُرجم مرة ما يُعاد تحميله ولا ترجمته. تجهيز فصول مقدمًا من زر الترجمة في صفحة العمل.' : null;
     group('الترجمة', rows, { note });
 
     if (!s.enabled) return;

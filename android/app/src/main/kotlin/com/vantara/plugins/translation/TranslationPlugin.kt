@@ -6,6 +6,11 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +26,9 @@ import java.util.concurrent.TimeUnit
  *   models / downloadModels (+ أحداث modelsProgress) / cancelDownload / removeModels
  *   analyzePage({ path, sourceLang }) → { pageHash, width, height, thumbnail, regions }
  *   renderPage({ path, regions: [{ id, arabic }] }) → { path, translated }
+ *
+ *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()
+ *   notificationPermission() → { granted }
  *
  * الرؤية والتبييض والرسم كلها هنا؛ Luna من JavaScript عبر sync-worker.
  */
@@ -133,5 +141,33 @@ class TranslationPlugin : Plugin() {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
             }
         }
+    }
+
+    /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */
+    @PluginMethod
+    fun jobProgress(call: PluginCall) {
+        TranslationJobService.update(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "", call.getInt("done") ?: 0, call.getInt("total") ?: 0)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun jobFinished(call: PluginCall) {
+        TranslationJobService.finished(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "")
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun jobStop(call: PluginCall) {
+        TranslationJobService.stop(context)
+        call.resolve()
+    }
+
+    /** أندرويد 13+: الإشعارات تحتاج إذنًا. يطلبه مرة ويرجع الحالة الحالية. */
+    @PluginMethod
+    fun notificationPermission(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return call.resolve(JSObject().put("granted", true))
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!granted) activity?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7303) }
+        call.resolve(JSObject().put("granted", granted))
     }
 }

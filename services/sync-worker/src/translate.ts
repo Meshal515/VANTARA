@@ -578,11 +578,22 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   const chapterNumber = Number.isFinite(Number(body.chapterNumber)) && body.chapterNumber !== null ? Number(body.chapterNumber) : null;
   const sourceLang = typeof body.sourceLang === 'string' && LANGS.has(body.sourceLang) ? body.sourceLang : 'auto';
   const seriesTitle = typeof body.seriesTitle === 'string' ? body.seriesTitle.slice(0, 200) : null;
-  const engine = textEngineOf(env);
-
-  const cached = await env.DB.prepare('SELECT regions_json, summary FROM translation_pages WHERE page_hash = ? AND engine = ?')
-    .bind(pageHash, engine)
-    .first<{ regions_json: string; summary: string | null }>();
+  // «سريع»: نفس Luna بلا تفكير. يُحفظ بمحرّك منفصل فلا يحلّ محل ترجمة الجودة أبدًا،
+  // والطلب السريع يأخذ ترجمة الجودة إن وُجدت (أفضل وبلا تكلفة).
+  const fast = body.speed === 'fast';
+  const qualityEngine = textEngineOf(env);
+  const engines = fast ? [qualityEngine, `${qualityEngine}:fast`] : [qualityEngine];
+  let engine = engines[engines.length - 1]!;
+  let cached: { regions_json: string; summary: string | null } | null = null;
+  for (const e of engines) {
+    cached = await env.DB.prepare('SELECT regions_json, summary FROM translation_pages WHERE page_hash = ? AND engine = ?')
+      .bind(pageHash, e)
+      .first<{ regions_json: string; summary: string | null }>();
+    if (cached) {
+      engine = e;
+      break;
+    }
+  }
   const known = new Set(regionsIn.map((r) => r.id));
   const saved = cached ? (JSON.parse(cached.regions_json) as TextRegionOut[]).filter((r) => known.has(r.id)) : [];
   // المحفوظ صالح ما دامت المعرّفات نفسها (نفس الصورة = نفس الكشف = نفس المعرّفات).
@@ -600,9 +611,10 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
   if (!repairing && (used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
 
-  const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
+  const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
   const ask = (regions: TextRegionIn[], retry = false) =>
     askText(env, deps, {
+      effort: fast ? 'none' : undefined,
       mediaType,
       data,
       context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions }) + (retry ? RETRY_NOTE : ''),
@@ -663,6 +675,18 @@ export const RETRY_NOTE = `
 
 These regions came back without Arabic in the first pass. Each one is its own bubble on the page and the reader sees it on its own, so each needs its own Arabic even if a neighbouring bubble says something related. Do not return null for speech, thought or narration: translate exactly the text of each region.`;
 
+/**
+ * `GET /v1/translate/usage`: كم صفحة ترجمتَ هذا الأسبوع ومن كم، ومتى يتجدد.
+ * لحاسبة الترجمة المقدّمة. الصفحات المحفوظة من قبل (لأي حساب) لا تُحسب.
+ */
+export async function handleTranslateUsage(env: TranslationEnv, userId: string, now: number): Promise<Response> {
+  const day = weekOf(now);
+  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
+  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
+  const start = Date.parse(`${day.slice(2)}T14:00:00Z`);
+  return reply({ used: used?.pages ?? 0, limit, resetsAt: start + 7 * 24 * 3600_000, configured: Boolean(env.OPENAI_API_KEY) });
+}
+
 /** مناطق طُلبت ولم تأخذ جوابًا: غائبة من الرد، أو كلام بلا عربي. اللافتة والمؤثر والحقوق بلا عربي جواب صحيح. */
 export function unanswered(asked: TextRegionIn[], got: TextRegionOut[]): TextRegionIn[] {
   const byId = new Map(got.map((r) => [r.id, r]));
@@ -678,9 +702,9 @@ export function unanswered(asked: TextRegionIn[], got: TextRegionOut[]): TextReg
 async function askText(
   env: TranslationEnv,
   deps: TranslateDeps,
-  input: { mediaType: string; data: string; context: string; known: Set<string> },
+  input: { effort?: 'none' | undefined; mediaType: string; data: string; context: string; known: Set<string> },
 ): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null }> {
-  const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
+  const effort = input.effort ?? (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
   let payload: OpenAIResponse;
   try {

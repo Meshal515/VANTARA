@@ -12,6 +12,8 @@
  *   removeModels()        → { installed: false }
  *   analyzePage({ path, sourceLang })          → { pageHash, width, height, regions: [...] }   (كشف + حروف + فقاعات + OCR)
  *   renderPage({ path, regions: [{id, arabic}] }) → { path }  (تبييض + عربي؛ ملف WebP جديد)
+ *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
+ *   notificationPermission() → { granted }
  *
  * على الويب (بلا Capacitor) لا ترجمة على الجهاز: `available()` = false والإعدادات تقول ذلك.
  */
@@ -70,6 +72,31 @@ export async function renderPage({ path, regions }) {
 }
 
 /** «٤١٢ ميجابايت» وما شابه، للإعدادات. */
+/**
+ * خدمة الترجمة المقدّمة: إشعار تقدّم ثابت يُبقي التطبيق حيًّا والشاشة مطفأة.
+ * APK أقدم بلا هذه الدوال: تمرّ بصمت، والطابور يعمل ما دام التطبيق مفتوحًا.
+ */
+async function call(name, args) {
+  try {
+    await plugin()?.[name]?.(args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+export const jobProgress = (args) => call('jobProgress', args);
+export const jobFinished = (args) => call('jobFinished', args);
+export const jobStop = () => call('jobStop');
+
+/** أندرويد 13+ يطلب إذن الإشعارات مرة. */
+export async function notificationPermission() {
+  try {
+    return Boolean((await plugin()?.notificationPermission?.())?.granted);
+  } catch {
+    return false;
+  }
+}
+
 export function formatBytes(bytes) {
   const n = Number(bytes) || 0;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} جيجابايت`;

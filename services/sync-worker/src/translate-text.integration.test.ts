@@ -233,3 +233,38 @@ describe('a bubble Luna skipped is never skipped for good', () => {
     expect(done.calls).toHaveLength(0);
   });
 });
+
+describe('fast mode and the weekly quota', () => {
+  const one = [{ id: 'rright001', source: 'RUN!', kind: 'speech', box: [10, 10, 100, 60] }];
+  const answer1 = (arabic: string) => ({ regions: [{ id: 'rright001', source: 'RUN!', kind: 'speech', arabic, speaker: null }], new_terms: [], characters: [], summary: '' });
+
+  it('fast asks Luna without reasoning and never replaces the quality translation', async () => {
+    const { env } = testEnv();
+    const fastGpt = fakeGpt(() => answer1('اهرب!'));
+    await handleTranslateText(req({ regions: one, speed: 'fast' }), env, A, Date.UTC(2026, 8, 24), { fetch: fastGpt.fetch });
+    expect((fastGpt.calls[0]!.body.reasoning as { effort: string }).effort).toBe('none');
+    // طلب الجودة لا يأخذ السريع: يترجم من جديد
+    const quality = fakeGpt(() => answer1('اركض!'));
+    const q = (await (await handleTranslateText(req({ regions: one }), env, A, Date.UTC(2026, 8, 24), { fetch: quality.fetch })).json()) as { regions: Array<{ arabic: string }> };
+    expect((quality.calls[0]!.body.reasoning as { effort: string }).effort).toBe('low');
+    expect(q.regions[0]?.arabic).toBe('اركض!');
+    // والسريع بعدها يأخذ الجودة المحفوظة بلا نداء
+    const again = fakeGpt(() => answer1('x'));
+    const f = (await (await handleTranslateText(req({ regions: one, speed: 'fast' }), env, B, Date.UTC(2026, 8, 24), { fetch: again.fetch })).json()) as { cached: boolean; regions: Array<{ arabic: string }> };
+    expect(again.calls).toHaveLength(0);
+    expect(f.cached).toBe(true);
+    expect(f.regions[0]?.arabic).toBe('اركض!');
+  });
+
+  it('reports this week\'s usage, the limit and when it resets', async () => {
+    const { handleTranslateUsage } = await import('./translate.ts');
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1000' });
+    const now = Date.UTC(2026, 8, 24, 10); // الخميس قبل 14:00 UTC: ما زال الأسبوع السابق
+    await handleTranslateText(req({ regions: one }), env, A, now, { fetch: fakeGpt(() => answer1('اركض!')).fetch });
+    const usage = (await (await handleTranslateUsage(env, A, now)).json()) as { used: number; limit: number; resetsAt: number };
+    expect(usage.used).toBe(1);
+    expect(usage.limit).toBe(1000);
+    expect(new Date(usage.resetsAt).toISOString()).toBe('2026-09-24T14:00:00.000Z');
+    expect(((await (await handleTranslateUsage(env, B, now)).json()) as { used: number }).used).toBe(0);
+  });
+});

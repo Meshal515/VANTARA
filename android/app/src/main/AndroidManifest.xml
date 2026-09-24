@@ -50,6 +50,12 @@
         <receiver
             android:name="com.vantara.plugins.InstallResultReceiver"
             android:exported="false" />
+
+        <!-- ترجمة الفصول مقدمًا والشاشة مطفأة: إشعار تقدّم ثابت (TranslationJobService) -->
+        <service
+            android:name="com.vantara.plugins.translation.TranslationJobService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
     <!-- Permissions -->
@@ -57,4 +63,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- «تثبيت» في شاشة التحديث: يفتح مثبّت أندرويد، والنظام يطلب الموافقة -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- ترجمة الفصول مقدمًا: خدمة أمامية بإشعار تقدّم، والمعالج مستيقظ والشاشة مطفأة -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>
