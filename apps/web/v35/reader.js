@@ -881,17 +881,34 @@ export function openSmartReader(deps, ctx) {
       if (!settings.pinchZoom || e.touches.length !== 2) return;
       const frame = e.target.closest('.rd-page');
       if (!frame) return;
+      // إصبعان على الصفحة ليسا تكبيرًا: يُفتح فقط حين يتباعدان أو يتقاربان فعلًا
+      // (كـScaleGestureDetector في أندرويد) — لا حين يسند أحدٌ الجوال بإصبع ثانٍ
+      pinch = { frame, d: dist(e.touches) };
+    },
+    { passive: true },
+  );
+  let pinch = null;
+  scroll.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!pinch || e.touches.length !== 2) return;
+      const d = dist(e.touches);
+      if (Math.abs(d / pinch.d - 1) < 0.12) return;
       const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      openZoom(frame, cx, cy);
+      openZoom(pinch.frame, cx, cy);
+      pinch = null;
       zoom.scale = 1;
       zoom.x = 0;
       zoom.y = 0;
-      zoom.start = { d: dist(e.touches), scale: 1 };
+      zoom.start = { d, scale: 1 };
       paintZoom();
     },
     { passive: true },
   );
+  scroll.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) pinch = null;
+  }, { passive: true });
   const zoomEl = q('rdZoom');
   zoomEl.addEventListener(
     'touchstart',
