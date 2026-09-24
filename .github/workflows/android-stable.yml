@@ -169,9 +169,15 @@ jobs:
           # نفس المفتاح في كل إصدار، وإلا رفض أندرويد التثبيت فوق السابق. البصمة
           # المثبّتة هي نفسها التي يتحقق منها التطبيق قبل أي تثبيت (ApkCheck)
           pinned=$(grep -oE 'STABLE_CERT_SHA256 = "[0-9a-f]{64}"' android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt | grep -oE '[0-9a-f]{64}')
-          grep -q "Signer #1 certificate SHA-256 digest: $pinned" /tmp/apksigner.txt             || { echo 'stable APK is not signed with the pinned VANTARA key'; exit 1; }
-          test "$(grep -c 'certificate SHA-256 digest' /tmp/apksigner.txt)" = 1             || { echo 'stable APK must have exactly one signer'; exit 1; }
-          "$tools/aapt2" dump badging "$apk" | head -1 | tee /tmp/badging.txt
+          # `--verbose` يطبع سطرًا لكل مخطط توقيع («V2 Signer: …»): كلها يجب أن تكون المفتاح المثبّت
+          grep -q "certificate SHA-256 digest: $pinned" /tmp/apksigner.txt             || { echo 'stable APK is not signed with the pinned VANTARA key'; exit 1; }
+          if grep 'certificate SHA-256 digest:' /tmp/apksigner.txt | grep -v "$pinned"; then
+            echo 'stable APK carries a signing certificate other than the pinned VANTARA key'; exit 1
+          fi
+          grep -q '^Number of signers: 1$' /tmp/apksigner.txt             || { echo 'stable APK must have exactly one signer'; exit 1; }
+          # إلى ملف لا عبر `head`: مع pipefail يموت aapt2 بـSIGPIPE فتفشل الخطوة
+          "$tools/aapt2" dump badging "$apk" > /tmp/badging.txt
+          sed -n 1p /tmp/badging.txt
           grep -q "package: name='com.vantara.app' versionCode='${VERSION_CODE}' " /tmp/badging.txt             || { echo 'unexpected package id or versionCode'; exit 1; }
           mkdir -p dist
           cp "$apk" dist/VANTARA-stable.apk
