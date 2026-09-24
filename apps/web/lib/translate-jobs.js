@@ -12,8 +12,11 @@
 
 const JOBS_KEY = 'vantara.translate.jobs';
 const PACE_KEY = 'vantara.translate.pace';
-/** صفحات تُترجم معًا: الرؤية على الجوال واحدة تلو الأخرى، وLuna تتداخل معها. */
-export const JOB_CONCURRENCY = 3;
+/**
+ * صفحات تُترجم معًا: الرؤية على الجوال واحدة تلو الأخرى، وLuna (~١٣ ث) تتداخل معها؛
+ * أربع تُبقي المعالج مشغولًا بتحليل التالية ما دامت السابقات تنتظر Luna.
+ */
+export const JOB_CONCURRENCY = 4;
 /** أخطاء لا تُحل بالانتظار: توقف الطابور وتنتظرك. */
 export const BLOCKING = new Set(['models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit']);
 /** أخطاء عابرة: تُعاد بعد مهلة. */

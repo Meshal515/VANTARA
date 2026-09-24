@@ -83,7 +83,8 @@ class BubbleSegmenter(file: File) {
     var tiles = 0
         private set
 
-    fun segment(img: RgbImage): List<Bubble> {
+    /** `rows` كما في [GlyphSegmenter.probabilities]: قطع بعيدة عن كل نص لا تُشغَّل. */
+    fun segment(img: RgbImage, rows: List<IntRange>? = null): List<Bubble> {
         if (img.height <= img.width * 2.6) {
             tiles = 1
             return infer(img)
@@ -92,8 +93,9 @@ class BubbleSegmenter(file: File) {
         val overlap = (img.width * 0.4).toInt()
         val found = ArrayList<Bubble>()
         val spans = verticalTiles(img.height, tile, overlap)
-        tiles = spans.size
-        for ((y0, y1) in spans) {
+        val needed = if (rows == null) spans else spans.filter { (y0, y1) -> rows.any { it.first < y1 && it.last >= y0 } }
+        tiles = needed.size
+        for ((y0, y1) in needed) {
             for (b in infer(img.crop(0, y0, img.width, y1))) {
                 val mask = ByteMask(img.width, img.height)
                 System.arraycopy(b.mask.data, 0, mask.data, y0 * img.width, b.mask.data.size)

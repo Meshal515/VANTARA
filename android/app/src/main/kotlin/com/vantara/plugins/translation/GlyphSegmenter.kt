@@ -17,14 +17,19 @@ class GlyphSegmenter(file: File) {
         private set
 
     /** يرجع احتمال «حرف» لكل بكسل. */
-    fun probabilities(img: RgbImage): FloatArray {
+    /**
+     * `rows`: صفوف النص (من الكاشف موسّعة). قطعة لا تمسّ أي صف لا تُشغَّل: كل بكسل في
+     * تلك الصفوف يأخذ القطع نفسها التي كان يأخذها، فقيمته هي نفسها بتًّا بتًّا.
+     */
+    fun probabilities(img: RgbImage, rows: List<IntRange>? = null): FloatArray {
         val acc = FloatArray(img.width * img.height)
         val cnt = FloatArray(img.width * img.height)
         val tileH = img.width
         val overlap = (img.width * 0.12).toInt()
         val spans = verticalTiles(img.height, tileH, overlap)
-        tiles = spans.size
-        for ((y0, y1) in spans) {
+        val needed = if (rows == null) spans else spans.filter { (y0, y1) -> rows.any { it.first < y1 && it.last >= y0 } }
+        tiles = needed.size
+        for ((y0, y1) in needed) {
             val crop = img.crop(0, y0, img.width, y1)
             val (chw, r) = crop.toChwPadded(size, 0)
             val nw = Math.round(crop.width * r)
