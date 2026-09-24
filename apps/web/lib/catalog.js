@@ -194,6 +194,36 @@ export function createWorkIndex() {
 	};
 }
 
+/**
+ * ترتيب قائمةٍ مدموجة من عدة مصادر، ثابت لا يتبع أيّ مصدر ردّ أولًا.
+ *
+ * كل مصدر يعطي ترتيبه هو (الأول عنده أول). الدرجة:
+ *   - `popular`: مجموع (1 − الموضع/الطول) عبر المصادر — العمل الرائج في
+ *     مصادر كثيرة وفي أعلاها يسبق.
+ *   - `latest`: أقرب موضع نسبي في أي مصدر — الأحدث تحديثًا في أي مكان يسبق،
+ *     والتعادل بعدد المصادر.
+ *   - غيرهما (الكتالوج، البحث): مثل `popular`.
+ * والتعادل الأخير بالعنوان المطبَّع، فالنتيجة واحدة في كل تشغيل.
+ *
+ * @param {Array<{ key: string }>} works
+ * @param {Map<string, Array<{ pos: number, len: number }>>} positions
+ */
+export function rankListing(works, positions, kind = 'popular') {
+	const score = (w) => {
+		const seen = positions.get(w.key) ?? [];
+		if (!seen.length) return { a: 0, b: 0 };
+		if (kind === 'latest') {
+			const best = Math.min(...seen.map((p) => p.pos / Math.max(1, p.len)));
+			return { a: -best, b: seen.length };
+		}
+		const sum = seen.reduce((t, p) => t + (1 - p.pos / Math.max(1, p.len)), 0);
+		return { a: sum, b: seen.length };
+	};
+	const scored = works.map((w) => ({ w, s: score(w) }));
+	scored.sort((x, y) => y.s.a - x.s.a || y.s.b - x.s.b || (x.w.key < y.w.key ? -1 : x.w.key > y.w.key ? 1 : 0));
+	return scored.map((x) => x.w);
+}
+
 /** يجمع نتائج المصادر في أعمال، كلُّ عمل ونسخُه. */
 export function groupWorks(entries) {
 	const index = createWorkIndex();
@@ -251,4 +281,5 @@ export default {
 	createWorkIndex,
 	groupWorks,
 	mergeChapters,
+	rankListing,
 };

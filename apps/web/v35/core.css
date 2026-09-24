@@ -2706,3 +2706,77 @@ html,
 .v35 .check-step--ok { color: var(--text-3); }
 .v35 .check-step--bad { color: var(--danger); }
 .v35 .check-why { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-caption); }
+
+/* ورقة «أضف إلى أفضل 5»: خمس خانات تختار منها */
+.v35 .top-slots { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.v35 .top-slot {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px;
+  border: 0; border-radius: var(--r-md); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-1); text-align: start;
+}
+.v35 .top-slot--here { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.v35 .top-slot--empty .top-slot-title { color: var(--text-4); }
+.v35 .top-slot-no {
+  flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--surface-3); font-weight: 800; font-size: 14px;
+}
+.v35 .top-slot-no--gold { background: var(--gold); color: #1a1205; }
+.v35 .top-slot-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.v35 .top-slot-hint { flex: none; font-size: var(--fs-caption); color: var(--text-3); }
+
+/* ── آخر المشاهدات: بطاقات بالأيام، بهوية VANTARA ── */
+.v35 .rv-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+.v35 .rv-day {
+  margin: 10px 2px 2px;
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+.v35 .rv-day:first-child { margin-top: 2px; }
+.v35 .rv-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-lg);
+  background: linear-gradient(90deg, var(--surface-1), var(--bg-raised));
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.v35 .rv-row--gone { opacity: 0; transform: translateX(-24px); }
+.v35 .rv-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
+  padding: 8px; border: 0; background: none; color: inherit; text-align: start;
+}
+.v35 .rv-cover {
+  position: relative; flex: none; width: 54px; aspect-ratio: 3 / 4; border-radius: var(--r-md);
+  overflow: hidden; background: var(--surface-2);
+  box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.8);
+}
+.v35 .rv-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .rv-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.v35 .rv-title {
+  display: block; font-size: var(--fs-body-lg); font-weight: 700; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.v35 .rv-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v35 .rv-chapter {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 7px;
+  border-radius: 99px; background: var(--accent-soft); color: var(--accent-text);
+  font-size: var(--fs-caption); font-weight: 650;
+}
+.v35 .rv-time { font-size: var(--fs-caption); color: var(--text-3); }
+.v35 .rv-progress {
+  --p: 0%;
+  display: block; height: 3px; border-radius: 99px; background: var(--surface-3); position: relative; overflow: hidden;
+}
+.v35 .rv-progress::after {
+  content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--p);
+  background: linear-gradient(90deg, var(--accent), var(--accent-text)); border-radius: inherit;
+}
+.v35 .rv-del {
+  flex: none; width: var(--tap); height: var(--tap); margin-inline-end: 4px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: none; color: var(--text-4);
+}
+.v35 .rv-del:active { color: var(--danger); background: var(--danger-soft); }

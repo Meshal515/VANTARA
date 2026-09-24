@@ -142,6 +142,7 @@ export type OpKind =
   | 'progress.confirm'
   | 'chapter.complete'
   | 'chapter.mark'
+  | 'chapter.markMany'
   | 'usage.add'
   | 'profile.patch'
   | 'library.add'
@@ -283,14 +284,27 @@ export interface ReadStats {
  *
  * 10 مرة، 11 مرة، 12 ثلاث مرات ⇒ فريدة 3، إجمالي 5، إعادات 2.
  */
-export function readStats(rows: readonly ChapterReadRow[]): ReadStats {
+export function readStats(
+  rows: readonly ChapterReadRow[],
+  marks: readonly { chapterKey: string; read: boolean }[] = [],
+): ReadStats {
+  // العين هي قرارك الأخير: فصلٌ علّمته مقروءًا يُحسب ولو لم تقرأه هنا (قرأته
+  // من قبل)، وفصلٌ ألغيت تعليمه لا يُحسب ولو فُتح يومًا.
+  const mark = new Map(marks.map((m) => [m.chapterKey, m.read]));
   let uniqueChapters = 0;
   let totalReads = 0;
+  const counted = new Set<string>();
   for (const row of rows) {
     const count = Math.max(0, Math.floor(row.readCount));
-    if (count <= 0) continue;
+    if (count <= 0 || mark.get(row.chapterKey) === false) continue;
+    counted.add(row.chapterKey);
     uniqueChapters += 1;
     totalReads += count;
+  }
+  for (const [key, read] of mark) {
+    if (!read || counted.has(key)) continue;
+    uniqueChapters += 1;
+    totalReads += 1;
   }
   return { uniqueChapters, totalReads, rereads: totalReads - uniqueChapters };
 }

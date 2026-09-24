@@ -82,6 +82,21 @@ describe('majlis reactions', () => {
     expect(notes).toEqual([{ body: '👏' }]);
   });
 
+  it('the same reaction again does not bring back a notification you already read', async () => {
+    const { env, db } = testEnv();
+    frame(db, 'f-read', A, B, []);
+    await react(env, B, { targetKind: 'frame', targetId: 'f-read', emoji: '🔥' });
+    db.prepare("UPDATE notifications SET read = 1, seen = 1 WHERE kind = 'REACTION'").run();
+    const before = db.prepare("SELECT rev FROM notifications WHERE kind = 'REACTION'").get() as { rev: number };
+    // سحبٌ ثم رجوع لنفس الرمز: لا جديد
+    await react(env, B, { targetKind: 'frame', targetId: 'f-read', emoji: null });
+    await react(env, B, { targetKind: 'frame', targetId: 'f-read', emoji: '🔥' });
+    expect(db.prepare("SELECT read, seen, rev FROM notifications WHERE kind = 'REACTION'").get()).toEqual({ read: 1, seen: 1, rev: before.rev });
+    // رمزٌ آخر إشعارٌ جديد فعلًا
+    await react(env, B, { targetKind: 'frame', targetId: 'f-read', emoji: '😂' });
+    expect(db.prepare("SELECT read, body FROM notifications WHERE kind = 'REACTION'").get()).toEqual({ read: 0, body: '😂' });
+  });
+
   it('only the closed set of emoji is accepted, and reacting to yourself notifies no one', async () => {
     const { env, db } = testEnv();
     frame(db, 'f-self', A, B, []);

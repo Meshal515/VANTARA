@@ -541,6 +541,8 @@ function frameChapter(value: unknown) {
  * العمل عنده وعنوانه وغلافه و`memo`. لا فصول ولا نبذة — تلك تُجلب من المصدر.
  */
 export const MAX_WORK_EDITIONS = 24;
+/** فصول دفعة «قرأته كله» الواحدة. أكبر مانهوا عندنا دون ألفين. */
+export const MAX_MARK_KEYS = 5000;
 export function workEditions(value: unknown) {
   if (!Array.isArray(value)) return null;
   const out: Array<{ sourceId: string; label: string; manga: ReturnType<typeof frameWork> }> = [];
@@ -869,6 +871,43 @@ export function statementsFor(
                rev = excluded.rev`,
           )
           .bind(userId, chapterKey, seriesRef, read ? 1 : 0, now, rev),
+      ];
+    }
+
+    /**
+     * عين الفصل لكثير من الفصول دفعة واحدة: «قرأته كله»، «من ← إلى»، أو
+     * «ألغِ التعليم». عبارة SQL واحدة مهما كثرت الفصول (`json_each`) — ألف
+     * فصل ليست ألف عملية في الطابور ولا ألف عبارة عند الخادم. و`all` مع
+     * `read: false` يمسح تعليم العمل كله بلا قائمة.
+     */
+    case 'chapter.markMany': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      const read = p['read'];
+      if (!seriesRef || typeof read !== 'boolean') return null;
+      if (p['all'] === true && read === false) {
+        return [
+          db
+            .prepare(
+              `UPDATE chapter_marks SET read = 0, updated_at = ?, rev = ?
+                WHERE user_id = ? AND series_ref = ? AND read = 1`,
+            )
+            .bind(now, rev, userId, seriesRef),
+        ];
+      }
+      const keys = Array.isArray(p['keys'])
+        ? [...new Set(p['keys'].map((k) => asString(k, 200)).filter((k): k is string => Boolean(k)))].slice(0, MAX_MARK_KEYS)
+        : [];
+      if (!keys.length) return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO chapter_marks (user_id, chapter_key, series_ref, read, updated_at, rev)
+             SELECT ?, value, ?, ?, ?, ? FROM json_each(?) WHERE true
+             ON CONFLICT (user_id, chapter_key) DO UPDATE SET
+               read = excluded.read, updated_at = excluded.updated_at, rev = excluded.rev
+             WHERE chapter_marks.read != excluded.read`,
+          )
+          .bind(userId, seriesRef, read ? 1 : 0, now, rev, JSON.stringify(keys)),
       ];
     }
 
@@ -1329,7 +1368,11 @@ export function statementsFor(
                  FROM (${MAJLIS_OWNER[targetKind]})
                 WHERE owner != ? AND ? IN (${visible})
                ON CONFLICT (id) DO UPDATE SET
-                 body = excluded.body, created_at = excluded.created_at, rev = excluded.rev, read = 0, seen = 0`,
+                 body = excluded.body, created_at = excluded.created_at, rev = excluded.rev,
+                 -- نفس الرمز مرة ثانية ليس إشعارًا جديدًا: ما قرأته يبقى مقروءًا
+                 read = CASE WHEN notifications.body IS excluded.body THEN notifications.read ELSE 0 END,
+                 seen = CASE WHEN notifications.body IS excluded.body THEN notifications.seen ELSE 0 END
+               WHERE notifications.body IS NOT excluded.body OR notifications.read = 0`,
             )
             // إشعار واحد لكل شخص على كل هدف: تغيير التفاعل يحدّثه ولا يكرّره
             .bind(
@@ -2268,13 +2311,14 @@ async function handlePendingProgress(env: Env, userId: string): Promise<Response
 // ───────────────────────────── الإحصائيات ─────────────────────────────
 
 async function handleStats(env: Env, targetId: string, now: number): Promise<Response> {
-  const [reads, usage, followed] = await env.DB.batch<Record<string, unknown>>([
+  const [reads, usage, followed, marks] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(
       'SELECT chapter_key, read_count FROM chapter_reads WHERE user_id = ? AND read_count > 0',
     ).bind(targetId),
     env.DB.prepare('SELECT day, active_ms FROM usage_daily WHERE user_id = ?').bind(targetId),
     // المكتبة نفسها خاصة ولا تُزامَن للأصدقاء؛ عددها وحده إحصاء في الملف
     env.DB.prepare('SELECT COUNT(*) AS n FROM library WHERE user_id = ? AND removed = 0').bind(targetId),
+    env.DB.prepare('SELECT chapter_key, read FROM chapter_marks WHERE user_id = ?').bind(targetId),
   ]);
 
   const stats = readStats(
@@ -2282,6 +2326,7 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
       chapterKey: String(row['chapter_key']),
       readCount: Number(row['read_count'] ?? 0),
     })),
+    (marks?.results ?? []).map((row) => ({ chapterKey: String(row['chapter_key']), read: Number(row['read']) === 1 })),
   );
 
   const today = new Date(now).toISOString().slice(0, 10);

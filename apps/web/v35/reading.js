@@ -35,10 +35,43 @@ export function chapterKeyOf(seriesRef, row) {
 }
 
 export function isChapterRead(sync, seriesRef, key) {
-  if (pending.has(key)) return pending.get(key);
   const userId = sync.user?.userId;
+  // المزامنة الحقيقية: بحث بالمفتاح (والطبقة المتفائلة فوقه) لا مسح كل العلامات —
+  // قائمة ألف فصل كانت تمسح ألف علامة لكل فصل فيها، فتتجمّد الصفحة
+  if (typeof sync.row === 'function') return Boolean(sync.row('chapter_marks', `${userId}/${key}`)?.read);
+  if (pending.has(key)) return pending.get(key);
   const [mark] = sync.rows('chapter_marks', (r) => r.user_id === userId && r.chapter_key === key);
   return Boolean(mark?.read);
+}
+
+/**
+ * فصولٌ كثيرة دفعة واحدة («قرأته كله»، «من ← إلى»، الإلغاء): عملية واحدة في
+ * الطابور وعبارة واحدة عند الخادم، والصفحة تتحدث فورًا من الطبقة المتفائلة.
+ * @returns {number} عدد الفصول التي تغيّرت فعلًا
+ */
+export function markChapters(sync, seriesRef, rows, read) {
+  const keys = [];
+  for (const row of rows) {
+    const key = chapterKeyOf(seriesRef, row);
+    if (isChapterRead(sync, seriesRef, key) !== read) keys.push(key);
+  }
+  if (!keys.length) return 0;
+  for (const key of keys) pending.set(key, read);
+  // دفعات من ألفين: سقف الخادم خمسة آلاف، والطابور يبقى خفيفًا
+  for (let i = 0; i < keys.length; i += 2000) {
+    sync.enqueue('chapter.markMany', { seriesRef, keys: keys.slice(i, i + 2000), read });
+  }
+  return keys.length;
+}
+
+/** يلغي تعليم كل فصول العمل. */
+export function clearChapterMarks(sync, seriesRef) {
+  const userId = sync.user?.userId;
+  const marked = sync.rows('chapter_marks', (r) => r.user_id === userId && r.series_ref === seriesRef && r.read);
+  if (!marked.length) return 0;
+  for (const r of marked) pending.set(r.chapter_key, false);
+  sync.enqueue('chapter.markMany', { seriesRef, read: false, all: true });
+  return marked.length;
 }
 
 export function markChapter(sync, seriesRef, row, read) {

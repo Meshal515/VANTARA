@@ -93,3 +93,35 @@ describe('completions', () => {
     expect((await pull()).completions?.[0]?.['member']).toBe(0);
   });
 });
+
+describe('chapter.markMany', () => {
+  it('marks a thousand chapters in one op, clears a range, clears all, and stats follow the eye', async () => {
+    const { env, db } = testEnv();
+    const keys = Array.from({ length: 1200 }, (_, i) => `ext:big#n:${i + 1}`);
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:big', keys, read: true });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM chapter_marks WHERE read = 1').get()).toEqual({ n: 1200 });
+
+    const token = await mintToken(A, SECRET);
+    const stats = async () => (await (await worker.fetch(new Request(`https://sync.test/v1/stats/${A}`, { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as { uniqueChapters: number };
+    expect((await stats()).uniqueChapters).toBe(1200);
+
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:big', keys: keys.slice(0, 200), read: false });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM chapter_marks WHERE read = 1').get()).toEqual({ n: 1000 });
+    expect((await stats()).uniqueChapters).toBe(1000);
+
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:big', read: false, all: true });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM chapter_marks WHERE read = 1').get()).toEqual({ n: 0 });
+    expect((await stats()).uniqueChapters).toBe(0);
+  });
+
+  it('a chapter read in the reader and then unmarked is not counted; a marked-only one is', async () => {
+    const { env } = testEnv();
+    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:1', seriesRef: 'ext:y', chapterNumber: 1, ratio: 0.5, activeMs: 9000 });
+    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:2', seriesRef: 'ext:y', chapterNumber: 2, ratio: 0.5, activeMs: 9000 });
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:y', keys: ['ext:y#n:2'], read: false });
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:y', keys: ['ext:y#n:3'], read: true });
+    const token = await mintToken(A, SECRET);
+    const body = (await (await worker.fetch(new Request(`https://sync.test/v1/stats/${A}`, { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as { uniqueChapters: number };
+    expect(body.uniqueChapters).toBe(2);
+  });
+});

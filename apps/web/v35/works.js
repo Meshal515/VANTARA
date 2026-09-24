@@ -10,7 +10,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
-import { createWorkIndex, gather, mergeChapters, normalizeTitle, titlesMatch } from '../lib/catalog.js';
+import { createWorkIndex, gather, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
 import { readWork, writeWork } from '../lib/chapter-store.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
@@ -104,12 +104,35 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
           : engine.catalogue(source.id, page), LISTING_TIMEOUT_MS),
   );
   const index = createWorkIndex();
+  const positions = new Map();
   let hasNextPage = false;
-  for (const { source, value } of ok) {
+  // بترتيب ثابت للمصادر لا بترتيب ردّها: العنوان والغلاف الأولان من أوثقها
+  for (const { source, value } of [...ok].sort((a, b) => sourceRank(a.source.id) - sourceRank(b.source.id) || String(a.source.id).localeCompare(String(b.source.id)))) {
     hasNextPage ||= Boolean(value?.hasNextPage);
-    for (const manga of value?.mangas ?? []) index.add({ sourceId: source.id, label: source.label, manga });
+    addPage(index, positions, source, value);
   }
-  return { items: index.list().map(toV35Work), hasNextPage, page };
+  return { items: ranked(index, positions, query || genre ? 'search' : kind).map(toV35Work), hasNextPage, page };
+}
+
+function addPage(index, positions, source, value) {
+  const mangas = value?.mangas ?? [];
+  mangas.forEach((manga, pos) => {
+    const hit = index.add({ sourceId: source.id, label: source.label, manga });
+    if (!hit) return;
+    const list = positions.get(hit.work.key) ?? [];
+    list.push({ pos, len: mangas.length });
+    positions.set(hit.work.key, list);
+  });
+}
+function ranked(index, positions, kind) {
+  const works = index.list();
+  for (const w of works) {
+    w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
+    // العنوان والغلاف من أوثق نسخة، لا من أول مصدر ردّ
+    w.title = w.editions[0]?.manga?.title ?? w.title;
+    w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
+  }
+  return rankListing(works, positions, kind === 'latest' ? 'latest' : 'popular');
 }
 
 /**
@@ -120,12 +143,14 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}) {
   const list = await sources();
   const index = createWorkIndex();
+  const positions = new Map();
+  const mode = query || genre ? 'search' : kind;
   let hasNextPage = false;
   let timer = null;
   const flush = () => {
     clearTimeout(timer);
     timer = null;
-    onUpdate({ items: index.list().map(toV35Work), hasNextPage, page });
+    onUpdate({ items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page });
   };
   await Promise.allSettled(
     list.map(async (source) => {
@@ -142,13 +167,13 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
         LISTING_TIMEOUT_MS,
       );
       hasNextPage ||= Boolean(value?.hasNextPage);
-      for (const manga of value?.mangas ?? []) index.add({ sourceId: source.id, label: source.label, manga });
+      addPage(index, positions, source, value);
       // الردود المتلاحقة تُجمع في رسمة واحدة كل ربع ثانية
       timer ??= setTimeout(flush, 250);
     }),
   );
   flush();
-  return { items: index.list().map(toV35Work), hasNextPage, page };
+  return { items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page };
 }
 
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
@@ -479,7 +504,15 @@ export function describe(v35work) {
     const primary = work._work?.editions?.[0];
     if (!primary) return work;
     const out = await engine.series(primary.sourceId, primary.manga);
-    return { ...work, ...detailFields(out.manga), _chapterCount: out.chapters?.length ?? null };
+    // الغلاف من التفاصيل: كثيرًا ما يكون هو الصحيح والقائمة بلا غلاف
+    const thumb = out.manga?.thumbnailUrl || work._work?.thumbnailUrl || null;
+    return {
+      ...work,
+      ...detailFields(out.manga),
+      _work: { ...work._work, thumbnailUrl: thumb },
+      ...(thumb && !work.coverImage?.large ? { coverImage: { extraLarge: thumb, large: thumb, medium: thumb, color: null }, bannerImage: thumb } : {}),
+      _chapterCount: out.chapters?.length ?? null,
+    };
   })();
   promise.catch(() => described.delete(key));
   described.set(key, promise);

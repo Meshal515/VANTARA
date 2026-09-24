@@ -326,6 +326,44 @@ export function createProfile(ctx) {
     }
     return wrap;
   }
+  /**
+   * أفضل 5 في ملفك أنت: الخانات الخمس كما هي (الفارغة تقول كيف تُملأ)، وعلى
+   * كل عمل زرّ إزالة ظاهر. التغيير يظهر حالًا ومن نفس الصفوف التي تقرؤها
+   * صفحة العمل.
+   */
+  function ownTopFive(slots) {
+    const wrap = el('div', 'pf-top5 pf-top5--own');
+    const grid = el('div', 'pf-slots');
+    slots.forEach((w, i) => {
+      const cell = el('div', `pf-slot${w ? '' : ' pf-slot--empty'}`);
+      const frame = el('span', 'pf-card-frame');
+      if (w) frame.append(poster(w, ''));
+      frame.append(el('span', `pf-rank${i === 0 ? ' pf-rank--gold' : ''}`, String(i + 1)));
+      if (w) {
+        const open = el('button', 'pf-slot-open');
+        open.type = 'button';
+        open.append(frame, el('bdi', 'pf-card-title', titleOf(w)));
+        open.onclick = () => ctx.openWork(w);
+        const remove = el('button', 'pf-slot-remove');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `أزل ${titleOf(w)} من أفضل 5`);
+        remove.innerHTML = glyph('close', { size: 14 });
+        remove.onclick = (e) => {
+          e.stopPropagation();
+          ctx.removeFromTop(String(w.id));
+          cell.classList.add('pf-slot--gone');
+        };
+        cell.append(open, remove);
+      } else {
+        frame.append(el('span', 'pf-slot-plus', '+'));
+        cell.append(frame, el('span', 'pf-card-title pf-slot-hint', 'فارغة'));
+        cell.onclick = () => ctx.toast?.('من صفحة أي عمل: ⋮ ← «أضف إلى أفضل 5» واختر الرقم');
+      }
+      grid.append(cell);
+    });
+    wrap.append(grid);
+    return wrap;
+  }
   function topSkeleton() {
     const wrap = el('div', 'pf-top5 pf-top5--loading');
     const lead = el('div', 'pf-first');
@@ -518,7 +556,12 @@ export function createProfile(ctx) {
     }
 
     const items = top5.slice(0, 5).map((t) => ctx.workFromRef(t.seriesRef, t.title, t.coverUrl));
-    if (items.length) {
+    if (own && ctx.topSlots) {
+      // ملفك: من صفوفك أنت لا من الخادم، فالإزالة والتبديل يظهران حالًا
+      const next = ownTopFive(ctx.topSlots());
+      topHost.replaceWith(next);
+      topHost = next;
+    } else if (items.length) {
       const next = topFive(items, name, own);
       topHost.replaceWith(next);
       topHost = next;

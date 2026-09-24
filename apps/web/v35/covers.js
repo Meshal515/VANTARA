@@ -99,3 +99,43 @@ export function nativeCover(url, sourceId) {
   inflight.set(url, promise);
   return promise;
 }
+
+// ── غلاف كل عمل، لا كل رابط ──
+// الغلاف الصحيح قد لا يُعرف إلا من تفاصيل العمل (القائمة بلا غلاف أو برابط
+// مكسور). ما عُرف مرة لعملٍ يُحفظ باسمه، فكل بطاقة للعمل نفسه — في الرئيسية
+// والمكتبة والسجل — تبدأ منه، ولا يلزم فتح صفحة العمل ليُكتشف.
+
+const WORK_KEY = 'vantara.covers.work.v1';
+let byWork = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(WORK_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+})();
+let workTimer = null;
+export const knownCover = (workId) => byWork[workId] ?? null;
+export function rememberCover(workId, url) {
+  if (!workId || !url || byWork[workId] === url) return;
+  byWork[workId] = url;
+  clearTimeout(workTimer);
+  workTimer = setTimeout(() => {
+    const keys = Object.keys(byWork);
+    if (keys.length > MAX_INDEX) for (const k of keys.slice(0, keys.length - MAX_INDEX)) delete byWork[k];
+    try {
+      localStorage.setItem(WORK_KEY, JSON.stringify(byWork));
+    } catch {
+      // تسريع لا حقيقة
+    }
+  }, 500);
+}
+const listeners = new Set();
+/** غلافٌ مرشّح عُرف للتوّ (من تفاصيل العمل): البطاقات الظاهرة بلا غلاف تجرّبه. */
+export function announceCover(workId, url) {
+  for (const fn of listeners) fn(workId, url);
+}
+/** يُنادى حين يُعرف غلافٌ جديد لعمل: البطاقات الظاهرة بلا غلاف تعيد المحاولة. */
+export function onCoverKnown(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
