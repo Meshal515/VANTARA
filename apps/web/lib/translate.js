@@ -26,7 +26,8 @@ import { analyzePage, nativeTranslationAvailable, renderPage } from './translati
 export const MAX_UPLOAD_EDGE = 4096;
 /** أعرض من هذا لا يزيد الدقة المفيدة للكشف والقراءة، ويثقل الرفع. */
 export const MAX_UPLOAD_WIDTH = 1600;
-const CACHE_PREFIX = 'tl3:';
+// tl4: صفحات tl3 حُفظت قبل معرفة «ناقصة»؛ تُسأل مرة، والخادم يصلح الناقص منها مجانًا
+const CACHE_PREFIX = 'tl4:';
 const RETRY_INCOMPLETE_MS = 5 * 60 * 1000;
 
 // ───────────────────────── العتبة: متى تدخل ─────────────────────────
