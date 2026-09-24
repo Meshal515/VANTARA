@@ -21,7 +21,13 @@ export const PROMPT_VERSION = 1;
 export const DEFAULT_MODEL = 'gpt-6-luna';
 const OPENAI_RESPONSES = 'https://api.openai.com/v1/responses';
 /** حدّ الصفحات المدفوعة لكل حساب في اليوم (المحفوظ لا يُحسب). قرار المالك: توفير أولًا. */
-const DEFAULT_WEEKLY_PAGES = 1000;
+const DEFAULT_WEEKLY_PAGES = 5000;
+/** فصل 300 صفحة يُنهي 5000 صفحة في 16 فصلًا: فالحد يُبلغ فقط حين تتجاوز الصفحات **والفصول** معًا. */
+const DEFAULT_WEEKLY_CHAPTERS = 100;
+/** سقف ما يُصرف شهريًا للتطبيق كله: ≈ 50 ريالًا. */
+const DEFAULT_MONTHLY_BUDGET_USD = 13.3;
+/** أسعار Luna لكل مليون توكن (سبتمبر 2026): إدخال، إدخال محفوظ، إخراج (التفكير ضمنه). */
+const PRICE_PER_M = { input: 0.1, cached: 0.01, output: 0.5 };
 /** ~3.4MB بعد فكّ base64؛ الجوال يصغّر الصفحة قبل الإرسال أصلًا. */
 const MAX_IMAGE_BASE64 = 4_500_000;
 const MAX_IMAGE_EDGE = 2576;
@@ -44,8 +50,14 @@ export interface Region {
 }
 
 /** ما نقرؤه من ردّ `/v1/responses` لا أكثر. */
+interface OpenAIUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  input_tokens_details?: { cached_tokens?: number };
+}
 interface OpenAIResponse {
   model?: string;
+  usage?: OpenAIUsage;
   status?: string;
   incomplete_details?: { reason?: string } | null;
   output?: Array<{ type: string; content?: Array<{ type: string; text?: string; refusal?: string }> }>;
@@ -54,6 +66,73 @@ interface OpenAIResponse {
 export interface TranslateDeps {
   /** للاختبار: fetch بديل بدل الشبكة. */
   fetch?: typeof fetch;
+}
+
+/** تكلفة ردّ واحد بالدولار من توكناته الفعلية. */
+export function costOf(usage: OpenAIUsage | undefined): number {
+  if (!usage) return 0;
+  const input = Math.max(0, usage.input_tokens ?? 0);
+  const cached = Math.min(input, Math.max(0, usage.input_tokens_details?.cached_tokens ?? 0));
+  const output = Math.max(0, usage.output_tokens ?? 0);
+  return ((input - cached) * PRICE_PER_M.input + cached * PRICE_PER_M.cached + output * PRICE_PER_M.output) / 1_000_000;
+}
+
+/** الشهر بتوقيت مكة: «m:2026-09». */
+export const monthOf = (now: number) => `m:${new Date(now + 3 * 3600_000).toISOString().slice(0, 7)}`;
+
+export interface QuotaState {
+  pages: number;
+  chapters: number;
+  pageLimit: number;
+  chapterLimit: number;
+  spentUsd: number;
+  budgetUsd: number;
+}
+
+export async function quotaState(env: TranslationEnv, userId: string, now: number): Promise<QuotaState> {
+  const day = weekOf(now);
+  const [used, chapters, spend] = await Promise.all([
+    env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>(),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM translation_usage_chapters WHERE user_id = ? AND day = ?').bind(userId, day).first<{ n: number }>(),
+    env.DB.prepare('SELECT usd FROM translation_spend WHERE month = ?').bind(monthOf(now)).first<{ usd: number }>(),
+  ]);
+  return {
+    pages: used?.pages ?? 0,
+    chapters: Number(chapters?.n ?? 0),
+    pageLimit: Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES,
+    chapterLimit: Number(env.TRANSLATE_WEEKLY_CHAPTERS) || DEFAULT_WEEKLY_CHAPTERS,
+    spentUsd: spend?.usd ?? 0,
+    budgetUsd: Number(env.TRANSLATE_MONTHLY_BUDGET_USD) || DEFAULT_MONTHLY_BUDGET_USD,
+  };
+}
+
+/**
+ * قبل أي نداء لـLuna: سقف الشهر أولًا، ثم حصة الأسبوع. الأسبوع يُبلغ فقط حين
+ * تتجاوز الصفحات حدها وتتجاوز الفصول حدها، وفصلٌ بدأته هذا الأسبوع يكمل دائمًا.
+ * يرجع ردّ الرفض، أو null إن مسموح.
+ */
+export async function quotaBlock(env: TranslationEnv, userId: string, now: number, chapterKey: string | null): Promise<Response | null> {
+  const q = await quotaState(env, userId, now);
+  if (q.spentUsd >= q.budgetUsd) return reply({ error: 'monthly_budget', budgetUsd: q.budgetUsd }, 429);
+  if (q.pages < q.pageLimit || q.chapters < q.chapterLimit) return null;
+  if (chapterKey) {
+    const started = await env.DB.prepare('SELECT 1 AS ok FROM translation_usage_chapters WHERE user_id = ? AND day = ? AND chapter_key = ?')
+      .bind(userId, weekOf(now), chapterKey)
+      .first<{ ok: number }>();
+    if (started) return null;
+  }
+  return reply({ error: 'weekly_limit', limit: q.pageLimit, chapterLimit: q.chapterLimit }, 429);
+}
+
+/** بعد ترجمة مدفوعة: صفحة للأسبوع، والفصل، والتكلفة الفعلية للشهر. */
+export function usageStatements(db: D1Database, userId: string, now: number, chapterKey: string | null, usd: number) {
+  const day = weekOf(now);
+  const out = [
+    db.prepare(`INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1) ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`).bind(userId, day),
+    db.prepare(`INSERT INTO translation_spend (month, usd, updated_at) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, updated_at = excluded.updated_at`).bind(monthOf(now), usd, now),
+  ];
+  if (chapterKey) out.push(db.prepare('INSERT OR IGNORE INTO translation_usage_chapters (user_id, day, chapter_key) VALUES (?, ?, ?)').bind(userId, day, chapterKey));
+  return out;
 }
 
 export const engineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:p${PROMPT_VERSION}`;
@@ -305,11 +384,9 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 
   if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
 
-  // ٢. الحد الأسبوعي: الترجمة تكلّف، والمحفوظ مجاني
-  const day = weekOf(now);
-  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
-  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+  // ٢. الحصة والسقف: الترجمة تكلّف، والمحفوظ مجاني
+  const blocked = await quotaBlock(env, userId, now, chapterKey);
+  if (blocked) return blocked;
 
   const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
   // «low» افتراضيًا: أقل توكنات تفكير = أرخص. `TRANSLATE_EFFORT` يرفعه إن احتجنا جودة أعلى
@@ -378,10 +455,7 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (page_hash, engine) DO NOTHING`,
     ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(regions), summary, userId, now),
-    env.DB.prepare(
-      `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
-       ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
-    ).bind(userId, day),
+    ...usageStatements(env.DB, userId, now, chapterKey, costOf(payload.usage)),
   ];
   for (const t of Array.isArray(parsed.new_terms) ? (parsed.new_terms as Array<Record<string, unknown>>).slice(0, 40) : []) {
     const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
@@ -606,10 +680,10 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   if (!env.OPENAI_API_KEY) {
     return repairing ? reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null }) : reply({ error: 'translation_not_configured' }, 503);
   }
-  const day = weekOf(now);
-  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
-  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  if (!repairing && (used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+  if (!repairing) {
+    const blocked = await quotaBlock(env, userId, now, chapterKey);
+    if (blocked) return blocked;
+  }
 
   const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
   const ask = (regions: TextRegionIn[], retry = false) =>
@@ -625,6 +699,7 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   let summary = cached?.summary ?? null;
   let parsed: { new_terms?: unknown; characters?: unknown } = {};
   let modelName: string | null = null;
+  let usd = 0;
   if (!repairing) {
     const first = await ask(regionsIn);
     if (first instanceof Response) return first;
@@ -632,12 +707,14 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
     summary = first.summary;
     parsed = first.parsed;
     modelName = first.model;
+    usd += first.usd;
   }
   // مرة واحدة فقط: ما سقط من الرد (أو كلام بلا عربي) يُسأل عنه وحده
   const missing = unanswered(regionsIn, merged);
   if (missing.length) {
     const retry = await ask(missing, true);
     if (!(retry instanceof Response)) {
+      usd += retry.usd;
       const fixed = new Map(retry.regions.map((r) => [r.id, r]));
       merged = regionsIn.map((r) => fixed.get(r.id) ?? merged.find((m) => m.id === r.id)).filter((r): r is TextRegionOut => Boolean(r));
       summary ??= retry.summary;
@@ -654,14 +731,9 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
        ON CONFLICT (page_hash, engine) DO UPDATE SET regions_json = excluded.regions_json, summary = COALESCE(translation_pages.summary, excluded.summary)`,
     ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(merged), summary, userId, now),
     ...(repairing
-      ? []
-      : [
-          env.DB.prepare(
-            `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
-             ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
-          ).bind(userId, day),
-          ...memoryStatements(env.DB, seriesRef, parsed, now),
-        ]),
+      ? // الإصلاح لا يُحسب صفحة، لكن تكلفته تُسجَّل في سقف الشهر
+        [env.DB.prepare(`INSERT INTO translation_spend (month, usd, updated_at) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, updated_at = excluded.updated_at`).bind(monthOf(now), usd, now)]
+      : [...usageStatements(env.DB, userId, now, chapterKey, usd), ...memoryStatements(env.DB, seriesRef, parsed, now)]),
   ];
   await env.DB.batch(statements);
   return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
@@ -680,11 +752,18 @@ These regions came back without Arabic in the first pass. Each one is its own bu
  * لحاسبة الترجمة المقدّمة. الصفحات المحفوظة من قبل (لأي حساب) لا تُحسب.
  */
 export async function handleTranslateUsage(env: TranslationEnv, userId: string, now: number): Promise<Response> {
-  const day = weekOf(now);
-  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
-  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  const start = Date.parse(`${day.slice(2)}T14:00:00Z`);
-  return reply({ used: used?.pages ?? 0, limit, resetsAt: start + 7 * 24 * 3600_000, configured: Boolean(env.OPENAI_API_KEY) });
+  const q = await quotaState(env, userId, now);
+  const start = Date.parse(`${weekOf(now).slice(2)}T14:00:00Z`);
+  return reply({
+    used: q.pages,
+    limit: q.pageLimit,
+    chapters: q.chapters,
+    chapterLimit: q.chapterLimit,
+    spentUsd: Math.round(q.spentUsd * 1000) / 1000,
+    budgetUsd: q.budgetUsd,
+    resetsAt: start + 7 * 24 * 3600_000,
+    configured: Boolean(env.OPENAI_API_KEY),
+  });
 }
 
 /** مناطق طُلبت ولم تأخذ جوابًا: غائبة من الرد، أو كلام بلا عربي. اللافتة والمؤثر والحقوق بلا عربي جواب صحيح. */
@@ -703,7 +782,7 @@ async function askText(
   env: TranslationEnv,
   deps: TranslateDeps,
   input: { effort?: 'none' | undefined; mediaType: string; data: string; context: string; known: Set<string> },
-): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null }> {
+): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null; usd: number }> {
   const effort = input.effort ?? (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
   let payload: OpenAIResponse;
@@ -761,6 +840,7 @@ async function askText(
     summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null,
     parsed,
     model: payload.model ?? null,
+    usd: costOf(payload.usage),
   };
 }
 
@@ -872,10 +952,8 @@ export async function handleTranslateLearn(request: Request, env: TranslationEnv
   if (existing && existing.learned_from === learnedFrom) return reply({ learned: false, cached: true, learnedFrom });
 
   if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
-  const day = weekOf(now);
-  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
-  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+  const blocked = await quotaBlock(env, userId, now, null);
+  if (blocked) return blocked;
 
   const content: Array<Record<string, unknown>> = [];
   pairs.forEach((p, i) => {
@@ -926,10 +1004,7 @@ export async function handleTranslateLearn(request: Request, env: TranslationEnv
       `INSERT INTO translation_style (series_ref, notes, learned_from, pairs, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (series_ref) DO UPDATE SET notes = excluded.notes, learned_from = excluded.learned_from, pairs = excluded.pairs, updated_at = excluded.updated_at`,
     ).bind(seriesRef, style, learnedFrom, pairs.length, now),
-    env.DB.prepare(
-      `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
-       ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
-    ).bind(userId, day),
+    ...usageStatements(env.DB, userId, now, null, costOf(payload.usage)),
   ];
   // المتعلَّم من الفريق يغلب ما اخترعه النموذج قبله
   for (const t of Array.isArray(parsed.terms) ? (parsed.terms as Array<Record<string, unknown>>).slice(0, 80) : []) {

@@ -126,10 +126,12 @@ describe('translate by region id (vision pipeline)', () => {
   });
 
   it('counts against the weekly limit and refuses without a key', async () => {
-    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1' });
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
     const gpt = fakeGpt(() => answer);
     expect((await handleTranslateText(req(), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch })).status).toBe(200);
-    const limited = await handleTranslateText(req({ pageHash: hash('c') }), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    // نفس الفصل يكمل؛ فصل جديد بعد بلوغ الحدّين يُرفض
+    expect((await handleTranslateText(req({ pageHash: hash('e') }), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch })).status).toBe(200);
+    const limited = await handleTranslateText(req({ pageHash: hash('c'), chapterKey: 'ext:wizardly tower#n:6' }), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
     expect(limited.status).toBe(429);
     const { env: noKey } = testEnv({ OPENAI_API_KEY: '' });
     expect((await handleTranslateText(req(), noKey, A, Date.UTC(2026, 8, 24))).status).toBe(503);

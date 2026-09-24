@@ -102,6 +102,10 @@ class Pipeline:
         t = time.time()
         dets = self.detector(rgb)
         timings["detect"] = time.time() - t
+        # كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_DET_SCORE: بلا صندوق كهذا لا منطقة
+        # مهما قالت بقية النماذج. فصفحة بلا نص تتخطاها، والنتيجة نفسها تمامًا.
+        if not any(d.label.startswith("text") and d.score >= MIN_DET_SCORE for d in dets):
+            return [], timings
         t = time.time()
         maps = self.glyphs(rgb)
         glyph_full = glyph_mask(maps)
