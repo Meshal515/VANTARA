@@ -20,7 +20,7 @@
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { AUTO_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
-import { editionRows, sourceLabel } from './works.js';
+import { editionRows, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
   chapterLabel,
@@ -301,6 +301,8 @@ export function openSmartReader(deps, ctx) {
       ({ row, pages } = await pagesFor(row));
     } catch (error) {
       if (token !== state.token) return;
+      // الفصل ما انفتح من مصدره: نجرّب مصدرًا ثانيًا عنده نفس الفصل قبل أي رسالة
+      if (switchSource({ row }, startAt ?? 0)) return;
       scroll.replaceChildren(chapterError(row, error));
       setChrome(true);
       return;
@@ -393,9 +395,9 @@ export function openSmartReader(deps, ctx) {
       const b = q(id);
       b.hidden = !needs;
       b.setAttribute('aria-pressed', String(on));
-      b.setAttribute('aria-label', on ? 'الترجمة العربية شغّالة — اضغط لعرض الأصل' : 'اعرض الترجمة العربية');
+      b.setAttribute('aria-label', on ? 'الترجمة العربية شغّالة — اضغط لعرض الأصل' : 'ترجم هذا العمل للعربي');
     }
-    q('rdTlFabLabel').textContent = on ? 'عربي' : 'الأصل';
+    q('rdTlFabLabel').textContent = on ? 'عربي' : 'ترجم';
   }
 
   /** صار هذا الفصل أمامك: الشريط له، وما بعده يُجهَّز من الآن. */
@@ -521,9 +523,38 @@ export function openSmartReader(deps, ctx) {
       tl.onImage(seg, index);
     } catch (error) {
       if (error?.cancelled || token !== state.token) return;
+      // مرة ثانية بهدوء: انقطاعٌ لحظي لا يستحق رسالة
+      if (!slot.retried) {
+        slot.retried = true;
+        await new Promise((r) => setTimeout(r, 900));
+        if (token !== state.token) return;
+        return loadSlot(seg, index, PRIORITY.VISIBLE);
+      }
+      // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا):
+      // نفس الفصل من مصدر ثانٍ، من نفس الصفحة، بلا أن تطلب
+      if (seg === state.seg && switchSource(seg, index)) return;
       slot.frame.replaceChildren(pageError(seg, index, error));
       slot.frame.classList.add('rd-page--error');
     }
+  }
+  /**
+   * صفحةٌ أو فصلٌ ما يتحمّل من مصدره: ننتقل للمصدر التالي بالأولوية ممن عنده
+   * نفس الفصل، مرة لكل مصدر (لا ذهاب وإياب)، ونكمل من نفس الصفحة.
+   */
+  const badSources = new Map();
+  function switchSource(seg, index) {
+    const row = seg.row;
+    const key = String(row.number);
+    const bad = badSources.get(key) ?? new Set();
+    bad.add(row.sourceId);
+    badSources.set(key, bad);
+    const next = otherSources(row)
+      .filter((r) => !bad.has(r.sourceId))
+      .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
+    if (!next) return false;
+    toast(`الصفحة ما تحمّلت من المصدر — كمّلنا من ${labelOf(next) ?? 'مصدر ثاني'}`);
+    void openChapter(next, { startAt: index });
+    return true;
   }
   /** الصورة تُفكّ قبل أن توضع: الإطار يأخذ مقاسها الحقيقي دفعةً واحدة. */
   async function placeImage(slot, src) {
@@ -767,15 +798,21 @@ export function openSmartReader(deps, ctx) {
   let lastTap = 0;
   let tapTimer = null;
   let down = null;
+  // لمسةٌ توقف التمرير ليست طلبًا للشريط: كان يظهر كلما أوقفت الصفحة بإصبعك
+  let lastScrollAt = 0;
+  scroll.addEventListener('scroll', () => {
+    lastScrollAt = performance.now();
+  }, { passive: true });
   scroll.addEventListener('pointerdown', (e) => {
-    down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+    down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, scrolling: performance.now() - lastScrollAt < 400 };
   });
   scroll.addEventListener('pointerup', (e) => {
     if (!down || down.id !== e.pointerId) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-    const quick = performance.now() - down.t < 350;
+    const quick = performance.now() - down.t < 260;
+    const scrolling = down.scrolling;
     down = null;
-    if (moved > 10 || !quick) return;
+    if (moved > 6 || !quick || scrolling) return;
     if (e.target.closest('button')) return;
     const frame = e.target.closest('.rd-page');
     const now = performance.now();
@@ -802,6 +839,12 @@ export function openSmartReader(deps, ctx) {
       const x = e.clientX / window.innerWidth;
       if (x < 0.3) return void jumpTo(Math.min(state.current + 1, state.slots.length - 1));
       if (x > 0.7) return void jumpTo(Math.max(state.current - 1, 0));
+    }
+    // إظهار الشريط بلمسة في وسط الشاشة فقط؛ وإخفاؤه بأي لمسة
+    if (!state.chrome && settings.mode !== 'paged') {
+      const x = e.clientX / window.innerWidth;
+      const y = e.clientY / window.innerHeight;
+      if (x < 0.2 || x > 0.8 || y < 0.22 || y > 0.78) return;
     }
     setChrome(!state.chrome);
   }

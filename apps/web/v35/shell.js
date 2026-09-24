@@ -16,6 +16,7 @@ import { glyph } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
+import { setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
@@ -1000,7 +1001,32 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const clamped = d.classList.toggle('clamped');
     q('moreToggle').textContent = clamped ? 'المزيد' : 'أقل';
   }
+  /**
+   * «ترجمة تلقائية» بجانب العين: تظهر فقط لعملٍ فيه فصول إنجليزية، ومقفلة
+   * افتراضيًا. مفعّلة = كل فصل إنجليزي تدخله يجهّز 30% منه بالعربي أولًا.
+   */
+  function renderTranslateToggle(w) {
+    const b = q('detailTlBtn');
+    if (!b) return;
+    const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
+    b.hidden = !hasEnglish;
+    const on = translationOn(String(w?.id ?? ''));
+    b.setAttribute('aria-pressed', String(on));
+    b.classList.toggle('detail-tl--on', on);
+    const label = on ? 'الترجمة التلقائية شغّالة لهذا العمل' : 'ترجمة تلقائية للفصول الإنجليزية (مقفلة)';
+    b.setAttribute('aria-label', label);
+    b.title = label;
+  }
+  function toggleTranslateCurrent() {
+    const w = state.current;
+    if (!w) return;
+    const on = !translationOn(String(w.id));
+    setTranslation(String(w.id), on);
+    renderTranslateToggle(w);
+    toast(on ? 'الترجمة التلقائية شغّالة: كل فصل إنجليزي يجهز 30% منه بالعربي قبل ما تبدأ' : 'الترجمة التلقائية مقفلة — الإنجليزي يُعرض كما هو');
+  }
   function renderInfo(w) {
+    renderTranslateToggle(w);
     const role = (needle) =>
       unique((w.staff?.edges || []).filter((e) => (e.role || '').toLowerCase().includes(needle)).map((e) => e.node?.name?.full)).join('، ');
     const pairs = [
@@ -2949,6 +2975,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openWorkMenu,
     shareCurrent: () => state.current && openShare(state.current),
     markPreviousReading,
+    toggleTranslateCurrent,
     readNow,
     flipChapterOrder,
     toggleSummary,

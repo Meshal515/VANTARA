@@ -380,6 +380,203 @@ export function cleanText(img, box, color, { onArt = false } = {}) {
   return canvas;
 }
 
+/**
+ * صندوق النموذج تقريبي، وقد يزيح فقاعةً كاملة (رأيناه على جوال: أعلى من
+ * الفقاعة بطولها، فبُيّض الرسم وبقي الإنجليزي). فلا نثق به أعمى: نبحث حوله
+ * عن الحروف نفسها ونضع الصندوق عليها.
+ *
+ *   1. الحروف = مكوّنات صغيرة داكنة تحيط بها خلفية فاتحة (أو العكس لفقاعة
+ *      سوداء). حدّ الفقاعة وخطوط اللوحة والرسم أكبر من حرف أو بلا خلفية فاتحة.
+ *   2. ننزلق بالصندوق نفسه في نافذةٍ حوله ونختار الموضع الأكثر حروفًا، مع
+ *      تفضيلٍ للقريب — ولا ننتقل إلا إن كان الموضع الجديد أوضح بفرق.
+ *   3. الصندوق النهائي = حدود الحروف في ذلك الموضع (أضيق وأدق).
+ * `claimed`: صناديق فقاعاتٍ سبقت، فلا تلتقط فقاعتان نفس النص.
+ * لا حروف وجدناها؟ يرجع الصندوق كما هو.
+ */
+export function snapBox(img, box, claimed = []) {
+  try {
+    const IW = img.naturalWidth;
+    const IH = img.naturalHeight;
+    const rx = Math.max(40, box.w * 0.9);
+    const ry = Math.max(40, box.h * 1.3);
+    const ax = Math.max(0, Math.floor(box.x - rx));
+    const ay = Math.max(0, Math.floor(box.y - ry));
+    const aw = Math.min(IW - ax, Math.ceil(box.w + rx * 2));
+    const ah = Math.min(IH - ay, Math.ceil(box.h + ry * 2));
+    if (aw < 8 || ah < 8) return box;
+    const scale = Math.min(1, 520 / Math.max(aw, ah));
+    const W = Math.max(1, Math.round(aw * scale));
+    const H = Math.max(1, Math.round(ah * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const g = canvas.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, ax, ay, aw, ah, 0, 0, W, H);
+    const d = g.getImageData(0, 0, W, H).data;
+    const L = new Float32Array(W * H);
+    for (let p = 0, i = 0; p < L.length; p++, i += 4) L[p] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+    const bw = Math.max(2, Math.round(box.w * scale));
+    const bh = Math.max(2, Math.round(box.h * scale));
+    const maxW = Math.max(6, bw * 0.95);
+    const maxH = Math.max(6, bh * 1.2);
+    const toImage = (x, y) => [ax + x / scale, ay + y / scale];
+    const isClaimed = (cx, cy) => {
+      const [x, y] = toImage(cx, cy);
+      return claimed.some((c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
+    };
+
+    const glyphs = (dark) => {
+      const ink = new Uint8Array(W * H);
+      for (let p = 0; p < ink.length; p++) ink[p] = dark ? (L[p] < 0.45 ? 1 : 0) : L[p] > 0.75 ? 1 : 0;
+      const bright = (p) => (dark ? L[p] > 0.8 : L[p] < 0.22);
+      const seen = new Uint8Array(W * H);
+      const out = [];
+      const stack = [];
+      for (let s = 0; s < ink.length; s++) {
+        if (!ink[s] || seen[s]) continue;
+        let x0 = W;
+        let y0 = H;
+        let x1 = -1;
+        let y1 = -1;
+        let n = 0;
+        stack.push(s);
+        seen[s] = 1;
+        while (stack.length) {
+          const p = stack.pop();
+          n += 1;
+          const x = p % W;
+          const y = (p / W) | 0;
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+          if (x > 0 && ink[p - 1] && !seen[p - 1]) (seen[p - 1] = 1), stack.push(p - 1);
+          if (x < W - 1 && ink[p + 1] && !seen[p + 1]) (seen[p + 1] = 1), stack.push(p + 1);
+          if (y > 0 && ink[p - W] && !seen[p - W]) (seen[p - W] = 1), stack.push(p - W);
+          if (y < H - 1 && ink[p + W] && !seen[p + W]) (seen[p + W] = 1), stack.push(p + W);
+        }
+        const cw = x1 - x0 + 1;
+        const ch = y1 - y0 + 1;
+        if (n < 3 || cw > maxW || ch > maxH || (cw < 2 && ch < 2)) continue;
+        // حرفٌ تحيط به خلفية فاتحة: إطار حول صندوقه، أغلبه فاتح
+        let ring = 0;
+        let lit = 0;
+        const pad = 2;
+        for (let x = x0 - pad; x <= x1 + pad; x++) {
+          for (const y of [y0 - pad, y1 + pad]) {
+            if (x < 0 || y < 0 || x >= W || y >= H) continue;
+            ring += 1;
+            if (bright(y * W + x)) lit += 1;
+          }
+        }
+        for (let y = y0 - pad; y <= y1 + pad; y++) {
+          for (const x of [x0 - pad, x1 + pad]) {
+            if (x < 0 || y < 0 || x >= W || y >= H) continue;
+            ring += 1;
+            if (bright(y * W + x)) lit += 1;
+          }
+        }
+        if (!ring || lit / ring < 0.6) continue;
+        const cx = (x0 + x1) / 2;
+        const cy = (y0 + y1) / 2;
+        if (claimed.length && isClaimed(cx, cy)) continue;
+        out.push({ x0, y0, x1, y1, n, cx, cy });
+      }
+      return out;
+    };
+
+    // الموضع الأصلي داخل النافذة
+    const ox = Math.round((box.x - ax) * scale);
+    const oy = Math.round((box.y - ay) * scale);
+    const diag = Math.hypot(W, H);
+    let best = null;
+    for (const dark of [true, false]) {
+      const list = glyphs(dark);
+      if (!list.length) continue;
+      // خريطة كثافة الحروف (بكسلاتها عند مراكزها) + صورة تكاملية للانزلاق السريع
+      const grid = new Float32Array((W + 1) * (H + 1));
+      for (const c of list) grid[(Math.round(c.cy) + 1) * (W + 1) + Math.round(c.cx) + 1] += c.n;
+      for (let y = 1; y <= H; y++) {
+        let row = 0;
+        for (let x = 1; x <= W; x++) {
+          row += grid[y * (W + 1) + x];
+          grid[y * (W + 1) + x] = row + grid[(y - 1) * (W + 1) + x];
+        }
+      }
+      const sum = (x, y) => {
+        const x0 = Math.max(0, Math.min(W, x));
+        const y0 = Math.max(0, Math.min(H, y));
+        const x1 = Math.max(0, Math.min(W, x + bw));
+        const y1 = Math.max(0, Math.min(H, y + bh));
+        return grid[y1 * (W + 1) + x1] - grid[y0 * (W + 1) + x1] - grid[y1 * (W + 1) + x0] + grid[y0 * (W + 1) + x0];
+      };
+      const here = sum(ox, oy);
+      let top = { score: here, x: ox, y: oy };
+      const step = Math.max(1, Math.round(Math.min(bw, bh) / 16));
+      for (let y = -bh + 1; y < H; y += step) {
+        for (let x = -bw + 1; x < W; x += step) {
+          const s = sum(x, y) * (1 - (0.35 * Math.hypot(x - ox, y - oy)) / diag);
+          if (s > top.score) top = { score: s, x, y };
+        }
+      }
+      // لا انتقال إلا بفرقٍ واضح: صندوقٌ صحيح لا يُزاح لحرفٍ شارد
+      if (top.score < here * 1.25 + 4) top = { score: here, x: ox, y: oy };
+      if (!best || top.score > best.score) best = { ...top, list };
+    }
+    if (!best || best.score < 8) return box;
+    // حدود الحروف في الموضع المختار (مراكزها داخله، بسماحٍ صغير)
+    const gx = bw * 0.12;
+    const gy = bh * 0.12;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    let n = 0;
+    for (const c of best.list) {
+      if (c.cx < best.x - gx || c.cx > best.x + bw + gx || c.cy < best.y - gy || c.cy > best.y + bh + gy) continue;
+      x0 = Math.min(x0, c.x0);
+      y0 = Math.min(y0, c.y0);
+      x1 = Math.max(x1, c.x1);
+      y1 = Math.max(y1, c.y1);
+      n += c.n;
+    }
+    if (n < 8 || !Number.isFinite(x0)) return box;
+    // إكمال السطر: حرفٌ خرج عن الصندوق («?!» في آخر الجملة، «E» على الحافة)
+    // يُضم إن كان ملاصقًا للنص بمسافة حرف، وبحجم حروفه
+    const inside = new Set(best.list.filter((c) => c.x0 >= x0 && c.x1 <= x1 && c.y0 >= y0 && c.y1 <= y1));
+    const heights = [...inside].map((c) => c.y1 - c.y0 + 1).sort((a, b) => a - b);
+    const glyphH = heights[heights.length >> 1] || 6;
+    for (let pass = 0; pass < 4; pass++) {
+      let grew = false;
+      for (const c of best.list) {
+        if (inside.has(c) || c.y1 - c.y0 + 1 > glyphH * 1.8) continue;
+        const gapX = Math.max(0, c.x0 - x1, x0 - c.x1);
+        const gapY = Math.max(0, c.y0 - y1, y0 - c.y1);
+        if (gapX > glyphH * 0.9 || gapY > glyphH * 0.8) continue;
+        inside.add(c);
+        x0 = Math.min(x0, c.x0);
+        y0 = Math.min(y0, c.y0);
+        x1 = Math.max(x1, c.x1);
+        y1 = Math.max(y1, c.y1);
+        grew = true;
+      }
+      if (!grew) break;
+    }
+    // هامشٌ بعرض حدّ الحرف: النص فوق الرسم محاطٌ بخطٍّ أسود يُمسح معه
+    const pad = Math.max(2, glyphH * 0.18);
+    const [ix0, iy0] = toImage(x0 - pad, y0 - pad);
+    const [ix1, iy1] = toImage(x1 + 1 + pad, y1 + 1 + pad);
+    const out = { x: Math.max(0, ix0), y: Math.max(0, iy0) };
+    out.w = Math.min(IW - out.x, ix1 - ix0);
+    out.h = Math.min(IH - out.y, iy1 - iy0);
+    // حروفٌ قليلة في زاوية لا تُصغّر فقاعةً كاملة إلى نقطة
+    if (out.w < box.w * 0.25 && out.h < box.h * 0.25) return box;
+    return out;
+  } catch {
+    return box;
+  }
+}
+
 const luminance = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 
 /** أكبر خط يتّسع، بحثًا ثنائيًّا على التخطيط الفعلي. */
@@ -415,8 +612,16 @@ export function paintTranslation(frame, img, result) {
   layer.dir = 'rtl';
   layer.lang = 'ar';
   const boxes = [];
-  for (const r of result.regions) {
-    if (!r.arabic) continue;
+  // صناديق النموذج بمقاس الصورة المعروضة، ثم تُثبَّت على الحروف نفسها
+  const sx = img.naturalWidth / W;
+  const sy = img.naturalHeight / H;
+  const claimed = [];
+  for (const raw of result.regions) {
+    if (!raw.arabic) continue;
+    const scaled = { x: raw.x * sx, y: raw.y * sy, w: raw.w * sx, h: raw.h * sy };
+    const snapped = snapBox(img, scaled, claimed);
+    claimed.push(snapped);
+    const r = { ...raw, x: snapped.x / sx, y: snapped.y / sy, w: snapped.w / sx, h: snapped.h / sy };
     // نص عمودي (ياباني غالبًا): صندوقه طويل ضيّق، والعربي أفقي. يُعرَّض حول
     // مركزه ليتّسع لكلمة كاملة — الفقاعة العمودية أعرض من عمود حروفها
     const tall = r.h > r.w * 1.8;
@@ -426,7 +631,7 @@ export function paintTranslation(frame, img, result) {
     const y = Math.max(0, r.y - gy);
     const w = Math.min(W - x, r.w + gx * 2);
     const h = Math.min(H - y, r.h + gy * 2);
-    const { color, flat } = ringStats(s, r);
+    const { color, flat } = ringStats(s, snapped);
     const pct = (b, el2) => {
       el2.style.left = `${(b.x / W) * 100}%`;
       el2.style.top = `${(b.y / H) * 100}%`;
@@ -438,8 +643,8 @@ export function paintTranslation(frame, img, result) {
     const inBubble = !isOnArt({ color, flat });
     {
       try {
-        const clean = cleanText(img, { x: r.x, y: r.y, w: r.w, h: r.h }, color, { onArt: !inBubble });
-        pct(clean.box, clean);
+        const clean = cleanText(img, snapped, color, { onArt: !inBubble });
+        pct({ x: clean.box.x / sx, y: clean.box.y / sy, w: clean.box.w / sx, h: clean.box.h / sy }, clean);
         layer.append(clean);
       } catch {
         // canvas ملوّث: يبقى الأصل تحت العربي، والخلفية الناعمة تكفي

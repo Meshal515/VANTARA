@@ -314,9 +314,10 @@ export async function detail(v35work) {
 const TRUSTED = ['mangalek', 'mangastarz', 'teamx', 'mangaswat', 'azora', 'mangaspark'];
 /**
  * والإنجليزي بعد كل العربي، وبينه بالجودة: Weeb Central (نسخ رسمية وفرق
- * معروفة)، ثم Asura للمانهوا، ثم MangaDex، ثم الأرشيفات الكبيرة.
+ * معروفة)، ثم Asura للمانهوا، ثم MangaDex، ثم الأرشيفات الكبيرة. وMangaFire
+ * أخيرًا: خادم صوره خلف Cloudflare على الجوال، فلا يُقرأ منه إلا ما لا يملكه غيره.
  */
-const TRUSTED_EN = ['weebcentral', 'asurascans', 'mangadex', 'mangafire', 'mangakakalot', 'mangahere'];
+const TRUSTED_EN = ['weebcentral', 'asurascans', 'mangadex', 'mangakakalot', 'mangahere', 'mangafire'];
 export function sourceRank(sourceId) {
   if (isFiller(sourceId)) {
     const pkg = String(sourceId).split('@')[0].toLowerCase();

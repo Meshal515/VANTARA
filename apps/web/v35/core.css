@@ -2780,3 +2780,11 @@ html,
   border: 0; border-radius: 50%; background: none; color: var(--text-4);
 }
 .v35 .rv-del:active { color: var(--danger); background: var(--danger-soft); }
+
+/* «ترجمة تلقائية» بجانب العين: مقفلة رمادية، ومفعّلة بلون التطبيق */
+.v35 .detail-tl[hidden] { display: none; }
+.v35 .detail-tl.detail-tl--on {
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+}
