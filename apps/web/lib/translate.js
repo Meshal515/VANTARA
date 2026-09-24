@@ -21,6 +21,7 @@
 
 import { readKv, writeKv } from './chapter-store.js';
 import { analyzePage, nativeTranslationAvailable, renderPage } from './translation-native.js';
+import { recordPerf, stopwatch } from './translate-perf.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
 export const MAX_UPLOAD_EDGE = 4096;
@@ -29,9 +30,22 @@ export const MAX_UPLOAD_WIDTH = 1600;
 // لا يُغيَّر اسم الكاش مرة أخرى: تغييره يُخفي كل صفحة مترجمة محفوظة (tl3 → tl4 فعلها مرة).
 const CACHE_PREFIX = 'tl4:';
 const OLD_CACHE_PREFIX = 'tl3:';
-const RETRY_INCOMPLETE_MS = 5 * 60 * 1000;
+/** بين محاولتي إكمال لنفس الصفحة: تعود للفصل بعد دقيقة فيُكمل الناقص فورًا. */
+export const RETRY_INCOMPLETE_MS = 60 * 1000;
 /** محاولات إكمال صفحة ناقصة قبل أن تُقبل كما هي. */
 const MAX_REPAIRS = 3;
+/**
+ * إصدار تعليمات Luna للمسار النصي — يطابق `TEXT_PROMPT_VERSION` في
+ * `services/sync-worker/src/translate.ts` (اختبار يتحقق). ترجمة محفوظة بإصدار
+ * أقدم تُعرض فورًا وتُجدَّد في الخلفية حين تزور صفحتها.
+ */
+export const TEXT_PROMPT_VERSION = 2;
+
+/** محرّك أقدم من التعليمات الحالية؟ (`model:t1`، `model:t1:fast`؛ 'device' = لا نص، لا يُجدَّد). */
+export function staleEngine(engine) {
+  const m = /:t(\d+)(?::fast)?$/.exec(String(engine ?? ''));
+  return Boolean(m) && Number(m[1]) < TEXT_PROMPT_VERSION;
+}
 
 // ───────────────────────── الإرسال (مسار الخادم) ─────────────────────────
 
@@ -79,8 +93,9 @@ export function createQueue({ concurrency = 3 } = {}) {
       if (!job) return;
       job.started = true;
       running += 1;
+      const waitedMs = Date.now() - job.addedAt;
       Promise.resolve()
-        .then(job.run)
+        .then(() => job.run({ waitedMs }))
         .then(
           (value) => job.resolve(value),
           (error) => job.reject(error),
@@ -108,7 +123,7 @@ export function createQueue({ concurrency = 3 } = {}) {
         resolve = a;
         reject = b;
       });
-      jobs.set(key, { key, chapterKey, index, run, resolve, reject, promise, started: false });
+      jobs.set(key, { key, chapterKey, index, run, resolve, reject, promise, started: false, addedAt: Date.now() });
       queueMicrotask(pump);
       return promise;
     },
@@ -218,28 +233,50 @@ export function renderPlan(analysis, reply) {
  * @returns {Promise<{ image: string | null, regions, translated, hash, from } | { error: string }>}
  */
 export async function translatePage(deps, src, meta) {
-  const hash = await pageHashOf(src);
-  const local = (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash));
+  const clock = stopwatch();
+  const hash = await clock.time('hash', pageHashOf(src));
+  const local = await clock.time('cacheRead', (async () => (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash)))());
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
   if (local && typeof local.translated === 'number' && !downgraded) {
-    // المحفوظ يُعرض دائمًا. وإن كانت فيه فقاعة ناقصة: إكمالها في الخلفية (مرات محدودة)،
-    // والصفحة تتحدّث حين تجهز — لا تعود للإنجليزي أثناء الانتظار أبدًا
-    const due = local.incomplete && (local.tries ?? 0) < MAX_REPAIRS && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
+    // المحفوظ يُعرض دائمًا. وإن كانت فيه فقاعة ناقصة (أو تُرجم بتعليمات أقدم): يُكمل في
+    // الخلفية (مرات محدودة) بلا إعادة الصفحة كلها: التحليل محفوظ على الجهاز، وما ردّت
+    // عليه Luna محفوظ في الخادم، فلا يُسأل إلا عن الناقص. لا تعود للإنجليزي أثناءه أبدًا
+    const due = (local.incomplete || staleEngine(local.engine)) && (local.tries ?? 0) < MAX_REPAIRS && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
     if (due) void repairInBackground(deps, src, hash, meta, local);
+    logPage(deps, meta, hash, clock, { from: 'cache', textless: !local.translated && !(local.regions ?? []).length, regions: (local.regions ?? []).length, translated: local.translated });
     return { ...local, hash, from: 'device' };
   }
 
-  const result = await translateFresh(deps, src, hash, meta);
-  if (result.error) return result;
+  const result = await translateFresh(deps, src, hash, meta, clock);
+  if (result.error) {
+    logPage(deps, meta, hash, clock, { from: 'error', error: result.error, native: result.native });
+    return result;
+  }
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries: 0 };
-  void writeKv(CACHE_PREFIX + hash, value);
+  const written = writeKv(CACHE_PREFIX + hash, value);
+  logPage(deps, meta, hash, clock, { from: result.cached ? 'friends' : 'model', textless: Boolean(result.textless), regions: (result.regions ?? []).length, translated: result.translated, native: result.native }, written);
   return { ...value, hash, from: result.cached ? 'friends' : 'model' };
 }
 
-function translateFresh(deps, src, hash, meta) {
+/** سطر في سجل الأداء (الانتظار في الطابور وجلب الصورة يأتيان من القارئ أو المهام). */
+function logPage(deps, meta, hash, clock, extra, written = null) {
+  const record = (cacheWrite) => {
+    const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
+    const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
+    recordPerf({ at: Date.now(), chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+  };
+  if (!written) return record(null);
+  const t = Date.now();
+  void Promise.resolve(written).then(
+    () => record(Date.now() - t),
+    () => record(Date.now() - t),
+  );
+}
+
+function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
-  return nativeTranslationAvailable() && imagePath ? translateOnDevice({ ...deps, imagePath }, hash, meta) : translateViaServer(deps, src, hash, meta);
+  return nativeTranslationAvailable() && imagePath ? translateOnDevice({ ...deps, imagePath }, hash, meta, clock) : translateViaServer(deps, src, hash, meta);
 }
 
 /** إكمال صفحة ناقصة بلا إخفاء الموجود. نجح بأفضل: يُحفظ ويُبلَّغ القارئ (`deps.onRepaired`). */
@@ -247,24 +284,28 @@ async function repairInBackground(deps, src, hash, meta, local) {
   const tries = (local.tries ?? 0) + 1;
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
   await writeKv(CACHE_PREFIX + hash, { ...local, at: Date.now(), tries });
-  const result = await translateFresh(deps, src, hash, meta).catch(() => ({ error: 'offline' }));
+  const clock = stopwatch();
+  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0 }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
+  logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
   if (result.error || !(result.translated >= (local.translated ?? 0))) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   await writeKv(CACHE_PREFIX + hash, value);
   deps.onRepaired?.({ ...value, hash, from: 'model' });
 }
 
-async function translateOnDevice(deps, hash, meta) {
+async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto' });
+    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto' }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
+  const native = { analyze: analysis.perf ?? null };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
-  if (!readable.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null };
+  const textless = !(analysis.regions ?? []).length;
+  if (!readable.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
-  const res = await deps.sync.translation('/v1/translate/text', {
+  const res = await clock.time('luna', deps.sync.translation('/v1/translate/text', {
     method: 'POST',
     body: {
       ...meta,
@@ -272,26 +313,32 @@ async function translateOnDevice(deps, hash, meta) {
       image: { mediaType: 'image/jpeg', data: analysis.thumbnail ?? '', width: analysis.width, height: analysis.height },
       regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     },
-  });
-  if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}` };
+  }));
+  if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
   const plan = renderPlan(analysis, res.body);
   const incomplete = unansweredIds(readable, res.body).length > 0;
-  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null };
+  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
-    rendered = await renderPage({ path: deps.imagePath, regions: plan });
+    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan }));
   } catch {
-    return { error: 'device_failed' };
+    return { error: 'device_failed', native };
   }
+  native.render = rendered.perf ?? null;
+  // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
+  // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
+  const drawn = Number.isFinite(rendered.translated) ? rendered.translated : plan.length;
+  if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   const convert = globalThis.Capacitor?.convertFileSrc;
   return {
     image: convert ? convert(rendered.path) : rendered.path,
     regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
-    translated: plan.length,
+    translated: drawn,
     engine: res.body?.engine ?? 'device',
     cached: Boolean(res.body?.cached),
     incomplete,
     error: null,
+    native,
   };
 }
 
@@ -307,6 +354,11 @@ async function fromOldCache(hash) {
   const value = { ...old, incomplete, at: incomplete ? 0 : Date.now(), tries: 0 };
   void writeKv(CACHE_PREFIX + hash, value);
   return value;
+}
+
+/** المحفوظ لصفحة ببصمتها (للقياس: عربيّها يُعاد رسمه بالطريقين). */
+export async function cachedPage(hash) {
+  return hash ? ((await readKv(CACHE_PREFIX + hash))?.value ?? null) : null;
 }
 
 /** صورة مترجمة محفوظة اختفت من الجهاز (أندرويد ينظّف مجلد الكاش): تُنسى فتُترجم من جديد. */

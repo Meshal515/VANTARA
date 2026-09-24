@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createJob, createJobRunner, englishSources, estimateMinutes, nextWork, pickChapters, progressOf, readJobs } from './translate-jobs.js';
+import { createJob, createJobRunner, englishSources, estimateMinutes, finishedText, nextWork, pickChapters, progressOf, readJobs } from './translate-jobs.js';
 
 const row = (number, sourceId = 'weeb', lang = 'en') => ({ number, sourceId, lang, sourceLabel: 'Weeb Central', chapter: { url: `${sourceId}/${number}` } });
 const keyOf = (r) => `ext:x#${r.sourceId}#${r.number}`;
@@ -138,12 +138,28 @@ describe('the runner', () => {
     expect(freshCalls).toHaveLength(0);
   });
 
-  it('a page that keeps failing is skipped instead of blocking the queue', async () => {
-    const { deps, storage } = fakeDeps({ pagesPer: 2, translate: (src) => (src.endsWith('/1') ? { error: 'refused' } : { translated: 1, from: 'model' }) });
+  it('a page that keeps failing is skipped, retried once at the end, and never counted as translated', async () => {
+    const { deps, storage, calls, notes } = fakeDeps({ pagesPer: 2, translate: (src) => (src.endsWith('/1') ? { error: 'refused' } : { translated: 1, from: 'model' }) });
     const runner = createJobRunner(deps);
     runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(1)], keyOf }));
     await until(() => runner.jobs()[0]?.status === 'done');
-    expect(readJobs(storage)[0].chapters[0]).toMatchObject({ done: [0], failed: [1] });
+    const saved = readJobs(storage)[0];
+    expect(saved.chapters[0]).toMatchObject({ done: [0], failed: [1] });
+    expect(calls.filter((c) => c.src.endsWith('/1'))).toHaveLength(2);
+    expect(progressOf(saved)).toMatchObject({ done: 1, failed: 1, total: 2, chaptersDone: 0 });
+    const [, finished] = notes.find(([k]) => k === 'finished');
+    expect(finished.title).toContain('بنقص');
+    expect(finished.text).toContain('1 صفحة ما تُرجمت');
+    expect(finished.text).not.toContain('تمت ترجمة');
+  });
+
+  it('a chapter whose pages never arrive is reported, not counted complete', () => {
+    const job = createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(1), row(2)], keyOf, pageCounts: { [keyOf(row(1))]: 2 } });
+    job.chapters[0].done.push(0, 1);
+    job.chapters[1].unreachable = true;
+    expect(nextWork(job)).toBeNull();
+    expect(progressOf(job)).toMatchObject({ chaptersDone: 1, unreachable: 1 });
+    expect(finishedText(job)).toContain('ما وصلت صفحاته');
   });
 
   it('cancel removes the job and stops the service', async () => {

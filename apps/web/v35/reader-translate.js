@@ -169,16 +169,18 @@ export function createReaderTranslation(deps) {
   function enqueuePage(seg, index) {
     if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
-    const run = async () => {
+    const run = async ({ waitedMs = 0 } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
+      const fetchStarted = Date.now();
       const src = await getImage(seg, index);
+      const fetchMs = Date.now() - fetchStarted;
       // صفحة ناقصة تُكمَل في الخلفية: حين تجهز تُبدَّل وهي أمامك
       const onRepaired = (better) => {
         if (!seg.tl) return;
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs }, src, {
         seriesRef: ref,
         seriesTitle: title,
         chapterKey,

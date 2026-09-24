@@ -74,28 +74,51 @@ export function createJob({ ref, title, sourceId, sourceLabel, mode = 'quality',
   };
 }
 
-/** التقدّم: الصفحات المعروفة عددها، والفصول المكتملة. */
+/**
+ * التقدّم: المترجَم فعلًا وحده. الصفحة الفاشلة ليست منجزة، والفصل المكتمل هو
+ * الذي تُرجمت كل صفحاته؛ والفصل الذي لم تصل صفحاته لا يُحسب مكتملًا.
+ */
 export function progressOf(job) {
   let done = 0;
+  let failed = 0;
   let total = 0;
   let chaptersDone = 0;
   let unknown = 0;
+  let unreachable = 0;
   for (const c of job.chapters) {
+    if (c.unreachable) {
+      unreachable += 1;
+      continue;
+    }
     if (c.pages === null) {
       unknown += 1;
       continue;
     }
     total += c.pages;
-    done += Math.min(c.pages, c.done.length + c.failed.length);
-    if (c.done.length + c.failed.length >= c.pages) chaptersDone += 1;
+    done += Math.min(c.pages, c.done.length);
+    failed += c.failed.filter((i) => !c.done.includes(i)).length;
+    if (c.pages > 0 && c.done.length >= c.pages) chaptersDone += 1;
   }
-  return { done, total, chaptersDone, chaptersTotal: job.chapters.length, unknown, ratio: total ? done / total : 0 };
+  return { done, failed, total, chaptersDone, chaptersTotal: job.chapters.length, unknown, unreachable, ratio: total ? done / total : 0 };
+}
+
+/** نص الانتهاء كما هو: كم فصلًا اكتمل فعلًا، وما لم يكتمل. */
+export function finishedText(job) {
+  const p = progressOf(job);
+  const n = p.chaptersDone;
+  const chapters = n === 1 ? 'فصل واحد' : n === 2 ? 'فصلين' : `${n} فصول`;
+  if (!p.failed && !p.unreachable) return `تمت ترجمة ${chapters}. افتحها وتقرأ على طول.`;
+  const parts = [`اكتمل ${chapters} من ${p.chaptersTotal}`];
+  if (p.failed) parts.push(`${p.failed} صفحة ما تُرجمت (يعيدها القارئ حين تصلها)`);
+  if (p.unreachable) parts.push(`${p.unreachable === 1 ? 'فصل' : `${p.unreachable} فصول`} ما وصلت صفحاته`);
+  return parts.join('، ') + '.';
 }
 
 /** العمل التالي: فصل بلا عدد صفحات بعد، أو أول صفحة لم تُنجز في أول فصل ناقص. */
 export function nextWork(job, busy = new Set()) {
   for (let c = 0; c < job.chapters.length; c++) {
     const ch = job.chapters[c];
+    if (ch.unreachable) continue;
     if (ch.pages === null) return { chapter: c, page: null };
     for (let p = 0; p < ch.pages; p++) {
       if (ch.done.includes(p) || ch.failed.includes(p) || busy.has(`${c}:${p}`)) continue;
@@ -180,7 +203,7 @@ export function createJobRunner(deps) {
 
   function notify(job) {
     const p = progressOf(job);
-    const ch = job.chapters.find((c) => c.pages === null || c.done.length + c.failed.length < c.pages);
+    const ch = job.chapters.find((c) => !c.unreachable && (c.pages === null || c.done.length + c.failed.length < c.pages));
     const text = p.total
       ? `${ch ? `فصل ${ch.number} · ` : ''}${p.done}/${p.total} صفحة${p.unknown ? ' (نحسب الباقي)' : ''}`
       : 'نجهّز الفصول…';
@@ -210,7 +233,7 @@ export function createJobRunner(deps) {
     const list = await pagesOf(job, c);
     const image = await engine.pageImage(ch.row.sourceId, list[p]);
     const result = await translatePage(
-      { sync, imagePath: image.path },
+      { sync, imagePath: image.path, fetchMs: now() - started },
       image.src,
       {
         seriesRef: job.ref,
@@ -257,7 +280,8 @@ export function createJobRunner(deps) {
                 const n = (tries.get(ch.key) ?? 0) + 1;
                 tries.set(ch.key, n);
                 if (n >= MAX_PAGE_TRIES) {
-                  ch.pages = 0;
+                  // لا يُحسب مكتملًا: يُذكر في نص الانتهاء
+                  ch.unreachable = true;
                   save();
                 } else {
                   transient = true;
@@ -309,11 +333,20 @@ export function createJobRunner(deps) {
         }
         if (job.status !== 'running') continue;
         if (isFinished(job)) {
+          // الصفحات الفاشلة تُحاول مرة أخيرة قبل الإعلان (عطل عابر طال)
+          if (!job.retriedFailed && job.chapters.some((c) => c.failed.length)) {
+            job.retriedFailed = true;
+            for (const c of job.chapters) c.failed = [];
+            for (const key of [...tries.keys()]) if (key.endsWith(job.id)) tries.delete(key);
+            save();
+            continue;
+          }
           job.status = 'done';
           job.reason = null;
           save();
-          const n = job.chapters.length;
-          void native.jobFinished({ title: `جاهزة للقراءة: ${job.title}`, text: `تمت ترجمة ${n === 1 ? 'فصل واحد' : n === 2 ? 'فصلين' : `${n} فصول`}. افتحها وتقرأ على طول.` });
+          const p = progressOf(job);
+          const complete = !p.failed && !p.unreachable;
+          void native.jobFinished({ title: complete ? `جاهزة للقراءة: ${job.title}` : `انتهت ترجمة ${job.title} بنقص`, text: finishedText(job) });
           continue;
         }
         if (transient) await sleep(20_000);

@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, resultOf, unansweredIds, uploadPlan } from './translate.js';
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, createQueue, resultOf, staleEngine, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -108,5 +109,33 @@ describe('queue across reader sessions', () => {
     q.add({ key: 'c2#1', chapterKey: 'c2', index: 1, run: async () => 1 });
     q.drop('c1');
     expect(q.order()).toEqual(['c2#1']);
+  });
+});
+
+describe('translations saved with an older prompt are refreshed, not served as current', () => {
+  it('knows which engines are older than the prompt in force', () => {
+    expect(staleEngine(`gpt-6-luna:t${TEXT_PROMPT_VERSION - 1}`)).toBe(true);
+    expect(staleEngine(`gpt-6-luna:t${TEXT_PROMPT_VERSION - 1}:fast`)).toBe(true);
+    expect(staleEngine(`gpt-6-luna:t${TEXT_PROMPT_VERSION}`)).toBe(false);
+    expect(staleEngine('device')).toBe(false);
+    expect(staleEngine(null)).toBe(false);
+  });
+
+  it('the app and the server agree on the prompt version', () => {
+    const worker = readFileSync(new URL('../../../services/sync-worker/src/translate.ts', import.meta.url), 'utf8');
+    expect(Number(/export const TEXT_PROMPT_VERSION = (\d+);/.exec(worker)?.[1])).toBe(TEXT_PROMPT_VERSION);
+  });
+
+  it('a revisited page with missing bubbles is completed within a minute, not five', () => {
+    expect(RETRY_INCOMPLETE_MS).toBeLessThanOrEqual(60_000);
+  });
+});
+
+describe('queue reports how long a page waited', () => {
+  it('passes the waiting time to the page when it starts', async () => {
+    const q = createQueue({ concurrency: 1 });
+    let seen = null;
+    await q.add({ key: 'c1#0', chapterKey: 'c1', index: 0, run: async (ctx) => (seen = ctx) });
+    expect(seen.waitedMs).toBeGreaterThanOrEqual(0);
   });
 });

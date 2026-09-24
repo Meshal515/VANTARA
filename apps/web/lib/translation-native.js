@@ -10,8 +10,9 @@
  *   downloadModels()      → يبدأ التنزيل؛ أحداث 'modelsProgress' { received, total, file } ثم يعود { installed: true }
  *   cancelDownload()
  *   removeModels()        → { installed: false }
- *   analyzePage({ path, sourceLang })          → { pageHash, width, height, regions: [...] }   (كشف + حروف + فقاعات + OCR)
- *   renderPage({ path, regions: [{id, arabic}] }) → { path }  (تبييض + عربي؛ ملف WebP جديد)
+ *   analyzePage({ path, sourceLang })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
+ *   renderPage({ path, regions: [{id, arabic}] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
+ *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
  *   notificationPermission() → { granted }
  *
@@ -69,6 +70,17 @@ export async function renderPage({ path, regions }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
   return p.renderPage({ path, regions });
+}
+
+/**
+ * القديم مقابل الجديد على هذا الجوال: الصفحة نفسها بالطريقين من الصفر.
+ * يرجع `{ legacy, current, identical }` (زمن كل مرحلة، وهل الناتج متطابق بكسلًا).
+ * APK أقدم بلا هذه الدالة: null.
+ */
+export async function benchmarkPage({ path, regions }) {
+  const p = plugin();
+  if (!p?.benchmarkPage) return null;
+  return p.benchmarkPage({ path, regions });
 }
 
 /** «٤١٢ ميجابايت» وما شابه، للإعدادات. */

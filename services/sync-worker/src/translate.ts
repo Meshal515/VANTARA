@@ -14,7 +14,7 @@
  * بلا مفتاح يرجع 503 `translation_not_configured` والقارئ يقول ذلك بهدوء.
  */
 
-import type { D1Database, Env } from './types.ts';
+import type { D1Database, D1PreparedStatement, Env } from './types.ts';
 
 /** يُرفع حين تتغير التعليمات تغييرًا يستحق ترجمة جديدة. */
 export const PROMPT_VERSION = 1;
@@ -66,6 +66,8 @@ interface OpenAIResponse {
 export interface TranslateDeps {
   /** للاختبار: fetch بديل بدل الشبكة. */
   fetch?: typeof fetch;
+  /** للاختبار: انتظار بديل (طلب متزامن ينتظر صفحة يترجمها غيره). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** تكلفة ردّ واحد بالدولار من توكناته الفعلية. */
@@ -106,34 +108,97 @@ export async function quotaState(env: TranslationEnv, userId: string, now: numbe
   };
 }
 
+/** المبلغ المحجوز لكل نداء قبل معرفة تكلفته (أعلى من صفحة عادية بكثير). */
+export const RESERVE_USD = 0.02;
+
 /**
- * قبل أي نداء لـLuna: سقف الشهر أولًا، ثم حصة الأسبوع. الأسبوع يُبلغ فقط حين
- * تتجاوز الصفحات حدها وتتجاوز الفصول حدها، وفصلٌ بدأته هذا الأسبوع يكمل دائمًا.
- * يرجع ردّ الرفض، أو null إن مسموح.
+ * تذكرة نداء مدفوع محجوز: `settle` بالتكلفة الفعلية مع حفظ الرد، و`refund`
+ * تُستدعى دائمًا بعده: تُرجع الحجز إن لم يُسوَّ (فشل، رفض، انقطاع)، ولا شيء إن سُوّي.
  */
-export async function quotaBlock(env: TranslationEnv, userId: string, now: number, chapterKey: string | null): Promise<Response | null> {
-  const q = await quotaState(env, userId, now);
-  if (q.spentUsd >= q.budgetUsd) return reply({ error: 'monthly_budget', budgetUsd: q.budgetUsd }, 429);
-  if (q.pages < q.pageLimit || q.chapters < q.chapterLimit) return null;
-  if (chapterKey) {
-    const started = await env.DB.prepare('SELECT 1 AS ok FROM translation_usage_chapters WHERE user_id = ? AND day = ? AND chapter_key = ?')
-      .bind(userId, weekOf(now), chapterKey)
-      .first<{ ok: number }>();
-    if (started) return null;
-  }
-  return reply({ error: 'weekly_limit', limit: q.pageLimit, chapterLimit: q.chapterLimit }, 429);
+export interface Admission {
+  settle(usd: number): D1PreparedStatement[];
+  refund(): Promise<void>;
 }
 
-/** بعد ترجمة مدفوعة: صفحة للأسبوع، والفصل، والتكلفة الفعلية للشهر. */
-export function usageStatements(db: D1Database, userId: string, now: number, chapterKey: string | null, usd: number) {
+/**
+ * الحجز قبل نداء Luna، ذرّيًا: المبلغ من سقف الشهر، ثم (لصفحة جديدة) الصفحة
+ * والفصل من حصة الأسبوع. كل شرط يُفحص بعد الحجز نفسه، فطلبات متزامنة لا تعبر
+ * السقف أو الحصة معًا. الأسبوع يُبلغ حين تتجاوز الصفحات حدها **و** الفصول حدها،
+ * والفصل الذي بدأ قبلُ يكمل دائمًا. الإكمال (`countPage: false`) يحجز من سقف
+ * الشهر وحده ولا يُحسب صفحة.
+ */
+export async function admit(env: TranslationEnv, userId: string, now: number, chapterKey: string | null, countPage = true): Promise<Response | Admission> {
+  const month = monthOf(now);
+  const budget = Number(env.TRANSLATE_MONTHLY_BUDGET_USD) || DEFAULT_MONTHLY_BUDGET_USD;
+  const [, reserved] = await env.DB.batch([
+    env.DB.prepare('INSERT INTO translation_spend (month, usd, reserved, updated_at) VALUES (?, 0, 0, ?) ON CONFLICT (month) DO NOTHING').bind(month, now),
+    env.DB.prepare('UPDATE translation_spend SET reserved = reserved + ?, updated_at = ? WHERE month = ? AND usd + reserved < ?').bind(RESERVE_USD, now, month, budget),
+  ]);
+  if (!Number(reserved?.meta?.changes ?? 0)) return reply({ error: 'monthly_budget', budgetUsd: budget }, 429);
+  const release = () => env.DB.prepare('UPDATE translation_spend SET reserved = MAX(0, reserved - ?) WHERE month = ?').bind(RESERVE_USD, month);
+
   const day = weekOf(now);
-  const out = [
-    db.prepare(`INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1) ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`).bind(userId, day),
-    db.prepare(`INSERT INTO translation_spend (month, usd, updated_at) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, updated_at = excluded.updated_at`).bind(monthOf(now), usd, now),
+  let newChapter = false;
+  const unpage = () => [
+    env.DB.prepare('UPDATE translation_usage SET pages = MAX(0, pages - 1) WHERE user_id = ? AND day = ?').bind(userId, day),
+    ...(newChapter && chapterKey ? [env.DB.prepare('DELETE FROM translation_usage_chapters WHERE user_id = ? AND day = ? AND chapter_key = ?').bind(userId, day, chapterKey)] : []),
   ];
-  if (chapterKey) out.push(db.prepare('INSERT OR IGNORE INTO translation_usage_chapters (user_id, day, chapter_key) VALUES (?, ?, ?)').bind(userId, day, chapterKey));
-  return out;
+  if (countPage) {
+    const pageLimit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
+    const chapterLimit = Number(env.TRANSLATE_WEEKLY_CHAPTERS) || DEFAULT_WEEKLY_CHAPTERS;
+    // دفعة واحدة = معاملة واحدة: الفحص والحجز معًا. ما زال تحت الحد (صفحاتٍ أو فصولًا)؟
+    const under = `((SELECT pages FROM translation_usage WHERE user_id = ?1 AND day = ?2) < ?3
+      OR (SELECT COUNT(*) FROM translation_usage_chapters WHERE user_id = ?1 AND day = ?2) < ?4)`;
+    const results = await env.DB.batch([
+      env.DB.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 0) ON CONFLICT (user_id, day) DO NOTHING').bind(userId, day),
+      ...(chapterKey
+        ? [
+            // فصل جديد يُفتح إن كنا تحت الحد؛ فصل بدأ قبلُ موجود أصلًا
+            env.DB.prepare(`INSERT OR IGNORE INTO translation_usage_chapters (user_id, day, chapter_key) SELECT ?1, ?2, ?5 WHERE ${under}`).bind(userId, day, pageLimit, chapterLimit, chapterKey),
+            // والصفحة تُحسب إن كان فصلها مفتوحًا (بدأ قبلُ أو فُتح الآن)
+            env.DB.prepare(
+              'UPDATE translation_usage SET pages = pages + 1 WHERE user_id = ?1 AND day = ?2 AND EXISTS (SELECT 1 FROM translation_usage_chapters WHERE user_id = ?1 AND day = ?2 AND chapter_key = ?3)',
+            ).bind(userId, day, chapterKey),
+          ]
+        : [env.DB.prepare(`UPDATE translation_usage SET pages = pages + 1 WHERE user_id = ?1 AND day = ?2 AND ${under}`).bind(userId, day, pageLimit, chapterLimit)]),
+    ]);
+    const counted = Number(results[results.length - 1]?.meta?.changes ?? 0) > 0;
+    newChapter = Boolean(chapterKey) && Number(results[1]?.meta?.changes ?? 0) > 0;
+    if (!counted) {
+      await env.DB.batch([release()]);
+      return reply({ error: 'weekly_limit', limit: pageLimit, chapterLimit }, 429);
+    }
+  }
+  let settled = false;
+  return {
+    settle: (usd: number) => {
+      settled = true;
+      return [env.DB.prepare('UPDATE translation_spend SET usd = usd + ?, reserved = MAX(0, reserved - ?), updated_at = ? WHERE month = ?').bind(usd, RESERVE_USD, now, month)];
+    },
+    refund: async () => {
+      if (settled) return;
+      settled = true;
+      await env.DB.batch([...(countPage ? unpage() : []), release()]);
+    },
+  };
 }
+
+/**
+ * صفحة واحدة لا تُدفع مرتين: يحجز (بصمة، محرّك) لهذا الطلب. `false` = طلب آخر
+ * يترجمها الآن. حجز أقدم من ثلاث دقائق يتيم (عامل مات في المنتصف) ويؤخذ.
+ */
+export async function claimPage(env: TranslationEnv, pageHash: string, engine: string, now: number): Promise<boolean> {
+  const res = await env.DB.prepare(
+    `INSERT INTO translation_inflight (page_hash, engine, started_at) VALUES (?, ?, ?)
+     ON CONFLICT (page_hash, engine) DO UPDATE SET started_at = excluded.started_at WHERE translation_inflight.started_at < ?`,
+  )
+    .bind(pageHash, engine, now, now - 180_000)
+    .run();
+  return Number(res.meta?.changes ?? 0) > 0;
+}
+
+export const releasePage = (env: TranslationEnv, pageHash: string, engine: string) =>
+  env.DB.prepare('DELETE FROM translation_inflight WHERE page_hash = ? AND engine = ?').bind(pageHash, engine);
 
 export const engineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:p${PROMPT_VERSION}`;
 
@@ -384,105 +449,111 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 
   if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
 
-  // ٢. الحصة والسقف: الترجمة تكلّف، والمحفوظ مجاني
-  const blocked = await quotaBlock(env, userId, now, chapterKey);
-  if (blocked) return blocked;
-
-  const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
-  // «low» افتراضيًا: أقل توكنات تفكير = أرخص. `TRANSLATE_EFFORT` يرفعه إن احتجنا جودة أعلى
-  const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
-  const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
-
-  let payload: OpenAIResponse;
+  // ٢. الحصة والسقف: الترجمة تكلّف، والمحفوظ مجاني. حجز ذرّي قبل النداء، يُرجع إن لم يُصرف
+  const ticket = await admit(env, userId, now, chapterKey);
+  if (ticket instanceof Response) return ticket;
   try {
-    const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        instructions: SYSTEM_PROMPT,
-        input: [
-          {
-            role: 'user',
-            content: [
-              // «original»: الأبعاد كما أرسلناها، فالإحداثيات بكسلات صورتنا نفسها
-              { type: 'input_image', image_url: `data:${mediaType};base64,${data}`, detail: 'original' },
-              { type: 'input_text', text: contextText({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory }) },
+    return await (async (): Promise<Response> => {
+
+      const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
+      // «low» افتراضيًا: أقل توكنات تفكير = أرخص. `TRANSLATE_EFFORT` يرفعه إن احتجنا جودة أعلى
+      const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
+      const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
+
+      let payload: OpenAIResponse;
+      try {
+        const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            instructions: SYSTEM_PROMPT,
+            input: [
+              {
+                role: 'user',
+                content: [
+                  // «original»: الأبعاد كما أرسلناها، فالإحداثيات بكسلات صورتنا نفسها
+                  { type: 'input_image', image_url: `data:${mediaType};base64,${data}`, detail: 'original' },
+                  { type: 'input_text', text: contextText({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory }) },
+                ],
+              },
             ],
-          },
-        ],
-        reasoning: { effort },
-        text: { format: { type: 'json_schema', name: 'page_translation', schema: OUTPUT_SCHEMA, strict: true } },
-        max_output_tokens: 16000,
-        store: false,
-      }),
-    });
-    if (res.status === 429) {
-      // 429 نوعان: ضغطٌ مؤقت، أو رصيدٌ خلص — والثاني لا تحلّه المحاولة ثانيةً
-      const code = await res
-        .json()
-        .then((b) => (b as { error?: { code?: string; type?: string } })?.error)
-        .catch(() => null);
-      if (code?.code === 'insufficient_quota' || code?.type === 'insufficient_quota') return reply({ error: 'no_credit' }, 402);
-      return reply({ error: 'busy' }, 429);
-    }
-    if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
-    if (res.status === 400) return reply({ error: 'rejected' }, 422);
-    if (!res.ok) return reply({ error: 'upstream' }, 502);
-    payload = (await res.json()) as OpenAIResponse;
-  } catch {
-    return reply({ error: 'upstream' }, 502);
-  }
+            reasoning: { effort },
+            text: { format: { type: 'json_schema', name: 'page_translation', schema: OUTPUT_SCHEMA, strict: true } },
+            max_output_tokens: 16000,
+            store: false,
+          }),
+        });
+        if (res.status === 429) {
+          // 429 نوعان: ضغطٌ مؤقت، أو رصيدٌ خلص — والثاني لا تحلّه المحاولة ثانيةً
+          const code = await res
+            .json()
+            .then((b) => (b as { error?: { code?: string; type?: string } })?.error)
+            .catch(() => null);
+          if (code?.code === 'insufficient_quota' || code?.type === 'insufficient_quota') return reply({ error: 'no_credit' }, 402);
+          return reply({ error: 'busy' }, 429);
+        }
+        if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
+        if (res.status === 400) return reply({ error: 'rejected' }, 422);
+        if (!res.ok) return reply({ error: 'upstream' }, 502);
+        payload = (await res.json()) as OpenAIResponse;
+      } catch {
+        return reply({ error: 'upstream' }, 502);
+      }
 
-  const content = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
-  const filtered = payload.incomplete_details?.reason === 'content_filter';
-  if (content.some((c) => c.type === 'refusal') || filtered) return reply({ error: 'refused' }, 422);
-  if (payload.status === 'incomplete') return reply({ error: 'too_long' }, 502);
-  const text = content.find((c) => c.type === 'output_text')?.text ?? '';
-  let parsed: { regions?: unknown; new_terms?: unknown; characters?: unknown; summary?: unknown };
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return reply({ error: 'bad_output' }, 502);
-  }
-  const regions = cleanRegions(parsed.regions, width, height);
-  const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null;
+      const content = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
+      const filtered = payload.incomplete_details?.reason === 'content_filter';
+      if (content.some((c) => c.type === 'refusal') || filtered) return reply({ error: 'refused' }, 422);
+      if (payload.status === 'incomplete') return reply({ error: 'too_long' }, 502);
+      const text = content.find((c) => c.type === 'output_text')?.text ?? '';
+      let parsed: { regions?: unknown; new_terms?: unknown; characters?: unknown; summary?: unknown };
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return reply({ error: 'bad_output' }, 502);
+      }
+      const regions = cleanRegions(parsed.regions, width, height);
+      const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null;
 
-  // ٣. الحفظ + ذاكرة العمل (أول قرار يثبت) + العدّاد، دفعة واحدة
-  const statements = [
-    env.DB.prepare(
-      `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (page_hash, engine) DO NOTHING`,
-    ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(regions), summary, userId, now),
-    ...usageStatements(env.DB, userId, now, chapterKey, costOf(payload.usage)),
-  ];
-  for (const t of Array.isArray(parsed.new_terms) ? (parsed.new_terms as Array<Record<string, unknown>>).slice(0, 40) : []) {
-    const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
-    const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
-    if (!term || !arabic) continue;
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'model', ?)
-         ON CONFLICT (series_ref, term) DO NOTHING`,
-      ).bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
-    );
-  }
-  for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 20) : []) {
-    const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
-    const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
-    if (!name || !arabic) continue;
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
-         ON CONFLICT (series_ref, name) DO UPDATE SET
-           gender = CASE WHEN translation_characters.gender IS NULL OR translation_characters.gender = 'unknown' THEN excluded.gender ELSE translation_characters.gender END`,
-      ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
-    );
-  }
-  await env.DB.batch(statements);
+      // ٣. الحفظ + ذاكرة العمل (أول قرار يثبت) + العدّاد، دفعة واحدة
+      const statements = [
+        env.DB.prepare(
+          `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (page_hash, engine) DO NOTHING`,
+        ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(regions), summary, userId, now),
+        ...ticket.settle(costOf(payload.usage)),
+      ];
+      for (const t of Array.isArray(parsed.new_terms) ? (parsed.new_terms as Array<Record<string, unknown>>).slice(0, 40) : []) {
+        const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
+        const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
+        if (!term || !arabic) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'model', ?)
+             ON CONFLICT (series_ref, term) DO NOTHING`,
+          ).bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
+        );
+      }
+      for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 20) : []) {
+        const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
+        const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
+        if (!name || !arabic) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+             ON CONFLICT (series_ref, name) DO UPDATE SET
+               gender = CASE WHEN translation_characters.gender IS NULL OR translation_characters.gender = 'unknown' THEN excluded.gender ELSE translation_characters.gender END`,
+          ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
+        );
+      }
+      await env.DB.batch(statements);
 
-  return reply({ engine, cached: false, width, height, regions, summary, model: payload.model ?? model });
+      return reply({ engine, cached: false, width, height, regions, summary, model: payload.model ?? model });
+    })();
+  } finally {
+    await ticket.refund();
+  }
 }
 
 // ───────────────────────── الترجمة بالمعرّفات (خط الرؤية) ─────────────────────────
@@ -493,7 +564,10 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 // الهندسة كلها عند العامل، واللغة والسياق هنا مع القاموس وذاكرة الفصل.
 
 /** يُرفع حين تتغير تعليمات الترجمة النصية تغييرًا يستحق ترجمة جديدة. */
-export const TEXT_PROMPT_VERSION = 1;
+// يرتفع مع كل تغيير في معنى التعليمات: المحفوظ بإصدار أقدم لا يُعرض كأنه الحالي.
+// 2: أمثلة الفريق، سؤال الإعادة، السرد بلا فقاعة واللافتات، و«نص حر بثقة منخفضة» يُرسل
+//    بتلميح sfx لتقرر Luna (لا يُسقط قبلها). يطابق TEXT_PROMPT_VERSION في apps/web/lib/translate.js.
+export const TEXT_PROMPT_VERSION = 2;
 export const textEngineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:t${TEXT_PROMPT_VERSION}`;
 const MAX_TEXT_REGIONS = 60;
 const REGION_ID = /^[a-z0-9_-]{1,32}$/;
@@ -596,7 +670,8 @@ export function cleanTextRegionsIn(raw: unknown, width: number, height: number):
     const id = typeof r?.id === 'string' && REGION_ID.test(r.id) ? r.id : null;
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const box = Array.isArray(r.box) && r.box.length === 4 ? (r.box.map((v) => clampInt(v, 0, Math.max(width, height))) as [number, number, number, number]) : ([0, 0, 0, 0] as [number, number, number, number]);
+    // كل إحداثي على محوره: x بعرض الصورة، y بارتفاعها
+    const box = Array.isArray(r.box) && r.box.length === 4 ? (r.box.map((v, i) => clampInt(v, 0, i % 2 === 0 ? width : height)) as [number, number, number, number]) : ([0, 0, 0, 0] as [number, number, number, number]);
     out.push({ id, source: typeof r.source === 'string' ? r.source.trim().slice(0, 2000) : '', kind: typeof r.kind === 'string' ? r.kind.slice(0, 20) : 'speech', box });
   }
   return out;
@@ -680,63 +755,87 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   if (!env.OPENAI_API_KEY) {
     return repairing ? reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null }) : reply({ error: 'translation_not_configured' }, 503);
   }
-  if (!repairing) {
-    const blocked = await quotaBlock(env, userId, now, chapterKey);
-    if (blocked) return blocked;
-  }
-
-  const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
-  const ask = (regions: TextRegionIn[], retry = false) =>
-    askText(env, deps, {
-      effort: fast ? 'none' : undefined,
-      mediaType,
-      data,
-      context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions }) + (retry ? RETRY_NOTE : ''),
-      known: new Set(regions.map((r) => r.id)),
-    });
-
-  let merged = saved;
-  let summary = cached?.summary ?? null;
-  let parsed: { new_terms?: unknown; characters?: unknown } = {};
-  let modelName: string | null = null;
-  let usd = 0;
-  if (!repairing) {
-    const first = await ask(regionsIn);
-    if (first instanceof Response) return first;
-    merged = first.regions;
-    summary = first.summary;
-    parsed = first.parsed;
-    modelName = first.model;
-    usd += first.usd;
-  }
-  // مرة واحدة فقط: ما سقط من الرد (أو كلام بلا عربي) يُسأل عنه وحده
-  const missing = unanswered(regionsIn, merged);
-  if (missing.length) {
-    const retry = await ask(missing, true);
-    if (!(retry instanceof Response)) {
-      usd += retry.usd;
-      const fixed = new Map(retry.regions.map((r) => [r.id, r]));
-      merged = regionsIn.map((r) => fixed.get(r.id) ?? merged.find((m) => m.id === r.id)).filter((r): r is TextRegionOut => Boolean(r));
-      summary ??= retry.summary;
-      modelName ??= retry.model;
-    } else if (repairing) {
-      return reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null });
+  // صفحة واحدة لا تُدفع مرتين: طلب متزامن لنفس البصمة (القارئ والترجمة المقدّمة معًا،
+  // أو جوّالان) ينتظر ما يحفظه الأول بدل نداء ثانٍ
+  if (!(await claimPage(env, pageHash, engine, now))) {
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (let i = 0; i < 25; i++) {
+      await sleep(1000);
+      const row = await env.DB.prepare('SELECT regions_json, summary FROM translation_pages WHERE page_hash = ? AND engine = ?')
+        .bind(pageHash, engine)
+        .first<{ regions_json: string; summary: string | null }>();
+      const got = row ? (JSON.parse(row.regions_json) as TextRegionOut[]).filter((r) => known.has(r.id)) : [];
+      if (row && got.length && !unanswered(regionsIn, got).length) return reply({ engine, cached: true, regions: got, summary: row.summary });
+      const still = await env.DB.prepare('SELECT 1 AS ok FROM translation_inflight WHERE page_hash = ? AND engine = ?').bind(pageHash, engine).first<{ ok: number }>();
+      if (!still) break;
     }
+    return reply({ error: 'busy' }, 503);
   }
+  try {
+    // حجز ذرّي قبل النداء (سقف الشهر دائمًا، وحصة الأسبوع لصفحة جديدة)، يُرجع إن لم يُصرف
+    const ticket = await admit(env, userId, now, chapterKey, !repairing);
+    if (ticket instanceof Response) return ticket;
+    try {
+      return await (async (): Promise<Response> => {
 
-  const statements = [
-    env.DB.prepare(
-      `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (page_hash, engine) DO UPDATE SET regions_json = excluded.regions_json, summary = COALESCE(translation_pages.summary, excluded.summary)`,
-    ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(merged), summary, userId, now),
-    ...(repairing
-      ? // الإصلاح لا يُحسب صفحة، لكن تكلفته تُسجَّل في سقف الشهر
-        [env.DB.prepare(`INSERT INTO translation_spend (month, usd, updated_at) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, updated_at = excluded.updated_at`).bind(monthOf(now), usd, now)]
-      : [...usageStatements(env.DB, userId, now, chapterKey, usd), ...memoryStatements(env.DB, seriesRef, parsed, now)]),
-  ];
-  await env.DB.batch(statements);
-  return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
+        const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
+        const ask = (regions: TextRegionIn[], retry = false) =>
+          askText(env, deps, {
+            effort: fast ? 'none' : undefined,
+            mediaType,
+            data,
+            context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions }) + (retry ? RETRY_NOTE : ''),
+            known: new Set(regions.map((r) => r.id)),
+          });
+
+        let merged = saved;
+        let summary = cached?.summary ?? null;
+        let parsed: { new_terms?: unknown; characters?: unknown } = {};
+        let modelName: string | null = null;
+        let usd = 0;
+        if (!repairing) {
+          const first = await ask(regionsIn);
+          if (first instanceof Response) return first;
+          merged = first.regions;
+          summary = first.summary;
+          parsed = first.parsed;
+          modelName = first.model;
+          usd += first.usd;
+        }
+        // مرة واحدة فقط: ما سقط من الرد (أو كلام بلا عربي) يُسأل عنه وحده
+        const missing = unanswered(regionsIn, merged);
+        if (missing.length) {
+          const retry = await ask(missing, true);
+          if (!(retry instanceof Response)) {
+            usd += retry.usd;
+            const fixed = new Map(retry.regions.map((r) => [r.id, r]));
+            merged = regionsIn.map((r) => fixed.get(r.id) ?? merged.find((m) => m.id === r.id)).filter((r): r is TextRegionOut => Boolean(r));
+            summary ??= retry.summary;
+            modelName ??= retry.model;
+          } else if (repairing) {
+            return reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null });
+          }
+        }
+
+        const statements = [
+          env.DB.prepare(
+            `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (page_hash, engine) DO UPDATE SET regions_json = excluded.regions_json, summary = COALESCE(translation_pages.summary, excluded.summary)`,
+          ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(merged), summary, userId, now),
+          // الإصلاح لا يُحسب صفحة (لم يُحجز منها)، لكن تكلفته تُسجَّل في سقف الشهر
+          ...ticket.settle(usd),
+          ...(repairing ? [] : memoryStatements(env.DB, seriesRef, parsed, now)),
+        ];
+        await env.DB.batch(statements);
+        return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
+      })();
+    } finally {
+      await ticket.refund();
+    }
+  } finally {
+    await releasePage(env, pageHash, engine).run();
+  }
 }
 
 /**
@@ -952,87 +1051,93 @@ export async function handleTranslateLearn(request: Request, env: TranslationEnv
   if (existing && existing.learned_from === learnedFrom) return reply({ learned: false, cached: true, learnedFrom });
 
   if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
-  const blocked = await quotaBlock(env, userId, now, null);
-  if (blocked) return blocked;
+  const ticket = await admit(env, userId, now, null);
+  if (ticket instanceof Response) return ticket;
+  try {
+    return await (async (): Promise<Response> => {
 
-  const content: Array<Record<string, unknown>> = [];
-  pairs.forEach((p, i) => {
-    content.push({ type: 'input_text', text: `Pair ${i + 1} (page ${p.pageIndex + 1}) — English edition:` });
-    content.push({ type: 'input_image', image_url: `data:${p.english.mediaType};base64,${p.english.data}`, detail: 'high' });
-    content.push({ type: 'input_text', text: `Pair ${i + 1} — Arabic edition of the same page:` });
-    content.push({ type: 'input_image', image_url: `data:${p.arabic.mediaType};base64,${p.arabic.data}`, detail: 'high' });
-  });
-  content.push({ type: 'input_text', text: `Work: ${seriesTitle ?? 'unknown'}${chapterNumber !== null ? ` — chapter ${chapterNumber}` : ''}. Study the Arabic team's choices on these ${pairs.length} pages and report.` });
-  const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
-  let payload: OpenAIResponse;
-  try {
-    const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        instructions: LEARN_SYSTEM_PROMPT,
-        input: [{ role: 'user', content }],
-        reasoning: { effort: 'medium' },
-        text: { format: { type: 'json_schema', name: 'team_style', schema: LEARN_OUTPUT_SCHEMA, strict: true } },
-        max_output_tokens: 8000,
-        store: false,
-      }),
-    });
-    if (res.status === 429) return reply({ error: 'busy' }, 429);
-    if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
-    if (!res.ok) return reply({ error: 'upstream' }, 502);
-    payload = (await res.json()) as OpenAIResponse;
-  } catch {
-    return reply({ error: 'upstream' }, 502);
+      const content: Array<Record<string, unknown>> = [];
+      pairs.forEach((p, i) => {
+        content.push({ type: 'input_text', text: `Pair ${i + 1} (page ${p.pageIndex + 1}) — English edition:` });
+        content.push({ type: 'input_image', image_url: `data:${p.english.mediaType};base64,${p.english.data}`, detail: 'high' });
+        content.push({ type: 'input_text', text: `Pair ${i + 1} — Arabic edition of the same page:` });
+        content.push({ type: 'input_image', image_url: `data:${p.arabic.mediaType};base64,${p.arabic.data}`, detail: 'high' });
+      });
+      content.push({ type: 'input_text', text: `Work: ${seriesTitle ?? 'unknown'}${chapterNumber !== null ? ` — chapter ${chapterNumber}` : ''}. Study the Arabic team's choices on these ${pairs.length} pages and report.` });
+      const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
+      let payload: OpenAIResponse;
+      try {
+        const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            instructions: LEARN_SYSTEM_PROMPT,
+            input: [{ role: 'user', content }],
+            reasoning: { effort: 'medium' },
+            text: { format: { type: 'json_schema', name: 'team_style', schema: LEARN_OUTPUT_SCHEMA, strict: true } },
+            max_output_tokens: 8000,
+            store: false,
+          }),
+        });
+        if (res.status === 429) return reply({ error: 'busy' }, 429);
+        if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
+        if (!res.ok) return reply({ error: 'upstream' }, 502);
+        payload = (await res.json()) as OpenAIResponse;
+      } catch {
+        return reply({ error: 'upstream' }, 502);
+      }
+      const out = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
+      if (out.some((c) => c.type === 'refusal')) return reply({ error: 'refused' }, 422);
+      let parsed: { characters?: unknown; terms?: unknown; style?: unknown };
+      try {
+        parsed = JSON.parse(out.find((c) => c.type === 'output_text')?.text ?? '');
+      } catch {
+        return reply({ error: 'bad_output' }, 502);
+      }
+      const style = (Array.isArray(parsed.style) ? (parsed.style as unknown[]) : [])
+        .filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+        .slice(0, 16)
+        .map((l) => `- ${l.trim().slice(0, 240)}`)
+        .join('\n');
+      const statements = [
+        env.DB.prepare(
+          `INSERT INTO translation_style (series_ref, notes, learned_from, pairs, updated_at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (series_ref) DO UPDATE SET notes = excluded.notes, learned_from = excluded.learned_from, pairs = excluded.pairs, updated_at = excluded.updated_at`,
+        ).bind(seriesRef, style, learnedFrom, pairs.length, now),
+        ...ticket.settle(costOf(payload.usage)),
+      ];
+      // المتعلَّم من الفريق يغلب ما اخترعه النموذج قبله
+      for (const t of Array.isArray(parsed.terms) ? (parsed.terms as Array<Record<string, unknown>>).slice(0, 80) : []) {
+        const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
+        const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
+        if (!term || !arabic) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'learned', ?)
+             ON CONFLICT (series_ref, term) DO UPDATE SET arabic = excluded.arabic, kind = excluded.kind, note = excluded.note, origin = 'learned', updated_at = excluded.updated_at`,
+          ).bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
+        );
+      }
+      for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 40) : []) {
+        const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
+        const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
+        if (!name || !arabic) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+             ON CONFLICT (series_ref, name) DO UPDATE SET arabic = excluded.arabic,
+               gender = CASE WHEN excluded.gender IS NULL OR excluded.gender = 'unknown' THEN translation_characters.gender ELSE excluded.gender END,
+               updated_at = excluded.updated_at`,
+          ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
+        );
+      }
+      await env.DB.batch(statements);
+      return reply({ learned: true, cached: false, learnedFrom, terms: statements.length - 2, styleLines: style ? style.split('\n').length : 0 });
+    })();
+  } finally {
+    await ticket.refund();
   }
-  const out = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
-  if (out.some((c) => c.type === 'refusal')) return reply({ error: 'refused' }, 422);
-  let parsed: { characters?: unknown; terms?: unknown; style?: unknown };
-  try {
-    parsed = JSON.parse(out.find((c) => c.type === 'output_text')?.text ?? '');
-  } catch {
-    return reply({ error: 'bad_output' }, 502);
-  }
-  const style = (Array.isArray(parsed.style) ? (parsed.style as unknown[]) : [])
-    .filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
-    .slice(0, 16)
-    .map((l) => `- ${l.trim().slice(0, 240)}`)
-    .join('\n');
-  const statements = [
-    env.DB.prepare(
-      `INSERT INTO translation_style (series_ref, notes, learned_from, pairs, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (series_ref) DO UPDATE SET notes = excluded.notes, learned_from = excluded.learned_from, pairs = excluded.pairs, updated_at = excluded.updated_at`,
-    ).bind(seriesRef, style, learnedFrom, pairs.length, now),
-    ...usageStatements(env.DB, userId, now, null, costOf(payload.usage)),
-  ];
-  // المتعلَّم من الفريق يغلب ما اخترعه النموذج قبله
-  for (const t of Array.isArray(parsed.terms) ? (parsed.terms as Array<Record<string, unknown>>).slice(0, 80) : []) {
-    const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
-    const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
-    if (!term || !arabic) continue;
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'learned', ?)
-         ON CONFLICT (series_ref, term) DO UPDATE SET arabic = excluded.arabic, kind = excluded.kind, note = excluded.note, origin = 'learned', updated_at = excluded.updated_at`,
-      ).bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
-    );
-  }
-  for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 40) : []) {
-    const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
-    const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
-    if (!name || !arabic) continue;
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
-         ON CONFLICT (series_ref, name) DO UPDATE SET arabic = excluded.arabic,
-           gender = CASE WHEN excluded.gender IS NULL OR excluded.gender = 'unknown' THEN translation_characters.gender ELSE excluded.gender END,
-           updated_at = excluded.updated_at`,
-      ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
-    );
-  }
-  await env.DB.batch(statements);
-  return reply({ learned: true, cached: false, learnedFrom, terms: statements.length - 2, styleLines: style ? style.split('\n').length : 0 });
 }
 
 /** مصطلحات العمل وشخصياته — لعرضها وتعديلها. */
