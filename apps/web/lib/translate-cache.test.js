@@ -53,3 +53,19 @@ describe('pages saved before the cache rename come back without translating agai
     expect(res.error).toBe('device_only');
   });
 });
+
+describe('smart and fast: a fast page is upgraded when you ask for smart, never the reverse', () => {
+  it('smart request re-translates a page saved from a fast translation', async () => {
+    const hash = await pageHashOf('file://p');
+    kv.set(`tl4:${hash}`, { value: saved({ engine: 'gpt-6-luna:t3:fast' }), at: 1 });
+    expect((await translatePage(noTranslate, 'file://p', {})).error).toBe('device_only');
+    expect((await translatePage(noTranslate, 'file://p', { speed: 'fast' })).from).toBe('device');
+  });
+
+  it('fast request takes the smart translation already saved', async () => {
+    const hash = await pageHashOf('file://p');
+    kv.set(`tl4:${hash}`, { value: saved({ engine: 'gpt-6-luna:t3' }), at: 1 });
+    expect((await translatePage(noTranslate, 'file://p', { speed: 'fast' })).from).toBe('device');
+    expect((await translatePage(noTranslate, 'file://p', {})).from).toBe('device');
+  });
+});

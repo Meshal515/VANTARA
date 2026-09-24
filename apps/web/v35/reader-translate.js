@@ -28,6 +28,9 @@ const RETRY_DELAYS_MS = [3_000, 10_000, 30_000, 90_000];
 const BLOCKING = new Set(['models_missing', 'device_only', 'translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'no_credit']);
 /** الأعمال التي فعّلتها بنفسك في وضع «عند الطلب»: للجلسة، وتُنسى بالخروج من العمل. */
 const sessionWorks = new Set();
+/** نوع الترجمة لكل عمل في هذه الجلسة (ذكية/سريعة) كما اخترته عند «ترجم»؛ وإلا من الإعدادات. */
+const sessionSpeed = new Map();
+export const speedOf = (ref) => sessionSpeed.get(ref) ?? readTranslateSettings().speed;
 
 const store = {
   get(key, fallback) {
@@ -168,6 +171,7 @@ export function createReaderTranslation(deps) {
         chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
         pageIndex: index,
         sourceLang: seg.row.lang ?? 'en',
+        ...(speedOf(ref) === 'fast' ? { speed: 'fast' } : {}),
       });
     };
     queue
@@ -394,6 +398,31 @@ export function createReaderTranslation(deps) {
     toast(on ? 'الترجمة العربية شغّالة لهذا العمل' : 'تعرض الأصل الحين');
   }
 
+  /**
+   * اخترت من ورقة «ترجم»: ذكية أو سريعة. يشغّل الترجمة إن كانت موقفة. ومن
+   * سريعة إلى ذكية: الصفحات تُترجم من جديد (السريعة تبقى معروضة حتى تجهز الذكية).
+   */
+  function start(segs, current, speed) {
+    currentSegs = segs;
+    currentSeg = current ?? currentSeg;
+    if (!enabled()) return;
+    const upgraded = isOn() && speedOf(ref) === 'fast' && speed === 'smart';
+    sessionSpeed.set(ref, speed === 'fast' ? 'fast' : 'smart');
+    if (readTranslateSettings().mode === 'manual') sessionWorks.add(ref);
+    else sessionWorks.delete(`off:${ref}`);
+    if (upgraded) {
+      for (const seg of currentSegs ?? []) {
+        if (!seg.tl) continue;
+        seg.tl.results.clear();
+        seg.tl.failed.clear();
+        seg.tl.tries.clear();
+        seg.tl.queued = false;
+      }
+    }
+    applyState();
+    toast(speed === 'fast' ? 'ترجمة سريعة شغّالة لهذا العمل' : 'ترجمة ذكية شغّالة لهذا العمل');
+  }
+
   function destroy() {
     stopped = true;
     unsubscribe();
@@ -402,7 +431,8 @@ export function createReaderTranslation(deps) {
     // «عند الطلب»: التفعيل ينتهي بالخروج من العمل
     sessionWorks.delete(ref);
     sessionWorks.delete(`off:${ref}`);
+    sessionSpeed.delete(ref);
   }
 
-  return { attach, onImage, enqueue, focus, openGate, toggle, destroy, needs: needsTranslation, isOn, enabled };
+  return { attach, onImage, enqueue, focus, openGate, toggle, start, speed: () => speedOf(ref), destroy, needs: needsTranslation, isOn, enabled };
 }

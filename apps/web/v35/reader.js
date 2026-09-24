@@ -436,6 +436,32 @@ export function openSmartReader(deps, ctx) {
     b.querySelector('span').textContent = on ? 'عربي' : 'ترجم';
   }
 
+  /** «ترجم»: تختار ذكية أو سريعة (المختار مسبقًا من الإعدادات)، أو تعرض الأصل. */
+  function openTranslateChoice() {
+    if (!tl.enabled()) return;
+    const on = tl.isOn();
+    const speed = tl.speed();
+    openSheet((body) => {
+      body.append(el('h3', null, 'الترجمة العربية'));
+      const pick = (value) => () => {
+        closeSheet();
+        tl.start(segs, state.seg, value);
+        syncTranslateButtons();
+      };
+      body.append(sheetItem('spark', 'ذكية', pick('smart'), { pressed: on ? speed === 'smart' : undefined, trail: 'الأدق، تاخذ ثواني أكثر' }));
+      body.append(sheetItem('flame', 'سريعة', pick('fast'), { pressed: on ? speed === 'fast' : undefined, trail: 'أسرع، وأحيانًا تغلط' }));
+      if (on) {
+        body.append(
+          sheetItem('eye', 'اعرض الأصل', () => {
+            closeSheet();
+            tl.toggle(segs, state.seg);
+            syncTranslateButtons();
+          }),
+        );
+      }
+    });
+  }
+
   /** صار هذا الفصل أمامك: الشريط له، وما بعده يُجهَّز من الآن. */
   function enterSegment(seg) {
     if (state.seg === seg) return;
@@ -1371,10 +1397,7 @@ export function openSmartReader(deps, ctx) {
     frameCancel: () => exitFrameMode(),
     frameNext: () => openFrameSend(),
     menu: () => openMenu(),
-    translate: () => {
-      tl.toggle(segs, state.seg);
-      syncTranslateButtons();
-    },
+    translate: () => openTranslateChoice(),
     prevChapter: () => {
       const { prev } = nav();
       if (!prev) return;
