@@ -428,7 +428,8 @@ export function snapBox(img, box, claimed = []) {
     const glyphs = (dark) => {
       const ink = new Uint8Array(W * H);
       for (let p = 0; p < ink.length; p++) ink[p] = dark ? (L[p] < 0.45 ? 1 : 0) : L[p] > 0.75 ? 1 : 0;
-      const bright = (p) => (dark ? L[p] > 0.8 : L[p] < 0.22);
+      // الخلفية حول الحرف تباينه بوضوح: فاتحة حول الداكن، وأغمق بكثير حول الأبيض
+      const bright = (p) => (dark ? L[p] > 0.72 : L[p] < 0.5);
       const seen = new Uint8Array(W * H);
       const out = [];
       const stack = [];
@@ -511,6 +512,7 @@ export function snapBox(img, box, claimed = []) {
         return grid[y1 * (W + 1) + x1] - grid[y0 * (W + 1) + x1] - grid[y1 * (W + 1) + x0] + grid[y0 * (W + 1) + x0];
       };
       const here = sum(ox, oy);
+      // مرشّحان لكل لون: البقاء مكانه، والموضع الأكثر حروفًا حوله
       let top = { score: here, x: ox, y: oy };
       const step = Math.max(1, Math.round(Math.min(bw, bh) / 16));
       for (let y = -bh + 1; y < H; y += step) {
@@ -519,49 +521,17 @@ export function snapBox(img, box, claimed = []) {
           if (s > top.score) top = { score: s, x, y };
         }
       }
-      // لا انتقال إلا بفرقٍ واضح: صندوقٌ صحيح لا يُزاح لحرفٍ شارد
-      if (top.score < here * 1.25 + 4) top = { score: here, x: ox, y: oy };
-      if (!best || top.score > best.score) best = { ...top, list };
-    }
-    if (!best || best.score < 8) return box;
-    // حدود الحروف في الموضع المختار (مراكزها داخله، بسماحٍ صغير)
-    const gx = bw * 0.12;
-    const gy = bh * 0.12;
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
-    let n = 0;
-    for (const c of best.list) {
-      if (c.cx < best.x - gx || c.cx > best.x + bw + gx || c.cy < best.y - gy || c.cy > best.y + bh + gy) continue;
-      x0 = Math.min(x0, c.x0);
-      y0 = Math.min(y0, c.y0);
-      x1 = Math.max(x1, c.x1);
-      y1 = Math.max(y1, c.y1);
-      n += c.n;
-    }
-    if (n < 8 || !Number.isFinite(x0)) return box;
-    // إكمال السطر: حرفٌ خرج عن الصندوق («?!» في آخر الجملة، «E» على الحافة)
-    // يُضم إن كان ملاصقًا للنص بمسافة حرف، وبحجم حروفه
-    const inside = new Set(best.list.filter((c) => c.x0 >= x0 && c.x1 <= x1 && c.y0 >= y0 && c.y1 <= y1));
-    const heights = [...inside].map((c) => c.y1 - c.y0 + 1).sort((a, b) => a - b);
-    const glyphH = heights[heights.length >> 1] || 6;
-    for (let pass = 0; pass < 4; pass++) {
-      let grew = false;
-      for (const c of best.list) {
-        if (inside.has(c) || c.y1 - c.y0 + 1 > glyphH * 1.8) continue;
-        const gapX = Math.max(0, c.x0 - x1, x0 - c.x1);
-        const gapY = Math.max(0, c.y0 - y1, y0 - c.y1);
-        if (gapX > glyphH * 0.9 || gapY > glyphH * 0.8) continue;
-        inside.add(c);
-        x0 = Math.min(x0, c.x0);
-        y0 = Math.min(y0, c.y0);
-        x1 = Math.max(x1, c.x1);
-        y1 = Math.max(y1, c.y1);
-        grew = true;
+      for (const [px, py, stay] of [[ox, oy, true], [top.x, top.y, false]]) {
+        const got = complete(list, px, py);
+        if (!got) continue;
+        // الحكم بما يُلتقط بعد إكمال الأسطر: البقاء يفوز ما لم يكن الانتقال أوضح بكثير
+        const far = Math.hypot(px - ox, py - oy) / diag;
+        const value = got.mass * (stay ? 1.6 : 1) * (1 - 0.5 * far);
+        if (!best || value > best.value) best = { ...got, value };
       }
-      if (!grew) break;
     }
+    if (!best || best.mass < 8) return box;
+    const { x0, y0, x1, y1, glyphH } = best;
     // هامشٌ بعرض حدّ الحرف: النص فوق الرسم محاطٌ بخطٍّ أسود يُمسح معه
     const pad = Math.max(2, glyphH * 0.18);
     const [ix0, iy0] = toImage(x0 - pad, y0 - pad);
@@ -572,6 +542,51 @@ export function snapBox(img, box, claimed = []) {
     // حروفٌ قليلة في زاوية لا تُصغّر فقاعةً كاملة إلى نقطة
     if (out.w < box.w * 0.25 && out.h < box.h * 0.25) return box;
     return out;
+
+    /**
+     * الحروف التي تقع مراكزها في الصندوق عند (px, py)، ثم إكمال السطر: حرفٌ خرج
+     * عنه («?!» في آخر الجملة، «E» على الحافة، السطر التالي) يُضم إن لاصق
+     * النص بمسافة حرف وكان بحجم حروفه.
+     */
+    function complete(list, px, py) {
+      const gx = bw * 0.12;
+      const gy = bh * 0.12;
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      const inside = new Set();
+      for (const c of list) {
+        if (c.cx < px - gx || c.cx > px + bw + gx || c.cy < py - gy || c.cy > py + bh + gy) continue;
+        inside.add(c);
+        x0 = Math.min(x0, c.x0);
+        y0 = Math.min(y0, c.y0);
+        x1 = Math.max(x1, c.x1);
+        y1 = Math.max(y1, c.y1);
+      }
+      if (!inside.size) return null;
+      const heights = [...inside].map((c) => c.y1 - c.y0 + 1).sort((a, b) => a - b);
+      const glyphH = heights[heights.length >> 1] || 6;
+      for (let pass = 0; pass < 6; pass++) {
+        let grew = false;
+        for (const c of list) {
+          if (inside.has(c) || c.y1 - c.y0 + 1 > glyphH * 1.8) continue;
+          const gapX = Math.max(0, c.x0 - x1, x0 - c.x1);
+          const gapY = Math.max(0, c.y0 - y1, y0 - c.y1);
+          if (gapX > glyphH * 0.9 || gapY > glyphH * 1.15) continue;
+          inside.add(c);
+          x0 = Math.min(x0, c.x0);
+          y0 = Math.min(y0, c.y0);
+          x1 = Math.max(x1, c.x1);
+          y1 = Math.max(y1, c.y1);
+          grew = true;
+        }
+        if (!grew) break;
+      }
+      let mass = 0;
+      for (const c of inside) mass += c.n;
+      return { x0, y0, x1, y1, glyphH, mass };
+    }
   } catch {
     return box;
   }
