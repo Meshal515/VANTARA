@@ -1038,7 +1038,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = q('detailTlBtn');
     if (!b) return;
     const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish;
+    b.hidden = !hasEnglish || !readTranslateSettings().enabled;
     const on = translationOn(String(w?.id ?? ''));
     b.setAttribute('aria-pressed', String(on));
     b.classList.toggle('detail-tl--on', on);
