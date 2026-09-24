@@ -443,6 +443,8 @@ What you receive: the page image, and a list of text regions the detector found,
 - arabic: the translation. null for sfx and credit: the art keeps its sound effects. Signs are translated only when the reader needs them to follow the story; otherwise null.
 - speaker: the character speaking, by the name used in the character list, or null when unclear.
 
+Every speech, thought and narration region gets its own Arabic; null is only for sfx, credit and signs the reader does not need. When one sentence runs across two or more bubbles, split the Arabic across them in the same order, so each bubble holds its own part. Never fold one bubble's words into its neighbour and leave it empty: an empty bubble on the page reads as untranslated.
+
 Also return summary: one or two Arabic sentences on what happens on this page, used as context for the next pages. Return empty arrays when there is nothing new.
 
 Reference translations from the team's style sheet. Match this register, rhythm and brevity (English → Arabic):
@@ -581,23 +583,105 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   const cached = await env.DB.prepare('SELECT regions_json, summary FROM translation_pages WHERE page_hash = ? AND engine = ?')
     .bind(pageHash, engine)
     .first<{ regions_json: string; summary: string | null }>();
-  if (cached) {
-    // المحفوظ صالح ما دامت المعرّفات نفسها (نفس الصورة = نفس الكشف = نفس المعرّفات)
-    const saved = JSON.parse(cached.regions_json) as TextRegionOut[];
-    const known = new Set(regionsIn.map((r) => r.id));
-    if (saved.some((r) => known.has(r.id))) return reply({ engine, cached: true, regions: saved.filter((r) => known.has(r.id)), summary: cached.summary });
+  const known = new Set(regionsIn.map((r) => r.id));
+  const saved = cached ? (JSON.parse(cached.regions_json) as TextRegionOut[]).filter((r) => known.has(r.id)) : [];
+  // المحفوظ صالح ما دامت المعرّفات نفسها (نفس الصورة = نفس الكشف = نفس المعرّفات).
+  // فقاعة سقطت من ردّ سابق لا تبقى ساقطة للأبد: تُسأل Luna عنها وحدها.
+  if (cached && saved.length && !unanswered(regionsIn, saved).length) {
+    return reply({ engine, cached: true, regions: saved, summary: cached.summary });
   }
 
-  if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
+  const repairing = Boolean(cached && saved.length);
+  if (!env.OPENAI_API_KEY) {
+    return repairing ? reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null }) : reply({ error: 'translation_not_configured' }, 503);
+  }
   const day = weekOf(now);
   const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
   const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
-  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+  if (!repairing && (used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
 
   const memory = await workMemory(env.DB, engine, seriesRef, chapterKey, pageIndex);
+  const ask = (regions: TextRegionIn[], retry = false) =>
+    askText(env, deps, {
+      mediaType,
+      data,
+      context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions }) + (retry ? RETRY_NOTE : ''),
+      known: new Set(regions.map((r) => r.id)),
+    });
+
+  let merged = saved;
+  let summary = cached?.summary ?? null;
+  let parsed: { new_terms?: unknown; characters?: unknown } = {};
+  let modelName: string | null = null;
+  if (!repairing) {
+    const first = await ask(regionsIn);
+    if (first instanceof Response) return first;
+    merged = first.regions;
+    summary = first.summary;
+    parsed = first.parsed;
+    modelName = first.model;
+  }
+  // مرة واحدة فقط: ما سقط من الرد (أو كلام بلا عربي) يُسأل عنه وحده
+  const missing = unanswered(regionsIn, merged);
+  if (missing.length) {
+    const retry = await ask(missing, true);
+    if (!(retry instanceof Response)) {
+      const fixed = new Map(retry.regions.map((r) => [r.id, r]));
+      merged = regionsIn.map((r) => fixed.get(r.id) ?? merged.find((m) => m.id === r.id)).filter((r): r is TextRegionOut => Boolean(r));
+      summary ??= retry.summary;
+      modelName ??= retry.model;
+    } else if (repairing) {
+      return reply({ engine, cached: true, regions: saved, summary: cached?.summary ?? null });
+    }
+  }
+
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (page_hash, engine) DO UPDATE SET regions_json = excluded.regions_json, summary = COALESCE(translation_pages.summary, excluded.summary)`,
+    ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(merged), summary, userId, now),
+    ...(repairing
+      ? []
+      : [
+          env.DB.prepare(
+            `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
+             ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
+          ).bind(userId, day),
+          ...memoryStatements(env.DB, seriesRef, parsed, now),
+        ]),
+  ];
+  await env.DB.batch(statements);
+  return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
+}
+
+/**
+ * سؤال الإعادة: فقاعة بقيت بلا عربي (غالبًا دُمج معناها في جارتها). كل فقاعة
+ * تُقرأ في مكانها، فلها ترجمتها هي، ولو تكرّر المعنى.
+ */
+export const RETRY_NOTE = `
+
+These regions came back without Arabic in the first pass. Each one is its own bubble on the page and the reader sees it on its own, so each needs its own Arabic even if a neighbouring bubble says something related. Do not return null for speech, thought or narration: translate exactly the text of each region.`;
+
+/** مناطق طُلبت ولم تأخذ جوابًا: غائبة من الرد، أو كلام بلا عربي. اللافتة والمؤثر والحقوق بلا عربي جواب صحيح. */
+export function unanswered(asked: TextRegionIn[], got: TextRegionOut[]): TextRegionIn[] {
+  const byId = new Map(got.map((r) => [r.id, r]));
+  return asked.filter((r) => {
+    if (!r.source.trim()) return false;
+    const hit = byId.get(r.id);
+    if (!hit) return true;
+    return hit.arabic === null && !['sfx', 'credit', 'sign'].includes(hit.kind);
+  });
+}
+
+/** نداء Luna واحد لقائمة مناطق. يرجع الرد المنظّف، أو `Response` خطأ جاهزًا. */
+async function askText(
+  env: TranslationEnv,
+  deps: TranslateDeps,
+  input: { mediaType: string; data: string; context: string; known: Set<string> },
+): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null }> {
   const effort = (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
-
   let payload: OpenAIResponse;
   try {
     const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
@@ -611,8 +695,8 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
             role: 'user',
             content: [
               // الصورة للسياق وتصحيح OCR لا للإحداثيات: «high» يكفي ولا يحتاج الدقة الأصلية
-              { type: 'input_image', image_url: `data:${mediaType};base64,${data}`, detail: 'high' },
-              { type: 'input_text', text: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions: regionsIn }) },
+              { type: 'input_image', image_url: `data:${input.mediaType};base64,${input.data}`, detail: 'high' },
+              { type: 'input_text', text: input.context },
             ],
           },
         ],
@@ -648,23 +732,12 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
   } catch {
     return reply({ error: 'bad_output' }, 502);
   }
-  const regions = cleanTextRegionsOut(parsed.regions, new Set(regionsIn.map((r) => r.id)));
-  const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null;
-
-  const statements = [
-    env.DB.prepare(
-      `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (page_hash, engine) DO NOTHING`,
-    ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(regions), summary, userId, now),
-    env.DB.prepare(
-      `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
-       ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
-    ).bind(userId, day),
-    ...memoryStatements(env.DB, seriesRef, parsed, now),
-  ];
-  await env.DB.batch(statements);
-  return reply({ engine, cached: false, regions, summary, model: payload.model ?? model });
+  return {
+    regions: cleanTextRegionsOut(parsed.regions, input.known),
+    summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 600) : null,
+    parsed,
+    model: payload.model ?? null,
+  };
 }
 
 /** المصطلحات والشخصيات الجديدة من ردّ النموذج → ذاكرة العمل (أول قرار يثبت). */

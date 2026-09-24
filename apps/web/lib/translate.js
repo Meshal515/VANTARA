@@ -27,6 +27,7 @@ export const MAX_UPLOAD_EDGE = 4096;
 /** أعرض من هذا لا يزيد الدقة المفيدة للكشف والقراءة، ويثقل الرفع. */
 export const MAX_UPLOAD_WIDTH = 1600;
 const CACHE_PREFIX = 'tl3:';
+const RETRY_INCOMPLETE_MS = 5 * 60 * 1000;
 
 // ───────────────────────── العتبة: متى تدخل ─────────────────────────
 
@@ -252,12 +253,14 @@ export function renderPlan(analysis, reply) {
 export async function translatePage(deps, src, meta) {
   const hash = await pageHashOf(src);
   const local = (await readKv(CACHE_PREFIX + hash))?.value;
-  if (local && typeof local.translated === 'number') return { ...local, hash, from: 'device' };
+  // صفحة ناقصة (فقاعة لم تُترجم) لا تُحفظ للأبد: تُعاد بعد مهلة، والخادم يسأل عن الناقص وحده
+  const stale = local?.incomplete && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
+  if (local && typeof local.translated === 'number' && !stale) return { ...local, hash, from: 'device' };
 
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
   const result = nativeTranslationAvailable() && imagePath ? await translateOnDevice({ ...deps, imagePath }, hash, meta) : await translateViaServer(deps, src, hash, meta);
   if (result.error) return result;
-  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine };
+  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now() };
   void writeKv(CACHE_PREFIX + hash, value);
   return { ...value, hash, from: result.cached ? 'friends' : 'model' };
 }
@@ -283,7 +286,8 @@ async function translateOnDevice(deps, hash, meta) {
   });
   if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}` };
   const plan = renderPlan(analysis, res.body);
-  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), error: null };
+  const incomplete = unansweredIds(readable, res.body).length > 0;
+  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null };
   let rendered;
   try {
     rendered = await renderPage({ path: deps.imagePath, regions: plan });
@@ -297,8 +301,21 @@ async function translateOnDevice(deps, hash, meta) {
     translated: plan.length,
     engine: res.body?.engine ?? 'device',
     cached: Boolean(res.body?.cached),
+    incomplete,
     error: null,
   };
+}
+
+/** فقاعات مقروءة لم تأخذ عربيًا من Luna (المؤثر واللافتة والحقوق بلا عربي جواب صحيح). */
+export function unansweredIds(readable, reply) {
+  const byId = new Map((reply?.regions ?? []).map((r) => [r.id, r]));
+  return readable
+    .filter((r) => {
+      const hit = byId.get(r.id);
+      if (!hit) return true;
+      return !(typeof hit.arabic === 'string' && hit.arabic.trim()) && !['sfx', 'credit', 'sign'].includes(hit.kind);
+    })
+    .map((r) => r.id);
 }
 
 async function translateViaServer(deps, src, hash, meta) {

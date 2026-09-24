@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, entryPages, readingRate, resultOf, uploadPlan } from './translate.js';
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, createQueue, entryPages, readingRate, resultOf, unansweredIds, uploadPlan } from './translate.js';
 
 describe('entry threshold: enter with the least ready that never makes you wait', () => {
   it('translation faster than you read: three pages are enough', () => {
@@ -96,5 +96,21 @@ describe('queue: current chapter first, then next, then previous; nearest to you
     expect(a).toBe(b);
     expect(await a).toBe('ok');
     expect(runs).toBe(1);
+  });
+});
+
+describe('a bubble Luna left out is known, so the page is retried', () => {
+  it('flags readable bubbles with no Arabic, but not sfx, signs or credits', () => {
+    const readable = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }];
+    const reply = {
+      regions: [
+        { id: 'a', kind: 'speech', arabic: 'نعم' },
+        { id: 'b', kind: 'speech', arabic: null },
+        { id: 'c', kind: 'sfx', arabic: null },
+        { id: 'd', kind: 'sign', arabic: null },
+      ],
+    };
+    expect(unansweredIds(readable, reply)).toEqual(['b', 'e']);
+    expect(unansweredIds(readable, null)).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 });
