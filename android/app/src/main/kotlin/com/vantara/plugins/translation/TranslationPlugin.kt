@@ -39,7 +39,7 @@ class TranslationPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val gate = PriorityGate()
 
-    /** «high»: الصفحة أمام القارئ. غيرها (الترجمة المقدّمة، الإكمال، القياس) بعدها. */
+    /** «high»: الصفحة أمام القارئ. غيرها (الترجمة المقدّمة، الإكمال) بعدها. */
     private fun high(call: PluginCall) = call.getString("priority", "high") != "low"
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
@@ -101,7 +101,12 @@ class TranslationPlugin : Plugin() {
                 require(file.exists()) { "page file missing" }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val (a, thumb) = gate.run(high(call), perf) { pipeline.analyzeForLuna(file, perf) }
+                val done = gate.run(PriorityGate.DETECT, perf) { pipeline.detectStage(file, perf) }
+                val (a, thumb) = if (done != null) {
+                    done to ""
+                } else {
+                    gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf) { pipeline.finishForLuna(file, perf) }
+                }
                 val regions = JSArray()
                 for (r in a.regions) {
                     regions.put(
@@ -119,7 +124,7 @@ class TranslationPlugin : Plugin() {
                 // صفحة فيها ما يُسأل عنه: نموذج التبييض يُحمَّل الآن في الخلفية (دور منخفض) فيجهز
                 // قبل أن يعود رد Luna، لا حين تنتظره الصفحة
                 if (thumb.isNotEmpty() && !pipeline.inpainterReady()) {
-                    scope.launch { runCatching { gate.run(false, Perf()) { pipeline.warmInpainter(Perf()) } } }
+                    scope.launch(Dispatchers.IO) { runCatching { pipeline.warmInpainter(Perf()) } }
                 }
                 call.resolve(
                     JSObject()
@@ -154,7 +159,9 @@ class TranslationPlugin : Plugin() {
                 call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val (out, translated) = gate.run(high(call), perf) { pipeline.render(File(path), byId, outDir, perf, leave) }
+                val (out, translated) = gate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf) {
+                    pipeline.render(File(path), byId, outDir, perf, leave)
+                }
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
@@ -181,7 +188,7 @@ class TranslationPlugin : Plugin() {
                     val ar = o.optString("arabic", "")
                     if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
                 }
-                val b = gate.run(false, Perf()) { pipeline.benchmark(file, byId) }
+                val b = gate.run(PriorityGate.BACKGROUND, Perf()) { pipeline.benchmark(file, byId) }
                 call.resolve(JSObject().put("legacy", perfJs(b.legacy, 0)).put("current", perfJs(b.current, 0)).put("identical", b.identical))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "benchmark failed", t.javaClass.simpleName)
@@ -223,6 +230,7 @@ class TranslationPlugin : Plugin() {
             .put("ctd", runCatching { pipeline.ctdVariant() }.getOrDefault("?"))
             .put("thermal", thermal())
             .put("thermalWaitMs", thermalWait)
+            .put("busyPct", gate.busyPercent())
             .put("lowMemory", mem.lowMemory)
             .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
     }
