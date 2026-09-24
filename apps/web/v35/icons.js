@@ -70,6 +70,12 @@ const P = {
   gap: '<rect x="5" y="3.5" width="14" height="6.5" rx="1.5"/><rect x="5" y="14" width="14" height="6.5" rx="1.5"/>',
   layers: '<path d="M12 4 20.5 8.5 12 13 3.5 8.5Z"/><path d="m3.5 12.8 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5" opacity=".55"/>',
   translate: '<path d="M4 5.5h9M8.5 3.5v2M6 5.5c.6 3.3 2.7 6 6 7.5M11 5.5c-.7 3.6-3.3 6.6-7 8"/><path d="m12.5 20.5 4-9.5 4 9.5M14 17h5"/>',
+  // فقاعتان: «A» الأصل و«ع» العربي — زرّ الترجمة في القارئ
+  translateAr:
+    '<path d="M3 5.2A2.2 2.2 0 0 1 5.2 3h6.6A2.2 2.2 0 0 1 14 5.2v4.6a2.2 2.2 0 0 1-2.2 2.2H8.6L5.5 14.5V12h-.3A2.2 2.2 0 0 1 3 9.8Z"/>' +
+    '<path d="m6.6 9.6 1.9-4.6 1.9 4.6M7.3 8.1h2.4"/>' +
+    '<path d="M16.5 9.5h2.3a2.2 2.2 0 0 1 2.2 2.2v4.6a2.2 2.2 0 0 1-2.2 2.2h-.3v2.5l-3.1-2.5h-3.2a2.2 2.2 0 0 1-2.2-2.2v-1.8"/>' +
+    '<text x="15.4" y="17.3" font-size="7.2" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui, sans-serif">ع</text>',
   skipNext: '<path d="M16 6.5 9.5 12l6.5 5.5Z"/><path d="M7.5 6.5v11"/>',
   skipPrev: '<path d="m8 6.5 6.5 5.5L8 17.5Z"/><path d="M16.5 6.5v11"/>',
 

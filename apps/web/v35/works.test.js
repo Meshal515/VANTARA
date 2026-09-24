@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work } from './works.js';
+import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, isWestern, isWesternManga, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work } from './works.js';
 import { mergeChapters } from '../lib/catalog.js';
 
 /**
@@ -136,5 +136,41 @@ describe('English fills only what Arabic lacks', () => {
     expect(first.label).toBe('MangaDex · إنجليزي');
     expect(first.lang).toBe('en');
     expect(sourceLabel({ sourceId: arabic(22).sourceId, label: 'Team X' })).toBe('Team X');
+  });
+});
+
+/**
+ * مانجا ومانهوا ومانها فقط. الأمثلة من المصادر الحقيقية: Comic Verse يوسم
+ * DC/MARVEL/IMAGE، وDilar «كوميك»، وMangaTime «comic»، ومانجا ستارز بلا وسوم.
+ */
+describe('no western comics or cartoons, only manga, manhwa and manhua', () => {
+  const ed = (title, genre = '') => ({ sourceId: 'x', manga: { title, genre } });
+  it('publisher and comic tags hide a work, whatever the source language', () => {
+    expect(isWesternManga({ title: 'ABSOLUTE BATMAN', genre: 'أكشن, غموض, مغامرة, DC' })).toBe(true);
+    expect(isWesternManga({ title: 'The Walking Dead: Deluxe', genre: 'أكشن, زومبي, مغامرة, IMAGE' })).toBe(true);
+    expect(isWesternManga({ title: 'The Batman Who Laughs', genre: 'أكشن, نفسي, كوميك' })).toBe(true);
+    expect(isWesternManga({ title: 'Invincible', genre: 'دراما, أكشن, مغامرة, comic' })).toBe(true);
+    expect(isWesternManga({ title: 'absolute batman', genre: 'Drama, Action, Comic, Western' })).toBe(true);
+  });
+  it('untagged western titles are known by name', () => {
+    for (const t of ['absolute batman', 'Spider-man :Life Story', 'Adventure Time Season 11', 'the walking dead', 'Lore Olympus']) {
+      expect(isWesternManga({ title: t })).toBe(true);
+    }
+  });
+  it('comedy is not comic, and Asian works stay — «Invincible» manhwa included', () => {
+    for (const [t, g] of [
+      ['I Am An Invincible Genius', 'أكشن, كوميدي'],
+      ['Perhaps Invincible', 'أكشن, كوميديا, Manhwa'],
+      ['High class', 'أكشن, دموي, حياة مدرسية'],
+      ['Solo Leveling', 'Action, Comedy, Webtoons, Manhwa'],
+      ['Full-Time Awakening', 'أكشن, مغامرة, فانتازيا, manhua'],
+      ['Festival of warriors', ''],
+    ]) {
+      expect(isWesternManga({ title: t, genre: g })).toBe(false);
+    }
+  });
+  it('one western edition hides the whole work', () => {
+    expect(isWestern({ key: 'k', editions: [ed('Batman'), ed('باتمان')] })).toBe(true);
+    expect(isWestern({ key: 'k2', editions: [ed('High class', 'أكشن'), ed('High Class', 'Manhwa')] })).toBe(false);
   });
 });
