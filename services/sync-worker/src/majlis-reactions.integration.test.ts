@@ -18,12 +18,15 @@ function testEnv() {
 const ctx = { waitUntil: () => {} };
 let seq = 0;
 async function react(env: ReturnType<typeof testEnv>['env'], as: string, payload: Record<string, unknown>) {
+  await op(env, as, 'majlis.react', payload);
+}
+async function op(env: ReturnType<typeof testEnv>['env'], as: string, kind: string, payload: Record<string, unknown>) {
   const token = await mintToken(as, SECRET);
   const res = await worker.fetch(
     new Request('https://sync.test/v1/ops', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ops: [{ opId: `op-react-${++seq}`, kind: 'majlis.react', payload, at: Date.now() }] }),
+      body: JSON.stringify({ ops: [{ opId: `op-react-${++seq}`, kind, payload, at: Date.now() }] }),
     }),
     env,
     ctx,
@@ -95,6 +98,25 @@ describe('majlis reactions', () => {
     // رمزٌ آخر إشعارٌ جديد فعلًا
     await react(env, B, { targetKind: 'frame', targetId: 'f-read', emoji: '😂' });
     expect(db.prepare("SELECT read, body FROM notifications WHERE kind = 'REACTION'").get()).toEqual({ read: 0, body: '😂' });
+  });
+
+  it('a reaction on your activity can be marked read: its id is longer than 80 characters', async () => {
+    // المعرّف `react:activity:<opId>:activity:<userId>` ≈ 97 حرفًا. كان
+    // `notification.read` يقصّه إلى 80، فلا يطابق صفًّا: الإشعار يبدو مقروءًا
+    // لحظة ثم يرجع غير مقروء مع أول مزامنة
+    const { env, db } = testEnv();
+    const activityId = '5b0f7c1e-2d7a-4f55-9d0e-3f8a0b6c1d22:activity';
+    db.prepare(
+      `INSERT INTO activity (id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev)
+       VALUES (?, ?, 'READ', 'ext:solo leveling', NULL, NULL, '{}', 1, 1)`,
+    ).run(activityId, A);
+    await react(env, B, { targetKind: 'activity', targetId: activityId, emoji: '😂' });
+    const note = db.prepare("SELECT id, read FROM notifications WHERE kind = 'REACTION'").get() as { id: string; read: number };
+    expect(note.id.length).toBeGreaterThan(80);
+    expect(note.read).toBe(0);
+
+    await op(env, A, 'notification.read', { id: note.id });
+    expect(db.prepare('SELECT read, seen FROM notifications WHERE id = ?').get(note.id)).toEqual({ read: 1, seen: 1 });
   });
 
   it('only the closed set of emoji is accepted, and reacting to yourself notifies no one', async () => {

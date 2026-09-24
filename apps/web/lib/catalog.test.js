@@ -22,6 +22,16 @@ const entry = (sourceId, title, extra) => ({ sourceId, label: sourceId, manga: m
 const chapter = (name, extra = {}) => ({ name, url: `/${name}`, chapterNumber: -1, ...extra });
 
 describe('مطابقة العناوين عبر المصادر', () => {
+	it('لغة النسخة بين قوسين لا تفصل العمل: One Piece (English) هو One Piece', () => {
+		for (const t of ['One Piece (English)', 'One Piece (French)', 'ONE PIECE [Arabic]', 'One Piece (عربي)']) {
+			expect(normalizeTitle(t)).toBe(normalizeTitle('One Piece'));
+		}
+		// بلا قوسين هي كلمة من العنوان، والأعمال الجانبية أعمالٌ أخرى
+		expect(normalizeTitle('English Teacher')).toBe('english teacher');
+		expect(normalizeTitle('One Piece Academy')).not.toBe(normalizeTitle('One Piece'));
+		expect(normalizeTitle('One Piece (Colored)')).not.toBe(normalizeTitle('One Piece'));
+	});
+
 	it('تتجاهل اختلاف حالة الأحرف والمسافات', () => {
 		// هذا هو الحال الواقعي في اللقطات: Team X يكتب «Nano machine»
 		// وMangaSwat يكتب «Nano Machine»، وهما عمل واحد

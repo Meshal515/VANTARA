@@ -247,6 +247,9 @@ const MAJLIS_VISIBLE_IDS: Record<'frame' | 'rec' | 'activity', string> = {
     "SELECT id FROM recommendations WHERE from_id = ? OR to_id = ? OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0)",
   activity: 'SELECT id FROM activity WHERE actor_id = ? OR target_user_id IS NULL OR target_user_id = ?',
 };
+/** أطول معرّف إشعار يُنشأ؛ وكل من يقرأ المعرّف أو يكتبه يلتزم به. */
+const NOTIFICATION_ID_MAX = 250;
+
 const MAJLIS_OWNER: Record<'frame' | 'rec' | 'activity', string> = {
   frame: 'SELECT from_id AS owner FROM frames WHERE id = ?',
   rec: 'SELECT from_id AS owner FROM recommendations WHERE id = ?',
@@ -1376,7 +1379,7 @@ export function statementsFor(
             )
             // إشعار واحد لكل شخص على كل هدف: تغيير التفاعل يحدّثه ولا يكرّره
             .bind(
-              `react:${targetKind}:${targetId}:${userId}`.slice(0, 250),
+              `react:${targetKind}:${targetId}:${userId}`.slice(0, NOTIFICATION_ID_MAX),
               userId,
               emoji,
               `vantara://majlis/${targetKind}/${targetId}`,
@@ -1583,7 +1586,9 @@ export function statementsFor(
      * ولا تُنقص أبدًا: `MAX` يحمي من إقرار متأخر يرجع بالحالة للخلف.
      */
     case 'notification.read': {
-      const id = asString(p['id'], 80);
+      // بطول ما يُنشأ به (حتى 250): معرّف تفاعلٍ على نشاط ≈ 97 حرفًا، وقصّه
+      // يجعل التحديث لا يطابق شيئًا فيرجع الإشعار غير مقروء بصمت
+      const id = asString(p['id'], NOTIFICATION_ID_MAX);
       if (!id) return null;
       return [
         db
@@ -1603,7 +1608,7 @@ export function statementsFor(
      * يفتحه أحد. `MAX` كي لا يُرجع `seen` متأخرٌ صفًّا صار مقروءًا.
      */
     case 'notification.seen': {
-      const id = asString(p['id'], 80);
+      const id = asString(p['id'], NOTIFICATION_ID_MAX);
       if (!id) return null;
       return [
         db
