@@ -57,6 +57,16 @@ export function translationOn(ref) {
   return s.mode === 'auto' ? !sessionWorks.has(`off:${ref}`) : sessionWorks.has(ref);
 }
 
+/** تشغيل/إيقاف الترجمة لعمل في هذه الجلسة، من صفحة العمل أو زر القارئ. */
+export function setTranslation(ref, on) {
+  if (!ref) return;
+  if (readTranslateSettings().mode === 'auto') {
+    if (on) sessionWorks.delete(`off:${ref}`);
+    else sessionWorks.add(`off:${ref}`);
+  } else if (on) sessionWorks.add(ref);
+  else sessionWorks.delete(ref);
+}
+
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;

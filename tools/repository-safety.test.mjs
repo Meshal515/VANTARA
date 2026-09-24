@@ -1254,3 +1254,41 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
   assert.equal(manifest.nativeApi, 2, '0.0.3 reads nativeApi: anything but 1 sends it to the APK');
   assert.throws(() => buildManifest({ ...manifest, native: 'dev' }), /native fingerprint/);
 });
+
+/**
+ * كل استيراد مسمّى في الواجهة يجد تصديره. استيراد ناقص يُسقط وحدة القشرة كلها
+ * فيبقى التطبيق على شاشة البداية بلا رسالة.
+ */
+test('every named import in apps/web resolves to an export', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../apps/web');
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(resolve(dir, e.name))) : [resolve(dir, e.name)],
+    );
+  const exportsOf = (file) => {
+    const src = readFileSync(file, 'utf8');
+    const names = new Set([...src.matchAll(/export\s+(?:async\s+)?(?:function\*?|const|let|class|var)\s+(\w+)/g)].map((m) => m[1]));
+    for (const [, list] of src.matchAll(/export\s*\{([^}]*)\}/g)) {
+      for (const part of list.split(',')) if (part.trim()) names.add(part.split(' as ').pop().trim());
+    }
+    if (/export\s+default/.test(src)) names.add('default');
+    return names;
+  };
+  const missing = [];
+  for (const file of walk(root).filter((f) => f.endsWith('.js') && !f.includes('.test.'))) {
+    for (const [, list, spec] of readFileSync(file, 'utf8').matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](\.[^'"]+)['"]/g)) {
+      const target = resolve(dirname(file), spec);
+      let available;
+      try {
+        available = exportsOf(target);
+      } catch {
+        missing.push(`${file}: ${spec} (file)`);
+        continue;
+      }
+      for (const name of list.split(',').map((n) => n.trim().split(' as ')[0].trim()).filter(Boolean)) {
+        if (!available.has(name)) missing.push(`${file}: ${name} from ${spec}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
+});
