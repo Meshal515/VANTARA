@@ -2710,6 +2710,53 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
 
+  let pendingPhones = 0;
+  let pendingAsked = false;
+  /** جوال معتمد يعتمد جوالًا جديدًا برمزه: بديل سير «اعتماد جوال» في GitHub. */
+  function openApprovePhone() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'اعتماد جوال جديد'));
+      const hint = el('p', null, 'الجوال الجديد يعرض رمز من ٨ أحرف. اكتبه هنا وبيدخل على طول.');
+      hint.style.marginBottom = '8px';
+      const f = el('label', 'field');
+      f.append(el('span', 'field-label', 'الرمز'));
+      const input = el('input', 'field-input');
+      input.dir = 'ltr';
+      input.autocapitalize = 'characters';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.maxLength = 9;
+      input.placeholder = 'K7Q4-M2XD';
+      f.append(input);
+      const go = el('button', 'btn btn-block btn-primary', 'اعتمد');
+      go.type = 'button';
+      go.onclick = async () => {
+        const code = input.value.trim();
+        if (code.replace(/[^a-z0-9]/gi, '').length !== 8) {
+          toast('الرمز ٨ أحرف، مثل K7Q4-M2XD');
+          return;
+        }
+        go.disabled = true;
+        try {
+          const res = await sync.approveDevice(code);
+          if (res?.approved) {
+            closeSheet();
+            pendingPhones = Math.max(0, pendingPhones - 1);
+            toast('اعتمدته ✓ الجوال الجديد يدخل خلال ثوانٍ');
+            renderSettings();
+          } else {
+            toast('ما لقينا طلب بهالرمز: تأكد من الكتابة، أو اطلب رمز جديد (الرمز يعيش ٣٠ دقيقة)');
+          }
+        } catch {
+          toast('تعذّر الاتصال. تأكد من النت وجرّب مرة ثانية');
+        } finally {
+          go.disabled = false;
+        }
+      };
+      body.append(hint, f, go);
+      requestAnimationFrame(() => input.focus());
+    });
+  }
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -2770,7 +2817,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
     group('حسابك', [
       row('user', 'ملفّك الشخصي', 'اسمك وصورتك والبانر', { run: () => openProfile(me()) }),
       row('switchUser', 'تبديل الحساب', null, { value: sync.user?.username ? `@${sync.user.username}` : null, run: confirmSwitchAccount }),
+      sync.approveDevice
+        ? row('shield', 'اعتماد جوال جديد', 'اكتب الرمز اللي يطلع على الجوال الجديد', {
+            value: pendingPhones ? `${pendingPhones} ينتظر` : null,
+            tone: pendingPhones ? 'warn' : undefined,
+            run: openApprovePhone,
+          })
+        : null,
     ]);
+    if (sync.pendingDevices && !pendingAsked) {
+      pendingAsked = true;
+      sync.pendingDevices().then((n) => {
+        if (n !== pendingPhones) {
+          pendingPhones = n;
+          if (q('settingsBody')?.isConnected) renderSettings();
+        }
+      });
+    }
 
     if (api) {
       const popups = api.popups();

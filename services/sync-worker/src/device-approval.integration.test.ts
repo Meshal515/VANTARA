@@ -129,3 +129,42 @@ describe('profile images through the public gate', () => {
     expect(up.status).toBe(401);
   });
 });
+
+describe('approving a new phone from inside the app', () => {
+  it('a signed-in phone approves the code; wrong codes and strangers approve nothing', async () => {
+    const { env, db } = testEnv();
+    // جوال معتمد أصلًا بالطريقة القديمة
+    const owner = { deviceId: 'owner-phone-0001', deviceCredential: 'credential-of-the-owner-phone-01' };
+    const first = ((await (await post(env, '/v1/device/request', owner)).json()) as { code: string }).code;
+    db.exec(buildApproveSql(codeHash(first, PEPPER)));
+    await post(env, '/v1/device/claim', owner);
+    const { token } = (await (await post(env, '/v1/session', { userId: ME, ...owner })).json()) as { token: string };
+    const authed = (path: string, init: RequestInit = {}) =>
+      worker.fetch(
+        new Request(`https://sync.test${path}`, {
+          ...init,
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        }),
+        env,
+        ctx,
+      );
+
+    const { code } = (await (await post(env, '/v1/device/request', phone)).json()) as { code: string };
+    expect(await (await authed('/v1/device/pending')).json()).toEqual({ pending: 1 });
+
+    // بلا جلسة: مرفوض
+    expect((await post(env, '/v1/device/approve', { code })).status).toBe(401);
+    // رمز غلط: لا شيء
+    expect(await (await authed('/v1/device/approve', { method: 'POST', body: JSON.stringify({ code: 'ABCD-EFGH' }) })).json()).toEqual({ approved: false });
+    expect((await authed('/v1/device/approve', { method: 'POST', body: JSON.stringify({ code: '12' }) })).status).toBe(400);
+    // الرمز الصحيح، بأحرف صغيرة وبلا شرطة
+    const ok = await authed('/v1/device/approve', { method: 'POST', body: JSON.stringify({ code: code.replace('-', '').toLowerCase() }) });
+    expect(await ok.json()).toEqual({ approved: true });
+    // مرة واحدة
+    expect(await (await authed('/v1/device/approve', { method: 'POST', body: JSON.stringify({ code }) })).json()).toEqual({ approved: false });
+    expect(await (await authed('/v1/device/pending')).json()).toEqual({ pending: 0 });
+
+    expect(((await (await post(env, '/v1/device/claim', phone)).json()) as { paired: boolean }).paired).toBe(true);
+    expect((await post(env, '/v1/session', { userId: ME, ...phone })).status).toBe(200);
+  });
+});
