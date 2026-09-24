@@ -16,6 +16,7 @@
 import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, entryPages, readingRate, translatePage } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings } from '../lib/translate-settings.js';
+import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
 
@@ -54,7 +55,8 @@ export function translationOn(ref) {
   const s = readTranslateSettings();
   if (!s.enabled || !ref) return false;
   // تلقائي: شغّالة ما لم توقفها مؤقتًا لهذا العمل؛ عند الطلب: إن فعّلتها في هذه الجلسة
-  return s.mode === 'auto' ? !sessionWorks.has(`off:${ref}`) : sessionWorks.has(ref);
+  // فصول جهّزتها مقدمًا تُعرض عربية دائمًا، ولو بعد إعادة فتح التطبيق
+  return s.mode === 'auto' ? !sessionWorks.has(`off:${ref}`) : sessionWorks.has(ref) || readJobs().some((j) => j.ref === ref);
 }
 
 /** تشغيل/إيقاف الترجمة لعمل في هذه الجلسة، من صفحة العمل أو زر القارئ. */

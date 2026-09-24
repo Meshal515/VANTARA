@@ -2788,3 +2788,72 @@ html,
   background: var(--accent);
   border-radius: 999px;
 }
+
+/* الزر يدور بهدوء ما دامت فصول هذا العمل تُترجم في الخلفية */
+.v35 .detail-tl.detail-tl--busy { animation: tl-busy 1.6s ease-in-out infinite; }
+@keyframes tl-busy { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .v35 .detail-tl.detail-tl--busy { animation: none; } }
+
+/* ترجمة الفصول مقدمًا: بطاقة مهمة (تقدّم + أزرار) وورقة الإعداد */
+.v35 .tl-job {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.v35 .tl-job__head { display: flex; flex-direction: column; gap: 2px; }
+.v35 .tl-job__head small { color: var(--text-3); }
+.v35 .tl-job__bar {
+  height: 6px;
+  margin: 10px 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-3) 25%, transparent);
+  overflow: hidden;
+}
+.v35 .tl-job__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.v35 .tl-job__state { margin: 0 0 10px; color: var(--text-3); font-size: var(--fs-meta); }
+.v35 .tl-job__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.v35 .tl-job__actions .btn { flex: 1 1 auto; min-width: 0; }
+.v35 .tl-ahead__range { display: flex; gap: 10px; }
+.v35 .tl-ahead__range .field { flex: 1 1 0; min-width: 0; }
+.v35 .tl-ahead__sources { margin-bottom: 12px; }
+.v35 .tl-ahead__note { margin: 6px 0 12px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.v35 .tl-ahead__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.v35 .tl-ahead__summary small { color: var(--text-3); line-height: 1.6; }
+.v35 .tl-ahead__summary .tl-ahead__warn { color: var(--danger); }
+
+/* أزرار الاختيار داخل .segmented (وضع الترجمة، مصدرها): بمظهر شرائح المكتبة */
+.v35 .segmented > button[aria-pressed] {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.v35 .segmented > button[aria-pressed='true'] {
+  background: var(--text-1);
+  box-shadow: none;
+  color: var(--bg);
+}
+.v35 .tl-ahead__label { display: block; margin: 10px 0 8px; }
