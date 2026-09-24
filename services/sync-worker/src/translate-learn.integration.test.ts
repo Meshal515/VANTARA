@@ -114,7 +114,8 @@ describe('learning from the Arabic edition', () => {
   });
 
   it('learns once per chapter, counts one page, and validates its input', async () => {
-    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1' });
+    const { env, db } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
+    db.prepare('INSERT INTO translation_usage_chapters (user_id, day, chapter_key) VALUES (?, ?, ?)').run(A, 'w:2026-09-17', 'ext:x#n:1'); // 24 سبتمبر منتصف الليل: ما زال أسبوع 17
     const gpt = fakeGpt(() => lesson);
     expect((await handleTranslateLearn(learnReq(), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch })).status).toBe(200);
     const again = await handleTranslateLearn(learnReq(), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });

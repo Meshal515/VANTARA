@@ -140,9 +140,9 @@ describe('translation engine (server)', () => {
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toBe('translation_not_configured');
 
-    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1' });
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
     await handleTranslatePage(page(), env, A, 1, { fetch: fakeGpt(() => firstPage).fetch });
-    const over = await handleTranslatePage(page({ pageHash: hash('c') }), env, A, 2, { fetch: fakeGpt(() => firstPage).fetch });
+    const over = await handleTranslatePage(page({ pageHash: hash('c'), chapterKey: 'ext:solo leveling#n:24' }), env, A, 2, { fetch: fakeGpt(() => firstPage).fetch });
     expect(over.status).toBe(429);
     const again = await handleTranslatePage(page(), env, A, 3, { fetch: fakeGpt(() => firstPage).fetch });
     expect(again.status).toBe(200);
@@ -159,7 +159,7 @@ describe('translation engine (server)', () => {
     expect(((await busy.json()) as { error: string }).error).toBe('busy');
   });
 
-  it('defaults: 1000 paid pages per account per week, renewed Thursday 5 pm Mecca time', async () => {
+  it('defaults: 5000 pages or 100 chapters a week (whichever is more), renewed Thursday 5 pm Mecca time', async () => {
     // الخميس 24 سبتمبر 2026: 4:59 عصرًا بمكة ثم 5:00
     const before = Date.UTC(2026, 8, 24, 13, 59);
     const after = Date.UTC(2026, 8, 24, 14, 0);
@@ -169,14 +169,43 @@ describe('translation engine (server)', () => {
     expect(weekOf(Date.UTC(2026, 9, 1, 14))).toBe('w:2026-10-01');
 
     const { env, db } = testEnv();
-    db.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 999)').run(A, weekOf(before));
-    const last = await handleTranslatePage(page(), env, A, before, { fetch: fakeGpt(() => firstPage).fetch });
-    expect(last.status).toBe(200);
-    const over = await handleTranslatePage(page({ pageHash: hash('d') }), env, A, before, { fetch: fakeGpt(() => firstPage).fetch });
+    const gpt = () => ({ fetch: fakeGpt(() => firstPage).fetch });
+    const chapter = (n: number) => `ext:solo leveling#n:${n}`;
+    // 5000 صفحة مرّت لكن في 99 فصلًا فقط (فصول طويلة): الحد لم يُبلغ
+    db.prepare('INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 5000)').run(A, weekOf(before));
+    for (let n = 1; n <= 99; n++) db.prepare('INSERT INTO translation_usage_chapters (user_id, day, chapter_key) VALUES (?, ?, ?)').run(A, weekOf(before), chapter(n));
+    expect((await handleTranslatePage(page({ chapterKey: chapter(100) }), env, A, before, gpt())).status).toBe(200);
+    // الفصل المئة بدأ: يكمل مهما كانت صفحاته
+    expect((await handleTranslatePage(page({ pageHash: hash('e'), chapterKey: chapter(100) }), env, A, before, gpt())).status).toBe(200);
+    // فصل جديد بعد 100 فصل و5000 صفحة: الحد
+    const over = await handleTranslatePage(page({ pageHash: hash('d'), chapterKey: chapter(101) }), env, A, before, gpt());
     expect(over.status).toBe(429);
-    expect(await over.json()).toMatchObject({ error: 'weekly_limit', limit: 1000 });
-    const renewed = await handleTranslatePage(page({ pageHash: hash('d') }), env, A, after, { fetch: fakeGpt(() => firstPage).fetch });
+    expect(await over.json()).toMatchObject({ error: 'weekly_limit', limit: 5000, chapterLimit: 100 });
+    const renewed = await handleTranslatePage(page({ pageHash: hash('d'), chapterKey: chapter(101) }), env, A, after, gpt());
     expect(renewed.status).toBe(200);
+  });
+
+  it('the monthly spend cap stops paid calls for everyone, from the real token usage', async () => {
+    const { env, db } = testEnv({ TRANSLATE_MONTHLY_BUDGET_USD: '0.01' });
+    const expensive: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          model: 'gpt-6-luna',
+          status: 'completed',
+          usage: { input_tokens: 30_000, input_tokens_details: { cached_tokens: 10_000 }, output_tokens: 20_000 },
+          output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(firstPage) }] }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    expect((await handleTranslatePage(page(), env, A, 1, { fetch: expensive })).status).toBe(200);
+    // 20k×0.10 + 10k×0.01 + 20k×0.50 لكل مليون = 0.0121$
+    const spent = db.prepare('SELECT usd FROM translation_spend').get() as { usd: number };
+    expect(spent.usd).toBeCloseTo(0.0121, 6);
+    const blocked = await handleTranslatePage(page({ pageHash: hash('f') }), env, B, 2, { fetch: expensive });
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toMatchObject({ error: 'monthly_budget' });
+    // المحفوظ يبقى مجانيًا
+    expect((await handleTranslatePage(page(), env, B, 3, { fetch: expensive })).status).toBe(200);
   });
 
   it('a refusal or a broken image is an error, never a stored empty translation', async () => {

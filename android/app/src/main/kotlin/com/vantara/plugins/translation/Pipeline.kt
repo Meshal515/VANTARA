@@ -68,6 +68,14 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val (img, hash) = decode(file)
         val gray = img.gray()
         val dets = detector!!.detect(img)
+        // كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_SCORE: بلا صندوق كهذا لا منطقة مهما قالت
+        // بقية النماذج. فصفحة بلا نص (مشهد، صفحة فاصلة) تتخطى الحروف والفقاعات وOCR، والنتيجة نفسها تمامًا.
+        if (dets.none { it.label.startsWith("text") && it.score >= Regions.MIN_SCORE }) {
+            val empty = Analysis(hash, img.width, img.height, emptyList())
+            analyses[hash] = empty
+            if (analyses.size > 12) analyses.remove(analyses.keys.first())
+            return empty
+        }
         val prob = glyphs!!.probabilities(img)
         val glyphFull = ByteMask(img.width, img.height)
         for (i in prob.indices) if (prob[i] > 0.3f) glyphFull.data[i] = 1

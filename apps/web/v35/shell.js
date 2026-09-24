@@ -1293,10 +1293,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const approx = allKnown ? pages : known.length ? Math.round((pages / known.length) * rows.length) : null;
         summary.append(el('strong', null, `${chaptersWord(rows.length)} · ${approx === null ? 'نحسب الصفحات…' : `${allKnown ? '' : 'تقريبًا '}${pagesWord(approx)}`}`));
         if (usage?.limit) {
-          const left = Math.max(0, usage.limit - usage.used);
-          const line = el('small', null, `من حصتك هالأسبوع: باقي ${left} من ${usage.limit} صفحة. الصفحات المترجمة من قبل ما تنحسب.`);
-          summary.append(line);
-          if (approx !== null && approx > left) summary.append(el('small', 'tl-ahead__warn', `الحصة ما تكفي كل الصفحات: يترجم ${left} ويوقف، ويكمل بعد تجدد الحصة الخميس.`));
+          const chapterLimit = usage.chapterLimit ?? 100;
+          const chaptersUsed = usage.chapters ?? 0;
+          summary.append(
+            el('small', null, `حصتك هالأسبوع: ${usage.used} من ${usage.limit} صفحة · ${chaptersUsed} من ${chapterLimit} فصل. توقف بس لما تتجاوز الاثنين، والفصل اللي بديته يكمل. الصفحات المترجمة من قبل ما تنحسب.`),
+          );
+          const pagesOver = approx !== null && usage.used + approx > usage.limit;
+          const chaptersOver = chaptersUsed + rows.length > chapterLimit;
+          if (pagesOver && chaptersOver) summary.append(el('small', 'tl-ahead__warn', 'الحصة ما تكفي كل هالفصول: يترجم لين يوصل الحد ويوقف، ويكمل من نفس الصفحة بعد تجددها الخميس.'));
+          if (usage.budgetUsd && usage.spentUsd >= usage.budgetUsd * 0.8) {
+            summary.append(el('small', 'tl-ahead__warn', `الترجمة قريبة من سقف الشهر للتطبيق كله (${Math.round(usage.spentUsd * 3.75)} من ${Math.round(usage.budgetUsd * 3.75)} ريال).`));
+          }
         }
         const pace = readPace()[mode];
         const minutes = approx === null ? null : estimateMinutes(approx, pace);

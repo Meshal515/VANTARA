@@ -42,6 +42,8 @@ export interface Env {
   TRANSLATE_MODEL?: string;
   TRANSLATE_EFFORT?: string;
   TRANSLATE_WEEKLY_PAGES?: string;
+  TRANSLATE_WEEKLY_CHAPTERS?: string;
+  TRANSLATE_MONTHLY_BUDGET_USD?: string;
 }
 
 export interface ExecutionContext {
