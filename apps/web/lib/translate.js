@@ -2,24 +2,31 @@
  * محرّك الترجمة — جانب الجوال.
  *
  * الصفحة → بصمة من بايتات صورتها الأصلية (نفس الصورة عند صديقك = نفس البصمة =
- * نفس الترجمة) → الذاكرة المحلية → وإلا تُرسل كاملةً إلى خادم المحتوى
- * `/v1/translate/page`، حيث عامل الترجمة على جهاز البيت يكشف الفقاعات ويقرأ
- * النص ويبيّضه ويكتب العربي في مكانه، ويرجع **الصفحة المترجمة صورةً** مع
- * المناطق. القارئ يبدّل الصورة لا يرسم فوقها: لا هندسة على الجوال.
+ * نفس الترجمة) → الذاكرة المحلية → وإلا:
+ *
+ *   على الجوال (الإضافة الأصلية `Translation` موجودة والنماذج منزَّلة):
+ *     1. `analyzePage` داخل الجهاز: الفقاعات، قناع الحروف، OCR → مناطق بمعرّفات.
+ *     2. sync-worker `/v1/translate/text`: Luna تصحّح القراءة وتترجم بالمعرّف
+ *        (القاموس وذاكرة الفصل والحدّ الأسبوعي مع الحساب).
+ *     3. `renderPage` داخل الجهاز: تبييض آمن + عربي في مكانه → ملف صورة.
+ *
+ *   على الويب (بلا إضافة): خادم المحتوى `/v1/translate/page` إن كان مضبوطًا،
+ *   وإلا «الترجمة على الجوال متاحة في التطبيق».
+ *
+ * القارئ يبدّل الصورة لا يرسم فوقها: لا هندسة في JavaScript.
  *
  * الجدولة طابور أولويات حيّ: الفصل الحالي ثم التالي ثم السابق، والصفحات
  * بقربها من موضعك لا بترتيبها. تقترب من صفحة لم تُترجم؟ تعود للمقدّمة.
- *
- * الدوال الخالصة (العتبة، الطابور، تصغير الإرسال) تُختبر بلا جهاز.
  */
 
 import { readKv, writeKv } from './chapter-store.js';
+import { analyzePage, nativeTranslationAvailable, renderPage } from './translation-native.js';
 
-/** أطول ضلع يُرسل: العامل يقصّ أكبر من هذا أصلًا، فلا نرفع ما سيُصغَّر. */
+/** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
 export const MAX_UPLOAD_EDGE = 4096;
 /** أعرض من هذا لا يزيد الدقة المفيدة للكشف والقراءة، ويثقل الرفع. */
 export const MAX_UPLOAD_WIDTH = 1600;
-const CACHE_PREFIX = 'tl2:';
+const CACHE_PREFIX = 'tl3:';
 
 // ───────────────────────── العتبة: متى تدخل ─────────────────────────
 
@@ -53,12 +60,11 @@ export function readingRate(history = []) {
   return Math.max(1, Math.min(60, (pages / ms) * 60_000));
 }
 
-// ───────────────────────── الإرسال ─────────────────────────
+// ───────────────────────── الإرسال (مسار الخادم) ─────────────────────────
 
 /**
  * أبعاد الصورة كما تُرسل: العرض ≤ MAX_UPLOAD_WIDTH وأطول ضلع ≤ MAX_UPLOAD_EDGE،
- * بنسبة ثابتة. شريط ويبتون 800×12000 يُرسل كما هو عرضًا ويُقصّ طولًا عند
- * العامل بشرائح، فالطول لا يُصغَّر إلا حين يتجاوز الحدّ.
+ * بنسبة ثابتة.
  */
 export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge = MAX_UPLOAD_EDGE } = {}) {
   const w = Math.max(1, Number(width) || 1);
@@ -191,9 +197,8 @@ function encodePage(img, plan) {
 }
 
 /**
- * ما يعود من العامل إلى ما يحفظه القارئ: صورة الصفحة المترجمة (data URL)
- * والمناطق وعدد المترجَم. صفحة بلا أي منطقة مترجمة (لا نص، أو مؤثرات فقط)
- * تبقى صورتها الأصلية: `image` فارغ يعني «اعرض الأصل».
+ * ما يعود من العامل (خادم) إلى ما يحفظه القارئ: صورة الصفحة المترجمة (data URL)
+ * والمناطق وعدد المترجَم. صفحة بلا أي منطقة مترجمة تبقى صورتها الأصلية.
  */
 export function resultOf(body) {
   const translated = Number(body?.translated) || 0;
@@ -208,37 +213,111 @@ export function resultOf(body) {
 }
 
 /**
- * يترجم صفحة عبر خادم المحتوى. `api(path, options)` نداء JSON بجلسة.
- * `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
+ * مسار ملف الصفحة على الجهاز من رابط `convertFileSrc`
+ * (`http://localhost/_capacitor_file_/data/…`)، أو null لرابط عادي.
+ */
+export function filePathFromSrc(src) {
+  const m = /_capacitor_file_(\/.*)$/.exec(String(src ?? ''));
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/**
+ * ردّ Luna بالمعرّفات → ما يُرسل للرسم: المناطق التي لها عربي فقط.
+ * المؤثرات والحقوق وما لم تردّ عليه Luna تبقى كما هي على الصفحة.
+ */
+export function renderPlan(analysis, reply) {
+  const byId = new Map((reply?.regions ?? []).map((r) => [r.id, r]));
+  const regions = [];
+  for (const r of analysis?.regions ?? []) {
+    const hit = byId.get(r.id);
+    if (!hit || typeof hit.arabic !== 'string' || !hit.arabic.trim()) continue;
+    if (hit.kind === 'sfx' || hit.kind === 'credit') continue;
+    regions.push({ id: r.id, arabic: hit.arabic.trim(), kind: hit.kind ?? r.kind, source: hit.source ?? r.source });
+  }
+  return regions;
+}
+
+/**
+ * يترجم صفحة.
+ *   `deps`: `{ api, sync, imagePath }` — `api` نداء خادم المحتوى، `sync.translation`
+ *   نداء sync-worker، `imagePath` مسار ملف الصفحة على الجهاز (من الإضافة) إن وُجد.
+ *   `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
  * @returns {Promise<{ image: string | null, regions, translated, hash, from } | { error: string }>}
  */
-export async function translatePage(api, src, meta) {
+export async function translatePage(deps, src, meta) {
   const hash = await pageHashOf(src);
   const local = (await readKv(CACHE_PREFIX + hash))?.value;
   if (local && typeof local.translated === 'number') return { ...local, hash, from: 'device' };
 
+  const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  const result = nativeTranslationAvailable() && imagePath ? await translateOnDevice({ ...deps, imagePath }, hash, meta) : await translateViaServer(deps, src, hash, meta);
+  if (result.error) return result;
+  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine };
+  void writeKv(CACHE_PREFIX + hash, value);
+  return { ...value, hash, from: result.cached ? 'friends' : 'model' };
+}
+
+async function translateOnDevice(deps, hash, meta) {
+  let analysis;
+  try {
+    analysis = await analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto' });
+  } catch (error) {
+    return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
+  }
+  const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
+  if (!readable.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null };
+
+  const res = await deps.sync.translation('/v1/translate/text', {
+    method: 'POST',
+    body: {
+      ...meta,
+      pageHash: hash,
+      image: { mediaType: 'image/jpeg', data: analysis.thumbnail ?? '', width: analysis.width, height: analysis.height },
+      regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
+    },
+  });
+  if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}` };
+  const plan = renderPlan(analysis, res.body);
+  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), error: null };
+  let rendered;
+  try {
+    rendered = await renderPage({ path: deps.imagePath, regions: plan });
+  } catch {
+    return { error: 'device_failed' };
+  }
+  const convert = globalThis.Capacitor?.convertFileSrc;
+  return {
+    image: convert ? convert(rendered.path) : rendered.path,
+    regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
+    translated: plan.length,
+    engine: res.body?.engine ?? 'device',
+    cached: Boolean(res.body?.cached),
+    error: null,
+  };
+}
+
+async function translateViaServer(deps, src, hash, meta) {
+  if (typeof deps.api !== 'function') return { error: 'device_only' };
   const img = await loadImage(src);
   const plan = uploadPlan(img.naturalWidth, img.naturalHeight);
   let body;
   try {
-    body = await api('/v1/translate/page', {
+    body = await deps.api('/v1/translate/page', {
       method: 'POST',
-      body: {
-        ...meta,
-        pageHash: hash,
-        image: { mediaType: 'image/jpeg', data: encodePage(img, plan) },
-      },
+      body: { ...meta, pageHash: hash, image: { mediaType: 'image/jpeg', data: encodePage(img, plan) } },
     });
   } catch (error) {
     if (!error?.status) return { error: 'offline' };
     return { error: error.code ?? `http_${error.status}` };
   }
   const result = resultOf(body);
-  // خطأ من Luna (حدّ أسبوعي، رصيد، مفتاح): الصورة عادت بلا ترجمة؛ لا نحفظها كنتيجة
   if (result.error && !result.translated) return { error: result.error };
-  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine };
-  void writeKv(CACHE_PREFIX + hash, value);
-  return { ...value, hash, from: result.cached ? 'friends' : 'model' };
+  return result;
 }
 
 /** رسالة لسبب الرفض، بكلام الناس. */
@@ -246,6 +325,9 @@ export const TRANSLATE_ERRORS = {
   translation_not_configured: 'الترجمة غير مفعّلة على الخادم بعد',
   translation_worker_offline: 'جهاز الترجمة مطفّى الحين — الصفحات المترجمة قبل تشتغل',
   translation_worker: 'الترجمة تعثّرت على الخادم، نحاول بعد شوي',
+  models_missing: 'ملفات الترجمة مو منزّلة — حمّلها من الإعدادات > الترجمة',
+  device_failed: 'الترجمة تعثّرت على الجهاز لهالصفحة',
+  device_only: 'الترجمة على الجوال متاحة في التطبيق فقط',
   weekly_limit: 'خلّصت ترجمة هالأسبوع — تتجدد الخميس 5 العصر بتوقيت مكة',
   no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',

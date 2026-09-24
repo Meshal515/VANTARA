@@ -135,7 +135,6 @@ export function openSmartReader(deps, ctx) {
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
     </header>
-    <button class="rd-tl-fab" type="button" data-act="translate" id="rdTlFab" hidden aria-pressed="false">${glyph('translateAr', { size: 22 })}<span id="rdTlFabLabel">عربي</span></button>
     <header class="rd-top rd-top--frame" id="rdFrameTop" hidden>
       ${iconButton('close', 'إلغاء الفريم', { act: 'frameCancel' })}
       <div class="rd-titles"><strong>فريم</strong><span id="rdFrameCount"></span></div>
@@ -245,6 +244,7 @@ export function openSmartReader(deps, ctx) {
   // الترجمة العربية للفصول غير العربية (التكملة الإنجليزية): طابورها يتبع موضعك
   const tl = createReaderTranslation({
     api,
+    sync,
     ref,
     title: ctx.title,
     root,
@@ -263,7 +263,8 @@ export function openSmartReader(deps, ctx) {
     try {
       return { row, pages: await pagesOf(row) };
     } catch (error) {
-      for (const alt of otherSources(row)) {
+      // اخترت مصدرًا بنفسك؟ فصوله من عنده أو خطأٌ صريح، لا بديل صامت
+      for (const alt of ctx.sourceLocked ? [] : otherSources(row)) {
         try {
           return { row: alt, pages: await pagesOf(alt) };
         } catch {
@@ -274,11 +275,43 @@ export function openSmartReader(deps, ctx) {
     }
   }
 
-  function savedPage(row) {
-    const saved = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === keyOf(row))[0];
-    // فصلٌ أنهيته يبدأ من أوله إن فتحته ثانية
-    if (!saved || saved.ratio >= 0.98) return 0;
-    return Math.max(0, Math.floor(saved.page ?? 0));
+  /**
+   * من أين يُكمَل الفصل حين تفتحه بنفسك.
+   *
+   * رقم الصفحة يخصّ مصدرًا بعينه: الفصل ٧٠ عند المصدر العربي ٣٣ صفحة وعند
+   * الإنجليزي ٧٠، ورقمٌ من هذا لا يعني شيئًا عند ذاك. فالموضع الدقيق يُحفظ
+   * على الجهاز مع مصدره وعدد صفحاته (`POS_KEY`)، ويُستعمل حين يطابق المصدر
+   * والعدد. وإلا فالتقدم المتزامن (نسبة لا رقم) يعطي موضعًا تقريبيًا بنسبة
+   * ما قُرئ. فصلٌ أنهيته يبدأ من أوله.
+   */
+  function savedPage(row, pageCount) {
+    const key = keyOf(row);
+    const local = readPositions()[key];
+    if (local && local.sourceId === row.sourceId && local.pages === pageCount) {
+      return local.ratio >= 0.98 ? 0 : Math.min(pageCount - 1, Math.max(0, Math.floor(local.page)));
+    }
+    const saved = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === key)[0];
+    if (!saved || (saved.ratio ?? 0) >= 0.98 || !(saved.ratio > 0)) return 0;
+    return Math.min(pageCount - 1, Math.max(0, Math.floor(saved.ratio * pageCount) - 1));
+  }
+  const POS_KEY = 'vantara.reader.positions';
+  function readPositions() {
+    try {
+      return JSON.parse(localStorage.getItem(POS_KEY) ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  }
+  function writePosition(seg) {
+    try {
+      const all = readPositions();
+      all[keyOf(seg.row)] = { sourceId: seg.row.sourceId, pages: seg.pages.length, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length), at: Date.now() };
+      const keys = Object.keys(all);
+      if (keys.length > 400) for (const k of keys.sort((a, b) => (all[a].at ?? 0) - (all[b].at ?? 0)).slice(0, keys.length - 400)) delete all[k];
+      localStorage.setItem(POS_KEY, JSON.stringify(all));
+    } catch {
+      // تفضيل لا حقيقة
+    }
   }
 
   /** فتحٌ من الصفر: أول فصل، أو قفزة (الفصل السابق من الشريط، مصدر آخر، إعادة المحاولة). */
@@ -313,7 +346,7 @@ export function openSmartReader(deps, ctx) {
     segs.push(seg);
     scroll.replaceChildren(seg.el);
     observePages();
-    const start = Math.min(startAt ?? savedPage(row), pages.length - 1);
+    const start = Math.min(startAt ?? savedPage(row, pages.length), pages.length - 1);
     requestSegment(seg, start);
     seg.current = start;
     seg.furthest = start;
@@ -385,20 +418,18 @@ export function openSmartReader(deps, ctx) {
   }
 
   /**
-   * زرّ الترجمة الظاهر: في الشريط العلوي بنصّه، وعائمٌ صغير في الزاوية يبقى
-   * أثناء القراءة. يظهر فقط في فصل يحتاج ترجمة (إنجليزي)، ويقول حالته:
-   * «عربي» والترجمة شغّالة، «الأصل» وهي موقفة.
+   * زرّ الترجمة: واحد في الشريط العلوي (لا زرّ عائم — كان يحجب الصفحة ويكرّر
+   * الشريط). يظهر فقط حين الترجمة مفعّلة من الإعدادات وفي فصل يحتاجها
+   * (إنجليزي)، ويقول حالته: «عربي» وهي شغّالة، «ترجم» وهي موقفة.
    */
   function syncTranslateButtons() {
-    const needs = Boolean(state.row) && tl.needs(state.row);
+    const needs = Boolean(state.row) && tl.needs(state.row) && tl.enabled();
     const on = tl.isOn();
-    for (const id of ['rdTlBtn', 'rdTlFab']) {
-      const b = q(id);
-      b.hidden = !needs;
-      b.setAttribute('aria-pressed', String(on));
-      b.setAttribute('aria-label', on ? 'الترجمة العربية شغّالة — اضغط لعرض الأصل' : 'ترجم هذا العمل للعربي');
-    }
-    q('rdTlFabLabel').textContent = on ? 'عربي' : 'ترجم';
+    const b = q('rdTlBtn');
+    b.hidden = !needs;
+    b.setAttribute('aria-pressed', String(on));
+    b.setAttribute('aria-label', on ? 'الترجمة العربية شغّالة — اضغط لعرض الأصل' : 'ترجم هذا العمل للعربي');
+    b.querySelector('span').textContent = on ? 'عربي' : 'ترجم';
   }
 
   /** صار هذا الفصل أمامك: الشريط له، وما بعده يُجهَّز من الآن. */
@@ -544,6 +575,8 @@ export function openSmartReader(deps, ctx) {
    */
   const badSources = new Map();
   function switchSource(seg, index) {
+    // اخترت مصدرًا بنفسك؟ لا نبدّله عليك؛ الخطأ يُعرض وفيه زرّ التبديل إن أردت
+    if (ctx.sourceLocked) return false;
     const row = seg.row;
     const key = String(row.number);
     const bad = badSources.get(key) ?? new Set();
@@ -773,6 +806,7 @@ export function openSmartReader(deps, ctx) {
     state.progressTimer = null;
     const seg = state.seg;
     if (!seg || !seg.pages.length) return;
+    writePosition(seg);
     sync.enqueue('progress.set', {
       chapterKey: keyOf(seg.row),
       seriesRef: ref,
@@ -1117,7 +1151,7 @@ export function openSmartReader(deps, ctx) {
       body.append(t);
       body.append(sheetItem('sliders', 'إعدادات القارئ', openSettings));
       body.append(sheetItem('info', 'معلومات الفصل', openInfo));
-      if (tl.needs(state.row)) {
+      if (tl.needs(state.row) && tl.enabled()) {
         body.append(
           sheetItem('translateAr', 'الترجمة العربية', () => {
             tl.toggle(segs, state.seg);
