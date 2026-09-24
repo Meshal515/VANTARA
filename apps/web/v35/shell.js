@@ -16,7 +16,7 @@ import { glyph } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
-import { setTranslation, translationOn } from './reader-translate.js';
+import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
@@ -901,6 +901,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
       work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
     }
+    if (state.current && String(state.current.id) !== String(work.id)) endWorkSession(String(state.current.id));
     state.current = work;
     state.nextRow = null;
     state.chapterSource = null;
@@ -2771,6 +2772,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       id = 'majlis';
     }
     const from = currentPage();
+    // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
+    if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));

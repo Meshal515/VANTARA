@@ -96,7 +96,12 @@ export function createQueue({ concurrency = 3 } = {}) {
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
     add({ key, chapterKey, index, run }) {
-      if (jobs.has(key)) return jobs.get(key).promise;
+      const existing = jobs.get(key);
+      if (existing) {
+        // مهمة لم تبدأ من جلسة قارئ سابقة: يأخذها صاحبها الجديد، فلا يرث وعدًا ميتًا
+        if (!existing.started) existing.run = run;
+        return existing.promise;
+      }
       let resolve;
       let reject;
       const promise = new Promise((a, b) => {

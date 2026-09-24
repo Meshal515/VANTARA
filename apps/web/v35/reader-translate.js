@@ -56,6 +56,14 @@ const queue = createQueue({ concurrency: 3 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
+/** خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» وإيقاف «تلقائي» واختيار ذكية/سريعة لهذا العمل. */
+export function endWorkSession(ref) {
+  if (!ref) return;
+  sessionWorks.delete(ref);
+  sessionWorks.delete(`off:${ref}`);
+  sessionSpeed.delete(ref);
+}
+
 /** هل الترجمة شغّالة لهذا العمل الآن؟ تلقائي = نعم؛ عند الطلب = إن فعّلتها في هذه الجلسة. */
 export function translationOn(ref) {
   const s = readTranslateSettings();
@@ -434,10 +442,9 @@ export function createReaderTranslation(deps) {
     unsubscribe();
     closeGate();
     closeModels();
-    // «عند الطلب»: التفعيل ينتهي بالخروج من العمل
-    sessionWorks.delete(ref);
-    sessionWorks.delete(`off:${ref}`);
-    sessionSpeed.delete(ref);
+    // صفحات هذه الجلسة التي لم تبدأ تخرج من الطابور المشترك: عودتك للفصل تبدأها من جديد
+    for (const seg of currentSegs ?? []) if (seg?.tl) queue.drop(keyOf(seg.row));
+    // التفعيل واختيار ذكية/سريعة يبقيان حتى تخرج من صفحة العمل (`endWorkSession`)، لا من الفصل
   }
 
   return { attach, onImage, enqueue, focus, openGate, toggle, start, speed: () => speedOf(ref), destroy, needs: needsTranslation, isOn, enabled };
