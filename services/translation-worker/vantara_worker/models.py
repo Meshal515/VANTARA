@@ -144,7 +144,13 @@ def ensure(name: str, *, download: bool = True) -> Path:
     spec = SPECS[name]
     target = path_of(name)
     if target.exists():
-        return target
+        # قبل أي استعمال: البصمة لا الوجود. تُحسب مرة لكل نسخة من الملف (حجمه ووقته
+        # محفوظان بجانبه)، وملف تالف أو مبدَّل يُحذف ويُنزَّل من جديد
+        if _verified(target, spec.sha256):
+            return target
+        target.unlink()
+        if not download:
+            raise FileNotFoundError(f"model {name!r} at {target} failed its checksum and was removed")
     if not download:
         raise FileNotFoundError(f"model {name!r} missing at {target}; run `python -m vantara_worker.cli models`")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -158,10 +164,35 @@ def ensure(name: str, *, download: bool = True) -> Path:
         if digest != spec.sha256:
             raise RuntimeError(f"model {name!r} checksum mismatch: got {digest}, expected {spec.sha256}")
         tmp.replace(target)
+        _remember(target, digest)
     finally:
         if tmp.exists():
             tmp.unlink()
     return target
+
+
+def _stamp_file(target: Path) -> Path:
+    return target.with_name(f".{target.name}.sha256")
+
+
+def _remember(target: Path, digest: str) -> None:
+    st = target.stat()
+    _stamp_file(target).write_text(f"{st.st_size}:{st.st_mtime_ns}:{digest}")
+
+
+def _verified(target: Path, expected: str) -> bool:
+    """بصمة الملف مطابقة؟ تُحسب مرة لكل (حجم، وقت تعديل) ثم تُقرأ من الختم."""
+    st = target.stat()
+    stamp = _stamp_file(target)
+    try:
+        size, mtime, digest = stamp.read_text().strip().split(":")
+        if int(size) == st.st_size and int(mtime) == st.st_mtime_ns:
+            return digest == expected
+    except (OSError, ValueError):
+        pass
+    digest = sha256_of(target)
+    _remember(target, digest)
+    return digest == expected
 
 
 def ensure_all(names: tuple[str, ...] = CORE, *, download: bool = True) -> dict[str, Path]:

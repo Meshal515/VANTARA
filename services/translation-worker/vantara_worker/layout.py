@@ -206,18 +206,40 @@ def glyph_height_of(region: Region) -> int:
     return int(np.median(runs)) if runs else max(12, (y2 - y1) // 3)
 
 
-def layout_region(region: Region, text: str, inner_mask: np.ndarray | None, image_size: tuple[int, int]) -> Layout | None:
-    """يختار المساحة الصحيحة للمنطقة ويعيد تخطيطًا أو None إن لم يدخل النص بحجم مقروء."""
+def _inside(lay: Layout, mask: np.ndarray) -> bool:
+    """كتلة العربي كلها (زواياها ومنتصف حوافها) داخل القناع."""
+    h, w = mask.shape[:2]
+    x1, y1, x2, y2 = (int(v) for v in lay.bounds)
+    for x in (x1, (x1 + x2) // 2, x2 - 1):
+        for y in (y1, (y1 + y2) // 2, y2 - 1):
+            if not (0 <= x < w and 0 <= y < h) or not mask[y, x]:
+                return False
+    return True
+
+
+def layout_region(region: Region, text: str, inner_mask: np.ndarray | None, image_size: tuple[int, int], thin_mask: np.ndarray | None = None) -> Layout | None:
+    """يختار المساحة الصحيحة للمنطقة ويعيد تخطيطًا أو None إن لم يدخل النص بحجم مقروء.
+
+    فقاعة معروفة: العربي داخل مضلّعها وحده، لا يخرج إلى الرسم أبدًا — الداخل المتآكل،
+    ثم هامش أرفع (`thin_mask`)، ثم الصندوق بشرط أن يقع كله داخلها؛ وإلا None."""
     gh = glyph_height_of(region)
     # حجم الخط: يتبع ارتفاع الحرف الأصلي. العربي بلا حروف كبيرة فيبدو أصغر عند نفس
     # الحجم، لذا داخل الفقاعة نسمح حتى ×1.7 (المضلّع يوقفه)، وفوق الرسم ×1.15 (الصندوق يوقفه)
-    if inner_mask is not None:
-        max_size = int(max(MIN_SIZE + 4, min(gh * 2.0, 110)))
-        lay = fit_in_mask(text, inner_mask, region.box, max_size=max_size)
+    box_size = int(max(MIN_SIZE + 4, min(gh * 1.15, 96)))
+    if inner_mask is None:
+        return fit_in_box(text, region.box, max_size=box_size, image_size=image_size)
+    max_size = int(max(MIN_SIZE + 4, min(gh * 2.0, 110)))
+    lay = fit_in_mask(text, inner_mask, region.box, max_size=max_size)
+    if lay is not None:
+        return lay
+    within = inner_mask
+    if thin_mask is not None:
+        within = thin_mask
+        lay = fit_in_mask(text, thin_mask, region.box, max_size=max_size, pad=2)
         if lay is not None:
             return lay
-    max_size = int(max(MIN_SIZE + 4, min(gh * 1.15, 96)))
-    return fit_in_box(text, region.box, max_size=max_size, image_size=image_size)
+    lay = fit_in_box(text, region.box, max_size=box_size, image_size=image_size)
+    return lay if lay is not None and _inside(lay, within) else None
 
 
 def draw_layout(image: Image.Image, layout: Layout, *, ink_light: bool, on_art: bool) -> None:
@@ -240,7 +262,7 @@ def draw_layout(image: Image.Image, layout: Layout, *, ink_light: bool, on_art: 
         )
 
 
-def inner_mask_for(region: Region, rgb: np.ndarray, siblings: list[Region] | None = None) -> np.ndarray | None:
+def inner_mask_for(region: Region, rgb: np.ndarray, siblings: list[Region] | None = None, erode: int | None = None) -> np.ndarray | None:
     """داخل الفقاعة المتآكل: هنا وحده يُرسم العربي. فقاعة تحمل جملتين تُقتسم:
     نصيب كل منطقة هو داخل الفقاعة بعيدًا عن صناديق شقيقاتها."""
     mask = None
@@ -253,7 +275,8 @@ def inner_mask_for(region: Region, rgb: np.ndarray, siblings: list[Region] | Non
     if mask is None:
         return None
     gh = glyph_height_of(region)
-    erode = max(6, int(gh * 0.45))
+    if erode is None:
+        erode = max(6, int(gh * 0.45))
     inner = cv2.erode(mask, np.ones((erode * 2 + 1, erode * 2 + 1), np.uint8))
     for sib in siblings or []:
         sx1, sy1, sx2, sy2 = sib.box

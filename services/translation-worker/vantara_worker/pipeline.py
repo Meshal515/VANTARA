@@ -118,9 +118,8 @@ class Pipeline:
         timings["assemble"] = time.time() - t
         t = time.time()
         for r in regions:
-            if r.kind == "sfx":
-                r.status = "skipped:sfx"
-                continue
+            # «نص حر بثقة منخفضة» (تلميح sfx) يُقرأ أيضًا: قد يكون سردًا فوق الرسم، وLuna
+            # ترى الصفحة وتقرر؛ المؤثر الحقيقي يعود منها sfx فلا يُرسم
             use_manga = self.manga_ocr is not None and source_lang == "ja"
             r.ocr = (self.manga_ocr.read(rgb, r.glyph, r.box) if use_manga else self.latin.read(rgb, r.glyph, r.box))  # type: ignore[union-attr]
             r.source = r.ocr.text
@@ -174,7 +173,11 @@ class Pipeline:
             if r.status != "translated":
                 continue
             inner = lay.inner_mask_for(r, rgb, siblings.get(r.id))
-            l = lay.layout_region(r, r.arabic or "", inner, (W, H))
+            thin = None
+            if inner is not None:
+                erode = max(6, int(lay.glyph_height_of(r) * 0.45))
+                thin = lay.inner_mask_for(r, rgb, siblings.get(r.id), erode=max(3, erode // 2))
+            l = lay.layout_region(r, r.arabic or "", inner, (W, H), thin_mask=thin)
             if l is None:
                 r.status = "skipped:no_fit"
                 r.notes.append("arabic does not fit at a readable size")
