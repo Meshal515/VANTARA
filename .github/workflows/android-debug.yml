@@ -72,7 +72,7 @@ jobs:
 
           for attempt in 1 2 3; do
             set +e
-            ./gradlew --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee /tmp/gradle-build.log
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:testDebugUnitTest 2>&1 | tee /tmp/gradle-build.log
             status=${PIPESTATUS[0]}
             set -e
 

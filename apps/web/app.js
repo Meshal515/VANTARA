@@ -25,7 +25,18 @@ import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
-import { applyUpdate, findUpdate } from './lib/updater.js';
+import {
+  APK_ERRORS,
+  activateStaged,
+  canInstall,
+  dismiss,
+  dismissedRecently,
+  findUpdate,
+  installApk,
+  reportHealthy,
+  resetWeb,
+  stageWeb,
+} from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
 import {
@@ -64,7 +75,9 @@ const state = {
   back: null,
 };
 
+let mountedOnce = false;
 function mount(node) {
+  mountedOnce = true;
   if (state.teardown) state.teardown();
   state.teardown = null;
   root.replaceChildren(node);
@@ -1433,7 +1446,8 @@ function screenV35(page) {
             await refreshPresence();
           },
           resync: () => sync.resync(),
-          checkUpdate: () => offerUpdate({ force: true }),
+          checkUpdate: () => checkUpdates({ force: true }),
+          resetWeb: () => resetWeb(),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
           setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
           labels: NOTIFICATION_LABELS,
@@ -1534,7 +1548,6 @@ async function go(route) {
           startHeartbeat();
           void sync.pull();
           await go({ name: 'home' });
-          void offerUpdate();
         },
       });
       state.teardown = teardown;
@@ -1897,72 +1910,122 @@ async function drainProgressOutbox() {
 
 // ───────────────────────────── التحديث ─────────────────────────────
 
-/**
- * شريط «نسخة جديدة».
- *
- * غير حاجب: التطبيق يعمل، والتحديث اختيار. الحجب يعني أن نسخة قديمة على جوّال
- * أحدهم توقفه تمامًا عن القراءة.
- */
-async function offerUpdate({ force = false } = {}) {
-  const update = await findUpdate({ force });
-  if (!update || document.querySelector('.vupdate')) return update;
+// ───────────────────────────── التحديث ─────────────────────────────
+//
+// الواجهة تتحدث وحدها: تنزل في الخلفية وتُعرض في الإقلاع التالي، أو عند
+// الرجوع للتطبيق بعد غياب. والـAPK (حين يتغيّر الكود الأصلي) شريطٌ واحد:
+// «يوجد تحديث جديد» و«تثبيت». التفاصيل في `lib/updater.js`.
 
-  // شريط هادئ في أسفل الشاشة: «يوجد تحديث جديد» وزرّ واحد. لا يحجب القراءة
-  const bar = el('div', 'vupdate');
-  bar.setAttribute('role', 'status');
+const UPDATE_EVERY_MS = 3 * 60 * 60 * 1000;
+const APPLY_AFTER_AWAY_MS = 30 * 60 * 1000;
+let updatesStarted = false;
+let hiddenAt = 0;
+
+async function startUpdates() {
+  if (updatesStarted) return;
+  updatesStarted = true;
+  // أول شاشة ظهرت: هذه الواجهة تعمل. بلا هذا النداء يرجع التطبيق عنها وحده
+  const health = await reportHealthy();
+  if (health.confirmed) showToast({ title: 'تحدّث VANTARA', body: `الإصدار ${appVersion() ?? ''}` });
+  void checkUpdates();
+  setInterval(() => void checkUpdates(), UPDATE_EVERY_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      hiddenAt = Date.now();
+      return;
+    }
+    const away = hiddenAt ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    // غاب نصف ساعة: الواجهة الجاهزة تُعرض الآن، إلا وسط فصل
+    if (away >= APPLY_AFTER_AWAY_MS && state.screen !== 'READER') void activateStaged();
+    else void checkUpdates();
+  });
+}
+
+/** `force`: من «تحديث التطبيق» في الإعدادات — الواجهة الجديدة تُطبَّق فورًا. */
+async function checkUpdates({ force = false } = {}) {
+  const found = await findUpdate({ force });
+  if (!found) return null;
+  if (found.web) {
+    const staged = await stageWeb(found.web);
+    if (staged && force) await activateStaged();
+  } else if (force && found.device?.staged) {
+    await activateStaged();
+  }
+  if (found.apk && (force || !dismissedRecently(found.apk))) showApkUpdate(found.apk);
+  return found.web || found.apk || (force && found.device?.staged) ? found : null;
+}
+
+/**
+ * «يوجد تحديث جديد» وزرّ «تثبيت». الاختياري يُؤجَّل يومًا بـ×؛ الإجباري
+ * (`minimumSupportedVersionCode`) يغطي الشاشة حتى يُثبَّت.
+ */
+function showApkUpdate(apk) {
+  if (document.querySelector('.vupdate')) return;
+  const bar = el('div', apk.required ? 'vupdate vupdate--required' : 'vupdate');
+  bar.setAttribute('role', apk.required ? 'alertdialog' : 'status');
+  const card = el('div', 'vupdate__card');
   const copy = el('div', 'vupdate__copy');
-  copy.append(el('strong', null, 'يوجد تحديث جديد'));
-  const sub = el(
-    'span',
-    null,
-    update.kind === 'web' ? `VANTARA ${update.version} · يتحدث في ثوانٍ` : `VANTARA ${update.version} · يحتاج تثبيت من أندرويد`,
-  );
+  copy.append(el('strong', null, apk.required ? 'تحديث مطلوب' : 'يوجد تحديث جديد'));
+  const sub = el('span', null, `الإصدار ${apk.version}`);
   copy.append(sub);
+  if (apk.changelog?.length) {
+    const list = el('ul', 'vupdate__notes');
+    for (const line of apk.changelog.slice(0, 4)) list.append(el('li', null, line));
+    copy.append(list);
+  }
   const go = el('button', 'vupdate__go', 'تثبيت');
   go.type = 'button';
-  const later = el('button', 'vupdate__later', '×');
-  later.type = 'button';
-  later.setAttribute('aria-label', 'لاحقًا');
-  later.addEventListener('click', () => bar.remove());
+  const idle = (message) => {
+    if (message) sub.textContent = message;
+    go.disabled = false;
+    go.textContent = 'تثبيت';
+  };
   go.addEventListener('click', async () => {
     go.disabled = true;
     go.textContent = '0%';
-    try {
-      const out = await applyUpdate(update, (p) => {
+    const out = await installApk(apk, {
+      onProgress: (p) => {
         go.textContent = `${Math.round(p * 100)}%`;
-      });
-      if (out.needsPermission) {
-        // أندرويد يسأل مرة: «السماح من هذا المصدر». بعدها ضغطة «تثبيت» ثانية
-        sub.textContent = 'فعّل «السماح من هذا المصدر» ثم ارجع';
-        go.disabled = false;
-        go.textContent = 'تثبيت';
-        // الرجوع من الإعداد بعد السماح يكمل التثبيت وحده، بلا ضغطة ثانية
-        const resume = async () => {
-          if (document.visibilityState !== 'visible') return;
-          document.removeEventListener('visibilitychange', resume);
-          const info = await globalThis.Capacitor?.Plugins?.AppUpdate?.info?.().catch(() => null);
-          if (info?.canInstall && bar.isConnected) go.click();
-        };
-        document.addEventListener('visibilitychange', resume);
-        return;
-      }
-      if (update.kind === 'apk') {
-        sub.textContent = 'اضغط «تحديث» في شاشة أندرويد';
-        go.textContent = 'تثبيت';
-        go.disabled = false;
-      }
-      // تحديث الواجهة يعيد تحميل الصفحة وحده
-    } catch {
-      sub.textContent = 'ما اكتمل التنزيل. جرّب مرة ثانية';
-      go.disabled = false;
+      },
+      onResult: (status) => {
+        if (status === 'cancelled') idle('ألغيت التثبيت. اضغط «تثبيت» متى ما بغيت');
+        else if (status === 'storage') idle('المساحة ما تكفي. فضّ مساحة وجرّب');
+        else if (status === 'conflict') idle(APK_ERRORS.INSTALLED_DIFFERENT_KEY);
+        else if (status !== 'success') idle('ما اكتمل التثبيت. جرّب مرة ثانية');
+      },
+    });
+    if (out.needsPermission) {
+      // أندرويد يسأل مرة: «السماح من هذا المصدر». الرجوع منه يكمل وحده
+      idle('فعّل «السماح من هذا المصدر» ثم ارجع');
+      const resume = async () => {
+        if (document.visibilityState !== 'visible') return;
+        document.removeEventListener('visibilitychange', resume);
+        if ((await canInstall()) && bar.isConnected) go.click();
+      };
+      document.addEventListener('visibilitychange', resume);
+    } else if (out.error) {
+      idle(APK_ERRORS[out.error] ?? 'ما اكتمل التنزيل. جرّب مرة ثانية');
+    } else {
+      sub.textContent = 'أكّد «تحديث» في شاشة أندرويد';
       go.textContent = 'تثبيت';
     }
   });
-  bar.append(copy, go, later);
+  card.append(copy, go);
+  if (!apk.required) {
+    const later = el('button', 'vupdate__later', '×');
+    later.type = 'button';
+    later.setAttribute('aria-label', 'لاحقًا');
+    later.addEventListener('click', () => {
+      dismiss(apk);
+      bar.remove();
+    });
+    card.append(later);
+  }
+  bar.append(card);
   document.body.append(bar);
-  return update;
 }
-globalThis.__vantaraCheckUpdate = (opts) => offerUpdate(opts);
+globalThis.__vantaraCheckUpdate = (opts) => checkUpdates(opts);
 
 // ───────────────────────────── الإقلاع ─────────────────────────────
 
@@ -2041,6 +2104,11 @@ setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4
 setInterval(() => void sync.push(), 15_000);
 
 async function boot() {
+  // شاشة الدخول أو الرئيسية قد تنتظر الشبكة؛ واجهةٌ رسمت شيئًا وما زالت حيّة
+  // سليمة، فلا يرجع عنها المراقب لأن الجوال بلا إنترنت
+  setTimeout(() => {
+    if (mountedOnce) void startUpdates();
+  }, 6_000);
   attachBackButton();
   // Pair a clean APK before the account gate can issue /v1/session.
   // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
@@ -2078,6 +2146,7 @@ async function boot() {
         return wrap;
       })(),
     );
+    void startUpdates();
     return;
   }
 
@@ -2087,12 +2156,13 @@ async function boot() {
     await go({ name: 'home' });
     void sync.pull();
     void refreshPresence();
-    void offerUpdate();
+    void startUpdates();
     // بعد السحب: الصندوق قد يحمل تقدمًا كتبه جهاز آخر ولم يصل مالكه
     void drainProgressOutbox();
     return;
   }
   await go({ name: 'gate' });
+  void startUpdates();
 }
 
 void boot();
