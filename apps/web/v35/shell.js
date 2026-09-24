@@ -359,9 +359,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
       nearObserver.observe(node);
     });
   }
+  /**
+   * أغلفةٌ ظهرت في هذه الجلسة: عملٌ → الرابط الذي عُرض. إعادة رسم القسم (وتتكرر
+   * مع كل تحديث للقوائم) كانت تبني الغلاف فارغًا ثم تحمّله، فيومض ويختفي
+   * ويرجع. الآن يوضع المعروف في نفس اللحظة، والذاكرة تعطيه بلا انتظار.
+   */
+  const shownCovers = new Map();
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
+    const known = shownCovers.get(String(work?.id ?? ''));
+    if (known) {
+      const current = container.querySelector(':scope > img');
+      if (current?.getAttribute('src') === known) return known;
+      const img = new Image();
+      img.alt = '';
+      img.decoding = 'sync';
+      img.src = known;
+      if (opts.position) img.style.objectPosition = opts.position;
+      container.replaceChildren(img);
+      return known;
+    }
     const tryUrl = (url, timeoutMs) =>
       new Promise((resolve) => {
         const img = new Image();
@@ -382,6 +400,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const show = (img, url) => {
       if (opts.position) img.style.objectPosition = opts.position;
       container.replaceChildren(img);
+      if (id) shownCovers.set(id, img.getAttribute('src') ?? url);
       return url;
     };
     // الغلاف المعروف لهذا العمل أولًا (من أي شاشة عرفته)، ثم وصف الخادم، ثم القائمة
