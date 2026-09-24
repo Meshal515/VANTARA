@@ -2982,6 +2982,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       modeRow.append(t, seg);
       rows.push(modeRow);
+
+      const speedRow = el('div', 'setting');
+      speedRow.innerHTML = glyph('spark');
+      const st = el('div');
+      st.append(el('strong', null, 'نوع الترجمة'));
+      st.append(el('small', null, s.speed === 'fast' ? 'سريعة: أسرع، وأحيانًا تغلط أو تخلط مين يتكلم' : 'ذكية: الأدق، تاخذ ثواني أكثر لكل صفحة'));
+      const speedSeg = el('div', 'segmented');
+      for (const [value, label] of [['smart', 'ذكية'], ['fast', 'سريعة']]) {
+        const b = el('button', null, label);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(s.speed === value));
+        b.onclick = () => {
+          writeTranslateSettings({ speed: value });
+          renderSettings();
+        };
+        speedSeg.append(b);
+      }
+      speedRow.append(st, speedSeg);
+      rows.push(speedRow);
     }
     if (s.enabled) {
       const all = translationJobs.jobs();
@@ -2994,7 +3013,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }),
       );
     }
-    const note = s.enabled ? 'الصفحات المترجمة تُحفظ عندك: ما تُرجم مرة ما يُعاد تحميله ولا ترجمته. تجهيز فصول مقدمًا من زر الترجمة في صفحة العمل.' : null;
+    const note = s.enabled ? 'الصفحات المترجمة تُحفظ عندك: ما تُرجم مرة ما يُعاد تحميله ولا ترجمته. زر «ترجم» في القارئ يسألك ذكية أو سريعة، وهذا الاختيار يكون محددًا مسبقًا. تجهيز فصول مقدمًا من زر الترجمة في صفحة العمل.' : null;
     group('الترجمة', rows, { note });
 
     if (!s.enabled) return;

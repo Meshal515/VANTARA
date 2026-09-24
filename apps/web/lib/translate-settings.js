@@ -4,13 +4,15 @@
  *   enabled  : مغلقة افتراضيًا. مغلقة = لا زرّ ولا أيقونة ترجمة في أي مكان.
  *   mode     : 'auto'   = كل فصل إنجليزي يُترجم حين تدخله.
  *              'manual' = تضغط «ترجم» في القارئ، ويستمر للعمل حتى تخرج من بطاقته.
+ *   speed    : 'smart' (افتراضي) = Luna بتفكير: أدق. 'fast' = Luna بلا تفكير: أسرع وأحيانًا تغلط.
+ *              القارئ يسألك عند «ترجم»، وهذا ما يكون مختارًا مسبقًا وما يستعمله «تلقائي».
  *
  * الترجمات المكتملة تُحفظ على الجهاز (`lib/translate.js`) فلا تُعاد، والنماذج
  * تُنزَّل مرة (`translation-native.js`). الدوال خالصة قدر الإمكان لتُختبر.
  */
 
 const KEY = 'vantara.translate.settings';
-const DEFAULTS = Object.freeze({ enabled: false, mode: 'auto' });
+const DEFAULTS = Object.freeze({ enabled: false, mode: 'auto', speed: 'smart' });
 const listeners = new Set();
 
 export function readTranslateSettings(storage = globalThis.localStorage) {
@@ -24,7 +26,7 @@ export function readTranslateSettings(storage = globalThis.localStorage) {
 
 export function normalize(value) {
   const v = value && typeof value === 'object' ? value : {};
-  return { enabled: v.enabled === true, mode: v.mode === 'manual' ? 'manual' : 'auto' };
+  return { enabled: v.enabled === true, mode: v.mode === 'manual' ? 'manual' : 'auto', speed: v.speed === 'fast' ? 'fast' : 'smart' };
 }
 
 export function writeTranslateSettings(patch, storage = globalThis.localStorage) {
@@ -45,3 +47,4 @@ export function onTranslateSettings(fn) {
 
 export const translateEnabled = () => readTranslateSettings().enabled;
 export const translateMode = () => readTranslateSettings().mode;
+export const translateSpeed = () => readTranslateSettings().speed;

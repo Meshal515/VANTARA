@@ -215,7 +215,9 @@ export async function translatePage(deps, src, meta) {
   const local = (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash));
   // صفحة ناقصة (فقاعة لم تُترجم) لا تُحفظ للأبد: تُعاد بعد مهلة، والخادم يسأل عن الناقص وحده
   const stale = local?.incomplete && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
-  if (local && typeof local.translated === 'number' && !stale) return { ...local, hash, from: 'device' };
+  // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
+  const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
+  if (local && typeof local.translated === 'number' && !stale && !downgraded) return { ...local, hash, from: 'device' };
 
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
   const result = nativeTranslationAvailable() && imagePath ? await translateOnDevice({ ...deps, imagePath }, hash, meta) : await translateViaServer(deps, src, hash, meta);

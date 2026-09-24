@@ -2857,3 +2857,6 @@ html,
   color: var(--bg);
 }
 .v35 .tl-ahead__label { display: block; margin: 10px 0 8px; }
+/* داخل صف إعداد: بلا هوامش الصفحة، فلا يُقصّ الزر الأخير عند الحافة */
+.v35 .setting .segmented { flex: none; margin: 0; padding: 0; gap: 6px; overflow: visible; }
+.v35 .setting .segmented > button[aria-pressed] { padding: 0 12px; }

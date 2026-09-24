@@ -9,18 +9,18 @@ const memory = () => {
 
 describe('translation settings: off by default, auto or on demand', () => {
   it('is closed until the user opens it, and unknown values fall back safely', () => {
-    expect(readTranslateSettings(memory())).toEqual({ enabled: false, mode: 'auto' });
-    expect(normalize({ enabled: 'yes', mode: 'weird' })).toEqual({ enabled: false, mode: 'auto' });
-    expect(normalize({ enabled: true, mode: 'manual' })).toEqual({ enabled: true, mode: 'manual' });
+    expect(readTranslateSettings(memory())).toEqual({ enabled: false, mode: 'auto', speed: 'smart' });
+    expect(normalize({ enabled: 'yes', mode: 'weird', speed: 'turbo' })).toEqual({ enabled: false, mode: 'auto', speed: 'smart' });
+    expect(normalize({ enabled: true, mode: 'manual', speed: 'fast' })).toEqual({ enabled: true, mode: 'manual', speed: 'fast' });
   });
 
   it('writes a patch, keeps the rest, and tells listeners', () => {
     const storage = memory();
     const seen = [];
     const off = onTranslateSettings((s) => seen.push(s));
-    expect(writeTranslateSettings({ enabled: true }, storage)).toEqual({ enabled: true, mode: 'auto' });
-    expect(writeTranslateSettings({ mode: 'manual' }, storage)).toEqual({ enabled: true, mode: 'manual' });
-    expect(readTranslateSettings(storage)).toEqual({ enabled: true, mode: 'manual' });
+    expect(writeTranslateSettings({ enabled: true }, storage)).toEqual({ enabled: true, mode: 'auto', speed: 'smart' });
+    expect(writeTranslateSettings({ mode: 'manual', speed: 'fast' }, storage)).toEqual({ enabled: true, mode: 'manual', speed: 'fast' });
+    expect(readTranslateSettings(storage)).toEqual({ enabled: true, mode: 'manual', speed: 'fast' });
     expect(seen).toHaveLength(2);
     off();
   });
