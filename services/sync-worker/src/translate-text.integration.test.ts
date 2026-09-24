@@ -177,3 +177,59 @@ describe('region cleaning', () => {
     ]);
   });
 });
+
+describe('a bubble Luna skipped is never skipped for good', () => {
+  const two = [
+    { id: 'rleft0001', source: 'THE LEFT COFFIN IS EMPTY...', kind: 'speech', box: [620, 120, 930, 300] },
+    { id: 'rright001', source: "AND THE RIGHT IS... OH NO! THERE'S A SCARY SKELETON IN IT!", kind: 'speech', box: [220, 456, 729, 614] },
+  ];
+  const left = { id: 'rleft0001', source: 'THE LEFT COFFIN IS EMPTY...', kind: 'speech', arabic: 'التابوت الأيسر فارغ…', speaker: null };
+  const right = { id: 'rright001', source: "AND THE RIGHT IS... OH NO! THERE'S A SCARY SKELETON IN IT!", kind: 'speech', arabic: 'والأيمن… يا إلهي! فيه هيكل عظمي مخيف!', speaker: null };
+  const reply = (regions: unknown[]) => ({ regions, new_terms: [], characters: [], summary: 'فتاة تفتح تابوتين.' });
+
+  it('asks again for just the missing bubble and returns both', async () => {
+    const { env } = testEnv();
+    const gpt = fakeGpt((body) => (promptOf({ body }).includes('rleft0001') ? reply([left]) : reply([right])));
+    const res = await handleTranslateText(req({ regions: two }), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    const out = (await res.json()) as { regions: Array<{ id: string; arabic: string }> };
+    expect(out.regions.map((r) => r.arabic)).toEqual([left.arabic, right.arabic]);
+    expect(gpt.calls).toHaveLength(2);
+    const retryPrompt = promptOf(gpt.calls[1]!);
+    expect(retryPrompt).toContain('rright001');
+    expect(retryPrompt).not.toContain('rleft0001');
+    expect(retryPrompt).toContain('Each one is its own bubble');
+    expect(promptOf(gpt.calls[0]!)).not.toContain('Each one is its own bubble');
+    // الإصلاح لا يُحسب صفحة ثانية
+    const usage = await env.DB.prepare('SELECT pages FROM translation_usage').first<{ pages: number }>();
+    expect(usage?.pages).toBe(1);
+  });
+
+  it('speech with null Arabic counts as missing; sfx and signs without Arabic do not', async () => {
+    const { env } = testEnv();
+    const withSign = [...two, { id: 'rsign0001', source: 'EXIT', kind: 'free', box: [10, 10, 60, 30] }];
+    const gpt = fakeGpt(() => reply([left, { ...right, arabic: null }, { id: 'rsign0001', source: 'EXIT', kind: 'sign', arabic: null, speaker: null }]));
+    await handleTranslateText(req({ regions: withSign }), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    expect(gpt.calls).toHaveLength(2);
+    expect(promptOf(gpt.calls[1]!)).toContain('rright001');
+    expect(promptOf(gpt.calls[1]!)).not.toContain('rsign0001');
+  });
+
+  it('a saved page with a hole is repaired once, for everyone, without charging the week', async () => {
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1' });
+    // أول مرة: Luna تُسقط الفقاعة في المحاولتين
+    const stubborn = fakeGpt(() => reply([left]));
+    await handleTranslateText(req({ regions: two }), env, A, Date.UTC(2026, 8, 24), { fetch: stubborn.fetch });
+    // لاحقًا (والأسبوع ممتلئ): المحفوظ ناقص ← سؤال عن الناقص وحده
+    const later = fakeGpt(() => reply([right]));
+    const res = await handleTranslateText(req({ regions: two }), env, B, Date.UTC(2026, 8, 24), { fetch: later.fetch });
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { regions: Array<{ arabic: string }> };
+    expect(out.regions.map((r) => r.arabic)).toEqual([left.arabic, right.arabic]);
+    expect(later.calls).toHaveLength(1);
+    // بعد الإصلاح: من المحفوظ بلا نداء
+    const done = fakeGpt(() => reply([]));
+    const again = (await (await handleTranslateText(req({ regions: two }), env, A, Date.UTC(2026, 8, 24), { fetch: done.fetch })).json()) as { cached: boolean };
+    expect(again.cached).toBe(true);
+    expect(done.calls).toHaveLength(0);
+  });
+});
