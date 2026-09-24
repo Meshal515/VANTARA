@@ -164,7 +164,13 @@ export function createReaderTranslation(deps) {
     const run = async () => {
       if (stopped || disabledReason || !isOn()) return null;
       const src = await getImage(seg, index);
-      return translatePage({ api, sync }, src, {
+      // صفحة ناقصة تُكمَل في الخلفية: حين تجهز تُبدَّل وهي أمامك
+      const onRepaired = (better) => {
+        if (!seg.tl) return;
+        seg.tl.results.set(index, better);
+        paint(seg, index);
+      };
+      return translatePage({ api, sync, onRepaired }, src, {
         seriesRef: ref,
         seriesTitle: title,
         chapterKey,

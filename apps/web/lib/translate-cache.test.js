@@ -37,11 +37,23 @@ describe('pages saved before the cache rename come back without translating agai
     expect(kv.get(`tl4:${hash}`)?.value).toMatchObject({ translated: 2, incomplete: false });
   });
 
-  it('an old page with a bubble left in English is asked again', async () => {
+  it('an old page with a bubble left in English stays shown while it is completed in the background', async () => {
     const hash = await pageHashOf('file://p');
     kv.set(`tl3:${hash}`, { value: saved({ regions: [{ id: 'r1', status: 'pending', source: 'HI', arabic: null }] }), at: 1 });
     const res = await translatePage(noTranslate, 'file://p', {});
-    expect(res.error).toBe('device_only');
+    expect(res).toMatchObject({ from: 'device', translated: 2, image: '/files/translated-pages/abc.webp' });
+    await new Promise((r) => setTimeout(r, 10));
+    // حاول الإكمال مرة (سُجّلت المحاولة) ولم يمسّ المعروض
+    expect(kv.get(`tl4:${hash}`)?.value).toMatchObject({ incomplete: true, tries: 1, image: '/files/translated-pages/abc.webp' });
+  });
+
+  it('never shows English while an incomplete page is retried, and gives up after three tries', async () => {
+    const hash = await pageHashOf('file://p');
+    kv.set(`tl4:${hash}`, { value: { ...saved(), incomplete: true, at: 0, tries: 3 }, at: 1 });
+    const res = await translatePage(noTranslate, 'file://p', {});
+    expect(res.from).toBe('device');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(kv.get(`tl4:${hash}`)?.value.tries).toBe(3);
   });
 
   it('a page whose image vanished is forgotten in both caches', async () => {

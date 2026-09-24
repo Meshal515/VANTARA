@@ -513,7 +513,7 @@ How you translate:
 What you receive: the page image, and a list of text regions the detector found, each with an id, a draft OCR reading (may contain small mistakes), a geometry guess and a box. What you return, one entry per region id, ids exactly as given, never invented, never merged:
 - id: the region id.
 - source: the original text exactly as written on the page (fix the OCR draft by reading the image).
-- kind: speech, thought, narration (caption boxes), sign (text drawn in the scene), sfx (sound effects and onomatopoeia drawn into the art: BOOM, CLANG, 쾅, ドン), credit (scanlator credits, watermarks, site names, page numbers, ads).
+- kind: speech, thought, narration (caption boxes, and also box-less captions lettered over the art or a black background, like "FROM THE WORTHLESS SCOUNDRELS" or "THERE'S A RULE IN THE UNDERWORLD": the narrator's voice is always narration), sign (only text that physically exists inside the scene: shop signs, papers, screens), sfx (sound effects and onomatopoeia drawn into the art: BOOM, CLANG, 쾅, ドン), credit (scanlator credits, watermarks, site names, page numbers, ads).
 - arabic: the translation. null for sfx and credit: the art keeps its sound effects. Signs are translated only when the reader needs them to follow the story; otherwise null.
 - speaker: the character speaking, by the name used in the character list, or null when unclear.
 

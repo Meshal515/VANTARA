@@ -30,6 +30,8 @@ export const MAX_UPLOAD_WIDTH = 1600;
 const CACHE_PREFIX = 'tl4:';
 const OLD_CACHE_PREFIX = 'tl3:';
 const RETRY_INCOMPLETE_MS = 5 * 60 * 1000;
+/** محاولات إكمال صفحة ناقصة قبل أن تُقبل كما هي. */
+const MAX_REPAIRS = 3;
 
 // ───────────────────────── الإرسال (مسار الخادم) ─────────────────────────
 
@@ -213,18 +215,38 @@ export function renderPlan(analysis, reply) {
 export async function translatePage(deps, src, meta) {
   const hash = await pageHashOf(src);
   const local = (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash));
-  // صفحة ناقصة (فقاعة لم تُترجم) لا تُحفظ للأبد: تُعاد بعد مهلة، والخادم يسأل عن الناقص وحده
-  const stale = local?.incomplete && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
-  if (local && typeof local.translated === 'number' && !stale && !downgraded) return { ...local, hash, from: 'device' };
+  if (local && typeof local.translated === 'number' && !downgraded) {
+    // المحفوظ يُعرض دائمًا. وإن كانت فيه فقاعة ناقصة: إكمالها في الخلفية (مرات محدودة)،
+    // والصفحة تتحدّث حين تجهز — لا تعود للإنجليزي أثناء الانتظار أبدًا
+    const due = local.incomplete && (local.tries ?? 0) < MAX_REPAIRS && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
+    if (due) void repairInBackground(deps, src, hash, meta, local);
+    return { ...local, hash, from: 'device' };
+  }
 
-  const imagePath = deps.imagePath ?? filePathFromSrc(src);
-  const result = nativeTranslationAvailable() && imagePath ? await translateOnDevice({ ...deps, imagePath }, hash, meta) : await translateViaServer(deps, src, hash, meta);
+  const result = await translateFresh(deps, src, hash, meta);
   if (result.error) return result;
-  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now() };
+  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries: 0 };
   void writeKv(CACHE_PREFIX + hash, value);
   return { ...value, hash, from: result.cached ? 'friends' : 'model' };
+}
+
+function translateFresh(deps, src, hash, meta) {
+  const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  return nativeTranslationAvailable() && imagePath ? translateOnDevice({ ...deps, imagePath }, hash, meta) : translateViaServer(deps, src, hash, meta);
+}
+
+/** إكمال صفحة ناقصة بلا إخفاء الموجود. نجح بأفضل: يُحفظ ويُبلَّغ القارئ (`deps.onRepaired`). */
+async function repairInBackground(deps, src, hash, meta, local) {
+  const tries = (local.tries ?? 0) + 1;
+  // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
+  await writeKv(CACHE_PREFIX + hash, { ...local, at: Date.now(), tries });
+  const result = await translateFresh(deps, src, hash, meta).catch(() => ({ error: 'offline' }));
+  if (result.error || !(result.translated >= (local.translated ?? 0))) return;
+  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
+  await writeKv(CACHE_PREFIX + hash, value);
+  deps.onRepaired?.({ ...value, hash, from: 'model' });
 }
 
 async function translateOnDevice(deps, hash, meta) {
@@ -271,15 +293,15 @@ async function translateOnDevice(deps, hash, meta) {
 /**
  * صفحة حُفظت بالاسم القديم (tl3) قبل أن تُعرف «الناقصة». تُعرض فورًا بلا
  * ترجمة جديدة، وتُنقل للاسم الحالي. وإن كان فيها فقاعة مقروءة بلا عربي تُعلَّم
- * ناقصة قديمة، فتُسأل مرة (والخادم يعيد المحفوظ ويصلح الناقص مجانًا).
+ * ناقصة، فتُكمَل في الخلفية وهي معروضة (والخادم يصلح الناقص مجانًا).
  */
 async function fromOldCache(hash) {
   const old = (await readKv(OLD_CACHE_PREFIX + hash))?.value;
   if (!old || typeof old.translated !== 'number') return null;
   const incomplete = (old.regions ?? []).some((r) => r.status === 'pending' && r.source && !(typeof r.arabic === 'string' && r.arabic.trim()));
-  const value = { ...old, incomplete, at: incomplete ? 0 : Date.now() };
+  const value = { ...old, incomplete, at: incomplete ? 0 : Date.now(), tries: 0 };
   void writeKv(CACHE_PREFIX + hash, value);
-  return incomplete ? null : value;
+  return value;
 }
 
 /** صورة مترجمة محفوظة اختفت من الجهاز (أندرويد ينظّف مجلد الكاش): تُنسى فتُترجم من جديد. */
