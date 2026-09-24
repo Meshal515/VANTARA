@@ -38,6 +38,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private val layout by lazy { ArabicLayout(typeface) }
     private val analyses = lru<Analysis>(24)
     private val images = lru<Decoded>(3)
+    private val detections = lru<List<Detection>>(12)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
     class Snapshot(
@@ -79,7 +80,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private fun detector(perf: Perf) = detector ?: load(perf, "rtdetr") { Detector(store.file("rtdetr")) }.also { detector = it }
     private fun glyphs(perf: Perf) = glyphs ?: load(perf, "ctd") { GlyphSegmenter(store.file("ctd")) }.also { glyphs = it }
     private fun bubbles(perf: Perf) = bubbles ?: load(perf, "bubbleseg") { BubbleSegmenter(store.file("bubbleseg")) }.also { bubbles = it }
-    private fun inpainter(perf: Perf) = inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it }
+    private val lamaLock = Any()
+    private fun inpainter(perf: Perf) = synchronized(lamaLock) { inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it } }
     private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict")) }.also { ocr = it }
 
     /** ملف قناع الحروف المستعمل: `seg` (الرأس وحده) أو `full` (الأصل، إلى أن يصل تحديث الملفات). */
@@ -87,8 +89,10 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     @Synchronized
     fun unload() {
-        detector?.close(); glyphs?.close(); bubbles?.close(); inpainter?.close(); ocr?.close()
-        detector = null; glyphs = null; bubbles = null; inpainter = null; ocr = null
+        detector?.close(); glyphs?.close(); bubbles?.close(); ocr?.close()
+        synchronized(lamaLock) { inpainter?.close(); inpainter = null }
+        detector = null; glyphs = null; bubbles = null; ocr = null
+        detections.clear()
         analyses.clear()
         images.clear()
     }
@@ -128,41 +132,68 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     @Synchronized
     fun analyze(file: File, perf: Perf = Perf()): Analysis = analyzeImpl(file, perf, useCache = true)
 
-    /**
-     * التحليل ومصغّرة Luna معًا بقفل واحد (لا انتظار ثانٍ خلف صفحة أخرى). المصغّرة
-     * لصفحة فيها ما يُسأل عنه وحدها.
-     */
-    @Synchronized
-    fun analyzeForLuna(file: File, perf: Perf): Pair<Analysis, String> {
-        val a = analyzeImpl(file, perf, useCache = true)
-        val asks = a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
-        return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
-    }
-
-    /** نموذج التبييض يُحمَّل مسبقًا (أثناء انتظار Luna) لا حين تنتظره الصفحة. */
-    @Synchronized
+    /** نموذج التبييض يُحمَّل مسبقًا (أثناء انتظار Luna) خارج قفل الصفحات: لا يوقف أحدًا. */
     fun warmInpainter(perf: Perf) {
         if (store.isInstalled()) inpainter(perf)
     }
 
-    @Synchronized
-    fun inpainterReady(): Boolean = inpainter != null
+    fun inpainterReady(): Boolean = synchronized(lamaLock) { inpainter != null }
 
     private fun analyzeImpl(file: File, perf: Perf, useCache: Boolean): Analysis {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
         if (useCache) analyses[hash]?.let { perf.count("analysisReused"); return it }
         val img = image(bytes, hash, perf, useCache).img
+        val dets = detect(img, perf)
+        textless(hash, img, dets, perf, useCache)?.let { return it }
+        return finish(hash, img, dets, perf, useCache)
+    }
+
+    private fun detect(img: RgbImage, perf: Perf): List<Detection> {
         val det = detector(perf)
         val dets = perf.time("detect") { det.detect(img) }
         perf.count("detectTiles", det.tiles)
-        // بوابة «هل في الصفحة نص؟»: كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_SCORE، فبلا صندوق
-        // كهذا لا منطقة مهما قالت بقية النماذج. صفحة بلا نص تتخطى الحروف والفقاعات وOCR
-        // وتحميل نماذجها، والنتيجة نفسها تمامًا (لا تخمين: أي صندوق نص يكمل المعالجة).
-        if (dets.none { it.label.startsWith("text") && it.score >= Regions.MIN_SCORE }) {
-            perf.count("textless")
-            return Analysis(hash, img.width, img.height, emptyList(), emptyList()).also { if (useCache) analyses[hash] = it }
+        return dets
+    }
+
+    /**
+     * بوابة «هل في الصفحة نص؟»: كل منطقة تبدأ من صندوق نص بثقة ≥ MIN_SCORE، فبلا صندوق
+     * كهذا لا منطقة مهما قالت بقية النماذج. صفحة بلا نص تتخطى الحروف والفقاعات وOCR
+     * وتحميل نماذجها، والنتيجة نفسها تمامًا (لا تخمين: أي صندوق نص يكمل المعالجة).
+     */
+    private fun textless(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis? {
+        if (dets.any { it.label.startsWith("text") && it.score >= Regions.MIN_SCORE }) return null
+        perf.count("textless")
+        return Analysis(hash, img.width, img.height, emptyList(), emptyList()).also { if (useCache) analyses[hash] = it }
+    }
+
+    /** المرحلة الخفيفة وحدها (قراءة، فك، كشف): صفحة بلا نص تنتهي هنا. */
+    @Synchronized
+    fun detectStage(file: File, perf: Perf): Analysis? {
+        store.requireInstalled()
+        val (bytes, hash) = read(file, perf)
+        analyses[hash]?.let { perf.count("analysisReused"); return it }
+        val img = image(bytes, hash, perf, true).img
+        val dets = detect(img, perf)
+        textless(hash, img, dets, perf, true)?.let { return it }
+        detections[hash] = dets
+        return null
+    }
+
+    /** المرحلة الثقيلة بعد [detectStage] (الحروف، الفقاعات، OCR) ومصغّرة Luna بالقفل نفسه. */
+    @Synchronized
+    fun finishForLuna(file: File, perf: Perf): Pair<Analysis, String> {
+        val (bytes, hash) = read(file, perf)
+        val a = analyses[hash] ?: run {
+            val img = image(bytes, hash, perf, true).img
+            val dets = detections.remove(hash) ?: detect(img, perf)
+            textless(hash, img, dets, perf, true) ?: finish(hash, img, dets, perf, true)
         }
+        val asks = a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
+        return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
+    }
+
+    private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
         val gray = perf.time("gray") { img.gray() }
         // القطع التي فيها نص وحدها: الحروف حول كل صندوق (بهامش المناطق)، والفقاعات بعرض
         // الصفحة فوق الصندوق وتحته (فقاعة تحيط بالنص كاملة مع ما ينافسها في الدمج)

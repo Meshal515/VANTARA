@@ -130,6 +130,9 @@ export function formatReport(entries, benchmarks = []) {
     const sum = (k) => mine.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
     lines.push(`${via === 'job' ? 'المقدّمة' : 'القارئ'}: ${mine.length} صفحة · مرسوم ${sum('translated')} · لم يدخل ${sum('noFit')} · لم يظهر ${sum('invisible')} · فقاعة أُبقيت ${sum('bubbleKept')} · لون قُلب ${sum('inkFlipped')}`);
   }
+  // المعالج مشغول فعلًا أم الصفحات تنتظر بعضها؟ من آخر صفحة قاسها الجهاز
+  const last = [...entries].reverse().find((e) => Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
+  if (last) lines.push(`المعالج مشغول ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة`);
   for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
