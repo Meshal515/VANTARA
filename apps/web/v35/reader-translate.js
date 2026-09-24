@@ -17,6 +17,7 @@ import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, entryPages, readingRate, translatePage } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings } from '../lib/translate-settings.js';
 import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
+import { learnOnce } from '../lib/translate-learn.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
 const MIN_READY = 0.3;
@@ -80,7 +81,8 @@ export function swapPageImage(img, result, on) {
  *   getImage: (seg, index) => Promise<string>, keyOf: (row) => string }} deps
  */
 export function createReaderTranslation(deps) {
-  const { api, sync, ref, title, root, toast, getImage, keyOf } = deps;
+  const { api, sync, ref, title, root, toast, getImage, keyOf, rows, pagesOf, imageOf } = deps;
+  let lessonStarted = false;
   let stopped = false;
   let disabledReason = null;
   let gate = null;
@@ -177,8 +179,18 @@ export function createReaderTranslation(deps) {
     queue.focus(keyOf(seg.row), index, ranks);
     if (!isOn()) return;
     if (!ensureModelsOrOffer()) return;
+    startLesson();
     enqueue(seg);
     if (segs[i + 1]) enqueue(segs[i + 1]);
+  }
+
+  /** Luna تتعلم من الفصول العربية لهذا العمل مرة، في الخلفية، قبل/مع أول صفحة. */
+  function startLesson() {
+    if (lessonStarted || !rows || !pagesOf || !imageOf || !sync?.translation) return;
+    lessonStarted = true;
+    void learnOnce({ sync, ref, title, rows, pagesOf, imageOf }).then((outcome) => {
+      if (outcome === 'learned') toast('تعلّمت Luna أسماء العمل ومصطلحاته من فصوله العربية');
+    });
   }
 
   // ── ملفات الترجمة على الجهاز ──

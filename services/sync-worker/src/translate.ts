@@ -158,10 +158,12 @@ interface WorkMemory {
   characters: Array<{ name: string; arabic: string; gender: string | null; voice: string | null }>;
   summaries: string[];
   recent: Array<{ speaker: string | null; arabic: string }>;
+  /** ما تعلّمته Luna من الفصول العربية لنفس العمل (`/v1/translate/learn`). */
+  style: string | null;
 }
 
 async function workMemory(db: D1Database, engine: string, seriesRef: string, chapterKey: string | null, pageIndex: number): Promise<WorkMemory> {
-  const [terms, characters, pages] = await Promise.all([
+  const [terms, characters, pages, style] = await Promise.all([
     db
       .prepare('SELECT term, arabic, kind, note FROM translation_terms WHERE series_ref = ? ORDER BY updated_at LIMIT 300')
       .bind(seriesRef)
@@ -181,6 +183,7 @@ async function workMemory(db: D1Database, engine: string, seriesRef: string, cha
           .bind(seriesRef, chapterKey, engine, pageIndex)
           .all<{ summary: string | null; regions_json: string }>()
       : Promise.resolve({ results: [] as Array<{ summary: string | null; regions_json: string }> }),
+    db.prepare('SELECT notes FROM translation_style WHERE series_ref = ?').bind(seriesRef).first<{ notes: string }>(),
   ]);
   const previous = [...(pages.results ?? [])].reverse();
   const recent: WorkMemory['recent'] = [];
@@ -196,6 +199,7 @@ async function workMemory(db: D1Database, engine: string, seriesRef: string, cha
     characters: characters.results ?? [],
     summaries: previous.map((p) => p.summary).filter((s): s is string => Boolean(s)),
     recent: recent.slice(-20),
+    style: style?.notes ?? null,
   };
 }
 
@@ -210,6 +214,7 @@ export function contextText(input: { seriesTitle: string | null; chapterNumber: 
       ? `Glossary (use exactly):\n${memory.terms.map((t) => `- ${t.term} → ${t.arabic}${t.kind ? ` [${t.kind}]` : ''}${t.note ? ` (${t.note})` : ''}`).join('\n')}`
       : 'Glossary: empty so far — you are setting the first terms for this work.',
   );
+  if (memory.style) lines.push(`Style of the Arabic team that translated the earlier chapters (match it):\n${memory.style}`);
   lines.push(
     memory.characters.length
       ? `Characters:\n${memory.characters.map((c) => `- ${c.name} → ${c.arabic}${c.gender && c.gender !== 'unknown' ? `, ${c.gender}` : ''}${c.voice ? `, speaks: ${c.voice}` : ''}`).join('\n')}`
@@ -438,7 +443,33 @@ What you receive: the page image, and a list of text regions the detector found,
 - arabic: the translation. null for sfx and credit: the art keeps its sound effects. Signs are translated only when the reader needs them to follow the story; otherwise null.
 - speaker: the character speaking, by the name used in the character list, or null when unclear.
 
-Also return summary: one or two Arabic sentences on what happens on this page, used as context for the next pages. Return empty arrays when there is nothing new.`;
+Also return summary: one or two Arabic sentences on what happens on this page, used as context for the next pages. Return empty arrays when there is nothing new.
+
+Reference translations from the team's style sheet. Match this register, rhythm and brevity (English → Arabic):
+- "Get out of my way!" → «ابتعد عن طريقي!»
+- "You're... still alive?" → «أما زلت… حيًّا؟»
+- "Don't make me laugh. You? Beat him?" → «لا تُضحكني. أنت؟ تهزمه؟»
+- "I'll handle this. Take the others and go." → «سأتولى الأمر. خذ الآخرين وارحل.»
+- "Tch. Whatever." → «تش. لا يهم.»
+- "Master, please reconsider!" → «سيدي، أرجوك أعد النظر!»
+- "So this is the power of a Grandmaster..." → «إذن هذه قوة السيد الأعظم…»
+- "It's not that I want to fight. It's that I have to." → «ليس لأني أريد القتال، بل لأني مضطر.»
+- "Hey, kid. You lost?" → «أنت يا فتى، أضعت طريقك؟»
+- "That day, everything changed." (narration) → «في ذلك اليوم، تغيّر كل شيء.»
+- "Can it be...? No. Impossible." (thought) → «أيُعقل…؟ لا. مستحيل.»
+- "Big brother, wait for me!" → «أخي الكبير، انتظرني!»
+- "You dare raise your hand against the Clan?!" → «أتجرؤ على رفع يدك في وجه العشيرة؟!»
+- "Heh. Not bad, for a rookie." → «هه. ليس سيئًا لمبتدئ.»
+- "Sorry... I'm sorry..." → «آسف… أنا آسف…»
+- "Boss, we've got a problem." → «زعيم، لدينا مشكلة.»
+- "Run! Don't look back!" → «اركض! ولا تنظر خلفك!»
+- "Is that all you've got?" → «أهذا كل ما لديك؟»
+- "Lord Kang, the elders await." → «سيد كانغ، الشيوخ في انتظارك.»
+- "Ugh... my head..." → «آه… رأسي…»
+- "We meet again, Jin. It's been ten years." → «نلتقي مجددًا يا جين. مرّت عشر سنوات.»
+- "Just try it. I dare you." → «جرّب فحسب. أتحداك.»
+- "If you enjoyed the show, even the smallest coin helps." → «إن أعجبكم العرض، فحتى أصغر قطعة نقدية تُعيننا.»
+Do not copy these sentences; copy their voice: short, natural فصحى, Arabic word order, emotion carried by rhythm and punctuation rather than by extra words.`;
 
 export const TEXT_OUTPUT_SCHEMA = {
   type: 'object',
@@ -667,6 +698,169 @@ function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms
     );
   }
   return statements;
+}
+
+
+// ───────────────────────── التعلّم من الفصول العربية ─────────────────────────
+//
+// عملٌ له مصدر عربي توقّف عند فصل، وتكملة إنجليزية بعده: الفريق العربي ثبّت
+// الأسماء والمصطلحات والأسلوب. الجوال يرسل صفحات متقابلة (إنجليزي/عربي) من
+// فصل موجود عند المصدرين، وLuna تستخرج القاموس وملاحظات الأسلوب فتُترجم
+// الفصول الجديدة بنفس الصوت. مرة لكل عمل (أو حين يزيد الفصل العربي).
+
+export const LEARN_SYSTEM_PROMPT = `You are the lead translator of VANTARA's Arabic team. You receive pairs of comic pages: the English edition of a page and the Arabic edition of the same page as translated by the Arabic scanlation team the readers already follow. Study how that team translated and report, so later chapters continue in the same voice:
+- characters: every character named on these pages, with the exact Arabic spelling the team used and gender when clear.
+- terms: names of places, organisations, clans, techniques, skills, ranks, items and titles, with the team's Arabic rendering (or their choice to keep it as is), and a short note when the choice matters.
+- style: 6 to 12 short Arabic lines describing the team's register and habits: فصحى level, sentence length, how honorifics and titles are handled (e.g. -nim, elder, master), how shouting and whispering are punctuated, recurring catchphrases and how each main character speaks. Concrete, not generic.
+Report only what the pages show. Pages may not align exactly; match dialogue by meaning and position.`;
+
+export const LEARN_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['characters', 'terms', 'style'],
+  properties: {
+    characters: OUTPUT_SCHEMA.properties.characters,
+    terms: OUTPUT_SCHEMA.properties.new_terms,
+    style: { type: 'array', items: { type: 'string' } },
+  },
+} as const;
+
+const MAX_LEARN_PAIRS = 6;
+const MAX_LEARN_IMAGE_BASE64 = 1_800_000; // ~1.3MB لكل صورة: الجوال يصغّر إلى عرض 1000
+
+interface LearnPair {
+  english: { mediaType: string; data: string };
+  arabic: { mediaType: string; data: string };
+  pageIndex: number;
+}
+
+function cleanLearnPairs(raw: unknown): LearnPair[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LearnPair[] = [];
+  for (const p of raw.slice(0, MAX_LEARN_PAIRS) as Array<Record<string, unknown>>) {
+    const side = (v: unknown) => {
+      const o = v as { mediaType?: unknown; data?: unknown } | undefined;
+      const mediaType = typeof o?.mediaType === 'string' && MEDIA_TYPES.has(o.mediaType) ? o.mediaType : null;
+      const data = typeof o?.data === 'string' && o.data && o.data.length <= MAX_LEARN_IMAGE_BASE64 ? o.data : null;
+      return mediaType && data ? { mediaType, data } : null;
+    };
+    const english = side(p?.english);
+    const arabic = side(p?.arabic);
+    if (!english || !arabic) continue;
+    out.push({ english, arabic, pageIndex: clampInt(p.pageIndex, 0, 100_000) });
+  }
+  return out;
+}
+
+/**
+ * `POST /v1/translate/learn`: `{ seriesRef, seriesTitle, chapterNumber, pairs: [{ english, arabic, pageIndex }] }`.
+ * يحسب صفحة واحدة من الحد الأسبوعي. القاموس المتعلَّم يغلب ما اقترحه النموذج
+ * سابقًا (origin='learned')، والأسلوب يُخزَّن في `translation_style`.
+ */
+export async function handleTranslateLearn(request: Request, env: TranslationEnv, userId: string, now: number, deps: TranslateDeps = {}): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return reply({ error: 'bad_json' }, 400);
+  }
+  const seriesRef = typeof body.seriesRef === 'string' ? body.seriesRef.slice(0, 200) : null;
+  const pairs = cleanLearnPairs(body.pairs);
+  if (!seriesRef || !pairs.length) return reply({ error: 'bad_request' }, 400);
+  const seriesTitle = typeof body.seriesTitle === 'string' ? body.seriesTitle.slice(0, 200) : null;
+  const chapterNumber = Number.isFinite(Number(body.chapterNumber)) && body.chapterNumber !== null ? Number(body.chapterNumber) : null;
+  const learnedFrom = chapterNumber !== null ? `chapter:${chapterNumber}` : 'unknown';
+
+  const existing = await env.DB.prepare('SELECT learned_from, pairs FROM translation_style WHERE series_ref = ?').bind(seriesRef).first<{ learned_from: string | null; pairs: number }>();
+  if (existing && existing.learned_from === learnedFrom) return reply({ learned: false, cached: true, learnedFrom });
+
+  if (!env.OPENAI_API_KEY) return reply({ error: 'translation_not_configured' }, 503);
+  const day = weekOf(now);
+  const limit = Number(env.TRANSLATE_WEEKLY_PAGES) || DEFAULT_WEEKLY_PAGES;
+  const used = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ? AND day = ?').bind(userId, day).first<{ pages: number }>();
+  if ((used?.pages ?? 0) >= limit) return reply({ error: 'weekly_limit', limit }, 429);
+
+  const content: Array<Record<string, unknown>> = [];
+  pairs.forEach((p, i) => {
+    content.push({ type: 'input_text', text: `Pair ${i + 1} (page ${p.pageIndex + 1}) — English edition:` });
+    content.push({ type: 'input_image', image_url: `data:${p.english.mediaType};base64,${p.english.data}`, detail: 'high' });
+    content.push({ type: 'input_text', text: `Pair ${i + 1} — Arabic edition of the same page:` });
+    content.push({ type: 'input_image', image_url: `data:${p.arabic.mediaType};base64,${p.arabic.data}`, detail: 'high' });
+  });
+  content.push({ type: 'input_text', text: `Work: ${seriesTitle ?? 'unknown'}${chapterNumber !== null ? ` — chapter ${chapterNumber}` : ''}. Study the Arabic team's choices on these ${pairs.length} pages and report.` });
+  const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
+  let payload: OpenAIResponse;
+  try {
+    const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        instructions: LEARN_SYSTEM_PROMPT,
+        input: [{ role: 'user', content }],
+        reasoning: { effort: 'medium' },
+        text: { format: { type: 'json_schema', name: 'team_style', schema: LEARN_OUTPUT_SCHEMA, strict: true } },
+        max_output_tokens: 8000,
+        store: false,
+      }),
+    });
+    if (res.status === 429) return reply({ error: 'busy' }, 429);
+    if (res.status === 401 || res.status === 403) return reply({ error: 'translation_not_configured' }, 503);
+    if (!res.ok) return reply({ error: 'upstream' }, 502);
+    payload = (await res.json()) as OpenAIResponse;
+  } catch {
+    return reply({ error: 'upstream' }, 502);
+  }
+  const out = (payload.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []);
+  if (out.some((c) => c.type === 'refusal')) return reply({ error: 'refused' }, 422);
+  let parsed: { characters?: unknown; terms?: unknown; style?: unknown };
+  try {
+    parsed = JSON.parse(out.find((c) => c.type === 'output_text')?.text ?? '');
+  } catch {
+    return reply({ error: 'bad_output' }, 502);
+  }
+  const style = (Array.isArray(parsed.style) ? (parsed.style as unknown[]) : [])
+    .filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+    .slice(0, 16)
+    .map((l) => `- ${l.trim().slice(0, 240)}`)
+    .join('\n');
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO translation_style (series_ref, notes, learned_from, pairs, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (series_ref) DO UPDATE SET notes = excluded.notes, learned_from = excluded.learned_from, pairs = excluded.pairs, updated_at = excluded.updated_at`,
+    ).bind(seriesRef, style, learnedFrom, pairs.length, now),
+    env.DB.prepare(
+      `INSERT INTO translation_usage (user_id, day, pages) VALUES (?, ?, 1)
+       ON CONFLICT (user_id, day) DO UPDATE SET pages = pages + 1`,
+    ).bind(userId, day),
+  ];
+  // المتعلَّم من الفريق يغلب ما اخترعه النموذج قبله
+  for (const t of Array.isArray(parsed.terms) ? (parsed.terms as Array<Record<string, unknown>>).slice(0, 80) : []) {
+    const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
+    const arabic = typeof t?.arabic === 'string' ? t.arabic.trim().slice(0, 120) : '';
+    if (!term || !arabic) continue;
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'learned', ?)
+         ON CONFLICT (series_ref, term) DO UPDATE SET arabic = excluded.arabic, kind = excluded.kind, note = excluded.note, origin = 'learned', updated_at = excluded.updated_at`,
+      ).bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
+    );
+  }
+  for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 40) : []) {
+    const name = typeof c?.name === 'string' ? c.name.trim().slice(0, 120) : '';
+    const arabic = typeof c?.arabic === 'string' ? c.arabic.trim().slice(0, 120) : '';
+    if (!name || !arabic) continue;
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+         ON CONFLICT (series_ref, name) DO UPDATE SET arabic = excluded.arabic,
+           gender = CASE WHEN excluded.gender IS NULL OR excluded.gender = 'unknown' THEN translation_characters.gender ELSE excluded.gender END,
+           updated_at = excluded.updated_at`,
+      ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
+    );
+  }
+  await env.DB.batch(statements);
+  return reply({ learned: true, cached: false, learnedFrom, terms: statements.length - 2, styleLines: style ? style.split('\n').length : 0 });
 }
 
 /** مصطلحات العمل وشخصياته — لعرضها وتعديلها. */

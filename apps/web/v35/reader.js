@@ -252,6 +252,10 @@ export function openSmartReader(deps, ctx) {
     keyOf,
     getImage: (seg, index) =>
       scheduler.request(imageKey(seg.row, index), { sourceId: seg.row.sourceId, page: seg.slots[index].page }, PRIORITY.CHAPTER),
+    // للدرس من الفصول العربية: كل فصول العمل من كل مصادره، وصفحات أي فصل وصوره
+    rows: ctx.work?._chapters ?? ctx.rows ?? [],
+    pagesOf: (row) => pagesOf(row),
+    imageOf: (row, index, page) => scheduler.request(imageKey(row, index), { sourceId: row.sourceId, page }, PRIORITY.NEXT_CHAPTER),
   });
 
   /**
