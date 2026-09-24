@@ -786,3 +786,30 @@ h1:not(.v35 *), h2:not(.v35 *), h3:not(.v35 *), p:not(.v35 *) { margin: 0; }
   display: block; margin: 18px auto 0; min-height: 46px; padding: 0 22px; border-radius: 999px;
   border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--text); font-weight: 800;
 }
+
+/* ───────────────────────── «يوجد تحديث جديد» ───────────────────────── */
+.vupdate {
+  position: fixed; z-index: 300;
+  inset-inline: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 80px);
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 18px;
+  background: rgba(18, 14, 30, 0.97);
+  box-shadow: inset 0 0 0 1px rgba(143, 92, 255, 0.45), 0 18px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  animation: rise 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+  color: #f3f4f8;
+}
+.vupdate__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vupdate__copy strong { font-size: 15px; font-weight: 750; }
+.vupdate__copy span { font-size: 12.5px; color: #bab6c6; }
+.vupdate__go {
+  flex: none; min-width: 84px; height: 42px; padding: 0 18px;
+  border: 0; border-radius: 99px; background: #8f5cff; color: #fff; font-weight: 750; font-size: 14px;
+}
+.vupdate__go:disabled { opacity: 0.8; }
+.vupdate__later {
+  flex: none; width: 34px; height: 34px; border: 0; border-radius: 50%;
+  background: transparent; color: #85809a; font-size: 22px; line-height: 1;
+}

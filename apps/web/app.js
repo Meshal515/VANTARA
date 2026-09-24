@@ -25,7 +25,7 @@ import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
-import { checkForUpdate, dismissUpdate } from './lib/update.js';
+import { applyUpdate, findUpdate } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
 import {
@@ -1433,6 +1433,7 @@ function screenV35(page) {
             await refreshPresence();
           },
           resync: () => sync.resync(),
+          checkUpdate: () => offerUpdate({ force: true }),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
           setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
           labels: NOTIFICATION_LABELS,
@@ -1902,30 +1903,66 @@ async function drainProgressOutbox() {
  * غير حاجب: التطبيق يعمل، والتحديث اختيار. الحجب يعني أن نسخة قديمة على جوّال
  * أحدهم توقفه تمامًا عن القراءة.
  */
-async function offerUpdate() {
-  const update = await checkForUpdate();
-  if (!update) return;
+async function offerUpdate({ force = false } = {}) {
+  const update = await findUpdate({ force });
+  if (!update || document.querySelector('.vupdate')) return update;
 
-  const bar = el('div', 'update');
-  const text = el('div', 'update__text', `VANTARA ${update.version} متوفر`);
-  bar.append(text);
-
-  if (update.url) {
-    const get = el('a', 'btn btn--small', 'تحديث');
-    get.href = update.url;
-    get.rel = 'noopener';
-    bar.append(get);
-  }
-
-  const later = el('button', 'update__later', 'لاحقًا');
+  // شريط هادئ في أسفل الشاشة: «يوجد تحديث جديد» وزرّ واحد. لا يحجب القراءة
+  const bar = el('div', 'vupdate');
+  bar.setAttribute('role', 'status');
+  const copy = el('div', 'vupdate__copy');
+  copy.append(el('strong', null, 'يوجد تحديث جديد'));
+  const sub = el(
+    'span',
+    null,
+    update.kind === 'web' ? `VANTARA ${update.version} · يتحدث في ثوانٍ` : `VANTARA ${update.version} · يحتاج تثبيت من أندرويد`,
+  );
+  copy.append(sub);
+  const go = el('button', 'vupdate__go', 'تثبيت');
+  go.type = 'button';
+  const later = el('button', 'vupdate__later', '×');
   later.type = 'button';
-  later.addEventListener('click', () => {
-    dismissUpdate(update.version);
-    bar.remove();
+  later.setAttribute('aria-label', 'لاحقًا');
+  later.addEventListener('click', () => bar.remove());
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = '0%';
+    try {
+      const out = await applyUpdate(update, (p) => {
+        go.textContent = `${Math.round(p * 100)}%`;
+      });
+      if (out.needsPermission) {
+        // أندرويد يسأل مرة: «السماح من هذا المصدر». بعدها ضغطة «تثبيت» ثانية
+        sub.textContent = 'فعّل «السماح من هذا المصدر» ثم ارجع';
+        go.disabled = false;
+        go.textContent = 'تثبيت';
+        // الرجوع من الإعداد بعد السماح يكمل التثبيت وحده، بلا ضغطة ثانية
+        const resume = async () => {
+          if (document.visibilityState !== 'visible') return;
+          document.removeEventListener('visibilitychange', resume);
+          const info = await globalThis.Capacitor?.Plugins?.AppUpdate?.info?.().catch(() => null);
+          if (info?.canInstall && bar.isConnected) go.click();
+        };
+        document.addEventListener('visibilitychange', resume);
+        return;
+      }
+      if (update.kind === 'apk') {
+        sub.textContent = 'اضغط «تحديث» في شاشة أندرويد';
+        go.textContent = 'تثبيت';
+        go.disabled = false;
+      }
+      // تحديث الواجهة يعيد تحميل الصفحة وحده
+    } catch {
+      sub.textContent = 'ما اكتمل التنزيل. جرّب مرة ثانية';
+      go.disabled = false;
+      go.textContent = 'تثبيت';
+    }
   });
-  bar.append(later);
+  bar.append(copy, go, later);
   document.body.append(bar);
+  return update;
 }
+globalThis.__vantaraCheckUpdate = (opts) => offerUpdate(opts);
 
 // ───────────────────────────── الإقلاع ─────────────────────────────
 

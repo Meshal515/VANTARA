@@ -2589,6 +2589,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     group('عن التطبيق', [
       row('layers', 'المصادر', 'مصادر عربية تشتغل على جهازك', { value: 'عربي' }),
       row('info', 'الإصدار', null, { value: deps.version || '—' }),
+      api?.checkUpdate
+        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث ويثبّتها بزرّ واحد', {
+            run: async () => {
+              toast('نبحث عن تحديث…');
+              const found = await api.checkUpdate().catch(() => null);
+              if (!found) toast('عندك آخر نسخة');
+            },
+          })
+        : null,
     ]);
 
     if (!api) return;

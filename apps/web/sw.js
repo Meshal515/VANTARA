@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '4c63e4bf75282dc998a2a0ee8323e04f0455e1e4ab02c5f10158cee97705d29d';
+const SHELL_DIGEST = '9e91a2e7b33b0104a8fdf917d3489ae99b75bd59d1ca28a85bcd5814f7e2a2b9';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -65,8 +65,8 @@ const SHELL = [
   '/styles.css',
   '/lib/sync.js',
   '/lib/optimistic.js',
+  '/lib/updater.js',
   '/lib/chapter-store.js',
-  '/lib/update.js',
   '/lib/icons.js',
   '/lib/config.js',
   '/lib/silk.js',
@@ -181,7 +181,7 @@ self.addEventListener('fetch', (event) => {
   // ثوانيَ، وهي أول ما يحكم به المستخدم على التطبيق.
   //
   // ولا نفقد التحديث: النسخة الجديدة تُجلب في الخلفية وتُخزَّن للمرة القادمة،
-  // و`lib/update.js` يسأل عن `version.json` ويعرض «حدّث الآن» — فآلية
+  // و`lib/updater.js` يسأل عن بيان آخر إصدار ويعرض «يوجد تحديث جديد» — فآلية
   // التحديث موجودة أصلًا ولا تحتاج أن يدفع الإقلاع ثمنها.
   if (request.mode === 'navigate') {
     event.respondWith(
