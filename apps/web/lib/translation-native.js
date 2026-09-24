@@ -11,7 +11,7 @@
  *   cancelDownload()
  *   removeModels()        → { installed: false }
  *   analyzePage({ path, sourceLang })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
- *   renderPage({ path, regions: [{id, arabic}] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
+ *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
  *   notificationPermission() → { granted }
@@ -66,10 +66,10 @@ export async function analyzePage({ path, sourceLang = 'auto' }) {
 }
 
 /** التبييض والرسم على الجهاز. يرجع مسار الصورة المترجمة. */
-export async function renderPage({ path, regions }) {
+export async function renderPage({ path, regions, leave = [] }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.renderPage({ path, regions });
+  return p.renderPage({ path, regions, leave });
 }
 
 /**

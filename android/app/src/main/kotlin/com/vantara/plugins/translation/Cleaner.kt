@@ -63,7 +63,11 @@ object Cleaner {
                     val deviant = maxOf(Math.abs(img.r(x, y) - color[0]), Math.abs(img.g(x, y) - color[1]), Math.abs(img.b(x, y) - color[2])) > 12
                     if (near[x, y].toInt() != 0 || (deviant && halo[x, y].toInt() != 0)) mask[x, y] = 1
                 }
-                region.eraseMask = mask.open(1).or(near.and(inner))
+                // فقاعة مسطّحة: صندوق النص كله داخلها يُملأ بلونها أيضًا، فلا يبقى حرف إنجليزي
+                // فاته قناع الحروف بجانب العربي (اللون واحد، فلا شيء يضيع)
+                val box = ByteMask(img.width, img.height)
+                box.fillRect(region.box.x1 - 2, region.box.y1 - 2, region.box.x2 + 2, region.box.y2 + 2)
+                region.eraseMask = mask.open(1).or(near.and(inner)).or(box.and(inner))
                 region.cleanMode = "fill"
                 region.fillColor = color
                 return

@@ -248,6 +248,22 @@ export async function translatePage(deps, src, meta) {
     return { ...local, hash, from: 'device' };
   }
 
+  // الصفحة نفسها من القارئ والترجمة المقدّمة معًا: تُترجم مرة، والثاني ينتظر الأول
+  const running = inflight.get(hash);
+  if (running) return running;
+  const job = translateOnce(deps, src, hash, meta, clock);
+  inflight.set(hash, job);
+  try {
+    return await job;
+  } finally {
+    inflight.delete(hash);
+  }
+}
+
+/** صفحات تُترجم الآن ببصمتها (للجهاز كله: القارئ والترجمة المقدّمة). */
+const inflight = new Map();
+
+async function translateOnce(deps, src, hash, meta, clock) {
   const result = await translateFresh(deps, src, hash, meta, clock);
   if (result.error) {
     logPage(deps, meta, hash, clock, { from: 'error', error: result.error, native: result.native });
@@ -264,7 +280,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -320,7 +336,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
-    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan }));
+    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body) }));
   } catch {
     return { error: 'device_failed', native };
   }
@@ -365,6 +381,11 @@ export async function cachedPage(hash) {
 export async function forgetPage(hash) {
   if (!hash) return;
   await Promise.all([writeKv(CACHE_PREFIX + hash, null), writeKv(OLD_CACHE_PREFIX + hash, null)]);
+}
+
+/** ما قالت Luna إنه يبقى أصله عمدًا (مؤثر، حقوق، لافتة): ليس نقصًا في فقاعته. */
+export function leftAsIs(reply) {
+  return (reply?.regions ?? []).filter((r) => ['sfx', 'credit', 'sign'].includes(r.kind)).map((r) => r.id);
 }
 
 /** فقاعات مقروءة لم تأخذ عربيًا من Luna (المؤثر واللافتة والحقوق بلا عربي جواب صحيح). */

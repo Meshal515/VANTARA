@@ -225,8 +225,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
      * منطقة بلا عربي تبقى كما هي؛ عربي لا يدخل بحجم مقروء لا يُمسح أصله.
      */
     @Synchronized
-    fun render(file: File, arabicById: Map<String, String>, outDir: File, perf: Perf = Perf()): Pair<File, Int> {
-        val (encoded, hash, translated) = renderImpl(file, arabicById, perf, useCache = true)
+    fun render(file: File, arabicById: Map<String, String>, outDir: File, perf: Perf = Perf(), leave: Set<String> = emptySet()): Pair<File, Int> {
+        val (encoded, hash, translated) = renderImpl(file, arabicById, perf, useCache = true, leave)
         val out = perf.time("write") { publish(outDir, hash, encoded) }
         return out to translated
     }
@@ -259,7 +259,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     }
 
     /** يرجع (WebP، بصمة الصفحة، عدد المرسوم). */
-    private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean): Triple<ByteArray, String, Int> {
+    private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean, leave: Set<String> = emptySet()): Triple<ByteArray, String, Int> {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
         val analysis = (if (useCache) analyses[hash] else null) ?: analyzeImpl(file, perf, useCache)
@@ -283,6 +283,10 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 r.layout = l
             }
         }
+        // ١ب. الفقاعة كلها أو لا شيء: جملة فيها بلا عربي (أو لم تدخل) تُبقي الفقاعة كلها
+        // على أصلها — لا عربي فوق فقاعة وبجانبه إنجليزي. الإكمال يأتي بالناقص لاحقًا.
+        // ما قالت Luna إنه مؤثر أو حقوق أو لافتة (`leave`) ليس نقصًا
+        keepWholeBubbles(regions, sibs, leave, perf)
         // ٢. المسح
         perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
         val original = perf.time("copy") { img.copy() }
@@ -314,6 +318,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                     perf.count("invisible")
                 }
             }
+            // وشقيقاتها في الفقاعة نفسها تعود لأصلها معها
+            keepWholeBubbles(regions, sibs, leave, perf)
         }
         // ٤. التحقق: لا بكسل خارج (قناع المسح ∪ حدود العربي) يتغير
         val final = perf.time("verify") {
@@ -347,6 +353,19 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.count("translated", translated)
         lastPixels = final.data
         return Triple(encoded, hash, translated)
+    }
+
+    /** منطقة مقروءة بقيت بلا عربي ظاهر في فقاعة فيها عربي: الفقاعة كلها تبقى أصلها. */
+    private fun keepWholeBubbles(regions: List<Region>, sibs: Map<String, List<Region>>, leave: Set<String>, perf: Perf) {
+        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible")
+        for (r in regions) {
+            if (r.status != "translated") continue
+            val gap = sibs[r.id]?.any { it.status in missing && it.id !in leave } == true
+            if (gap) {
+                r.status = "skipped:sibling"
+                perf.count("bubbleKept")
+            }
+        }
     }
 
     /** بكسلات آخر صفحة رُسمت (لمقارنة القديم بالجديد وحدها). */

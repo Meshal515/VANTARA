@@ -123,6 +123,13 @@ const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).to
 export function formatReport(entries, benchmarks = []) {
   const s = summarize(entries);
   const lines = [`أداء الترجمة — ${s.pages} صفحة جديدة، ${s.cached} من المحفوظ`];
+  // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
+  for (const via of ['reader', 'job']) {
+    const mine = entries.filter((e) => e.via === via && e.native?.render);
+    if (!mine.length) continue;
+    const sum = (k) => mine.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
+    lines.push(`${via === 'job' ? 'المقدّمة' : 'القارئ'}: ${mine.length} صفحة · مرسوم ${sum('translated')} · لم يدخل ${sum('noFit')} · لم يظهر ${sum('invisible')} · فقاعة أُبقيت ${sum('bubbleKept')} · لون قُلب ${sum('inkFlipped')}`);
+  }
   for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);

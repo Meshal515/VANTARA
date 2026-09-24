@@ -233,7 +233,7 @@ export function createJobRunner(deps) {
     const list = await pagesOf(job, c);
     const image = await engine.pageImage(ch.row.sourceId, list[p]);
     const result = await translatePage(
-      { sync, imagePath: image.path, fetchMs: now() - started },
+      { sync, imagePath: image.path, fetchMs: now() - started, via: 'job' },
       image.src,
       {
         seriesRef: job.ref,

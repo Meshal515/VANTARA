@@ -408,7 +408,16 @@ class ExtensionEnginePlugin : Plugin() {
                         it.startsWith("image/")
                     } ?: typeForUrl(url)
                     file = cacheFile(url, extensionForType(type))
-                    withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                    // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
+                    // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
+                    withContext(Dispatchers.IO) {
+                        val tmp = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.part")
+                        tmp.writeBytes(bytes)
+                        if (!tmp.renameTo(file)) {
+                            tmp.delete()
+                            if (!(file.isFile && file.length() == bytes.size.toLong())) error("cannot cache page image")
+                        }
+                    }
                 }
 
                 val out = JSObject()

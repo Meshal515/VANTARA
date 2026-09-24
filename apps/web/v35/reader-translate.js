@@ -180,7 +180,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader' }, src, {
         seriesRef: ref,
         seriesTitle: title,
         chapterKey,

@@ -69,3 +69,27 @@ describe('what the phone draws is what the reader shows', () => {
     expect(entry.native.render.stages.encode).toBe(80);
   });
 });
+
+describe('the reader and advance translation never process the same page twice at once', () => {
+  it('a second request for a page being translated waits for the first', async () => {
+    const calls = device({ drawn: 1 });
+    let analyses = 0;
+    const analyze = globalThis.Capacitor.Plugins.Translation.analyzePage;
+    globalThis.Capacitor.Plugins.Translation.analyzePage = async (a) => {
+      analyses += 1;
+      await new Promise((r) => setTimeout(r, 20));
+      return analyze(a);
+    };
+    globalThis.fetch = async () => new Response(new Uint8Array([7, 7, 7]));
+    globalThis.localStorage = memory();
+    const src = 'http://localhost/_capacitor_file_/cache/pages/p3.jpg';
+    const [a, b] = await Promise.all([
+      translatePage({ ...deps(), via: 'reader' }, src, { chapterKey: 'c1', pageIndex: 2 }),
+      translatePage({ ...deps(), via: 'job' }, src, { chapterKey: 'c1', pageIndex: 2 }),
+    ]);
+    expect(analyses).toBe(1);
+    expect(calls.render).toBe(1);
+    expect(a.image).toBe(b.image);
+    delete globalThis.Capacitor;
+  });
+});

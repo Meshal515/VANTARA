@@ -143,9 +143,12 @@ class TranslationPlugin : Plugin() {
                     val ar = o.optString("arabic", "")
                     if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
                 }
+                // ما قالت Luna إنه مؤثر أو حقوق أو لافتة: يبقى أصله عمدًا، وليس نقصًا في فقاعته
+                val leave = HashSet<String>()
+                call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val (out, translated) = pipeline.render(File(path), byId, outDir, perf)
+                val (out, translated) = pipeline.render(File(path), byId, outDir, perf, leave)
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
