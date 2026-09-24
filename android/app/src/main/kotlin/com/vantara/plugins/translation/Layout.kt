@@ -139,9 +139,16 @@ class ArabicLayout(private val typeface: Typeface) {
 
     /** داخل الفقاعة المتآكل، مقتسمًا مع الشقيقات. */
     fun innerMaskFor(img: RgbImage, region: Region, siblings: List<Region>?): ByteMask? {
-        val mask = region.bubble?.mask ?: region.bubbleBox?.let { Regions.flatBoxMask(img, it, region.box) } ?: return null
+        val mask = bubbleMaskFor(img, region) ?: return null
+        return innerOf(mask, region, siblings, maxOf(6, (Cleaner.glyphHeight(region.glyph, region.box) * 0.45).toInt()))
+    }
+
+    private fun bubbleMaskFor(img: RgbImage, region: Region): ByteMask? =
+        region.bubble?.mask ?: region.bubbleBox?.let { Regions.flatBoxMask(img, it, region.box) }
+
+    private fun innerOf(mask: ByteMask, region: Region, siblings: List<Region>?, erode: Int): ByteMask {
         val gh = Cleaner.glyphHeight(region.glyph, region.box)
-        val inner = mask.erode(maxOf(6, (gh * 0.45).toInt()))
+        val inner = mask.erode(erode)
         for (sib in siblings ?: emptyList()) {
             val gap = maxOf(4, gh / 2)
             if (sib.box.y1 >= region.box.y2) inner.fillRect(0, (region.box.y2 + sib.box.y1) / 2 - gap / 2, inner.width, inner.height, 0)
@@ -151,15 +158,30 @@ class ArabicLayout(private val typeface: Typeface) {
         return inner
     }
 
+    /**
+     * فقاعة معروفة: العربي داخل مضلّعها وحده، لا يخرج إلى الرسم أبدًا. إن لم يدخل
+     * في الداخل المتآكل يُجرَّب هامش أرفع، ثم الصندوق بشرط أن يقع كله داخل الفقاعة؛
+     * وإلا لا تخطيط (تبقى الفقاعة كما هي). النص الحر بلا فقاعة: الصندوق كما كان.
+     */
     fun layoutRegion(img: RgbImage, region: Region, text: String, siblings: List<Region>?): TextLayout? {
         val gh = Cleaner.glyphHeight(region.glyph, region.box)
-        val inner = innerMaskFor(img, region, siblings)
-        if (inner != null) {
-            val maxSize = maxOf(minSize + 4, minOf(gh * 2.0f, 110f))
-            fitInMask(text, inner, region.box, maxSize)?.let { return it }
-        }
-        val maxSize = maxOf(minSize + 4, minOf(gh * 1.15f, 96f))
-        return fitInBox(text, region.box, maxSize, img.width, img.height)
+        val boxSize = maxOf(minSize + 4, minOf(gh * 1.15f, 96f))
+        val bubble = bubbleMaskFor(img, region)
+            ?: return fitInBox(text, region.box, boxSize, img.width, img.height)
+        val maxSize = maxOf(minSize + 4, minOf(gh * 2.0f, 110f))
+        val erode = maxOf(6, (gh * 0.45).toInt())
+        fitInMask(text, innerOf(bubble, region, siblings, erode), region.box, maxSize)?.let { return it }
+        val thin = maxOf(3, erode / 2)
+        val inner = innerOf(bubble, region, siblings, thin)
+        fitInMask(text, inner, region.box, maxSize, pad = 2)?.let { return it }
+        return fitInBox(text, region.box, boxSize, img.width, img.height)?.takeIf { insideMask(it, inner) }
+    }
+
+    /** كل سطر (بزواياه ومنتصف حوافه) داخل القناع. */
+    private fun insideMask(l: TextLayout, mask: ByteMask): Boolean = l.lineBounds.all { b ->
+        val xs = intArrayOf(b.x1, (b.x1 + b.x2) / 2, b.x2 - 1)
+        val ys = intArrayOf(b.y1, (b.y1 + b.y2) / 2, b.y2 - 1)
+        xs.all { x -> ys.all { y -> x in 0 until mask.width && y in 0 until mask.height && mask[x, y].toInt() != 0 } }
     }
 
     /** يرسم التخطيط على الـBitmap: لون الحبر الأصلي، وحدّ مضاد فوق الرسم. */

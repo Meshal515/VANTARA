@@ -24,8 +24,10 @@ import java.util.concurrent.TimeUnit
  * الترجمة على الجوال — الجسر إلى JavaScript (`lib/translation-native.js`).
  *
  *   models / downloadModels (+ أحداث modelsProgress) / cancelDownload / removeModels
- *   analyzePage({ path, sourceLang }) → { pageHash, width, height, thumbnail, regions }
- *   renderPage({ path, regions: [{ id, arabic }] }) → { path, translated }
+ *   analyzePage({ path, sourceLang }) → { pageHash, width, height, thumbnail, regions, perf }
+ *   renderPage({ path, regions: [{ id, arabic }] }) → { path, translated, perf }
+ *   benchmarkPage({ path, regions }) → { legacy: perf, current: perf, identical }
+ *   perf = { stages: {مرحلة: ms}, counts, ctd, thermal, thermalWaitMs, lowMemory, heapMb }
  *
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()
  *   notificationPermission() → { granted }
@@ -93,7 +95,9 @@ class TranslationPlugin : Plugin() {
             try {
                 val file = File(path)
                 require(file.exists()) { "page file missing" }
-                val a = pipeline.analyze(file)
+                val perf = Perf()
+                val thermalWait = coolDown(perf)
+                val a = pipeline.analyze(file, perf)
                 val regions = JSArray()
                 for (r in a.regions) {
                     regions.put(
@@ -108,13 +112,17 @@ class TranslationPlugin : Plugin() {
                             .put("inkLight", r.inkLight),
                     )
                 }
+                // المصغّرة سياقٌ لـLuna وحدها: لا تُصنع لصفحة لا شيء فيها يُسأل عنه
+                val asks = a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
+                val thumb = if (asks) perf.time("thumbnail") { pipeline.thumbnail(file, a.pageHash) } else ""
                 call.resolve(
                     JSObject()
                         .put("pageHash", a.pageHash)
                         .put("width", a.width)
                         .put("height", a.height)
-                        .put("thumbnail", pipeline.thumbnail(file))
-                        .put("regions", regions),
+                        .put("thumbnail", thumb)
+                        .put("regions", regions)
+                        .put("perf", perfJs(perf, thermalWait)),
                 )
             } catch (t: Throwable) {
                 call.reject(t.message ?: "analyze failed", t.javaClass.simpleName)
@@ -135,12 +143,82 @@ class TranslationPlugin : Plugin() {
                     val ar = o.optString("arabic", "")
                     if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
                 }
-                val (out, translated) = pipeline.render(File(path), byId, outDir)
-                call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated))
+                // ما قالت Luna إنه مؤثر أو حقوق أو لافتة: يبقى أصله عمدًا، وليس نقصًا في فقاعته
+                val leave = HashSet<String>()
+                call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
+                val perf = Perf()
+                val thermalWait = coolDown(perf)
+                val (out, translated) = pipeline.render(File(path), byId, outDir, perf, leave)
+                call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
             }
         }
+    }
+
+    /**
+     * القديم مقابل الجديد على هذا الجوال: الصفحة نفسها بالطريقين من الصفر، زمن كل
+     * مرحلة لكلٍّ منهما، وهل الناتج متطابق بكسلًا بكسلًا.
+     */
+    @PluginMethod
+    fun benchmarkPage(call: PluginCall) {
+        val path = call.getString("path") ?: return call.reject("path required")
+        val regions = call.getArray("regions") ?: JSArray()
+        scope.launch {
+            try {
+                val file = File(path)
+                require(file.exists()) { "page file missing" }
+                val byId = HashMap<String, String>()
+                for (i in 0 until regions.length()) {
+                    val o = regions.getJSONObject(i)
+                    val id = o.optString("id", "")
+                    val ar = o.optString("arabic", "")
+                    if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
+                }
+                val b = pipeline.benchmark(file, byId)
+                call.resolve(JSObject().put("legacy", perfJs(b.legacy, 0)).put("current", perfJs(b.current, 0)).put("identical", b.identical))
+            } catch (t: Throwable) {
+                call.reject(t.message ?: "benchmark failed", t.javaClass.simpleName)
+            }
+        }
+    }
+
+    /** حرارة الجوال (0 لا شيء … 6 إيقاف). */
+    private fun thermal(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return -1
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager ?: return -1
+        return pm.currentThermalStatus
+    }
+
+    /**
+     * الجوال ساخن جدًا (SEVERE فأعلى): مهلة قصيرة قبل الصفحة بدل خنقه حتى يبطئ
+     * كل شيء. يرجع زمن الانتظار.
+     */
+    private suspend fun coolDown(perf: Perf): Long {
+        var waited = 0L
+        while (waited < 6_000 && thermal() >= 3) {
+            kotlinx.coroutines.delay(1_500)
+            waited += 1_500
+        }
+        if (waited > 0) perf.add("thermalWait", waited * 1_000_000)
+        return waited
+    }
+
+    private fun perfJs(perf: Perf, thermalWait: Long): JSObject {
+        val stages = JSObject()
+        for ((k, v) in perf.millis()) stages.put(k, v)
+        val counts = JSObject()
+        for ((k, v) in perf.counts) counts.put(k, v)
+        val mem = android.app.ActivityManager.MemoryInfo()
+        (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.getMemoryInfo(mem)
+        return JSObject()
+            .put("stages", stages)
+            .put("counts", counts)
+            .put("ctd", runCatching { pipeline.ctdVariant() }.getOrDefault("?"))
+            .put("thermal", thermal())
+            .put("thermalWaitMs", thermalWait)
+            .put("lowMemory", mem.lowMemory)
+            .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
     }
 
     /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */

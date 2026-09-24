@@ -159,7 +159,7 @@ describe('region cleaning', () => {
       200,
     );
     expect(cleaned).toEqual([
-      { id: 'r1', source: 'hi', kind: 'speech', box: [0, 10, 200, 20] },
+      { id: 'r1', source: 'hi', kind: 'speech', box: [0, 10, 100, 20] }, // x بعرض الصورة لا بأطول ضلع
       { id: 'r2', source: 'no box', kind: 'speech', box: [0, 0, 0, 0] },
     ]);
   });
@@ -268,5 +268,74 @@ describe('fast mode and the weekly quota', () => {
     expect(usage.limit).toBe(1000);
     expect(new Date(usage.resetsAt).toISOString()).toBe('2026-09-24T14:00:00.000Z');
     expect(((await (await handleTranslateUsage(env, B, now)).json()) as { used: number }).used).toBe(0);
+  });
+
+  it('two requests for the same page at once pay Luna once: the second waits for the first', async () => {
+    const { env } = testEnv();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const gpt = fakeGpt(() => answer);
+    const slow: typeof fetch = async (input, init) => {
+      await gate;
+      return gpt.fetch(input, init);
+    };
+    const sleep = async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 5));
+    };
+    const [a, b] = await Promise.all([
+      handleTranslateText(req(), env, A, 1, { fetch: slow, sleep }),
+      handleTranslateText(req(), env, B, 1, { fetch: slow, sleep }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(gpt.calls).toHaveLength(1);
+    const bodies = [await a.json(), await b.json()] as Array<{ cached: boolean }>;
+    expect(bodies.map((x) => x.cached).sort()).toEqual([false, true]);
+  });
+
+  it('a failed Luna call gives the page and the reserved money back', async () => {
+    const { env, db } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
+    const broken: typeof fetch = async () => new Response('{}', { status: 500 });
+    expect((await handleTranslateText(req(), env, A, 1, { fetch: broken })).status).toBe(502);
+    const usage = db.prepare('SELECT pages FROM translation_usage').get() as { pages: number } | undefined;
+    expect(usage?.pages ?? 0).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM translation_usage_chapters').get()).toMatchObject({ n: 0 });
+    expect(db.prepare('SELECT usd, reserved FROM translation_spend').get()).toMatchObject({ usd: 0, reserved: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM translation_inflight').get()).toMatchObject({ n: 0 });
+    // والحصة لم تُستهلك: الصفحة تُترجم بعدها
+    expect((await handleTranslateText(req(), env, A, 2, { fetch: fakeGpt(() => answer).fetch })).status).toBe(200);
+  });
+
+  /** Luna بطيئة: كل الطلبات في منتصفها معًا قبل أن يعود أي رد. */
+  const heldGpt = () => {
+    const gpt = fakeGpt(() => answer);
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const held: typeof fetch = async (input, init) => {
+      setTimeout(open, 20);
+      await gate;
+      return gpt.fetch(input, init);
+    };
+    return { fetch: held, calls: gpt.calls };
+  };
+
+  it('concurrent new chapters cannot pass the weekly limit together', async () => {
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1', TRANSLATE_WEEKLY_CHAPTERS: '1' });
+    const gpt = heldGpt();
+    const results = await Promise.all(
+      [1, 2, 3].map((n) => handleTranslateText(req({ pageHash: hash(String(n)), chapterKey: `ext:wizardly tower#n:${n}` }), env, A, 1, { fetch: gpt.fetch })),
+    );
+    expect(results.map((r) => r.status).sort()).toEqual([200, 429, 429]);
+    expect(gpt.calls).toHaveLength(1);
+  });
+
+  it('concurrent calls cannot pass the monthly cap together', async () => {
+    const { env, db } = testEnv({ TRANSLATE_MONTHLY_BUDGET_USD: '0.03' });
+    db.prepare('INSERT INTO translation_spend (month, usd, reserved, updated_at) VALUES (?, 0.011, 0, 0)').run('m:2026-09');
+    const gpt = heldGpt();
+    const now = Date.UTC(2026, 8, 24);
+    const results = await Promise.all([1, 2, 3].map((n) => handleTranslateText(req({ pageHash: hash(String(n)) }), env, A, now, { fetch: gpt.fetch })));
+    // 0.011 + حجز 0.02 = 0.031 ≥ 0.03: يمر طلب واحد والباقون يُرفضون قبل النداء
+    expect(results.map((r) => r.status).sort()).toEqual([200, 429, 429]);
   });
 });

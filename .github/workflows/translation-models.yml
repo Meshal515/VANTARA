@@ -1,0 +1,60 @@
+name: ملفات الترجمة
+
+# يبني من الأصل المنشور ما يحتاجه الجوال من ملفات الترجمة، وينشره إصدارًا
+# جانبيًا (prerelease، ليس «الأحدث»: رابط التحديث في التطبيق يقرأ الأحدث).
+#
+# comictextdetector-seg.onnx: comic-text-detector برأس قناع الحروف وحده.
+# الجوال لا يقرأ غير `seg`، وONNX Runtime يحسب الرسم كله مهما طُلب منه، فحذف
+# رأسي blk وdet يوفّر نحو 40% من زمن كل مربع ويصغّر الملف 29MB. العقد الباقية
+# هي نفسها بأوزانها، والبصمتان (الأصل والناتج) مثبّتتان هنا وفي
+# ModelStore.kt: أي اختلاف يوقف النشر.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: translation-models
+  cancel-in-progress: false
+
+env:
+  TAG: models-ctd-seg-1
+  CTD_URL: https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
+  CTD_SHA256: 1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f
+  SEG_SHA256: 143f5aedd9d2f1362449852bf5d58718836ff16b87f3681b52ebd0bc7c8464d4
+
+jobs:
+  ctd-seg:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: الأدوات بنسخها المثبّتة
+        run: pip install onnx==1.23.0 protobuf==7.36.2 numpy==2.4.6
+
+      - name: البناء والتحقق
+        run: |
+          curl -fsSL --retry 4 -o ctd.onnx "$CTD_URL"
+          echo "$CTD_SHA256  ctd.onnx" | sha256sum -c
+          python services/translation-worker/tools/ctd_seg_only.py ctd.onnx comictextdetector-seg.onnx
+          echo "$SEG_SHA256  comictextdetector-seg.onnx" | sha256sum -c
+          ls -l comictextdetector-seg.onnx
+
+      - name: النشر
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease --latest=false \
+              --title "ملفات الترجمة: comic-text-detector (قناع الحروف)" \
+              --notes "comic-text-detector (dmMaze, GPL-3.0) برأس seg وحده، مبنيًّا من ${CTD_URL} بـ services/translation-worker/tools/ctd_seg_only.py. sha256: ${SEG_SHA256}"
+          fi
+          gh release upload "$TAG" comictextdetector-seg.onnx --clobber

@@ -22,9 +22,10 @@ import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapte
 import { titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-settings.js';
-import { downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
-import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
-import { translatePage } from '../lib/translate.js';
+import { benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
+import { clearPerf, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
+import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
+import { cachedPage, translatePage } from '../lib/translate.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
@@ -1100,11 +1101,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     head.append(el('small', null, `${first === last ? `الفصل ${first}` : `الفصول ${first}–${last}`} · ${job.mode === 'fast' ? 'أسرع' : 'أعلى جودة'}`));
     const bar = el('div', 'tl-job__bar');
     const fill = el('span');
-    fill.style.width = `${Math.round((job.status === 'done' ? 1 : p.ratio) * 100)}%`;
+    fill.style.width = `${Math.round((job.status === 'done' && !p.failed && !p.unreachable ? 1 : p.ratio) * 100)}%`;
     bar.append(fill);
     const state_ =
       job.status === 'done'
-        ? `اكتملت: ${chaptersWord(job.chapters.length)} جاهزة للقراءة`
+        ? p.failed || p.unreachable
+          ? finishedText(job)
+          : `اكتملت: ${chaptersWord(job.chapters.length)} جاهزة للقراءة`
         : job.status === 'paused'
           ? job.reason
             ? BLOCK_TEXT[job.reason] ?? 'متوقفة'
@@ -1160,6 +1163,90 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   const toggleTranslateCurrent = openTranslateMenu;
+
+  /**
+   * الإعدادات ← أداء الترجمة: من سجل جوالك (لا تقديرات): الوسيط لصفحة بلا نص
+   * وبنص، وأثقل المراحل، والفصول الأخيرة؛ و«قِس القديم مقابل الجديد» على صفحات
+   * ترجمتها؛ ونسخ التقرير كاملًا.
+   */
+  function openPerfSheet() {
+    let benchmarks = [];
+    const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
+    const build = (body) => {
+      body.append(el('h3', null, 'أداء الترجمة'));
+      const entries = readPerf();
+      const s = summarize(entries);
+      if (!s.pages) body.append(el('p', null, 'ما فيه قياس بعد. ترجم صفحات وارجع هنا.'));
+      for (const [label, g] of [['صفحة بلا نص', s.textless], ['صفحة فيها حوار', s.text]]) {
+        if (!g.pages) continue;
+        body.append(el('p', null, `${label}: ${sec(g.median)} (وسيط ${g.pages} صفحة)`));
+        const top = Object.entries(g.stages)
+          .filter(([k]) => !['total'].includes(k))
+          .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+          .slice(0, 8);
+        const list = el('ul', 'perf-list');
+        for (const [k, v] of top) list.append(el('li', null, `${k}: ${sec(v)}`));
+        body.append(list);
+      }
+      for (const c of s.chapters.slice(-3)) body.append(el('p', null, `فصل ${c.chapterKey.split('#').pop()}: ${c.pages} صفحة في ${sec(c.wallMs)}`));
+      for (const b of benchmarks) {
+        body.append(el('p', null, `القديم ${sec(totalOf(b.legacy))} ← الجديد ${sec(totalOf(b.current))} · ${b.identical ? 'الناتج متطابق بكسلًا بكسلًا' : 'الناتج مختلف!'}`));
+      }
+      const bench = el('button', 'btn btn-secondary btn-block', 'قِس القديم مقابل الجديد');
+      bench.type = 'button';
+      bench.onclick = async () => {
+        const pages = readPerf()
+          .filter((e) => e.path && e.hash && e.translated > 0)
+          .slice(-3);
+        if (!pages.length) return toast('ترجم صفحة فيها حوار أولًا');
+        bench.disabled = true;
+        bench.textContent = 'نقيس… (دقيقة تقريبًا)';
+        benchmarks = [];
+        for (const e of pages) {
+          const saved = await cachedPage(e.hash);
+          const regions = (saved?.regions ?? []).filter((r) => typeof r.arabic === 'string' && r.arabic).map((r) => ({ id: r.id, arabic: r.arabic }));
+          const res = await benchmarkPage({ path: e.path, regions }).catch(() => null);
+          if (res) benchmarks.push({ page: `${e.chapterKey?.split('#').pop() ?? ''}#${e.pageIndex}`, ...res });
+        }
+        if (!benchmarks.length) toast('القياس يحتاج تحديث التطبيق، أو ملفات الصفحات انمسحت');
+        refresh();
+      };
+      body.append(bench);
+      const copy = el('button', 'btn btn-secondary btn-block');
+      copy.type = 'button';
+      copy.innerHTML = `${glyph('share')}<span>انسخ التقرير</span>`;
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(formatReport(readPerf(), benchmarks));
+          toast('انسخ. ألصقه لي');
+        } catch {
+          toast('ما قدرت أنسخ');
+        }
+      };
+      body.append(copy);
+      const clear = el('button', 'btn btn-secondary btn-block', 'امسح السجل');
+      clear.type = 'button';
+      clear.onclick = () => {
+        clearPerf();
+        benchmarks = [];
+        refresh();
+      };
+      body.append(clear);
+    };
+    let sheetBody = null;
+    const refresh = () => {
+      if (!sheetBody) return;
+      sheetBody.replaceChildren(el('div', 'sheet-handle'));
+      build(sheetBody);
+    };
+    openSheet((body) => {
+      sheetBody = body;
+      build(body);
+      return () => {
+        sheetBody = null;
+      };
+    });
+  }
 
   /** الإعدادات ← قائمة الترجمة: كل المهام، بتقدّمها وأزرارها. */
   function openJobsSheet() {
@@ -3039,6 +3126,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
           }),
         );
       }
+      const perf = summarize(readPerf());
+      rows.push(
+        row('activity', 'أداء الترجمة', 'زمن كل مرحلة على جوالك، لكل صفحة وفصل، وقياس القديم مقابل الجديد', {
+          value: perf.text.median ? `${(perf.text.median / 1000).toFixed(1)} ث/صفحة` : null,
+          run: openPerfSheet,
+        }),
+      );
       const all = translationJobs.jobs();
       const runningCount = all.filter((j) => j.status === 'running').length;
       rows.push(

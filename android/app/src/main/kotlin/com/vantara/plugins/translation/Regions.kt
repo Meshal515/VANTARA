@@ -82,10 +82,18 @@ object Regions {
         val (labels, comps) = ink.components(true)
         val keep = ByteMask(img.width, img.height)
         val overlap = IntArray(comps.size + 1)
-        for (i in labels.indices) if (labels[i] != 0 && glyph.data[i].toInt() != 0) overlap[labels[i]]++
+        // الحبر محصور في الصندوق؛ التسميات خارجه صفر
+        val win = ink.scanWindow()
+        if (win != null) for (y in win[1] until win[3]) for (x in win[0] until win[2]) {
+            val i = y * img.width + x
+            if (labels[i] != 0 && glyph.data[i].toInt() != 0) overlap[labels[i]]++
+        }
         val ok = BooleanArray(comps.size + 1)
         for (c in comps) if (c.area >= 3 && overlap[c.label] * 2 >= c.area) ok[c.label] = true
-        for (i in labels.indices) if (labels[i] != 0 && ok[labels[i]]) keep.data[i] = 1
+        if (win != null) for (y in win[1] until win[3]) for (x in win[0] until win[2]) {
+            val i = y * img.width + x
+            if (labels[i] != 0 && ok[labels[i]]) keep.data[i] = 1
+        }
         return if (keep.count() < 0.25 * glyph.count()) glyph else keep
     }
 
@@ -137,7 +145,11 @@ object Regions {
         val best = counts.indices.maxByOrNull { counts[it] } ?: return null
         if (best == 0 || counts[best] < ringN * 0.8) return null
         val comp = ByteMask(img.width, img.height)
-        for (i in labels.indices) if (labels[i] == best) comp.data[i] = 1
+        val c = comps.first { it.label == best }
+        for (y in c.y0 until c.y1) for (x in c.x0 until c.x1) {
+            val i = y * img.width + x
+            if (labels[i] == best) comp.data[i] = 1
+        }
         return comp.filledHoles()
     }
 
