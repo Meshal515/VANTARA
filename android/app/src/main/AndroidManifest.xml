@@ -50,4 +50,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- «تثبيت» في شاشة التحديث: يفتح مثبّت أندرويد، والنظام يطلب الموافقة -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

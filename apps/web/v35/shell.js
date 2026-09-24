@@ -17,9 +17,9 @@ import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, 
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, isChapterRead, markChapter } from './reading.js';
+import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
-import { cachedCover, coverCandidates, forgetCover, nativeCover } from './covers.js';
+import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
@@ -277,10 +277,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sourceId: '',
       chapter: { chapterNumber: Number(row.chapter_number), name: row.chapter_label ?? '' },
     });
-    const marked = sync.rows('chapter_marks', (r) => r.user_id === me() && r.chapter_key === chapterKey)[0];
-    if (marked?.read) return true;
-    const progress = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === chapterKey)[0];
-    return Number(progress?.ratio) >= 0.2;
+    // بحث بالمفتاح: السجل يُرسم كثيرًا، ومسح كل العلامات لكل صف كان يثقله
+    if (sync.row('chapter_marks', `${me()}/${chapterKey}`)?.read) return true;
+    return Number(sync.row('progress', `${me()}/${chapterKey}`)?.ratio) >= 0.2;
   }
   const viewRows = (userId = me()) =>
     sync
@@ -384,14 +383,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
       container.replaceChildren(img);
       return url;
     };
-    const candidates = coverCandidates(work);
+    // الغلاف المعروف لهذا العمل أولًا (من أي شاشة عرفته)، ثم وصف الخادم، ثم القائمة
+    const id = String(work?.id ?? '');
+    const serverCover = id ? sync.rows('works', (x) => x.series_ref === id)[0]?.cover_url : null;
+    const seen = new Set();
+    const candidates = [
+      ...[knownCover(id), serverCover].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? work?._work?.editions?.[0]?.sourceId ?? null })),
+      ...coverCandidates(work),
+    ].filter((c) => !seen.has(c.url) && seen.add(c.url));
     // المحفوظ أولًا وبلا هيكل لامع: الغلاف الذي رأيته أمس يظهر كما هو
     for (const { url } of candidates) {
       const local = cachedCover(url);
       if (!local) continue;
       const img = await tryUrl(local, 2500);
       if (container.dataset.imageToken !== token) return null;
-      if (img) return show(img, local);
+      if (img) {
+        rememberCover(id, url);
+        return show(img, local);
+      }
       forgetCover(url);
     }
     container.replaceChildren(el('div', 'skeleton'));
@@ -404,10 +413,57 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (container.dataset.imageToken !== token) return null;
       const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000));
       if (container.dataset.imageToken !== token) return null;
-      if (img) return show(img, img.src);
+      if (img) {
+        rememberCover(id, url);
+        return show(img, img.src);
+      }
     }
-    if (container.dataset.imageToken === token) fallbackArt(container, titleOf(work));
+    if (container.dataset.imageToken !== token) return null;
+    fallbackArt(container, titleOf(work));
+    // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
+    waitingCovers.set(container, work);
+    resolveCoverLater(work);
     return null;
+  }
+  const waitingCovers = new Map();
+  onCoverKnown((workId, url) => {
+    for (const [container, work] of waitingCovers) {
+      if (!container.isConnected) {
+        waitingCovers.delete(container);
+        continue;
+      }
+      if (String(work.id) !== workId) continue;
+      waitingCovers.delete(container);
+      void mountImage(container, { ...work, coverImage: { ...(work.coverImage ?? {}), extraLarge: url, large: url } });
+    }
+  });
+  const coverTried = new Map();
+  let coverActive = 0;
+  const coverWaiting = [];
+  /** تفاصيل العمل من أوثق نسخة تحمل غلافه غالبًا. مرتين في آنٍ، ومرة لكل عمل كل عشر دقائق. */
+  function resolveCoverLater(work) {
+    const id = String(work?.id ?? '');
+    if (!id || !available() || !work?._work?.editions?.length) return;
+    if (Date.now() - (coverTried.get(id) ?? 0) < 10 * 60_000) return;
+    coverTried.set(id, Date.now());
+    const run = async () => {
+      coverActive += 1;
+      try {
+        const full = await describe(work);
+        const url = full?._work?.thumbnailUrl || full?.coverImage?.large || null;
+        if (url && url !== work.coverImage?.large) {
+          rememberWork({ ...full, _work: { ...full._work, thumbnailUrl: url } });
+          announceCover(id, url);
+        }
+      } catch {
+        // المصدر ما ردّ: يُعاد بعد عشر دقائق عند أول ظهور للبطاقة
+      } finally {
+        coverActive -= 1;
+        coverWaiting.shift()?.();
+      }
+    };
+    if (coverActive < 2) void run();
+    else coverWaiting.push(run);
   }
 
   function card(work, { meta } = {}) {
@@ -474,21 +530,49 @@ export function mountV35(deps, { page = 'home' } = {}) {
     s.append(h, strip);
     return s;
   }
+  /**
+   * ما يقرؤه أصدقاؤك فعلًا: أعمال في «آخر المشاهدات» عندهم خلال أسبوعين،
+   * الأكثر أصدقاءً أولًا ثم الأحدث. من سجلّهم نفسه، لا تقدير.
+   */
+  function friendsReading() {
+    const since = Date.now() - 14 * 86_400_000;
+    const byRef = new Map();
+    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label)) {
+      const e = byRef.get(v.series_ref) ?? { ref: v.series_ref, users: new Set(), at: 0, title: v.series_title, cover: v.cover_url };
+      e.users.add(v.user_id);
+      e.at = Math.max(e.at, v.viewed_at ?? 0);
+      e.title ??= v.series_title;
+      e.cover ??= v.cover_url;
+      byRef.set(v.series_ref, e);
+    }
+    return [...byRef.values()]
+      .sort((a, b) => b.users.size - a.users.size || b.at - a.at)
+      .map((e) => workFromRef(e.ref, e.title, e.cover));
+  }
+  /**
+   * الرئيسية من بيانات حقيقية فقط، كل قسم بمصدره وترتيبه:
+   *   - آخر المشاهدات: سجلّك (20% من فصل أو تعليم).
+   *   - أعمال تتابعها: مكتبتك.
+   *   - يقرأها أصدقاؤك: سجلّات أصدقائك.
+   *   - الأكثر رواجًا: «الرائج» عند كل المصادر، مرتّبًا بحضوره فيها وموضعه.
+   *   - آخر التحديثات: «الأحدث» عند كل المصادر، بأقرب موضع.
+   * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
+   */
   function renderHome() {
     const blocks = [];
-    const reading = libraryWorks('reading');
-    if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
     const history = historyWorks();
     if (history.length) blocks.push(sectionBlock('آخر المشاهدات', 'history', history.slice(0, 20)));
-    if (state.home.featured.length) blocks.push(sectionBlock('مقترحة لك', 'featured', state.home.featured));
+    const reading = libraryWorks('reading');
+    if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
+    const friends = friendsReading();
+    if (friends.length) blocks.push(sectionBlock('يقرأها أصدقاؤك', null, friends.slice(0, 20)));
     if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
-    if (state.home.recent.length) blocks.push(sectionBlock('المضافة حديثًا', 'recent', state.home.recent));
-    if (state.home.popular.length) blocks.push(sectionBlock('المميزة', 'popular', state.home.popular));
+    if (state.home.recent.length) blocks.push(sectionBlock('آخر التحديثات', 'recent', state.home.recent));
     if (blocks.length) q('homeSections').replaceChildren(...blocks);
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
-      ...['مقترحة لك', 'الأكثر رواجًا', 'المضافة حديثًا'].map((title) => {
+      ...['الأكثر رواجًا', 'آخر التحديثات'].map((title) => {
         const s = el('section', 'section');
         s.setAttribute('aria-busy', 'true');
         const h = el('div', 'section-head');
@@ -510,28 +594,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return;
     }
     // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
-    // لا شاشة تنتظر أبطأ مصدر من ستة عشر
-    const cached = (await readKv('home'))?.value;
-    const fromCache = (list) => (list ?? []).map((w) => ({ ...w, _work: w._work }));
-    if (cached?.featured?.length) {
-      state.home.featured = fromCache(cached.featured);
-      state.home.trending = fromCache(cached.trending);
-      state.home.recent = fromCache(cached.recent);
-      state.home.popular = fromCache(cached.popular);
-      state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+    // لا شاشة تنتظر أبطأ مصدر من ستة عشر. قائمتان حقيقيتان: الرائج والأحدث.
+    const cached = (await readKv('home.v2'))?.value;
+    const hasCache = Boolean(cached?.trending?.length || cached?.recent?.length);
+    const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
+    if (hasCache) {
+      state.home.trending = cached.trending ?? [];
+      state.home.recent = cached.recent ?? [];
+      state.heroItems = heroFrom(state.home.trending);
       renderHero();
       renderHome();
     } else {
       renderHomeSkeleton();
       renderHeroSkeleton();
     }
-    let heroDone = Boolean(cached?.featured?.length);
+    let heroDone = hasCache;
     let paintTimer = null;
     const paint = () => {
       clearTimeout(paintTimer);
       paintTimer = setTimeout(() => {
-        if (!heroDone && (state.home.trending.length || state.home.featured.length)) {
-          state.heroItems = uniqueById([...state.home.trending, ...state.home.featured]).filter((w) => !!w.coverImage?.large).slice(0, 6);
+        if (!heroDone && state.home.trending.length) {
+          state.heroItems = heroFrom(state.home.trending);
           if (state.heroItems.length >= 3) {
             heroDone = true;
             renderHero();
@@ -547,32 +630,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       paint();
     };
     try {
-      const [fe, tr, re] = await Promise.all([
-        browseLive({ kind: 'catalogue', page: 1 }, live('featured')),
+      const [tr, re] = await Promise.all([
         browseLive({ kind: 'popular', page: 1 }, live('trending')),
         browseLive({ kind: 'latest', page: 1 }, live('recent')),
       ]);
-      state.home.featured = fe.items;
       state.home.trending = tr.items;
       state.home.recent = re.items;
-      if (!heroDone || state.heroItems.length < 3) {
-        state.heroItems = uniqueById([...tr.items, ...fe.items]).filter((w) => !!w.coverImage?.large).slice(0, 6);
-        renderHero();
-      }
+      state.heroItems = heroFrom(tr.items);
+      renderHero();
       renderHome();
-      if (!fe.items.length && !tr.items.length && !re.items.length && !cached) throw new Error('empty');
-      const po = await browse({ kind: 'popular', page: 2 }).catch(() => ({ items: [] }));
-      state.home.popular = po.items.filter((w) => !state.home.trending.some((t) => t.id === w.id));
-      renderHome();
-      void writeKv('home', {
-        featured: state.home.featured.slice(0, 40),
-        trending: state.home.trending.slice(0, 40),
-        recent: state.home.recent.slice(0, 40),
-        popular: state.home.popular.slice(0, 40),
-      });
+      if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
+      void writeKv('home.v2', { trending: tr.items.slice(0, 40), recent: re.items.slice(0, 40) });
     } catch {
       // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
-      if (cached?.featured?.length) return;
+      if (hasCache) return;
       renderHeroFallback();
       const box = el('div');
       emptyState(box, {
@@ -812,6 +883,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!full._chapters?.length && !settled) return;
       const first = !state.current?._chapters;
       state.current = full;
+      // غلافٌ عرفته التفاصيل تجرّبه البطاقات التي بقيت بلا غلاف، حالًا لا بعد الرجوع
+      if (full._work?.thumbnailUrl) announceCover(String(full.id), full._work.thumbnailUrl);
       if (first || full._work?.thumbnailUrl !== work._work?.thumbnailUrl) renderDetail(full);
       else refreshDetailMeta(full);
       renderSources(full);
@@ -1280,37 +1353,91 @@ export function mountV35(deps, { page = 'home' } = {}) {
       .rows('collections', (r) => r.user_id === me() && r.kind === 'top' && r.member)
       .sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || a.updated_at - b.updated_at);
   }
-  function toggleTopCurrent() {
-    if (!state.current) return;
-    const d = descriptorOf(state.current);
-    const rows = topRows();
-    if (inCollection('top', d.seriesRef)) {
-      sync.enqueue('top.set', { ...d, member: false });
-      toast('أُزيل من أفضل 5');
-      return afterLibraryChange();
+  /**
+   * «أفضل 5» خانات ثابتة من 1 إلى 5. خانة كل عمل موضعه المحفوظ؛ ما حُفظ قديمًا
+   * بلا موضع صالح (أو بموضع مكرّر) يأخذ أول خانة فارغة بترتيبه.
+   * @returns {Array<object|null>} خمس خانات
+   */
+  function topSlots() {
+    const slots = [null, null, null, null, null];
+    const loose = [];
+    for (const row of topRows()) {
+      const p = Number(row.position);
+      if (Number.isInteger(p) && p >= 1 && p <= TOP_MAX && !slots[p - 1]) slots[p - 1] = row;
+      else loose.push(row);
     }
-    if (rows.length < TOP_MAX) {
-      sync.enqueue('top.set', { ...d, member: true, position: rows.length + 1 });
-      toast(`صار رقم ${rows.length + 1} في أفضل 5`);
-      return afterLibraryChange();
+    for (const row of loose) {
+      const free = slots.indexOf(null);
+      if (free < 0) break;
+      slots[free] = row;
     }
-    openSheet((body) => {
-      body.append(el('h3', null, 'قائمة أفضل 5 مكتملة'));
-      body.append(el('p', null, 'اختر العمل اللي يطلع ويأخذ هذا مكانه.'));
-      rows.forEach((row, i) => {
-        const work = sync.rows('works', (w) => w.series_ref === row.series_ref)[0];
-        const item = sheetItem('star', `${i + 1}. ${work?.title || row.series_ref.replace(/^ext:/, '')}`, () => {
-          sync.enqueue('top.set', { seriesRef: row.series_ref, member: false });
-          sync.enqueue('top.set', { ...d, member: true, position: row.position ?? i + 1 });
-          closeSheet();
-          toast(`صار رقم ${i + 1} في أفضل 5`);
-          afterLibraryChange();
-        });
-        item.querySelector('span').dir = 'auto';
-        body.append(item);
-      });
+    return slots;
+  }
+  const topTitle = (row) => displayTitle(row.series_ref, sync.rows('works', (w) => w.series_ref === row.series_ref)[0]?.title);
+  /**
+   * يضع عملًا في خانة يختارها صاحبه. الخانة المشغولة: عملها يبادل مكانه إن
+   * كان هذا في خانة أخرى، أو يخرج إن كان جديدًا. لا عمل في خانتين أبدًا.
+   */
+  function placeInTop(d, slot) {
+    const slots = topSlots();
+    const from = slots.findIndex((r) => r?.series_ref === d.seriesRef);
+    const occupant = slots[slot - 1];
+    if (from === slot - 1) return;
+    if (occupant && occupant.series_ref !== d.seriesRef) {
+      if (from >= 0) sync.enqueue('top.set', { seriesRef: occupant.series_ref, member: true, position: from + 1 });
+      else sync.enqueue('top.set', { seriesRef: occupant.series_ref, member: false });
+    }
+    sync.enqueue('top.set', { ...d, member: true, position: slot });
+    // الخانات الأخرى تُثبَّت بمواضعها: قائمة قديمة بلا مواضع تصير صريحة مرة واحدة
+    slots.forEach((r, i) => {
+      if (!r || r.series_ref === d.seriesRef || r === occupant || Number(r.position) === i + 1) return;
+      sync.enqueue('top.set', { seriesRef: r.series_ref, member: true, position: i + 1 });
     });
   }
+  function removeFromTop(ref) {
+    sync.enqueue('top.set', { seriesRef: ref, member: false });
+  }
+  /** «أضف إلى أفضل 5»: ورقة بخمس خانات، والمستخدم يختار الرقم. */
+  function openTopPicker(w = state.current) {
+    if (!w) return;
+    const d = descriptorOf(w);
+    openSheet((body) => {
+      const slots = topSlots();
+      const here = slots.findIndex((r) => r?.series_ref === d.seriesRef);
+      body.append(el('h3', null, here >= 0 ? `في أفضل 5 — رقم ${here + 1}` : 'أضف إلى أفضل 5'));
+      const note = el('p', null, 'اختر رقمه. الخانة المشغولة يطلع عملها أو يبادل مكانه.');
+      note.style.marginBottom = '8px';
+      body.append(note);
+      const list = el('div', 'top-slots');
+      slots.forEach((row, i) => {
+        const b = el('button', `top-slot${i === here ? ' top-slot--here' : ''}${row ? '' : ' top-slot--empty'}`);
+        b.type = 'button';
+        b.append(el('span', `top-slot-no${i === 0 ? ' top-slot-no--gold' : ''}`, String(i + 1)));
+        const t = el('bdi', 'top-slot-title', row ? topTitle(row) : 'فارغة');
+        b.append(t);
+        if (row && i !== here) b.append(el('span', 'top-slot-hint', here >= 0 ? 'يبادل' : 'يطلع'));
+        b.onclick = () => {
+          closeSheet();
+          placeInTop(d, i + 1);
+          toast(`صار رقم ${i + 1} في أفضل 5`);
+          afterLibraryChange();
+        };
+        list.append(b);
+      });
+      body.append(list);
+      if (here >= 0) {
+        body.append(
+          sheetItem('trash', 'أزله من أفضل 5', () => {
+            closeSheet();
+            removeFromTop(d.seriesRef);
+            toast('أُزيل من أفضل 5');
+            afterLibraryChange();
+          }, { danger: true }),
+        );
+      }
+    });
+  }
+  const toggleTopCurrent = () => openTopPicker(state.current);
   function afterLibraryChange() {
     refreshLibraryDetail();
     // الطابور يكتب في المرآة مع الدفع؛ onChange يعيد الرسم حين يعود
@@ -1376,9 +1503,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           closeSheet();
           toggleLaterCurrent();
         }, { pressed: !!e?.later }),
-        sheetItem('star', 'ضمن أفضل 5', () => {
+        sheetItem('star', inCollection('top', String(w.id)) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
           closeSheet();
-          toggleTopCurrent();
+          setTimeout(() => toggleTopCurrent(), 0);
         }, { pressed: inCollection('top', String(w.id)) }),
         sheetItem('check', 'أكملته', () => {
           closeSheet();
@@ -1418,40 +1545,43 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return Number.isFinite(b) && b > a ? row : best;
     }, null);
   }
-  function markRowsRead(w, rows, historyRow = null) {
-    const ref = String(w.id);
-    for (const row of rows) {
-      const key = chapterKeyOf(ref, row);
-      if (!isChapterRead(sync, ref, key)) markChapter(sync, ref, row, true);
-    }
-    if (historyRow) recordChapterView(w, historyRow);
+  function refreshChaptersSoon(w) {
     clearTimeout(state.eyeTimer);
-    state.eyeTimer = setTimeout(() => state.current?.id === w.id && renderChapters(w), 50);
+    state.eyeTimer = setTimeout(() => state.current?.id === w.id && renderChapters(w), 30);
   }
-  function openPreviousReadingRange(w) {
+  /** تعليم (أو إلغاء) دفعة فصول: عملية واحدة، والصفحة تتحدث حالًا. */
+  function markRows(w, rows, read, historyRow = null) {
+    const changed = markChapters(sync, String(w.id), rows, read);
+    if (read && historyRow) recordChapterView(w, historyRow);
+    refreshChaptersSoon(w);
+    return changed;
+  }
+  /** «من ← إلى»: للتعليم أو للإلغاء، بنفس الورقة. */
+  function openChapterRange(w, read) {
     openSheet((body) => {
-      body.append(el('h3', null, 'حدد الفصول التي قرأتها'));
-      const fromField = el('label', 'field');
-      fromField.append(el('span', 'field-label', 'من'));
-      const from = el('input', 'field-input');
-      from.type = 'number';
-      from.inputMode = 'decimal';
-      from.step = 'any';
-      from.placeholder = 'رقم الفصل';
-      fromField.append(from);
-      const toField = el('label', 'field');
-      toField.append(el('span', 'field-label', 'إلى'));
-      const to = el('input', 'field-input');
-      to.type = 'number';
-      to.inputMode = 'decimal';
-      to.step = 'any';
-      to.placeholder = 'رقم الفصل';
-      toField.append(to);
-      const save = el('button', 'btn btn-primary btn-block', 'علّمها مقروءة');
+      body.append(el('h3', null, read ? 'علّم الفصول التي قرأتها' : 'ألغِ تعليم فصول'));
+      const numbers = (w._chapters ?? []).map((r) => r.number).filter((n) => Number.isFinite(n) && n >= 0);
+      const hint = el('p', null, numbers.length ? `فصول العمل من ${Math.min(...numbers)} إلى ${Math.max(...numbers)}` : '');
+      hint.style.marginBottom = '8px';
+      body.append(hint);
+      const field = (label) => {
+        const f = el('label', 'field');
+        f.append(el('span', 'field-label', label));
+        const input = el('input', 'field-input');
+        input.type = 'number';
+        input.inputMode = 'decimal';
+        input.step = 'any';
+        input.placeholder = 'رقم الفصل';
+        f.append(input);
+        return { f, input };
+      };
+      const from = field('من');
+      const to = field('إلى');
+      const save = el('button', `btn btn-block ${read ? 'btn-primary' : 'btn-secondary'}`, read ? 'علّمها مقروءة' : 'ألغِ تعليمها');
       save.type = 'button';
       save.onclick = () => {
-        const start = Number(from.value);
-        const end = Number(to.value);
+        const start = Number(from.input.value);
+        const end = Number(to.input.value);
         if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
           toast('اكتب نطاقًا صحيحًا من فصل إلى فصل');
           return;
@@ -1461,13 +1591,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
           toast('ما لقينا فصولًا داخل هذا النطاق');
           return;
         }
-        const historyRow = rows.reduce((best, row) => (!best || Math.abs(row.number - end) < Math.abs(best.number - end) ? row : best), null);
+        const historyRow = rows.reduce((best, row) => (!best || row.number > best.number ? row : best), null);
         closeSheet();
-        markRowsRead(w, rows, historyRow);
-        toast(`علّمت ${countLabel(rows.length, 'chapter')} مقروءة`);
+        const n = markRows(w, rows, read, historyRow);
+        toast(n ? `${read ? 'علّمت' : 'ألغيت تعليم'} ${countLabel(n, 'chapter')}` : read ? 'كلها مقروءة من قبل' : 'ما فيها فصل معلّم');
       };
-      body.append(fromField, toField, save);
-      requestAnimationFrame(() => from.focus());
+      body.append(from.f, to.f, save);
+      requestAnimationFrame(() => from.input.focus());
     });
   }
   function markPreviousReading() {
@@ -1477,16 +1607,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
       toast('انتظر لين تجهز الفصول');
       return;
     }
+    const ref = String(w.id);
+    const readCount = rows.filter((r) => isChapterRead(sync, ref, chapterKeyOf(ref, r))).length;
     openSheet((body) => {
+      body.append(el('h3', null, 'قراءتك لهذا العمل'));
+      const note = el('p', null, readCount ? `علّمت ${countLabel(readCount, 'chapter')} من ${rows.length}.` : 'هل قرأته من قبل؟ علّم ما قرأته ويظهر في سجلّك.');
+      note.style.marginBottom = '8px';
+      body.append(note);
       body.append(
-        el('h3', null, 'هل قرأت هذا العمل من قبل؟'),
         sheetItem('check', 'نعم، كله', () => {
           closeSheet();
-          markRowsRead(w, rows, latestChapter(rows));
-          toast('علّمت كل الفصول مقروءة');
+          const n = markRows(w, rows, true, latestChapter(rows));
+          toast(n ? `علّمت ${countLabel(n, 'chapter')} مقروءة` : 'كلها مقروءة من قبل');
         }),
-        sheetItem('eye', 'نعم، من فصل إلى فصل', () => openPreviousReadingRange(w)),
+        sheetItem('eye', 'من فصل إلى فصل', () => openChapterRange(w, true)),
       );
+      if (readCount) {
+        body.append(el('div', 'settings-group-label', 'إلغاء'));
+        body.append(
+          sheetItem('close', 'ألغِ تعليم فصول (من ← إلى)', () => openChapterRange(w, false), { danger: true }),
+          sheetItem('trash', 'ألغِ تعليم كل الفصول', () => {
+            closeSheet();
+            const n = clearChapterMarks(sync, ref);
+            refreshChaptersSoon(w);
+            toast(n ? `ألغيت تعليم ${countLabel(n, 'chapter')}` : 'ما فيه فصل معلّم');
+          }, { danger: true }),
+        );
+      }
     });
   }
 
@@ -1562,51 +1709,58 @@ export function mountV35(deps, { page = 'home' } = {}) {
       });
       return;
     }
-    const list = el('div', 'hist-list');
-    rows.slice(0, limit).forEach((v, i) => {
-      const work = workFromRef(v.series_ref, v.series_title, v.cover_url);
-      const item = el('div', 'hist-row');
-      const open = el('button', 'hist-open');
-      open.type = 'button';
-      const cover = el('span', 'hist-cover');
-      void mountImage(cover, work);
-      const copy = el('span', 'hist-copy');
-      const title = el('bdi', 'hist-title', titleOf(work));
-      const meta = el('span', 'hist-meta');
-      if (v.chapter_label || v.chapter_number != null) {
-        const ch = el('span', 'hist-chapter');
-        ch.innerHTML = glyph('book', { size: 15 });
-        ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
-        meta.append(ch, el('span', 'hist-dot', '·'));
+    // مجموعات بالأيام كما يُقرأ السجل: اليوم، أمس، هذا الأسبوع، أقدم
+    const startOfDay = new Date().setHours(0, 0, 0, 0);
+    const dayOf = (at) => (at >= startOfDay ? 'اليوم' : at >= startOfDay - 86_400_000 ? 'أمس' : at >= startOfDay - 6 * 86_400_000 ? 'هذا الأسبوع' : 'أقدم');
+    const list = el('div', 'rv-list');
+    let day = null;
+    for (const v of rows.slice(0, limit)) {
+      const at = v.viewed_at ?? Date.now();
+      const d = dayOf(at);
+      if (d !== day) {
+        day = d;
+        list.append(el('div', 'rv-day', d));
       }
-      meta.append(el('span', null, viewedLabel(v.viewed_at ?? Date.now())));
-      copy.append(title, meta);
+      const work = workFromRef(v.series_ref, v.series_title, v.cover_url);
+      const item = el('div', 'rv-row');
+      const open = el('button', 'rv-open');
+      open.type = 'button';
+      const cover = el('span', 'rv-cover');
+      void mountImage(cover, work);
+      const copy = el('span', 'rv-copy');
+      copy.append(el('bdi', 'rv-title', titleOf(work)));
+      const meta = el('span', 'rv-meta');
+      if (v.chapter_label || v.chapter_number != null) {
+        const ch = el('span', 'rv-chapter');
+        ch.innerHTML = glyph('book', { size: 13 });
+        ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
+        meta.append(ch);
+      }
+      meta.append(el('time', 'rv-time', d === 'اليوم' || d === 'أمس' ? timeAgo(at).replace(/^الآن$/, 'الآن') : viewedLabel(at)));
+      copy.append(meta);
+      // تقدّم الفصل الأخير إن كان في منتصفه: شريط رفيع لا رقم «0%»
+      const ratio = chapterRatio(userId, v.series_ref, v.chapter_number);
+      if (ratio !== null && ratio > 0.02 && ratio < 0.98) {
+        const bar = el('span', 'rv-progress');
+        bar.style.setProperty('--p', `${Math.round(ratio * 100)}%`);
+        copy.append(bar);
+      }
       open.append(cover, copy);
       open.onclick = () => void openWork(work);
       item.append(open);
-      const side = el('span', 'hist-side');
-      // الحلقة لآخر ما فتحت وحده، حين لم تُكمل فصله
-      const ratio = i === 0 ? chapterRatio(userId, v.series_ref, v.chapter_number) : null;
-      if (ratio !== null && ratio < 0.98) {
-        const ring = el('span', 'hist-ring');
-        ring.style.setProperty('--p', String(Math.round(ratio * 100)));
-        ring.append(el('b', null, `${Math.round(ratio * 100)}%`));
-        side.append(ring);
-      }
       if (own) {
-        const del = el('button', 'hist-del');
+        const del = el('button', 'rv-del');
         del.type = 'button';
-        del.innerHTML = glyph('trash', { size: 20 });
-        del.setAttribute('aria-label', `احذف ${titleOf(work)} من السجل`);
+        del.innerHTML = glyph('close', { size: 18 });
+        del.setAttribute('aria-label', `احذف ${titleOf(work)} من آخر المشاهدات`);
         del.onclick = () => {
-          item.classList.add('hist-row--gone');
+          item.classList.add('rv-row--gone');
           setTimeout(() => removeView(v.series_ref), 180);
         };
-        side.append(del);
+        item.append(del);
       }
-      item.append(side);
       list.append(item);
-    });
+    }
     target.replaceChildren(list);
   }
 
@@ -1664,9 +1818,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const COLLECTIONS = {
     trending: { title: 'الأكثر رواجًا', kind: 'popular' },
-    featured: { title: 'مقترحة لك', kind: 'catalogue' },
-    recent: { title: 'المضافة حديثًا', kind: 'latest' },
-    popular: { title: 'المميزة', kind: 'popular' },
+    recent: { title: 'آخر التحديثات', kind: 'latest' },
   };
   async function openCollection(kind) {
     if (kind === 'history') {
@@ -1725,7 +1877,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   /** أغلفة من أعمال التصنيف مما حمّلته الرئيسية: البلاطة تُري التصنيف لا تسمّيه فقط. */
   function genreCovers(g, used) {
-    const pool = uniqueById([...(state.home.trending || []), ...(state.home.featured || []), ...(state.home.popular || []), ...(state.home.recent || [])]);
+    const pool = uniqueById([...(state.home.trending || []), ...(state.home.recent || [])]);
     const match = pool.filter((w) => w.coverImage?.large && (w.genres || []).some((x) => x === g.en || x === g.ar));
     // غلاف لم تأخذه بلاطة قبلها أولًا: لا تتشابه البلاطات
     const picked = [...match.filter((w) => !used.has(w.id)), ...match.filter((w) => used.has(w.id))].slice(0, 2);
@@ -2437,6 +2589,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     group('عن التطبيق', [
       row('layers', 'المصادر', 'مصادر عربية تشتغل على جهازك', { value: 'عربي' }),
       row('info', 'الإصدار', null, { value: deps.version || '—' }),
+      api?.checkUpdate
+        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث ويثبّتها بزرّ واحد', {
+            run: async () => {
+              toast('نبحث عن تحديث…');
+              const found = await api.checkUpdate().catch(() => null);
+              if (!found) toast('عندك آخر نسخة');
+            },
+          })
+        : null,
     ]);
 
     if (!api) return;
@@ -2856,6 +3017,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     edit: () => editProfile(),
     libraryWorks,
     historyList: (target, opts) => renderHistoryList(target, opts),
+    topSlots: () => topSlots().map((r) => (r ? workFromRef(r.series_ref, topTitle(r)) : null)),
+    toast: (text) => toast(text),
+    removeFromTop: (ref) => removeFromTop(ref),
     openHistory: () => {
       state.libraryFilter = 'history';
       navTo('library');

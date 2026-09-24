@@ -171,8 +171,19 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let quarantine = readJson(QUARANTINE_KEY, []);
   /** أثر الكتابات التي لم يُقرّها الخادم بعد (`lib/optimistic.js`). يُحسب ولا يُحفظ. */
   let overlay = {};
+  /**
+   * عملياتٌ أقرّها الخادم ولم تصل مرآتنا بعد: `rev` الذي كُتبت فيه.
+   *
+   * بلا هذه الطبقة يسقط الأثر لحظة الإقرار، وسحبٌ كان في الطريق قبل الكتابة
+   * يصل بعدها بالصف القديم — فيرجع الإشعار «غير مقروء» والقلب فارغًا حتى
+   * السحب التالي. الأثر يبقى حتى تبلغ المرآة `rev` كتابته.
+   */
+  let landing = [];
+  /** قيم كل جدول (المرآة + الطبقة) محسوبة مرة حتى يتغير أحدهما: الشاشات تسأل مئات المرات. */
+  let valuesCache = new Map();
   const refreshOverlay = () => {
-    overlay = projectQueue(queue, mirror, user?.userId ?? null);
+    overlay = projectQueue(landing.length ? [...landing.map((l) => l.op), ...queue] : queue, mirror, user?.userId ?? null);
+    valuesCache = new Map();
   };
   let pulling = false;
   let pullAgain = false;
@@ -228,6 +239,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       return true;
     }
     mirror = {};
+    valuesCache = new Map();
     try {
       localStorage.removeItem(MIRROR_KEY);
     } catch {
@@ -513,6 +525,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   function resyncMirror() {
     cursor = 0;
     mirror = {};
+    landing = [];
+    valuesCache = new Map();
     localStorage.setItem(CURSOR_KEY, '0');
     persistMirror();
   }
@@ -576,9 +590,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
 
         persistMirror();
-        // ما لم يُرسل بعد يبقى ظاهرًا فوق ما وصل: سحبٌ أسبق من الكتابة لا يُرجع القلب
-        refreshOverlay();
         cursor = Number(payload.cursor ?? cursor) || cursor;
+        // ما لم يُرسل بعد، وما أُقرّ ولم يصل بعد، يبقى ظاهرًا فوق ما وصل:
+        // سحبٌ أسبق من الكتابة لا يُرجع القلب ولا نقطة الإشعار
+        if (landing.length) landing = landing.filter((l) => l.rev > cursor);
+        refreshOverlay();
         localStorage.setItem(CURSOR_KEY, String(cursor));
         if (touched.length > 0) emit(touched);
         lastSyncAt = Date.now();
@@ -636,7 +652,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     // الأثر يظهر الآن لا بعد الرحلة: القلب والنقطة والتفاعل يتغيرون تحت الإصبع
     const touched = new Set();
     try {
-      for (const change of PROJECTIONS[kind]?.(op, (t, k) => overlay[t]?.[k] ?? mirror[t]?.[k] ?? null, user?.userId) ?? []) {
+      for (const change of PROJECTIONS[kind]?.(op, (t, k) => overlay[t]?.[k] ?? mirror[t]?.[k] ?? null, user?.userId, mirror) ?? []) {
         touched.add(change.table);
       }
     } catch {
@@ -718,6 +734,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         // تصلح بإعادة الإرسال. تُعزل حالًا بدل أن تُحاول إلى الأبد.
         for (const op of batch) {
           if (!settled.has(op.opId)) quarantineOp(op, 422, 'not_settled');
+        }
+        const writtenAt = Number(payload?.serverRev ?? payload?.cursor ?? 0);
+        if (writtenAt > cursor) {
+          for (const op of batch) if (settled.has(op.opId) && PROJECTIONS[op.kind]) landing.push({ op, rev: writtenAt });
+          if (landing.length > 400) landing = landing.slice(-400);
         }
         queue = queue.filter((op) => !settled.has(op.opId));
         pruneAttempts();
@@ -860,10 +881,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   };
 
   function rows(table, predicate) {
-    const bucket = overlay[table] ? { ...mirror[table], ...overlay[table] } : mirror[table];
-    if (!bucket) return [];
-    const all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
-    return predicate ? all.filter(predicate) : all;
+    let all = valuesCache.get(table);
+    if (!all) {
+      const bucket = overlay[table] ? { ...mirror[table], ...overlay[table] } : mirror[table];
+      if (!bucket) return [];
+      all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
+      valuesCache.set(table, all);
+    }
+    return predicate ? all.filter(predicate) : [...all];
   }
 
   function row(table, key) {

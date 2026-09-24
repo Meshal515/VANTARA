@@ -10,7 +10,8 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  # contents: write لنشر الإصدار الذي يقرؤه «يوجد تحديث جديد» في التطبيق
+  contents: write
   actions: read
 
 concurrency:
@@ -153,3 +154,55 @@ jobs:
             dist/VANTARA-stable.apk.sha256
           if-no-files-found: error
           retention-days: 30
+
+      # ── التحديث بزرّ واحد ──
+      # إصدار GitHub لكل بناء مستقر: الـAPK، وحزمة الواجهة نفسها التي داخله،
+      # وبيانٌ يقرؤه التطبيق من releases/latest/download/vantara-update.json.
+      # الواجهة وحدها تكفي ما دام NATIVE_API لم يتغير؛ وإلا يُعرض الـAPK.
+      - name: Package the web bundle and the update manifest
+        id: bundle
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          native=$(grep -oE 'const val NATIVE_API = [0-9]+' android/app/src/main/kotlin/com/vantara/plugins/AppUpdatePlugin.kt | grep -oE '[0-9]+$')
+          test -n "$native"
+          tag="stable-${VERSION_CODE}"
+          (cd android/app/src/main/assets/public && zip -qr "$GITHUB_WORKSPACE/dist/VANTARA-web.zip" .)
+          apk_sha=$(sha256sum dist/VANTARA-stable.apk | cut -d' ' -f1)
+          web_sha=$(sha256sum dist/VANTARA-web.zip | cut -d' ' -f1)
+          notes=$(git log -1 --format=%s "$HEAD_SHA" | head -c 200)
+          base="https://github.com/${REPO}/releases/download/${tag}"
+          python3 - "$native" "$apk_sha" "$web_sha" "$base" "$notes" <<'PY'
+          import json, os, sys
+          native, apk_sha, web_sha, base, notes = sys.argv[1:6]
+          manifest = {
+              'versionName': os.environ['VERSION_NAME'],
+              'versionCode': int(os.environ['VERSION_CODE']),
+              'nativeApi': int(native),
+              'notes': notes,
+              'apk': {'url': f'{base}/VANTARA-stable.apk', 'sha256': apk_sha, 'size': os.path.getsize('dist/VANTARA-stable.apk')},
+              'web': {'url': f'{base}/VANTARA-web.zip', 'sha256': web_sha, 'size': os.path.getsize('dist/VANTARA-web.zip')},
+          }
+          open('dist/vantara-update.json', 'w').write(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+          cat dist/vantara-update.json
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bundle.outputs.tag }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            dist/VANTARA-stable.apk dist/VANTARA-web.zip dist/vantara-update.json \
+            --target "$HEAD_SHA" \
+            --title "VANTARA $VERSION_NAME" \
+            --notes "النسخة المستقرة من main. التطبيق يجدها وحده من «يوجد تحديث جديد»." \
+            --latest

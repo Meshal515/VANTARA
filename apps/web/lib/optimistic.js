@@ -90,6 +90,20 @@ export const PROJECTIONS = {
       },
     ];
   },
+  'chapter.markMany': (op, get, userId, mirror) => {
+    const p = op.payload ?? {};
+    const t = now();
+    if (p.all && p.read === false) {
+      return Object.values(mirror?.chapter_marks ?? {})
+        .filter((r) => r.user_id === userId && r.series_ref === p.seriesRef && r.read)
+        .map((r) => ({ table: 'chapter_marks', key: `${userId}/${r.chapter_key}`, row: { ...r, read: 0, updated_at: t } }));
+    }
+    return (p.keys ?? []).map((key) => ({
+      table: 'chapter_marks',
+      key: `${userId}/${key}`,
+      row: { user_id: userId, chapter_key: key, series_ref: p.seriesRef, read: p.read ? 1 : 0, updated_at: t },
+    }));
+  },
   'rating.set': (op, get, userId) => {
     const p = op.payload ?? {};
     const key = `${userId}/${p.seriesRef}`;
@@ -233,7 +247,7 @@ export function projectQueue(queue, mirror, userId) {
     if (!project) continue;
     let changes = [];
     try {
-      changes = project(op, get, userId) ?? [];
+      changes = project(op, get, userId, mirror) ?? [];
     } catch {
       changes = [];
     }

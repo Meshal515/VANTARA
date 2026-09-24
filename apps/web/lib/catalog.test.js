@@ -14,6 +14,7 @@ import {
 	mergeChapters,
 	normalizeTitle,
 	parseChapterNumber,
+	rankListing,
 } from './catalog.js';
 
 const manga = (title, extra = {}) => ({ title, url: `/${title}`, ...extra });
@@ -240,5 +241,28 @@ describe('titlesMatch — نفس العمل في مصدر آخر', async () => {
 		expect(titlesMatch('Naruto', 'Boruto')).toBe(false);
 		expect(titlesMatch('The Beginning After the End', 'The End')).toBe(false);
 		expect(titlesMatch('', 'x')).toBe(false);
+	});
+});
+
+describe('rankListing', () => {
+	const w = (key) => ({ key });
+	it('is the same whatever order sources answered in', () => {
+		const works = [w('a'), w('b'), w('c')];
+		const pos = new Map([
+			['a', [{ pos: 5, len: 10 }]],
+			['b', [{ pos: 0, len: 10 }, { pos: 1, len: 10 }]],
+			['c', [{ pos: 0, len: 10 }]],
+		]);
+		const one = rankListing(works, pos).map((x) => x.key);
+		const two = rankListing([...works].reverse(), pos).map((x) => x.key);
+		expect(one).toEqual(['b', 'c', 'a']);
+		expect(two).toEqual(one);
+	});
+	it('latest ranks by the freshest position anywhere', () => {
+		const pos = new Map([
+			['old', [{ pos: 8, len: 10 }, { pos: 7, len: 10 }]],
+			['new', [{ pos: 0, len: 20 }]],
+		]);
+		expect(rankListing([w('old'), w('new')], pos, 'latest').map((x) => x.key)).toEqual(['new', 'old']);
 	});
 });

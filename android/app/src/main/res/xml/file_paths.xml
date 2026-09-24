@@ -10,4 +10,6 @@
       Capacitor المحلي لا عبر FileProvider، فحصرُ المسار عليها لا يكسر شيئًا.
     -->
     <cache-path name="page_cache" path="pages/" />
+    <!-- APK التحديث وحده: مثبّت أندرويد يقرؤه من هنا (`AppUpdatePlugin`) -->
+    <cache-path name="updates" path="updates/" />
 </paths>

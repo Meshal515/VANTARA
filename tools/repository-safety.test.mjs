@@ -491,7 +491,7 @@ test('the APK never serves its shell from a cache an update cannot clear', () =>
 
 test('the app shell is served from cache before the network', () => {
   // شبكة أولًا على مستند التنقّل تعني شاشة بيضاء بطول زمن الشبكة عند كل
-  // إقلاع بارد. والتحديث لا يضيع: `lib/update.js` يعرضه صراحةً.
+  // إقلاع بارد. والتحديث لا يضيع: `lib/updater.js` يعرضه صراحةً.
   const worker = read('apps/web/sw.js');
   const navigate = worker.slice(worker.indexOf("request.mode === 'navigate'"));
   const cacheAt = navigate.indexOf('cache.match');
@@ -1189,4 +1189,17 @@ test('every source extension ships inside the app and matches its pinned hash', 
   if (tracked.length) assert.equal(tracked.length, specs.length, 'every bundled extension must be tracked');
   const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
+});
+
+test('one-button updates: native updater registered, manifest published from the CI-gated stable build', () => {
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/AppUpdatePlugin.kt');
+  assert.match(plugin, /const val NATIVE_API = \d+/, 'NATIVE_API must be a literal the workflow can read');
+  assert.match(plugin, /sha256 mismatch/, 'every update download must be checksum-verified');
+  assert.match(plugin, /canonicalPath\.startsWith\(base\)/, 'web bundles must be unzipped without zip-slip');
+  assert.match(read('android/app/src/main/java/com/vantara/app/MainActivity.java'), /registerPlugin\(AppUpdatePlugin\.class\)/);
+  assert.match(read('android/app/src/main/res/xml/file_paths.xml'), /<cache-path name="updates" path="updates\/" \/>/);
+  const workflow = read('.github/workflows/android-stable.yml');
+  assert.match(workflow, /vantara-update\.json/, 'the stable build must publish the update manifest');
+  assert.match(workflow, /--latest/, 'the manifest must be reachable at releases/latest');
+  assert.match(read('apps/web/lib/updater.js'), /releases\/latest\/download\/vantara-update\.json/);
 });

@@ -80,6 +80,8 @@ const OPS = {
   'chapter.complete': { class: CUMULATIVE },
   'usage.add': { class: CUMULATIVE },
   'comment.add': { class: EVENT },
+  // دفعة فصول: لا تُضغط مع غيرها (نطاقان مختلفان لا يستبدل أحدهما الآخر)
+  'chapter.markMany': { class: EVENT },
   'recommendation.send': { class: EVENT },
   'activity.add': { class: EVENT },
 };
