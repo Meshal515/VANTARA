@@ -301,7 +301,7 @@ async function repairInBackground(deps, src, hash, meta, local) {
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
   await writeKv(CACHE_PREFIX + hash, { ...local, at: Date.now(), tries });
   const clock = stopwatch();
-  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0 }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
+  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
   logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
   if (result.error || !(result.translated >= (local.translated ?? 0))) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
@@ -309,10 +309,13 @@ async function repairInBackground(deps, src, hash, meta, local) {
   deps.onRepaired?.({ ...value, hash, from: 'model' });
 }
 
+/** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
+const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low' : 'high');
+
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto' }));
+    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps) }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -336,7 +339,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
-    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body) }));
+    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps) }));
   } catch {
     return { error: 'device_failed', native };
   }

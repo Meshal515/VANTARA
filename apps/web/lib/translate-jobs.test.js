@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createJob, createJobRunner, englishSources, estimateMinutes, finishedText, nextWork, pickChapters, progressOf, readJobs } from './translate-jobs.js';
+import { JOB_CONCURRENCY, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, nextWork, pickChapters, progressOf, readJobs } from './translate-jobs.js';
 
 const row = (number, sourceId = 'weeb', lang = 'en') => ({ number, sourceId, lang, sourceLabel: 'Weeb Central', chapter: { url: `${sourceId}/${number}` } });
 const keyOf = (r) => `ext:x#${r.sourceId}#${r.number}`;
@@ -123,12 +123,12 @@ describe('the runner', () => {
     const { deps, calls, storage } = fakeDeps({ translate: async () => (await gate, { translated: 1, from: 'model' }) });
     const runner = createJobRunner(deps);
     const job = runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(1), row(2)], keyOf }));
-    await until(() => calls.length === 3);
+    await until(() => calls.length === JOB_CONCURRENCY);
     runner.pause(job.id);
     release();
-    await until(() => readJobs(storage)[0].chapters[0].done.length === 3);
+    await until(() => readJobs(storage)[0].chapters[0].done.length === JOB_CONCURRENCY);
     await new Promise((r) => setTimeout(r, 30));
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(JOB_CONCURRENCY);
     expect(readJobs(storage)[0].status).toBe('paused');
 
     const { deps: fresh, calls: freshCalls } = fakeDeps();

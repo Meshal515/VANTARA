@@ -38,6 +38,8 @@ object Regions {
     const val MIN_SCORE = 0.35f
     const val MIN_GLYPH_PIXELS = 40
     const val MIN_OCR_CONF = 0.55f
+    /** ما يقرؤه التجميع من قناع الحروف حول كل صندوق (`pad`) وزيادة. */
+    const val GLYPH_MARGIN = 16
 
     fun stableId(pageHash: String, box: Box, width: Int, height: Int): String {
         val key = "$pageHash:${Math.round(200f * box.x1 / width)}:${Math.round(200f * box.y1 / height)}:${Math.round(200f * box.x2 / width)}:${Math.round(200f * box.y2 / height)}"

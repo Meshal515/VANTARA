@@ -10,7 +10,7 @@
  *   downloadModels()      → يبدأ التنزيل؛ أحداث 'modelsProgress' { received, total, file } ثم يعود { installed: true }
  *   cancelDownload()
  *   removeModels()        → { installed: false }
- *   analyzePage({ path, sourceLang })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
+ *   analyzePage({ path, sourceLang, priority })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
  *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
@@ -59,17 +59,17 @@ export async function removeModels() {
 }
 
 /** الهندسة وOCR على الجهاز. `path` مسار ملف الصفحة كما أعطته الإضافة `ExtensionEngine.image`. */
-export async function analyzePage({ path, sourceLang = 'auto' }) {
+export async function analyzePage({ path, sourceLang = 'auto', priority = 'high' }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.analyzePage({ path, sourceLang });
+  return p.analyzePage({ path, sourceLang, priority });
 }
 
 /** التبييض والرسم على الجهاز. يرجع مسار الصورة المترجمة. */
-export async function renderPage({ path, regions, leave = [] }) {
+export async function renderPage({ path, regions, leave = [], priority = 'high' }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.renderPage({ path, regions, leave });
+  return p.renderPage({ path, regions, leave, priority });
 }
 
 /**

@@ -128,6 +128,26 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     @Synchronized
     fun analyze(file: File, perf: Perf = Perf()): Analysis = analyzeImpl(file, perf, useCache = true)
 
+    /**
+     * التحليل ومصغّرة Luna معًا بقفل واحد (لا انتظار ثانٍ خلف صفحة أخرى). المصغّرة
+     * لصفحة فيها ما يُسأل عنه وحدها.
+     */
+    @Synchronized
+    fun analyzeForLuna(file: File, perf: Perf): Pair<Analysis, String> {
+        val a = analyzeImpl(file, perf, useCache = true)
+        val asks = a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
+        return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
+    }
+
+    /** نموذج التبييض يُحمَّل مسبقًا (أثناء انتظار Luna) لا حين تنتظره الصفحة. */
+    @Synchronized
+    fun warmInpainter(perf: Perf) {
+        if (store.isInstalled()) inpainter(perf)
+    }
+
+    @Synchronized
+    fun inpainterReady(): Boolean = inpainter != null
+
     private fun analyzeImpl(file: File, perf: Perf, useCache: Boolean): Analysis {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
@@ -144,8 +164,13 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             return Analysis(hash, img.width, img.height, emptyList(), emptyList()).also { if (useCache) analyses[hash] = it }
         }
         val gray = perf.time("gray") { img.gray() }
+        // القطع التي فيها نص وحدها: الحروف حول كل صندوق (بهامش المناطق)، والفقاعات بعرض
+        // الصفحة فوق الصندوق وتحته (فقاعة تحيط بالنص كاملة مع ما ينافسها في الدمج)
+        val texts = dets.filter { it.label.startsWith("text") }
+        val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
+        val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
         val gs = glyphs(perf)
-        val prob = perf.time("glyphs") { gs.probabilities(img) }
+        val prob = perf.time("glyphs") { gs.probabilities(img, glyphRows) }
         perf.count("glyphTiles", gs.tiles)
         val glyphFull = perf.time("glyphMask") {
             val m = ByteMask(img.width, img.height)
@@ -153,7 +178,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             m
         }
         val bs = bubbles(perf)
-        val bubbleList = perf.time("bubbles") { bs.segment(img) }
+        val bubbleList = perf.time("bubbles") { bs.segment(img, bubbleRows) }
         perf.count("bubbleTiles", bs.tiles)
         perf.count("bubbles", bubbleList.size)
         val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
