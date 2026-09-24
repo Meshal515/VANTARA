@@ -1173,9 +1173,13 @@ test('every source extension ships inside the app and matches its pinned hash', 
   // keiyoushi يحذف إصداراته القديمة مع كل بناء للفهرس: التنزيل وحده أسقط
   // المصادر الستة عشر كلها (HTTP 404). فكل إضافة مضمّنة في التطبيق، وبصمتها
   // هي نفسها المثبّتة في GeneratedSources.kt — لا نسخة قديمة تبقى بلا أن يُعرف.
-  const kotlin = read('android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt');
-  const specs = [...kotlin.matchAll(/pkg = "([^"]+)",[\s\S]*?sha256 = "([0-9a-f]{64})"/g)].map((m) => ({ pkg: m[1], sha: m[2] }));
-  assert.ok(specs.length >= 10, 'GeneratedSources.kt must list the Arabic sources');
+  const pinned = (file) => [...read(file).matchAll(/pkg = "([^"]+)",[\s\S]*?sha256 = "([0-9a-f]{64})"/g)].map((m) => ({ pkg: m[1], sha: m[2] }));
+  const arabic = pinned('android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt');
+  assert.ok(arabic.length >= 10, 'GeneratedSources.kt must list the Arabic sources');
+  // والإنجليزية المستقلة (تكملة) بنفس القاعدة: مضمّنة ومطابقة لبصمتها
+  const english = pinned('android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt');
+  assert.ok(english.length >= 5, 'FillerSources.kt must pin the English filler extensions');
+  const specs = [...arabic, ...english];
   const dir = 'android/app/src/main/assets/extensions';
   const tracked = trackedFiles().filter((p) => p.startsWith(`${dir}/`));
   const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));

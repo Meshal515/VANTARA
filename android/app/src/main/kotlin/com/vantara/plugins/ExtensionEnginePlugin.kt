@@ -115,6 +115,8 @@ class ExtensionEnginePlugin : Plugin() {
                 if (spec.blockedReason != null) continue
                 launch { runCatching { obtain(spec.pkg) } }
             }
+            // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
+            for (filler in FILLER_SOURCES) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
         }
     }
 
@@ -151,7 +153,7 @@ class ExtensionEnginePlugin : Plugin() {
         }
         // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
         for (filler in FILLER_SOURCES) {
-            val spec = SPIKE_SOURCES.firstOrNull { it.pkg == filler.pkg && it.blockedReason == null } ?: continue
+            val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
             val id = "${filler.pkg}@${filler.lang}"
             list.put(
                 JSObject()
@@ -619,10 +621,11 @@ class ExtensionEnginePlugin : Plugin() {
 
     private suspend fun load(sourceId: String): CatalogueSource {
         val (pkg, lang) = splitSourceId(sourceId)
-        val spec = SPIKE_SOURCES.firstOrNull { it.pkg == pkg }
-            ?: error("unknown sourceId: $sourceId")
+        val spec = packageSpec(pkg) ?: error("unknown sourceId: $sourceId")
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
-        if (lang != null && FILLER_SOURCES.none { it.pkg == pkg && it.lang == lang }) error("unknown sourceId: $sourceId")
+        val filler = if (lang == null) null else FILLER_SOURCES.firstOrNull { it.pkg == pkg && it.lang == lang } ?: error("unknown sourceId: $sourceId")
+        // الإنجليزية المستقلة ليست مصدرًا عربيًا: لا تُطلب إلا بلغتها
+        if (lang == null && SPIKE_SOURCES.none { it.pkg == pkg }) error("unknown sourceId: $sourceId")
 
         val all = packages[pkg] ?: loadPackage(spec).also { packages[pkg] = it }
         val source = if (lang == null) {
@@ -630,7 +633,8 @@ class ExtensionEnginePlugin : Plugin() {
             selectArabicSources(spec, all).firstOrNull()
                 ?: error("${spec.label}: لا مصدر عربي في الحزمة (catalogue=${all.size})")
         } else {
-            all.firstOrNull { it.lang.equals(lang, ignoreCase = true) }
+            // المعرّف المثبّت أولًا: MangaFire يحمل عشر لغات، فلا نعتمد ترتيبها
+            (filler?.sourceId?.let { id -> all.firstOrNull { it.id.toString() == id } } ?: all.firstOrNull { it.lang.equals(lang, ignoreCase = true) })
                 ?: error("${spec.label}: لا مصدر بلغة $lang في الحزمة")
         }
         loaded[sourceId] = source

@@ -20,7 +20,7 @@
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { AUTO_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
-import { editionRows } from './works.js';
+import { editionRows, sourceLabel } from './works.js';
 import {
   PRIORITY,
   chapterLabel,
@@ -1158,7 +1158,7 @@ export function openSmartReader(deps, ctx) {
       grid.style.marginTop = '12px';
       const pairs = [
         ['العمل', ctx.title],
-        ['المصدر', r.label || '—'],
+        ['المصدر', labelOf(r) || '—'],
         ['الصفحات', state.pages.length ? String(state.pages.length) : '—'],
         ['المترجم', r.chapter?.scanlator || '—'],
         ['تاريخ الرفع', r.chapter?.dateUpload ? new Date(r.chapter.dateUpload).toLocaleDateString('ar', { numberingSystem: 'latn' }) : '—'],
@@ -1173,6 +1173,10 @@ export function openSmartReader(deps, ctx) {
       }
       body.append(grid);
     });
+  }
+  /** اسم مصدر الفصل؛ صفّ القارئ الذكي الإنجليزي بلا اسم فيُؤخذ من نسخته. */
+  function labelOf(row) {
+    return row.label || sourceLabel(ctx.work?._editions?.find((e) => e.sourceId === row.sourceId)) || null;
   }
   /** نسخ هذا الفصل نفسه (بالرقم) عند مصادر العمل الأخرى. */
   function otherSources(row) {
@@ -1191,7 +1195,7 @@ export function openSmartReader(deps, ctx) {
       const note = el('p', null, others.length ? 'نفس الفصل عند مصادر ثانية. التبديل يكمّل من نفس الصفحة.' : 'هذا الفصل متوفر عند هذا المصدر فقط.');
       note.style.marginBottom = '8px';
       body.append(note);
-      body.append(sheetItem('layers', here.label || 'المصدر الحالي', closeSheet, { pressed: true }));
+      body.append(sheetItem('layers', labelOf(here) || 'المصدر الحالي', closeSheet, { pressed: true }));
       for (const r of others) {
         body.append(
           sheetItem('layers', r.label, () => {

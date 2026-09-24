@@ -8,7 +8,7 @@
  * 404 بين ليلة وضحاها — وسقطت المصادر الستة عشر كلها مرة واحدة على الجهاز.
  *
  * الآن تُحمَّل الإضافات مرة هنا، ويُتحقق من SHA-256 كل ملف مقابل
- * `GeneratedSources.kt` (المصدر الوحيد للبصمات)، وتُكتب في
+ * `GeneratedSources.kt` و`FillerSources.kt` (مصدرا البصمات الوحيدان)، وتُكتب في
  * `android/app/src/main/assets/extensions/<package>.apk`. التطبيق يقرأ منها أولًا،
  * والتنزيل يبقى احتياطًا لا طريقًا.
  */
@@ -18,7 +18,11 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const SOURCES = join(ROOT, 'android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt');
+const SOURCES = [
+  join(ROOT, 'android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt'),
+  // الإضافات الإنجليزية المستقلة (تكملة)
+  join(ROOT, 'android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt'),
+];
 const OUT = join(ROOT, 'android/app/src/main/assets/extensions');
 
 export function parseSpecs(kotlin) {
@@ -31,7 +35,7 @@ export function parseSpecs(kotlin) {
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 async function main() {
-  const specs = parseSpecs(await readFile(SOURCES, 'utf8'));
+  const specs = (await Promise.all(SOURCES.map((f) => readFile(f, 'utf8')))).flatMap(parseSpecs);
   if (!specs.length) throw new Error('no sources parsed from GeneratedSources.kt');
   await mkdir(OUT, { recursive: true });
   const keep = new Set(specs.map((s) => `${s.pkg}.apk`));

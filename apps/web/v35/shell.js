@@ -1068,7 +1068,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * المصدران الظاهران: المختار إن كان أحد المصادر، ثم الأكثر فصولًا.
    */
   function renderSources(w) {
-    const sources = [...(w._sources ?? [])].sort((a, b) => b.count - a.count);
+    // العربي أولًا دائمًا، ثم الأكثر فصولًا؛ الإنجليزي بعده بوسمه
+    const sources = [...(w._sources ?? [])].sort((a, b) => (a.lang === 'en') - (b.lang === 'en') || b.count - a.count);
     const failed = w._failedSources ?? [];
     q('sourcesBlock').hidden = sources.length + failed.length < 2;
     const pick = (value) => {

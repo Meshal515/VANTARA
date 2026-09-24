@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STATUS_BY_SMANGA, detailFields, isFiller, localizeFiller, seriesRefOf, sourceRank, toV35Work } from './works.js';
+import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work } from './works.js';
 import { mergeChapters } from '../lib/catalog.js';
 
 /**
@@ -111,5 +111,30 @@ describe('English fills only what Arabic lacks', () => {
 
   it('with no English edition nothing changes', () => {
     expect(mergeChapters([arabic(22)], { rank: sourceRank })).toHaveLength(22);
+  });
+
+  it('several English sources: the better one fills each chapter, and all stay after Arabic', () => {
+    const weeb = { sourceId: 'eu.kanade.tachiyomi.extension.en.weebcentral@en', label: 'Weeb Central', chapters: chapters(1, 60, 'wc') };
+    const here = { sourceId: 'eu.kanade.tachiyomi.extension.en.mangahere@en', label: 'Mangahere', chapters: chapters(1, 80, 'mh') };
+    const ids = [weeb, english, here].map((e) => e.sourceId);
+    expect(ids.map(sourceRank)).toEqual([...ids.map(sourceRank)].sort((a, b) => a - b));
+    for (const id of ids) expect(sourceRank(id)).toBeGreaterThan(sourceRank('some.unknown.arabic.source'));
+    const merged = mergeChapters([here, english, weeb, arabic(22)], { rank: sourceRank });
+    expect(merged).toHaveLength(80);
+    expect(from(merged, 22)).toBe(arabic(22).sourceId);
+    expect(from(merged, 23)).toBe(weeb.sourceId);
+    expect(from(merged, 61)).toBe(english.sourceId);
+    expect(from(merged, 75)).toBe(here.sourceId);
+  });
+
+  it('you can switch to an English source: its chapters read «الفصل N», labelled English, and still get translated', () => {
+    const work = { _editions: [arabic(22), english] };
+    const rows = editionRows(work, english.sourceId);
+    expect(rows).toHaveLength(72);
+    const first = rows.find((r) => r.number === 1);
+    expect(first.chapter.name).toBe('الفصل 1');
+    expect(first.label).toBe('MangaDex · إنجليزي');
+    expect(first.lang).toBe('en');
+    expect(sourceLabel({ sourceId: arabic(22).sourceId, label: 'Team X' })).toBe('Team X');
   });
 });
