@@ -14,7 +14,10 @@ import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, entryPages, readingRate, translatePage } from '../lib/translate.js';
 import { paintTranslation } from './translate-layer.js';
 
-const ON_KEY = 'vantara.translate.on';
+/** الأعمال التي فعّلت فيها الترجمة. الافتراضي: مقفلة — الإنجليزي يُعرض كما هو. */
+const WORKS_KEY = 'vantara.translate.works';
+/** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
+const MIN_READY = 0.3;
 const RATE_KEY = 'vantara.translate.readRate';
 const TL_RATE_KEY = 'vantara.translate.speed';
 
@@ -39,7 +42,16 @@ const store = {
 const queue = createQueue({ concurrency: 4 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
-export const translationOn = () => store.get(ON_KEY, true) !== false;
+const onWorks = () => new Set(store.get(WORKS_KEY, []));
+/** الترجمة التلقائية لهذا العمل: مقفلة ما لم تفعّلها أنت من صفحة العمل أو القارئ. */
+export const translationOn = (ref) => Boolean(ref) && onWorks().has(ref);
+export function setTranslation(ref, on) {
+  if (!ref) return;
+  const set = onWorks();
+  if (on) set.add(ref);
+  else set.delete(ref);
+  store.set(WORKS_KEY, [...set].slice(-500));
+}
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -59,7 +71,8 @@ export function createReaderTranslation(deps) {
   let gate = null;
   const last = { seg: null, index: 0, at: 0 };
 
-  root.classList.toggle('rd-tl-off', !translationOn());
+  const isOn = () => translationOn(ref);
+  root.classList.toggle('rd-tl-off', !isOn());
 
   function attach(seg) {
     if (!needsTranslation(seg.row)) return;
@@ -79,7 +92,7 @@ export function createReaderTranslation(deps) {
   }
 
   function enqueue(seg) {
-    if (!seg.tl || seg.tl.queued || stopped || disabledReason || !translationOn()) return;
+    if (!seg.tl || seg.tl.queued || stopped || disabledReason || !isOn()) return;
     seg.tl.queued = true;
     const chapterKey = keyOf(seg.row);
     seg.slots.forEach((slot, index) => {
@@ -152,13 +165,15 @@ export function createReaderTranslation(deps) {
     const measured = queue.rate();
     const speed = measured || store.get(TL_RATE_KEY, 6);
     if (measured) store.set(TL_RATE_KEY, measured);
-    return entryPages({ total: seg.slots.length - from, translatePerMin: speed, readPerMin: readingRate(store.get(RATE_KEY, [])) });
+    const total = seg.slots.length - from;
+    const adaptive = entryPages({ total, translatePerMin: speed, readPerMin: readingRate(store.get(RATE_KEY, [])) });
+    return Math.min(total, Math.max(Math.ceil(total * MIN_READY), adaptive));
   }
 
   /** فتح فصل يحتاج ترجمة: الانتظار حتى أقل جاهز يكفي، أو «اقرأ الآن». */
   function openGate(seg, from) {
     closeGate();
-    if (!seg.tl || !translationOn() || disabledReason) return;
+    if (!seg.tl || !isOn() || disabledReason) return;
     enqueue(seg);
     gate = { seg, from, el: el('div', 'rd-tl-gate') };
     gate.el.setAttribute('role', 'status');
@@ -194,14 +209,18 @@ export function createReaderTranslation(deps) {
 
   /** تشغيل/إيقاف من القائمة: الطبقات تختفي فورًا، والطابور يقف أو يكمل. */
   function toggle(segs, current) {
-    const on = !translationOn();
-    store.set(ON_KEY, on);
+    const on = !isOn();
+    setTranslation(ref, on);
     root.classList.toggle('rd-tl-off', !on);
     if (on) {
       disabledReason = null;
       for (const s of segs) if (s.tl) s.tl.queued = false;
-      if (current) focus(current, current.current, segs);
-      toast('الترجمة العربية شغّالة');
+      if (current) {
+        focus(current, current.current, segs);
+        // تفعيلٌ من داخل الفصل: نفس الانتظار، من الصفحة التي أنت فيها
+        openGate(current, current.current ?? 0);
+      }
+      toast('الترجمة العربية شغّالة لهذا العمل');
     } else {
       closeGate();
       toast('تعرض الأصل الحين');
@@ -213,5 +232,5 @@ export function createReaderTranslation(deps) {
     closeGate();
   }
 
-  return { attach, onImage, enqueue, focus, openGate, toggle, destroy, needs: needsTranslation, isOn: translationOn };
+  return { attach, onImage, enqueue, focus, openGate, toggle, destroy, needs: needsTranslation, isOn };
 }
