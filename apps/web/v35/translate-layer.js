@@ -110,88 +110,220 @@ const INK = 42;
 const MAX_CLEAN = 700;
 
 /**
- * نصٌّ فوق الرسم: تُغطّى رقعته برقعةٍ من الرسم نفسه، لا بلطخة.
- *
- * نبحث حول الصندوق عن إزاحةٍ تطابق فيها «حافة» الصندوق (شريط بعرض بضعة
- * بكسلات حوله) حافةَ الموضع المُزاح أكثر ما يمكن — فالتنقيط والخطوط
- * والتدرّج تستمر عبر الرقعة كأن النص لم يكن. ثم تُنسخ الرقعة وتُمزج أطرافها.
- * يرجع canvas بشفافية خارج الصندوق، أو null إن لم يوجد موضعٌ صالح.
+ * كل حفرة (حرفٌ ممسوح أو كلمة) بما يناسب ما حولها: حولها لونٌ واحد (جلد،
+ * سماء، لوحة) = تزحف الألوان من الحافة فتذوب الحفرة بلا أثر؛ حولها نقشٌ
+ * (خطوط، تنقيط، شعر) = رقعٌ صغيرة من الجوار تكمل النقش.
  */
-function patchFromArt(img, box) {
-  const band = 6;
-  const reachX = Math.max(40, Math.round(box.w * 0.9));
-  const reachY = Math.max(40, Math.round(box.h * 2.5));
-  const area = { x: Math.max(0, box.x - reachX), y: Math.max(0, box.y - reachY) };
-  area.w = Math.min(img.naturalWidth - area.x, box.w + reachX * 2);
-  area.h = Math.min(img.naturalHeight - area.y, box.h + reachY * 2);
-  const scale = Math.min(1, 900 / Math.max(area.w, area.h));
-  const W = Math.max(1, Math.round(area.w * scale));
-  const H = Math.max(1, Math.round(area.h * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const g = canvas.getContext('2d', { willReadFrequently: true });
-  g.drawImage(img, area.x, area.y, area.w, area.h, 0, 0, W, H);
-  const image = g.getImageData(0, 0, W, H);
-  const d = image.data;
-  const bx = Math.round((box.x - area.x) * scale);
-  const by = Math.round((box.y - area.y) * scale);
-  const bw = Math.max(1, Math.round(box.w * scale));
-  const bh = Math.max(1, Math.round(box.h * scale));
-  // بكسلات الشريط حول الصندوق (عيّنة كل بكسلين تكفي للمطابقة)
-  const ring = [];
-  for (let y = by - band; y < by + bh + band; y += 2) {
-    for (let x = bx - band; x < bx + bw + band; x += 2) {
-      if (x < 0 || y < 0 || x >= W || y >= H) continue;
-      if (x >= bx && x < bx + bw && y >= by && y < by + bh) continue;
-      ring.push(x, y);
-    }
-  }
-  if (ring.length < 20) return null;
-  let best = null;
-  let bestCost = Infinity;
-  const step = Math.max(1, Math.round(Math.min(bw, bh) / 12));
-  for (let dy = -by + band; dy <= H - (by + bh + band); dy += step) {
-    for (let dx = -bx + band; dx <= W - (bx + bw + band); dx += step) {
-      // المصدر لا يلمس الصندوق نفسه: رقعةٌ من الرسم لا من النص
-      if (Math.abs(dx) < bw + band && Math.abs(dy) < bh + band) continue;
-      let cost = 0;
-      for (let k = 0; k < ring.length && cost < bestCost; k += 2) {
-        const a = (ring[k + 1] * W + ring[k]) * 4;
-        const b = ((ring[k + 1] + dy) * W + ring[k] + dx) * 4;
-        cost += Math.abs(d[a] - d[b]) + Math.abs(d[a + 1] - d[b + 1]) + Math.abs(d[a + 2] - d[b + 2]);
-      }
-      if (cost < bestCost) {
-        bestCost = cost;
-        best = { dx, dy };
+function fillHoles(d, w, h, mask) {
+  const seen = new Uint8Array(w * h);
+  const stack = [];
+  for (let s = 0; s < mask.length; s++) {
+    if (!mask[s] || seen[s]) continue;
+    const comp = [];
+    stack.push(s);
+    seen[s] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      comp.push(p);
+      const x = p % w;
+      const y = (p / w) | 0;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1]) {
+        if (q >= 0 && mask[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
       }
     }
+    // تباين الحافة: بكسلاتٌ معروفة تلاصق الحفرة
+    const ring = [];
+    const inComp = new Set(comp);
+    for (const p of comp) {
+      const x = p % w;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+        if (q >= 0 && q < mask.length && !mask[q] && !inComp.has(q)) ring.push(q);
+      }
+    }
+    const one = new Uint8Array(w * h);
+    for (const p of comp) one[p] = 1;
+    let spread = 0;
+    if (ring.length) {
+      const med = [0, 1, 2].map((c) => ring.map((q) => d[q * 4 + c]).sort((a, b) => a - b)[ring.length >> 1]);
+      // نسبة الحافة البعيدة عن لونها الغالب: خطوطٌ قليلة فوق لونٍ واحد نقشٌ أيضًا
+      for (const q of ring) if ((Math.abs(d[q * 4] - med[0]) + Math.abs(d[q * 4 + 1] - med[1]) + Math.abs(d[q * 4 + 2] - med[2])) / 3 > 28) spread += 1;
+      spread /= ring.length;
+    }
+    if (spread < 0.15) onionFill(d, w, h, one);
+    else inpaintPatches(d, w, h, one);
+    for (const p of comp) mask[p] = 0;
   }
-  if (!best) return null;
-  // النسخ مع مزجٍ ناعم عند الأطراف (feather) كي لا تُرى الحدود
-  const out = g.createImageData(W, H);
-  const o = out.data;
-  const feather = 4;
-  for (let y = by - feather; y < by + bh + feather; y++) {
-    for (let x = bx - feather; x < bx + bw + feather; x++) {
-      if (x < 0 || y < 0 || x >= W || y >= H) continue;
-      const sx = x + best.dx;
-      const sy = y + best.dy;
-      if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
-      const inside = Math.min(x - (bx - feather), bx + bw + feather - 1 - x, y - (by - feather), by + bh + feather - 1 - y);
-      const alpha = Math.max(0, Math.min(1, inside / feather));
-      const i = (y * W + x) * 4;
-      const j = (sy * W + sx) * 4;
-      o[i] = d[j];
-      o[i + 1] = d[j + 1];
-      o[i + 2] = d[j + 2];
-      o[i + 3] = Math.round(alpha * 255);
+}
+
+/** ترميمٌ يزحف من الحافة: كل بكسل يأخذ متوسط جيرانه المعروفين، طبقةً بعد طبقة. */
+function onionFill(d, w, h, mask) {
+  const known = new Uint8Array(w * h);
+  for (let p = 0; p < known.length; p++) known[p] = mask[p] ? 0 : 1;
+  for (let layer = 0; layer < 600; layer++) {
+    const fill = [];
+    for (let p = 0; p < known.length; p++) {
+      if (known[p]) continue;
+      const x = p % w;
+      const y = (p / w) | 0;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const q = ny * w + nx;
+          if (!known[q]) continue;
+          r += d[q * 4];
+          g += d[q * 4 + 1];
+          b += d[q * 4 + 2];
+          n += 1;
+        }
+      }
+      if (n) fill.push(p, r / n, g / n, b / n);
+    }
+    if (!fill.length) break;
+    for (let k = 0; k < fill.length; k += 4) {
+      const p = fill[k];
+      d[p * 4] = fill[k + 1];
+      d[p * 4 + 1] = fill[k + 2];
+      d[p * 4 + 2] = fill[k + 3];
+      known[p] = 1;
     }
   }
-  g.putImageData(out, 0, 0);
-  canvas.className = 'rd-tl-clean';
-  canvas.box = area;
-  return canvas;
+}
+
+/**
+ * ترميمٌ بالرقع (على طريقة Criminisi، مبسّطة): الحفرة تُملأ من حافتها إلى
+ * داخلها، كل مرة رقعة 9×9 حول أوثق نقطة على الحافة، منسوخةٌ من أقرب موضع في
+ * الجوار تطابق بكسلاته المعروفة ما حول النقطة. الرقعة صغيرة فلا تتكرر قبعةٌ
+ * أو وجه، لكن الخطوط والتنقيط والتدرّج تستمر كأن النص لم يكن.
+ * `mask`: 1 = يُملأ. يعدّل `d` في مكانه.
+ */
+function inpaintPatches(d, w, h, mask) {
+  const R = 4;
+  const S = 28;
+  const known = new Uint8Array(w * h);
+  let left = 0;
+  for (let p = 0; p < known.length; p++) {
+    known[p] = mask[p] ? 0 : 1;
+    if (mask[p]) left += 1;
+  }
+  if (!left) return;
+  // مصدرٌ صالح = رقعته كلها معروفة من الأصل (صورة تكاملية للمجهول)
+  const holes = new Int32Array((w + 1) * (h + 1));
+  for (let y = 1; y <= h; y++) {
+    let row = 0;
+    for (let x = 1; x <= w; x++) {
+      row += mask[(y - 1) * w + x - 1] ? 1 : 0;
+      holes[y * (w + 1) + x] = row + holes[(y - 1) * (w + 1) + x];
+    }
+  }
+  const clean = (cx, cy) => {
+    const x0 = cx - R;
+    const y0 = cy - R;
+    const x1 = cx + R + 1;
+    const y1 = cy + R + 1;
+    if (x0 < 0 || y0 < 0 || x1 > w || y1 > h) return false;
+    return holes[y1 * (w + 1) + x1] - holes[y0 * (w + 1) + x1] - holes[y1 * (w + 1) + x0] + holes[y0 * (w + 1) + x0] === 0;
+  };
+  let guard = 0;
+  while (left > 0 && guard++ < 20000) {
+    // أوثق نقطة على الحافة: أكثر رقعتها معروف
+    let best = -1;
+    let bestKnown = -1;
+    for (let p = 0; p < known.length; p++) {
+      if (known[p]) continue;
+      const x = p % w;
+      const y = (p / w) | 0;
+      if (!((x > 0 && known[p - 1]) || (x < w - 1 && known[p + 1]) || (y > 0 && known[p - w]) || (y < h - 1 && known[p + w]))) continue;
+      let k = 0;
+      for (let dy = -R; dy <= R; dy += 2) {
+        for (let dx = -R; dx <= R; dx += 2) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && known[ny * w + nx]) k += 1;
+        }
+      }
+      if (k > bestKnown) {
+        bestKnown = k;
+        best = p;
+      }
+    }
+    if (best < 0) break;
+    const tx = best % w;
+    const ty = (best / w) | 0;
+    // أقرب رقعة تطابق المعروف حولها (بخطوتين، ومقارنة كل بكسلين للسرعة)
+    let src = -1;
+    let cost = Infinity;
+    for (let sy = Math.max(R, ty - S); sy <= Math.min(h - R - 1, ty + S); sy += 2) {
+      for (let sx = Math.max(R, tx - S); sx <= Math.min(w - R - 1, tx + S); sx += 2) {
+        if (!clean(sx, sy)) continue;
+        let c = 0;
+        for (let dy = -R; dy <= R && c < cost; dy += 1) {
+          const yy = ty + dy;
+          if (yy < 0 || yy >= h) continue;
+          for (let dx = -R; dx <= R; dx += 1) {
+            const xx = tx + dx;
+            if (xx < 0 || xx >= w) continue;
+            const a = yy * w + xx;
+            if (!known[a]) continue;
+            const i = a * 4;
+            const j = ((sy + dy) * w + sx + dx) * 4;
+            c += Math.abs(d[i] - d[j]) + Math.abs(d[i + 1] - d[j + 1]) + Math.abs(d[i + 2] - d[j + 2]);
+          }
+        }
+        // تفضيلٌ خفيف للأقرب: الجار أصدق من البعيد المشابه
+        c += (Math.abs(sx - tx) + Math.abs(sy - ty)) * 6;
+        if (c < cost) {
+          cost = c;
+          src = sy * w + sx;
+        }
+      }
+    }
+    const sxx = src >= 0 ? src % w : -1;
+    const syy = src >= 0 ? (src / w) | 0 : -1;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const xx = tx + dx;
+        const yy = ty + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const a = yy * w + xx;
+        if (known[a]) continue;
+        const i = a * 4;
+        if (src >= 0) {
+          const j = ((syy + dy) * w + sxx + dx) * 4;
+          d[i] = d[j];
+          d[i + 1] = d[j + 1];
+          d[i + 2] = d[j + 2];
+        } else {
+          // لا مصدر صالح قريب: متوسط الجيران المعروفين
+          let r = 0;
+          let gg = 0;
+          let b = 0;
+          let n = 0;
+          for (const q of [a - 1, a + 1, a - w, a + w]) {
+            if (q < 0 || q >= known.length || !known[q]) continue;
+            r += d[q * 4];
+            gg += d[q * 4 + 1];
+            b += d[q * 4 + 2];
+            n += 1;
+          }
+          if (!n) continue;
+          d[i] = r / n;
+          d[i + 1] = gg / n;
+          d[i + 2] = b / n;
+        }
+        known[a] = 1;
+        left -= 1;
+      }
+    }
+  }
 }
 
 /**
@@ -205,10 +337,6 @@ function patchFromArt(img, box) {
  * يرجع canvas يغطي الصندوق مع هامشه، وموضعه بنسب الصورة (`canvas.box`).
  */
 export function cleanText(img, box, color, { onArt = false } = {}) {
-  if (onArt) {
-    const patched = patchFromArt(img, box);
-    if (patched) return patched;
-  }
   // هامشٌ أعرض من أطراف الحروف: إطاره الخارجي هو ما يبدأ منه الترميم، فيجب أن يكون نظيفًا
   const margin = Math.max(10, Math.round(Math.min(box.w, box.h) * 0.12));
   const crop = {
@@ -261,14 +389,45 @@ export function cleanText(img, box, color, { onArt = false } = {}) {
     return x <= 2 || y <= 2 || x >= w - 3 || y >= h - 3;
   };
   if (onArt) {
-    // نص فوق الرسم: لا حدّ فقاعة نحميه، وخطوط الرسم تمرّ بين الحروف فتربطها بالخارج.
-    // يُمسح الصندوق كله ويُرمَّم من حوله — رقعةٌ ناعمة لا بقايا حروف
-    const bx0 = Math.max(1, Math.round((box.x - crop.x) * scale) - 2);
-    const by0 = Math.max(1, Math.round((box.y - crop.y) * scale) - 2);
-    const bx1 = Math.min(w - 1, Math.round((box.x - crop.x + box.w) * scale) + 2);
-    const by1 = Math.min(h - 1, Math.round((box.y - crop.y + box.h) * scale) + 2);
-    for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) mask[y * w + x] = 1;
+    // نص فوق الرسم: الحروف وحدها ومعها خطّها المحيط، لا الصندوق. نسخ رقعة من
+    // مكانٍ آخر كرّر قبعةً ووجهًا على جوال، ومسح الصندوق كله لطّخ الرسم؛ فيُمسح
+    // ما هو حرفٌ فعلًا (بحجم حرف وتحيط به خلفية تباينه) ويُرمَّم من جيرانه
     ink.fill(0);
+    const Lc = new Float32Array(w * h);
+    for (let p = 0, i = 0; p < Lc.length; p++, i += 4) Lc[p] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+    const bw = Math.max(2, (box.w * scale) | 0);
+    const bh = Math.max(2, (box.h * scale) | 0);
+    let pick = null;
+    for (const dark of [true, false]) {
+      const inBox = findGlyphs(Lc, w, h, dark, Math.max(6, bw * 0.95), Math.max(6, bh * 1.2)).filter(
+        (c) => c.cx >= tx0 && c.cx <= tx1 && c.cy >= ty0 && c.cy <= ty1,
+      );
+      const mass = inBox.reduce((a, c) => a + c.n, 0);
+      if (!pick || mass > pick.mass) pick = { list: inBox, mass, dark };
+    }
+    if (pick?.list.length) {
+      const heights = pick.list.map((c) => c.y1 - c.y0 + 1).sort((a, b) => a - b);
+      const glyphH = heights[heights.length >> 1] || 6;
+      for (const c of pick.list) for (const p of c.px) mask[p] = 1;
+      // الخط المحيط بالحرف (أسود حول الأبيض أو العكس) يُمسح معه بكامل سُمكه:
+      // النمو يتبع بكسلات لونه المعاكس وحدها، ثم حلقتان للحواف الناعمة
+      const outline = Math.max(2, Math.round(glyphH * 0.3));
+      const opposite = pick.dark ? (p) => Lc[p] > 0.7 : (p) => Lc[p] < 0.3;
+      const grow = (only) => {
+        const grown = new Uint8Array(mask);
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const p = y * w + x;
+            if (mask[p] || (only && !only(p))) continue;
+            if (mask[p - 1] || mask[p + 1] || mask[p - w] || mask[p + w]) grown[p] = 1;
+          }
+        }
+        mask = grown;
+      };
+      for (let pass = 0; pass < outline; pass++) grow(opposite);
+      grow(null);
+      grow(null);
+    }
   }
   for (let start = 0; start < ink.length; start++) {
     if (!ink[start] || seen[start]) continue;
@@ -321,6 +480,16 @@ export function cleanText(img, box, color, { onArt = false } = {}) {
     mask = grown;
   }
 
+  // ٢أ. فوق الرسم: ترميمٌ برقعٍ صغيرة من الجوار (لا لون متوسط يطمس الخطوط والتنقيط)
+  if (onArt) {
+    const erasedArt = new Uint8Array(mask);
+    fillHoles(d, w, h, mask);
+    for (let p = 0; p < erasedArt.length; p++) d[p * 4 + 3] = erasedArt[p] ? 255 : 0;
+    g.putImageData(image, 0, 0);
+    canvas.className = 'rd-tl-clean';
+    canvas.box = crop;
+    return canvas;
+  }
   // ٢. ترميم «قشرة البصلة»: الحافة المعروفة تزحف إلى الداخل. المصدر هو الخلفية
   // لا خطوط الحبر المحفوظة، فلا يسيل سواد الحدّ إلى داخل الفقاعة
   const erased = new Uint8Array(mask);
@@ -381,6 +550,71 @@ export function cleanText(img, box, color, { onArt = false } = {}) {
 }
 
 /**
+ * الحروف في صورة سطوع `L` (W×H): مكوّنات «حبر» صغيرة تحيط بها خلفية تباينها
+ * بوضوح. `dark`: حروف داكنة على فاتح، وإلا فاتحة على داكن. خصلة شعر أو خط
+ * لوحة أو حدّ فقاعة أكبر من حرف فتُستبعد بالحجم (`maxW`/`maxH`).
+ * يرجع لكل حرف صندوقه ومركزه وعدد بكسلاته، ومعها بكسلاته (`px`).
+ */
+function findGlyphs(L, W, H, dark, maxW, maxH) {
+  const ink = new Uint8Array(W * H);
+  for (let p = 0; p < ink.length; p++) ink[p] = dark ? (L[p] < 0.45 ? 1 : 0) : L[p] > 0.75 ? 1 : 0;
+  // الخلفية حول الحرف تباينه بوضوح: فاتحة حول الداكن، وأغمق بكثير حول الأبيض
+  const bright = (p) => (dark ? L[p] > 0.72 : L[p] < 0.5);
+  const seen = new Uint8Array(W * H);
+  const out = [];
+  const stack = [];
+  for (let s = 0; s < ink.length; s++) {
+    if (!ink[s] || seen[s]) continue;
+    let x0 = W;
+    let y0 = H;
+    let x1 = -1;
+    let y1 = -1;
+    const px = [];
+    stack.push(s);
+    seen[s] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      px.push(p);
+      const x = p % W;
+      const y = (p / W) | 0;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (x > 0 && ink[p - 1] && !seen[p - 1]) (seen[p - 1] = 1), stack.push(p - 1);
+      if (x < W - 1 && ink[p + 1] && !seen[p + 1]) (seen[p + 1] = 1), stack.push(p + 1);
+      if (y > 0 && ink[p - W] && !seen[p - W]) (seen[p - W] = 1), stack.push(p - W);
+      if (y < H - 1 && ink[p + W] && !seen[p + W]) (seen[p + W] = 1), stack.push(p + W);
+    }
+    const n = px.length;
+    const cw = x1 - x0 + 1;
+    const ch = y1 - y0 + 1;
+    if (n < 3 || cw > maxW || ch > maxH || (cw < 2 && ch < 2)) continue;
+    // حرفٌ تحيط به خلفية تباينه: إطار حول صندوقه، أغلبه كذلك
+    let ring = 0;
+    let lit = 0;
+    const pad = 2;
+    for (let x = x0 - pad; x <= x1 + pad; x++) {
+      for (const y of [y0 - pad, y1 + pad]) {
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        ring += 1;
+        if (bright(y * W + x)) lit += 1;
+      }
+    }
+    for (let y = y0 - pad; y <= y1 + pad; y++) {
+      for (const x of [x0 - pad, x1 + pad]) {
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        ring += 1;
+        if (bright(y * W + x)) lit += 1;
+      }
+    }
+    if (!ring || lit / ring < 0.6) continue;
+    out.push({ x0, y0, x1, y1, n, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, px });
+  }
+  return out;
+}
+
+/**
  * صندوق النموذج تقريبي، وقد يزيح فقاعةً كاملة (رأيناه على جوال: أعلى من
  * الفقاعة بطولها، فبُيّض الرسم وبقي الإنجليزي). فلا نثق به أعمى: نبحث حوله
  * عن الحروف نفسها ونضع الصندوق عليها.
@@ -425,66 +659,8 @@ export function snapBox(img, box, claimed = []) {
       return claimed.some((c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
     };
 
-    const glyphs = (dark) => {
-      const ink = new Uint8Array(W * H);
-      for (let p = 0; p < ink.length; p++) ink[p] = dark ? (L[p] < 0.45 ? 1 : 0) : L[p] > 0.75 ? 1 : 0;
-      // الخلفية حول الحرف تباينه بوضوح: فاتحة حول الداكن، وأغمق بكثير حول الأبيض
-      const bright = (p) => (dark ? L[p] > 0.72 : L[p] < 0.5);
-      const seen = new Uint8Array(W * H);
-      const out = [];
-      const stack = [];
-      for (let s = 0; s < ink.length; s++) {
-        if (!ink[s] || seen[s]) continue;
-        let x0 = W;
-        let y0 = H;
-        let x1 = -1;
-        let y1 = -1;
-        let n = 0;
-        stack.push(s);
-        seen[s] = 1;
-        while (stack.length) {
-          const p = stack.pop();
-          n += 1;
-          const x = p % W;
-          const y = (p / W) | 0;
-          if (x < x0) x0 = x;
-          if (x > x1) x1 = x;
-          if (y < y0) y0 = y;
-          if (y > y1) y1 = y;
-          if (x > 0 && ink[p - 1] && !seen[p - 1]) (seen[p - 1] = 1), stack.push(p - 1);
-          if (x < W - 1 && ink[p + 1] && !seen[p + 1]) (seen[p + 1] = 1), stack.push(p + 1);
-          if (y > 0 && ink[p - W] && !seen[p - W]) (seen[p - W] = 1), stack.push(p - W);
-          if (y < H - 1 && ink[p + W] && !seen[p + W]) (seen[p + W] = 1), stack.push(p + W);
-        }
-        const cw = x1 - x0 + 1;
-        const ch = y1 - y0 + 1;
-        if (n < 3 || cw > maxW || ch > maxH || (cw < 2 && ch < 2)) continue;
-        // حرفٌ تحيط به خلفية فاتحة: إطار حول صندوقه، أغلبه فاتح
-        let ring = 0;
-        let lit = 0;
-        const pad = 2;
-        for (let x = x0 - pad; x <= x1 + pad; x++) {
-          for (const y of [y0 - pad, y1 + pad]) {
-            if (x < 0 || y < 0 || x >= W || y >= H) continue;
-            ring += 1;
-            if (bright(y * W + x)) lit += 1;
-          }
-        }
-        for (let y = y0 - pad; y <= y1 + pad; y++) {
-          for (const x of [x0 - pad, x1 + pad]) {
-            if (x < 0 || y < 0 || x >= W || y >= H) continue;
-            ring += 1;
-            if (bright(y * W + x)) lit += 1;
-          }
-        }
-        if (!ring || lit / ring < 0.6) continue;
-        const cx = (x0 + x1) / 2;
-        const cy = (y0 + y1) / 2;
-        if (claimed.length && isClaimed(cx, cy)) continue;
-        out.push({ x0, y0, x1, y1, n, cx, cy });
-      }
-      return out;
-    };
+    const glyphs = (dark) =>
+      findGlyphs(L, W, H, dark, maxW, maxH).filter((c) => !(claimed.length && isClaimed(c.cx, c.cy)));
 
     // الموضع الأصلي داخل النافذة
     const ox = Math.round((box.x - ax) * scale);
@@ -569,8 +745,16 @@ export function snapBox(img, box, claimed = []) {
       const glyphH = heights[heights.length >> 1] || 6;
       for (let pass = 0; pass < 6; pass++) {
         let grew = false;
+        // سقف النمو: لا يتجاوز صندوق النموذج بأكثر من نصفه — خصلة شعر أو تفصيلة
+        // رسمٍ بحجم حرف قرب النص لا تجرّ الصندوق إلى الرسم
+        const lx0 = px - bw * 0.45;
+        const ly0 = py - bh * 0.6;
+        const lx1 = px + bw * 1.45;
+        const ly1 = py + bh * 1.6;
         for (const c of list) {
-          if (inside.has(c) || c.y1 - c.y0 + 1 > glyphH * 1.8) continue;
+          const ch = c.y1 - c.y0 + 1;
+          if (inside.has(c) || ch > glyphH * 1.6 || ch < glyphH * 0.35) continue;
+          if (c.x0 < lx0 || c.y0 < ly0 || c.x1 > lx1 || c.y1 > ly1) continue;
           const gapX = Math.max(0, c.x0 - x1, x0 - c.x1);
           const gapY = Math.max(0, c.y0 - y1, y0 - c.y1);
           if (gapX > glyphH * 0.9 || gapY > glyphH * 1.15) continue;
