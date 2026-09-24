@@ -287,7 +287,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
-      // رمز الخطأ من الخادم (`daily_limit`، `translation_not_configured`…) إن وُجد
+      // رمز الخطأ من الخادم (`weekly_limit`، `translation_not_configured`…) إن وُجد
       error.translationError = await response
         .clone()
         .json()
