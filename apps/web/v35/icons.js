@@ -69,6 +69,7 @@ const P = {
   zoom: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4M11 8.3v5.4M8.3 11h5.4"/>',
   gap: '<rect x="5" y="3.5" width="14" height="6.5" rx="1.5"/><rect x="5" y="14" width="14" height="6.5" rx="1.5"/>',
   layers: '<path d="M12 4 20.5 8.5 12 13 3.5 8.5Z"/><path d="m3.5 12.8 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5" opacity=".55"/>',
+  translate: '<path d="M4 5.5h9M8.5 3.5v2M6 5.5c.6 3.3 2.7 6 6 7.5M11 5.5c-.7 3.6-3.3 6.6-7 8"/><path d="m12.5 20.5 4-9.5 4 9.5M14 17h5"/>',
   skipNext: '<path d="M16 6.5 9.5 12l6.5 5.5Z"/><path d="M7.5 6.5v11"/>',
   skipPrev: '<path d="m8 6.5 6.5 5.5L8 17.5Z"/><path d="M16.5 6.5v11"/>',
 

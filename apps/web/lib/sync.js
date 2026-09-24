@@ -287,6 +287,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
+      // رمز الخطأ من الخادم (`daily_limit`، `translation_not_configured`…) إن وُجد
+      error.translationError = await response
+        .clone()
+        .json()
+        .then((b) => (typeof b?.error === 'string' ? b.error : null))
+        .catch(() => null);
       // «جهاز غير موثوق» يختلف عن انقطاع: الشاشة تعرض رمز الاعتماد بدل «حاول مرة أخرى»
       error.code = (await response.json().catch(() => null))?.error ?? null;
       throw error;
@@ -819,6 +825,20 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  /**
+   * طلب الترجمة: يرجع `{ status, body }` ولا يرمي على 4xx/5xx — القارئ يحتاج
+   * سبب الرفض (غير مفعّلة، الحد اليومي، مشغول) لا مجرد «فشل».
+   */
+  async function translation(path, options = {}) {
+    if (!token) return { status: 401, body: { error: 'unauthorized' } };
+    try {
+      return { status: 200, body: await request(path, options) };
+    } catch (error) {
+      if (!error?.status) return { status: 0, body: { error: 'offline' } };
+      return { status: error.status, body: { error: error.translationError ?? `http_${error.status}` } };
+    }
+  }
+
   async function stats(userId) {
     if (!token) return null;
     try {
@@ -961,6 +981,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     uploadMedia,
     topWorks,
     stats,
+    translation,
     pendingProgress,
     health,
     retryQuarantined,

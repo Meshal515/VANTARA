@@ -36,6 +36,12 @@ export interface Env {
   VANTARA_DEVICE_PEPPER: string;
   /** أصول مسموح لها بالطلب. فاصلة بينها. */
   ALLOWED_ORIGINS?: string;
+  /** اختياري: مفتاح OpenAI للترجمة. غيابه = «الترجمة غير مفعّلة»، والباقي يعمل. */
+  OPENAI_API_KEY?: string;
+  /** اختياري: النموذج (الافتراضي gpt-6-luna)، ومستوى التفكير، وحد الصفحات اليومي لكل حساب. */
+  TRANSLATE_MODEL?: string;
+  TRANSLATE_EFFORT?: string;
+  TRANSLATE_DAILY_PAGES?: string;
 }
 
 export interface ExecutionContext {

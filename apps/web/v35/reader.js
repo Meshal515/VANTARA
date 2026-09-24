@@ -36,6 +36,7 @@ import {
 import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
+import { createReaderTranslation } from './reader-translate.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -238,6 +239,18 @@ export function openSmartReader(deps, ctx) {
 
   const pagesOf = (row) => sharedPages(engine, row);
 
+  // الترجمة العربية للفصول غير العربية (التكملة الإنجليزية): طابورها يتبع موضعك
+  const tl = createReaderTranslation({
+    sync,
+    ref,
+    title: ctx.title,
+    root,
+    toast: (text) => toast(text),
+    keyOf,
+    getImage: (seg, index) =>
+      scheduler.request(imageKey(seg.row, index), { sourceId: seg.row.sourceId, page: seg.slots[index].page }, PRIORITY.CHAPTER),
+  });
+
   /**
    * صفحات الفصل، ومن مصدر آخر تلقائيًا إن تعذّر مصدره: المستخدم لا يختار
    * بديلًا بيده. نفس الفصل (بالرقم) من المصادر الأخرى بترتيبها.
@@ -300,6 +313,8 @@ export function openSmartReader(deps, ctx) {
     seg.current = start;
     seg.furthest = start;
     enterSegment(seg);
+    // فصلٌ يحتاج ترجمة: ننتظر أقل جاهز يكفي، أو «اقرأ الآن»
+    tl.openGate(seg, start);
     if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);
@@ -351,6 +366,7 @@ export function openSmartReader(deps, ctx) {
     seg.end = el('section', 'rd-end');
     seg.el.append(seg.end);
     paintBoundary(seg);
+    tl.attach(seg);
     return seg;
   }
 
@@ -372,6 +388,7 @@ export function openSmartReader(deps, ctx) {
     }
     state.seg = seg;
     announce(seg.row);
+    tl.focus(seg, seg.current, segs);
     if (!seg.requested) requestSegment(seg, seg.current);
     updateProgress();
     // من أول الفصل لا من آخره: التالي يصل قبل أن تصل إليه
@@ -481,6 +498,7 @@ export function openSmartReader(deps, ctx) {
       const src = await scheduler.request(imageKey(row, index), { sourceId: row.sourceId, page: slot.page }, priority);
       if (token !== state.token) return;
       await placeImage(slot, src);
+      tl.onImage(seg, index);
     } catch (error) {
       if (error?.cancelled || token !== state.token) return;
       slot.frame.replaceChildren(pageError(seg, index, error));
@@ -640,6 +658,7 @@ export function openSmartReader(deps, ctx) {
     }
     updateProgress();
     afterProgress();
+    tl.focus(seg, index, segs);
   }
   function updateProgress() {
     const n = state.pages.length;
@@ -1046,6 +1065,14 @@ export function openSmartReader(deps, ctx) {
       body.append(t);
       body.append(sheetItem('sliders', 'إعدادات القارئ', openSettings));
       body.append(sheetItem('info', 'معلومات الفصل', openInfo));
+      if (tl.needs(state.row)) {
+        body.append(
+          sheetItem('translate', 'الترجمة العربية', () => {
+            tl.toggle(segs, state.seg);
+            closeSheet();
+          }, { pressed: tl.isOn() }),
+        );
+      }
       body.append(sheetItem('layers', 'المصدر', openSourceSheet, { trail: state.row.label ?? '' }));
       if (deps.friends) body.append(sheetItem('share', 'رشّح هذا الفصل', openShareChapter));
       if (deps.report) body.append(sheetItem('flag', 'بلّغ عن مشكلة', openReport));
@@ -1287,6 +1314,7 @@ export function openSmartReader(deps, ctx) {
     clearTimeout(state.progressTimer);
     deps.setReading?.(null);
     deps.immersive?.(false);
+    tl.destroy();
   }
 
   applySettings();

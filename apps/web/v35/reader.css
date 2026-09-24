@@ -572,3 +572,52 @@
   color: var(--text-3);
   font-size: var(--fs-caption);
 }
+
+/* ── الترجمة العربية فوق الصفحة (translate-layer.js) ──
+   الإطار حاوية: حجم الخط بـcqw يتبع عرض الصفحة مهما تغيّر */
+.v35 .rd-page { container-type: inline-size; }
+.v35 .rd-tl { position: absolute; inset: 0; pointer-events: none; }
+.v35.rd-tl-off .rd-tl { display: none; }
+.v35 .rd-tl-clean { position: absolute; display: block; }
+.v35 .rd-tl-box {
+  position: absolute;
+  display: flex; align-items: center; justify-content: center;
+  padding: 2% 4%;
+  box-sizing: border-box;
+  text-align: center;
+}
+/* فوق الرسم: خلفية بلون المكان وأطراف ذائبة (box-shadow من لونها) لا حافة حادّة */
+.v35 .rd-tl-onart { border-radius: 30%; }
+.v35 .rd-tl-onart.rd-tl-narration, .v35 .rd-tl-onart.rd-tl-sign { border-radius: 6px; }
+.v35 .rd-tl-text {
+  font-family: 'Noto Sans Arabic', system-ui, sans-serif;
+  font-weight: 700;
+  line-height: 1.22;
+  /* الكلمة العربية لا تنكسر أبدًا (حروفٌ مقطّعة لا تُقرأ): يصغر الخط بدلها،
+     والأسطر متوازنة فلا تبقى كلمة وحدها في سطر */
+  overflow-wrap: normal;
+  word-break: keep-all;
+  text-wrap: balance;
+  max-width: 100%;
+  text-shadow: 0 0 2px var(--tl-halo, transparent), 0 0 3px var(--tl-halo, transparent), 0 0 5px var(--tl-halo, transparent);
+}
+.v35 .rd-tl-thought .rd-tl-text, .v35 .rd-tl-narration .rd-tl-text { font-weight: 600; }
+
+/* «نجهّز الفصل بالعربي»: فوق الصفحات، لا يحجب الشريط */
+.v35 .rd-tl-gate {
+  position: absolute; inset: 0; z-index: 30;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(5, 4, 10, 0.72);
+  backdrop-filter: blur(6px);
+}
+.v35 .rd-tl-card {
+  width: min(320px, 100%);
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 22px 20px;
+  border-radius: 20px;
+  background: var(--surface-2, #16131f);
+  box-shadow: inset 0 0 0 1px rgba(143, 92, 255, 0.35);
+  text-align: center;
+}
+.v35 .rd-tl-card strong { font-size: 17px; }
+.v35 .rd-tl-line { color: var(--text-2, #bab6c6); font-size: 13px; }

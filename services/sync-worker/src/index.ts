@@ -1,15 +1,16 @@
 /**
  * VANTARA sync worker.
  *
- * نطاقه: الطبقة الاجتماعية والتقدم والإحصائيات لثلاثة مستخدمين. لا ترجمة ولا
- * OCR ولا صور فصول — الفصول المنزّلة وكاش الصور وكوكيز المصادر تبقى على
- * الهاتف ولا تمرّ من هنا.
+ * نطاقه: الطبقة الاجتماعية والتقدم والإحصائيات لثلاثة مستخدمين، وذاكرة
+ * الترجمة (`translate.ts`: نص ومناطق لا صور). صور الفصول وكاشها وكوكيز
+ * المصادر تبقى على الهاتف؛ الصفحة تمرّ من هنا فقط حين تُطلب ترجمتها.
  *
  * القواعد الحاكمة مُختبرة في `@vantara/domain/sync`، وهذا الملف يطبّقها على
  * D1 ولا يعيد كتابتها. حيث يفرض SQL القاعدة بنفسه (MAX للتقدم، جمع للوقت)
  * تُستدعى دالة المجال للتحقق من المدخل، وتعليق يربط الاثنين.
  */
 
+import { handleTranslateCached, handleTranslateGlossary, handleTranslatePage, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
   clampUsageCredit,
@@ -2471,6 +2472,16 @@ export default {
       }
       else if (path === '/v1/media' && request.method === 'POST') {
         response = await handleMediaUpload(request, env, userId, url, now);
+      }
+      // الترجمة: المحفوظ لأي حساب، وما لم يُترجم يمرّ بالنموذج (المفتاح هنا وحده)
+      else if (path === '/v1/translate/page' && request.method === 'POST') {
+        response = await handleTranslatePage(request, env as TranslationEnv, userId, now);
+      }
+      else if (path === '/v1/translate/cached' && request.method === 'GET') {
+        response = await handleTranslateCached(url, env as TranslationEnv);
+      }
+      else if (path === '/v1/translate/glossary' && request.method === 'GET') {
+        response = await handleTranslateGlossary(url, env as TranslationEnv);
       }
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
