@@ -253,7 +253,9 @@ class ExtensionEnginePlugin : Plugin() {
     @PluginMethod
     fun search(call: PluginCall) = paged(call) { source, page ->
         val query = call.getString("query").orEmpty()
-        source.getSearchManga(page, query, FilterList())
+        // فلاتر المصدر الافتراضية كما يمرّرها Mihon: بعض الإضافات (Manga Tales)
+        // تبحث عن فلترها في القائمة وتنهار إن جاءت فارغة
+        source.getSearchManga(page, query, runCatching { source.getFilterList() }.getOrElse { FilterList() })
     }
 
     /**
