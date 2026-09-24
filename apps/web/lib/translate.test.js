@@ -88,3 +88,25 @@ describe('a bubble Luna left out is known, so the page is retried', () => {
     expect(unansweredIds(readable, null)).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 });
+
+describe('queue across reader sessions', () => {
+  it('a page queued by a reader you left is taken over by the new one, not left with a dead run', async () => {
+    const q = createQueue({ concurrency: 0 });
+    const oldRun = async () => null; // الجلسة القديمة انتهت: ترجع لا شيء
+    const first = q.add({ key: 'c1#4', chapterKey: 'c1', index: 4, run: oldRun });
+    const second = q.add({ key: 'c1#4', chapterKey: 'c1', index: 4, run: async () => 'translated' });
+    expect(second).toBe(first);
+    const q2 = createQueue({ concurrency: 1 });
+    q2.add({ key: 'c1#4', chapterKey: 'c1', index: 4, run: oldRun });
+    const taken = q2.add({ key: 'c1#4', chapterKey: 'c1', index: 4, run: async () => 'translated' });
+    expect(await taken).toBe('translated');
+  });
+
+  it('drop removes the pages a closed reader had not started', () => {
+    const q = createQueue({ concurrency: 0 });
+    q.add({ key: 'c1#1', chapterKey: 'c1', index: 1, run: async () => 1 });
+    q.add({ key: 'c2#1', chapterKey: 'c2', index: 1, run: async () => 1 });
+    q.drop('c1');
+    expect(q.order()).toEqual(['c2#1']);
+  });
+});
