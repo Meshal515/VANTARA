@@ -85,6 +85,10 @@ export function createMajlis(ctx) {
       .map((a) => a.user_id)
       .sort((a, b) => (a === me() ? -1 : b === me() ? 1 : nameOf(a).localeCompare(nameOf(b), 'ar')));
   const presenceOf = (userId) => presence.find((p) => p.userId === userId) ?? null;
+  // الأنمي يعيش في نفس المجلس بمرجع `anime:<id>`: «يشاهد» بدل «يقرأ»، ولونه أزرق
+  const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
+  const watching = (p) => p?.screen === 'ANIME' || isAnime(p?.seriesRef);
+  const toneOf = (ref) => (isAnime(ref) ? 'anime' : 'manga');
   const workOf = (ref, title, cover) => {
     const row = ref ? sync.rows('works', (w) => w.series_ref === ref)[0] : null;
     // فريمٌ بلا مرجع يُربط بعنوانه بنفس قاعدة المكتبة، فلا يصير العمل عملين
@@ -367,13 +371,13 @@ export function createMajlis(ctx) {
     ring.append(ctx.avatarNode(personOf(userId), 60));
     if (status === 'READING') {
       const badge = el('span', 'mj-badge');
-      badge.innerHTML = glyph('book', { size: 12 });
+      badge.innerHTML = glyph(watching(p) ? 'play' : 'book', { size: 12 });
       ring.append(badge);
     } else if (status === 'ONLINE' || status === 'IDLE') {
       ring.append(el('span', 'mj-dot'));
     }
     b.append(ring, el('span', 'mj-member-name', nameOf(userId)));
-    const label = { READING: 'يقرأ الآن', ONLINE: 'متصل', IDLE: 'خامل' }[status] ?? lastSeen(p?.lastSeenAt);
+    const label = { READING: watching(p) ? 'يشاهد الآن' : 'يقرأ الآن', ONLINE: 'متصل', IDLE: 'خامل' }[status] ?? lastSeen(p?.lastSeenAt);
     b.append(el('span', 'mj-member-state', label));
     b.setAttribute('aria-label', `${nameOf(userId)}، ${label}`);
     b.onclick = () => ctx.openProfile(userId);
@@ -397,11 +401,12 @@ export function createMajlis(ctx) {
     const work = workOf(p.seriesRef, p.seriesTitle);
     const b = el('button', 'mj-now');
     b.type = 'button';
+    b.dataset.tone = toneOf(p.seriesRef);
     const cover = el('span', 'mj-now-cover');
     void ctx.mountImage(cover, work);
     const copy = el('span', 'mj-now-copy');
     const who = el('span', 'mj-now-who');
-    who.append(ctx.avatarNode(personOf(p.userId), 22), el('span', null, `${nameOf(p.userId)} يقرأ`));
+    who.append(ctx.avatarNode(personOf(p.userId), 22), el('span', null, `${nameOf(p.userId)} ${watching(p) ? 'يشاهد' : 'يقرأ'}`));
     const title = el('bdi', 'mj-now-title', p.seriesTitle);
     copy.append(who, title);
     if (p.chapterLabel) copy.append(el('span', 'mj-now-chapter', p.chapterLabel));
@@ -526,8 +531,13 @@ export function createMajlis(ctx) {
   function recCard(e) {
     const r = e.row;
     const card = el('article', 'mj-card mj-card--rec');
+    const anime = isAnime(r.series_ref);
+    card.dataset.tone = toneOf(r.series_ref);
     const chapter = r.chapter_label ? { label: r.chapter_label, number: r.chapter_number ?? null } : null;
-    card.append(headline(e.actor, chapter ? `رشّح ${chapter.label}` : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
+    // لحظة من المشغّل: «الحلقة 12 · 12:10–12:20»
+    const moment = anime && chapter?.label.includes('·');
+    const verb = moment ? 'شارك لحظة من' : 'رشّح';
+    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
     const b = el('button', 'mj-work');
     b.type = 'button';
@@ -537,7 +547,7 @@ export function createMajlis(ctx) {
     copy.append(el('bdi', 'mj-work-title', r.series_title || work.title?.english || 'عمل'));
     if (chapter) {
       const tag = el('span', 'mj-chapter-tag');
-      tag.innerHTML = glyph('book', { size: 14 });
+      tag.innerHTML = glyph(anime ? 'play' : 'book', { size: 14 });
       tag.append(el('span', null, chapter.label));
       copy.append(tag);
     }
@@ -571,6 +581,7 @@ export function createMajlis(ctx) {
     const work = a.series_ref ? workOf(a.series_ref) : null;
     const b = el('button', 'mj-line');
     b.type = 'button';
+    if (a.series_ref) b.dataset.tone = toneOf(a.series_ref);
     const face = el('span', 'mj-line-face');
     face.append(ctx.avatarNode(personOf(e.actor), 32));
     const icon = el('span', `mj-line-icon mj-line-icon--${a.verb.toLowerCase()}`);

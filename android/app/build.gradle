@@ -166,6 +166,9 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
     implementation "androidx.media3:media3-ui:$media3Version"
     implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
+    // لقطات الفيديو: قصّ مدى من الحلقة (10–70 ثانية) بلا تسجيل شاشة ولا تنزيل الحلقة
+    implementation "androidx.media3:media3-transformer:$media3Version"
+    implementation "androidx.media3:media3-effect:$media3Version"
 
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
     // `okhttp3.JavaNetCookieJar` يسكن هذه القطعة لا في okhttp نفسه

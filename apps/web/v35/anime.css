@@ -1167,6 +1167,139 @@
   line-height: 1.6;
 }
 
+/* ورقة السيرفرات: رموز قصيرة لا أسماء، مجمّعة بالجودة، بحالتها الحيّة */
+.v35 .an-srv-best {
+  width: 100%;
+  margin-bottom: 10px;
+}
+.v35 .an-srv-best.waiting {
+  opacity: 0.72;
+}
+.v35 .an-srv-best:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.v35 .an-srv-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  padding: 2px 4px 6px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.v35 .an-srv-list {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 6px;
+}
+.v35 .an-srv-q {
+  margin: 0 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+.v35 .an-srv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.v35 .an-srv {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-height: 70px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--text-1);
+  text-align: start;
+  transition:
+    transform 0.15s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+.v35 .an-srv:not(:disabled):active {
+  transform: scale(0.97);
+}
+.v35 .an-srv-code {
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
+}
+.v35 .an-srv-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .an-srv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-4);
+  flex: none;
+}
+.v35 .an-srv--ready .an-srv-dot {
+  background: var(--success);
+}
+.v35 .an-srv--ready .an-srv-state {
+  color: var(--text-2);
+}
+.v35 .an-srv--resolving .an-srv-dot {
+  background: var(--warning);
+  animation: an-srv-pulse 1s ease-in-out infinite alternate;
+}
+.v35 .an-srv--failed .an-srv-dot {
+  background: var(--danger);
+}
+.v35 .an-srv--failed .an-srv-state {
+  color: var(--danger);
+}
+.v35 .an-srv--unavailable,
+.v35 .an-srv--resolving {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.v35 .an-srv--unavailable .an-srv-code {
+  color: var(--text-4);
+}
+.v35 .an-srv:disabled {
+  cursor: default;
+}
+.v35 .an-srv--prefer {
+  border-color: var(--accent-line);
+}
+.v35 .an-srv-tag {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+@keyframes an-srv-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .an-srv--resolving .an-srv-dot {
+    animation: none;
+  }
+}
+
 /* ───────────── اكتشف ───────────── */
 
 .v35 .an-discover {

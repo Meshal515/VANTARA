@@ -454,7 +454,7 @@ export function createAnime(deps) {
 
   // ───────────── صفحة الأنمي ─────────────
 
-  async function openAnime(m, { episode = null } = {}) {
+  async function openAnime(m, { episode = null, position = null } = {}) {
     const token = ++state.detailToken;
     state.episodeRange = 0;
     state.detail = m;
@@ -468,6 +468,8 @@ export function createAnime(deps) {
       state.malTitles = {};
       renderDetail(full);
       void locateWork(full, token);
+      // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
+      if (episode && position != null) playEpisode(full, episode, { position });
       if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
       // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
       void fetchMalEpisodes(full.idMal)
@@ -549,8 +551,9 @@ export function createAnime(deps) {
     actions.dataset.reveal = '';
     const { episode: startEp, resume } = resumePoint(m);
     const watch = button('an-btn an-btn--primary an-btn--wide', `${glyph('play', { size: 20, filled: true })}<span>${resume ? 'تابع' : 'شاهد'} الحلقة ${startEp}</span>`, () => playEpisode(m, startEp));
-    const party = button('an-btn an-btn--icon', glyph('users', { size: 20 }), () => toast('المشاهدة الجماعية قريبًا: تابعوا معي وتزامن لحظي'), 'مشاهدة جماعية');
-    actions.append(watch, listButton(m, 'an-btn an-btn--glass'), party);
+    // ترشيح لصديق أو للمجلس (بدل زر «مشاهدة جماعية» لم يكن يعمل)
+    const recommend = button('an-btn an-btn--icon', glyph('send', { size: 20 }), () => shareCurrent(), 'رشّح لصديق');
+    actions.append(watch, listButton(m, 'an-btn an-btn--glass'), recommend);
 
     const sourcesStrip = el('div', 'an-sources');
     sourcesStrip.id = 'animeSources';
@@ -642,8 +645,7 @@ export function createAnime(deps) {
       const box = q('animeEpisodes');
       if (box) renderEpisodes(box, m);
     }, e?.done ? 'ألغِ «شوهدت»' : 'علّمها شوهدت');
-    const dl = button('an-er-icon', glyph('download', { size: 20 }), () => toast('التحميل يعمل مع ربط السيرفرات قريبًا'), 'تحميل الحلقة');
-    row.append(main, eye, dl);
+    row.append(main, eye);
     return row;
   }
 
@@ -770,19 +772,90 @@ export function createAnime(deps) {
     for (const s of list ?? []) SOURCE_NAMES[s.id] = s.name;
   }).catch(() => {});
 
-  // تقدّم المشغّل الأصلي ← سجل المشاهدة (الاستئناف و«آخر المشاهدات»)
+  // ───────────── التشغيل: ورقة السيرفرات ثم المشغّل الأصلي ─────────────
+
+  /** آخر سيرفر نجح أو اختاره المستخدم لكل أنمي: ترجيح في «الأفضل» لا قفل. */
+  const SERVER_KEY = 'vantara.anime.servers';
+  const preferredCode = (id) => readJson(SERVER_KEY, {})[id] ?? null;
+  const rememberCode = (id, code) => {
+    if (!id || !code) return;
+    const all = readJson(SERVER_KEY, {});
+    all[id] = code;
+    writeJson(SERVER_KEY, all);
+  };
+
+  // تقدّم المشغّل الأصلي ← سجل المشاهدة (الاستئناف و«آخر المشاهدات»). الحلقة
+  // من الحدث نفسه: التبديل لحلقة أخرى داخل المشغّل يُسجَّل لها لا للأولى.
   engine.on('playback', (p) => {
     const cur = state.playing;
-    if (!cur || p.session !== cur.session) return;
-    if (p.duration > 0) recordWatch(cur.m, cur.n, p.position, p.duration);
+    if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
+    const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
+    if (p.duration > 0) recordWatch(cur.m, n, p.position, p.duration);
+    if (p.code) rememberCode(cur.m.id, p.code);
+    cur.n = n;
     if (p.final) {
+      // المشغّل أُغلق (التبديل بين الحلقات داخله ليس نهاية)
       state.playing = null;
+      deps.setWatching?.(null);
       const box = q('animeEpisodes');
       if (box && state.detail?.id === cur.m.id) renderEpisodes(box, state.detail);
+    } else {
+      deps.setWatching?.({ ref: `anime:${cur.m.id}`, title: cur.m.title, episode: n });
     }
   });
+  engine.on('episode', (e) => {
+    const cur = state.playing;
+    if (!cur || String(e.animeId) !== String(cur.m.id)) return;
+    cur.session = e.session;
+    cur.n = e.episode;
+  });
+  engine.on('server', (e) => {
+    if (e?.animeId && e.code) rememberCode(e.animeId, e.code);
+  });
 
-  async function playEpisode(m, n) {
+  /**
+   * اللحظات والترشيحات من المشغّل ← المجلس. المشغّل يحفظها في صندوق صادر
+   * أصلي فلا تضيع إن كانت الواجهة نائمة خلفه؛ هنا تُسحب وتدخل طابور المزامنة
+   * (الذي يعيد المحاولة وحده حتى تصل).
+   */
+  async function flushOutbox() {
+    if (!engine.available() || !deps.sync) return;
+    let items = [];
+    try {
+      items = await engine.outbox();
+    } catch {
+      return;
+    }
+    for (const it of items) {
+      const ep = Number(it.episode) || 1;
+      const label = it.type === 'moment' ? engine.momentLabel(ep, it.startMs, it.endMs) : `الحلقة ${ep}`;
+      deps.sync.enqueue('recommendation.send', {
+        toId: it.toId ?? null,
+        seriesRef: `anime:${it.animeId}`,
+        seriesTitle: it.title || 'أنمي',
+        coverUrl: it.poster ?? null,
+        message: null,
+        hiddenFrom: [],
+        chapterLabel: label,
+        chapterNumber: ep,
+      });
+    }
+  }
+  engine.on('outbox', () => void flushOutbox());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void flushOutbox();
+  });
+  setTimeout(() => void flushOutbox(), 2500);
+
+  const STATE_AR = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
+
+  /**
+   * لمسة الحلقة: الورقة تفتح فورًا والسيرفرات تتجهّز خلفها واحدًا واحدًا.
+   * رموز قصيرة لا أسماء استضافات، مجمّعة بالجودة، بحالة كل سيرفر الآن.
+   * «شغّل الأفضل» يزن الموثوقية وسرعة البدء والجودة والفشل الأخير، ويرجّح
+   * سيرفرك السابق لهذا الأنمي دون أن يقفل عليه.
+   */
+  function playEpisode(m, n, { position = null } = {}) {
     if (!engine.available()) {
       deps.openSheet((body) => {
         const head = el('div', 'an-sheet-head');
@@ -795,23 +868,183 @@ export function createAnime(deps) {
       });
       return;
     }
-    toast(`نجهّز سيرفرات الحلقة ${n}…`);
-    const work = state.work ?? (await locateWork(m));
-    if (!work) {
-      toast('هذا الأنمي غير متوفر في المصادر العربية حاليًا');
-      return;
-    }
     const saved = readWatch()[m.id]?.episodes?.[n];
-    const position = saved && !saved.done ? saved.position : 0;
-    try {
-      const out = await engine.play({ copies: work.copies, episode: n, title: `${m.title} — الحلقة ${n}`, position });
-      if (!out?.count) {
-        toast(`لم نجد سيرفرات تعمل للحلقة ${n} الآن`);
-        return;
-      }
-      state.playing = { session: out.session, m, n };
-    } catch (e) {
-      toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+    const startAt = position ?? (saved && !saved.done ? saved.position : 0);
+    const prefer = preferredCode(m.id);
+    const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, work: null };
+    let paintQueued = false;
+    let off = [];
+
+    deps.openSheet((body) => {
+      body.classList.add('an-srv-sheet');
+      const head = el('div', 'an-sheet-head');
+      const t = el('div', 'an-sheet-title', m.title);
+      t.dir = 'auto';
+      head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}${startAt > 5000 ? ` · من ${engine.clock(startAt)}` : ''}`), t);
+      const bestBtn = el('button', 'an-btn an-btn--primary an-btn--wide an-srv-best');
+      bestBtn.type = 'button';
+      const status = el('div', 'an-srv-status');
+      const list = el('div', 'an-srv-list');
+      body.append(head, bestBtn, status, list);
+
+      const paintBest = () => {
+        const ready = sheet.routes.some((r) => r.state === 'READY');
+        bestBtn.disabled = sheet.busy || (!ready && sheet.done);
+        bestBtn.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
+        bestBtn.classList.toggle('waiting', !ready && !sheet.done);
+      };
+
+      const paint = () => {
+        paintQueued = false;
+        if (sheet.closed) return;
+        paintBest();
+        const ready = sheet.routes.filter((r) => r.state === 'READY').length;
+        if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
+        else if (!sheet.done) status.innerHTML = `<i class="an-sources-spin"></i><span>نجهّز السيرفرات… ${ready ? `${ready} جاهز` : ''}</span>`;
+        else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
+        if (sheet.work === false) status.querySelector('i')?.remove();
+        list.replaceChildren();
+        for (const [name, routes] of engine.groupRoutes(sheet.routes)) {
+          const group = el('section', 'an-srv-group');
+          group.append(el('h4', 'an-srv-q', name));
+          const grid = el('div', 'an-srv-grid');
+          for (const r of routes) grid.append(tile(r));
+          group.append(grid);
+          list.append(group);
+        }
+      };
+      const queuePaint = () => {
+        if (paintQueued) return;
+        paintQueued = true;
+        requestAnimationFrame(paint);
+      };
+
+      const tile = (r) => {
+        const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
+        b.type = 'button';
+        b.disabled = r.state !== 'READY';
+        const code = el('b', 'an-srv-code', r.code);
+        code.dir = 'ltr';
+        const line = el('span', 'an-srv-state');
+        line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
+        b.append(code, line);
+        if (r.variant === 'DUB') b.append(el('span', 'an-srv-tag', 'مدبلج'));
+        else if (r.code === prefer) b.append(el('span', 'an-srv-tag', 'آخر اختيار'));
+        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
+        b.onclick = async () => {
+          if (sheet.busy) return;
+          sheet.busy = true;
+          paintBest();
+          try {
+            const candidate = await engine.pick(sheet.session, r.id);
+            if (!candidate) {
+              toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
+              return;
+            }
+            rememberCode(m.id, r.code);
+            await launch(candidate, r.code);
+          } catch (e) {
+            toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          } finally {
+            sheet.busy = false;
+            queuePaint();
+          }
+        };
+        return b;
+      };
+
+      bestBtn.onclick = async () => {
+        if (sheet.busy || !sheet.session) return;
+        sheet.busy = true;
+        paintBest();
+        try {
+          const out = await engine.best(sheet.session, prefer);
+          if (sheet.closed) return;
+          if (!out?.candidate) {
+            toast('لم يجهز أي سيرفر لهذه الحلقة الآن');
+            return;
+          }
+          await launch(out.candidate, out.code);
+        } catch (e) {
+          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+        } finally {
+          sheet.busy = false;
+          queuePaint();
+        }
+      };
+
+      paint();
+      void (async () => {
+        const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
+        if (sheet.closed) return;
+        if (!work) {
+          sheet.work = false;
+          sheet.done = true;
+          paint();
+          return;
+        }
+        sheet.work = work;
+        off.push(
+          engine.on('route', (e) => {
+            if (e.session !== sheet.session || !e.route) return;
+            sheet.routes = engine.upsertRoute(sheet.routes, e.route);
+            queuePaint();
+          }),
+          engine.on('prepared', (e) => {
+            if (e.session !== sheet.session) return;
+            sheet.done = true;
+            queuePaint();
+          }),
+        );
+        try {
+          const out = await engine.prepare({ copies: work.copies, episode: n });
+          if (sheet.closed) {
+            if (out?.session) void engine.closeSession(out.session);
+            return;
+          }
+          sheet.session = out.session;
+          // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
+          const snap = await engine.routes(out.session);
+          sheet.routes = snap?.routes ?? out.routes ?? [];
+          sheet.done = Boolean(snap?.done ?? out.done);
+          queuePaint();
+        } catch (e) {
+          status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
+        }
+      })();
+
+      return () => {
+        sheet.closed = true;
+        for (const f of off) f();
+        off = [];
+        // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
+        if (!sheet.launched && sheet.session) void engine.closeSession(sheet.session);
+      };
+    }, { tone: 'anime' });
+
+    async function launch(candidate, code) {
+      sheet.launched = true;
+      const session = sheet.session;
+      deps.closeSheet();
+      const watch = readWatch()[m.id]?.episodes ?? {};
+      const resume = {};
+      for (const [ep, e] of Object.entries(watch)) if (!e.done && e.position > 5000) resume[ep] = e.position;
+      state.playing = { session, m, n };
+      deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
+      await engine.open({
+        session,
+        candidate,
+        prefer: code ?? prefer,
+        title: m.title,
+        animeId: String(m.id),
+        episode: n,
+        total: m.aired || m.episodes || 0,
+        position: startAt,
+        poster: m.posterSmall ?? m.poster ?? null,
+        friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
+        copies: sheet.work.copies,
+        resume,
+      });
     }
   }
 
@@ -1080,10 +1313,15 @@ export function createAnime(deps) {
   function shareCurrent() {
     const m = state.detail;
     if (!m) return;
+    // داخل الحساب: ترشيح في المجلس لصديق أو للجميع (نفس ورقة المانجا)
+    if (deps.share) {
+      deps.share({ ref: `anime:${m.id}`, title: m.title, cover: m.posterSmall ?? m.poster ?? null });
+      return;
+    }
     const url = `https://anilist.co/anime/${m.id}`;
     if (navigator.share) void navigator.share({ title: m.title, url }).catch(() => {});
     else void navigator.clipboard?.writeText(url).then(() => toast('نُسخ الرابط'));
   }
 
-  return { show, loadHome, openAnime, showDiscover, renderLibrary, openDiscover, shareCurrent, leaveDetail: () => window.removeEventListener('scroll', state.detailScroll) };
+  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, shareCurrent, leaveDetail: () => window.removeEventListener('scroll', state.detailScroll) };
 }

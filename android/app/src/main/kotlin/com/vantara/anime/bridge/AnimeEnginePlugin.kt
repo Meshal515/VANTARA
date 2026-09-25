@@ -50,24 +50,101 @@ class AnimeEnginePlugin : Plugin() {
                 "playback",
                 JSObject()
                     .put("session", p.session).put("candidate", p.candidateId).put("sourceId", p.sourceId)
-                    .put("position", p.positionMs).put("duration", p.durationMs).put("final", p.final),
+                    .put("position", p.positionMs).put("duration", p.durationMs).put("final", p.final)
+                    .put("animeId", p.animeId).put("episode", p.episode.toDouble()).put("code", p.code),
             )
         }
+        // تفضيل السيرفر، تبديل الحلقة، وصندوق اللحظات الصادر
+        com.vantara.anime.player.PlaybackEvents.events = { name, data -> notifyListeners(name, JSObject(data.toString())) }
     }
 
-    /** يفتح المشغّل الأصلي لجلسة فتحتها [streams]. */
+    /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
+    @PluginMethod
+    fun outbox(call: PluginCall) {
+        call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context).toString())))
+    }
+
+    /**
+     * يفتح المشغّل الأصلي لجلسة فتحتها [prepare] (أو [streams]). `candidate`:
+     * السيرفر الذي اختاره المستخدم من الورقة (وإلا الأفضل في الجلسة).
+     */
     @PluginMethod
     fun play(call: PluginCall) {
         val session = call.getString("session") ?: return call.reject("session مطلوب")
         if (engine.session(session) == null) return call.reject("الجلسة انتهت، افتحها من جديد")
         val intent = com.vantara.anime.player.PlayerActivity.intent(
             context,
-            session,
-            call.getString("title").orEmpty(),
-            (call.getDouble("position") ?: 0.0).toLong(),
+            com.vantara.anime.player.PlayerActivity.Launch(
+                session = session,
+                title = call.getString("title").orEmpty(),
+                animeId = call.getString("animeId").orEmpty(),
+                episode = (call.getDouble("episode") ?: 1.0).toFloat(),
+                total = call.getInt("total") ?: 0,
+                positionMs = (call.getDouble("position") ?: 0.0).toLong(),
+                candidate = call.getString("candidate"),
+                preferCode = call.getString("prefer"),
+                poster = call.getString("poster"),
+                friends = call.getArray("friends")?.toString(),
+                copies = call.getArray("copies")?.toString(),
+                quality = call.getInt("quality") ?: 1080,
+                variant = call.getString("variant") ?: "SUB",
+                resume = call.getObject("resume")?.toString(),
+            ),
         )
         activity.startActivity(intent)
         call.resolve()
+    }
+
+    /**
+     * يبدأ تجهيز الحلقة ويرجع فورًا بما جهز حتى الآن. كل تغيّر في سيرفر يصل
+     * بحدث `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
+     */
+    @PluginMethod
+    fun prepare(call: PluginCall) = run(call) {
+        val copiesJson = call.getArray("copies") ?: error("copies مطلوب")
+        val copies = (0 until copiesJson.length()).map { animeFrom(copiesJson.getJSONObject(it)) }
+        val number = (call.getDouble("episode") ?: error("episode مطلوب")).toFloat()
+        val prefs = Preferences(
+            quality = call.getInt("quality") ?: 1080,
+            variant = runCatching { Variant.valueOf(call.getString("variant") ?: "SUB") }.getOrDefault(Variant.SUB),
+        )
+        val session = call.getString("session") ?: "s-${System.nanoTime()}"
+        val prep = engine.prepare(session, copies, number, prefs)
+        prep.listen { route ->
+            if (route == null) notifyListeners("prepared", JSObject().put("session", session))
+            else notifyListeners("route", JSObject().put("session", session).put("route", route, com.vantara.anime.stream.Route.serializer()))
+        }
+        JSObject().put("session", session)
+            .put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer()))
+            .put("done", prep.done)
+    }
+
+    @PluginMethod
+    fun routes(call: PluginCall) {
+        val prep = engine.prepared(call.getString("session") ?: "") ?: return call.resolve(JSObject().put("routes", JSArray()).put("done", true))
+        call.resolve(
+            JSObject().put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer())).put("done", prep.done),
+        )
+    }
+
+    /** «شغّل الأفضل»: أفضل سيرفر جاهز، منتظرًا أول واحد يجهز إن لم يجهز شيء. */
+    @PluginMethod
+    fun best(call: PluginCall) = run(call) {
+        val prep = engine.prepared(call.getString("session") ?: "") ?: error("الجلسة انتهت")
+        val c = prep.awaitBest(call.getString("prefer"), (call.getInt("waitMs") ?: 45_000).toLong())
+        JSObject().apply {
+            put("candidate", c?.id)
+            put("route", c?.let { prep.routeOf(it.id)?.id })
+            put("code", c?.let { prep.routeOf(it.id)?.code })
+        }
+    }
+
+    /** أفضل مرشّح داخل سيرفر اختاره المستخدم من الورقة. */
+    @PluginMethod
+    fun pick(call: PluginCall) {
+        val prep = engine.prepared(call.getString("session") ?: "") ?: return call.reject("الجلسة انتهت")
+        val list = prep.rank(prep.candidatesOf(call.getString("route") ?: ""))
+        call.resolve(JSObject().put("candidate", list.firstOrNull()?.id))
     }
 
     override fun handleOnPause() {
