@@ -149,8 +149,13 @@ class AnimeNetTest {
     }
 
     @Test fun `SNI-reset detection matches TLS and reset errors only`() {
-        assertTrue(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("x")))
+        assertTrue(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("Read error: I/O error during system call, Connection reset by peer")))
+        assertTrue(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("connection closed")))
         assertTrue(AnimeHostRouter.looksLikeSniReset(SocketException("Connection reset")))
+        // مشكلة TLS حقيقية ليست حجبًا: لا تُعاد بالتجزئة
+        assertFalse(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("x").apply { initCause(java.security.cert.CertificateException("Trust anchor not found")) }))
+        assertFalse(AnimeHostRouter.looksLikeSniReset(javax.net.ssl.SSLPeerUnverifiedException("Hostname x not verified")))
+        assertFalse(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("x")))
         assertTrue(AnimeHostRouter.looksLikeSniReset(SocketException("connection reset by peer")))
         assertFalse(AnimeHostRouter.looksLikeSniReset(UnknownHostException("x")))
         assertFalse(AnimeHostRouter.looksLikeSniReset(java.net.SocketTimeoutException("timeout")))

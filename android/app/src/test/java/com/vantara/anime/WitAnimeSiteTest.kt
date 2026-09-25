@@ -148,7 +148,34 @@ class WitAnimeSiteTest {
         assertEquals(1080, c.first { it.url.endsWith("id=full") }.quality)
         // mega لا يُطلب أصلًا: فيديوه مشفّر ولا نشغّله بعد
         assertTrue(seen.none { mega in it })
-        assertTrue(seen.containsAll(listOf("POST /watch/stream-source/$ok", "GET /watch/stream-gate/$ok")))
+        // البوابة وحدها تكفي: stream-source يستهلك من حد الطلبات بلا فائدة
+        assertTrue(seen.contains("GET /watch/stream-gate/$ok"))
+        assertTrue(seen.none { it.contains("stream-source") })
+    }
+
+    @Test fun `the trace says why each server gave nothing`() = runBlocking {
+        val hg = "3".repeat(64)
+        val mega = "4".repeat(64)
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val r = chain.request()
+            fun reply(code: Int, body: String) = Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(code).message("x")
+                .body(body.toResponseBody("text/html".toMediaType())).build()
+            when {
+                r.url.encodedPath == "/watch/x/1" -> reply(200, """<meta name="csrf-token" content="t">""")
+                r.url.encodedPath == "/watch/x/1/sources" ->
+                    reply(200, """{"players":{"FHD":[{"token":"$hg","label":"hgcloud"},{"token":"$mega","label":"mega"}]}}""")
+                else -> reply(429, "")
+            }
+        }.build()
+        val adapter = WitAnimeSiteAdapter("witanime", "WitAnime", client, { "https://witanime.site" }, EmbedResolver(client))
+        val trace = com.vantara.anime.adapters.ResolveTrace()
+
+        val c = adapter.candidates(SourceEpisode("witanime", "/watch/x/1", "الحلقة 1", 1f), now = 0, trace = trace)
+
+        assertTrue(c.isEmpty())
+        val notes = trace.notes().joinToString(" | ")
+        assertTrue(notes, notes.contains("mega") && notes.contains("غير مدعوم"))
+        assertTrue(notes, notes.contains("hgcloud FHD") && notes.contains("البوابة"))
     }
 
     @Test fun `a movie is one episode on its own watch path`() = runBlocking {

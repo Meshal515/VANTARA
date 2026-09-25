@@ -2,9 +2,9 @@ package com.vantara.anime.adapters
 
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.registry.PageEmbeds
+import com.vantara.anime.registry.PageEpisodes
 import com.vantara.anime.stream.Candidate
 import kotlinx.coroutines.CancellationException
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.TrackRef
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
@@ -72,8 +72,15 @@ interface AnimeAdapter {
     suspend fun seasons(anime: SourceAnime): List<SourceAnime>
     suspend fun episodes(anime: SourceAnime): List<SourceEpisode>
 
-    /** كل طرق تشغيل الحلقة من هذا المصدر: كل سيرفر، كل جودة، روابط محلولة الآن. */
-    suspend fun candidates(episode: SourceEpisode, now: Long = System.currentTimeMillis()): List<Candidate>
+    /**
+     * كل طرق تشغيل الحلقة من هذا المصدر: كل سيرفر، كل جودة، روابط محلولة الآن.
+     * [trace] يسجّل سبب فشل كل سيرفر لمن يريد أن يعرف (التشخيص).
+     */
+    suspend fun candidates(
+        episode: SourceEpisode,
+        now: Long = System.currentTimeMillis(),
+        trace: ResolveTrace? = null,
+    ): List<Candidate>
 }
 
 /**
@@ -89,6 +96,8 @@ class ExtensionAdapter(
     /** قاعدة البيان الحالية لسيرفرات الصفحة (تُقرأ عند كل طلب فتتحدّث بلا إعادة تحميل). */
     private val pageEmbeds: () -> PageEmbeds? = { null },
     private val resolver: EmbedResolver? = null,
+    /** قاعدة البيان لحلقات صفحة العمل، حين لا تجد الإضافة أي حلقة. */
+    private val pageEpisodes: () -> PageEpisodes? = { null },
 ) : AnimeAdapter {
 
     override val name: String get() = source.name
@@ -157,45 +166,76 @@ class ExtensionAdapter(
     override suspend fun seasons(anime: SourceAnime): List<SourceAnime> =
         if (!anime.hasSeasons) emptyList() else source.getSeasonList(anime.toAniyomi()).map { it.toVantara() }
 
-    override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> =
-        source.getEpisodeList(anime.toAniyomi()).map { e ->
-            SourceEpisode(
-                sourceId = id,
-                url = e.url,
-                name = e.name,
-                number = e.episode_number,
-                date = e.date_upload,
-                preview = e.preview_url,
-                summary = e.summary,
-                filler = e.fillermark,
-            )
-        }.sortedBy { it.number }
+    override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
+        val fromExtension = try {
+            source.getEpisodeList(anime.toAniyomi()).map { e ->
+                SourceEpisode(
+                    sourceId = id,
+                    url = e.url,
+                    name = e.name,
+                    number = e.episode_number,
+                    date = e.date_upload,
+                    preview = e.preview_url,
+                    summary = e.summary,
+                    filler = e.fillermark,
+                )
+            }.sortedBy { it.number }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // بلا قاعدة بديلة يبقى خطأ الإضافة هو الجواب (لا قائمة فارغة صامتة)
+            if (pageEpisodes() == null) throw e
+            emptyList()
+        }
+        if (fromExtension.isNotEmpty()) return fromExtension
+        val rule = pageEpisodes() ?: return fromExtension
+        val (finalUrl, html) = fetchPage(anime.url)
+        return rule.extract(html, finalUrl).map { item ->
+            val n = if (item.number % 1f == 0f) item.number.toInt().toString() else item.number.toString()
+            SourceEpisode(sourceId = id, url = item.path, name = "الحلقة $n", number = item.number)
+        }
+    }
 
-    override suspend fun candidates(episode: SourceEpisode, now: Long): List<Candidate> {
+    /** صفحة من الموقع عبر عميل الإضافة (ترويساتها وكوكيزها وموجّه الدومين). */
+    private suspend fun fetchPage(path: String): Pair<String, String> {
+        val http = source as? AnimeHttpSource ?: error("المصدر ليس HTTP")
+        val url = if (path.startsWith("http")) path else http.baseUrl.trimEnd('/') + path
+        return http.client.newCall(GET(url, http.headers)).awaitOk().use { it.request.url.toString() to it.body.string() }
+    }
+
+    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
         val fromExtension = try {
             extensionCandidates(episode, now)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            trace?.note("الإضافة", e.brief())
             emptyList()
         }
         if (fromExtension.isNotEmpty()) return fromExtension
+        trace?.note("الإضافة", "لا سيرفرات")
         val rule = pageEmbeds() ?: return fromExtension
         val r = resolver ?: return fromExtension
-        return pageCandidates(episode, rule, r, now)
+        return pageCandidates(episode, rule, r, now, trace)
     }
 
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
-    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long): List<Candidate> {
-        val http = source as? AnimeHttpSource ?: return emptyList()
-        val pageUrl = if (episode.url.startsWith("http")) episode.url else http.baseUrl.trimEnd('/') + episode.url
-        val (finalUrl, html) = http.client.newCall(GET(pageUrl, http.headers)).awaitSuccess().use { it.request.url.toString() to it.body.string() }
-        val referer = finalUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}/" }
+    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?): List<Candidate> {
+        val (finalUrl, html) = fetchPage(episode.url)
+        // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
+        val referer = finalUrl
+        val embeds = rule.extract(html, finalUrl)
+        if (embeds.isEmpty()) trace?.note("صفحة الحلقة", "لا روابط سيرفرات بقاعدة البيان")
         return coroutineScope {
-            rule.extract(html, finalUrl).map { embed ->
+            embeds.map { embed ->
                 async {
                     withTimeoutOrNull(pageEmbedTimeoutMs) {
-                        runCatching { r.resolve(embed.url, referer) }.getOrDefault(emptyList()).map { st ->
+                        runCatching { r.resolve(embed.url, referer) }
+                            .fold(
+                                { it.also { s -> if (s.isEmpty()) trace?.note(embed.name, "لم يُستخرج رابط فيديو") } },
+                                { trace?.note(embed.name, it.brief()); emptyList() },
+                            )
+                            .map { st ->
                             Candidate(
                                 id = "$id|${episode.url}|${st.url.hashCode()}",
                                 sourceId = id,
@@ -212,7 +252,7 @@ class ExtensionAdapter(
                                 expiresAt = StreamClassifier.expiresAt(st.url, now),
                             )
                         }
-                    }.orEmpty()
+                    } ?: emptyList<Candidate>().also { trace?.note(embed.name, "لم يرد خلال ${pageEmbedTimeoutMs / 1000} ثانية") }
                 }
             }.awaitAll().flatten().distinctBy { it.url }
         }

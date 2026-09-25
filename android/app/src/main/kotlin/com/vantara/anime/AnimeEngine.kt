@@ -71,7 +71,7 @@ class AnimeEngine(context: Context) {
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val sessions = ConcurrentHashMap<String, PlaybackSession>()
 
-    val resolver = EpisodeResolver(::adapter, health)
+    val resolver = EpisodeResolver(::adapter, health, priorityOf = { id -> entry(id)?.priority ?: 0 })
 
     /** عمل خلفي لا يخص طلبًا (تحميل الإضافات مسبقًا). */
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -128,7 +128,12 @@ class AnimeEngine(context: Context) {
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds }, resolver = embeds).also { a ->
+                ExtensionAdapter(
+                    id, source,
+                    pageEmbeds = { entry(id)?.embeds },
+                    resolver = embeds,
+                    pageEpisodes = { entry(id)?.episodes },
+                ).also { a ->
                     // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
                     AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
                     adapters[id] = a
@@ -226,7 +231,7 @@ class AnimeEngine(context: Context) {
             if (home != null) home += item else works += mutableListOf(item)
         }
         return works.map { group ->
-            val ranked = health.rank(group) { HealthStore.sourceKey(it.sourceId) }
+            val ranked = health.rank(group, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
             val lead = ranked.first()
             Work(
                 key = WorkMatcher.bucket(lead.title),
@@ -366,29 +371,42 @@ class AnimeEngine(context: Context) {
             },
         )
 
-        // السلسلة كاملة على أول نتيجة: الحلقات ← روابط تشغيل أول حلقة
+        // السلسلة كاملة على أول نتيجة، مرحلة مرحلة: الحلقات ثم روابط أول حلقة
         found.getOrNull()?.items?.firstOrNull()?.let { first ->
+            val why = { t: Throwable, limit: Long ->
+                if (t is TimeoutCancellationException) "لم يكتمل خلال ${limit / 1000} ثانية" else AnimeHostRouter.describe(t)
+            }
             val t1 = System.nanoTime()
-            runCatching {
-                withTimeout(PLAY_PROBE_TIMEOUT_MS) {
-                    val eps = a.episodes(first)
-                    val ep = eps.firstOrNull() ?: return@withTimeout Triple(0, null, emptyList<Candidate>())
-                    Triple(eps.size, ep, a.candidates(ep))
-                }
-            }.fold(
-                { (count, ep, found) ->
-                    val took = (System.nanoTime() - t1) / 1_000_000
-                    val servers = found.map { it.server }.distinct().joinToString("، ")
+            val eps = runCatching { withTimeout(SEARCH_TIMEOUT_MS) { a.episodes(first) } }
+            val epsMs = (System.nanoTime() - t1) / 1_000_000
+            val list = eps.getOrElse { t ->
+                add("حلقات «${first.title}»", "fail", why(t, SEARCH_TIMEOUT_MS))
+                return@let
+            }
+            val ep = list.firstOrNull()
+            if (ep == null) {
+                add("حلقات «${first.title}»", "fail", "لا حلقات · ${epsMs}ms")
+                return@let
+            }
+            add("حلقات «${first.title}»", "ok", "${list.size} حلقة · ${epsMs}ms")
+
+            val trace = com.vantara.anime.adapters.ResolveTrace()
+            val t2 = System.nanoTime()
+            runCatching { withTimeout(PLAY_PROBE_TIMEOUT_MS) { a.candidates(ep, trace = trace) } }.fold(
+                { links ->
+                    val took = (System.nanoTime() - t2) / 1_000_000
+                    val servers = links.map { it.server }.distinct().joinToString("، ")
+                    val notes = trace.notes().take(8).joinToString(" | ")
                     add(
-                        "تشغيل «${first.title}»",
-                        if (found.isNotEmpty()) "ok" else "warn",
-                        if (ep == null) "لا حلقات" else "$count حلقة · ${ep.name}: ${found.size} رابط" +
-                            (if (servers.isNotEmpty()) " ($servers)" else "") + " · ${took}ms",
+                        "تشغيل ${ep.name}",
+                        if (links.isNotEmpty()) "ok" else "fail",
+                        "${links.size} رابط" + (if (servers.isNotEmpty()) " ($servers)" else "") + " · ${took}ms" +
+                            (if (notes.isNotEmpty()) " — $notes" else ""),
                     )
                 },
                 { t ->
-                    val why = if (t is TimeoutCancellationException) "لم يكتمل خلال ${PLAY_PROBE_TIMEOUT_MS / 1000} ثانية" else AnimeHostRouter.describe(t)
-                    add("تشغيل «${first.title}»", "fail", why)
+                    val notes = trace.notes().take(8).joinToString(" | ")
+                    add("تشغيل ${ep.name}", "fail", why(t, PLAY_PROBE_TIMEOUT_MS) + (if (notes.isNotEmpty()) " — $notes" else ""))
                 },
             )
         }

@@ -137,12 +137,16 @@ class HealthStore(private val file: File?, private val clock: () -> Long = Syste
         return r.blocked != null || HealthPolicy.open(r, clock())
     }
 
-    /** يرتّب أهدافًا (مصادر أو سيرفرات) من الأصح إلى الأضعف، ويؤخّر المتجاوَزة. */
-    fun <T> rank(items: List<T>, keyOf: (T) -> String): List<T> {
+    /**
+     * يرتّب أهدافًا (مصادر أو سيرفرات) من الأصح إلى الأضعف، ويؤخّر المتجاوَزة.
+     * [priorityOf]: عند تساوي الصحة (مصدران جديدان مثلًا) الأولوية الأعلى أولًا.
+     */
+    fun <T> rank(items: List<T>, priorityOf: (T) -> Int = { 0 }, keyOf: (T) -> String): List<T> {
         val now = clock()
         return items.sortedWith(
             compareBy<T> { if (skip(keyOf(it))) 1 else 0 }
-                .thenByDescending { HealthPolicy.score(records[keyOf(it)], now) },
+                .thenByDescending { HealthPolicy.score(records[keyOf(it)], now) }
+                .thenByDescending { priorityOf(it) },
         )
     }
 
