@@ -20,7 +20,7 @@ import kotlin.math.abs
  * العمل في VANTARA له نسخ في عدة مصادر ([Copy]). طلب «الحلقة 12» يعني:
  *   1. رتّب النسخ بصحة مصادرها.
  *   2. من كل نسخة: قائمة حلقاتها (مخبّأة دقائق) ← الحلقة رقم 12.
- *   3. اجمع كل سيرفراتها. إذا جمعنا [minCandidates] طريقًا سليمًا توقفنا؛
+ *   3. اجمع سيرفراتها. إذا توفرت روابط من [minHosts] مضيفات سليمة توقفنا؛
  *      وإلا ننتقل للمصدر التالي. فمصدر ميت لا يُشعر به المستخدم.
  */
 class EpisodeResolver(
@@ -51,14 +51,21 @@ class EpisodeResolver(
         episodes.firstOrNull { abs(it.number - number) < 0.01f }
             ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
+    /**
+     * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة
+     * (ثلاث جودات من مضيف واحد ليست ثلاثة طرق). [exhaustive]: كل المصادر وكل
+     * السيرفرات، لتوسيع جلسة نفدت ([com.vantara.anime.AnimeEngine.more]).
+     */
     suspend fun candidates(
         copies: List<Copy>,
         number: Float,
         prefs: Preferences,
-        minCandidates: Int = 3,
-        perSourceTimeoutMs: Long = 25_000,
+        minHosts: Int = 2,
+        perSourceTimeoutMs: Long = 60_000,
+        exhaustive: Boolean = false,
     ): List<Candidate> {
         val ordered = health.rank(copies, { priorityOf(it.sourceId) }) { HealthStore.sourceKey(it.sourceId) }
+        val enough = if (exhaustive) Int.MAX_VALUE else minHosts
         val gathered = mutableListOf<Candidate>()
         // دفعات من مصدرين بالتوازي: الأول يبدأ فورًا، والثاني احتياطٌ جاهز
         for (batch in ordered.chunked(2)) {
@@ -68,7 +75,7 @@ class EpisodeResolver(
                         withTimeoutOrNull(perSourceTimeoutMs) {
                             runCatching {
                                 val ep = pick(episodes(copy), number) ?: return@runCatching emptyList()
-                                adapterOf(copy.sourceId)?.candidates(ep).orEmpty()
+                                adapterOf(copy.sourceId)?.candidates(ep, enough = enough).orEmpty()
                             }.onFailure { health.fail(HealthStore.sourceKey(copy.sourceId), it.message ?: it.javaClass.simpleName) }
                                 .getOrDefault(emptyList())
                         }.orEmpty()
@@ -76,8 +83,8 @@ class EpisodeResolver(
                 }.awaitAll().flatten()
             }
             gathered += found
-            val usable = gathered.count { !health.skip(HealthStore.hostKey(it.host)) }
-            if (usable >= minCandidates) break
+            val hosts = gathered.filter { !health.skip(HealthStore.hostKey(it.host)) }.map { it.host }.distinct().size
+            if (!exhaustive && hosts >= minHosts) break
         }
         return StreamRanker.rank(gathered.distinctBy { it.url }, health, prefs, clock())
     }

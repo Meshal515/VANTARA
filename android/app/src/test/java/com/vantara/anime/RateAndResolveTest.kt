@@ -142,7 +142,7 @@ class RateAndResolveTest {
         override suspend fun details(anime: SourceAnime) = anime
         override suspend fun seasons(anime: SourceAnime) = emptyList<SourceAnime>()
         override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> { asked++; return lists.removeAt(0) }
-        override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?) = emptyList<Candidate>()
+        override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int) = emptyList<Candidate>()
     }
 
     @Test fun `an empty episode list is not cached as the answer`() = runBlocking {

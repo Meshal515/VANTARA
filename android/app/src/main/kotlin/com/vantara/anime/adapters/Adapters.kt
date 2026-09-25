@@ -80,6 +80,8 @@ interface AnimeAdapter {
         episode: SourceEpisode,
         now: Long = System.currentTimeMillis(),
         trace: ResolveTrace? = null,
+        /** توقف مبكر حين تتوفر روابط من هذا العدد من المضيفات المختلفة. */
+        enough: Int = Int.MAX_VALUE,
     ): List<Candidate>
 }
 
@@ -203,7 +205,7 @@ class ExtensionAdapter(
         return http.client.newCall(GET(url, http.headers)).awaitOk().use { it.request.url.toString() to it.body.string() }
     }
 
-    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
+    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val fromExtension = try {
             extensionCandidates(episode, now)
         } catch (e: CancellationException) {
@@ -216,19 +218,19 @@ class ExtensionAdapter(
         trace?.note("الإضافة", "لا سيرفرات")
         val rule = pageEmbeds() ?: return fromExtension
         val r = resolver ?: return fromExtension
-        return pageCandidates(episode, rule, r, now, trace)
+        return pageCandidates(episode, rule, r, now, trace, enough)
     }
 
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
-    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?): List<Candidate> {
+    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val (finalUrl, html) = fetchPage(episode.url)
         // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
         val referer = finalUrl
         val embeds = rule.extract(html, finalUrl)
         if (embeds.isEmpty()) trace?.note("صفحة الحلقة", "لا روابط سيرفرات بقاعدة البيان")
-        return coroutineScope {
+        return gatherUntil(
             embeds.map { embed ->
-                async {
+                suspend {
                     withTimeoutOrNull(pageEmbedTimeoutMs) {
                         runCatching { r.resolve(embed.url, referer) }
                             .fold(
@@ -247,15 +249,16 @@ class ExtensionAdapter(
                                 quality = st.quality ?: embed.quality,
                                 label = embed.name,
                                 variant = StreamClassifier.variant(embed.name, episode.name),
-                                container = StreamClassifier.container(st.url),
+                                container = st.container ?: StreamClassifier.container(st.url),
                                 resolvedAt = now,
                                 expiresAt = StreamClassifier.expiresAt(st.url, now),
                             )
                         }
                     } ?: emptyList<Candidate>().also { trace?.note(embed.name, "لم يرد خلال ${pageEmbedTimeoutMs / 1000} ثانية") }
                 }
-            }.awaitAll().flatten().distinctBy { it.url }
-        }
+            },
+            enough,
+        )
     }
 
     private suspend fun extensionCandidates(episode: SourceEpisode, now: Long): List<Candidate> {

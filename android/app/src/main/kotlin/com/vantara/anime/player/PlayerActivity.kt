@@ -37,6 +37,12 @@ import com.vantara.anime.stream.Candidate
 import com.vantara.anime.stream.Container
 import com.vantara.anime.stream.PlaybackSession
 import eu.kanade.tachiyomi.network.NetworkHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -68,6 +74,16 @@ class PlayerActivity : Activity() {
     private val startupWatchdog = Runnable {
         if (!reportedStart) fail("لم يبدأ خلال ${STARTUP_TIMEOUT_MS / 1000} ثانية")
     }
+
+    /** بدأ التشغيل ثم علق التحميل: لا خطأ من ExoPlayer، فالمراقبة هنا. */
+    private val stallWatchdog = Runnable {
+        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${STALL_TIMEOUT_MS / 1000} ثانية")
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** وُسّعت الجلسة مرة لكل المصادر؛ لا نكرر ذلك بلا نهاية. */
+    private var expanded = false
     private val progressTick = object : Runnable {
         override fun run() {
             report(final = false)
@@ -93,6 +109,11 @@ class PlayerActivity : Activity() {
         player = ExoPlayer.Builder(this).build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_BUFFERING && reportedStart) {
+                    main.removeCallbacks(stallWatchdog)
+                    main.postDelayed(stallWatchdog, STALL_TIMEOUT_MS)
+                }
+                if (state != Player.STATE_BUFFERING) main.removeCallbacks(stallWatchdog)
                 if (state == Player.STATE_READY && !reportedStart) {
                     reportedStart = true
                     main.removeCallbacks(startupWatchdog)
@@ -192,17 +213,40 @@ class PlayerActivity : Activity() {
     /** عطل السيرفر الحالي ← التالي من نفس الموضع. */
     private fun fail(reason: String) {
         main.removeCallbacks(startupWatchdog)
+        main.removeCallbacks(stallWatchdog)
         val c = current ?: return
         val at = player.currentPosition.coerceAtLeast(0)
         val next = session?.failed(c, reason)
-        if (next == null) {
-            showStatus("تعذّر التشغيل من كل السيرفرات المتاحة")
-            report(final = true)
-            main.postDelayed({ finish() }, 2500)
+        if (next != null) {
+            showStatus("انتقلنا لسيرفر آخر: ${next.server}")
+            play(next, at)
             return
         }
-        showStatus("انتقلنا لسيرفر آخر: ${next.server}")
-        play(next, at)
+        // بدأنا بأسرع طريقين؛ نفدا ← كل السيرفرات من كل المصادر هذه المرة
+        if (!expanded) {
+            expanded = true
+            player.stop()
+            showStatus("نبحث عن سيرفرات أخرى…")
+            scope.launch {
+                val more = runCatching { withContext(Dispatchers.IO) { AnimeEngine.get(this@PlayerActivity).more(sessionId) } }.getOrDefault(emptyList())
+                session?.append(more)
+                val again = session?.next()
+                if (again != null) {
+                    showStatus("انتقلنا لسيرفر آخر: ${again.server}")
+                    play(again, at)
+                } else {
+                    giveUp()
+                }
+            }
+            return
+        }
+        giveUp()
+    }
+
+    private fun giveUp() {
+        showStatus("تعذّر التشغيل من كل السيرفرات المتاحة")
+        report(final = true)
+        main.postDelayed({ finish() }, 2500)
     }
 
     private fun showStatus(text: String) {
@@ -232,6 +276,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         main.removeCallbacksAndMessages(null)
         report(final = true)
         player.release()
@@ -253,6 +298,7 @@ class PlayerActivity : Activity() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_POSITION = "position"
         const val STARTUP_TIMEOUT_MS = 15_000L
+        const val STALL_TIMEOUT_MS = 20_000L
         const val PROGRESS_EVERY_MS = 10_000L
 
         fun intent(context: Context, session: String, title: String, positionMs: Long) =
