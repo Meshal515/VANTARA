@@ -15,7 +15,7 @@
 
 import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage } from '../lib/translate.js';
-import { onTranslateSettings, readTranslateSettings } from '../lib/translate-settings.js';
+import { onTranslateSettings, readTranslateSettings, setTranslationLocked } from '../lib/translate-settings.js';
 import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
@@ -25,7 +25,7 @@ const ENTRY_PAGES = 3;
 /** إعادة الصفحة بعد فشل عابر. */
 const RETRY_DELAYS_MS = [3_000, 10_000, 30_000, 90_000];
 /** أخطاء لا يحلّها الانتظار: توقف الترجمة وتُقال مرة. */
-const BLOCKING = new Set(['models_missing', 'device_only', 'translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'monthly_budget', 'no_credit']);
+const BLOCKING = new Set(['translation_locked', 'models_missing', 'device_only', 'translation_not_configured', 'translation_worker_offline', 'weekly_limit', 'monthly_budget', 'no_credit']);
 /** الأعمال التي فعّلتها بنفسك في وضع «عند الطلب»: للجلسة، وتُنسى بالخروج من العمل. */
 const sessionWorks = new Set();
 /** نوع الترجمة لكل عمل في هذه الجلسة (ذكية/سريعة) كما اخترته عند «ترجم»؛ وإلا من الإعدادات. */
@@ -221,6 +221,7 @@ export function createReaderTranslation(deps) {
     if (!seg.tl) return;
     // خطأ عام (لا نماذج، لا مفتاح، حد أسبوعي) يوقف الطابور مرة ويقال مرة
     if (BLOCKING.has(code)) {
+      if (code === 'translation_locked') setTranslationLocked(true);
       seg.tl.failed.add(index);
       if (!disabledReason) toast(TRANSLATE_ERRORS[code]);
       disabledReason = code;

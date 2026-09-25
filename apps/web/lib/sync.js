@@ -416,6 +416,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // B10: الخيط إلى سطر السجلّ عند الخادم. يُحمل على الخطأ فيصل إلى
       // `lastError` ومنه إلى البلاغ، بدل أن يبقى البلاغ يقول «ما اشتغل».
       error.correlationId = response.headers.get('x-correlation-id') ?? null;
+      // رمز الخادم (`weekly_limit`، `translation_locked`…): الترجمة تعرض سببه بدل «http_429»
+      error.translationError = await response
+        .json()
+        .then((b) => (typeof b?.error === 'string' ? b.error : null))
+        .catch(() => null);
       throw error;
     }
     return response.status === 204 ? null : response.json();

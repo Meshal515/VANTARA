@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalize, onTranslateSettings, readTranslateSettings, writeTranslateSettings } from './translate-settings.js';
+import { normalize, onTranslateSettings, readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from './translate-settings.js';
 import { filePathFromSrc, renderPlan } from './translate.js';
 
 const memory = () => {
@@ -50,5 +50,26 @@ describe('on-device flow: Luna reply → what gets drawn', () => {
     expect(filePathFromSrc('http://localhost/_capacitor_file_/data/user/0/com.vantara.app/cache/pages/ab%20c.jpg')).toBe('/data/user/0/com.vantara.app/cache/pages/ab c.jpg');
     expect(filePathFromSrc('https://cdn.example/page.jpg')).toBeNull();
     expect(filePathFromSrc(null)).toBeNull();
+  });
+});
+
+describe('translation locked for accounts it is not open to', () => {
+  const memory = () => {
+    const m = new Map();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+  };
+
+  it('a locked account sees translation off everywhere, whatever it chose, and gets it back when opened', () => {
+    const storage = memory();
+    writeTranslateSettings({ enabled: true, mode: 'manual' }, storage);
+    const seen = [];
+    const off = onTranslateSettings((s) => seen.push(s.enabled));
+    setTranslationLocked(true, storage);
+    expect(translationLocked(storage)).toBe(true);
+    expect(readTranslateSettings(storage)).toEqual({ enabled: false, mode: 'manual', speed: 'smart' });
+    setTranslationLocked(false, storage);
+    expect(readTranslateSettings(storage).enabled).toBe(true);
+    expect(seen).toEqual([false, true]);
+    off();
   });
 });

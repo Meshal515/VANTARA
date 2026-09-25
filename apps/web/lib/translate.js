@@ -451,6 +451,7 @@ async function translateViaServer(deps, src, hash, meta) {
 
 /** رسالة لسبب الرفض، بكلام الناس. */
 export const TRANSLATE_ERRORS = {
+  translation_locked: 'الترجمة قيد التطوير',
   translation_not_configured: 'الترجمة غير مفعّلة على الخادم بعد',
   translation_worker_offline: 'جهاز الترجمة مطفّى الحين — الصفحات المترجمة قبل تشتغل',
   translation_worker: 'الترجمة تعثّرت على الخادم، نحاول بعد شوي',

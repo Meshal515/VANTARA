@@ -10,7 +10,7 @@
  * تُستدعى دالة المجال للتحقق من المدخل، وتعليق يربط الاثنين.
  */
 
-import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, type TranslationEnv } from './translate.ts';
+import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
   clampUsageCredit,
@@ -2472,6 +2472,10 @@ export default {
       }
       else if (path === '/v1/media' && request.method === 'POST') {
         response = await handleMediaUpload(request, env, userId, url, now);
+      }
+      // الترجمة قيد التطوير: مقفلة إلا لمن فُتحت له (الحصة وحدها تجيب، لتقول للجهاز «مقفلة»)
+      else if (path.startsWith('/v1/translate/') && path !== '/v1/translate/usage' && !(await translationAllowed(env as TranslationEnv, userId))) {
+        response = json({ error: 'translation_locked' }, { status: 403 });
       }
       // الترجمة: المحفوظ لأي حساب، وما لم يُترجم يمرّ بالنموذج (المفتاح هنا وحده)
       else if (path === '/v1/translate/page' && request.method === 'POST') {

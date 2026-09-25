@@ -15,13 +15,39 @@ const KEY = 'vantara.translate.settings';
 const DEFAULTS = Object.freeze({ enabled: false, mode: 'auto', speed: 'smart' });
 const listeners = new Set();
 
+const LOCK_KEY = 'vantara.translate.locked';
+
+/** الترجمة مقفلة لهذا الحساب (قيد التطوير): الخادم يقرر، والجهاز يتذكر آخر ما قاله. */
+export function translationLocked(storage = globalThis.localStorage) {
+  try {
+    return storage?.getItem(LOCK_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setTranslationLocked(locked, storage = globalThis.localStorage) {
+  if (translationLocked(storage) === locked) return;
+  try {
+    if (locked) storage?.setItem(LOCK_KEY, '1');
+    else storage?.removeItem(LOCK_KEY);
+  } catch {
+    // الخادم يرفض على كل حال
+  }
+  const next = readTranslateSettings(storage);
+  for (const fn of listeners) fn(next);
+}
+
+/** مقفلة = مغلقة في كل مكان (لا زرّ ولا ترجمة مقدّمة)، مهما كان اختيار الجهاز. */
 export function readTranslateSettings(storage = globalThis.localStorage) {
+  let settings;
   try {
     const raw = storage?.getItem(KEY);
-    return normalize(raw ? JSON.parse(raw) : null);
+    settings = normalize(raw ? JSON.parse(raw) : null);
   } catch {
-    return { ...DEFAULTS };
+    settings = { ...DEFAULTS };
   }
+  return translationLocked(storage) ? { ...settings, enabled: false } : settings;
 }
 
 export function normalize(value) {
