@@ -1,6 +1,7 @@
 package com.vantara.anime.registry
 
 import com.vantara.anime.net.DomainPlan
+import com.vantara.anime.net.UrlRewrite
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -52,6 +53,7 @@ data class Domains(
     val legacy: List<String> = emptyList(),
     val mirrors: List<String> = emptyList(),
     val fingerprint: String? = null,
+    val rewrites: List<UrlRewrite> = emptyList(),
 ) {
     fun plan(extensionBaseUrl: String?): DomainPlan = DomainPlan(
         current = current,
@@ -59,6 +61,7 @@ data class Domains(
         legacy = (legacy + listOfNotNull(extensionBaseUrl)).toSet(),
         mirrors = mirrors.toSet(),
         fingerprint = fingerprint,
+        rewrites = rewrites,
     )
 }
 
@@ -111,6 +114,9 @@ object ManifestParser {
                 if (!e.apk.startsWith("https://")) add("${s.id}: رابط APK ليس https")
             }
             s.domains.fingerprint?.let { fp -> runCatching { Regex(fp) }.onFailure { add("${s.id}: بصمة ليست Regex صالحة") } }
+            for (r in s.domains.rewrites) {
+                if (!r.path.startsWith("/") || r.to?.startsWith("/") == false) add("${s.id}: مسار إعادة الكتابة يجب أن يبدأ بـ/")
+            }
         }
     }
 }

@@ -4,8 +4,11 @@ import com.vantara.anime.health.HealthStore
 import com.vantara.anime.net.AnimeDns
 import com.vantara.anime.net.AnimeHostRouter
 import com.vantara.anime.net.DomainPlan
+import com.vantara.anime.net.DomainPolicy
 import com.vantara.anime.net.SniFragmentingOutputStream
+import com.vantara.anime.net.UrlRewrite
 import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -172,6 +175,54 @@ class AnimeNetTest {
         assertEquals(200, response.code)
         assertEquals(1, h.get(HealthStore.sourceKey("sni-src"))!!.ok)
         AnimeHostRouter.fragmentClient = null
+    }
+
+    @Test fun `a host that needed fragmentation goes straight to the fragmentation client afterwards`() {
+        AnimeHostRouter.health = HealthStore(null)
+        AnimeHostRouter.register("sni-src-3", DomainPlan("https://sni3.test"))
+        var fragmented = 0
+        AnimeHostRouter.fragmentClient = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { chain -> fragmented++; Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").build() }
+            .build()
+        var plain = 0
+        val primary = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { plain++; throw SocketException("Connection reset") }
+            .build()
+
+        repeat(3) { primary.newCall(Request.Builder().url("https://sni3.test/p$it").build()).execute().close() }
+
+        assertEquals(1, plain)
+        assertEquals(3, fragmented)
+        AnimeHostRouter.fragmentClient = null
+    }
+
+    // ── مسارات غيّرها الموقع ──
+
+    @Test fun `an old search path is rewritten to the site's new one, keeping other parameters`() {
+        val plan = DomainPlan(
+            "https://ww3.okanime.xyz",
+            rewrites = listOf(UrlRewrite("/search/", to = "/search", params = mapOf("s" to "q"))),
+        )
+        val fixed = DomainPolicy.fixPath("https://ww3.okanime.xyz/search/?s=ون%20بيس&page=2".toHttpUrl(), plan)
+        assertEquals("https://ww3.okanime.xyz/search?q=%D9%88%D9%86%20%D8%A8%D9%8A%D8%B3&page=2", fixed.toString())
+        assertNull(DomainPolicy.fixPath("https://ww3.okanime.xyz/anime/one-piece/".toHttpUrl(), plan))
+    }
+
+    @Test fun `the request that reaches the network carries the rewritten path`() {
+        AnimeHostRouter.health = HealthStore(null)
+        AnimeHostRouter.register(
+            "rw-src",
+            DomainPlan("https://rw.test", legacy = setOf("https://old.rw.test"), rewrites = listOf(UrlRewrite("/search/", "/search", mapOf("s" to "q")))),
+        )
+        var seen: String? = null
+        val client = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { chain -> seen = chain.request().url.toString(); Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").build() }
+            .build()
+        client.newCall(Request.Builder().url("https://old.rw.test/search/?s=naruto&page=1").build()).execute().close()
+        assertEquals("https://rw.test/search?q=naruto&page=1", seen)
     }
 
     @Test fun `a handshake reset that fails again after fragmentation is reported once, not twice`() {

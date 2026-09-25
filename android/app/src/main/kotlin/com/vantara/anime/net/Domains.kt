@@ -4,6 +4,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
+import kotlinx.serialization.Serializable
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
 
@@ -27,6 +28,8 @@ data class DomainPlan(
     val mirrors: Set<String> = emptySet(),
     /** Regex تبحث عنه في HTML الصفحة المحوَّل إليها قبل قبولها. */
     val fingerprint: String? = null,
+    /** مسارات غيّرها الموقع وما زالت الإضافة تطلبها بشكلها القديم. */
+    val rewrites: List<UrlRewrite> = emptyList(),
 ) {
     val currentUrl: HttpUrl? get() = current.toHttpUrlOrNull()
     val currentHost: String? get() = currentUrl?.host
@@ -39,6 +42,20 @@ data class DomainPlan(
             addAll(mirrors.mapNotNull { it.toHttpUrlOrNull()?.host ?: bareHost(it) })
         }
 }
+
+/**
+ * مثال OkAnime: الإضافة تطلب `/search/?s=X&page=N`، والموقع صار `/search?q=X`
+ * ويحوّل الشكل القديم إلى `http://…/search` بلا كلمة البحث.
+ */
+@Serializable
+data class UrlRewrite(
+    /** المسار المطابق حرفيًا، مثل `/search/`. */
+    val path: String,
+    /** المسار الجديد؛ غيابه يُبقي المسار. */
+    val to: String? = null,
+    /** إعادة تسمية معاملات الاستعلام: القديم ← الجديد، والبقية كما هي. */
+    val params: Map<String, String> = emptyMap(),
+)
 
 /** `https://www.x.com/a` أو `www.x.com` ← `www.x.com`. */
 internal fun bareHost(s: String): String = s.toHttpUrlOrNull()?.host ?: s.substringAfter("://").substringBefore('/').lowercase()
@@ -67,6 +84,21 @@ object DomainPolicy {
         val legacy = plan.legacy.map(::bareHost)
         if (url.host !in legacy) return null
         return url.newBuilder().scheme(target.scheme).host(target.host).port(target.port).build()
+    }
+
+    /** يطبّق أول قاعدة [UrlRewrite] يطابق مسارها؛ null إن لم تطابق أي قاعدة. */
+    fun fixPath(url: HttpUrl, plan: DomainPlan): HttpUrl? {
+        val rule = plan.rewrites.firstOrNull { it.path == url.encodedPath } ?: return null
+        val b = url.newBuilder()
+        rule.to?.let { b.encodedPath(it) }
+        if (rule.params.isNotEmpty()) {
+            b.query(null)
+            for (i in 0 until url.querySize) {
+                val name = url.queryParameterName(i)
+                b.addQueryParameter(rule.params[name] ?: name, url.queryParameterValue(i))
+            }
+        }
+        return b.build().takeIf { it != url }
     }
 
     enum class Verdict { SAME, KNOWN, SAME_SITE, FINGERPRINT_OK, FOREIGN }
@@ -109,11 +141,15 @@ class DomainInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val rewritten = DomainPolicy.rewrite(original.url, plan, active.get())
-        val request = if (rewritten != null) {
-            original.newBuilder().url(rewritten).apply {
-                // Referer/Origin القديمان يكشفان الدومين الميت لبعض المواقع
-                original.header("Referer")?.let { ref -> header("Referer", swapHost(ref)) }
-                original.header("Origin")?.let { o -> header("Origin", swapHost(o)) }
+        val hosted = rewritten ?: original.url
+        val url = DomainPolicy.fixPath(hosted, plan) ?: hosted
+        val request = if (url != original.url) {
+            original.newBuilder().url(url).apply {
+                if (rewritten != null) {
+                    // Referer/Origin القديمان يكشفان الدومين الميت لبعض المواقع
+                    original.header("Referer")?.let { ref -> header("Referer", swapHost(ref)) }
+                    original.header("Origin")?.let { o -> header("Origin", swapHost(o)) }
+                }
             }.build()
         } else {
             original
