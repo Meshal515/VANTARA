@@ -65,6 +65,8 @@ class NetworkHelper(context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(2, TimeUnit.MINUTES)
+        // محلّل الأسماء قابل للاستبدال (DNS عبر HTTPS لمضيفات محجوبة)؛ افتراضيًا النظام
+        .dns(HostRouting)
         // الأول دائمًا: توجيه مضيفات مسجّلة (محرك الأنمي)؛ بلا تسجيل لا يفعل شيئًا
         .addInterceptor(HostRouting)
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net

@@ -54,6 +54,19 @@ object AnimeHostRouter : Interceptor {
     /** الدومين النشط الآن لمصدر (بعد أي تحويل مقبول). */
     fun activeBase(sourceId: String): String? = byId[sourceId]?.domains?.activeBase()
 
+    /** سبب مقروء: نوع الخطأ الأعمق ورسالته (UnknownHost = حجب DNS غالبًا). */
+    fun describe(t: Throwable): String {
+        val root = generateSequence(t) { it.cause }.last()
+        val kind = when (root) {
+            is java.net.UnknownHostException -> "الدومين لا يُحلّ (حجب DNS؟)"
+            is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال"
+            is java.net.ConnectException -> "رُفض الاتصال"
+            is javax.net.ssl.SSLException -> "خطأ شهادة/اتصال آمن"
+            else -> root.javaClass.simpleName
+        }
+        return listOfNotNull(kind, root.message?.take(120)).joinToString(": ")
+    }
+
     /** Cloudflare يسأل: هل يُمنع إظهار التحدي لهذا المضيف؟ */
     fun isHiddenOnly(host: String): Boolean = host in hiddenOnly
 
@@ -78,7 +91,11 @@ object AnimeHostRouter : Interceptor {
             health?.fail(key, e.message ?: "cloudflare", blocked = if (e.interactive) "cloudflare_interactive" else null)
             throw e
         } catch (e: IOException) {
-            health?.fail(key, e.javaClass.simpleName + ": " + (e.message ?: ""))
+            // إلغاؤنا نحن (مهلة البحث، مغادرة الصفحة) ليس عطل المصدر: لا يُسجَّل.
+            // المهلة تُسجَّل في المحرك بسببها الحقيقي («لم يرد خلال …»)
+            if (!chain.call().isCanceled()) {
+                health?.fail(key, describe(e))
+            }
             throw e
         }
     }
