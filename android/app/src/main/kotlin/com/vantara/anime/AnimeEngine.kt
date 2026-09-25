@@ -271,6 +271,45 @@ class AnimeEngine(context: Context) {
         )
     }
 
+    private val prepared = ConcurrentHashMap<String, com.vantara.anime.stream.PreparedEpisode>()
+
+    /**
+     * يبدأ تجهيز حلقة ويرجع فورًا: كل السيرفرات من كل المصادر، وكل سيرفر يُبلَّغ
+     * لحظة يتغيّر ([com.vantara.anime.stream.PreparedEpisode.listen]). الجلسة
+     * تمتلئ وهي تعمل، فالمشغّل يبدأ بأول ما يجهز ويجد الاحتياط خلفه.
+     */
+    fun prepare(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): com.vantara.anime.stream.PreparedEpisode {
+        prepared.remove(sessionId)?.job?.cancel()
+        val session = PlaybackSession(emptyList(), health)
+        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health)
+        sessions[sessionId] = session
+        sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
+        prepared[sessionId] = prep
+        prep.job = background.launch {
+            val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
+            kotlinx.coroutines.coroutineScope {
+                for (copy in ordered) {
+                    launch {
+                        runCatching {
+                            val c = EpisodeResolver.Copy(copy.sourceId, copy)
+                            val ep = resolver.pick(resolver.episodes(c), number) ?: return@runCatching
+                            val a = adapter(copy.sourceId) ?: return@runCatching
+                            val list = withTimeout(PREPARE_TIMEOUT_MS) {
+                                a.candidates(ep, trace = com.vantara.anime.adapters.ResolveTrace(prep::report))
+                            }
+                            prep.adopt(copy.sourceId, list)
+                        }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
+                    }
+                }
+            }
+            prep.finish()
+            health.flush()
+        }
+        return prep
+    }
+
+    fun prepared(id: String): com.vantara.anime.stream.PreparedEpisode? = prepared[id]
+
     fun session(id: String): PlaybackSession? = sessions[id]
 
     fun sessionCandidate(session: PlaybackSession, id: String): Candidate? = session.find(id)
@@ -278,6 +317,7 @@ class AnimeEngine(context: Context) {
     fun closeSession(id: String) {
         sessions.remove(id)
         sessionRequests.remove(id)
+        prepared.remove(id)?.job?.cancel()
         health.flush()
     }
 
@@ -479,6 +519,8 @@ class AnimeEngine(context: Context) {
         const val SEARCH_TIMEOUT_MS = 30_000L
         const val LOAD_TIMEOUT_MS = 90_000L
         const val PLAY_PROBE_TIMEOUT_MS = 75_000L
+        /** سقف تجهيز مصدر واحد (سيرفراته بالتوازي، والمتصفح المخفي آخرها). */
+        const val PREPARE_TIMEOUT_MS = 90_000L
 
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, configure, pickWork } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, momentLabel, momentStart, pickWork, upsertRoute } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -35,5 +35,27 @@ describe('anime-engine bridge', () => {
 
   it('refuses a weak match rather than playing the wrong anime', () => {
     expect(pickWork([work('Naruto Shippuden', 'a')], ['Naruto: The Movie Special Edition'])).toBe(null);
+  });
+
+  it('groups servers by quality like the native sheet, unavailable last', () => {
+    const r = (id, quality, state) => ({ id, code: id.toUpperCase(), quality, state });
+    const groups = groupRoutes([r('a', 720, 'READY'), r('b', 1080, 'RESOLVING'), r('c', null, 'UNAVAILABLE'), r('d', 1080, 'READY'), r('e', null, 'FAILED')]);
+    expect(groups.map((g) => g[0])).toEqual(['1080p', '720p', 'جودة غير محددة', 'غير متاح']);
+    expect(groups[0][1].map((x) => x.id)).toEqual(['d', 'b']);
+  });
+
+  it('upserts a route update in place', () => {
+    const list = [{ id: 'x', state: 'RESOLVING' }];
+    expect(upsertRoute(list, { id: 'x', state: 'READY' })).toEqual([{ id: 'x', state: 'READY' }]);
+    expect(upsertRoute(list, { id: 'y', state: 'READY' })).toHaveLength(2);
+  });
+
+  it('round-trips a shared moment through its Majlis label', () => {
+    const label = momentLabel(12, 730_000, 740_000);
+    expect(label).toBe('الحلقة 12 · 12:10–12:20');
+    expect(momentStart(label)).toBe(730_000);
+    expect(momentStart('الحلقة 12')).toBe(null);
+    expect(clock(3_725_000)).toBe('1:02:05');
+    expect(momentStart(momentLabel(3, 3_725_000, 3_730_000))).toBe(3_725_000);
   });
 });

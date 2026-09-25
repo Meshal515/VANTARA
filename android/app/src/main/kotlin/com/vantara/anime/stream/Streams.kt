@@ -136,8 +136,10 @@ object StreamRanker {
 
 /**
  * جلسة تشغيل حلقة: المشغّل يطلب «التالي» عند كل عطل، والجلسة تسجّل الفشل
- * في الصحة وتعطيه المرشّح التالي. إذا فرغت القائمة ترجع null، والمحرّك
- * يوسّع البحث لمصدر آخر ([com.vantara.anime.episodes.EpisodeResolver]).
+ * في الصحة وتعطيه المرشّح التالي. تمتلئ وهي تعمل: ورقة السيرفرات تضيف كل
+ * سيرفر يجهز ([append])، والمشغّل ينتظر ما يجهز إن فرغت ([changes]).
+ *
+ * يلمسها خيطان (المشغّل والحل في الخلفية)، فكل ما فيها متزامن.
  */
 class PlaybackSession(
     candidates: List<Candidate>,
@@ -145,10 +147,22 @@ class PlaybackSession(
 ) {
     private val queue = ArrayDeque(candidates)
     private val tried = mutableListOf<Candidate>()
+    private val failedIds = mutableSetOf<String>()
 
-    val remaining: Int get() = queue.size
+    /** يزيد مع كل إضافة: من ينتظر مرشّحًا جديدًا يراقبه. */
+    val changes = kotlinx.coroutines.flow.MutableStateFlow(0)
 
-    fun next(): Candidate? = queue.removeFirstOrNull()?.also { tried += it }
+    val remaining: Int get() = synchronized(this) { queue.size }
+
+    fun next(): Candidate? = synchronized(this) { queue.removeFirstOrNull()?.also { tried += it } }
+
+    /** اختيار المستخدم من ورقة السيرفرات: هذا المرشّح الآن، والباقي احتياط. */
+    fun take(id: String): Candidate? = synchronized(this) {
+        val c = queue.firstOrNull { it.id == id } ?: tried.firstOrNull { it.id == id && it.id !in failedIds } ?: return null
+        queue.remove(c)
+        if (c !in tried) tried += c
+        c
+    }
 
     fun started(c: Candidate, startupMs: Long) {
         health.ok(HealthStore.hostKey(c.host), startupMs)
@@ -157,17 +171,32 @@ class PlaybackSession(
 
     fun failed(c: Candidate, error: String): Candidate? {
         health.fail(HealthStore.hostKey(c.host), error)
-        // سيرفر ميت لا يدين المصدر كله؛ المصدر يُدان فقط إذا ماتت كل سيرفراته
-        if (queue.none { it.sourceId == c.sourceId } && tried.count { it.sourceId == c.sourceId } > 0) {
-            health.fail(HealthStore.sourceKey(c.sourceId), "كل سيرفرات الحلقة فشلت: $error")
+        synchronized(this) {
+            failedIds += c.id
+            // سيرفر ميت لا يدين المصدر كله؛ المصدر يُدان فقط إذا ماتت كل سيرفراته
+            if (queue.none { it.sourceId == c.sourceId } && tried.count { it.sourceId == c.sourceId } > 0) {
+                health.fail(HealthStore.sourceKey(c.sourceId), "كل سيرفرات الحلقة فشلت: $error")
+            }
         }
         return next()
     }
 
-    fun find(id: String): Candidate? = (tried + queue).firstOrNull { it.id == id }
+    fun isFailed(id: String): Boolean = synchronized(this) { id in failedIds }
+
+    fun find(id: String): Candidate? = synchronized(this) { (tried + queue).firstOrNull { it.id == id } }
 
     fun append(more: List<Candidate>) {
-        val seen = (tried + queue).map { it.url }.toSet()
-        queue.addAll(more.filter { it.url !in seen })
+        synchronized(this) {
+            val seen = (tried + queue).map { it.url }.toSet()
+            queue.addAll(more.filter { it.url !in seen })
+        }
+        changes.value = changes.value + 1
+    }
+
+    /** يعيد ترتيب ما لم يُجرَّب بعد (الأفضل أولًا) كلما جهز سيرفر جديد. */
+    fun reorder(rank: (List<Candidate>) -> List<Candidate>) = synchronized(this) {
+        val sorted = rank(queue.toList())
+        queue.clear()
+        queue.addAll(sorted)
     }
 }

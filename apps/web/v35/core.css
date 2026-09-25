@@ -113,6 +113,49 @@ html,
   accent-color: #8f5cff;
   caret-color: #bba2ff;
 }
+/*
+ * نبرة المحتوى: ورقة أو بطاقة عمل تلبس لون نوعه لا لون القسم المفتوح —
+ * مانهوا تُعرض من المجلس وأنت في قسم الأنمي تبقى بنفسجية، وأنمي في قسم
+ * المانجا يبقى أزرق.
+ */
+.v35 [data-tone='manga'] {
+  --bg: #08070c;
+  --bg-raised: #0c0b12;
+  --surface-1: #121019;
+  --surface-2: #18161f;
+  --surface-3: #211e2b;
+  --line: rgba(255, 255, 255, 0.065);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --text-2: #bab6c6;
+  --text-3: #85809a;
+  --text-4: #57536a;
+  --accent: #8f5cff;
+  --accent-press: #7a47f0;
+  --accent-text: #bba2ff;
+  --accent-soft: rgba(143, 92, 255, 0.14);
+  --accent-line: rgba(143, 92, 255, 0.4);
+  --accent-glow: rgba(143, 92, 255, 0.4);
+  accent-color: #8f5cff;
+}
+.v35 [data-tone='anime'] {
+  --bg: #05070d;
+  --bg-raised: #080b14;
+  --surface-1: #0d111b;
+  --surface-2: #131826;
+  --surface-3: #1b2233;
+  --line: rgba(160, 190, 255, 0.07);
+  --line-strong: rgba(160, 190, 255, 0.14);
+  --text-2: #b4bdd0;
+  --text-3: #7d879d;
+  --text-4: #4e576b;
+  --accent: #3b82f6;
+  --accent-press: #2563eb;
+  --accent-text: #8fb8ff;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-line: rgba(59, 130, 246, 0.42);
+  --accent-glow: rgba(59, 130, 246, 0.45);
+  accent-color: #3b82f6;
+}
 /* النص المحدَّد بلون التطبيق لا أزرق النظام */
 ::selection {
   background: rgba(143, 92, 255, 0.32);

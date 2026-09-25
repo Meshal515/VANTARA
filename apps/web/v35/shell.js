@@ -35,6 +35,7 @@ import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { createAnime } from './anime.js';
+import { momentStart } from '../lib/anime-engine.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
 
 const AR_GENRE = {
@@ -165,16 +166,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   let sheetClose = null;
   /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
-  function openSheet(build) {
+  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. `full`: صفحة كاملة لا ورقة. */
+  function openSheet(build, { tone = null, full = false } = {}) {
     closeSheet();
     const body = q('sheetBody');
-    body.innerHTML = '<div class="sheet-handle"></div>';
+    body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
+    body.className = 'sheet';
+    if (tone) q('sheet').dataset.tone = tone;
+    // صفحة كاملة (اختيار السيرفر والجودة): نفس الطبقة وزر الرجوع يغلقها
+    q('sheet').classList.toggle('sheet-backdrop--full', full);
     sheetClose = build(body) ?? null;
     q('sheet').classList.add('show');
   }
   function closeSheet() {
     if (!q('sheet').classList.contains('show')) return false;
     q('sheet').classList.remove('show');
+    delete q('sheet').dataset.tone;
     sheetClose?.();
     sheetClose = null;
     return true;
@@ -1789,11 +1796,32 @@ export function mountV35(deps, { page = 'home' } = {}) {
     deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource) });
   }
 
+  // ── الأنمي من المجلس والملف ──
+  // مرجع الأنمي `anime:<AniList id>`: يفتح صفحة الأنمي في قسمه، واللحظة
+  // المرسلة («الحلقة 12 · 12:10–12:20») تفتح ورقة سيرفراتها من ثانيتها.
+
+  const isAnimeRef = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
+  function openAnimeRef(ref, { title = null, cover = null, chapter = null } = {}) {
+    const id = Number(ref.slice('anime:'.length));
+    if (!Number.isFinite(id) || id <= 0) return toast('ما قدرنا نفتح هذا الأنمي');
+    closeSheet();
+    if (root.dataset.section !== 'anime') {
+      writeSection('anime');
+      applySection('anime');
+      q('mangaHome').hidden = true;
+      q('animeHome').hidden = false;
+    }
+    const episode = chapter && Number.isFinite(chapter.number) ? chapter.number : null;
+    const position = chapter ? momentStart(chapter.label) : null;
+    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position });
+  }
+
   // ── ورقة المعاينة ──
   // من المجلس والملف: لمسة على عملٍ تعرض غلافه ونبذته أولًا، ثم «افتح».
   // لمسةٌ بالغلط وأنت تمرّر لا تنقلك من مكانك.
 
   function previewWork(work, { chapter = null } = {}) {
+    if (isAnimeRef(work?.id)) return openAnimeRef(work.id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter });
     let alive = true;
     openSheet((body) => {
       const box = el('div', 'pv');
@@ -1857,7 +1885,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           if (alive) desc.textContent = 'ما قدرنا نجيب النبذة الحين.';
         });
       return () => (alive = false);
-    });
+    }, { tone: 'manga' });
   }
 
   // ── المكتبة والتقييم (في حسابك) ──
@@ -3874,6 +3902,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     workFromRef,
     openWork: (w) => void openWork(w),
     preview: (w, opts) => previewWork(w, opts),
+    openAnime: (ref, opts) => openAnimeRef(ref, opts),
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
     openShare: () => navTo('discover'),
@@ -3947,7 +3976,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     void profile.show(userId);
   }
 
-  const anime = createAnime({ root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv });
+  const anime = createAnime({
+    root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    sync,
+    friends: () => deps.friends?.() ?? [],
+    // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
+    setWatching: (info) => deps.setWatching?.(info),
+    // ترشيح الأنمي: نفس ورقة المانجا، بمرجع `anime:<id>` يفتحه المجلس في قسم الأنمي
+    share: (work) =>
+      openShareSheet({
+        sync,
+        friends: deps.friends?.() ?? [],
+        openSheet: (build) => openSheet(build, { tone: 'anime' }),
+        closeSheet,
+        sheetBody: () => q('sheetBody'),
+        toast,
+        work,
+      }),
+  });
   const startSection = readSection();
   applySection(startSection);
   q('mangaHome').hidden = startSection !== 'manga';

@@ -4,6 +4,9 @@ import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.registry.PageEmbeds
 import com.vantara.anime.registry.PageEpisodes
 import com.vantara.anime.stream.Candidate
+import com.vantara.anime.stream.RouteReport
+import com.vantara.anime.stream.RouteState
+import com.vantara.anime.stream.Variant
 import kotlinx.coroutines.CancellationException
 import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.TrackRef
@@ -207,7 +210,7 @@ class ExtensionAdapter(
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val fromExtension = try {
-            extensionCandidates(episode, now)
+            extensionCandidates(episode, now, trace)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -221,6 +224,9 @@ class ExtensionAdapter(
         return pageCandidates(episode, rule, r, now, trace, enough)
     }
 
+    private fun report(trace: ResolveTrace?, key: String, server: String, quality: Int?, variant: Variant, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
+        trace?.route(RouteReport(id, key, server, quality, variant, state, list, reason))
+
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
     private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val (finalUrl, html) = fetchPage(episode.url)
@@ -228,53 +234,69 @@ class ExtensionAdapter(
         val referer = finalUrl
         val embeds = rule.extract(html, finalUrl)
         if (embeds.isEmpty()) trace?.note("صفحة الحلقة", "لا روابط سيرفرات بقاعدة البيان")
+        val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
+        val keyOf = { e: PageEmbeds.Embed -> "p" + Integer.toHexString(e.url.hashCode()) }
+        embeds.forEach { report(trace, keyOf(it), it.name, it.quality, variant, RouteState.RESOLVING) }
         return gatherUntil(
             embeds.map { embed ->
                 suspend {
-                    withTimeoutOrNull(pageEmbedTimeoutMs) {
+                    val got = withTimeoutOrNull(pageEmbedTimeoutMs) {
                         runCatching { r.resolve(embed.url, referer) }
                             .fold(
-                                { it.also { s -> if (s.isEmpty()) trace?.note(embed.name, "لم يُستخرج رابط فيديو") } },
-                                { trace?.note(embed.name, it.brief()); emptyList() },
+                                { it },
+                                { report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = it.brief()); null },
                             )
-                            .map { st ->
-                            Candidate(
-                                id = "$id|${episode.url}|${st.url.hashCode()}",
-                                sourceId = id,
-                                sourceName = name,
-                                server = embed.name,
-                                host = StreamClassifier.host(st.url),
-                                url = st.url,
-                                headers = st.headers,
-                                quality = st.quality ?: embed.quality,
-                                label = embed.name,
-                                variant = StreamClassifier.variant(embed.name, episode.name),
-                                container = st.container ?: StreamClassifier.container(st.url),
-                                resolvedAt = now,
-                                expiresAt = StreamClassifier.expiresAt(st.url, now),
-                            )
+                            ?.map { st ->
+                                Candidate(
+                                    id = "$id|${episode.url}|${st.url.hashCode()}",
+                                    sourceId = id,
+                                    sourceName = name,
+                                    server = embed.name,
+                                    host = StreamClassifier.host(st.url),
+                                    url = st.url,
+                                    headers = st.headers,
+                                    quality = st.quality ?: embed.quality,
+                                    label = embed.name,
+                                    variant = variant,
+                                    container = st.container ?: StreamClassifier.container(st.url),
+                                    resolvedAt = now,
+                                    expiresAt = StreamClassifier.expiresAt(st.url, now),
+                                )
+                            }
+                    }
+                    when {
+                        got == null -> emptyList<Candidate>().also {
+                            report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${pageEmbedTimeoutMs / 1000} ثانية")
                         }
-                    } ?: emptyList<Candidate>().also { trace?.note(embed.name, "لم يرد خلال ${pageEmbedTimeoutMs / 1000} ثانية") }
+                        got.isEmpty() -> got.also { report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = "لم يُستخرج رابط فيديو") }
+                        else -> got.also { report(trace, keyOf(embed), embed.name, it.maxOfOrNull { c -> c.quality ?: 0 }?.takeIf { q -> q > 0 } ?: embed.quality, variant, RouteState.READY, it) }
+                    }
                 }
             },
             enough,
         )
     }
 
-    private suspend fun extensionCandidates(episode: SourceEpisode, now: Long): List<Candidate> {
+    private suspend fun extensionCandidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
         val sEpisode = SEpisode.create().apply {
             url = episode.url
             name = episode.name
             episode_number = episode.number
         }
         val hosters = source.getHosterList(sEpisode)
+        val nameOf = { h: Hoster -> h.hosterName.takeUnless { it == Hoster.NO_HOSTER_LIST || it.isBlank() } ?: name }
+        val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
+        hosters.forEachIndexed { i, h -> report(trace, "h$i", nameOf(h), null, variant, RouteState.RESOLVING) }
         return coroutineScope {
-            hosters.map { hoster ->
+            hosters.mapIndexed { i, hoster ->
                 async {
-                    withTimeoutOrNull(hosterTimeoutMs) {
+                    val got = withTimeoutOrNull(hosterTimeoutMs) {
                         runCatching { videosOf(hoster) }.getOrDefault(emptyList())
                             .mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
                     }.orEmpty()
+                    if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = "لا رابط فيديو")
+                    else report(trace, "h$i", nameOf(hoster), got.maxOfOrNull { it.quality ?: 0 }?.takeIf { it > 0 }, variant, RouteState.READY, got)
+                    got
                 }
             }.awaitAll().flatten().distinctBy { it.url }
         }

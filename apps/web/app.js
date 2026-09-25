@@ -137,7 +137,7 @@ function presencePayload() {
   if (state.reading) {
     return {
       status: 'READING',
-      screen: 'READER',
+      screen: state.reading.watching ? 'ANIME' : 'READER',
       seriesId: state.reading.seriesId,
       seriesTitle: state.reading.seriesTitle,
       chapterId: state.reading.chapterId,
@@ -167,7 +167,8 @@ function startHeartbeat() {
   let sinceFlush = 0;
   beatTimer = setInterval(() => {
     tickUsage();
-    if (document.visibilityState !== 'visible') return;
+    // المشغّل الأصلي فوق الواجهة يخفيها، والمشاهدة ما زالت حضورًا
+    if (document.visibilityState !== 'visible' && !state.reading?.watching) return;
     void sync.beat(presencePayload());
     void refreshPresence();
     sinceFlush += BEAT_MS;
@@ -1432,6 +1433,19 @@ function screenV35(page) {
         version: appVersion(),
         friends: () => frameCapability().friends(),
         presence: () => sync.presence(),
+        // «يشاهد: … الحلقة 12» للأصدقاء؛ النبضة تُرسل مباشرة (المشغّل يخفي الواجهة)
+        setWatching: (info) => {
+          if (!info && !state.reading?.watching) return;
+          const next = info
+            ? { seriesId: info.ref, seriesTitle: info.title, chapterId: null, chapterLabel: `الحلقة ${info.episode}`, chapterNumber: info.episode, watching: true }
+            : null;
+          const same = next && state.reading?.watching && state.reading.seriesId === next.seriesId && state.reading.chapterNumber === next.chapterNumber;
+          state.reading = next;
+          if (!same || Date.now() - (state.watchBeatAt ?? 0) > 20_000) {
+            state.watchBeatAt = Date.now();
+            void sync.beat(presencePayload());
+          }
+        },
         pageImage: async (sourceId, page) => (await engine.pageImage(sourceId, page)).src,
         // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
         report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),

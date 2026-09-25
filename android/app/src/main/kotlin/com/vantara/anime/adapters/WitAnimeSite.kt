@@ -2,6 +2,8 @@ package com.vantara.anime.adapters
 
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.stream.Candidate
+import com.vantara.anime.stream.RouteReport
+import com.vantara.anime.stream.RouteState
 import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.Variant
 import eu.kanade.tachiyomi.network.GET
@@ -103,17 +105,34 @@ class WitAnimeSiteAdapter(
         val sourcesPath = Parse.sourcesUrl(page) ?: "${episode.url.trimEnd('/')}/sources"
         val all = Parse.servers(post(sourcesPath, csrf, watch))
         val (skipped, servers) = all.partition { it.label.lowercase() in EmbedResolver.UNSUPPORTED }
-        skipped.map { it.label }.distinct().forEach { trace?.note(it, "غير مدعوم بعد (فيديو مشفّر)") }
         if (all.isEmpty()) trace?.note("السيرفرات", "الموقع لم يُرجع أي سيرفر")
+        fun report(s: Parse.Server, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
+            trace?.route(
+                RouteReport(
+                    sourceId = id, key = s.token.take(16), server = s.label, quality = Parse.quality(s.quality),
+                    variant = if (s.version == "dub") Variant.DUB else Variant.SUB,
+                    state = state, candidates = list, reason = reason,
+                ),
+            )
+        skipped.forEach { report(it, RouteState.UNAVAILABLE, reason = "غير مدعوم بعد (فيديو مشفّر)") }
+        servers.forEach { report(it, RouteState.RESOLVING) }
 
         return gatherUntil(
             servers.map { s ->
                 suspend {
                     val label = "${s.label} ${s.quality}"
-                    withTimeoutOrNull(serverTimeoutMs) {
+                    val got = withTimeoutOrNull(serverTimeoutMs) {
                         runCatching { streamsOf(s, watch, episode, now, trace) }
-                            .fold({ it }, { trace?.note(label, it.brief()); emptyList() })
-                    } ?: emptyList<Candidate>().also { trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية") }
+                            .fold({ it }, { report(s, RouteState.UNAVAILABLE, reason = it.brief()); emptyList() })
+                    }
+                    when {
+                        got == null -> emptyList<Candidate>().also {
+                            trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
+                            report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
+                        }
+                        got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = "لا رابط فيديو") }
+                        else -> got.also { report(s, RouteState.READY, it) }
+                    }
                 }
             },
             enough,

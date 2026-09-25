@@ -89,15 +89,90 @@ export async function episodes(anime) {
 }
 
 /**
- * يفتح جلسة الحلقة (كل النسخ ← كل السيرفرات) ويشغّلها في المشغّل الأصلي.
- * يرجع عدد طرق التشغيل التي وُجدت.
+ * يبدأ تجهيز الحلقة ويرجع فورًا: كل سيرفر من كل مصدر بحالته الآن
+ * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
+ * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function play({ copies, episode, title, position = 0, quality = 1080, variant = 'SUB' }) {
-  const out = await call('streams', { copies, episode, quality, variant });
-  if (!out) return null;
-  const count = out.candidates?.length ?? 0;
-  if (count) await bridge().play({ session: out.session, title, position });
-  return { session: out.session, count };
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB' }) {
+  return (await call('prepare', { copies, episode, quality, variant })) ?? null;
+}
+
+export async function routes(session) {
+  return (await call('routes', { session })) ?? null;
+}
+
+/** «شغّل الأفضل»: ينتظر أول سيرفر يجهز إن لم يجهز شيء بعد. */
+export async function best(session, prefer = null, waitMs = 45_000) {
+  return (await call('best', { session, prefer, waitMs })) ?? null;
+}
+
+/** أفضل رابط داخل سيرفر اختاره المستخدم. */
+export async function pick(session, route) {
+  return (await call('pick', { session, route }))?.candidate ?? null;
+}
+
+/** يفتح المشغّل الأصلي على جلسة مجهّزة (والسيرفر المختار إن وُجد). */
+export async function open(args) {
+  const plugin = bridge();
+  if (!plugin) return null;
+  await plugin.play(args);
+  return true;
+}
+
+export const closeSession = (session) => call('closeSession', { session });
+
+/** ما أرسله المشغّل (لحظات وترشيحات) ولم يصل المجلس بعد. يُفرَّغ بالقراءة. */
+export async function outbox() {
+  return (await call('outbox'))?.items ?? [];
+}
+
+// ───────────── نموذج ورقة السيرفرات (نفس قاعدة المشغّل الأصلي) ─────────────
+
+const bucket = (q) => (q == null ? null : q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360);
+const ORDER = { READY: 0, RESOLVING: 1, FAILED: 2, UNAVAILABLE: 3 };
+
+/** [[«1080p»، سيرفرات]…] من الأعلى، ثم غير المحددة، وغير المتاحة في الآخر. */
+export function groupRoutes(list) {
+  const usable = list.filter((r) => r.state !== 'UNAVAILABLE');
+  const groups = new Map();
+  for (const r of usable) {
+    const b = bucket(r.quality);
+    if (!groups.has(b)) groups.set(b, []);
+    groups.get(b).push(r);
+  }
+  const out = [...groups.entries()]
+    .sort((a, b) => (b[0] ?? -1) - (a[0] ?? -1))
+    .map(([b, rs]) => [b == null ? 'جودة غير محددة' : `${b}p`, rs.sort((x, y) => ORDER[x.state] - ORDER[y.state])]);
+  const dead = list.filter((r) => r.state === 'UNAVAILABLE');
+  if (dead.length) out.push(['غير متاح', dead]);
+  return out;
+}
+
+/** يدمج تحديث سيرفر في القائمة مكانه (أو يضيفه آخرها). */
+export function upsertRoute(list, route) {
+  const i = list.findIndex((r) => r.id === route.id);
+  if (i < 0) return [...list, route];
+  const next = list.slice();
+  next[i] = route;
+  return next;
+}
+
+/** «12:10» من الملّي ثانية. */
+export function clock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+/** عنوان اللحظة في المجلس، ومنه تُقرأ بدايتها عند صديقك. */
+export const momentLabel = (episode, startMs, endMs) => `الحلقة ${episode} · ${clock(startMs)}–${clock(endMs)}`;
+
+export function momentStart(label) {
+  const m = /·\s*(\d+(?::\d{2}){1,2})\s*[–-]/.exec(String(label ?? ''));
+  if (!m) return null;
+  return m[1].split(':').reduce((acc, part) => acc * 60 + Number(part), 0) * 1000;
 }
 
 export async function sources() {

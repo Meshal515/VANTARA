@@ -14,11 +14,19 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * أين انكسرت السلسلة: المصدر ← الحلقة ← السيرفر ← المستخرج. الواجهة تبقى نظيفة
  * («لا سيرفرات»)، والتشخيص يُري السبب لكل سيرفر بدل قائمة فارغة صامتة.
  */
-class ResolveTrace {
+class ResolveTrace(
+    /** حالة كل سيرفر لحظة تتغيّر: ورقة السيرفرات تُرسم منها وهي تتجهّز. */
+    private val onRoute: ((com.vantara.anime.stream.RouteReport) -> Unit)? = null,
+) {
     private val notes = ConcurrentLinkedQueue<String>()
 
     fun note(stage: String, reason: String) {
         if (notes.size < MAX) notes += "$stage: $reason"
+    }
+
+    fun route(report: com.vantara.anime.stream.RouteReport) {
+        runCatching { onRoute?.invoke(report) }
+        if (report.state == com.vantara.anime.stream.RouteState.UNAVAILABLE && report.reason != null) note(report.server, report.reason)
     }
 
     fun notes(): List<String> = notes.toList()
