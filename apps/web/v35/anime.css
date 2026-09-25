@@ -1,0 +1,1309 @@
+/*
+ * VANTARA ANIME — الهوية والتركيب.
+ *
+ * نفس نظام المتغيّرات في core.css: القسم يغيّر قيمها فقط، فكل ما في
+ * التطبيق (الأزرار، التنقّل، الأوراق، الإعدادات) يلبس لون القسم بلا سطر
+ * إضافي. وما يخصّ الأنمي وحده (البطاقات الدائرية، بطاقات الحلقات، Top 10)
+ * بأسماء `an-` هنا.
+ *
+ * المانجا: أسود بنفسجي، أغلفة طولية، ورق.
+ * الأنمي: أسود أزرق عميق، إطارات عريضة، ضوء شاشة.
+ * السينما: أسود دافئ، برتقالي.
+ */
+
+/* ───────────── متغيّرات الأقسام ───────────── */
+
+.v35[data-section='anime'] {
+  --bg: #05070d;
+  --bg-raised: #080b14;
+  --surface-1: #0d111b;
+  --surface-2: #131826;
+  --surface-3: #1b2233;
+  --line: rgba(160, 190, 255, 0.07);
+  --line-strong: rgba(160, 190, 255, 0.14);
+  --text-2: #b4bdd0;
+  --text-3: #7d879d;
+  --text-4: #4e576b;
+  --accent: #3b82f6;
+  --accent-press: #2563eb;
+  --accent-text: #8fb8ff;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-line: rgba(59, 130, 246, 0.42);
+  --accent-glow: rgba(59, 130, 246, 0.45);
+  accent-color: #3b82f6;
+  caret-color: #8fb8ff;
+}
+.v35[data-section='cinema'] {
+  --bg: #0b0806;
+  --bg-raised: #110d0a;
+  --surface-1: #17120e;
+  --surface-2: #1e1813;
+  --surface-3: #29211a;
+  --line: rgba(255, 210, 170, 0.07);
+  --line-strong: rgba(255, 210, 170, 0.14);
+  --text-2: #cdbfb3;
+  --text-3: #9a8a7c;
+  --text-4: #62564c;
+  --accent: #f97316;
+  --accent-press: #ea580c;
+  --accent-text: #ffb27a;
+  --accent-soft: rgba(249, 115, 22, 0.15);
+  --accent-line: rgba(249, 115, 22, 0.42);
+  --accent-glow: rgba(249, 115, 22, 0.4);
+  accent-color: #f97316;
+  caret-color: #ffb27a;
+}
+.v35,
+.v35 .app,
+.v35 .bottom-nav {
+  transition: background-color 0.5s ease;
+}
+
+/* ما يخصّ قسمًا يختفي في غيره */
+.v35:not([data-section='anime']) .anime-only,
+.v35[data-section='anime'] .manga-only {
+  display: none !important;
+}
+
+/* ───────────── عناصر مشتركة ───────────── */
+
+.v35 .an-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.v35 .an-img.loaded {
+  opacity: 1;
+}
+.v35 .an-img.failed {
+  visibility: hidden;
+}
+
+.v35 .an-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 750;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform 0.16s ease,
+    background-color 0.2s ease;
+}
+.v35 .an-btn:active {
+  transform: scale(0.96);
+}
+.v35 .an-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+.v35 .an-btn--primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
+  color: #fff;
+  box-shadow:
+    0 10px 28px var(--accent-glow, var(--accent-soft)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.v35 .an-btn--glass {
+  background: rgba(255, 255, 255, 0.09);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.v35 .an-btn--glass[aria-pressed='true'] {
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: var(--accent-soft);
+}
+.v35 .an-btn--icon {
+  flex: none;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .an-btn--icon .icon {
+  width: 21px;
+  height: 21px;
+}
+.v35 .an-btn--wide {
+  flex: 1;
+  min-width: 0;
+  height: 50px;
+  font-size: 15px;
+}
+
+.v35 .an-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #ffd166;
+  font-size: 12px;
+  font-weight: 800;
+  direction: ltr;
+}
+.v35 .an-score .icon {
+  width: 12px;
+  height: 12px;
+}
+.v35 .an-bar {
+  display: block;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.v35 .an-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+/* ───────────── البانر: بطاقات تطلّ جاراتها ───────────── */
+
+.v35 .an-car {
+  padding-top: 4px;
+}
+.v35 .an-car-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 8% 16px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.v35 .an-car-track::-webkit-scrollbar {
+  display: none;
+}
+.v35 .an-car-slide {
+  --art: var(--accent);
+  position: relative;
+  flex: 0 0 100%;
+  aspect-ratio: 1.42;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 22%, var(--surface-1));
+  scroll-snap-align: center;
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  transform-origin: center;
+  cursor: pointer;
+  text-align: start;
+  font: inherit;
+  color: #fff;
+}
+.v35 .an-car-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(3, 5, 10, 0.35), transparent 40%);
+}
+/* المعلومات تحت البطاقة: تذوب مع السحب وتكتمل حين تستقر */
+.v35 .an-car-info {
+  min-height: 150px;
+  padding: 14px var(--gutter) 0;
+  will-change: opacity, transform;
+}
+.v35 .an-car-info-in {
+  display: grid;
+  gap: 7px;
+  justify-items: start;
+}
+.v35 .an-car-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .an-car-rank {
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  direction: ltr;
+  box-shadow: 0 4px 14px var(--accent-glow, transparent);
+}
+.v35 .an-car-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 850;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .an-car-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.v35 .an-car-sub > span + span::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--text-4);
+  vertical-align: middle;
+}
+.v35 .an-car-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.v35 .an-car-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding-top: 2px;
+}
+.v35 .an-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition:
+    width 0.3s ease,
+    background-color 0.3s ease;
+}
+.v35 .an-dot.active {
+  width: 24px;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow, transparent);
+}
+
+/* ───────────── الشرائط ───────────── */
+
+.v35 .an-rail {
+  padding-top: 30px;
+}
+.v35 .an-rail-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 var(--gutter);
+  margin-bottom: 14px;
+}
+.v35 .an-rail-head--flat {
+  padding: 0;
+}
+.v35 .an-rail-titles {
+  display: grid;
+  gap: 2px;
+}
+.v35 .an-rail-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 820;
+  line-height: 1.25;
+}
+.v35 .an-rail-sub {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.v35 .an-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.v35 .an-more .icon {
+  width: 16px;
+  height: 16px;
+}
+.v35 .an-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 var(--gutter) 6px;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--gutter);
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.v35 .an-strip::-webkit-scrollbar {
+  display: none;
+}
+.v35 .an-strip > * {
+  scroll-snap-align: start;
+  flex: none;
+}
+
+/* بطاقة العمل: بوستر طولي */
+.v35 .an-card {
+  --art: var(--surface-2);
+  width: 116px;
+  display: grid;
+  gap: 7px;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .an-poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 30%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 0.18s ease;
+}
+.v35 .an-card:active .an-poster {
+  transform: scale(0.96);
+}
+.v35 .an-poster .an-score {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: rgba(4, 6, 12, 0.62);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+}
+.v35 .an-ep-badge {
+  position: absolute;
+  bottom: 6px;
+  inset-inline-start: 6px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.v35 .an-card-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .an-card-meta {
+  margin-top: -3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* Top 10: رقم كبير مفرّغ يتكئ عليه البوستر */
+.v35 .an-card--ranked {
+  width: 148px;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+.v35 .an-card--ranked .an-poster {
+  position: relative;
+  z-index: 1;
+  width: 104px;
+  flex: none;
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    -10px 0 24px rgba(0, 0, 0, 0.55);
+}
+.v35 .an-rank {
+  position: relative;
+  z-index: 0;
+  flex: none;
+  width: 54px;
+  margin-inline-end: -10px;
+  font-size: 88px;
+  line-height: 0.76;
+  font-weight: 900;
+  letter-spacing: -5px;
+  color: var(--bg);
+  -webkit-text-stroke: 2px color-mix(in srgb, var(--accent-text) 70%, transparent);
+  text-align: center;
+  direction: ltr;
+}
+
+/* بطاقة الحلقة: عريضة */
+.v35 .an-ep-card {
+  --art: var(--surface-2);
+  width: 248px;
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .an-ep-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 30%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 0.18s ease;
+}
+.v35 .an-ep-card:active .an-ep-art {
+  transform: scale(0.97);
+}
+.v35 .an-ep-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(3, 5, 10, 0.85), transparent 55%);
+}
+.v35 .an-play {
+  position: absolute;
+  bottom: 10px;
+  inset-inline-end: 10px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.v35 .an-play .icon {
+  width: 16px;
+  height: 16px;
+  margin-inline-end: -2px;
+}
+.v35 .an-ep-num {
+  position: absolute;
+  bottom: 12px;
+  inset-inline-start: 12px;
+  font-size: 14px;
+  font-weight: 850;
+  color: #fff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7);
+}
+.v35 .an-ep-copy {
+  display: grid;
+  gap: 1px;
+  padding-inline: 2px;
+}
+.v35 .an-ep-title {
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .an-ep-when {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* «آخر المشاهدات»: بوستر صغير والحلقة وشريط التقدّم */
+.v35 .an-cw {
+  width: 240px;
+  display: flex;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: transform 0.16s ease;
+}
+.v35 .an-cw:active {
+  transform: scale(0.97);
+}
+.v35 .an-cw-art {
+  flex: none;
+  width: 74px;
+  aspect-ratio: 0.72;
+  background: var(--surface-2);
+}
+.v35 .an-cw-info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.v35 .an-cw-ep {
+  font-size: 15px;
+  font-weight: 850;
+}
+.v35 .an-cw-title {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .an-cw-pct {
+  font-size: 11px;
+  color: var(--text-3);
+  direction: ltr;
+  text-align: left;
+}
+
+/* الأنواع */
+.v35 .an-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 var(--gutter) 4px;
+  scrollbar-width: none;
+}
+.v35 .an-chips::-webkit-scrollbar {
+  display: none;
+}
+.v35 .an-chip {
+  --hue: 215;
+  flex: none;
+  height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, hsl(var(--hue) 75% 55% / 0.24), hsl(var(--hue) 75% 55% / 0.07));
+  box-shadow: inset 0 0 0 1px hsl(var(--hue) 85% 65% / 0.22);
+  color: hsl(var(--hue) 90% 84%);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.16s ease;
+}
+.v35 .an-chip:active {
+  transform: scale(0.95);
+}
+.v35 .an-chip.active {
+  background: var(--accent);
+  box-shadow: 0 6px 18px var(--accent-glow, transparent);
+  color: #fff;
+}
+
+.v35 .an-credit {
+  margin: 34px var(--gutter) 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+/* ───────────── الهياكل والفراغ ───────────── */
+
+.v35 .an-skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-1);
+  border-radius: 14px;
+}
+.v35 .an-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.05) 50%, transparent 80%);
+  animation: an-shimmer 1.4s infinite;
+}
+@keyframes an-shimmer {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+.v35 .an-car-slide.an-skel {
+  border-radius: 24px;
+}
+.v35 .an-skel-line {
+  width: 140px;
+  height: 18px;
+  border-radius: 6px;
+}
+.v35 .an-skel-wide {
+  width: 248px;
+  aspect-ratio: 16 / 9;
+}
+.v35 .an-skel-poster {
+  width: 116px;
+  aspect-ratio: 2 / 3;
+}
+.v35 .an-skel-grid {
+  height: 180px;
+}
+.v35 .an-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 60px 32px 40px;
+  text-align: center;
+}
+.v35 .an-empty h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+}
+.v35 .an-empty p {
+  margin: 0 0 8px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.v35 .an-empty-icon {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.v35 .an-note {
+  margin: 12px 0;
+  color: var(--text-3);
+  font-size: 13px;
+  text-align: center;
+  grid-column: 1 / -1;
+}
+
+/* ───────────── صفحة الأنمي ───────────── */
+
+.v35 .anime-page {
+  --art: var(--accent);
+  padding-bottom: 40px;
+}
+.v35 .an-detail-top {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 520px);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--safe-top) 6px 0;
+  min-height: calc(var(--top-h) + var(--safe-top));
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent);
+  transition:
+    background-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+.v35 .an-detail-top .icon-btn {
+  color: #fff;
+}
+.v35 .an-detail-top.scrolled {
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 1px 0 var(--line);
+}
+.v35 .an-detail-top-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 750;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+.v35 .an-detail-top.scrolled .an-detail-top-title {
+  opacity: 1;
+  transform: none;
+}
+.v35 .an-detail-hero {
+  position: relative;
+  aspect-ratio: 16 / 11;
+  overflow: hidden;
+  background: var(--bg);
+}
+.v35 .an-detail-art {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+/* الظل داخل إطار الصورة: يذوب أسفلها في الخلفية تمامًا فلا يبقى خط فاصل */
+.v35 .an-detail-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), transparent 30%, color-mix(in srgb, var(--bg) 55%, transparent) 62%, color-mix(in srgb, var(--bg) 90%, transparent) 85%, var(--bg) 99%);
+}
+.v35 .an-detail-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: -84px;
+  padding: 0 var(--gutter);
+}
+.v35 .an-detail-poster {
+  flex: none;
+  width: 112px;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 40px color-mix(in srgb, var(--art) 30%, transparent);
+}
+.v35 .an-detail-titles {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+.v35 .an-detail-titles h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.22;
+  font-weight: 850;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .an-detail-alt {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .an-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 14px var(--gutter) 0;
+}
+.v35 .an-fact,
+.v35 .an-status {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-2);
+}
+.v35 .an-status--releasing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6ee7a8;
+  background: rgba(52, 211, 153, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.25);
+}
+.v35 .an-status--releasing::before,
+.v35 .an-next-dot {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: an-pulse 1.8s ease-in-out infinite;
+}
+@keyframes an-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+.v35 .an-stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  margin: 16px var(--gutter) 0;
+  padding: 14px 4px;
+  border-radius: 18px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .an-stat {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+.v35 .an-stat + .an-stat {
+  border-inline-start: 1px solid var(--line);
+}
+.v35 .an-stat b {
+  font-size: 18px;
+  font-weight: 850;
+  direction: ltr;
+}
+.v35 .an-stat--score b {
+  color: #ffd166;
+}
+.v35 .an-stat span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.v35 .an-detail-actions {
+  display: flex;
+  gap: 10px;
+  padding: 16px var(--gutter) 0;
+}
+.v35 .an-detail-actions .an-btn--glass {
+  flex: none;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+}
+.v35 .an-detail-actions .an-btn--glass span {
+  display: none;
+}
+.v35 .an-detail-actions .an-btn--glass .icon {
+  width: 21px;
+  height: 21px;
+}
+.v35 .an-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px var(--gutter) 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.v35 .an-block {
+  padding: 26px var(--gutter) 0;
+}
+.v35 .an-synopsis {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-2);
+  white-space: pre-line;
+}
+.v35 .an-synopsis.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .an-more-text {
+  margin-top: 4px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.v35 .an-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.v35 .an-tag {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.v35 .an-ranges {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin: -4px 0 12px;
+  scrollbar-width: none;
+}
+.v35 .an-range {
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-1);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  direction: ltr;
+  cursor: pointer;
+}
+.v35 .an-range.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.v35 .an-ep-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.v35 .an-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-3);
+}
+.v35 .an-jump input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.v35 .an-er-list {
+  display: grid;
+  gap: 8px;
+}
+.v35 .an-er {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  padding-inline-end: 4px;
+  border-radius: 16px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow 0.4s ease, background-color 0.4s ease;
+}
+.v35 .an-er.flash {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-soft);
+}
+.v35 .an-er-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .an-er-art {
+  position: relative;
+  flex: none;
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  border-radius: 11px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 25%, var(--surface-2));
+}
+.v35 .an-er-no {
+  position: absolute;
+  bottom: 5px;
+  inset-inline-start: 5px;
+  min-width: 26px;
+  padding: 1px 7px;
+  border-radius: 7px;
+  background: rgba(3, 5, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+.v35 .an-er-bar {
+  position: absolute;
+  bottom: 0;
+  inset-inline: 0;
+  height: 3px;
+  border-radius: 0;
+}
+.v35 .an-er-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.v35 .an-er-copy b {
+  font-size: 14.5px;
+  font-weight: 800;
+}
+.v35 .an-er-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .an-er.seen .an-er-copy b {
+  color: var(--text-3);
+}
+.v35 .an-er.seen .an-er-art img {
+  filter: saturate(0.5) brightness(0.7);
+}
+.v35 .an-er-icon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+.v35 .an-er-icon:active {
+  background: var(--surface-2);
+}
+.v35 .an-er-icon.on {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.v35 .anime-page .an-rail {
+  padding-top: 30px;
+}
+
+/* ورقة الحلقة */
+.v35 .an-sheet-head {
+  padding: 4px 4px 14px;
+}
+.v35 .an-sheet-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent-text);
+}
+.v35 .an-sheet-title {
+  font-size: 17px;
+  font-weight: 800;
+}
+.v35 .an-sheet-note {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--accent-text);
+  margin-bottom: 8px;
+}
+.v35 .an-sheet-note div {
+  display: grid;
+  gap: 4px;
+}
+.v35 .an-sheet-note b {
+  color: var(--text-1);
+  font-size: 14px;
+}
+.v35 .an-sheet-note span {
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ───────────── اكتشف ───────────── */
+
+.v35 .an-discover {
+  display: grid;
+  gap: 14px;
+}
+.v35 .an-discover .an-chips {
+  margin-inline: calc(var(--gutter) * -1);
+}
+.v35 .an-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 10px;
+}
+.v35 .an-grid .an-card,
+.v35 .an-grid .an-skel-poster {
+  width: auto;
+}
+.v35 .an-load-more {
+  justify-self: center;
+  margin-top: 6px;
+}
+.v35 .an-count {
+  margin: 14px 0 12px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ───────────── مكتبتي: سجل المشاهدة وقائمتي ───────────── */
+
+.v35 .an-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .an-seg-btn {
+  height: 40px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.v35 .an-seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.v35 .an-clear {
+  display: block;
+  margin: 12px 0 8px;
+  margin-inline-start: auto;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.v35 .an-hr-list {
+  display: grid;
+  gap: 12px;
+}
+.v35 .an-hr {
+  display: flex;
+  align-items: stretch;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+.v35 .an-hr-art {
+  flex: none;
+  width: 88px;
+  aspect-ratio: 2 / 3;
+  background: var(--surface-2);
+}
+.v35 .an-hr-info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.v35 .an-hr-title {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .an-hr-ep {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.v35 .an-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.v35 .an-hr-x {
+  flex: none;
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-inline-end: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.v35 .an-foot {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface-1);
+  font-size: 12.5px;
+  color: var(--text-3);
+}

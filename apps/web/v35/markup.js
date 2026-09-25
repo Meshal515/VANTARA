@@ -46,10 +46,31 @@ export const SHELL_HTML = `<div class="app">
   <section class="page active" id="home">
     <header class="header">
       <div class="header-start">${iconButton('menu', 'القائمة', { act: 'openDrawer' })}</div>
-      <div class="brand-box" aria-hidden="true"><div class="brand">VANTARA</div></div>
+      <div class="brand-box">
+        <button class="brand-switch" type="button" data-act="toggleSections" aria-haspopup="menu" aria-expanded="false" aria-controls="sectionMenu" id="brandSwitch" aria-label="أقسام VANTARA">
+          <span class="brand">VANTARA</span>
+          <span class="brand-section"><span id="brandSectionName">MANGA</span><span class="brand-caret" aria-hidden="true">${glyph('chevron', { size: 8 })}</span></span>
+        </button>
+      </div>
+      <div class="section-scrim" id="sectionScrim" data-act="toggleSections" hidden></div>
+      <div class="section-menu" id="sectionMenu" role="menu" aria-label="أقسام VANTARA" hidden>
+        <button class="section-item section-item--manga" type="button" role="menuitemradio" aria-checked="true" data-act="pickSection" data-arg="manga">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">MANGA</span></span>
+          <span class="section-sub">مانجا · مانهوا</span>
+        </button>
+        <button class="section-item section-item--anime" type="button" role="menuitemradio" aria-checked="false" data-act="pickSection" data-arg="anime">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">ANIME</span></span>
+          <span class="section-sub">مسلسلات · أفلام</span>
+        </button>
+        <button class="section-item section-item--cinema" type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" data-act="pickSection" data-arg="cinema">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">CINEMA</span></span>
+          <span class="section-sub">قريبًا</span>
+        </button>
+      </div>
       <div class="header-end">${iconButton('search', 'بحث', { act: 'openSearch' })}${bell()}</div>
     </header>
 
+    <div class="home-view" id="mangaHome">
     <section class="hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
       <div class="hero-track" id="heroTrack"></div>
       <div class="hero-dots" id="heroDots"></div>
@@ -62,7 +83,11 @@ export const SHELL_HTML = `<div class="app">
       ${shortcut('clock', 'المضافة حديثًا', 'openCollection', 'recent')}
     </div>
     <main id="homeSections"></main>
+    </div>
+    <div class="home-view anime-home" id="animeHome" hidden></div>
   </section>
+
+  <section class="page anime-page" id="anime"></section>
 
   <section class="page" id="detail">
     <div class="detail-glow" aria-hidden="true"><i id="detailGlow"></i></div>
@@ -135,7 +160,8 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page" id="library">
     ${mainTop('مكتبتي')}
-    <div class="page-body">
+    <div class="page-body anime-only" id="animeLibrary"></div>
+    <div class="page-body manga-only">
       <div class="segmented" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">
         <span class="work-meta" id="libraryCount"></span>
@@ -149,7 +175,8 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page" id="discover">
     ${mainTop('اكتشف')}
-    <div class="page-body">
+    <div class="page-body anime-only" id="animeDiscover"></div>
+    <div class="page-body manga-only">
       <form class="search-bar" data-submit="discoverSearch" role="search">
         ${glyph('search')}
         <input class="search-input" id="discoverSearch" type="search" enterkeyhint="search" autocomplete="off" placeholder="ابحث في كل المصادر" data-input="discoverSearch" aria-label="ابحث في كل المصادر">

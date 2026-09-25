@@ -86,10 +86,13 @@ const P = {
   shield: '<path d="M12 3.5 19 6.2v5.3c0 4.2-2.8 7.4-7 8.9-4.2-1.5-7-4.7-7-8.9V6.2Z"/>',
   puzzle:
     '<path d="M3.6 8.9a1.5 1.5 0 0 1 1.5-1.5h3.5a2.2 2.2 0 1 1 3 0h3.5a1.5 1.5 0 0 1 1.5 1.5v3.5a2.2 2.2 0 1 1 0 3v3.5a1.5 1.5 0 0 1-1.5 1.5h-10a1.5 1.5 0 0 1-1.5-1.5Z"/>',
+  // التشغيل: مثلث بزوايا مدوّرة، مزاح قليلًا ليبدو في المنتصف بصريًا
+  pause: '<rect x="7" y="5.5" width="3.4" height="13" rx="1"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1"/>',
+  play: '<path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6Z"/>',
 };
 
 /** رموزٌ لها حالة «مفعّل» تُملأ فيها بدل أن تُحدَّد. */
-const FILLABLE = new Set(['heart', 'library', 'star', 'bell']);
+const FILLABLE = new Set(['heart', 'library', 'star', 'bell', 'play', 'pause']);
 
 /**
  * @param {keyof typeof P} name

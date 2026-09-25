@@ -329,6 +329,168 @@ html,
   direction: ltr;
 }
 
+/* مبدّل الأقسام: VANTARA وتحته اسم القسم بلونه؛ الضغط يُنزل لوحة الأقسام */
+.v35 .brand-switch {
+  pointer-events: auto;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 4px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  direction: ltr;
+  -webkit-tap-highlight-color: transparent;
+}
+.v35 .brand-switch:active .brand {
+  opacity: 0.7;
+}
+.v35 .brand-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 3.5px;
+  color: var(--accent-text);
+}
+.v35 .brand-caret {
+  display: inline-flex;
+  opacity: 0.8;
+  transform: rotate(-90deg);
+  transition: transform 0.25s ease;
+}
+.v35 .brand-caret .icon {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2.6;
+}
+.v35 .brand-switch[aria-expanded='true'] .brand-caret {
+  transform: rotate(90deg);
+}
+
+.v35 .section-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(4, 4, 8, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.v35 .section-scrim.open {
+  opacity: 1;
+}
+.v35 .section-menu {
+  position: absolute;
+  top: calc(var(--top-h) + var(--safe-top) + 2px);
+  inset-inline: 0;
+  margin-inline: auto;
+  z-index: 40;
+  width: min(248px, calc(100vw - 32px));
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 20px 50px rgba(0, 0, 0, 0.55);
+  transform-origin: top center;
+  opacity: 0;
+}
+.v35 .section-menu.open {
+  opacity: 1;
+}
+.v35 .section-item {
+  --tone: #8f5cff;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.16s ease;
+}
+.v35 .section-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 22%, transparent), color-mix(in srgb, var(--tone) 6%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.v35 .section-item[aria-checked='true']::before {
+  opacity: 1;
+}
+.v35 .section-item:active {
+  transform: scale(0.97);
+}
+.v35 .section-item--anime {
+  --tone: #3b82f6;
+}
+.v35 .section-item--cinema {
+  --tone: #f97316;
+}
+.v35 .section-lockup {
+  position: relative;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  direction: ltr;
+  line-height: 1;
+}
+.v35 .section-kicker {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  margin-inline-end: -3px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.v35 .section-word {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  margin-inline-end: -4px; /* يلغي تباعد آخر حرف لتتحاذى الكلمتان */
+  color: color-mix(in srgb, var(--tone) 62%, #fff);
+}
+.v35 .section-sub {
+  position: relative;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+.v35 .section-item[aria-disabled='true'] .section-word {
+  color: color-mix(in srgb, var(--tone) 35%, rgba(255, 255, 255, 0.3));
+}
+.v35 .section-item[aria-disabled='true'] .section-kicker,
+.v35 .section-item[aria-disabled='true'] .section-sub {
+  color: rgba(255, 255, 255, 0.28);
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .section-menu,
+  .v35 .section-scrim,
+  .v35 .brand-caret {
+    transition: none;
+  }
+}
+
 /* ترويسة الصفحات الفرعية: رجوع في البداية (يمين)، العنوان، أفعال في النهاية */
 .v35 .page-top {
   position: sticky;
