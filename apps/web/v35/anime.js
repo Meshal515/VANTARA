@@ -1015,7 +1015,8 @@ export function createAnime(deps) {
       const meta = el('div', 'an-src-meta', facts.join(' · '));
       meta.dir = 'ltr';
       row.append(top, meta);
-      const why = s.disabledReason ?? s.loadError ?? r?.blocked ?? (r?.streak >= 3 ? r?.lastError : null);
+      // السبب يظهر متى تعطّل المصدر أو لم ينجح قط (لا «0%» بلا تفسير)
+      const why = s.disabledReason ?? s.loadError ?? r?.blocked ?? (r?.streak >= 3 || (r && !r.ok) ? r?.lastError : null);
       if (why) row.append(el('div', 'an-src-why', why));
       if (s.enabled) {
         const cat = s.catalog;
@@ -1029,11 +1030,39 @@ export function createAnime(deps) {
           await engine.unblock(`source:${s.id}`);
           void renderSourcesHealth(box);
         }));
-        row.append(line);
+        const report = el('div', 'an-diag');
+        line.append(button('an-src-btn', 'تشخيص', () => runDiagnosis(s, report)));
+        row.append(line, report);
       }
       return row;
     });
     box.replaceChildren(...rows);
+  }
+
+  /** يفحص المصدر خطوة خطوة ويعرض أين ينكسر، مع نسخ التقرير لإرساله. */
+  async function runDiagnosis(s, report) {
+    report.replaceChildren(el('p', 'an-diag-wait', 'جارٍ الفحص… (قد يأخذ حتى دقيقة على شبكة بطيئة)'));
+    let steps;
+    try {
+      steps = await engine.diagnose(s.id);
+    } catch (e) {
+      report.replaceChildren(el('p', 'an-src-why', `تعذّر الفحص: ${e?.message ?? e}`));
+      return;
+    }
+    const mark = { ok: '✓', warn: '!', fail: '✕' };
+    const rows = (steps ?? []).map((st) => {
+      const li = el('div', `an-diag-row an-diag-row--${st.state}`);
+      const detail = el('span', 'an-diag-detail', st.detail);
+      detail.dir = 'auto';
+      li.append(el('i', null, mark[st.state] ?? '·'), el('b', null, st.label), detail);
+      return li;
+    });
+    const text = [`${s.name} — ${new Date().toISOString()}`, ...(steps ?? []).map((st) => `${mark[st.state] ?? '·'} ${st.label}: ${st.detail}`)].join('\n');
+    const copy = button('an-src-btn', 'انسخ التقرير', () => {
+      void navigator.clipboard?.writeText(text).then(() => toast('نُسخ التقرير'));
+    });
+    report.replaceChildren(...rows, copy);
+    stripIn(rows);
   }
 
   // تقدّم الحلب يحدّث شاشة الصحة إن كانت مفتوحة

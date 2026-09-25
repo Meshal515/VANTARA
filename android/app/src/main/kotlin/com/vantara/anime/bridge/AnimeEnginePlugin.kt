@@ -137,6 +137,14 @@ class AnimeEnginePlugin : Plugin() {
         call.resolve()
     }
 
+    /** فحص مصدر خطوة خطوة (DNS، الاتصال، Cloudflare، البصمة، الإضافة، البحث). */
+    @PluginMethod
+    fun diagnose(call: PluginCall) = run(call) {
+        val id = call.getString("sourceId") ?: error("sourceId مطلوب")
+        val steps = engine.diagnose(id, call.getString("query") ?: "naruto")
+        JSObject().put("steps", steps, ListSerializer(AnimeEngine.Step.serializer()))
+    }
+
     /** بحث موحّد في كل المصادر، والنتيجة أعمال مدموجة كل منها بنسخه. */
     @PluginMethod
     fun search(call: PluginCall) = run(call) {

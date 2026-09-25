@@ -1439,3 +1439,43 @@
   font-weight: 700;
   cursor: pointer;
 }
+.v35 .an-diag {
+  display: grid;
+  gap: 6px;
+}
+.v35 .an-diag:empty {
+  display: none;
+}
+.v35 .an-diag-wait {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.v35 .an-diag-row {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--surface-2, var(--surface-1));
+  font-size: 12px;
+}
+.v35 .an-diag-row i {
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+.v35 .an-diag-row--ok i {
+  color: #34d399;
+}
+.v35 .an-diag-row--warn i {
+  color: #fbbf24;
+}
+.v35 .an-diag-row--fail i {
+  color: #f87171;
+}
+.v35 .an-diag-detail {
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}

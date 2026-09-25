@@ -108,7 +108,11 @@ class HealthStore(private val file: File?, private val clock: () -> Long = Syste
     init {
         file?.takeIf { it.isFile }?.let { f ->
             runCatching { json.decodeFromString<List<Record>>(f.readText()) }
-                .getOrNull()?.forEach { records[it.key] = it }
+                .getOrNull()
+                // سجلات فشلها الوحيد «Canceled» كانت إلغاءنا نحن (مهلة البحث القديمة)
+                // لا عطل المصدر؛ تُمسح مرة ليبدأ المصدر نظيفًا
+                ?.filterNot { it.ok == 0 && it.lastError?.endsWith("Canceled") == true }
+                ?.forEach { records[it.key] = it }
         }
     }
 

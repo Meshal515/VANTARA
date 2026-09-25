@@ -109,6 +109,11 @@ export async function health() {
 }
 
 export const unblock = (key) => call('unblock', { key });
+
+/** فحص مصدر خطوة خطوة: [{label, state: ok|warn|fail, detail}]. */
+export async function diagnose(sourceId, query) {
+  return (await call('diagnose', { sourceId, query }))?.steps ?? null;
+}
 export const crawl = (sourceId) => call('crawl', { sourceId });
 export const stopCrawl = (sourceId) => call('stopCrawl', { sourceId });
 
