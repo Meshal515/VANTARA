@@ -81,6 +81,10 @@ class AnimeEngine(context: Context) {
         eu.kanade.tachiyomi.network.HostRouting.delegate = AnimeHostRouter
         eu.kanade.tachiyomi.network.HostRouting.hiddenOnly = AnimeHostRouter::isHiddenOnly
         eu.kanade.tachiyomi.network.HostRouting.dns = dns
+        // نفس عميل الشبكة إلا مصنع المقبس؛ تُستخدم فقط عند مصافحة TLS تنقطع فجأة
+        AnimeHostRouter.fragmentClient = network.client.newBuilder()
+            .socketFactory(com.vantara.anime.net.SniFragmentingSocketFactory())
+            .build()
     }
 
     /** يُنادى من الواجهة عند الإقلاع وكلما وصل بيان أحدث. */
@@ -293,7 +297,13 @@ class AnimeEngine(context: Context) {
 
         add("IPv6 في الجوال", "ok", if (AnimeDns.deviceHasIpv6()) "موجود" else "غير موجود — نستخدم IPv4 فقط")
         val v4 = (doh.getOrNull().orEmpty() + sys.getOrNull().orEmpty()).firstOrNull { it is java.net.Inet4Address }
-        if (v4 != null) probeTls(host, v4, ::add)
+        if (v4 != null) {
+            probeTls(host, v4, java.net.Socket(), "مصافحة TLS", showConnect = true, add = ::add)
+            // فشلت المصافحة العادية؟ جرّب بتجزئة ClientHello (نمط حجب SNI الشائع)
+            if (steps.lastOrNull { it.label == "مصافحة TLS" }?.state == "fail") {
+                probeTls(host, v4, com.vantara.anime.net.FragmentingSocket(), "تجزئة SNI", showConnect = false, add = ::add)
+            }
+        }
 
         val started = System.nanoTime()
         runCatching {
@@ -338,17 +348,25 @@ class AnimeEngine(context: Context) {
     }
 
     /**
-     * اتصال خام بعنوان IPv4 ثم مصافحة TLS باسم الموقع: يفرّق بين «العنوان
-     * محجوب» (فشل TCP) و«الاسم محجوب داخل TLS» (TCP ينجح والمصافحة تنقطع = حجب SNI).
+     * اتصال خام بعنوان IPv4 ثم مصافحة TLS باسم الموقع، عبر [socket] (عادي أو
+     * مجزِّئ ClientHello): يفرّق بين «العنوان محجوب» (فشل TCP) و«الاسم محجوب
+     * داخل TLS» (TCP ينجح والمصافحة تنقطع = حجب SNI). [showConnect] يمنع تكرار
+     * سطر «اتصال مباشر» عند إعادة المحاولة بالتجزئة على نفس الاتصال الناجح.
      */
-    private fun probeTls(host: String, ip: java.net.InetAddress, add: (String, String, String) -> Unit) {
+    private fun probeTls(
+        host: String,
+        ip: java.net.InetAddress,
+        socket: java.net.Socket,
+        label: String,
+        showConnect: Boolean,
+        add: (String, String, String) -> Unit,
+    ) {
         val t0 = System.nanoTime()
-        val socket = java.net.Socket()
         try {
             socket.connect(java.net.InetSocketAddress(ip, 443), 8_000)
-            add("اتصال مباشر", "ok", "${ip.hostAddress}:443 · ${(System.nanoTime() - t0) / 1_000_000}ms")
+            if (showConnect) add("اتصال مباشر", "ok", "${ip.hostAddress}:443 · ${(System.nanoTime() - t0) / 1_000_000}ms")
         } catch (e: Exception) {
-            add("اتصال مباشر", "fail", "${ip.hostAddress}:443 — ${AnimeHostRouter.describe(e)}")
+            if (showConnect) add("اتصال مباشر", "fail", "${ip.hostAddress}:443 — ${AnimeHostRouter.describe(e)}")
             runCatching { socket.close() }
             return
         }
@@ -358,10 +376,11 @@ class AnimeEngine(context: Context) {
             (factory.createSocket(socket, host, 443, true) as javax.net.ssl.SSLSocket).use { tls ->
                 val t1 = System.nanoTime()
                 tls.startHandshake()
-                add("مصافحة TLS", "ok", "${tls.session.protocol} · ${(System.nanoTime() - t1) / 1_000_000}ms")
+                add(label, "ok", "${tls.session.protocol} · ${(System.nanoTime() - t1) / 1_000_000}ms")
             }
         } catch (e: Exception) {
-            add("مصافحة TLS", "fail", "${AnimeHostRouter.describe(e)} — غالبًا الشبكة تحجب اسم الموقع داخل الاتصال (SNI)")
+            val hint = if (showConnect) " — غالبًا الشبكة تحجب اسم الموقع داخل الاتصال (SNI)" else " — لا تكفي؛ الحاجب يعيد تجميع التدفق"
+            add(label, "fail", AnimeHostRouter.describe(e) + hint)
         } finally {
             runCatching { socket.close() }
         }

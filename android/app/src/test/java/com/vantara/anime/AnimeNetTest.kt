@@ -4,9 +4,13 @@ import com.vantara.anime.health.HealthStore
 import com.vantara.anime.net.AnimeDns
 import com.vantara.anime.net.AnimeHostRouter
 import com.vantara.anime.net.DomainPlan
+import com.vantara.anime.net.SniFragmentingOutputStream
 import okhttp3.Dns
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.Response
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -14,8 +18,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.net.InetAddress
+import java.net.SocketException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLHandshakeException
 
 class AnimeNetTest {
 
@@ -101,5 +108,88 @@ class AnimeNetTest {
         first.addSuppressed(java.net.SocketTimeoutException("connect timed out"))
         val text = AnimeHostRouter.describe(first)
         assertTrue(text, text.contains("ENETUNREACH") && text.contains("انتهت مهلة الاتصال"))
+    }
+
+    // ── تجزئة SNI ──
+
+    private class RecordingOutputStream : OutputStream() {
+        val chunks = mutableListOf<ByteArray>()
+        override fun write(b: Int) { chunks += byteArrayOf(b.toByte()) }
+        override fun write(b: ByteArray, off: Int, len: Int) { chunks += b.copyOfRange(off, off + len) }
+        override fun flush() = Unit
+    }
+
+    @Test fun `the first sizable write is split into two flushed chunks, later writes pass through whole`() {
+        val rec = RecordingOutputStream()
+        val frag = SniFragmentingOutputStream(rec)
+        val clientHello = ByteArray(200) { it.toByte() }
+        frag.write(clientHello)
+        assertEquals(2, rec.chunks.size)
+        assertEquals(5, rec.chunks[0].size)
+        assertEquals(195, rec.chunks[1].size)
+        assertArrayEquals(clientHello, rec.chunks[0] + rec.chunks[1])
+
+        // بيانات التطبيق بعد المصافحة لا تُقسَّم
+        val appData = ByteArray(50) { 7 }
+        frag.write(appData)
+        assertEquals(3, rec.chunks.size)
+        assertArrayEquals(appData, rec.chunks[2])
+    }
+
+    @Test fun `a small first write is not split`() {
+        val rec = RecordingOutputStream()
+        val frag = SniFragmentingOutputStream(rec)
+        val tiny = byteArrayOf(1, 2, 3)
+        frag.write(tiny)
+        assertEquals(1, rec.chunks.size)
+        assertArrayEquals(tiny, rec.chunks[0])
+    }
+
+    @Test fun `SNI-reset detection matches TLS and reset errors only`() {
+        assertTrue(AnimeHostRouter.looksLikeSniReset(SSLHandshakeException("x")))
+        assertTrue(AnimeHostRouter.looksLikeSniReset(SocketException("Connection reset")))
+        assertTrue(AnimeHostRouter.looksLikeSniReset(SocketException("connection reset by peer")))
+        assertFalse(AnimeHostRouter.looksLikeSniReset(UnknownHostException("x")))
+        assertFalse(AnimeHostRouter.looksLikeSniReset(java.net.SocketTimeoutException("timeout")))
+        assertFalse(AnimeHostRouter.looksLikeSniReset(SocketException("Connection refused")))
+    }
+
+    @Test fun `a handshake reset is retried once via the fragmentation client and its own outcome returned`() {
+        val h = HealthStore(null)
+        AnimeHostRouter.health = h
+        AnimeHostRouter.register("sni-src", DomainPlan("https://sni.test"))
+        AnimeHostRouter.fragmentClient = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { chain -> Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").build() }
+            .build()
+        val primary = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { throw SSLHandshakeException("Connection reset") }
+            .build()
+
+        val response = primary.newCall(Request.Builder().url("https://sni.test/").build()).execute()
+
+        assertEquals(200, response.code)
+        assertEquals(1, h.get(HealthStore.sourceKey("sni-src"))!!.ok)
+        AnimeHostRouter.fragmentClient = null
+    }
+
+    @Test fun `a handshake reset that fails again after fragmentation is reported once, not twice`() {
+        val h = HealthStore(null)
+        AnimeHostRouter.health = h
+        AnimeHostRouter.register("sni-src-2", DomainPlan("https://sni2.test"))
+        AnimeHostRouter.fragmentClient = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { throw SSLHandshakeException("Connection reset") }
+            .build()
+        val primary = OkHttpClient.Builder()
+            .addInterceptor(AnimeHostRouter)
+            .addInterceptor { throw SSLHandshakeException("Connection reset") }
+            .build()
+
+        runCatching { primary.newCall(Request.Builder().url("https://sni2.test/").build()).execute() }
+
+        assertEquals(1, h.get(HealthStore.sourceKey("sni-src-2"))!!.fail)
+        AnimeHostRouter.fragmentClient = null
     }
 }
