@@ -4,7 +4,10 @@ import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.dnsoverhttps.DnsOverHttps
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -19,12 +22,16 @@ import java.util.concurrent.TimeUnit
  *  - غيرها (سيرفرات الفيديو، المانجا، كل شيء): النظام أولًا كما هو، و DoH
  *    فقط إن فشل النظام أو أعاد عنوانًا وهميًا.
  *
+ * وعناوين IPv6 من DoH لا تُعاد إلا إن كان للجوال مسار IPv6 فعلي: جوال بلا IPv6
+ * يفشل عليها فورًا بـENETUNREACH (رأيناه على جوال حقيقي)، وOkHttp يبدأ بها.
+ *
  * عميل DoH مستقل تمامًا (عناوين 1.1.1.1/8.8.8.8 ثابتة، بلا [eu.kanade.tachiyomi.network.HostRouting])
  * حتى لا يستدعي نفسه.
  */
 class AnimeDns(
     private val isSourceHost: (String) -> Boolean,
     private val system: Dns = Dns.SYSTEM,
+    private val hasIpv6: () -> Boolean = ::deviceHasIpv6,
 ) : Dns {
 
     private val bootstrap: OkHttpClient by lazy {
@@ -75,7 +82,7 @@ class AnimeDns(
         var last: Throwable? = null
         for ((_, resolver) in resolvers) {
             try {
-                val found = resolver.lookup(hostname)
+                val found = usable(resolver.lookup(hostname))
                 if (found.isNotEmpty() && !isSinkhole(found)) return found
             } catch (e: Throwable) {
                 last = e
@@ -84,12 +91,30 @@ class AnimeDns(
         throw UnknownHostException("DoH: $hostname (${last?.message ?: "بلا نتيجة"})")
     }
 
+    /** IPv4 أولًا، وIPv6 فقط إن كان له مسار. */
+    internal fun usable(addresses: List<InetAddress>): List<InetAddress> {
+        val v4 = addresses.filterIsInstance<Inet4Address>()
+        val v6 = addresses.filterIsInstance<Inet6Address>()
+        return if (hasIpv6()) v4 + v6 else v4.ifEmpty { v6 }
+    }
+
     private fun remember(host: String, addresses: List<InetAddress>) {
         cache[host] = Cached(addresses, System.currentTimeMillis() + TTL_MS)
     }
 
     companion object {
         private const val TTL_MS = 10 * 60_000L
+
+        /** هل للجوال عنوان IPv6 عام على واجهة شغّالة؟ (بدونه IPv6 = ENETUNREACH) */
+        fun deviceHasIpv6(): Boolean = runCatching {
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty().any { nif ->
+                nif.isUp && !nif.isLoopback && nif.inetAddresses.toList().any {
+                    it is Inet6Address && !it.isLinkLocalAddress && !it.isLoopbackAddress && !it.isSiteLocalAddress &&
+                        // ULA (fc00::/7) ليست عامة
+                        (it.address[0].toInt() and 0xFE) != 0xFC
+                }
+            }
+        }.getOrDefault(false)
 
         /** عنوان لا يمكن أن يكون موقعًا عامًا: إجابة حجب. */
         fun isSinkhole(addresses: List<InetAddress>): Boolean =

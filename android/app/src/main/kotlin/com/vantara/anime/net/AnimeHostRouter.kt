@@ -56,6 +56,12 @@ object AnimeHostRouter : Interceptor {
 
     /** سبب مقروء: نوع الخطأ الأعمق ورسالته (UnknownHost = حجب DNS غالبًا). */
     fun describe(t: Throwable): String {
+        // OkHttp يرمي فشل أول عنوان ويعلّق الباقي كـsuppressed (IPv6 ثم IPv4…)
+        val all = listOf(t) + t.suppressed
+        return all.map(::one).distinct().joinToString(" | ")
+    }
+
+    private fun one(t: Throwable): String {
         val root = generateSequence(t) { it.cause }.last()
         val kind = when (root) {
             is java.net.UnknownHostException -> "الدومين لا يُحلّ (حجب DNS؟)"
