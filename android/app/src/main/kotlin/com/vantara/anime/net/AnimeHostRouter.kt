@@ -38,6 +38,12 @@ object AnimeHostRouter : Interceptor {
     /** يمنع تكرار محاولة التجزئة داخل محاولة التجزئة نفسها. */
     private object FragmentRetryTag
 
+    /** مضيفات نجحت بالتجزئة: طلباتها التالية تذهب إليها مباشرة بلا مصافحة فاشلة أولًا. */
+    private val fragmentHosts: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    private fun viaFragment(fc: OkHttpClient, request: okhttp3.Request): Response =
+        fc.newCall(request.newBuilder().tag(FragmentRetryTag::class.java, FragmentRetryTag).build()).execute()
+
     /** يسجّل مصدرًا: كل مضيفاته (الحالي، القديمة، المرايا) تمر من هنا. */
     fun register(sourceId: String, plan: DomainPlan) {
         lateinit var route: Route
@@ -99,6 +105,9 @@ object AnimeHostRouter : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val route = routes[request.url.host] ?: return chain.proceed(request)
+        val retried = request.tag(FragmentRetryTag::class.java) != null
+        val fc = fragmentClient
+        if (fc != null && !retried && request.url.host in fragmentHosts) return viaFragment(fc, request)
         val key = HealthStore.sourceKey(route.sourceId)
         val started = System.nanoTime()
         try {
@@ -121,15 +130,16 @@ object AnimeHostRouter : Interceptor {
             // المهلة تُسجَّل في المحرك بسببها الحقيقي («لم يرد خلال …»)
             if (chain.call().isCanceled()) throw e
 
-            val fc = fragmentClient
-            if (fc != null && looksLikeSniReset(e) && request.tag(FragmentRetryTag::class.java) == null) {
+            if (fc != null && looksLikeSniReset(e) && !retried) {
                 // إعادة عبر عميل يجزّئ ClientHello؛ الوسم يمنع تكرارها داخل نفسها.
                 // المحاولة المُعادة تمر بهذا الاعتراض نفسه فتُسجّل صحتها بنفسها
                 // (نجاحًا أو فشلًا)، فلا تُسجَّل هنا مرتين.
-                val tagged = request.newBuilder().tag(FragmentRetryTag::class.java, FragmentRetryTag).build()
-                val retried = runCatching { fc.newCall(tagged).execute() }
-                retried.getOrNull()?.let { return it }
-                throw retried.exceptionOrNull() as? IOException ?: e
+                val again = runCatching { viaFragment(fc, request) }
+                again.getOrNull()?.let {
+                    fragmentHosts += request.url.host
+                    return it
+                }
+                throw again.exceptionOrNull() as? IOException ?: e
             }
 
             health?.fail(key, describe(e))

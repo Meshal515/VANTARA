@@ -18,7 +18,10 @@
           "https://www.okanime.xyz",
           "https://okanime.xyz"
         ],
-        "fingerprint": "OkAnime|اوك انمي"
+        "fingerprint": "OkAnime|اوك انمي",
+        "rewrites": [
+          { "path": "/search/", "to": "/search", "params": { "s": "q" } }
+        ]
       },
       "catalog": {
         "urlTemplate": "/anime-list?page={page}",
