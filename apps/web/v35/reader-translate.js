@@ -97,19 +97,33 @@ const el = (tag, cls, text) => {
 export function swapPageImage(img, result, on, onBroken = null) {
   if (!img) return;
   if (!img.dataset.original) img.dataset.original = img.src;
+  // مقاس الأصل: ترجمة محفوظة أصغر منه (نسخ قديمة صغّرت الصفحات الطويلة فبدت مبكسلة) تُعاد بمقاسه
+  if (img.src === img.dataset.original && img.naturalHeight > 0) img.dataset.originalHeight = String(img.naturalHeight);
   const translated = on && Boolean(result?.image);
   const target = translated ? result.image : img.dataset.original;
+  const broken = () => {
+    img.onerror = null;
+    img.onload = null;
+    img.src = img.dataset.original;
+    img.classList.remove('rd-page--translated');
+    onBroken?.();
+  };
   // ملف الترجمة المحفوظ قد يختفي (أندرويد ينظّف الكاش): الأصل فورًا، ثم ترجمة جديدة
-  img.onerror = translated
+  img.onerror = translated ? broken : null;
+  img.onload = translated
     ? () => {
-        img.onerror = null;
-        img.src = img.dataset.original;
-        img.classList.remove('rd-page--translated');
-        onBroken?.();
+        img.onload = null;
+        if (smallerThanOriginal(img)) broken();
       }
     : null;
   if (img.src !== target) img.src = target;
   img.classList.toggle('rd-page--translated', translated);
+}
+
+/** الترجمة المعروضة أقصر من الأصل بوضوح (أكثر من 2%): محفوظة من نسخة صغّرتها. */
+export function smallerThanOriginal(img) {
+  const original = Number(img.dataset.originalHeight ?? 0);
+  return original > 0 && img.naturalHeight > 0 && img.naturalHeight < original * 0.98;
 }
 
 /**
@@ -380,10 +394,8 @@ export function createReaderTranslation(deps) {
     root.classList.toggle('rd-tl-off', !on);
     for (const s of currentSegs) {
       if (!s.tl) continue;
-      s.slots.forEach((slot, index) => {
-        const img = slot?.frame.querySelector(':scope > img');
-        const result = s.tl.results.get(index);
-        if (img && result) swapPageImage(img, result, on);
+      s.slots.forEach((_slot, index) => {
+        if (s.tl.results.has(index)) paint(s, index);
       });
     }
     if (on && currentSeg) {
