@@ -23,6 +23,13 @@
           { "path": "/search/", "to": "/search", "params": { "s": "q" } }
         ]
       },
+      "embeds": {
+        "selector": "a.ep-link[data-server]",
+        "attr": "@click",
+        "pattern": "setServer\\('([^']+)'\\)",
+        "nameAttr": "data-server",
+        "qualityAttr": "data-umami-event-quality"
+      },
       "catalog": {
         "urlTemplate": "/anime-list?page={page}",
         "cards": {

@@ -128,7 +128,7 @@ class AnimeEngine(context: Context) {
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(id, source).also { a ->
+                ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds }, resolver = embeds).also { a ->
                     // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
                     AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
                     adapters[id] = a

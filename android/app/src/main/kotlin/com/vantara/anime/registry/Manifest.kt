@@ -32,6 +32,8 @@ data class SourceEntry(
     /** محوّل VANTARA أصلي بدل الإضافة (مثل `witanime-site`)؛ يُقدَّم عليها إن وُجد الاثنان. */
     val adapter: String? = null,
     val domains: Domains,
+    /** سيرفرات الحلقة من صفحتها مباشرة، حين لا تجد الإضافة أي سيرفر (صفحة تغيّر شكلها). */
+    val embeds: PageEmbeds? = null,
     /** كيف يُحلب الكتالوج كاملًا. */
     val catalog: CatalogHint = CatalogHint(),
     /** سبب إيقاف معروف (دومين ميت…): يظهر في شاشة الصحة ولا يُحمَّل. */
@@ -65,6 +67,36 @@ data class Domains(
         fingerprint = fingerprint,
         rewrites = rewrites,
     )
+}
+
+/**
+ * مثال OkAnime: `<a class="ep-link" data-server="vk" data-umami-event-quality="720p"
+ * @click="setServer('https://vkvideo.ru/…')">`. الإضافة 14.26 تبحث عن `data-src`.
+ */
+@Serializable
+data class PageEmbeds(
+    /** عناصر السيرفرات في صفحة الحلقة. */
+    val selector: String,
+    /** السمة التي تحمل رابط صفحة المشغّل. */
+    val attr: String,
+    /** Regex مجموعته الأولى هي الرابط داخل السمة؛ غيابه = السمة كلها رابط. */
+    val pattern: String? = null,
+    val nameAttr: String? = null,
+    val qualityAttr: String? = null,
+) {
+    data class Embed(val url: String, val name: String, val quality: Int?)
+
+    fun extract(html: String, pageUrl: String): List<Embed> {
+        val re = pattern?.let(::Regex)
+        return org.jsoup.Jsoup.parse(html, pageUrl).select(selector).mapNotNull { el ->
+            val raw = el.attr(attr).ifBlank { return@mapNotNull null }
+            val url = (if (re != null) re.find(raw)?.groupValues?.getOrNull(1) else raw)?.trim()
+                ?.takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            val name = nameAttr?.let { el.attr(it) }?.ifBlank { null } ?: el.text().trim()
+            val quality = qualityAttr?.let { el.attr(it) }?.let { com.vantara.anime.stream.StreamClassifier.quality(it) }
+            Embed(url, name, quality)
+        }.distinctBy { it.url }
+    }
 }
 
 @Serializable
@@ -114,6 +146,7 @@ object ManifestParser {
         for (s in m.sources) {
             if (!ids.add(s.id)) add("مكرر: ${s.id}")
             s.adapter?.let { if (it !in NATIVE_ADAPTERS) add("${s.id}: محوّل غير معروف «$it»") }
+            s.embeds?.pattern?.let { p -> runCatching { Regex(p) }.onFailure { add("${s.id}: نمط السيرفرات ليس Regex صالحًا") } }
             if (!s.domains.current.startsWith("https://") && !s.domains.current.startsWith("http://")) add("${s.id}: current ليس رابطًا")
             s.extension?.let { e ->
                 if (!Regex("^[0-9a-fA-F]{64}$").matches(e.sha256)) add("${s.id}: sha256 غير صالح")

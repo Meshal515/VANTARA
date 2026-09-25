@@ -91,6 +91,9 @@
 
 - **`adapter` في البيان** يختار محوّل VANTARA أصليًا بدل الإضافة (يُقدَّم عليها).
   يُبنى فورًا بلا تنزيل. التطبيق يرفض بيانًا يطلب محوّلًا لا يعرفه إصداره.
+- **`embeds` في البيان**: حين لا تجد الإضافة أي سيرفر، تُقرأ روابط صفحات المشغّل
+  من صفحة الحلقة مباشرة (محدِّد + سمة + Regex) وتُحل بـ`hosts/`. OkAnime غيّر
+  صفحة الحلقة إلى `@click="setServer('…')"` والإضافة 14.26 تبحث عن `data-src`.
 - **`witanime-site`** (`adapters/WitAnimeSite.kt`): بحث `/search?q=`، الكتالوج
   من `sitemap-anime.xml` و`sitemap-movies.xml`، الحلقات من صفحة العمل، والفيلم
   حلقة واحدة `/watch/movie/<slug>`. السيرفرات: `POST …/sources` برمز CSRF من
@@ -99,7 +102,7 @@
 - **`hosts/`**: من صفحة المشغّل إلى رابط يشغّله Media3. ok.ru و4shared
   يُستخرجان مباشرة من الصفحة. البقية (hgcloud، videa، …) عبر `WebViewSniffer`:
   متصفح مخفي 1×1 يفتح الصفحة ويلتقط أول طلب m3u8/mp4/mpd بترويساته، بمهلة
-  20 ثانية. **MEGA** يُتخطّى: الفيديو مشفّر ويُفك داخل صفحته (فك تشفير AES-CTR
+  20 ثانية، وثلاثة متصفحات معًا كحد أقصى. **MEGA** يُتخطّى: الفيديو مشفّر ويُفك داخل صفحته (فك تشفير AES-CTR
   أثناء التشغيل عمل لاحق).
 
 ## ما نعيد استخدامه من محرك المانجا
@@ -130,7 +133,7 @@
 
 | المصدر | الحالة |
 |---|---|
-| OkAnime | يعمل مباشرة (www → ww3) |
+| OkAnime | يعمل مباشرة (www → ww3)؛ البحث عبر `rewrites`، والسيرفرات عبر `embeds`: mp4upload، vk، megamax، streamruby (+ mega للتحميل فقط) |
 | Anime4Up, AnimeBlkom, ArabAnime, FaselHD | Cloudflare |
 | Animerco | Cloudflare + تغيّر الدومين (zeta → det) |
 | WitAnime | انتقل إلى witanime.site (witanime.com ← witanime.net صفحة هبوط ← .site)؛ محوّل أصلي `witanime-site`. السيرفرات: mega (في كل حلقة تقريبًا، غير مدعوم بعد)، ok، videa، hgcloud، 4shared، yonaplay، google |

@@ -41,7 +41,8 @@ class WitAnimeSiteAdapter(
     private val client: OkHttpClient,
     private val base: () -> String,
     private val embeds: EmbedResolver,
-    private val serverTimeoutMs: Long = 25_000,
+    /** يشمل انتظار دوره في المتصفح المخفي (3 معًا). */
+    private val serverTimeoutMs: Long = 45_000,
 ) : AnimeAdapter {
 
     private val noRedirect by lazy { client.newBuilder().followRedirects(false).followSslRedirects(false).build() }

@@ -11,6 +11,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -28,7 +30,12 @@ class WebViewSniffer(
 
     private val main = Handler(Looper.getMainLooper())
 
-    override suspend fun sniff(url: String, referer: String?): Stream? {
+    /** حلقة بستة سيرفرات لا تفتح ستة متصفحات معًا على جوال. */
+    private val slots = Semaphore(3)
+
+    override suspend fun sniff(url: String, referer: String?): Stream? = slots.withPermit { sniffNow(url, referer) }
+
+    private suspend fun sniffNow(url: String, referer: String?): Stream? {
         val found = CompletableDeferred<Stream>()
         var view: WebView? = null
         main.post { view = open(url, referer, found) }
