@@ -18,6 +18,7 @@
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, relativeAr, searchAnime } from '../lib/anime-meta.js';
 import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
+import * as engine from '../lib/anime-engine.js';
 
 const HOME_KEY = 'anime.home.v2';
 const LIST_KEY = 'vantara.anime.list';
@@ -84,6 +85,9 @@ export function createAnime(deps) {
     detailToken: 0,
     detailScroll: null,
     episodeRange: 0,
+    work: null,
+    workFor: null,
+    playing: null,
     newestFirst: false,
     malTitles: {},
     libraryTab: 'history',
@@ -463,6 +467,7 @@ export function createAnime(deps) {
       if (episode) state.episodeRange = Math.floor((episode - 1) / 50);
       state.malTitles = {};
       renderDetail(full);
+      void locateWork(full, token);
       if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
       // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
       void fetchMalEpisodes(full.idMal)
@@ -547,7 +552,11 @@ export function createAnime(deps) {
     const party = button('an-btn an-btn--icon', glyph('users', { size: 20 }), () => toast('المشاهدة الجماعية قريبًا: تابعوا معي وتزامن لحظي'), 'مشاهدة جماعية');
     actions.append(watch, listButton(m, 'an-btn an-btn--glass'), party);
 
-    wrap.append(bar, hero, head, facts, stats, actions);
+    const sourcesStrip = el('div', 'an-sources');
+    sourcesStrip.id = 'animeSources';
+    sourcesStrip.dataset.reveal = '';
+    wrap.append(bar, hero, head, facts, stats, actions, sourcesStrip);
+    paintSources(m);
 
     if (m.next) {
       const next = el('div', 'an-next');
@@ -706,17 +715,104 @@ export function createAnime(deps) {
     window.addEventListener('scroll', onScroll, { passive: true });
   }
 
-  /** الحلقة: السيرفرات من امتدادات المصادر (الخطوة التالية)، والورقة جاهزة لها. */
-  function playEpisode(m, n) {
-    deps.openSheet((body) => {
-      const head = el('div', 'an-sheet-head');
-      const t = el('div', 'an-sheet-title', m.title);
-      t.dir = 'auto';
-      head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
-      const note = el('div', 'an-sheet-note');
-      note.innerHTML = `${glyph('layers', { size: 22 })}<div><b>السيرفرات قيد الربط</b><span>WitAnime وبقية المصادر العربية تُربط الآن بمحرّك التطبيق: تختار السيرفر والجودة، ويبدأ التشغيل في المشغّل.</span></div>`;
-      body.append(head, note);
-    });
+  // ───────────── المصادر العربية والتشغيل ─────────────
+
+  /** يبحث عن الأنمي في كل المصادر العربية (محرك التطبيق) ويدمج نسخه. */
+  async function locateWork(m, token = state.detailToken) {
+    if (!engine.available()) return null;
+    if (state.workFor === m.id && state.work) return state.work;
+    state.work = null;
+    state.workFor = m.id;
+    paintSources(m, 'loading');
+    try {
+      const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
+      if (token !== state.detailToken) return null;
+      state.work = work;
+      paintSources(m, work ? 'found' : 'none');
+      return work;
+    } catch {
+      if (token === state.detailToken) paintSources(m, 'error');
+      return null;
+    }
+  }
+
+  function paintSources(m, phase = state.work ? 'found' : engine.available() ? 'loading' : 'web') {
+    const host = q('animeSources');
+    if (!host) return;
+    host.replaceChildren();
+    const label = el('span', 'an-sources-label');
+    if (phase === 'web') {
+      label.textContent = 'التشغيل من المصادر العربية داخل تطبيق أندرويد';
+      host.append(label);
+      return;
+    }
+    if (phase === 'loading') {
+      label.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
+      host.append(label);
+      return;
+    }
+    if (phase !== 'found') {
+      label.textContent = phase === 'error' ? 'تعذّر البحث في المصادر — تحقّق من الاتصال' : 'غير متوفر في المصادر العربية حاليًا';
+      host.append(label, button('an-sources-retry', 'ابحث مجددًا', () => {
+        state.workFor = null;
+        void locateWork(m);
+      }));
+      return;
+    }
+    label.textContent = 'متوفر في';
+    host.append(label);
+    for (const c of state.work.copies) host.append(el('span', 'an-source-chip', c.sourceId === state.work.copies[0].sourceId ? `${sourceName(c.sourceId)} ★` : sourceName(c.sourceId)));
+  }
+
+  const SOURCE_NAMES = {};
+  const sourceName = (id) => SOURCE_NAMES[id] ?? id;
+  void engine.sources().then((list) => {
+    for (const s of list ?? []) SOURCE_NAMES[s.id] = s.name;
+  }).catch(() => {});
+
+  // تقدّم المشغّل الأصلي ← سجل المشاهدة (الاستئناف و«آخر المشاهدات»)
+  engine.on('playback', (p) => {
+    const cur = state.playing;
+    if (!cur || p.session !== cur.session) return;
+    if (p.duration > 0) recordWatch(cur.m, cur.n, p.position, p.duration);
+    if (p.final) {
+      state.playing = null;
+      const box = q('animeEpisodes');
+      if (box && state.detail?.id === cur.m.id) renderEpisodes(box, state.detail);
+    }
+  });
+
+  async function playEpisode(m, n) {
+    if (!engine.available()) {
+      deps.openSheet((body) => {
+        const head = el('div', 'an-sheet-head');
+        const t = el('div', 'an-sheet-title', m.title);
+        t.dir = 'auto';
+        head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
+        const note = el('div', 'an-sheet-note');
+        note.innerHTML = `${glyph('layers', { size: 22 })}<div><b>التشغيل داخل التطبيق</b><span>المصادر العربية والسيرفرات تعمل في تطبيق VANTARA على أندرويد.</span></div>`;
+        body.append(head, note);
+      });
+      return;
+    }
+    toast(`نجهّز سيرفرات الحلقة ${n}…`);
+    const work = state.work ?? (await locateWork(m));
+    if (!work) {
+      toast('هذا الأنمي غير متوفر في المصادر العربية حاليًا');
+      return;
+    }
+    const saved = readWatch()[m.id]?.episodes?.[n];
+    const position = saved && !saved.done ? saved.position : 0;
+    try {
+      const out = await engine.play({ copies: work.copies, episode: n, title: `${m.title} — الحلقة ${n}`, position });
+      if (!out?.count) {
+        toast(`لم نجد سيرفرات تعمل للحلقة ${n} الآن`);
+        return;
+      }
+      state.playing = { session: out.session, m, n };
+    } catch (e) {
+      toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+    }
   }
 
   // ───────────── اكتشف ─────────────
@@ -843,6 +939,7 @@ export function createAnime(deps) {
     for (const [k, label] of [
       ['history', 'سجل المشاهدة'],
       ['list', 'قائمتي'],
+      ...(engine.available() ? [['sources', 'المصادر']] : []),
     ]) {
       tabs.append(
         button(`an-seg-btn${state.libraryTab === k ? ' active' : ''}`, label, () => {
@@ -852,6 +949,14 @@ export function createAnime(deps) {
       );
     }
     const nodes = [tabs];
+    if (state.libraryTab === 'sources') {
+      const box = el('div', 'an-health');
+      box.append(el('p', 'an-note', 'نقرأ صحة المصادر…'));
+      nodes.push(box);
+      host.replaceChildren(...nodes);
+      void renderSourcesHealth(box);
+      return;
+    }
     if (state.libraryTab === 'history') {
       const items = watching();
       if (!items.length) nodes.push(emptyBox('clock', 'لا مشاهدات بعد', 'أول حلقة تشاهدها تظهر هنا بتقدّمها.'));
@@ -882,6 +987,61 @@ export function createAnime(deps) {
     host.replaceChildren(...nodes);
     stripIn([...host.querySelectorAll('.an-hr, .an-card')].slice(0, 10));
   }
+  /** صحة كل مصدر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي، والكتالوج المحلوب. */
+  async function renderSourcesHealth(box) {
+    let list;
+    let records;
+    try {
+      [list, records] = await Promise.all([engine.sources(), engine.health()]);
+    } catch (e) {
+      box.replaceChildren(el('p', 'an-note', `تعذّر قراءة المحرك: ${e?.message ?? e}`));
+      return;
+    }
+    const byKey = Object.fromEntries((records ?? []).map((r) => [r.key, r]));
+    const rows = (list ?? []).map((s) => {
+      const r = byKey[`source:${s.id}`];
+      const row = el('div', `an-src${s.enabled ? '' : ' off'}`);
+      const total = (r?.ok ?? 0) + (r?.fail ?? 0);
+      const rate = total ? Math.round(((r?.ok ?? 0) / total) * 100) : null;
+      const mood = !s.enabled ? 'off' : r?.blocked ? 'blocked' : r && r.streak >= 3 ? 'down' : rate === null ? 'new' : rate >= 70 ? 'good' : 'weak';
+      const top = el('div', 'an-src-top');
+      top.append(el('i', `an-dot-state an-dot-state--${mood}`), el('b', null, s.name), el('span', 'an-src-rate', rate === null ? '—' : `${rate}%`));
+      const facts = [
+        s.domain ? String(s.domain).replace(/^https?:\/\//, '') : null,
+        r?.latencyMs ? `${Math.round(r.latencyMs)} ms` : null,
+        r?.lastOkAt ? `آخر نجاح ${relativeAr(r.lastOkAt)}` : null,
+        r?.lastFailAt ? `آخر فشل ${relativeAr(r.lastFailAt)}` : null,
+      ].filter(Boolean);
+      const meta = el('div', 'an-src-meta', facts.join(' · '));
+      meta.dir = 'ltr';
+      row.append(top, meta);
+      const why = s.disabledReason ?? s.loadError ?? r?.blocked ?? (r?.streak >= 3 ? r?.lastError : null);
+      if (why) row.append(el('div', 'an-src-why', why));
+      if (s.enabled) {
+        const cat = s.catalog;
+        const line = el('div', 'an-src-cat');
+        line.append(el('span', null, cat ? `الكتالوج: ${cat.count} عمل · ${cat.pagesFetched} صفحة${cat.done ? ' · مكتمل' : ''}` : 'الكتالوج لم يُحلب بعد'));
+        line.append(button('an-src-btn', cat?.done ? 'حدّث' : cat ? 'أكمل' : 'احلب الكتالوج', async () => {
+          await engine.crawl(s.id);
+          toast(`بدأ حلب كتالوج ${s.name}`);
+        }));
+        if (r?.blocked) line.append(button('an-src-btn', 'أعد المحاولة', async () => {
+          await engine.unblock(`source:${s.id}`);
+          void renderSourcesHealth(box);
+        }));
+        row.append(line);
+      }
+      return row;
+    });
+    box.replaceChildren(...rows);
+  }
+
+  // تقدّم الحلب يحدّث شاشة الصحة إن كانت مفتوحة
+  engine.on('catalog', () => {
+    const box = q('animeLibrary')?.querySelector('.an-health');
+    if (box && state.libraryTab === 'sources') void renderSourcesHealth(box);
+  });
+
   function emptyBox(icon, title, text) {
     const box = el('div', 'an-empty');
     box.innerHTML = `<div class="an-empty-icon">${glyph(icon, { size: 30 })}</div><h3>${title}</h3><p>${text}</p>`;
