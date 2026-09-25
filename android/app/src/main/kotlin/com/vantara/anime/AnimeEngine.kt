@@ -291,6 +291,10 @@ class AnimeEngine(context: Context) {
                 if (sysBad && doh.isSuccess) " — الشبكة تحجب الاسم، والمحرك يتجاوزه" else "",
         )
 
+        add("IPv6 في الجوال", "ok", if (AnimeDns.deviceHasIpv6()) "موجود" else "غير موجود — نستخدم IPv4 فقط")
+        val v4 = (doh.getOrNull().orEmpty() + sys.getOrNull().orEmpty()).firstOrNull { it is java.net.Inet4Address }
+        if (v4 != null) probeTls(host, v4, ::add)
+
         val started = System.nanoTime()
         runCatching {
             network.client.newCall(Request.Builder().url(base).build()).execute().use { r ->
@@ -331,6 +335,36 @@ class AnimeEngine(context: Context) {
         )
         health.flush()
         return steps
+    }
+
+    /**
+     * اتصال خام بعنوان IPv4 ثم مصافحة TLS باسم الموقع: يفرّق بين «العنوان
+     * محجوب» (فشل TCP) و«الاسم محجوب داخل TLS» (TCP ينجح والمصافحة تنقطع = حجب SNI).
+     */
+    private fun probeTls(host: String, ip: java.net.InetAddress, add: (String, String, String) -> Unit) {
+        val t0 = System.nanoTime()
+        val socket = java.net.Socket()
+        try {
+            socket.connect(java.net.InetSocketAddress(ip, 443), 8_000)
+            add("اتصال مباشر", "ok", "${ip.hostAddress}:443 · ${(System.nanoTime() - t0) / 1_000_000}ms")
+        } catch (e: Exception) {
+            add("اتصال مباشر", "fail", "${ip.hostAddress}:443 — ${AnimeHostRouter.describe(e)}")
+            runCatching { socket.close() }
+            return
+        }
+        try {
+            socket.soTimeout = 8_000
+            val factory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+            (factory.createSocket(socket, host, 443, true) as javax.net.ssl.SSLSocket).use { tls ->
+                val t1 = System.nanoTime()
+                tls.startHandshake()
+                add("مصافحة TLS", "ok", "${tls.session.protocol} · ${(System.nanoTime() - t1) / 1_000_000}ms")
+            }
+        } catch (e: Exception) {
+            add("مصافحة TLS", "fail", "${AnimeHostRouter.describe(e)} — غالبًا الشبكة تحجب اسم الموقع داخل الاتصال (SNI)")
+        } finally {
+            runCatching { socket.close() }
+        }
     }
 
     companion object {

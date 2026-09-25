@@ -85,4 +85,21 @@ class AnimeNetTest {
         assertEquals(listOf(ip("93.184.216.34")), dns.lookup("example.org"))
         assertEquals(1, asked)
     }
+
+    @Test fun `DoH answers keep IPv6 only when the phone has an IPv6 route`() {
+        val answer = listOf(ip("2606:4700::1"), ip("104.21.1.1"), ip("172.67.1.1"))
+        val noV6 = AnimeDns(isSourceHost = { true }, hasIpv6 = { false })
+        assertEquals(listOf(ip("104.21.1.1"), ip("172.67.1.1")), noV6.usable(answer))
+        val withV6 = AnimeDns(isSourceHost = { true }, hasIpv6 = { true })
+        assertEquals(listOf(ip("104.21.1.1"), ip("172.67.1.1"), ip("2606:4700::1")), withV6.usable(answer))
+        // موقع IPv6 فقط يبقى قابلًا للمحاولة
+        assertEquals(listOf(ip("2606:4700::1")), noV6.usable(listOf(ip("2606:4700::1"))))
+    }
+
+    @Test fun `failures list every address attempt, not just the first`() {
+        val first = java.net.ConnectException("connect failed: ENETUNREACH")
+        first.addSuppressed(java.net.SocketTimeoutException("connect timed out"))
+        val text = AnimeHostRouter.describe(first)
+        assertTrue(text, text.contains("ENETUNREACH") && text.contains("انتهت مهلة الاتصال"))
+    }
 }
