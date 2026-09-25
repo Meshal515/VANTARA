@@ -33,13 +33,16 @@ import { compactEditions, describesMore, displayTitle, mergeEditions, serverEdit
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
+import { SECTIONS, readSection, writeSection } from './sections.js';
+import { createAnime } from './anime.js';
+import { menuIn, menuOut, swapViews } from './motion.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
   Supernatural: 'قوى خارقة', 'Sci-Fi': 'خيال علمي', Mystery: 'غموض', Thriller: 'إثارة', Horror: 'رعب', Sports: 'رياضة',
   Psychological: 'نفسي', Mecha: 'ميكا', Music: 'موسيقى', 'Slice of Life': 'حياة يومية', Isekai: 'إيسيكاي',
   Historical: 'تاريخي', Superhero: 'أبطال خارقون', Tragedy: 'مأساة', Medical: 'طبي', Philosophical: 'فلسفي',
-  Crime: 'جريمة', 'Magical Girls': 'فتيات سحريات', Wuxia: 'ووشيا',
+  Crime: 'جريمة', 'Magical Girls': 'فتيات سحريات', Wuxia: 'ووشيا', Ecchi: 'إيتشي', 'Mahou Shoujo': 'فتيات سحريات',
 };
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', HIATUS: 'متوقف مؤقتًا', CANCELLED: 'ملغي', NOT_YET_RELEASED: 'لم يبدأ' };
 /**
@@ -892,7 +895,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function restartHero() {
     clearInterval(state.heroTimer);
     // يلفّ والرئيسية أمامك فقط: لا حركة في صفحة مخفية ولا والتطبيق في الخلفية
-    if (state.heroItems.length > 1) state.heroTimer = setInterval(() => currentPage() === 'home' && !document.hidden && heroNext(), 5200);
+    if (state.heroItems.length > 1) state.heroTimer = setInterval(() => currentPage() === 'home' && root.dataset.section === 'manga' && !document.hidden && heroNext(), 5200);
   }
 
   // ───────────────────────── صفحة العمل ─────────────────────────
@@ -2615,6 +2618,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openSearch() {
+    if (root.dataset.section === 'anime') {
+      showPage('discover');
+      setTimeout(() => q('animeDiscover')?.querySelector('input')?.focus(), 60);
+      return;
+    }
     showPage('search');
     if (!q('searchInput').value.trim()) showSearchIdle(true);
     setTimeout(() => q('searchInput')?.focus(), 60);
@@ -2890,8 +2898,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else n.removeAttribute('aria-current');
     });
     q('detailTop').classList.remove('scrolled');
-    if (id === 'library') renderLibrary();
-    if (id === 'discover' && !state.catalog.length) void loadMoreDiscover();
+    if (from === 'anime' && id !== 'anime') anime.leaveDetail();
+    const inAnime = root.dataset.section === 'anime';
+    if (id === 'library') inAnime ? anime.renderLibrary() : renderLibrary();
+    if (id === 'discover') {
+      if (inAnime) anime.showDiscover();
+      else if (!state.catalog.length) void loadMoreDiscover();
+    }
     if (id === 'settings') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
@@ -3697,31 +3710,68 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const button = q('brandSwitch');
     if (!menu || !button) return;
     button.setAttribute('aria-expanded', String(open));
-    for (const layer of [menu, scrim]) {
-      if (!layer) continue;
-      if (open) {
-        layer.hidden = false;
-        requestAnimationFrame(() => layer.classList.add('open'));
-      } else {
-        layer.classList.remove('open');
-        setTimeout(() => {
-          if (!layer.classList.contains('open')) layer.hidden = true;
-        }, 280);
-      }
+    if (open) {
+      for (const layer of [menu, scrim]) layer.hidden = false;
+      requestAnimationFrame(() => {
+        menu.classList.add('open');
+        scrim.classList.add('open');
+        menuIn(menu, [...menu.querySelectorAll('.section-item')]);
+      });
+      return;
     }
+    scrim.classList.remove('open');
+    setTimeout(() => {
+      if (!scrim.classList.contains('open')) scrim.hidden = true;
+    }, 240);
+    menuOut(menu, () => {
+      if (sectionsOpen()) return;
+      menu.classList.remove('open');
+      menu.hidden = true;
+    });
   }
   const sectionsOpen = () => q('brandSwitch')?.getAttribute('aria-expanded') === 'true';
+
+  /** يلبس التطبيق هوية القسم: المتغيّرات، اسم القسم تحت الشعار، ولون شريط النظام. */
+  function applySection(id) {
+    const s = SECTIONS[id] ?? SECTIONS.manga;
+    root.dataset.section = s.id;
+    q('brandSectionName').textContent = s.word;
+    for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', s.theme);
+    document.documentElement.style.background = s.theme;
+  }
   function pickSection(_e, t) {
-    if (t.getAttribute('aria-disabled') === 'true') {
-      toast(t.dataset.arg === 'anime' ? 'VANTARA ANIME قريبًا' : 'VANTARA CINEMA قريبًا');
+    const id = t.dataset.arg;
+    if (!SECTIONS[id]?.ready) {
+      toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
       return;
     }
     setSectionsOpen(false);
+    if (root.dataset.section === id) return;
+    writeSection(id);
+    const from = id === 'anime' ? q('mangaHome') : q('animeHome');
+    const to = id === 'anime' ? q('animeHome') : q('mangaHome');
+    if (currentPage() !== 'home') {
+      applySection(id);
+      from.hidden = true;
+      to.hidden = false;
+      showPage('home');
+      if (id === 'anime') anime.show();
+      return;
+    }
+    swapViews(from, to, {
+      onSwap: () => {
+        applySection(id);
+        if (id === 'anime') anime.show();
+        else restartHero();
+      },
+    });
   }
 
   const actions = {
     toggleSections: () => setSectionsOpen(!sectionsOpen()),
     pickSection,
+    shareAnime: () => anime.shareCurrent(),
     backFromDetail: () => goBack(),
     goBack: () => goBack(),
     closeDrawer,
@@ -3896,6 +3946,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage('profile');
     void profile.show(userId);
   }
+
+  const anime = createAnime({ root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv });
+  const startSection = readSection();
+  applySection(startSection);
+  q('mangaHome').hidden = startSection !== 'manga';
+  q('animeHome').hidden = startSection !== 'anime';
+  if (startSection === 'anime') anime.show();
 
   paintNotifyDots();
   void loadHome();
