@@ -852,7 +852,23 @@ These regions came back without Arabic in the first pass. Each one is its own bu
  * `GET /v1/translate/usage`: كم صفحة ترجمتَ هذا الأسبوع ومن كم، ومتى يتجدد.
  * لحاسبة الترجمة المقدّمة. الصفحات المحفوظة من قبل (لأي حساب) لا تُحسب.
  */
+/**
+ * هل الترجمة مفتوحة لهذا الحساب؟ `TRANSLATE_USERS` إن ضُبط، وإلا من ترجم أكثر
+ * الصفحات (صاحب الترجمة أثناء تطويرها). لا ترجمة إطلاقًا بعد = مفتوحة للجميع.
+ */
+export async function translationAllowed(env: TranslationEnv, userId: string): Promise<boolean> {
+  const list = (env.TRANSLATE_USERS ?? '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+  if (list.length) {
+    if (list.includes(userId.toLowerCase())) return true;
+    const row = await env.DB.prepare('SELECT username FROM accounts WHERE user_id = ?').bind(userId).first<{ username: string }>();
+    return Boolean(row && list.includes(row.username.toLowerCase()));
+  }
+  const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1').first<{ created_by: string }>();
+  return !top || top.created_by === userId;
+}
+
 export async function handleTranslateUsage(env: TranslationEnv, userId: string, now: number): Promise<Response> {
+  if (!(await translationAllowed(env, userId))) return reply({ allowed: false, configured: Boolean(env.OPENAI_API_KEY) });
   const q = await quotaState(env, userId, now);
   const start = Date.parse(`${weekOf(now).slice(2)}T14:00:00Z`);
   return reply({
@@ -864,6 +880,7 @@ export async function handleTranslateUsage(env: TranslationEnv, userId: string, 
     budgetUsd: q.budgetUsd,
     resetsAt: start + 7 * 24 * 3600_000,
     configured: Boolean(env.OPENAI_API_KEY),
+    allowed: true,
   });
 }
 

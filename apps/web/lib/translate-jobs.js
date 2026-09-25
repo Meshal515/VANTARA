@@ -18,7 +18,7 @@ const PACE_KEY = 'vantara.translate.pace';
  */
 export const JOB_CONCURRENCY = 4;
 /** أخطاء لا تُحل بالانتظار: توقف الطابور وتنتظرك. */
-export const BLOCKING = new Set(['models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit']);
+export const BLOCKING = new Set(['translation_locked', 'models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit']);
 /** أخطاء عابرة: تُعاد بعد مهلة. */
 const TRANSIENT = new Set(['offline', 'busy', 'upstream', 'unauthorized', 'http_0', 'http_401', 'http_502', 'http_503', 'too_long', 'bad_output', 'device_failed']);
 const MAX_PAGE_TRIES = 4;
@@ -414,6 +414,7 @@ export function createJobRunner(deps) {
 export const BLOCK_TEXT = {
   models_missing: 'ملفات الترجمة مو منزّلة. حمّلها من الإعدادات ← الترجمة',
   device_only: 'الترجمة تشتغل في تطبيق أندرويد فقط',
+  translation_locked: 'الترجمة قيد التطوير',
   translation_not_configured: 'الترجمة مو مفعّلة على الخادم',
   weekly_limit: 'خلصت حصة الترجمة لهالأسبوع. تتجدد الخميس ٥ العصر، ويكمل من نفس الصفحة',
   monthly_budget: 'وصلت الترجمة لسقف الشهر. يكمل أول الشهر الجاي من نفس الصفحة',

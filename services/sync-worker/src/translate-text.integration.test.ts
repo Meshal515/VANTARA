@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanTextRegionsIn, cleanTextRegionsOut, handleTranslateText, TEXT_SYSTEM_PROMPT, textEngineOf } from './translate.ts';
+import { cleanTextRegionsIn, cleanTextRegionsOut, handleTranslateText, handleTranslateUsage, TEXT_SYSTEM_PROMPT, textEngineOf, translationAllowed } from './translate.ts';
 import { sqliteEnv } from './test-d1.ts';
 
 /**
@@ -275,7 +275,7 @@ describe('fast mode and the weekly quota', () => {
 
   it('reports this week\'s usage, the limit and when it resets', async () => {
     const { handleTranslateUsage } = await import('./translate.ts');
-    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1000' });
+    const { env } = testEnv({ TRANSLATE_WEEKLY_PAGES: '1000', TRANSLATE_USERS: `${A},${B}` });
     const now = Date.UTC(2026, 8, 24, 10); // الخميس قبل 14:00 UTC: ما زال الأسبوع السابق
     await handleTranslateText(req({ regions: one }), env, A, now, { fetch: fakeGpt(() => answer1('اركض!')).fetch });
     const usage = (await (await handleTranslateUsage(env, A, now)).json()) as { used: number; limit: number; resetsAt: number };
@@ -354,3 +354,28 @@ describe('fast mode and the weekly quota', () => {
     expect(results.map((r) => r.status).sort()).toEqual([200, 429, 429]);
   });
 });
+
+describe('translation is open only to its owner while it is being built', () => {
+  it('without a list: the account that translated the most pages; everyone before any translation', async () => {
+    const { env } = testEnv();
+    expect(await translationAllowed(env, A)).toBe(true);
+    expect(await translationAllowed(env, B)).toBe(true);
+    const gpt = fakeGpt(() => answer);
+    await handleTranslateText(req(), env, A, Date.UTC(2026, 8, 24), { fetch: gpt.fetch });
+    expect(await translationAllowed(env, A)).toBe(true);
+    expect(await translationAllowed(env, B)).toBe(false);
+    const locked = (await (await handleTranslateUsage(env, B, Date.UTC(2026, 8, 24))).json()) as { allowed: boolean };
+    expect(locked.allowed).toBe(false);
+    const open = (await (await handleTranslateUsage(env, A, Date.UTC(2026, 8, 24))).json()) as { allowed: boolean };
+    expect(open.allowed).toBe(true);
+  });
+
+  it('TRANSLATE_USERS names who it is open to, by username or id', async () => {
+    const { env } = testEnv({ TRANSLATE_USERS: 'mishal, ' + B });
+    await env.DB.prepare('INSERT INTO accounts (user_id, username, created_at) VALUES (?, ?, 0) ON CONFLICT (user_id) DO UPDATE SET username = excluded.username').bind(A, 'Mishal').run();
+    expect(await translationAllowed(env, A)).toBe(true);
+    expect(await translationAllowed(env, B)).toBe(true);
+    expect(await translationAllowed(env, 'someone-else')).toBe(false);
+  });
+});
+

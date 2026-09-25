@@ -21,7 +21,7 @@ import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
-import { readTranslateSettings, writeTranslateSettings } from '../lib/translate-settings.js';
+import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
 import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
 import { clearPerf, engineLines, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
 import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
@@ -3077,6 +3077,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   let usageAsked = false;
   function renderTranslationSettings(group, row, toggle) {
     const s = readTranslateSettings();
+    if (translationLocked()) {
+      const locked = el('div', 'setting');
+      locked.innerHTML = glyph('lock');
+      const t = el('div');
+      t.append(el('strong', null, 'الترجمة العربية'));
+      t.append(el('small', null, 'قيد التطوير — تنفتح لك قريبًا'));
+      locked.append(t);
+      return group('الترجمة', [locked]);
+    }
     const rows = [
       toggle('translateAr', 'الترجمة العربية', 'تترجم فصول التكملة الإنجليزية إلى العربية', s.enabled, (enabled) => {
         writeTranslateSettings({ enabled });
@@ -3789,6 +3798,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openSheet,
     closeSheet,
   });
+  // الترجمة لمن فُتحت له وحده (قيد التطوير للبقية): الخادم يقول، والجهاز يخفي كل أزرارها
+  const checkTranslationAccess = () =>
+    sync
+      .translation('/v1/translate/usage')
+      .then((res) => {
+        if (res.status === 200 && typeof res.body?.allowed === 'boolean') setTranslationLocked(!res.body.allowed);
+        else if (res.status === 403 && res.body?.error === 'translation_locked') setTranslationLocked(true);
+        else return;
+        if (currentPage() === 'settings') renderSettings();
+      })
+      .catch(() => {});
+  setTimeout(checkTranslationAccess, 1500);
   // ما وصل هذا الجهاز قبل فتح الشاشة: المرسل يرى «وصله» الآن لا عند أول مجلس
   setTimeout(() => {
     majlis.acknowledgeDelivered();

@@ -42,6 +42,11 @@ export interface Env {
   TRANSLATE_MODEL?: string;
   TRANSLATE_EFFORT?: string;
   TRANSLATE_WEEKLY_PAGES?: string;
+  /**
+   * من تُفتح له الترجمة (أسماء مستخدمين أو معرّفات، بفواصل). غير مضبوط: الحساب الذي
+   * ترجم أكثر الصفحات وحده (صاحبها أثناء التطوير)، والبقية يرون «قيد التطوير».
+   */
+  TRANSLATE_USERS?: string;
   TRANSLATE_WEEKLY_CHAPTERS?: string;
   TRANSLATE_MONTHLY_BUDGET_USD?: string;
 }
