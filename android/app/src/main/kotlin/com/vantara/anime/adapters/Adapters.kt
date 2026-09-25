@@ -1,6 +1,10 @@
 package com.vantara.anime.adapters
 
+import com.vantara.anime.hosts.EmbedResolver
+import com.vantara.anime.registry.PageEmbeds
 import com.vantara.anime.stream.Candidate
+import kotlinx.coroutines.CancellationException
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.TrackRef
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
@@ -80,6 +84,11 @@ class ExtensionAdapter(
     override val id: String,
     private val source: AnimeCatalogueSource,
     private val hosterTimeoutMs: Long = 20_000,
+    /** سيرفر من الصفحة قد ينتظر دوره في المتصفح المخفي قبل مهلته هو. */
+    private val pageEmbedTimeoutMs: Long = 45_000,
+    /** قاعدة البيان الحالية لسيرفرات الصفحة (تُقرأ عند كل طلب فتتحدّث بلا إعادة تحميل). */
+    private val pageEmbeds: () -> PageEmbeds? = { null },
+    private val resolver: EmbedResolver? = null,
 ) : AnimeAdapter {
 
     override val name: String get() = source.name
@@ -163,6 +172,53 @@ class ExtensionAdapter(
         }.sortedBy { it.number }
 
     override suspend fun candidates(episode: SourceEpisode, now: Long): List<Candidate> {
+        val fromExtension = try {
+            extensionCandidates(episode, now)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (fromExtension.isNotEmpty()) return fromExtension
+        val rule = pageEmbeds() ?: return fromExtension
+        val r = resolver ?: return fromExtension
+        return pageCandidates(episode, rule, r, now)
+    }
+
+    /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
+    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long): List<Candidate> {
+        val http = source as? AnimeHttpSource ?: return emptyList()
+        val pageUrl = if (episode.url.startsWith("http")) episode.url else http.baseUrl.trimEnd('/') + episode.url
+        val (finalUrl, html) = http.client.newCall(GET(pageUrl, http.headers)).awaitSuccess().use { it.request.url.toString() to it.body.string() }
+        val referer = finalUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}/" }
+        return coroutineScope {
+            rule.extract(html, finalUrl).map { embed ->
+                async {
+                    withTimeoutOrNull(pageEmbedTimeoutMs) {
+                        runCatching { r.resolve(embed.url, referer) }.getOrDefault(emptyList()).map { st ->
+                            Candidate(
+                                id = "$id|${episode.url}|${st.url.hashCode()}",
+                                sourceId = id,
+                                sourceName = name,
+                                server = embed.name,
+                                host = StreamClassifier.host(st.url),
+                                url = st.url,
+                                headers = st.headers,
+                                quality = st.quality ?: embed.quality,
+                                label = embed.name,
+                                variant = StreamClassifier.variant(embed.name, episode.name),
+                                container = StreamClassifier.container(st.url),
+                                resolvedAt = now,
+                                expiresAt = StreamClassifier.expiresAt(st.url, now),
+                            )
+                        }
+                    }.orEmpty()
+                }
+            }.awaitAll().flatten().distinctBy { it.url }
+        }
+    }
+
+    private suspend fun extensionCandidates(episode: SourceEpisode, now: Long): List<Candidate> {
         val sEpisode = SEpisode.create().apply {
             url = episode.url
             name = episode.name

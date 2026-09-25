@@ -6,6 +6,9 @@ import com.vantara.anime.adapters.ExtensionAdapter
 import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.adapters.SourcePage
+import com.vantara.anime.adapters.WitAnimeSiteAdapter
+import com.vantara.anime.hosts.EmbedResolver
+import com.vantara.anime.hosts.WebViewSniffer
 import com.vantara.anime.catalog.CatalogCrawler
 import com.vantara.anime.catalog.CatalogCursor
 import com.vantara.anime.catalog.CatalogStore
@@ -106,7 +109,7 @@ class AnimeEngine(context: Context) {
      */
     private fun preload() {
         for (s in manifest.sources) {
-            if (!s.enabled || s.disabledReason != null || s.extension == null) continue
+            if (!s.enabled || s.disabledReason != null || (s.extension == null && s.adapter == null)) continue
             background.launch { adapter(s.id) }
         }
     }
@@ -120,11 +123,12 @@ class AnimeEngine(context: Context) {
         adapters[id]?.let { return it }
         val e = entry(id) ?: return null
         if (!e.enabled || e.disabledReason != null) return null
+        e.adapter?.let { kind -> return native(e, kind).also { adapters[id] = it } }
         val ext = e.extension ?: return null
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(id, source).also { a ->
+                ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds }, resolver = embeds).also { a ->
                     // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
                     AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
                     adapters[id] = a
@@ -135,6 +139,23 @@ class AnimeEngine(context: Context) {
                 health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
             }.getOrNull()
         }
+    }
+
+    /** سيرفرات الفيديو المضمّنة، والمتصفح المخفي لما لا نستخرجه مباشرة. */
+    private val embeds by lazy {
+        EmbedResolver(network.client, WebViewSniffer(appContext, network::defaultUserAgentProvider))
+    }
+
+    /** محوّل VANTARA أصلي: لا تنزيل ولا تحميل كود، فيُبنى فورًا. */
+    private fun native(e: SourceEntry, kind: String): AnimeAdapter = when (kind) {
+        WitAnimeSiteAdapter.KIND -> WitAnimeSiteAdapter(
+            id = e.id,
+            name = e.name,
+            client = network.client,
+            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
+            embeds = embeds,
+        )
+        else -> error("محوّل غير معروف: $kind")
     }
 
     fun loadError(id: String): String? = loadErrors[id]
@@ -238,11 +259,11 @@ class AnimeEngine(context: Context) {
 
     suspend fun crawl(id: String, onPage: (CatalogCursor) -> Unit = {}): CatalogCursor {
         val e = entry(id) ?: error("مصدر غير معروف: $id")
-        val a = adapter(id) as? ExtensionAdapter ?: error(loadErrors[id] ?: "المصدر غير متاح")
+        val a = adapter(id) ?: error(loadErrors[id] ?: "المصدر غير متاح")
         val hint = e.catalog
-        val template = hint.urlTemplate
+        val template = hint.urlTemplate.takeIf { a is ExtensionAdapter }
         val fetcher = CatalogCrawler.PageFetcher { page ->
-            if (template != null) {
+            if (template != null && a is ExtensionAdapter) {
                 val base = AnimeHostRouter.activeBase(id) ?: e.domains.current
                 val path = template.replace("{page}", page.toString())
                 val url = if (path.startsWith("http")) path else base.trimEnd('/') + path
@@ -331,7 +352,8 @@ class AnimeEngine(context: Context) {
             add("الإضافة", "fail", loadErrors[id] ?: "لم تُحمَّل خلال ${LOAD_TIMEOUT_MS / 1000} ثانية")
             return steps
         }
-        add("الإضافة", "ok", "محمّلة (${e.extension?.version ?: "?"})")
+        if (e.adapter != null) add("المحوّل", "ok", "محوّل VANTARA أصلي (${e.adapter})")
+        else add("الإضافة", "ok", "محمّلة (${e.extension?.version ?: "?"})")
 
         val t0 = System.nanoTime()
         val found = runCatching { withTimeout(SEARCH_TIMEOUT_MS) { a.page(Listing.SEARCH, 1, query) } }
@@ -343,6 +365,33 @@ class AnimeEngine(context: Context) {
                 add("بحث «$query»", "fail", why)
             },
         )
+
+        // السلسلة كاملة على أول نتيجة: الحلقات ← روابط تشغيل أول حلقة
+        found.getOrNull()?.items?.firstOrNull()?.let { first ->
+            val t1 = System.nanoTime()
+            runCatching {
+                withTimeout(PLAY_PROBE_TIMEOUT_MS) {
+                    val eps = a.episodes(first)
+                    val ep = eps.firstOrNull() ?: return@withTimeout Triple(0, null, emptyList<Candidate>())
+                    Triple(eps.size, ep, a.candidates(ep))
+                }
+            }.fold(
+                { (count, ep, found) ->
+                    val took = (System.nanoTime() - t1) / 1_000_000
+                    val servers = found.map { it.server }.distinct().joinToString("، ")
+                    add(
+                        "تشغيل «${first.title}»",
+                        if (found.isNotEmpty()) "ok" else "warn",
+                        if (ep == null) "لا حلقات" else "$count حلقة · ${ep.name}: ${found.size} رابط" +
+                            (if (servers.isNotEmpty()) " ($servers)" else "") + " · ${took}ms",
+                    )
+                },
+                { t ->
+                    val why = if (t is TimeoutCancellationException) "لم يكتمل خلال ${PLAY_PROBE_TIMEOUT_MS / 1000} ثانية" else AnimeHostRouter.describe(t)
+                    add("تشغيل «${first.title}»", "fail", why)
+                },
+            )
+        }
         health.flush()
         return steps
     }
@@ -390,6 +439,7 @@ class AnimeEngine(context: Context) {
         /** مهل تناسب الشبكات البطيئة (ping 600–1000ms شائع على الجوال). */
         const val SEARCH_TIMEOUT_MS = 30_000L
         const val LOAD_TIMEOUT_MS = 90_000L
+        const val PLAY_PROBE_TIMEOUT_MS = 75_000L
 
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =
