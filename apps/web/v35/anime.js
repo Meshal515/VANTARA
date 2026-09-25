@@ -875,36 +875,99 @@ export function createAnime(deps) {
     let paintQueued = false;
     let off = [];
 
+    // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
-      body.classList.add('an-srv-sheet');
-      const head = el('div', 'an-sheet-head');
-      const t = el('div', 'an-sheet-title', m.title);
-      t.dir = 'auto';
-      head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}${startAt > 5000 ? ` · من ${engine.clock(startAt)}` : ''}`), t);
-      const bestBtn = el('button', 'an-btn an-btn--primary an-btn--wide an-srv-best');
-      bestBtn.type = 'button';
+      body.classList.add('an-pick');
+      const bar = el('header', 'an-pick-bar');
+      const back = button('an-pick-back', glyph('back', { size: 22 }), () => deps.closeSheet(), 'رجوع');
+      const heading = el('div', 'an-pick-heading');
+      const name = el('span', 'an-pick-anime', m.title);
+      name.dir = 'auto';
+      heading.append(el('b', null, `الحلقة ${n}`), name);
+      bar.append(back, heading);
+
+      const scroll = el('div', 'an-pick-scroll');
+      const hero = el('div', 'an-pick-hero');
+      const thumb = m.thumbs?.[n]?.thumbnail;
+      hero.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { eager: true, position: thumb || m.banner ? 'center' : 'center 25%' }));
+      const cap = el('div', 'an-pick-cap');
+      const epTitle = state.malTitles?.[n] ?? m.thumbs?.[n]?.title;
+      cap.append(el('span', 'an-pick-no', `الحلقة ${n}`));
+      if (epTitle) {
+        const et = el('b', 'an-pick-title', epTitle);
+        et.dir = 'auto';
+        cap.append(et);
+      }
+      if (startAt > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(startAt)}`));
+      hero.append(cap);
+
       const status = el('div', 'an-srv-status');
+      const filters = el('div', 'an-pick-filters');
       const list = el('div', 'an-srv-list');
-      body.append(head, bestBtn, status, list);
+      scroll.append(hero, status, filters, list);
+
+      const foot = el('footer', 'an-pick-foot');
+      const bestBtn = el('button', 'an-pick-best');
+      bestBtn.type = 'button';
+      foot.append(bestBtn);
+      body.append(bar, scroll, foot);
+
+      const filter = { q: 'all', v: null };
+      const visible = () => (filter.v ? sheet.routes.filter((r) => (filter.v === 'DUB') === (r.variant === 'DUB')) : sheet.routes);
+      const shownGroups = () => {
+        const groups = engine.groupRoutes(visible());
+        return filter.q === 'all' ? groups : groups.filter(([g]) => g === filter.q);
+      };
+      const filtered = () => filter.q !== 'all' || filter.v !== null;
 
       const paintBest = () => {
-        const ready = sheet.routes.some((r) => r.state === 'READY');
-        bestBtn.disabled = sheet.busy || (!ready && sheet.done);
-        bestBtn.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
+        const pool = filtered() ? shownGroups().flatMap(([, rs]) => rs) : sheet.routes;
+        const ready = pool.some((r) => r.state === 'READY');
+        bestBtn.disabled = sheet.busy || (!ready && (sheet.done || filtered()));
+        const label = sheet.busy ? 'نجهّز أفضل سيرفر…' : filter.q !== 'all' ? `شغّل أفضل ${filter.q}` : 'شغّل الأفضل';
+        bestBtn.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${label}</span>`;
         bestBtn.classList.toggle('waiting', !ready && !sheet.done);
+      };
+
+      const chip = (text, on, onClick) => {
+        const c = button(`an-pick-chip${on ? ' on' : ''}`, '', onClick);
+        c.textContent = text;
+        c.setAttribute('aria-pressed', String(on));
+        return c;
+      };
+
+      const paintFilters = () => {
+        filters.replaceChildren();
+        const qualities = engine.groupRoutes(visible()).map(([g]) => g).filter((g) => g !== 'غير متاح');
+        if (filter.q !== 'all' && !qualities.includes(filter.q)) filter.q = 'all';
+        if (qualities.length > 1) {
+          const row = el('div', 'an-pick-row');
+          row.append(chip('الكل', filter.q === 'all', () => ((filter.q = 'all'), paint())));
+          for (const g of qualities) row.append(chip(g, filter.q === g, () => ((filter.q = g), paint())));
+          filters.append(row);
+        }
+        const dub = sheet.routes.some((r) => r.variant === 'DUB');
+        const sub = sheet.routes.some((r) => r.variant !== 'DUB');
+        if (dub && sub) {
+          const row = el('div', 'an-pick-row');
+          row.append(chip('مترجم', filter.v === 'SUB', () => ((filter.v = filter.v === 'SUB' ? null : 'SUB'), paint())));
+          row.append(chip('مدبلج', filter.v === 'DUB', () => ((filter.v = filter.v === 'DUB' ? null : 'DUB'), paint())));
+          filters.append(row);
+        }
       };
 
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
         paintBest();
+        paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
         if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
         else if (!sheet.done) status.innerHTML = `<i class="an-sources-spin"></i><span>نجهّز السيرفرات… ${ready ? `${ready} جاهز` : ''}</span>`;
         else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
         if (sheet.work === false) status.querySelector('i')?.remove();
         list.replaceChildren();
-        for (const [name, routes] of engine.groupRoutes(sheet.routes)) {
+        for (const [name, routes] of shownGroups()) {
           const group = el('section', 'an-srv-group');
           group.append(el('h4', 'an-srv-q', name));
           const grid = el('div', 'an-srv-grid');
@@ -919,42 +982,53 @@ export function createAnime(deps) {
         requestAnimationFrame(paint);
       };
 
+      const playRoute = async (r) => {
+        if (sheet.busy) return;
+        sheet.busy = true;
+        paintBest();
+        try {
+          const candidate = await engine.pick(sheet.session, r.id);
+          if (!candidate) {
+            toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
+            return;
+          }
+          rememberCode(m.id, r.code);
+          await launch(candidate, r.code);
+        } catch (e) {
+          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+        } finally {
+          sheet.busy = false;
+          queuePaint();
+        }
+      };
+
       const tile = (r) => {
         const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
         b.type = 'button';
         b.disabled = r.state !== 'READY';
+        const top = el('span', 'an-srv-top');
         const code = el('b', 'an-srv-code', r.code);
         code.dir = 'ltr';
+        top.append(code);
+        if (r.variant === 'DUB') top.append(el('span', 'an-srv-tag', 'مدبلج'));
+        else if (r.code === prefer) top.append(el('span', 'an-srv-tag', 'السابق'));
         const line = el('span', 'an-srv-state');
         line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
-        b.append(code, line);
-        if (r.variant === 'DUB') b.append(el('span', 'an-srv-tag', 'مدبلج'));
-        else if (r.code === prefer) b.append(el('span', 'an-srv-tag', 'آخر اختيار'));
+        b.append(top, line);
         b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
-        b.onclick = async () => {
-          if (sheet.busy) return;
-          sheet.busy = true;
-          paintBest();
-          try {
-            const candidate = await engine.pick(sheet.session, r.id);
-            if (!candidate) {
-              toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
-              return;
-            }
-            rememberCode(m.id, r.code);
-            await launch(candidate, r.code);
-          } catch (e) {
-            toast(`تعذّر التشغيل: ${e?.message ?? e}`);
-          } finally {
-            sheet.busy = false;
-            queuePaint();
-          }
-        };
+        b.onclick = () => void playRoute(r);
         return b;
       };
 
       bestBtn.onclick = async () => {
         if (sheet.busy || !sheet.session) return;
+        // فلتر مختار (جودة/لغة): الأفضل داخله — السيرفر المفضّل أولًا ثم الأول الجاهز
+        if (filtered()) {
+          const pool = shownGroups().flatMap(([, rs]) => rs).filter((r) => r.state === 'READY');
+          const pick = pool.find((r) => r.code === prefer) ?? pool[0];
+          if (pick) void playRoute(pick);
+          return;
+        }
         sheet.busy = true;
         paintBest();
         try {
@@ -1020,7 +1094,7 @@ export function createAnime(deps) {
         // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
         if (!sheet.launched && sheet.session) void engine.closeSession(sheet.session);
       };
-    }, { tone: 'anime' });
+    }, { tone: 'anime', full: true });
 
     async function launch(candidate, code) {
       sheet.launched = true;

@@ -166,13 +166,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   let sheetClose = null;
   /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
-  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. */
-  function openSheet(build, { tone = null } = {}) {
+  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. `full`: صفحة كاملة لا ورقة. */
+  function openSheet(build, { tone = null, full = false } = {}) {
     closeSheet();
     const body = q('sheetBody');
-    body.innerHTML = '<div class="sheet-handle"></div>';
+    body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
     body.className = 'sheet';
     if (tone) q('sheet').dataset.tone = tone;
+    // صفحة كاملة (اختيار السيرفر والجودة): نفس الطبقة وزر الرجوع يغلقها
+    q('sheet').classList.toggle('sheet-backdrop--full', full);
     sheetClose = build(body) ?? null;
     q('sheet').classList.add('show');
   }
