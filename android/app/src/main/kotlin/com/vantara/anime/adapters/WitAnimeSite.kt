@@ -5,7 +5,6 @@ import com.vantara.anime.stream.Candidate
 import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.Variant
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.awaitSuccess
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -31,9 +30,13 @@ import eu.kanade.tachiyomi.network.await
  *   بحث       /search?q=…&page=N           بطاقات `a.group` ← /anime/… أو /movie/…
  *   الكتالوج  /sitemap-anime.xml + movies  (1900+ عمل؛ صفحة «تصفّح» تحمّل بالتمرير)
  *   الحلقات   صفحة العمل: كل روابط /watch/<slug>/<n> (One Piece: 1200 في صفحة واحدة)
- *   السيرفرات POST /watch/…/sources (رمز CSRF من الصفحة) ← لكل سيرفر رمز
- *             POST /watch/stream-source/<t> ثم GET /watch/stream-gate/<t> ← 302 إلى
- *             صفحة المشغّل (ok.ru، hgcloud، mega…) ← [EmbedResolver].
+ *   السيرفرات POST /watch/…/sources (رمز CSRF من الصفحة) ← لكل سيرفر رمز ←
+ *             GET /watch/stream-gate/<t> (بكوكيز الجلسة) ← 302 إلى صفحة المشغّل
+ *             (ok.ru، hgcloud، mega…) ← [EmbedResolver].
+ *
+ * حدود الموقع (`X-RateLimit-Limit: 20` في الدقيقة): سطل لـ`sources` و`stream-source`
+ * معًا، وسطل لـ`stream-gate`. البوابة تعمل بلا `stream-source` فلا نطلبه؛ والحدود
+ * نفسها في البيان يطبّقها [com.vantara.anime.net.RateGate] على كل طلبات المصدر.
  */
 class WitAnimeSiteAdapter(
     override val id: String,
@@ -53,7 +56,7 @@ class WitAnimeSiteAdapter(
 
     private suspend fun html(path: String, referer: String? = null): String {
         val h = Headers.Builder().apply { referer?.let { add("Referer", it) } }.build()
-        return client.newCall(GET(abs(path), h)).awaitSuccess().use { it.body.string() }
+        return client.newCall(GET(abs(path), h)).awaitOk().use { it.body.string() }
     }
 
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage = when (listing) {
@@ -93,30 +96,36 @@ class WitAnimeSiteAdapter(
         return Parse.episodes(html(anime.url), slug, id)
     }
 
-    override suspend fun candidates(episode: SourceEpisode, now: Long): List<Candidate> {
+    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
         val watch = abs(episode.url)
         val page = html(episode.url)
         val csrf = Parse.csrf(page) ?: error("لا رمز CSRF في صفحة الحلقة")
         val sourcesPath = Parse.sourcesUrl(page) ?: "${episode.url.trimEnd('/')}/sources"
-        val servers = Parse.servers(post(sourcesPath, csrf, watch))
-            .filter { it.label.lowercase() !in EmbedResolver.UNSUPPORTED }
+        val all = Parse.servers(post(sourcesPath, csrf, watch))
+        val (skipped, servers) = all.partition { it.label.lowercase() in EmbedResolver.UNSUPPORTED }
+        skipped.map { it.label }.distinct().forEach { trace?.note(it, "غير مدعوم بعد (فيديو مشفّر)") }
+        if (all.isEmpty()) trace?.note("السيرفرات", "الموقع لم يُرجع أي سيرفر")
 
         return coroutineScope {
             servers.map { s ->
                 async {
+                    val label = "${s.label} ${s.quality}"
                     withTimeoutOrNull(serverTimeoutMs) {
-                        runCatching { streamsOf(s, csrf, watch, episode, now) }.getOrDefault(emptyList())
-                    }.orEmpty()
+                        runCatching { streamsOf(s, watch, episode, now, trace) }
+                            .fold({ it }, { trace?.note(label, it.brief()); emptyList() })
+                    } ?: emptyList<Candidate>().also { trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية") }
                 }
             }.awaitAll().flatten().distinctBy { it.url }
         }
     }
 
-    private suspend fun streamsOf(s: Parse.Server, csrf: String, watch: String, episode: SourceEpisode, now: Long): List<Candidate> {
-        // الموقع «يسلّح» البوابة بطلب المصدر أولًا (كما يفعل مشغّله)
-        post("/watch/stream-source/${s.token}", csrf, watch)
-        val embed = gate(s.token, watch) ?: return emptyList()
-        return embeds.resolve(embed, base().trimEnd('/') + "/").map { st ->
+    private suspend fun streamsOf(s: Parse.Server, watch: String, episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
+        val label = "${s.label} ${s.quality}"
+        val embed = gate(s.token, watch) ?: return emptyList<Candidate>().also { trace?.note(label, "البوابة لم تحوّل إلى مشغّل") }
+        // المشغّل يتحقق من الصفحة الأم نفسها: صفحة الحلقة، لا جذر الموقع
+        val streams = embeds.resolve(embed, watch)
+        if (streams.isEmpty()) trace?.note(label, "لم يُستخرج رابط فيديو من ${embed.substringAfter("://").substringBefore('/')}")
+        return streams.map { st ->
             Candidate(
                 id = "$id|${episode.url}|${st.url.hashCode()}",
                 sourceId = id,
@@ -143,7 +152,7 @@ class WitAnimeSiteAdapter(
             .header("X-Requested-With", "XMLHttpRequest")
             .header("Referer", referer)
             .build()
-        return client.newCall(req).awaitSuccess().use { it.body.string() }
+        return client.newCall(req).awaitOk().use { it.body.string() }
     }
 
     /** البوابة تحوّل (302) إلى صفحة المشغّل؛ وإن أعادت صفحة فمنها `meta refresh`. */

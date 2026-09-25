@@ -30,6 +30,8 @@ data class DomainPlan(
     val fingerprint: String? = null,
     /** مسارات غيّرها الموقع وما زالت الإضافة تطلبها بشكلها القديم. */
     val rewrites: List<UrlRewrite> = emptyList(),
+    /** حدود الطلبات لكل مسار (يطبّقها [RateGate] على كل طلبات المصدر). */
+    val limits: List<RateLimit> = emptyList(),
 ) {
     val currentUrl: HttpUrl? get() = current.toHttpUrlOrNull()
     val currentHost: String? get() = currentUrl?.host
@@ -56,6 +58,10 @@ data class UrlRewrite(
     /** إعادة تسمية معاملات الاستعلام: القديم ← الجديد، والبقية كما هي. */
     val params: Map<String, String> = emptyMap(),
 )
+
+/** `path`: Regex على مسار الطلب؛ `perMinute`: أقصى عدد في أي دقيقة. */
+@Serializable
+data class RateLimit(val path: String, val perMinute: Int)
 
 /** `https://www.x.com/a` أو `www.x.com` ← `www.x.com`. */
 internal fun bareHost(s: String): String = s.toHttpUrlOrNull()?.host ?: s.substringAfter("://").substringBefore('/').lowercase()

@@ -1,6 +1,7 @@
 package com.vantara.anime.registry
 
 import com.vantara.anime.net.DomainPlan
+import com.vantara.anime.net.RateLimit
 import com.vantara.anime.net.UrlRewrite
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -34,6 +35,8 @@ data class SourceEntry(
     val domains: Domains,
     /** سيرفرات الحلقة من صفحتها مباشرة، حين لا تجد الإضافة أي سيرفر (صفحة تغيّر شكلها). */
     val embeds: PageEmbeds? = null,
+    /** حلقات العمل من صفحته مباشرة، حين لا تجد الإضافة أي حلقة. */
+    val episodes: PageEpisodes? = null,
     /** كيف يُحلب الكتالوج كاملًا. */
     val catalog: CatalogHint = CatalogHint(),
     /** سبب إيقاف معروف (دومين ميت…): يظهر في شاشة الصحة ولا يُحمَّل. */
@@ -58,6 +61,7 @@ data class Domains(
     val mirrors: List<String> = emptyList(),
     val fingerprint: String? = null,
     val rewrites: List<UrlRewrite> = emptyList(),
+    val limits: List<RateLimit> = emptyList(),
 ) {
     fun plan(extensionBaseUrl: String?): DomainPlan = DomainPlan(
         current = current,
@@ -66,6 +70,7 @@ data class Domains(
         mirrors = mirrors.toSet(),
         fingerprint = fingerprint,
         rewrites = rewrites,
+        limits = limits,
     )
 }
 
@@ -96,6 +101,31 @@ data class PageEmbeds(
             val quality = qualityAttr?.let { el.attr(it) }?.let { com.vantara.anime.stream.StreamClassifier.quality(it) }
             Embed(url, name, quality)
         }.distinctBy { it.url }
+    }
+}
+
+/**
+ * مثال OkAnime: `<a class="ep-compact-btn" href="…/episode/boruto-…-episode-12">12</a>`.
+ * الإضافة 14.26 تبحث عن `div.row div.episode-card div.anime-title a` فلا تجد شيئًا.
+ */
+@Serializable
+data class PageEpisodes(
+    val selector: String,
+    /** Regex مجموعته الأولى رقم الحلقة من الرابط؛ غيابه = أول رقم في نص العنصر. */
+    val numberPattern: String? = null,
+) {
+    data class Item(val path: String, val number: Float)
+
+    fun extract(html: String, pageUrl: String): List<Item> {
+        val re = numberPattern?.let(::Regex)
+        return org.jsoup.Jsoup.parse(html, pageUrl).select(selector).mapNotNull { el ->
+            val href = el.absUrl("href").ifBlank { return@mapNotNull null }
+            val url = runCatching { java.net.URI(href) }.getOrNull() ?: return@mapNotNull null
+            val path = (url.rawPath ?: return@mapNotNull null) + (url.rawQuery?.let { "?$it" } ?: "")
+            val number = (re?.find(href)?.groupValues?.getOrNull(1) ?: Regex("""\d+(?:\.\d+)?""").find(el.text())?.value)
+                ?.toFloatOrNull() ?: return@mapNotNull null
+            Item(path, number)
+        }.distinctBy { it.path }.sortedBy { it.number }
     }
 }
 
@@ -147,6 +177,10 @@ object ManifestParser {
             if (!ids.add(s.id)) add("مكرر: ${s.id}")
             s.adapter?.let { if (it !in NATIVE_ADAPTERS) add("${s.id}: محوّل غير معروف «$it»") }
             s.embeds?.pattern?.let { p -> runCatching { Regex(p) }.onFailure { add("${s.id}: نمط السيرفرات ليس Regex صالحًا") } }
+            s.episodes?.numberPattern?.let { p -> runCatching { Regex(p) }.onFailure { add("${s.id}: نمط رقم الحلقة ليس Regex صالحًا") } }
+            for (l in s.domains.limits) {
+                if (runCatching { Regex(l.path) }.isFailure || l.perMinute < 1) add("${s.id}: حد طلبات غير صالح «${l.path}»")
+            }
             if (!s.domains.current.startsWith("https://") && !s.domains.current.startsWith("http://")) add("${s.id}: current ليس رابطًا")
             s.extension?.let { e ->
                 if (!Regex("^[0-9a-fA-F]{64}$").matches(e.sha256)) add("${s.id}: sha256 غير صالح")

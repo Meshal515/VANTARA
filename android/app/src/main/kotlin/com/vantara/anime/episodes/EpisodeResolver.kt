@@ -27,6 +27,8 @@ class EpisodeResolver(
     private val adapterOf: suspend (String) -> AnimeAdapter?,
     private val health: HealthStore,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** أولوية المصدر في البيان: تفصل بين مصدرين متساويين في الصحة. */
+    private val priorityOf: (String) -> Int = { 0 },
 ) {
     data class Copy(val sourceId: String, val anime: SourceAnime)
 
@@ -38,7 +40,9 @@ class EpisodeResolver(
         episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS }?.let { return it.episodes }
         val adapter = adapterOf(copy.sourceId) ?: return emptyList()
         val list = adapter.episodes(copy.anime)
-        episodeCache[key] = Cached(clock(), list)
+        // قائمة فارغة قد تكون محلّلًا تغيّر موقعه أو تحديًا عابرًا، لا «عمل بلا حلقات»:
+        // لا تُخبّأ فتحجب المحاولة التالية عشر دقائق
+        if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list)
         return list
     }
 
@@ -54,7 +58,7 @@ class EpisodeResolver(
         minCandidates: Int = 3,
         perSourceTimeoutMs: Long = 25_000,
     ): List<Candidate> {
-        val ordered = health.rank(copies) { HealthStore.sourceKey(it.sourceId) }
+        val ordered = health.rank(copies, { priorityOf(it.sourceId) }) { HealthStore.sourceKey(it.sourceId) }
         val gathered = mutableListOf<Candidate>()
         // دفعات من مصدرين بالتوازي: الأول يبدأ فورًا، والثاني احتياطٌ جاهز
         for (batch in ordered.chunked(2)) {

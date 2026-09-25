@@ -23,6 +23,10 @@
           { "path": "/search/", "to": "/search", "params": { "s": "q" } }
         ]
       },
+      "episodes": {
+        "selector": "a.ep-compact-btn[href*=/episode/]",
+        "numberPattern": "-episode-([0-9]+(?:\\.[0-9]+)?)/?$"
+      },
       "embeds": {
         "selector": "a.ep-link[data-server]",
         "attr": "@click",
@@ -55,7 +59,11 @@
           "https://witanime.pics",
           "https://witanime.life"
         ],
-        "fingerprint": "images\\.witanime\\.site"
+        "fingerprint": "images\\.witanime\\.site",
+        "limits": [
+          { "path": "^/watch/.+/sources$|^/watch/stream-source/", "perMinute": 18 },
+          { "path": "^/watch/stream-gate/", "perMinute": 18 }
+        ]
       },
       "catalog": {
         "listing": "popular",
