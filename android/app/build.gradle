@@ -5,6 +5,8 @@ apply plugin: 'org.jetbrains.kotlin.plugin.serialization'
 
 // إصدار OkHttp في مكان واحد: التوحيد أدناه يقرأ منه، فلا يفترقان بالسهو.
 def okhttpVersion = '5.3.2'
+// Media3 1.5: آخر خط يقبل compileSdk 35 وminSdk 26 بلا ترقية AGP
+def media3Version = '1.5.1'
 
 // ───────────────────────────── التوقيع والإصدار ─────────────────────────────
 //
@@ -156,6 +158,14 @@ dependencies {
     // الأوزان (~430MB) ليست هنا: تُنزَّل عند الطلب (ModelStore). المكتبة نفسها
     // ~12MB لـarm64 فقط (انظر abiFilters أدناه).
     implementation "com.microsoft.onnxruntime:onnxruntime-android:1.20.0"
+
+    // ── مشغّل الأنمي: Media3 أصلي (لا WebView). الرابط + ترويساته يمرّان
+    // عبر OkHttp نفسه فيحملان كوكيز Cloudflare وترويسات السيرفر ──
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
+    implementation "androidx.media3:media3-ui:$media3Version"
+    implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
 
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
     // `okhttp3.JavaNetCookieJar` يسكن هذه القطعة لا في okhttp نفسه

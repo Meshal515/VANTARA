@@ -65,6 +65,8 @@ class NetworkHelper(context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(2, TimeUnit.MINUTES)
+        // الأول دائمًا: توجيه مضيفات مسجّلة (محرك الأنمي)؛ بلا تسجيل لا يفعل شيئًا
+        .addInterceptor(HostRouting)
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net
         // for search/details then briefly returned EAI_NODATA for chapters.
         // Retry only idempotent methods; never replay POST/PUT blindly.

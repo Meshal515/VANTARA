@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-25",
+  "sources": [
+    {
+      "id": "okanime",
+      "name": "OkAnime",
+      "priority": 70,
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.okanime",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.okanime-v14.26.apk",
+        "sha256": "ff5c3fc383f2063a62ee954158669186a59fac66aefbebbe2c8b2cd11b774ed3",
+        "version": "14.26"
+      },
+      "domains": {
+        "current": "https://ww3.okanime.xyz",
+        "legacy": [
+          "https://www.okanime.xyz",
+          "https://okanime.xyz"
+        ],
+        "fingerprint": "OkAnime|اوك انمي"
+      },
+      "catalog": {
+        "urlTemplate": "/anime-list?page={page}",
+        "cards": {
+          "card": "div.anime-card",
+          "link": "div.anime-title h4 a",
+          "image": "img"
+        },
+        "ratePerSecond": 1.0,
+        "maxPages": 1000
+      }
+    },
+    {
+      "id": "witanime",
+      "name": "WitAnime",
+      "priority": 80,
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.witanime",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.witanime-v14.62.apk",
+        "sha256": "22612b963df827c1139001feee9c051ace3e8ec24ff4392c155d5b3b968c1be4",
+        "version": "14.62"
+      },
+      "domains": {
+        "current": "https://witanime.com",
+        "legacy": [
+          "https://witanime.cyou",
+          "https://witanime.you",
+          "https://witanime.pics",
+          "https://witanime.life"
+        ],
+        "fingerprint": "anime-card-poster|episodes-card|anime-details-title"
+      },
+      "catalog": {
+        "listing": "popular",
+        "ratePerSecond": 1.0,
+        "maxPages": 1000
+      }
+    },
+    {
+      "id": "anime4up",
+      "name": "Anime4Up",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.anime4up",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.anime4up-v14.79.apk",
+        "sha256": "06247517185df570c0656eb289e13b5fd02fe6d47d6528447a3169123eb09add",
+        "version": "14.79"
+      },
+      "domains": {
+        "current": "https://w1.anime4up.rest",
+        "legacy": []
+      }
+    },
+    {
+      "id": "animerco",
+      "name": "Animerco",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.animerco",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animerco-v14.58.apk",
+        "sha256": "794d1197b2046d87ad534270f58621c349197ff460af1e610d087a53af689457",
+        "version": "14.58"
+      },
+      "domains": {
+        "current": "https://det.animerco.org",
+        "legacy": [
+          "https://zeta.animerco.org"
+        ]
+      }
+    },
+    {
+      "id": "animeblkom",
+      "name": "AnimeBlkom",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.animeblkom",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animeblkom-v14.27.apk",
+        "sha256": "89fe005a7d5b33a7335ae01c3f2c01edd48515c6d3868473497eb70b5425aeb7",
+        "version": "14.27"
+      },
+      "domains": {
+        "current": "https://animeblkom.net",
+        "legacy": []
+      }
+    },
+    {
+      "id": "arabanime",
+      "name": "ArabAnime",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.arabanime",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.arabanime-v14.2.apk",
+        "sha256": "3f7b52b4ebcc9bf50437742f56cb69d4d1168c72d3449db8f15018bf9c5f0968",
+        "version": "14.2"
+      },
+      "domains": {
+        "current": "https://www.arabanime.net",
+        "legacy": []
+      }
+    },
+    {
+      "id": "animeiat",
+      "name": "Animeiat",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "الدومين لا يستجيب (api.animeiat.co) — ينتظر دومينًا جديدًا",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.animeiat",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animeiat-v14.1.apk",
+        "sha256": "7568a3d4ed99ae874e1043105b1aadb58db37e2b602fbf8232eae6765c592f04",
+        "version": "14.1"
+      },
+      "domains": {
+        "current": "https://api.animeiat.co/v1",
+        "legacy": []
+      }
+    },
+    {
+      "id": "animelek",
+      "name": "AnimeLek",
+      "content": "anime",
+      "enabled": false,
+      "disabledReason": "الدومين لا يستجيب (animelek.me)",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.animelek",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animelek-v14.39.apk",
+        "sha256": "8d856e08aa64b09279c0dea2595ed2ec099f6b47011ca8d57c5283d2829a7aea",
+        "version": "14.39"
+      },
+      "domains": {
+        "current": "https://animelek.me",
+        "legacy": []
+      }
+    },
+    {
+      "id": "cimaleek",
+      "name": "Cimaleek",
+      "content": "cinema",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.cimaleek",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.cimaleek-v14.11.apk",
+        "sha256": "d20b8ae966ab359054c0f1ee8e9ce09f25ebaa1e73f49774ae4abf092d1ed757",
+        "version": "14.11"
+      },
+      "domains": {
+        "current": "https://m.cimaleek.pw",
+        "legacy": [
+          "https://m.cimaleek.to"
+        ]
+      }
+    },
+    {
+      "id": "egydead",
+      "name": "EgyDead",
+      "content": "cinema",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.egydead",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.egydead-v14.29.apk",
+        "sha256": "0b0cf0ec85cf011ce60785d73d8cca538b683b082d46e92ad9748f601b1031ba",
+        "version": "14.29"
+      },
+      "domains": {
+        "current": "https://tv10.egydead.live",
+        "legacy": [
+          "https://egydead.space"
+        ]
+      }
+    },
+    {
+      "id": "faselhd",
+      "name": "FaselHD",
+      "content": "cinema",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.faselhd",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.faselhd-v14.28.apk",
+        "sha256": "5d6981c3259784239a8a3f9926c4784e98b8fdd6b397935f7ac6ebeca5f38b62",
+        "version": "14.28"
+      },
+      "domains": {
+        "current": "https://www.faselhds.biz",
+        "legacy": []
+      }
+    },
+    {
+      "id": "arabseed",
+      "name": "ArabSeed",
+      "content": "cinema",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.arabseed",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.arabseed-v14.31.apk",
+        "sha256": "9ea6bf5b462d5055ce15b12a21b2dd7c2c75157f6f4dc48270c5c9096d1f7eb7",
+        "version": "14.31"
+      },
+      "domains": {
+        "current": "https://m.asd.homes",
+        "legacy": []
+      }
+    },
+    {
+      "id": "tuktukcinema",
+      "name": "TukTuk Cinema",
+      "content": "cinema",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.tuktukcinema",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.tuktukcinema-v14.8.apk",
+        "sha256": "c8b027204b6b49beb13681b0fb3380758c7e6ef98c418dc8054b10b8a7bdb52a",
+        "version": "14.8"
+      },
+      "domains": {
+        "current": "https://tuktukhd.com",
+        "legacy": []
+      }
+    },
+    {
+      "id": "asia2tv",
+      "name": "Asia2TV",
+      "content": "drama",
+      "enabled": false,
+      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "extension": {
+        "pkg": "eu.kanade.tachiyomi.animeextension.ar.asia2tv",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.asia2tv-v14.37.apk",
+        "sha256": "91c1898eb923b9cb33ad2dae741d6a29b8e94ae28bdfb7436a2c2197efff391e",
+        "version": "14.37"
+      },
+      "domains": {
+        "current": "https://ww1.asia2tv.pw",
+        "legacy": []
+      }
+    }
+  ]
+}

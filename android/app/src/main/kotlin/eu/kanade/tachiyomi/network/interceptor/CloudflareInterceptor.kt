@@ -252,7 +252,14 @@ class CloudflareInterceptor(
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
                         interactive.set(true)
-                        when (CloudflareInteractionMode.action()) {
+                        // مضيفات مسجّلة «مخفي فقط» (محرك الأنمي): لا صفحة تحقق أمام
+                        // المستخدم أبدًا؛ يفشل الطلب وينتقل المحرك لمصدر آخر
+                        val action = if (eu.kanade.tachiyomi.network.HostRouting.hiddenOnly(request.url.host)) {
+                            CloudflareInteractiveAction.FAIL_FAST
+                        } else {
+                            CloudflareInteractionMode.action()
+                        }
+                        when (action) {
                             CloudflareInteractiveAction.FAIL_FAST -> finish(SolveOutcome.INTERACTIVE)
                             CloudflareInteractiveAction.SHOW_BROWSER -> showInteractive(view, request.url.host)
                         }

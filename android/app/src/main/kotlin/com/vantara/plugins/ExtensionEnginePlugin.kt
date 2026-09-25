@@ -102,12 +102,7 @@ class ExtensionEnginePlugin : Plugin() {
         // ومرة واحدة للعملية لا لكل نسخة من الإضافة: تدوير الشاشة يبني
         // Activity جديدة فتُحمَّل الإضافة من جديد، وتسجيلٌ ثانٍ لنفس المفرد
         // في injekt يرمي — فيسقط التطبيق عند أول تدوير لا عند أول استعمال.
-        synchronized(INJEKT_LOCK) {
-            if (!injektReady) {
-                Injekt.importModule(EngineModule(context.applicationContext as Application))
-                injektReady = true
-            }
-        }
+        ensureEngineInjekt(context.applicationContext as Application)
         // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
         // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
         scope.launch {
@@ -787,12 +782,26 @@ class ExtensionEnginePlugin : Plugin() {
             .joinToString(" <- ") { "${it.javaClass.simpleName}: ${it.message?.take(160) ?: "—"}" }
 
     private companion object {
-        val INJEKT_LOCK = Any()
         const val MAX_COVERS = 2000
         val CACHE_EXTENSIONS = listOf("jpg", "webp", "png", "gif", "avif")
+    }
+}
 
-        @Volatile
-        var injektReady = false
+private val INJEKT_LOCK = Any()
+
+@Volatile
+private var injektReady = false
+
+/**
+ * تسجيل ما تطلبه الإضافات من injekt، مرة واحدة للعملية. يناديه محرك المانجا
+ * ومحرك الأنمي كلاهما، وأيهما سبق سجّل: تسجيلٌ ثانٍ لنفس المفرد يرمي.
+ */
+fun ensureEngineInjekt(app: Application) {
+    synchronized(INJEKT_LOCK) {
+        if (!injektReady) {
+            Injekt.importModule(EngineModule(app))
+            injektReady = true
+        }
     }
 }
 
