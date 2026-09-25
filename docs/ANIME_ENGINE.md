@@ -84,7 +84,23 @@
 - **تشخيص لكل مصدر** (تبويب «المصادر» ← «تشخيص»): DNS الجوال مقابل DoH، IPv6
   في الجهاز، اتصال TCP مباشر، مصافحة TLS (وتجزئتها إن فشلت العادية)، فتح
   الموقع (الحالة، الزمن، الدومين النهائي، العنوان)، Cloudflare، البصمة،
-  الإضافة، وبحث تجريبي — مع «انسخ التقرير».
+  الإضافة أو المحوّل، بحث تجريبي، و«تشغيل»: حلقات أول نتيجة وروابط أول حلقة
+  وسيرفراتها — مع «انسخ التقرير».
+
+## المحوّلات الأصلية والسيرفرات
+
+- **`adapter` في البيان** يختار محوّل VANTARA أصليًا بدل الإضافة (يُقدَّم عليها).
+  يُبنى فورًا بلا تنزيل. التطبيق يرفض بيانًا يطلب محوّلًا لا يعرفه إصداره.
+- **`witanime-site`** (`adapters/WitAnimeSite.kt`): بحث `/search?q=`، الكتالوج
+  من `sitemap-anime.xml` و`sitemap-movies.xml`، الحلقات من صفحة العمل، والفيلم
+  حلقة واحدة `/watch/movie/<slug>`. السيرفرات: `POST …/sources` برمز CSRF من
+  الصفحة ← لكل سيرفر `POST /watch/stream-source/<t>` ثم `GET /watch/stream-gate/<t>`
+  ← تحويل 302 إلى صفحة المشغّل.
+- **`hosts/`**: من صفحة المشغّل إلى رابط يشغّله Media3. ok.ru و4shared
+  يُستخرجان مباشرة من الصفحة. البقية (hgcloud، videa، …) عبر `WebViewSniffer`:
+  متصفح مخفي 1×1 يفتح الصفحة ويلتقط أول طلب m3u8/mp4/mpd بترويساته، بمهلة
+  20 ثانية. **MEGA** يُتخطّى: الفيديو مشفّر ويُفك داخل صفحته (فك تشفير AES-CTR
+  أثناء التشغيل عمل لاحق).
 
 ## ما نعيد استخدامه من محرك المانجا
 
@@ -117,6 +133,6 @@
 | OkAnime | يعمل مباشرة (www → ww3) |
 | Anime4Up, AnimeBlkom, ArabAnime, FaselHD | Cloudflare |
 | Animerco | Cloudflare + تغيّر الدومين (zeta → det) |
-| WitAnime | witanime.com يحوّل إلى witanime.net (صفحة هبوط لأصحاب الموقع) ← witanime.site: منصة جديدة كليًا لا تقرؤها الإضافة 14.62؛ تحتاج محوّلًا أصليًا |
+| WitAnime | انتقل إلى witanime.site (witanime.com ← witanime.net صفحة هبوط ← .site)؛ محوّل أصلي `witanime-site`. السيرفرات: mega (في كل حلقة تقريبًا، غير مدعوم بعد)، ok، videa، hgcloud، 4shared، yonaplay، google |
 | Animeiat, AnimeLek | الدومين لا يستجيب |
 | Cimaleek, EgyDead, Asia2TV, TukTuk | تعمل (أفلام/مسلسلات) مع تغيّر دومينات |

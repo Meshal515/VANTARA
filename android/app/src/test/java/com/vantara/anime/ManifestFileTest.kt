@@ -17,6 +17,12 @@ class ManifestFileTest {
         val m = ManifestParser.parse(file.readText())
         assertEquals(emptyList<String>(), ManifestParser.validate(m))
         assertTrue(m.sources.any { it.id == "okanime" && it.enabled })
+        assertTrue(m.sources.any { it.id == "witanime" && it.enabled && it.adapter == "witanime-site" })
+    }
+
+    @Test fun `an adapter this app version does not know is rejected`() {
+        val m = ManifestParser.parse("""{"sources":[{"id":"x","name":"X","adapter":"nope","domains":{"current":"https://x.test"}}]}""")
+        assertTrue(ManifestParser.validate(m).any { "nope" in it })
     }
 
     @Test fun `every disabled source says why`() {

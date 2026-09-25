@@ -38,21 +38,17 @@
       "id": "witanime",
       "name": "WitAnime",
       "priority": 80,
-      "extension": {
-        "pkg": "eu.kanade.tachiyomi.animeextension.ar.witanime",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.witanime-v14.62.apk",
-        "sha256": "22612b963df827c1139001feee9c051ace3e8ec24ff4392c155d5b3b968c1be4",
-        "version": "14.62"
-      },
+      "adapter": "witanime-site",
       "domains": {
-        "current": "https://witanime.com",
+        "current": "https://witanime.site",
         "legacy": [
+          "https://witanime.com",
           "https://witanime.cyou",
           "https://witanime.you",
           "https://witanime.pics",
           "https://witanime.life"
         ],
-        "fingerprint": "anime-card-poster|episodes-card|anime-details-title"
+        "fingerprint": "images\\.witanime\\.site"
       },
       "catalog": {
         "listing": "popular",

@@ -29,6 +29,8 @@ data class SourceEntry(
     /** anime | cinema | drama — لتصفية المصادر حسب قسم الواجهة. */
     val content: String = "anime",
     val extension: ExtensionRef? = null,
+    /** محوّل VANTARA أصلي بدل الإضافة (مثل `witanime-site`)؛ يُقدَّم عليها إن وُجد الاثنان. */
+    val adapter: String? = null,
     val domains: Domains,
     /** كيف يُحلب الكتالوج كاملًا. */
     val catalog: CatalogHint = CatalogHint(),
@@ -101,6 +103,9 @@ data class CardSelectors(
 object ManifestParser {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /** المحوّلات الأصلية التي يعرفها هذا الإصدار من التطبيق. */
+    val NATIVE_ADAPTERS = setOf(com.vantara.anime.adapters.WitAnimeSiteAdapter.KIND)
+
     fun parse(text: String): Manifest = json.decodeFromString(Manifest.serializer(), text)
 
     /** أخطاء البيان تُرفض كاملة قبل أن تمس المحرك. */
@@ -108,6 +113,7 @@ object ManifestParser {
         val ids = mutableSetOf<String>()
         for (s in m.sources) {
             if (!ids.add(s.id)) add("مكرر: ${s.id}")
+            s.adapter?.let { if (it !in NATIVE_ADAPTERS) add("${s.id}: محوّل غير معروف «$it»") }
             if (!s.domains.current.startsWith("https://") && !s.domains.current.startsWith("http://")) add("${s.id}: current ليس رابطًا")
             s.extension?.let { e ->
                 if (!Regex("^[0-9a-fA-F]{64}$").matches(e.sha256)) add("${s.id}: sha256 غير صالح")
