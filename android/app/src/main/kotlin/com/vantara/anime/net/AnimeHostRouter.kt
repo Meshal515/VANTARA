@@ -121,12 +121,32 @@ object AnimeHostRouter : Interceptor {
     /** أقصى انتظار داخل الطلب لدور المصدر أو لـ`Retry-After`؛ أطول منه يُرمى بسببه. */
     private const val MAX_WAIT_MS = 20_000L
 
+    /**
+     * مضيف ليس لمصدر (صفحة مشغّل، شبكة توزيع فيديو، مانجا): يمر كما هو، إلا أن
+     * مصافحة تنقطع بنمط حجب SNI تُعاد مرة بالتجزئة. الحاجب نفسه يحجب سيرفرات
+     * الفيديو كما يحجب مواقع الأنمي، وبلا هذا يصل رابط الفيديو ولا يُشغَّل.
+     */
+    private fun unrouted(chain: Interceptor.Chain, fc: OkHttpClient?, retried: Boolean): Response {
+        val request = chain.request()
+        try {
+            return chain.proceed(request)
+        } catch (e: IOException) {
+            if (fc == null || retried || chain.call().isCanceled() || !looksLikeSniReset(e)) throw e
+            val again = runCatching { viaFragment(fc, request) }
+            again.getOrNull()?.let {
+                fragmentHosts += request.url.host
+                return it
+            }
+            throw again.exceptionOrNull() as? IOException ?: e
+        }
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val route = routes[request.url.host] ?: return chain.proceed(request)
         val retried = request.tag(FragmentRetryTag::class.java) != null
         val fc = fragmentClient
         if (fc != null && !retried && request.url.host in fragmentHosts) return viaFragment(fc, request)
+        val route = routes[request.url.host] ?: return unrouted(chain, fc, retried)
         val key = HealthStore.sourceKey(route.sourceId)
         val gate = gates[route.sourceId]
         val path = request.url.encodedPath

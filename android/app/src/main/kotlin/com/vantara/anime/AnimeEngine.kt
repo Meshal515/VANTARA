@@ -148,7 +148,11 @@ class AnimeEngine(context: Context) {
 
     /** سيرفرات الفيديو المضمّنة، والمتصفح المخفي لما لا نستخرجه مباشرة. */
     private val embeds by lazy {
-        EmbedResolver(network.client, WebViewSniffer(appContext, network::defaultUserAgentProvider))
+        EmbedResolver(
+            network.client,
+            WebViewSniffer(appContext, network::defaultUserAgentProvider),
+            userAgent = network::defaultUserAgentProvider,
+        )
     }
 
     /** محوّل VANTARA أصلي: لا تنزيل ولا تحميل كود، فيُبنى فورًا. */
@@ -248,7 +252,23 @@ class AnimeEngine(context: Context) {
     suspend fun openSession(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): List<Candidate> {
         val list = resolver.candidates(copies.map { EpisodeResolver.Copy(it.sourceId, it) }, number, prefs)
         sessions[sessionId] = PlaybackSession(list, health)
+        sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
         return list
+    }
+
+    private data class SessionRequest(val copies: List<SourceAnime>, val number: Float, val prefs: Preferences)
+    private val sessionRequests = ConcurrentHashMap<String, SessionRequest>()
+
+    /**
+     * جلسة نفدت سيرفراتها: كل المصادر وكل السيرفرات هذه المرة (بدأنا بأسرع
+     * طريقين فقط). المشغّل يضيفها للجلسة ويكمل من نفس الثانية.
+     */
+    suspend fun more(sessionId: String): List<Candidate> {
+        val req = sessionRequests[sessionId] ?: return emptyList()
+        return resolver.candidates(
+            req.copies.map { EpisodeResolver.Copy(it.sourceId, it) }, req.number, req.prefs,
+            exhaustive = true,
+        )
     }
 
     fun session(id: String): PlaybackSession? = sessions[id]
@@ -257,6 +277,7 @@ class AnimeEngine(context: Context) {
 
     fun closeSession(id: String) {
         sessions.remove(id)
+        sessionRequests.remove(id)
         health.flush()
     }
 

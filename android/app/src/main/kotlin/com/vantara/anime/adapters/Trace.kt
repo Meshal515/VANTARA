@@ -1,6 +1,10 @@
 package com.vantara.anime.adapters
 
+import com.vantara.anime.stream.Candidate
 import eu.kanade.tachiyomi.network.await
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import okhttp3.Call
 import okhttp3.Response
 import java.io.IOException
@@ -35,5 +39,26 @@ internal suspend fun Call.awaitOk(): Response {
     throw SourceHttpException(r.code, path)
 }
 
+/**
+ * يحل مهامّ بالتوازي ويتوقف مبكرًا حين تكفي: روابط من [enough] مضيفات مختلفة.
+ * التشغيل يبدأ بأول سيرفرين سليمين بدل انتظار أبطأ سيرفر؛ والبقية تُطلب لاحقًا
+ * إن فشلا ([com.vantara.anime.AnimeEngine.more]).
+ */
+internal suspend fun gatherUntil(tasks: List<suspend () -> List<Candidate>>, enough: Int): List<Candidate> =
+    coroutineScope {
+        val results = Channel<List<Candidate>>(Channel.UNLIMITED)
+        val jobs = tasks.map { t -> launch { results.send(t()) } }
+        val out = mutableListOf<Candidate>()
+        for (i in tasks.indices) {
+            out += results.receive()
+            if (out.map { it.host }.distinct().size >= enough) {
+                jobs.forEach { it.cancel() }
+                break
+            }
+        }
+        out.distinctBy { it.url }
+    }
+
 /** سبب مختصر لسطر تشخيص: الرسالة إن وُجدت، وإلا نوع الخطأ. */
 internal fun Throwable.brief(): String = message?.take(160)?.ifBlank { null } ?: javaClass.simpleName
+

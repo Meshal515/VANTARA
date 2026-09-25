@@ -96,7 +96,7 @@ class WitAnimeSiteAdapter(
         return Parse.episodes(html(anime.url), slug, id)
     }
 
-    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
+    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val watch = abs(episode.url)
         val page = html(episode.url)
         val csrf = Parse.csrf(page) ?: error("لا رمز CSRF في صفحة الحلقة")
@@ -106,17 +106,18 @@ class WitAnimeSiteAdapter(
         skipped.map { it.label }.distinct().forEach { trace?.note(it, "غير مدعوم بعد (فيديو مشفّر)") }
         if (all.isEmpty()) trace?.note("السيرفرات", "الموقع لم يُرجع أي سيرفر")
 
-        return coroutineScope {
+        return gatherUntil(
             servers.map { s ->
-                async {
+                suspend {
                     val label = "${s.label} ${s.quality}"
                     withTimeoutOrNull(serverTimeoutMs) {
                         runCatching { streamsOf(s, watch, episode, now, trace) }
                             .fold({ it }, { trace?.note(label, it.brief()); emptyList() })
                     } ?: emptyList<Candidate>().also { trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية") }
                 }
-            }.awaitAll().flatten().distinctBy { it.url }
-        }
+            },
+            enough,
+        )
     }
 
     private suspend fun streamsOf(s: Parse.Server, watch: String, episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
@@ -137,7 +138,7 @@ class WitAnimeSiteAdapter(
                 quality = st.quality ?: Parse.quality(s.quality),
                 label = "${s.label} ${s.quality}".trim(),
                 variant = if (s.version == "dub") Variant.DUB else Variant.SUB,
-                container = StreamClassifier.container(st.url),
+                container = st.container ?: StreamClassifier.container(st.url),
                 resolvedAt = now,
                 expiresAt = StreamClassifier.expiresAt(st.url, now),
             )
