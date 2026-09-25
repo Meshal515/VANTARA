@@ -16,7 +16,7 @@
  * العربية، ويُربط في الخطوة التالية.
  */
 import { glyph, iconButton } from './icons.js';
-import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchAnimeHome, relativeAr, searchAnime } from '../lib/anime-meta.js';
+import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, relativeAr, searchAnime } from '../lib/anime-meta.js';
 import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
 
 const HOME_KEY = 'anime.home.v2';
@@ -84,6 +84,8 @@ export function createAnime(deps) {
     detailToken: 0,
     detailScroll: null,
     episodeRange: 0,
+    newestFirst: false,
+    malTitles: {},
     libraryTab: 'history',
     discover: { query: '', genre: '', page: 1, items: [], hasNext: false, token: 0 },
   };
@@ -231,37 +233,47 @@ export function createAnime(deps) {
       s.setAttribute('aria-label', m.title);
       tint(s, m.color);
       s.append(image(m.banner ?? m.poster, 'an-img', { eager: i < 2, position: m.banner ? 'center' : 'center 25%' }), el('span', 'an-car-shade'));
-      const copy = el('span', 'an-car-copy');
-      const kicker = el('span', 'an-car-kicker');
-      kicker.innerHTML = `<span class="an-car-rank">#${i + 1}</span><span>رائج الآن</span>`;
-      const t = el('span', 'an-car-title', m.title);
-      t.dir = 'auto';
-      const facts = el('span', 'an-car-sub');
-      if (m.score) facts.append(scoreBadge(m.score));
-      const ep = m.status === 'RELEASING' && m.aired ? `الحلقة ${m.aired}` : m.episodes ? `${m.episodes} حلقة` : null;
-      for (const f of [FORMAT_AR[m.format], ep].filter(Boolean)) facts.append(el('span', null, f));
-      copy.append(kicker, t, facts);
-      s.append(copy);
       s.onclick = () => void openAnime(m);
       track.append(s);
-      const d = button(`an-dot${i === 0 ? ' active' : ''}`, '', () => goSlide(track, i), `الشريحة ${i + 1}`);
-      dots.append(d);
+      dots.append(button(`an-dot${i === 0 ? ' active' : ''}`, '', () => goSlide(track, i), `الشريحة ${i + 1}`));
     });
-    wrap.append(track, dots);
+    // المعلومات تحت البطاقة لا فوقها: تذوب مع السحب وتظهر معلومات التالية
+    const info = el('div', 'an-car-info');
+    wrap.append(track, dots, info);
+    wrap._items = items;
+    wrap._shown = -1;
     let raf = 0;
     track.addEventListener(
       'scroll',
       () => {
         cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => paintCarousel(track, dots));
+        raf = requestAnimationFrame(() => paintCarousel(wrap));
       },
       { passive: true },
     );
     track.addEventListener('touchstart', () => clearInterval(state.carouselTimer), { passive: true });
     track.addEventListener('touchend', () => autoplay(track));
-    requestAnimationFrame(() => paintCarousel(track, dots));
+    requestAnimationFrame(() => paintCarousel(wrap));
     autoplay(track);
     return wrap;
+  }
+  function carouselInfo(m, i) {
+    const box = el('div', 'an-car-info-in');
+    const kicker = el('span', 'an-car-kicker');
+    kicker.innerHTML = `<span class="an-car-rank">#${i + 1}</span><span>رائج الآن</span>`;
+    const t = el('h2', 'an-car-title', m.title);
+    t.dir = 'auto';
+    const facts = el('span', 'an-car-sub');
+    if (m.score) facts.append(scoreBadge(m.score));
+    const ep = m.status === 'RELEASING' && m.aired ? `الحلقة ${m.aired}` : m.episodes ? `${m.episodes} حلقة` : null;
+    for (const f of [FORMAT_AR[m.format], ep, (m.genres ?? []).slice(0, 2).map(genreAr).join(' · ')].filter(Boolean)) facts.append(el('span', null, f));
+    const actions = el('div', 'an-car-actions');
+    actions.append(
+      button('an-btn an-btn--primary', `${glyph('play', { size: 18, filled: true })}<span>شاهد</span>`, () => void openAnime(m, { episode: 1 })),
+      listButton(m, 'an-btn an-btn--glass'),
+    );
+    box.append(kicker, t, facts, actions);
+    return box;
   }
   const slideIndex = (track) => {
     const mid = track.getBoundingClientRect().left + track.clientWidth / 2;
@@ -277,17 +289,30 @@ export function createAnime(deps) {
     });
     return best;
   };
-  /** البطاقات الجانبية تصغر وتخفت، والوسطى بحجمها. */
-  function paintCarousel(track, dots) {
+  /** البطاقات الجانبية تصغر وتخفت، والوسطى بحجمها، والمعلومات تحتها تذوب مع البعد عن المنتصف. */
+  function paintCarousel(wrap) {
+    const track = wrap.querySelector('.an-car-track');
+    const dots = wrap.querySelector('.an-car-dots');
+    const info = wrap.querySelector('.an-car-info');
     const mid = track.getBoundingClientRect().left + track.clientWidth / 2;
+    let nearest = 1;
     for (const s of track.children) {
       const r = s.getBoundingClientRect();
       const t = Math.min(1, Math.abs(r.left + r.width / 2 - mid) / r.width);
+      nearest = Math.min(nearest, t);
       s.style.transform = `scale(${(1 - t * 0.1).toFixed(3)})`;
       s.style.opacity = (1 - t * 0.45).toFixed(3);
     }
     const i = slideIndex(track);
     [...dots.children].forEach((d, k) => d.classList.toggle('active', k === i));
+    if (wrap._shown !== i) {
+      wrap._shown = i;
+      info.replaceChildren(carouselInfo(wrap._items[i], i));
+    }
+    // في منتصف السحبة تكون المعلومات شفافة، وتكتمل حين تستقرّ البطاقة
+    const fade = Math.max(0, 1 - nearest * 2.4);
+    info.style.opacity = fade.toFixed(3);
+    info.style.transform = `translateY(${((1 - fade) * 8).toFixed(1)}px)`;
   }
   function goSlide(track, i) {
     const s = track.children[i];
@@ -436,8 +461,18 @@ export function createAnime(deps) {
       if (token !== state.detailToken || !full) return;
       state.detail = full;
       if (episode) state.episodeRange = Math.floor((episode - 1) / 50);
+      state.malTitles = {};
       renderDetail(full);
       if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
+      // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
+      void fetchMalEpisodes(full.idMal)
+        .then(({ titles }) => {
+          if (token !== state.detailToken || !Object.keys(titles).length) return;
+          state.malTitles = titles;
+          const box = q('animeEpisodes');
+          if (box) renderEpisodes(box, full);
+        })
+        .catch(() => {});
     } catch {
       if (token !== state.detailToken) return;
       q('animeEpisodes')?.replaceChildren(el('p', 'an-note', 'تعذّر جلب تفاصيل الأنمي — تحقّق من الاتصال.'));
@@ -555,6 +590,54 @@ export function createAnime(deps) {
     if (partial) pageIn(page);
   }
 
+  function setSeen(m, n, on) {
+    const all = readWatch();
+    const w = all[m.id] ?? { id: m.id, episodes: {} };
+    Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color });
+    const prev = w.episodes[n] ?? { position: 0, duration: 0 };
+    if (on) w.episodes[n] = { ...prev, done: true, at: Date.now() };
+    else delete w.episodes[n];
+    if (on && (!w.episode || n >= w.episode)) {
+      w.episode = n;
+      w.at = Date.now();
+    }
+    all[m.id] = w;
+    writeJson(WATCH_KEY, all);
+  }
+
+  function episodeRow(m, n, e) {
+    const ratio = e?.duration ? Math.min(1, e.position / e.duration) : 0;
+    const row = el('div', `an-er${e?.done ? ' seen' : ''}`);
+    row.dataset.ep = String(n);
+    const main = el('button', 'an-er-main');
+    main.type = 'button';
+    const art = el('span', 'an-er-art');
+    const thumb = m.thumbs?.[n]?.thumbnail;
+    art.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { position: thumb || m.banner ? 'center' : 'center 25%' }));
+    art.append(el('span', 'an-er-no', String(n)));
+    if (ratio > 0 && !e?.done) {
+      const bar = progress(ratio);
+      bar.classList.add('an-er-bar');
+      art.append(bar);
+    }
+    const copy = el('span', 'an-er-copy');
+    copy.append(el('b', null, `الحلقة ${n}`));
+    const title = state.malTitles?.[n] ?? m.thumbs?.[n]?.title;
+    const sub = el('span', 'an-er-sub', [title, m.duration ? `${m.duration} د` : null].filter(Boolean).join(' · ') || (e?.done ? 'شوهدت' : ''));
+    sub.dir = 'auto';
+    copy.append(sub);
+    main.append(art, copy);
+    main.onclick = () => playEpisode(m, n);
+    const eye = button(`an-er-icon${e?.done ? ' on' : ''}`, glyph('eye', { size: 20 }), () => {
+      setSeen(m, n, !e?.done);
+      const box = q('animeEpisodes');
+      if (box) renderEpisodes(box, m);
+    }, e?.done ? 'ألغِ «شوهدت»' : 'علّمها شوهدت');
+    const dl = button('an-er-icon', glyph('download', { size: 20 }), () => toast('التحميل يعمل مع ربط السيرفرات قريبًا'), 'تحميل الحلقة');
+    row.append(main, eye, dl);
+    return row;
+  }
+
   function renderEpisodes(host, m) {
     const total = m.aired || m.episodes || 0;
     const head = el('div', 'an-rail-head an-rail-head--flat');
@@ -565,6 +648,28 @@ export function createAnime(deps) {
     if (!total) return;
     const SIZE = 50;
     const ranges = Math.ceil(total / SIZE);
+    state.episodeRange = Math.min(state.episodeRange, ranges - 1);
+
+    // أدوات: انتقل لحلقة برقمها، وعكس الترتيب
+    const tools = el('div', 'an-ep-tools');
+    const jump = el('form', 'an-jump');
+    jump.innerHTML = `${glyph('search', { size: 18 })}<input type="number" inputmode="numeric" min="1" max="${total}" placeholder="انتقل للحلقة… (1–${total})" aria-label="رقم الحلقة">`;
+    jump.onsubmit = (ev) => {
+      ev.preventDefault();
+      const n = Math.max(1, Math.min(total, Number(jump.querySelector('input').value) || 1));
+      state.episodeRange = Math.floor((n - 1) / SIZE);
+      renderEpisodes(host, m);
+      const target = host.querySelector(`[data-ep="${n}"]`);
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target?.classList.add('flash');
+    };
+    const order = button(`an-er-icon${state.newestFirst ? ' on' : ''}`, glyph('sort', { size: 20 }), () => {
+      state.newestFirst = !state.newestFirst;
+      renderEpisodes(host, m);
+    }, state.newestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا');
+    tools.append(jump, order);
+    host.append(tools);
+
     if (ranges > 1) {
       const tabs = el('div', 'an-ranges');
       for (let r = 0; r < ranges; r++) {
@@ -579,18 +684,14 @@ export function createAnime(deps) {
       requestAnimationFrame(() => tabs.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
     }
     const seen = readWatch()[m.id]?.episodes ?? {};
-    const grid = el('div', 'an-ep-grid');
+    const list = el('div', 'an-er-list');
     const start = state.episodeRange * SIZE + 1;
-    for (let n = start; n <= Math.min(total, start + SIZE - 1); n++) {
-      const e = seen[n];
-      const ratio = e?.duration ? Math.min(1, e.position / e.duration) : 0;
-      const b = button(`an-ep${e?.done ? ' seen' : e ? ' partial' : ''}`, `<b>${n}</b><span>${e?.done ? 'شوهدت' : 'حلقة'}</span>`, () => playEpisode(m, n));
-      b.dataset.ep = String(n);
-      if (e && !e.done) b.append(progress(ratio));
-      grid.append(b);
-    }
-    host.append(grid);
-    stripIn([...grid.children].slice(0, 20));
+    const nums = [];
+    for (let n = start; n <= Math.min(total, start + SIZE - 1); n++) nums.push(n);
+    if (state.newestFirst) nums.reverse();
+    list.append(...nums.map((n) => episodeRow(m, n, seen[n])));
+    host.append(list);
+    stripIn([...list.children].slice(0, 8));
   }
 
   function bindDetailScroll(page, bar) {
