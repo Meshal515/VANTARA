@@ -31,6 +31,8 @@ import java.util.Base64
 private const val OUT_CAP = 2_500L * 1024 * 1024
 private const val OUT_KEEP = 2_000L * 1024 * 1024
 private const val THUMB_PIXELS = 3_200_000.0
+/** أطول ضلع للتحليل (النماذج والأقنعة). الرسم النهائي بمقاس الملف دائمًا. */
+private const val MAX_EDGE = 4096
 
 class Pipeline(private val context: Context, private val store: ModelStore) {
     private var detector: Detector? = null
@@ -64,8 +66,11 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>)
 
-    /** الصورة مفكوكة. `exact`: بكسلاتها هي بكسلات الملف (لم تُصغَّر ولا شفافية). */
-    private class Decoded(val img: RgbImage, val exact: Boolean)
+    /**
+     * الصورة مفكوكة. `exact`: بكسلاتها هي بكسلات الملف (لم تُصغَّر ولا شفافية).
+     * `fullW`/`fullH`: مقاس الملف نفسه؛ صفحة أطول من [MAX_EDGE] تُحلَّل مصغّرة وتُرسم بمقاسها.
+     */
+    private class Decoded(val img: RgbImage, val exact: Boolean, val fullW: Int, val fullH: Int)
 
     private fun <T> lru(max: Int) = object : LinkedHashMap<String, T>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, T>?) = size > max
@@ -113,14 +118,15 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
         var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: error("not an image")
         val opaque = !bmp.hasAlpha()
-        val maxEdge = 4096
+        val fullW = bmp.width
+        val fullH = bmp.height
         var scaled = false
-        if (maxOf(bmp.width, bmp.height) > maxEdge) {
-            val s = maxEdge.toFloat() / maxOf(bmp.width, bmp.height)
+        if (maxOf(bmp.width, bmp.height) > MAX_EDGE) {
+            val s = MAX_EDGE.toFloat() / maxOf(bmp.width, bmp.height)
             bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true)
             scaled = true
         }
-        Decoded(ArabicLayout.rgbOf(bmp), opaque && !scaled)
+        Decoded(ArabicLayout.rgbOf(bmp), opaque && !scaled, fullW, fullH)
     }
 
     private fun image(bytes: ByteArray, hash: String, perf: Perf, useCache: Boolean): Decoded {
@@ -343,7 +349,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val analysis = (if (useCache) analyses[hash] else null) ?: analyzeImpl(file, perf, useCache)
         val regions = perf.time("unpack") { thaw(analysis) }
         // الصورة المحفوظة تبقى نظيفة: المسح على نسخة
-        val img = image(bytes, hash, perf, useCache).img.let { src -> perf.time("copy") { src.copy() } }
+        val decoded = image(bytes, hash, perf, useCache)
+        val img = perf.time("copy") { decoded.img.copy() }
         val sibs = Regions.siblings(regions)
         for (r in regions) {
             val ar = arabicById[r.id]?.trim()
@@ -367,12 +374,14 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         keepWholeBubbles(regions, sibs, leave, perf)
         // ٢. المسح
         perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
-        val original = perf.time("copy") { img.copy() }
+        // لم يُكتب في img شيء بعد: الأصل هو المفكوك نفسه (بلا نسخة ثالثة بحجم الصفحة)
+        val original = decoded.img
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
         perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
         perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         // ٣. الرسم: بلون الحبر الأصلي، إلا إن كان سيختفي في خلفيته بعد المسح
+        val inks = HashMap<String, Boolean>()
         val bmp = perf.time("draw") {
             val b = ArabicLayout.bitmapOf(img)
             val canvas = Canvas(b)
@@ -381,6 +390,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 val l = r.layout!!
                 val light = Visibility.inkLight(img, l, r.inkLight)
                 if (light != r.inkLight) perf.count("inkFlipped")
+                inks[r.id] = light
                 layout.draw(canvas, l, light, r.bubble == null && r.bubbleBox == null)
             }
             b
@@ -420,17 +430,70 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             f
         }
         // بلا فقد: ما خارج المسح والعربي يبقى بكسلات الأصل نفسها في الملف المحفوظ
+        // صفحة حُلِّلت مصغّرة (أطول من MAX_EDGE): المسح والعربي يُعادان على الملف بمقاسه، فلا
+        // تُحفظ الصفحة أصغر من أصلها (كانت تُمطّ على الشاشة فتظهر مبكسلة)
+        val out = if (decoded.fullW == img.width && decoded.fullH == img.height) {
+            ArabicLayout.bitmapOf(final)
+        } else {
+            perf.count("fullRes")
+            perf.time("fullRes") { fullRes(bytes, img.width, img.height, regions, inks, lama) }
+        }
         val encoded = perf.time("encode") {
-            val out = ByteArrayOutputStream()
+            val buf = ByteArrayOutputStream()
             val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
             // WEBP_LOSSLESS: الرقم جهد الضغط (أسرع بحجم أكبر قليلًا)؛ WEBP القديم: 100 = بلا فقد
-            ArabicLayout.bitmapOf(final).compress(format, if (android.os.Build.VERSION.SDK_INT >= 30) 10 else 100, out)
-            out.toByteArray()
+            out.compress(format, if (android.os.Build.VERSION.SDK_INT >= 30) 10 else 100, buf)
+            out.recycle()
+            buf.toByteArray()
         }
         val translated = regions.count { it.status == "translated" }
         perf.count("translated", translated)
-        lastPixels = final.data
+        if (keepPixels) lastPixels = final.data
         return Triple(encoded, hash, translated)
+    }
+
+    /**
+     * الصفحة بمقاس ملفها: كل منطقة مترجمة يُكبَّر قناع مسحها من مقاس التحليل ويُمسح بالطريقة
+     * نفسها (لون الفقاعة أو LaMa)، ويُرسم العربي بالتخطيط نفسه مكبّرًا (خط متجهي: حادّ لا مبكسل)
+     * وبلون الحبر نفسه. ما سوى ذلك بكسلات الملف كما هي.
+     */
+    private fun fullRes(bytes: ByteArray, sw: Int, sh: Int, regions: List<Region>, inks: Map<String, Boolean>, lama: Inpainter?): Bitmap {
+        val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+        val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: error("not an image")
+        val big = ArabicLayout.rgbOf(src)
+        src.recycle()
+        val kx = big.width.toFloat() / sw
+        val ky = big.height.toFloat() / sh
+        val mask = ByteMask(big.width, big.height)
+        for (r in regions) {
+            if (r.status != "translated") continue
+            val m = r.eraseMask ?: continue
+            val w = m.bounds() ?: continue
+            val x0 = (w[0] * kx).toInt(); val y0 = (w[1] * ky).toInt()
+            val x1 = minOf(big.width, Math.ceil(w[2] * kx.toDouble()).toInt()); val y1 = minOf(big.height, Math.ceil(w[3] * ky.toDouble()).toInt())
+            for (y in y0 until y1) {
+                val my = minOf(sh - 1, (y / ky).toInt())
+                for (x in x0 until x1) mask[x, y] = m[minOf(sw - 1, (x / kx).toInt()), my]
+            }
+            if (r.cleanMode == "fill") {
+                val c = r.fillColor
+                if (c != null) for (y in y0 until y1) for (x in x0 until x1) if (mask[x, y].toInt() != 0) {
+                    val i = (y * big.width + x) * 3
+                    big.data[i] = c[0].toByte(); big.data[i + 1] = c[1].toByte(); big.data[i + 2] = c[2].toByte()
+                }
+            } else if (lama != null) {
+                lama.inpaint(big, mask, Box(x0, y0, x1, y1))
+            }
+            mask.fillRect(x0, y0, x1, y1, 0)
+        }
+        val out = ArabicLayout.bitmapOf(big)
+        val canvas = Canvas(out)
+        canvas.scale(kx, ky)
+        for (r in regions) {
+            if (r.status != "translated") continue
+            layout.draw(canvas, r.layout!!, inks[r.id] ?: r.inkLight, r.bubble == null && r.bubbleBox == null)
+        }
+        return out
     }
 
     /** منطقة مقروءة بقيت بلا عربي ظاهر في فقاعة فيها عربي: الفقاعة كلها تبقى أصلها. */
@@ -446,8 +509,9 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         }
     }
 
-    /** بكسلات آخر صفحة رُسمت (لمقارنة القديم بالجديد وحدها). */
+    /** بكسلات آخر صفحة رُسمت (لمقارنة القديم بالجديد وحدها، أثناءها فقط). */
     private var lastPixels: ByteArray? = null
+    private var keepPixels = false
 
     // ── القديم مقابل الجديد، على الجوال نفسه ──
 
@@ -515,6 +579,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val warm = Perf()
         detector(warm); glyphs(warm); bubbles(warm); ocr(warm); inpainter(warm)
         val before = ByteMask.windowed
+        keepPixels = true
         try {
             val legacy = Perf()
             ByteMask.windowed = false
@@ -533,6 +598,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             return Benchmark(legacy, current, a != null && b != null && a.contentEquals(b))
         } finally {
             ByteMask.windowed = before
+            keepPixels = false
             lastPixels = null
         }
     }
