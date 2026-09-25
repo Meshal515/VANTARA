@@ -46,7 +46,27 @@ export const SHELL_HTML = `<div class="app">
   <section class="page active" id="home">
     <header class="header">
       <div class="header-start">${iconButton('menu', 'القائمة', { act: 'openDrawer' })}</div>
-      <div class="brand-box" aria-hidden="true"><div class="brand">VANTARA</div></div>
+      <div class="brand-box">
+        <button class="brand-switch" type="button" data-act="toggleSections" aria-haspopup="menu" aria-expanded="false" aria-controls="sectionMenu" id="brandSwitch" aria-label="أقسام VANTARA">
+          <span class="brand">VANTARA</span>
+          <span class="brand-section"><span id="brandSectionName">MANGA</span><span class="brand-caret" aria-hidden="true">${glyph('chevron', { size: 8 })}</span></span>
+        </button>
+      </div>
+      <div class="section-scrim" id="sectionScrim" data-act="toggleSections" hidden></div>
+      <div class="section-menu" id="sectionMenu" role="menu" aria-label="أقسام VANTARA" hidden>
+        <button class="section-item section-item--manga" type="button" role="menuitemradio" aria-checked="true" data-act="pickSection" data-arg="manga">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">MANGA</span></span>
+          <span class="section-sub">مانجا · مانهوا</span>
+        </button>
+        <button class="section-item section-item--anime" type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" data-act="pickSection" data-arg="anime">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">ANIME</span></span>
+          <span class="section-sub">قريبًا</span>
+        </button>
+        <button class="section-item section-item--cinema" type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" data-act="pickSection" data-arg="cinema">
+          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">CINEMA</span></span>
+          <span class="section-sub">قريبًا</span>
+        </button>
+      </div>
       <div class="header-end">${iconButton('search', 'بحث', { act: 'openSearch' })}${bell()}</div>
     </header>
 

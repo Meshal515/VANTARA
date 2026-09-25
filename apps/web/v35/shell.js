@@ -3689,7 +3689,39 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
+  // ───────────────────────── مبدّل الأقسام ─────────────────────────
+  // «VANTARA MANGA ⌄»: قائمة الأقسام. الأنمي والسينما قريبًا.
+  function setSectionsOpen(open) {
+    const menu = q('sectionMenu');
+    const scrim = q('sectionScrim');
+    const button = q('brandSwitch');
+    if (!menu || !button) return;
+    button.setAttribute('aria-expanded', String(open));
+    for (const layer of [menu, scrim]) {
+      if (!layer) continue;
+      if (open) {
+        layer.hidden = false;
+        requestAnimationFrame(() => layer.classList.add('open'));
+      } else {
+        layer.classList.remove('open');
+        setTimeout(() => {
+          if (!layer.classList.contains('open')) layer.hidden = true;
+        }, 280);
+      }
+    }
+  }
+  const sectionsOpen = () => q('brandSwitch')?.getAttribute('aria-expanded') === 'true';
+  function pickSection(_e, t) {
+    if (t.getAttribute('aria-disabled') === 'true') {
+      toast(t.dataset.arg === 'anime' ? 'VANTARA ANIME قريبًا' : 'VANTARA CINEMA قريبًا');
+      return;
+    }
+    setSectionsOpen(false);
+  }
+
   const actions = {
+    toggleSections: () => setSectionsOpen(!sectionsOpen()),
+    pickSection,
     backFromDetail: () => goBack(),
     goBack: () => goBack(),
     closeDrawer,
@@ -3779,6 +3811,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
     if (editor?.open) return editor.handleBack();
+    if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     return majlis.closeBar() || closeSheet() || closeDrawer() || goBack();
   }
 
