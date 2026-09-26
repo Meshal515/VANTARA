@@ -4041,6 +4041,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     closeSheet,
     genreAr,
     readWatch,
+    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
     openAnime: (card) => openAnimeRef(card.workId, { title: card.title, cover: card.cover }),
     openManga: async (card) => {
       const found = await resolveManga(card);

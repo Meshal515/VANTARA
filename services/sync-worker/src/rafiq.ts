@@ -168,6 +168,10 @@ export interface Intent {
   length: 'short' | 'medium' | 'long' | 'any';
   status: 'FINISHED' | 'RELEASING' | 'ANY';
   reference: string | null;
+  /** كل الأعمال المذكورة كمرجع («زي لوكيسم وفيرال هيت») بعناوينها المعروفة. */
+  references: string[];
+  /** بلد المنشأ إن طلبه صراحة: KR مانهوا، JP مانجا، CN مانها. */
+  country: 'KR' | 'JP' | 'CN' | 'ANY';
   exploration: 'low' | 'normal' | 'high';
   mood: string | null;
   /** يسأل عن أعمال عربيها متأخر عن الإنجليزي (أو يبي يترجم فصولًا مقدمًا). */
@@ -177,24 +181,36 @@ export interface Intent {
 }
 
 export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «رفيق»، مساعد توصيات الأنمي والمانجا في تطبيق VANTARA.
-مهمتك: تحويل رسالة المستخدم إلى JSON منظّم فقط. لا تقترح أعمالًا ولا تكتب ردًّا للمستخدم.
+مهمتك الوحيدة: تحويل رسالة المستخدم (مع سياق المحادثة) إلى JSON دقيق جدًّا. لا تقترح أعمالًا ولا تكتب ردًّا.
+دقّتك هي اللي تحدد جودة الاقتراحات: كل وسم تختاره يصير شرط بحث في الكتالوج، فاختر الوسوم اللي تصف الطلب فعلًا.
 
 الحقول:
-- intent: recommend (يريد اقتراحات) | resume (يريد إكمال شيء بدأه أو تركه) | similar (شيء يشبه عملًا بعينه) | explain (يسأل لماذا اقتُرح عمل، أو عن عمل في الرسائل السابقة) | lookup (يسأل عن عمل بعينه بالاسم) | feedback (رأي في اقتراح سابق فقط دون طلب جديد) | chat (كلام عام).
-- format: MANGA أو ANIME أو ANY. المانهوا والمانها = MANGA.
+- intent: recommend (يريد اقتراحات) | resume (يكمل شيء بدأه أو تركه) | similar (يشبه عملًا بعينه) | explain (يسأل لماذا اقتُرح عمل أو عن عمل في الرسائل السابقة) | lookup (يسأل عن عمل بعينه بالاسم) | feedback (رأي في اقتراح سابق فقط) | chat (كلام عام بلا طلب).
+- format: MANGA أو ANIME أو ANY. المانهوا والمانها والويبتون = MANGA. إن ذكر عملًا مرجعًا ولم يحدد، format = نوع ذلك العمل (Lookism مانهوا → MANGA).
+- country: KR إن قال مانهوا/كوري، JP إن قال مانجا يابانية صراحة، CN إن قال مانها/صيني، وإلا ANY.
 - genres_in / genres_out: من هذه القائمة حرفيًّا فقط: ${GENRES.join(', ')}.
-- tags_in / tags_out: من هذه القائمة حرفيًّا فقط: ${TAGS.join(', ')}.
-- length: short (قصير، ينتهي بسرعة) | medium | long | any.
-- status: FINISHED (مكتمل) | RELEASING (مستمر) | ANY.
-- reference: عنوان العمل المذكور (للتشابه أو السؤال عنه) بعنوانه الإنجليزي أو الروماجي المعروف، حتى لو كتبه المستخدم بالعربي («سولو ليفلنق» → "Solo Leveling")، وإلا null.
+- tags_in / tags_out: من هذه القائمة حرفيًّا فقط (أسماء AniList): ${TAGS.join(', ')}.
+- references: عناوين الأعمال المذكورة كمرجع بعنوانها الإنجليزي أو الروماجي المعروف حتى لو كتبها بالعربي («لوكيسم» → "Lookism"، «سولو ليفلنق» → "Solo Leveling")، وإلا [].
+- reference: أول عنوان في references أو null.
+- length: short | medium | long | any. status: FINISHED | RELEASING | ANY.
 - exploration: high إن طلب شيئًا مختلفًا أو «فاجئني»، low إن طلب شيئًا قريبًا جدًّا من ذوقه، وإلا normal.
-- mood: وصف قصير بالعربي للمزاج الحالي إن ذُكر («هادي قبل النوم»، «يحمّس»)، وإلا null.
-- gap: true إن سأل عن أعمال ترجمتها العربية متأخرة عن الإنجليزية («العربي واقف عند 22 والإنجليزي 72»)، أو طلب يترجم/يجهّز فصولًا مقدمًا، وإلا false.
-- preference_updates: تفضيلات **دائمة** قالها صراحة فقط («لا عاد تقترح أعمال مدرسية» → {kind:"tag", key:"School", polarity:-1}). kind: genre | tag | length | format | pacing | other. الكلام العابر («تعبان اليوم») ليس تفضيلًا دائمًا.
-- feedback: رأيه في اقتراح سابق («ذا سيئ لا تجيب لي زيه» → {target:"last", kind:"less_like"}؛ «شفته» → seen؛ «مو لي» → not_for_me؛ «عجبني» → like). target: "last" أو عنوان العمل.
+- mood: وصف قصير بالعربي للمزاج إن ذُكر، وإلا null.
+- gap: true إن سأل عن أعمال عربيها متأخر عن الإنجليزي أو طلب يترجم فصولًا مقدمًا، وإلا false.
+- preference_updates: تفضيلات دائمة قالها صراحة فقط («لا عاد تقترح أعمال مدرسية» → {kind:"tag", key:"School", polarity:-1}). kind: genre | tag | length | format | pacing | other.
+- feedback: رأيه في اقتراح سابق ({target:"last" أو العنوان, kind: not_for_me | like | seen | less_like | more_like}).
 
-الطلب الحالي أهم من الذوق العام: «أبي شيء هادي» يعني tags/genres هادئة حتى لو كان يحب الأكشن.
-أرجع JSON فقط بهذه الحقول كلها.`;
+قواعد مهمة:
+1. ترجم كلامه العامي لوسوم الكتالوج بدقة: «قتال شوارع/هوشات/عصابات» → tags_in ["Delinquents","Fist Fighting","Gangs"] وgenres_in ["Action"]؛ «مدرسة» → "School"؛ «تناسخ/رجع بالزمن» → "Reincarnation","Time Manipulation"؛ «ضعيف يصير قوي» → "Weak to Strong"؛ «نظام/لفلات» → "Video Games" أو "Dungeon"؛ «انتقام» → "Revenge"؛ «فنون قتالية/موريم» → "Martial Arts"؛ «بطل قوي من البداية» → "Overpowered Main Characters"؛ «رعب» → genre Horror؛ «رومانسية» → genre Romance.
+2. إذا طلب نوعًا محددًا (أكشن، قتال...) ولم يطلب رومانسية، ضع في genres_out الأنواع اللي تناقض طلبه بوضوح (مثل "Romance" و"Slice of Life" لطلب قتال شوارع)، إلا إن ذكرها.
+3. المتابعة («غيرها»، «لا مو كذا»، «أبي أقوى»، «زي اللي قبل بس…»): انسخ شروط الطلب السابق من المحادثة وعدّل عليها، لا تبدأ من الصفر. وإن رفض ما اقتُرح (مثلًا «عطيتني دراما بنات») أضف ما رفضه في genres_out/tags_out.
+4. الطلب الحالي أهم من الذوق العام.
+
+أمثلة:
+- «ابي زي لوكيسم وقتال شوارع» → {"intent":"similar","format":"MANGA","country":"KR","references":["Lookism"],"reference":"Lookism","genres_in":["Action"],"genres_out":["Romance","Slice of Life"],"tags_in":["Delinquents","Fist Fighting","School"],...}
+- «رشح لي انمي قصير يضحك» → {"intent":"recommend","format":"ANIME","genres_in":["Comedy"],"length":"short",...}
+- «عندك عمل جبار؟» → {"intent":"recommend","format":"ANY","exploration":"normal",...} (بلا شروط: الذوق العام يقرر)
+
+أرجع JSON فقط بكل الحقول.`;
 
 const INTENT_DEFAULT: Intent = {
   intent: 'recommend',
@@ -206,6 +222,8 @@ const INTENT_DEFAULT: Intent = {
   length: 'any',
   status: 'ANY',
   reference: null,
+  references: [],
+  country: 'ANY',
   exploration: 'normal',
   mood: null,
   gap: false,
@@ -229,6 +247,14 @@ export function cleanIntent(raw: unknown): Intent {
     length: pickEnum(r.length, ['short', 'medium', 'long', 'any'] as const, 'any'),
     status: pickEnum(r.status, ['FINISHED', 'RELEASING', 'ANY'] as const, 'ANY'),
     reference: typeof r.reference === 'string' && r.reference.trim() ? r.reference.trim().slice(0, 200) : null,
+    references: [
+      ...new Set(
+        [...(Array.isArray(r.references) ? r.references : []), r.reference]
+          .filter((x): x is string => typeof x === 'string' && Boolean(x.trim()))
+          .map((x) => x.trim().slice(0, 200)),
+      ),
+    ].slice(0, 3),
+    country: pickEnum(r.country, ['KR', 'JP', 'CN', 'ANY'] as const, 'ANY'),
     exploration: pickEnum(r.exploration, ['low', 'normal', 'high'] as const, 'normal'),
     mood: typeof r.mood === 'string' && r.mood.trim() ? r.mood.trim().slice(0, 80) : null,
     gap: r.gap === true,
@@ -267,6 +293,10 @@ export interface Candidate {
   fit: number;
   /** وين وصل العربي والإنجليزي (من الجهاز)؛ null = ما نعرف. */
   span?: Gap | null;
+  /** وسوم وأنواع يشارك فيها الطلب أو المرجع: سبب ترشيحه الحقيقي. */
+  matches?: string[];
+  /** أبعد عن الطلب (ما لقينا مطابقًا كفاية). */
+  loose?: boolean;
 }
 
 const candidateId = (m: Meta) => (m.type === 'ANIME' ? `anime:${m.anilistId}` : `manga:${m.anilistId}`);
@@ -297,7 +327,13 @@ function affinity(m: Meta, p: TasteProfile, intent: Intent): number {
   return s;
 }
 
-async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent: Intent, bundle: ProfileBundle, lastCards: string[], gaps: Gap[], now: number): Promise<Candidate[]> {
+/** وسوم تنطبق على نص الكتالوج (ملوّن، بطل ذكر…): لا تدل على ذوق ولا تطابق طلبًا. */
+const GENERIC_TAGS = new Set(['Full Color', 'Long Strip', 'Web Comic', 'Male Protagonist', 'Female Protagonist', 'Heterosexual', 'Primarily Male Cast', 'Primarily Female Cast', 'Primarily Adult Cast', 'Primarily Teen Cast', 'Ensemble Cast', 'Adapted Mangaka', '4-koma']);
+
+/** جزء ثاني/موسم ثاني: يُقترح الأول لا تكملته. */
+const SEQUEL = /(season\s*\d|\b(final|second|third|2nd|3rd|\d+th)\s+season\b|\bpart\s*\d|\bcour\s*\d|\b(ii|iii|iv)\b|\s\d+$)/i;
+
+export async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent: Intent, bundle: ProfileBundle, lastCards: string[], gaps: Gap[], now: number, section: 'MANGA' | 'ANIME' | null = null): Promise<Candidate[]> {
   const { profile, works } = bundle;
   const strong = works.filter((w) => w.state === 'strong');
   const knownIds = new Set<number>();
@@ -340,56 +376,135 @@ async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent: Intent
     return mine.map((w) => ({ id: w.ref, kind: w.kind, meta: w.meta, title: w.title, own: w, relation: progressLabel(w), exploration: false, fit: w.lastAt }));
   }
 
-  const types: Array<'ANIME' | 'MANGA'> =
-    intent.format === 'ANIME' ? ['ANIME'] : intent.format === 'MANGA' ? ['MANGA'] : profile.mangaVsAnime.leaning === 'anime' ? ['ANIME', 'MANGA'] : ['MANGA', 'ANIME'];
   const exclude = [...knownIds];
-  const out: Candidate[] = [];
-
-  if ((intent.intent === 'similar' || intent.intent === 'lookup') && intent.reference) {
-    const ref = await searchTitle(fetchImpl, intent.reference, intent.format === 'ANY' ? undefined : intent.format);
-    if (ref) {
-      if (intent.intent === 'lookup') out.push(wrap(ref));
-      const sims = await similarTo(fetchImpl, ref.anilistId);
-      out.push(...sims.filter((m) => !knownIds.has(m.anilistId)).map((m) => wrap(m)));
-      if (intent.intent === 'lookup') return out.slice(0, 16);
-    }
-  }
-
   const disliked = profile.dislikedGenres.filter((g) => g.confidence !== 'low').map((g) => g.key);
   const explicitOutTags = profile.explicitPreferences.filter((p) => p.polarity < 0 && p.kind === 'tag').map((p) => p.key);
   const explicitOutGenres = profile.explicitPreferences.filter((p) => p.polarity < 0 && p.kind === 'genre').map((p) => p.key);
-  const genresOut = [...new Set([...intent.genres_out, ...explicitOutGenres, ...(intent.genres_in.length ? [] : disliked)])];
-  const tagsOut = [...new Set([...intent.tags_out, ...explicitOutTags])];
-  const favGenres = profile.favoriteGenres.filter((g) => g.confidence !== 'low').slice(0, 3).map((g) => g.key);
-  for (const type of types) {
-    const base = {
-      type,
-      genresOut,
-      tagsOut,
-      length: intent.length,
-      status: intent.status === 'ANY' ? null : intent.status,
-      exclude,
-    };
-    // الطلب كما هو؛ وإن لم يحدد نوعًا: أنواعك المفضّلة
-    const primary = await candidates(fetchImpl, {
-      ...base,
-      genresIn: intent.genres_in.length ? intent.genres_in : intent.tags_in.length || intent.exploration === 'high' ? [] : favGenres,
-      tagsIn: intent.tags_in,
-      sort: intent.exploration === 'high' ? 'SCORE_DESC' : 'POPULARITY_DESC',
-    });
-    out.push(...primary.map((m) => wrap(m)));
-    // استكشاف صغير: خارج أنواعك المعتادة، بتقييم عالٍ، بنفس شروط الطلب
-    if (intent.exploration !== 'low') {
-      const explore = await candidates(fetchImpl, { ...base, genresIn: intent.genres_in, tagsIn: intent.tags_in, genresOut: [...genresOut, ...favGenres.slice(0, 2)], sort: 'SCORE_DESC' });
-      out.push(...explore.slice(0, 8).map((m) => wrap(m, true)));
-    }
-    if (out.length >= 30) break;
+  const genresOut = [...new Set([...intent.genres_out, ...explicitOutGenres, ...(intent.genres_in.length ? [] : disliked)])].filter((g) => !intent.genres_in.includes(g));
+  const tagsOut = [...new Set([...intent.tags_out, ...explicitOutTags])].filter((t) => !intent.tags_in.includes(t));
+
+  // ١. المراجع: «زي لوكيسم» = Lookism نفسه، ونوعه يحدد النوع إن ما قال
+  const refs: Meta[] = [];
+  for (const title of intent.references.length ? intent.references : intent.reference ? [intent.reference] : []) {
+    const m = await searchTitle(fetchImpl, title, intent.format === 'ANY' ? undefined : intent.format);
+    if (m && !refs.some((r) => r.anilistId === m.anilistId)) refs.push(m);
   }
-  const seen = new Set<string>();
-  return out
-    .filter((c) => c.meta && !knownIds.has(c.meta.anilistId) && !seen.has(c.id) && seen.add(c.id))
-    .sort((a, b) => b.fit - a.fit)
-    .slice(0, 26);
+  // ما حدد: نوع المرجع، ثم القسم اللي هو فيه (مانجا/أنمي)، ثم اللي يقرأه فعلًا
+  const kinds = works.filter((w) => w.state !== 'disliked');
+  const readsManga = kinds.filter((w) => w.kind === 'manga').length;
+  const readsAnime = kinds.filter((w) => w.kind === 'anime').length;
+  const habit = readsManga >= readsAnime * 2 && readsManga > 0 ? 'MANGA' : readsAnime >= readsManga * 2 && readsAnime > 0 ? 'ANIME' : 'ANY';
+  const format = intent.format !== 'ANY' ? intent.format : refs[0]?.type ?? section ?? habit;
+  const types: Array<'ANIME' | 'MANGA'> = format === 'ANIME' ? ['ANIME'] : format === 'MANGA' ? ['MANGA'] : profile.mangaVsAnime.leaning === 'anime' ? ['ANIME', 'MANGA'] : ['MANGA', 'ANIME'];
+  const country = intent.country !== 'ANY' ? intent.country : null;
+
+  // ٢. البذرة: ما طلبه صراحة أثقل، ثم أبرز وسوم المرجع (مرتبة بقوتها في AniList)
+  const seed = new Map<string, number>();
+  const bump = (k: string, w: number) => seed.set(k, Math.max(seed.get(k) ?? 0, w));
+  for (const t of intent.tags_in) if (!GENERIC_TAGS.has(t)) bump(t, 3);
+  for (const g of intent.genres_in) bump(g, 2.5);
+  for (const r of refs) {
+    r.tags.filter((t) => !GENERIC_TAGS.has(t)).slice(0, 7).forEach((t, i) => bump(t, 2 - i * 0.2));
+    for (const g of r.genres) bump(g, 1);
+  }
+  const vague = !seed.size && !refs.length;
+  // بلا شروط: ذوقه هو الطلب. أقوى ما قرأ مؤخرًا يصير مرجعًا (توصيات قرّائه أدق من أي نوع)
+  const RANK = { strong: 0, current: 1, started: 2, listed: 3, abandoned: 9, disliked: 9 } as const;
+  const tasteRefs: Meta[] = vague
+    ? works
+        .filter((w) => w.meta && RANK[w.state] < 9 && (format === 'ANY' || w.meta.type === format))
+        .sort((a, b) => RANK[a.state] - RANK[b.state] || b.lastAt - a.lastAt)
+        .slice(0, 3)
+        .map((w) => w.meta as Meta)
+    : [];
+  if (vague) {
+    for (const r of tasteRefs) r.tags.filter((t) => !GENERIC_TAGS.has(t)).slice(0, 5).forEach((t, i) => bump(t, 1.2 - i * 0.15));
+    for (const g of profile.favoriteGenres.filter((x) => x.confidence !== 'low').slice(0, 3)) bump(g.key, 1.5);
+    for (const t of profile.preferredThemes.filter((x) => x.confidence !== 'low' && !GENERIC_TAGS.has(x.key)).slice(0, 4)) bump(t.key, 1.5);
+  }
+  const seedTags = [...seed.entries()].filter(([k]) => !(GENRES as readonly string[]).includes(k)).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+
+  // ٣. المصادر: توصيات المجتمع للمرجع أولًا، ثم الكتالوج بشروط الطلب
+  const pool = new Map<number, { m: Meta; rec: number; explore: boolean }>();
+  const add = (list: Meta[], rec = 0, explore = false) => {
+    for (const m of list) {
+      const had = pool.get(m.anilistId);
+      if (!had) pool.set(m.anilistId, { m, rec, explore });
+      else had.rec = Math.max(had.rec, rec);
+    }
+  };
+  if (intent.intent === 'lookup') add(refs, 5);
+  for (const r of refs) add(await similarTo(fetchImpl, r.anilistId), 4);
+  for (const r of tasteRefs) add((await similarTo(fetchImpl, r.anilistId)).slice(0, 10), 3);
+  for (const type of types) {
+    const base = { type, genresOut, tagsOut, length: intent.length, status: intent.status === 'ANY' ? null : intent.status, exclude, country };
+    // الوسوم الأقوى معًا (أي واحد منها)، والنوع اللي طلبه صراحة
+    add(await candidates(fetchImpl, { ...base, genresIn: intent.genres_in, tagsIn: seedTags.slice(0, 3), sort: 'POPULARITY_DESC' }));
+    if (seedTags.length > 3 || !vague) add(await candidates(fetchImpl, { ...base, genresIn: intent.genres_in, tagsIn: seedTags.slice(0, 5), sort: 'SCORE_DESC', perPage: 25 }));
+    if (vague && intent.exploration !== 'low') {
+      const fav = profile.favoriteGenres.slice(0, 2).map((g) => g.key);
+      add((await candidates(fetchImpl, { ...base, genresOut: [...genresOut, ...fav], sort: 'SCORE_DESC', perPage: 15 })).slice(0, 8), 0, true);
+    }
+  }
+
+  // ٤. الترتيب: كم يطابق الطلب فعلًا، لا كم هو مشهور
+  const want = new Set(intent.genres_in);
+  // البلد اللي يقرأ منه أكثر (مانهوا/مانجا): يرجّح في الطلب المفتوح
+  const countries = new Map<string, number>();
+  for (const w of kinds) if (w.meta?.country) countries.set(w.meta.country, (countries.get(w.meta.country) ?? 0) + (w.state === 'strong' ? 2 : 1));
+  const tasteCountry = [...countries.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const seedWeight = [...seed.values()].reduce((a, b) => a + b, 0) * 0.6;
+  const scored: Array<Candidate & { strict: boolean }> = [];
+  for (const { m, rec, explore } of pool.values()) {
+    if (knownIds.has(m.anilistId) || refs.some((r) => r.anilistId === m.anilistId && intent.intent !== 'lookup')) continue;
+    if (format !== 'ANY' && m.type !== format) continue;
+    // فيلم أو أغنية أو حلقة خاصة: ما يُرشَّح كعمل تتابعه إلا إن طلبه
+    if (intent.intent !== 'lookup' && ['MOVIE', 'MUSIC', 'SPECIAL', 'ONE_SHOT'].includes(m.format ?? '')) continue;
+    if (intent.intent !== 'lookup' && (m.sequel || SEQUEL.test(m.title))) continue;
+    if (country && m.country !== country) continue;
+    if (m.genres.some((g) => genresOut.includes(g)) || m.tags.some((t) => tagsOut.includes(t))) continue;
+    let match = 0;
+    const shared: string[] = [];
+    m.tags.forEach((t, i) => {
+      const w = seed.get(t);
+      if (w) {
+        match += w * Math.max(0.4, 1 - i * 0.08);
+        shared.push(t);
+      }
+    });
+    for (const g of m.genres) {
+      const w = seed.get(g);
+      if (w) {
+        match += w * 0.6;
+        shared.push(g);
+      }
+    }
+    // طلب نوعًا صراحة (أكشن…): العمل لازم يكون منه
+    const hasWanted = !want.size || m.genres.some((g) => want.has(g));
+    const refCountry = refs[0]?.country ?? (vague ? tasteCountry : null);
+    const leaning = vague && profile.mangaVsAnime.leaning !== 'both' && (m.type === 'ANIME') === (profile.mangaVsAnime.leaning === 'anime') ? 1.5 : 0;
+    const score = match + rec + leaning + (refCountry && m.country === refCountry ? 1.2 : 0) + affinity(m, profile, intent) * 0.25 + ((m.score ?? 60) - 70) / 12;
+    // المطابقة الكافية نسبةً لما طُلب: طلب بنوع واحد يكفيه النوع، وطلب بوسوم يحتاج وسومه
+    const need = Math.min(3, seedWeight * 0.45);
+    const strict = hasWanted && (vague ? match > 0 || explore : match >= need || (rec > 0 && match >= 1));
+    scored.push({
+      id: candidateId(m),
+      kind: m.type === 'ANIME' ? 'anime' : 'manga',
+      meta: m,
+      title: m.title,
+      own: null,
+      relation: rec && refs.length ? `من توصيات قرّاء ${refs.map((r) => r.title).join(' و')}` : relationTo(m, strong),
+      exploration: explore,
+      fit: score,
+      matches: shared.slice(0, 6),
+      strict,
+    });
+  }
+  scored.sort((a, b) => Number(b.strict) - Number(a.strict) || b.fit - a.fit);
+  const good = scored.filter((c) => c.strict);
+  // إن قلّ المطابق: الأقرب بعده، والنموذج يعرف إنها «أبعد شوي»
+  const chosen = good.length >= 8 ? good.slice(0, 18) : [...good, ...scored.filter((c) => !c.strict).slice(0, 8 - good.length).map((c) => ({ ...c, loose: true }))];
+  return chosen.map(({ strict: _s, ...c }) => c);
 }
 
 // ───────────────────────── الرد ─────────────────────────
@@ -404,7 +519,8 @@ export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: �
 3. لا حرق: لا تذكر أحداثًا بعد بداية العمل. للأعمال التي بدأها المستخدم لا تتجاوز ما وصل إليه (progress).
 4. السبب شخصي حقًّا: اربطه بملف الذوق (أعمال أكملها أو تركها بالاسم، أنواع يكملها، طول يناسبه) وبطلبه الحالي. ممنوع «لأنه مشهور ورائع» وحده.
 5. الطلب الحالي فوق الذوق العام (مزاج اليوم يغلب). طلب مانجا = مانجا فقط، وطلب أنمي = أنمي فقط.
-6. 2 إلى 4 بطاقات عادةً. بطاقة استكشاف واحدة كحد أقصى (exploration: true) واشرح لماذا تستحق رغم اختلافها.
+6. الترتيب بالمطابقة: القائمة مرتبة من الأقرب لطلبه (matches_request = وش يطابق فيه طلبه أو العمل اللي ذكره). اختر الأقرب، واشرح السبب من matches_request بكلامك («فيها هوشات مدارس وعصابات زي لوكيسم بالضبط»). لا تختار عملًا يناقض طلبه (طلب قتال شوارع → لا رومانسية ولا دراما بنات)، ولا تختار weaker_match إلا إذا ما فيه غيره وقل إنه أبعد شوي.
+6ب. 2 إلى 4 بطاقات عادةً. بطاقة استكشاف واحدة كحد أقصى (exploration: true) واشرح لماذا تستحق رغم اختلافها.
 7. إن كان الطلب سؤالًا أو شرحًا لا يحتاج اقتراحات: cards فارغة. وإن كان كلامًا عامًّا («هلا»، «شف الحين»، «؟؟») فرد بخفة واقترح عملين من القائمة يناسبون ذوقه.
 8. إن لم تجد في القائمة ما يناسب فعلًا، قلها بصراحة واقترح تعديل الطلب. لا تذكر أبدًا كلمات داخلية مثل candidates أو «القائمة المرسلة» أو «النظام»: تكلّم كأنك تعرف الأعمال بنفسك.
 9. لكل بطاقة summary: نبذة عربية بسطر أو سطرين من synopsis المرسلة فقط، بلا حرق وبنفس أسلوبك.
@@ -464,6 +580,8 @@ function compactCandidate(c: Candidate) {
     relation: c.relation,
     progress: c.own ? progressLabel(c.own) : null,
     exploration_pool: c.exploration,
+    matches_request: c.matches ?? [],
+    weaker_match: Boolean(c.loose),
     arabic_until: c.span ? c.span.ar : null,
     english_until: c.span ? c.span.en : null,
   };
@@ -700,6 +818,8 @@ interface MessageBody {
   anilist?: unknown;
   intent?: unknown;
   round?: unknown;
+  /** القسم المفتوح في التطبيق: طلب مفتوح في قسم الأنمي = أنمي. */
+  section?: unknown;
 }
 
 /**
@@ -756,6 +876,7 @@ export async function handleRafiqMessage(
   const local = body?.local && Array.isArray(body.local.anime) ? cleanLocal(body.local.anime) : null;
   const gaps = cleanGaps((body?.local as { gaps?: unknown } | undefined)?.gaps);
   const round = Math.max(0, Math.min(3, Math.floor(Number(body?.round) || 0)));
+  const section = body?.section === 'anime' ? 'ANIME' : body?.section === 'manga' ? 'MANGA' : null;
   const catalog = relayFetch(fetchImpl, body?.anilist);
   const net = catalog.fetch;
 
@@ -844,13 +965,13 @@ export async function handleRafiqMessage(
         pool = lastCards
           .map((c) => ({ c, m: metas.get(c.workId) ?? null }))
           .map(({ c, m }) => ({ id: c.workId, kind: c.workId.startsWith('anime:') ? 'anime' : 'manga', meta: m, title: c.title, own: null, relation: null, exploration: false, fit: 0 }) as Candidate);
-      } else if (!(intent.intent === 'feedback' && !/(غير|ثاني|بدل|عطني|أعطني|اقترح)/.test(text))) {
+      } else {
         // ما عُرض في الأسبوعين الماضيين لا يتكرر (إلا إن سأل عنه بالاسم)
         const { results: shown } = await db
           .prepare('SELECT DISTINCT work_id FROM rafiq_recs WHERE user_id = ? AND shown_at > ?')
           .bind(userId, now - 14 * 86_400_000)
           .all<{ work_id: string }>();
-        pool = await gatherCandidates(db, net, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now);
+        pool = await gatherCandidates(db, net, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now, section);
         // أي مرشّح مانجا نعرف فصوله على الجهاز: يعرف النموذج وين وصل العربي والإنجليزي
         for (const c of pool) {
           if (c.span || c.kind !== 'manga') continue;
@@ -865,7 +986,7 @@ export async function handleRafiqMessage(
       // المعرّفات المرشّحة تُحفظ مع بياناتها: «ليش؟» و«أقل من هذا» تعرفها لاحقًا
       await cacheMeta(db, pool, now);
       // لا مرشّحين لطلب يحتاجهم: لا نسأل النموذج عن فراغ (كان يقول «ما عندي candidates»)
-      if (!pool.length && ['recommend', 'similar', 'lookup', 'resume', 'chat'].includes(intent.intent)) {
+      if (!pool.length && intent.intent !== 'explain') {
         const none =
           intent.intent === 'resume'
             ? 'دوّرت في اللي بديته وما لقيت شي واقف عليه 👀 تبي أرشّح لك شي جديد؟'
