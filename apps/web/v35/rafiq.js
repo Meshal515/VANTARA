@@ -94,8 +94,8 @@ export function createRafiq(deps) {
   let sendBtn;
 
   // ── الإتاحة ──
-  async function check() {
-    const res = await sync.translation('/v1/rafiq/state').catch(() => null);
+  async function check(conversationId = null) {
+    const res = await sync.translation(`/v1/rafiq/state${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`).catch(() => null);
     if (res?.status !== 200) return state.enabled;
     state.enabled = Boolean(res.body?.enabled);
     if (state.enabled) {
@@ -499,6 +499,70 @@ export function createRafiq(deps) {
     });
   }
 
+  // ── سجل المحادثات ──
+  const when = (at) => {
+    const d = new Date(at);
+    const days = Math.floor((Date.now() - at) / 86_400_000);
+    if (days < 1) return d.toLocaleTimeString('ar-SA', { hour: 'numeric', minute: '2-digit' });
+    if (days < 2) return 'أمس';
+    if (days < 7) return `قبل ${days} أيام`;
+    return d.toLocaleDateString('ar-SA', { day: 'numeric', month: 'long' });
+  };
+  function history() {
+    deps.openSheet((body) => {
+      body.classList.add('rf-sheet');
+      body.append(el('h3', null, 'محادثاتك'));
+      const box = el('div', 'rf-history');
+      box.append(el('p', 'rf-alt', 'لحظة…'));
+      const start = button('محادثة جديدة', 'btn btn-primary', 'plus');
+      start.onclick = () => {
+        deps.closeSheet();
+        void fresh();
+      };
+      body.append(start, box);
+      void sync.translation('/v1/rafiq/conversations').then((res) => {
+        box.replaceChildren();
+        const list = res.status === 200 ? res.body?.conversations ?? [] : null;
+        if (!list) return box.append(el('p', 'rf-alt', ERRORS[res.body?.error] ?? 'ما قدرنا نجيب السجل الحين.'));
+        if (!list.length) return box.append(el('p', 'rf-alt', 'لسا ما عندك محادثات. ابدأ وحدة 🔥'));
+        for (const c of list) {
+          const row = el('div', `rf-conv${c.id === state.conversationId ? ' is-current' : ''}`);
+          const open = el('button', 'rf-conv-open');
+          open.type = 'button';
+          open.append(el('strong', null, c.title), el('small', null, `${when(c.at)} · ${c.messages} رسالة`));
+          open.onclick = () => {
+            deps.closeSheet();
+            void load(c.id);
+          };
+          const del = el('button', 'icon-btn');
+          del.type = 'button';
+          del.innerHTML = glyph('trash');
+          del.setAttribute('aria-label', 'احذف المحادثة');
+          del.onclick = async () => {
+            del.disabled = true;
+            const out = await sync.translation(`/v1/rafiq/conversations?id=${encodeURIComponent(c.id)}`, { method: 'DELETE' }).catch(() => null);
+            if (out?.status !== 200) return void (del.disabled = false);
+            row.remove();
+            if (c.id === state.conversationId) {
+              state.conversationId = null;
+              state.messages = [];
+              renderAll();
+            }
+          };
+          row.append(open, del);
+          box.append(row);
+        }
+      });
+    });
+  }
+  async function load(id) {
+    if (state.busy) return;
+    list.replaceChildren(el('div', 'rf-loading', 'لحظة…'));
+    await check(id);
+    state.pending = null;
+    renderAll();
+  }
+
   async function fresh() {
     if (state.busy) return;
     const res = await sync.translation('/v1/rafiq/new', { method: 'POST' }).catch(() => null);
@@ -529,5 +593,6 @@ export function createRafiq(deps) {
     },
     memory,
     fresh,
+    history,
   };
 }

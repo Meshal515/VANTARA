@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanIntent, handleRafiqFeedback, handleRafiqMessage, handleRafiqPrefs, handleRafiqState, statsAnswer, type RafiqEnv } from './rafiq.ts';
+import { cleanIntent, handleRafiqConversations, handleRafiqFeedback, handleRafiqMessage, handleRafiqPrefs, handleRafiqState, statsAnswer, type RafiqEnv } from './rafiq.ts';
 import { partialString } from './rafiq-llm.ts';
 import { sqliteEnv } from './test-d1.ts';
 
@@ -247,6 +247,25 @@ describe('rafiq', () => {
     expect(payload.candidates[0]!.id).toBe('ext:the breaker');
     expect(payload.candidates.some((c) => c.id === 'ext:done')).toBe(false);
     expect(payload.candidates[0]).toMatchObject({ arabic_until: 22, english_until: 72 });
+  });
+
+  it('lists past conversations by their first message, opens and deletes one', async () => {
+    const env = testEnv();
+    await seedAccounts(env);
+    const f = fake(INTENT, { message: 'خذ 👀', cards: [], chips: [] });
+    await events(await handleRafiqMessage(send({ clientId: 'msg-00000008', text: 'أبي شي يحمّس' }), env, A, NOW, f.fetch));
+    const listUrl = new URL('https://sync.test/v1/rafiq/conversations');
+    const list = (await (await handleRafiqConversations(new Request(listUrl), listUrl, env, A)).json()) as { conversations: Array<{ id: string; title: string; messages: number }> };
+    expect(list.conversations).toEqual([expect.objectContaining({ title: 'أبي شي يحمّس', messages: 2 })]);
+    const id = list.conversations[0]!.id;
+    const state = (await (await handleRafiqState(new URL(`https://sync.test/v1/rafiq/state?conversationId=${id}`), env, A, NOW)).json()) as { messages: Array<{ content: string }> };
+    expect(state.messages.map((m) => m.content)).toEqual(['أبي شي يحمّس', 'خذ 👀']);
+    // غيرك ما يشوفها ولا يحذفها
+    expect((await handleRafiqConversations(new Request(listUrl), listUrl, env, B)).status).toBe(403);
+    const del = new URL(`https://sync.test/v1/rafiq/conversations?id=${id}`);
+    await handleRafiqConversations(new Request(del, { method: 'DELETE' }), del, env, A);
+    const after = (await (await handleRafiqConversations(new Request(listUrl), listUrl, env, A)).json()) as { conversations: unknown[] };
+    expect(after.conversations).toEqual([]);
   });
 
   it('refuses without a key, before any call', async () => {

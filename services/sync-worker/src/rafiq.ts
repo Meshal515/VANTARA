@@ -651,6 +651,37 @@ export async function handleRafiqPrefs(request: Request, url: URL, env: RafiqEnv
   return reply({ prefs, profile: cached ? parseJson(cached.data_json, null) : null });
 }
 
+/**
+ * GET /v1/rafiq/conversations — سجل المحادثات: عنوان كل واحدة أول ما كتبته فيها،
+ * الأحدث أولًا، والفارغة لا تظهر. DELETE ?id= يحذف محادثة برسائلها (الذاكرة تبقى).
+ */
+export async function handleRafiqConversations(request: Request, url: URL, env: RafiqEnv, userId: string): Promise<Response> {
+  if (!(await rafiqAllowed(env, userId))) return reply({ error: 'rafiq_locked' }, 403);
+  if (request.method === 'DELETE') {
+    const id = url.searchParams.get('id');
+    if (!id) return reply({ error: 'bad_request' }, 400);
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM rafiq_messages WHERE conversation_id = ? AND user_id = ?').bind(id, userId),
+      env.DB.prepare('DELETE FROM rafiq_conversations WHERE id = ? AND user_id = ?').bind(id, userId),
+    ]);
+    return reply({ ok: true });
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT c.id, c.updated_at,
+            (SELECT content FROM rafiq_messages m WHERE m.conversation_id = c.id AND m.role = 'user' ORDER BY m.created_at ASC LIMIT 1) AS first,
+            (SELECT COUNT(*) FROM rafiq_messages m WHERE m.conversation_id = c.id) AS n
+       FROM rafiq_conversations c
+      WHERE c.user_id = ?
+      ORDER BY c.updated_at DESC
+      LIMIT 60`,
+  )
+    .bind(userId)
+    .all<{ id: string; updated_at: number; first: string | null; n: number }>();
+  return reply({
+    conversations: results.filter((r) => r.n > 0).map((r) => ({ id: r.id, title: (r.first ?? 'محادثة').slice(0, 70), messages: r.n, at: r.updated_at })),
+  });
+}
+
 /** POST /v1/rafiq/new — محادثة جديدة (الذاكرة تبقى). */
 export async function handleRafiqNew(env: RafiqEnv, userId: string, now: number): Promise<Response> {
   if (!(await rafiqAllowed(env, userId))) return reply({ error: 'rafiq_locked' }, 403);
