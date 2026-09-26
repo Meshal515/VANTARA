@@ -27,3 +27,17 @@ describe('rafiq client', () => {
     ]);
   });
 });
+
+describe('catalog relay', () => {
+  it('sends the exact request body to AniList and returns the data by key', async () => {
+    const { fetchCatalog } = await import('./rafiq.js');
+    const seen = [];
+    const fake = async (url, init) => {
+      seen.push([url, init.body]);
+      return new Response(JSON.stringify(init.body === 'bad' ? { errors: [{}] } : { data: { Page: { media: [{ id: 1 }] } } }), { status: init.body === 'bad' ? 400 : 200 });
+    };
+    const out = await fetchCatalog(['{"q":1}', 'bad'], fake);
+    expect(seen.map((x) => x[0])).toEqual(['https://graphql.anilist.co', 'https://graphql.anilist.co']);
+    expect(out).toEqual([{ key: '{"q":1}', data: { Page: { media: [{ id: 1 }] } } }]);
+  });
+});

@@ -220,7 +220,7 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-top">
       <div class="page-top-right">${iconButton('menu', 'القائمة', { act: 'openDrawer' })}</div>
       <h1>رفيق</h1>
-      <div class="page-top-left">${iconButton('plus', 'محادثة جديدة', { act: 'rafiqNew' })}${iconButton('layers', 'ذاكرة رفيق', { act: 'rafiqMemory' })}</div>
+      <div class="page-top-left">${iconButton('history', 'سجل المحادثات', { act: 'rafiqHistory' })}${iconButton('plus', 'محادثة جديدة', { act: 'rafiqNew' })}${iconButton('layers', 'ذاكرة رفيق', { act: 'rafiqMemory' })}</div>
     </div>
     <div id="rafiqBody"></div>
   </section>

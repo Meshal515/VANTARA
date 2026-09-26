@@ -3838,6 +3838,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     drawerNavigate: (_e, t) => drawerNavigate(t.dataset.arg),
     rafiqMemory: () => void rafiq.memory(),
     rafiqNew: () => void rafiq.fresh(),
+    rafiqHistory: () => rafiq.history(),
     sheetBackdrop: (e) => {
       if (e.target === q('sheet')) closeSheet();
     },
