@@ -924,6 +924,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── صفحة العمل ─────────────────────────
 
   async function openWork(work, { readNumber = null } = {}) {
+    // أنمي (ترشيح، إشعار، حضور…): صفحته في قسم الأنمي، لا صفحة مانجا بنفس العنوان
+    if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
     if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
       work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
