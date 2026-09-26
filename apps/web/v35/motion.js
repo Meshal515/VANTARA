@@ -28,30 +28,21 @@ export function menuOut(menu, done) {
   g.to(menu, { opacity: 0, y: -6, scale: 0.97, duration: 0.18, ease: 'power2.in', onComplete: () => (g.set(menu, { clearProps: 'opacity,scale,y' }), done()) });
 }
 
-/**
- * تبديل القسم: الرئيسية الحالية تبهت وتنكمش قليلًا، ثم الجديدة تدخل
- * بطبقاتها (البانر ثم الشرائط) بتدرّج — كأن التطبيق يغيّر «غرفته».
- */
+/** بدّل القسم قبل الحركة: إن توقف مؤقت الرسوم في WebView يبقى القسم ظاهرًا. */
 export function swapViews(from, to, { onSwap } = {}) {
   const g = live();
-  if (!g || !from) {
-    if (from) from.hidden = true;
-    to.hidden = false;
-    onSwap?.();
-    return;
+  if (g) g.killTweensOf([from, to].filter(Boolean));
+  if (from) {
+    from.hidden = true;
+    from.style?.removeProperty?.('opacity');
+    from.style?.removeProperty?.('filter');
+    from.style?.removeProperty?.('transform');
   }
-  g.killTweensOf([from, to]);
-  g.timeline()
-    .to(from, { opacity: 0, scale: 0.985, filter: 'blur(6px)', duration: 0.22, ease: 'power2.in' })
-    .add(() => {
-      from.hidden = true;
-      g.set(from, { clearProps: 'all' });
-      to.hidden = false;
-      onSwap?.();
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    })
-    .fromTo(to, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: EASE.soft, clearProps: 'opacity' });
-  revealIn(to, 0.26);
+  to.hidden = false;
+  to.style?.removeProperty?.('opacity');
+  onSwap?.();
+  globalThis.window?.scrollTo?.({ top: 0, behavior: 'instant' });
+  if (g) g.fromTo(to, { y: 8 }, { y: 0, duration: 0.3, ease: EASE.soft, clearProps: 'transform' });
 }
 
 /** دخول العناصر المعلَّمة `[data-reveal]` داخل حاوية، بترتيبها. */
@@ -60,14 +51,14 @@ export function revealIn(container, delay = 0) {
   if (!g || !container) return;
   const items = [...container.querySelectorAll('[data-reveal]')];
   if (!items.length) return;
-  g.fromTo(items, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: EASE.out, stagger: 0.07, delay, clearProps: 'opacity,transform' });
+  g.fromTo(items, { y: 14 }, { y: 0, duration: 0.45, ease: EASE.out, stagger: 0.05, delay, clearProps: 'transform' });
 }
 
 /** بطاقات شريط جديد: تنزلق من جهة البداية بتتابع سريع. */
 export function stripIn(cards) {
   const g = live();
   if (!g || !cards.length) return;
-  g.fromTo(cards, { opacity: 0, x: -18 }, { opacity: 1, x: 0, duration: 0.5, ease: EASE.out, stagger: 0.04, clearProps: 'opacity,transform' });
+  g.fromTo(cards, { x: -12 }, { x: 0, duration: 0.4, ease: EASE.out, stagger: 0.04, clearProps: 'transform' });
 }
 
 /** البانر: صورة تتقدّم ببطء (Ken Burns) ونص يصعد سطرًا سطرًا. */

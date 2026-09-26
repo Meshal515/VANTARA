@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sniffAnimated } from './media-encode.js';
+import { prepareRoomAvatar, sniffAnimated } from './media-encode.js';
 
 const bytes = (...parts) =>
   new Blob(parts.map((p) => (typeof p === 'string' ? new TextEncoder().encode(p) : new Uint8Array(p))));
@@ -30,4 +30,15 @@ describe('كشف الصور المتحركة من البايتات', () => {
   it('JPEG ليست متحركة', async () => {
     expect(await sniffAnimated(bytes([0xff, 0xd8, 0xff, 0xe0]))).toBeNull();
   });
+});
+
+it('keeps a small animated Majlis GIF intact when the browser has no frame decoder', async () => {
+  const gif = bytes('GIF89a', [1, 0, 1, 0, 0, 0, 0], GCE, [0x2c], GCE, [0x2c]);
+  const out = await prepareRoomAvatar(gif);
+  expect(out).toBe(gif);
+});
+
+it('keeps GIF data even when its frames do not carry optional graphic control extensions', async () => {
+  const gif = bytes('GIF89a', [1, 0, 1, 0, 0, 0, 0], [0x2c], [0x2c]);
+  expect(await prepareRoomAvatar(gif)).toBe(gif);
 });

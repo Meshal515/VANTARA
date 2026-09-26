@@ -846,7 +846,6 @@ export function createRoom(ctx) {
     paintFailed();
     // الدخول على المحتوى لا على الحاوية: تحريك حاوية التمرير نفسها يعيدها لأولها في كروم
     const g = motion();
-    g?.fromTo(node, { opacity: 0 }, { opacity: 1, duration: 0.22, ease: 'power1.out', clearProps: 'opacity' });
     g?.fromTo([node.querySelector('.mc-head'), node.querySelector('.mc-compose')], { y: 10 }, { y: 0, duration: 0.3, ease: 'power3.out', clearProps: 'transform' });
     // حركة الدخول تعيد التمرير لأوله في كروم: المحادثة تُفتح على آخرها دائمًا
     const toEnd = () => scroller && (scroller.scrollTop = scroller.scrollHeight);
@@ -870,13 +869,10 @@ export function createRoom(ctx) {
     list = null;
     window.visualViewport?.removeEventListener('resize', onViewport);
     window.visualViewport?.removeEventListener('scroll', onViewport);
-    const g = motion();
-    const done = () => {
-      n.remove();
-      ctx.onClose();
-    };
-    if (g) g.to(n, { opacity: 0, y: 14, duration: 0.2, ease: 'power2.in', onComplete: done });
-    else done();
+    // أزل الشاشة فورًا: توقف GSAP في WebView كان يترك طبقة المجلس فوق الصفحات.
+    motion()?.killTweensOf(n);
+    n.remove();
+    ctx.onClose();
     return true;
   }
 

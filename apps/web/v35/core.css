@@ -217,13 +217,6 @@ html,
 }
 .v35 .page.active {
   display: block;
-  animation: v35-page-in var(--dur) var(--ease-out);
-}
-@keyframes v35-page-in {
-  from {
-    opacity: 0.4;
-    transform: translateY(4px);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .v35 *,
@@ -785,8 +778,8 @@ html,
 .v35 .card-strip {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: calc((100% - var(--gutter) * 2 - 20px) / 3.15);
-  gap: 10px;
+  grid-auto-columns: minmax(146px, calc((100% - var(--gutter) * 2 - 12px) / 2.2));
+  gap: 12px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
   scroll-padding-inline: var(--gutter);
@@ -804,8 +797,15 @@ html,
 .v35 .work-card {
   min-width: 0;
   cursor: pointer;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-1);
   -webkit-tap-highlight-color: transparent;
 }
+.v35 .work-card:focus-visible,
+.v35 .work-quick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v35 .work-card-frame { position: relative; }
 .v35 .poster {
   position: relative;
   aspect-ratio: 0.7;
@@ -814,6 +814,19 @@ html,
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--line);
   transition: transform var(--dur-fast) var(--ease);
+}
+.v35 .work-score {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  inset-inline-start: 7px;
+  padding: 5px 8px;
+  border-radius: 99px;
+  background: rgba(19, 12, 30, .91);
+  color: #d4baff;
+  font-size: 12px;
+  font-weight: 750;
+  backdrop-filter: blur(8px);
 }
 .v35 .work-card:active .poster {
   transform: scale(0.97);
@@ -891,15 +904,38 @@ html,
 .v35 .work-meta:empty {
   display: none;
 }
+.v35 .work-facts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+}
+.v35 .work-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v35 .work-quick {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.v35 .work-quick:active { background: var(--accent-soft); }
 
 .v35 .grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 10px;
 }
 @media (min-width: 480px) {
   .v35 .grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

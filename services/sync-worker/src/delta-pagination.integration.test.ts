@@ -8,11 +8,14 @@ const SECRET = 'delta-boundary-secret-that-is-at-least-32-chars';
 const USER = '9e4b51d9-4ca0-4da2-9b1f-2205e67134ed';
 
 function testEnv() {
-  return sqliteEnv({
+  const out = sqliteEnv({
     VANTARA_SESSION_SECRET: SECRET,
     VANTARA_IDENTITY_SECRET: 'identity-secret-for-tests-only-32-chars',
     VANTARA_DEVICE_PEPPER: 'device-pepper-for-tests-only-32-chars-x',
   });
+  // رقم المراجعة في هذا الاختبار للفصول فقط، والمالك مجهّز سلفًا.
+  out.db.prepare("UPDATE accounts SET badge = 'owner' WHERE username = 'ngm'").run();
+  return out;
 }
 
 async function pull(env: Env, since: number): Promise<Response> {

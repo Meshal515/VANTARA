@@ -24,15 +24,14 @@ const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)'
 export const motion = () => (reduced() ? null : gsap);
 
 /**
- * شارة المالك: درعٌ صغير بحرف V مفرّغ. ليست علامة توثيق زرقاء: لونها ذهبي
- * هادئ، وحجمها من حجم السطر فلا تكسر ارتفاعه.
+ * شارة المالك: نجمة بنفسجية ذات علامة صح بيضاء، وحجمها من حجم السطر.
  */
 export function ownerBadge() {
   const s = el('span', 'sx-badge');
   s.setAttribute('role', 'img');
-  s.setAttribute('aria-label', 'مالك المجلس');
+  s.setAttribute('aria-label', 'مالك VANTARA');
   s.innerHTML =
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.1 13.7 3.6v4.2c0 3.3-2.3 5.8-5.7 7C4.6 13.6 2.3 11.1 2.3 7.8V3.6Z" fill="currentColor"/><path d="m5.3 6.1 2.7 4.6 2.7-4.6" fill="none" stroke="var(--bg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 0.9 2.2 1.7 2.8-.1 1.1 2.6 2.5 1.3-.3 2.8 1.2 2.5-1.8 2.2-.1 2.8-2.7.9-1.5 2.4-2.8-.5-2.6 1.1-2.2-1.8-2.8-.1-.9-2.7-2.4-1.5.5-2.8L.9 9.1l1.8-2.2.1-2.8 2.7-.9L7 0.8l2.8.5Z" fill="currentColor" transform="translate(0 .1) scale(.97)"/><path d="m5.8 10.1 2.7 2.6 5.7-5.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   return s;
 }
 

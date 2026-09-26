@@ -16,6 +16,8 @@ function atomicEnv() {
   out.db
     .prepare('INSERT OR IGNORE INTO accounts (user_id, username, created_at, rev) VALUES (?, ?, ?, 0)')
     .run(USER, 'mishal', 1);
+  // اختبر الذرّية بعد تهيئة شارة المالك؛ تهيئتها نفسها مراجعة مستقلة.
+  out.db.prepare("UPDATE accounts SET badge = 'owner' WHERE username = 'ngm'").run();
   return out;
 }
 
