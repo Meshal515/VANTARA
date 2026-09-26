@@ -70,6 +70,40 @@ describe('v35 work shape', () => {
 
 describe('latest chapter evidence', () => {
   const now = Date.UTC(2026, 8, 26);
+  it('stops starting new chapter requests after leaving home', async () => {
+    let active = true;
+    const visited = [];
+    const result = await listing.collectLatestChapters([{ id: 'a' }, { id: 'b' }], 1, {
+      concurrency: 1,
+      shouldContinue: () => active,
+      latest: async (id) => ({ mangas: [{ title: id, url: `/${id}` }] }),
+      chapters: async (id) => {
+        visited.push(id);
+        active = false;
+        return [{ name: 'الفصل 1', chapterNumber: 1 }];
+      },
+    });
+    expect(visited).toEqual(['a']);
+    expect(result.entries).toHaveLength(1);
+  });
+  it('shows chapters from a responding source while another source is still waiting', async () => {
+    let releaseSlow;
+    const slow = new Promise((resolve) => { releaseSlow = resolve; });
+    let firstUpdate;
+    const first = new Promise((resolve) => { firstUpdate = resolve; });
+    const scan = listing.collectLatestChapters([{ id: 'fast' }, { id: 'slow' }], 1, {
+      latest: (id) => id === 'slow' ? slow : Promise.resolve({ mangas: [{ title: 'العمل السريع', url: '/fast' }] }),
+      chapters: async () => [{ name: 'الفصل 1', chapterNumber: 1, url: '/1' }],
+      onUpdate: (entries) => firstUpdate(entries),
+    });
+    try {
+      const entries = await Promise.race([first, new Promise((_, reject) => setTimeout(() => reject(new Error('fast source was held by slow listing')), 250))]);
+      expect(entries[0].manga.title).toBe('العمل السريع');
+    } finally {
+      releaseSlow({ mangas: [] });
+      await scan;
+    }
+  });
   it('promotes newly detected chapters from any source without trusting upload dates', async () => {
     const sources = [{ id: 'a', label: 'أ' }, { id: 'b', label: 'ب' }];
     const rows = {

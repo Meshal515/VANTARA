@@ -112,6 +112,7 @@ export function onLongPress(node, run, ms = 420) {
   let t = null;
   let start = null;
   node.addEventListener('pointerdown', (e) => {
+    delete node.dataset.longPressed;
     start = { x: e.clientX, y: e.clientY };
     t = setTimeout(() => {
       t = null;
@@ -132,6 +133,7 @@ export function onLongPress(node, run, ms = 420) {
   node.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     cancel();
+    if (node.dataset.longPressed) return;
     node.dataset.longPressed = '1';
     run();
   });

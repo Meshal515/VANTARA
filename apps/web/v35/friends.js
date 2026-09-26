@@ -460,7 +460,21 @@ export function createFriends(ctx) {
     feed.append(heading('آخر ما صار'), bar, list);
     parts.push(feed);
 
-    host.replaceChildren(...parts);
+    // حضور صديق يصل بعد فتح الاجتماع بثوانٍ: حافظ على الأقسام التي لم تتغير
+    // بدل نزع كل المحتوى والأغلفة، خصوصًا في WebView أثناء الانتقال.
+    const stable = parts.map((part, i) => {
+      const signature = part.outerHTML;
+      const previous = host.children[i];
+      if (previous?._renderKey === signature) return previous;
+      part._renderKey = signature;
+      return part;
+    });
+    stable.forEach((part, i) => {
+      if (host.children[i] === part) return;
+      if (host.children[i]) host.replaceChild(part, host.children[i]);
+      else host.append(part);
+    });
+    while (host.children.length > stable.length) host.lastElementChild.remove();
     const strip = host.querySelector('.sx-strip');
     if (strip) strip.scrollLeft = keepScroll;
 
@@ -468,15 +482,11 @@ export function createFriends(ctx) {
     if (!entered) {
       entered = true;
       for (const r of rows) seenRows.add(r.dataset.key);
-      const g = motion();
-      g?.fromTo(host.querySelectorAll('.sx-pal'), { y: 8 }, { y: 0, duration: 0.36, ease: 'power2.out', stagger: 0.035, clearProps: 'transform' });
-      g?.fromTo(host.querySelector('.sx-door'), { y: 8 }, { y: 0, duration: 0.36, ease: 'power2.out', delay: 0.08, clearProps: 'transform' });
-      reveal(rows.slice(0, 14), 0.14);
+      // لا تُنشئ طبقات GSAP وقت أول رسم لشاشة الاجتماع في Android WebView.
     } else {
       const fresh = rows.filter((r) => !seenRows.has(r.dataset.key));
       for (const r of rows) seenRows.add(r.dataset.key);
       if (fresh.length) {
-        reveal(fresh, 0);
         for (const r of fresh) r.classList.add('sx-row--fresh');
       }
     }
@@ -491,7 +501,10 @@ export function createFriends(ctx) {
     } catch {
       return;
     }
-    if (ctx.visible()) render();
+    if (ctx.visible()) {
+      try { render(); }
+      catch (error) { console.error('تعذّر تحديث الأصدقاء', error); }
+    }
   }
 
   return {
@@ -511,7 +524,10 @@ export function createFriends(ctx) {
     onChange(tables) {
       if (!ctx.visible()) return;
       const watched = ['frames', 'recommendations', 'activity', 'majlis_messages', 'majlis_hidden', 'majlis_meta', 'majlis_reads', 'profiles', 'accounts', 'works', 'settings'];
-      if (tables.some((t) => watched.includes(t))) render();
+      if (tables.some((t) => watched.includes(t))) {
+        try { render(); }
+        catch (error) { console.error('تعذّر تحديث الاجتماع', error); }
+      }
     },
     render,
   };
