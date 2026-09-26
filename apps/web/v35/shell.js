@@ -2962,6 +2962,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq') void rafiq.show();
+    // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
+    root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
     if (id === 'settings') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
