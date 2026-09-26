@@ -43,6 +43,7 @@ const P = {
   more: '<circle cx="12" cy="5.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.4" fill="currentColor" stroke="none"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2.2"/><path d="M15.5 8.5V6.2A1.7 1.7 0 0 0 13.8 4.5H6.2A1.7 1.7 0 0 0 4.5 6.2v7.6a1.7 1.7 0 0 0 1.7 1.7h2.3"/>',
   edit: '<path d="M4.5 19.5h3.8L18.7 9.1a2.7 2.7 0 0 0-3.8-3.8L4.5 15.7Z"/><path d="m13.5 6.8 3.7 3.7"/>',
   trash: '<path d="M4.5 7h15M9.5 7V5.2c0-.7.5-1.2 1.2-1.2h2.6c.7 0 1.2.5 1.2 1.2V7M6.5 7l.8 11.8A2 2 0 0 0 9.3 20.7h5.4a2 2 0 0 0 2-1.9L17.5 7M10.3 10.8v6M13.7 10.8v6"/>',
   filter: '<path d="M4 5.5h16l-6.2 7.2v5.6l-3.6 1.7v-7.3Z"/>',

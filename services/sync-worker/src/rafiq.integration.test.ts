@@ -268,6 +268,39 @@ describe('rafiq', () => {
     expect(after.conversations).toEqual([]);
   });
 
+  it('when AniList blocks the Worker, the device fetches the catalog and the second round answers', async () => {
+    const env = testEnv();
+    await seedAccounts(env);
+    const f = fake(INTENT, { message: 'خذ هذي 🔥', cards: [{ id: 'manga:101', reason: 'تناسبك' }], chips: [] });
+    const blocked: typeof fetch = async (input, init) => (String(input).includes('anilist') ? new Response('blocked', { status: 403 }) : f.fetch(input, init));
+
+    const first = await events(await handleRafiqMessage(send({ clientId: 'msg-00000009', text: 'عندك عمل جبار' }), env, A, NOW, blocked));
+    const need = first.find((e) => e.event === 'need')!.data as { requests: string[]; intent: unknown; round: number };
+    expect(need.requests.length).toBeGreaterThan(0);
+    expect(first.some((e) => e.event === 'final')).toBe(false);
+    const intentCalls = f.llm.filter((b) => !b.stream).length;
+
+    // الجهاز يسأل AniList بنفس الطلبات ويرجع بالردود
+    const anilist = need.requests.map((key) => ({ key, data: { Page: { media: CATALOG } } }));
+    const second = await events(await handleRafiqMessage(send({ clientId: 'msg-00000009', text: 'عندك عمل جبار', anilist, intent: need.intent, round: need.round }), env, A, NOW + 3000, blocked));
+    const final = second.find((e) => e.event === 'final')!.data.message;
+    expect(final.cards.map((c: { workId: string }) => c.workId)).toEqual(['manga:101']);
+    // الفهم ما انعاد، والرسالة ما تكررت
+    expect(f.llm.filter((b) => !b.stream).length).toBe(intentCalls);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM rafiq_messages WHERE role = 'user'").first<{ n: number }>();
+    expect(count?.n).toBe(1);
+  });
+
+  it('never asks the model about an empty catalog', async () => {
+    const env = testEnv();
+    await seedAccounts(env);
+    const f = fake(INTENT, { message: 'ما عندي candidates', cards: [], chips: [] });
+    const empty: typeof fetch = async (input, init) => (String(input).includes('anilist') ? new Response(JSON.stringify({ data: { Page: { media: [] } } }), { status: 200 }) : f.fetch(input, init));
+    const evs = await events(await handleRafiqMessage(send({ clientId: 'msg-00000010', text: 'رشح لي' }), env, A, NOW, empty));
+    expect(f.llm.some((b) => b.stream)).toBe(false);
+    expect(evs.find((e) => e.event === 'final')!.data.message.content).not.toContain('candidates');
+  });
+
   it('refuses without a key, before any call', async () => {
     const env = testEnv({ DEEPSEEK_API_KEY: '' });
     await seedAccounts(env);

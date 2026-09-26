@@ -16,7 +16,7 @@
  */
 
 import type { D1Database, Env } from './types.ts';
-import { GENRES, type Meta, TAGS, candidates, metaFor, metaKeyForAnime, metaKeyForManga, metaKeyForTitle, searchTitle, similarTo, titleMatches } from './rafiq-anilist.ts';
+import { ANILIST, GENRES, type Meta, TAGS, candidates, metaFor, metaKeyForAnime, metaKeyForManga, metaKeyForTitle, searchTitle, similarTo, titleMatches } from './rafiq-anilist.ts';
 import { quotaState, translationAllowed, type TranslationEnv } from './translate.ts';
 import { type ChatMessage, LlmError, type LlmEnv, chatJson, chatStream } from './rafiq-llm.ts';
 import { type LocalAnime, type Preference, type TasteProfile, type UserWork, buildProfile, preferences, progressLabel, userWorks } from './rafiq-profile.ts';
@@ -406,7 +406,7 @@ export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: �
 5. الطلب الحالي فوق الذوق العام (مزاج اليوم يغلب). طلب مانجا = مانجا فقط، وطلب أنمي = أنمي فقط.
 6. 2 إلى 4 بطاقات عادةً. بطاقة استكشاف واحدة كحد أقصى (exploration: true) واشرح لماذا تستحق رغم اختلافها.
 7. إن كان الطلب سؤالًا أو شرحًا لا يحتاج اقتراحات: cards فارغة.
-8. إن لم تجد في القائمة ما يناسب فعلًا، قلها بصراحة واقترح تعديل الطلب.
+8. إن لم تجد في القائمة ما يناسب فعلًا، قلها بصراحة واقترح تعديل الطلب. لا تذكر أبدًا كلمات داخلية مثل candidates أو «القائمة المرسلة» أو «النظام»: تكلّم كأنك تعرف الأعمال بنفسك.
 9. لكل بطاقة summary: نبذة عربية بسطر أو سطرين من synopsis المرسلة فقط، بلا حرق وبنفس أسلوبك.
 10. arabic_until وenglish_until = آخر فصل عربي وآخر فصل إنجليزي في مصادرنا. إن كان الإنجليزي أبعد، قلها بالأرقام («العربي واقف عند 22 والإنجليزي واصل 72») واقترح translate: {"from": أول فصل بعد العربي, "to": آخر إنجليزي} — نظام VANTARA هو اللي يترجم مقدمًا، أنت تحدد النطاق. إن كانت null فلا تخترع أرقامًا ولا translate.
 
@@ -696,6 +696,41 @@ interface MessageBody {
   text?: unknown;
   action?: unknown;
   local?: { anime?: unknown; gaps?: unknown };
+  /** ردود AniList جابها الجهاز (الخادم محجوب عنه): `[{key, data}]`، و`key` نص الطلب نفسه. */
+  anilist?: unknown;
+  intent?: unknown;
+  round?: unknown;
+}
+
+/**
+ * AniList يحجب طلبات Cloudflare Workers (403). فالكتالوج يمرّ بالجهاز: ما عرفناه من
+ * ردود الجهاز يُخدم منها، وما لا نعرفه نجرّبه مباشرة، فإن حُجب يُسجَّل ويطلبه الجهاز
+ * ويرجع به في جولة ثانية. نفس الكود يعمل لو فُكّ الحجب يومًا.
+ */
+function relayFetch(direct: Fetch, raw: unknown): { fetch: Fetch; pending: Set<string> } {
+  const known = new Map<string, unknown>();
+  if (Array.isArray(raw)) {
+    for (const r of raw.slice(0, 40)) {
+      const x = r as { key?: unknown; data?: unknown };
+      if (typeof x?.key === 'string' && x.key.length < 20_000 && x.data && typeof x.data === 'object') known.set(x.key, x.data);
+    }
+  }
+  const pending = new Set<string>();
+  const relay = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith(ANILIST)) return direct(input, init);
+    const key = typeof init?.body === 'string' ? init.body : '';
+    if (known.has(key)) return new Response(JSON.stringify({ data: known.get(key) }), { status: 200, headers: { 'content-type': 'application/json' } });
+    try {
+      const res = await direct(input, init);
+      if (res.ok) return res;
+    } catch {
+      // محجوب أو شبكة: للجهاز
+    }
+    if (key) pending.add(key);
+    return new Response('{}', { status: 503 });
+  }) as Fetch;
+  return { fetch: relay, pending };
 }
 
 /**
@@ -720,6 +755,9 @@ export async function handleRafiqMessage(
   if ((!text && !action) || !clientId) return reply({ error: 'bad_request' }, 400);
   const local = body?.local && Array.isArray(body.local.anime) ? cleanLocal(body.local.anime) : null;
   const gaps = cleanGaps((body?.local as { gaps?: unknown } | undefined)?.gaps);
+  const round = Math.max(0, Math.min(3, Math.floor(Number(body?.round) || 0)));
+  const catalog = relayFetch(fetchImpl, body?.anilist);
+  const net = catalog.fetch;
 
   const db = env.DB;
   const conv = await conversationOf(db, userId, typeof body?.conversationId === 'string' ? body.conversationId : null, now);
@@ -748,7 +786,7 @@ export async function handleRafiqMessage(
         await send('final', { message: present(stored) });
         return;
       }
-      const bundle = await profileFor(env, fetchImpl, userId, local, now);
+      const bundle = await profileFor(env, net, userId, local, now);
       const history = await recentMessages(db, conv.id, RECENT_MESSAGES + 1);
       const prior = history.filter((m) => m.id !== clientId).slice(-RECENT_MESSAGES);
 
@@ -763,7 +801,11 @@ export async function handleRafiqMessage(
 
       const lastCards = await lastCardsOf(db, conv.id);
       let intent: Intent;
-      if (action?.type === 'similar' && action.title) {
+      const carried = round > 0 && body?.intent ? cleanIntent(body.intent) : null;
+      if (carried) {
+        // جولة ثانية بعد ما جاب الجهاز الكتالوج: نفس الفهم بلا نداء جديد، والذاكرة سُجّلت في الأولى
+        intent = { ...carried, preference_updates: [], feedback: [] };
+      } else if (action?.type === 'similar' && action.title) {
         intent = { ...INTENT_DEFAULT, intent: 'similar', reference: String(action.title).slice(0, 200), format: action.workId?.startsWith('anime:') ? 'ANIME' : action.workId?.startsWith('manga:') ? 'MANGA' : 'ANY' };
       } else if (action?.type === 'more') {
         intent = { ...INTENT_DEFAULT };
@@ -794,11 +836,11 @@ export async function handleRafiqMessage(
         for (const c of target) await applyFeedback(db, userId, c.recId, f.kind, now);
       }
       // تفضيل جديد أو رأي: الملف يُعاد بمعطياته الجديدة
-      const fresh = intent.preference_updates.length || intent.feedback.length ? await profileFor(env, fetchImpl, userId, local, now) : bundle;
+      const fresh = intent.preference_updates.length || intent.feedback.length ? await profileFor(env, net, userId, local, now) : bundle;
 
       let pool: Candidate[] = [];
       if (intent.intent === 'explain') {
-        const metas = await metaFor(db, fetchImpl, lastCards.map((c) => { const n = Number(c.workId.split(':')[1]); return Number.isInteger(n) ? { key: c.workId, anilistId: n } : { key: c.workId }; }), now);
+        const metas = await metaFor(db, net, lastCards.map((c) => { const n = Number(c.workId.split(':')[1]); return Number.isInteger(n) ? { key: c.workId, anilistId: n } : { key: c.workId }; }), now);
         pool = lastCards
           .map((c) => ({ c, m: metas.get(c.workId) ?? null }))
           .map(({ c, m }) => ({ id: c.workId, kind: c.workId.startsWith('anime:') ? 'anime' : 'manga', meta: m, title: c.title, own: null, relation: null, exploration: false, fit: 0 }) as Candidate);
@@ -808,15 +850,31 @@ export async function handleRafiqMessage(
           .prepare('SELECT DISTINCT work_id FROM rafiq_recs WHERE user_id = ? AND shown_at > ?')
           .bind(userId, now - 14 * 86_400_000)
           .all<{ work_id: string }>();
-        pool = await gatherCandidates(db, fetchImpl, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now);
+        pool = await gatherCandidates(db, net, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now);
         // أي مرشّح مانجا نعرف فصوله على الجهاز: يعرف النموذج وين وصل العربي والإنجليزي
         for (const c of pool) {
           if (c.span || c.kind !== 'manga') continue;
           c.span = gaps.find((g) => g.ref === c.id || titleMatches(g.title, c.meta?.titles ?? [c.title])) ?? null;
         }
       }
+      // الكتالوج ما وصلنا مباشرة: الجهاز يجيبه ويرجع (ثلاث جولات بالكثير)
+      if (catalog.pending.size && round < 3) {
+        await send('need', { requests: [...catalog.pending].slice(0, 30), intent, round: round + 1 });
+        return;
+      }
       // المعرّفات المرشّحة تُحفظ مع بياناتها: «ليش؟» و«أقل من هذا» تعرفها لاحقًا
       await cacheMeta(db, pool, now);
+      // لا مرشّحين لطلب يحتاجهم: لا نسأل النموذج عن فراغ (كان يقول «ما عندي candidates»)
+      if (!pool.length && ['recommend', 'similar', 'lookup', 'resume'].includes(intent.intent)) {
+        const none =
+          intent.intent === 'resume'
+            ? 'دوّرت في اللي بديته وما لقيت شي واقف عليه 👀 تبي أرشّح لك شي جديد؟'
+            : 'ما قدرت أوصل لكتالوج الأعمال الحين 😵 جرّب بعد شوي، أو قول لي اسم عمل تحبه وأطلع لك شي يشبهه.';
+        const msg = await saveAssistant(db, userId, conv.id, clientId, none, [], ['رشّح لي شي', 'أكمل شي تركته'], now);
+        await send('delta', { text: none });
+        await send('final', { message: msg });
+        return;
+      }
 
       const payload = {
         request: text || (action?.type === 'similar' ? `شيء مشابه لـ ${action.title}` : 'أعطني اقتراحات أخرى'),
@@ -868,7 +926,7 @@ export async function handleRafiqMessage(
         );
       }
       const message = typeof out.message === 'string' && out.message.trim() ? out.message.trim().slice(0, 1600) : 'والله دوّرت وما لقيت شي يستاهل بهالشروط 😭 غيّر الطلب شوي وأبشر.';
-      const chips = Array.isArray(out.chips) ? out.chips.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 40)).slice(0, 3) : [];
+      const chips = Array.isArray(out.chips) ? out.chips.filter((x) => typeof x === 'string' && x.trim() && !/candidate|النظام|القائمة/i.test(x)).map((x) => x.trim().slice(0, 40)).slice(0, 3) : [];
       const msg = await saveAssistant(db, userId, conv.id, clientId, message, cards, chips, now);
       if (message !== lastSent) await send('delta', { text: message.slice(lastSent.length), replace: !message.startsWith(lastSent) ? message : undefined });
       await send('final', { message: msg });

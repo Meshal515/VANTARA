@@ -32,7 +32,7 @@
 
 /* ── الترحيب ── */
 .v35 .rf-welcome {
-  margin: 12vh auto 0;
+  margin: 6vh auto 0;
   max-width: 340px;
   text-align: center;
 }
@@ -464,4 +464,104 @@
 }
 .v35 .rf-conv.is-current strong {
   color: var(--accent-text);
+}
+
+/* ── الكاتب والنسخ والحالة ── */
+.v35 .rf-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  color: var(--text-2);
+}
+.v35 .rf-avatar {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.v35 .rf-avatar .icon {
+  width: 14px;
+  height: 14px;
+}
+.v35 .rf-bubble {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.v35 .rf-tools {
+  display: flex;
+  gap: 4px;
+  margin-top: -4px;
+}
+.v35 .rf-tool {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-3);
+}
+.v35 .rf-tool:active {
+  background: var(--surface-2);
+}
+.v35 .rf-tool .icon {
+  width: 17px;
+  height: 17px;
+}
+.v35 .rf-bubble--typing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.v35 .rf-status {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .rf-msg--assistant {
+  padding-bottom: 4px;
+}
+.v35 .rf-msg + .rf-msg--user {
+  margin-top: 6px;
+}
+
+/* ── بدايات جاهزة ── */
+.v35 .rf-starters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 22px;
+  text-align: start;
+}
+.v35 .rf-starter {
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: start;
+}
+.v35 .rf-starter .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
+}
+.v35 .rf-starter:active {
+  background: var(--surface-2);
 }

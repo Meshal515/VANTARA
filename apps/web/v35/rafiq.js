@@ -38,6 +38,26 @@ export function localSignals(watch) {
     .slice(0, 150);
 }
 
+/** طلبات AniList كما صاغها الخادم (نص الطلب نفسه مفتاح)، أربعة معًا. */
+export async function fetchCatalog(requests, fetchImpl = globalThis.fetch) {
+  const out = [];
+  const queue = [...requests].slice(0, 30);
+  const worker = async () => {
+    while (queue.length) {
+      const key = queue.shift();
+      try {
+        const res = await fetchImpl('https://graphql.anilist.co', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: key });
+        const body = await res.json();
+        if (res.ok && body?.data) out.push({ key, data: body.data });
+      } catch {
+        // ناقص: الخادم يكمل بما وصله
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return out;
+}
+
 /** يقرأ دفق SSE: يستدعي `on(event, data)` لكل حدث مكتمل. */
 export async function readEvents(response, on) {
   const reader = response.body.getReader();
@@ -158,7 +178,7 @@ export function createRafiq(deps) {
     list.replaceChildren();
     if (!state.messages.length) list.append(welcome());
     for (const m of state.messages) list.append(messageNode(m));
-    renderChips(lastChips());
+    renderChips(state.messages.length ? lastChips() : []);
     scrollDown(false);
   }
 
@@ -168,6 +188,18 @@ export function createRafiq(deps) {
     box.append(el('h2', null, 'هلا! أنا رفيق 👋'));
     box.append(el('p', null, 'أعرف وش قريت ووش شاهدت، وأطلع لك الشي اللي فعلًا يناسبك — مو أي شي مشهور وخلاص. قول لي مزاجك 🔥'));
     if (!state.configured) box.append(el('p', 'rf-warn', ERRORS.rafiq_not_configured));
+    // بدايات جاهزة كبطاقات: أوضح من شريط صغير تحت
+    const starters = el('div', 'rf-starters');
+    const icons = ['spark', 'clock', 'flame', 'book', 'translate'];
+    (state.suggestions.length ? state.suggestions : ['وش تنصحني اليوم؟', 'شيء قصير', 'فاجئني', 'أكمل شيء تركته']).slice(0, 4).forEach((text, i) => {
+      const b = el('button', 'rf-starter');
+      b.type = 'button';
+      b.innerHTML = glyph(icons[i % icons.length]);
+      b.append(el('span', null, text));
+      b.onclick = () => !state.busy && void send({ text });
+      starters.append(b);
+    });
+    box.append(starters);
     return box;
   }
 
@@ -194,14 +226,59 @@ export function createRafiq(deps) {
   // ── الرسائل ──
   function messageNode(m) {
     const row = el('div', `rf-msg rf-msg--${m.role}`);
+    if (m.role === 'assistant') row.append(authorLine());
     const bubble = el('div', 'rf-bubble', m.content ?? '');
+    bubble.dir = 'auto';
     row.append(bubble);
+    // النسخ بزر ولمسة مطوّلة: تحديد النص في WebView يرسم مساحة سوداء على بعض الأجهزة
+    holdToCopy(bubble, () => m.content ?? '');
+    if (m.role === 'assistant' && m.content) {
+      const tools = el('div', 'rf-tools');
+      const copy = el('button', 'rf-tool');
+      copy.type = 'button';
+      copy.innerHTML = glyph('copy');
+      copy.setAttribute('aria-label', 'انسخ الرد');
+      copy.title = 'انسخ';
+      copy.onclick = () => void copyText(m.content);
+      tools.append(copy);
+      row.append(tools);
+    }
     if (m.cards?.length) {
       const cards = el('div', 'rf-cards');
       for (const c of m.cards) cards.append(cardNode(c));
       row.append(cards);
     }
     return row;
+  }
+
+  function authorLine() {
+    const who = el('div', 'rf-author');
+    who.insertAdjacentHTML('beforeend', `<span class="rf-avatar">${glyph('spark')}</span>`);
+    who.append(el('span', null, 'رفيق'));
+    return who;
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('نسخته ✓');
+    } catch {
+      toast('ما قدرت أنسخ على هالجهاز');
+    }
+  }
+
+  function holdToCopy(node, textOf) {
+    let timer = 0;
+    const cancel = () => clearTimeout(timer);
+    node.addEventListener('touchstart', () => {
+      cancel();
+      timer = setTimeout(() => {
+        navigator.vibrate?.(12);
+        void copyText(textOf());
+      }, 550);
+    }, { passive: true });
+    for (const ev of ['touchend', 'touchmove', 'touchcancel']) node.addEventListener(ev, cancel, { passive: true });
+    node.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   function cardNode(card) {
@@ -378,8 +455,13 @@ export function createRafiq(deps) {
     }
     const row = el('div', 'rf-msg rf-msg--assistant');
     const bubble = el('div', 'rf-bubble rf-bubble--typing');
-    bubble.innerHTML = '<span class="rf-dots"><i></i><i></i><i></i></span>';
-    row.append(bubble);
+    const status = (label) => {
+      if (!bubble.classList.contains('rf-bubble--typing')) return;
+      bubble.innerHTML = '<span class="rf-dots"><i></i><i></i><i></i></span>';
+      bubble.append(el('span', 'rf-status', label));
+    };
+    status('يفكّر…');
+    row.append(authorLine(), bubble);
     list.append(row);
     scrollDown();
 
@@ -393,15 +475,22 @@ export function createRafiq(deps) {
     } catch {
       // بدونها يكمل
     }
-    const res = await sync.stream('/v1/rafiq/message', {
-      conversationId: state.conversationId,
-      clientId,
-      text: text || undefined,
-      action: action ?? undefined,
-      local: { anime: localSignals(deps.readWatch?.()), gaps },
-    });
-    if (res.status !== 200) failure = res.error;
-    else {
+    // الكتالوج (AniList) يحجب الخادم: إن طلبه الخادم يجيبه الجهاز ويرجع بنفس الرسالة
+    let extra = {};
+    for (let round = 0; round < 4 && !final && !failure; round++) {
+      let need = null;
+      const res = await sync.stream('/v1/rafiq/message', {
+        conversationId: state.conversationId,
+        clientId,
+        text: text || undefined,
+        action: action ?? undefined,
+        local: { anime: localSignals(deps.readWatch?.()), gaps },
+        ...extra,
+      });
+      if (res.status !== 200) {
+        failure = res.error;
+        break;
+      }
       try {
         await readEvents(res.response, (event, data) => {
           if (event === 'meta' && data.conversationId) state.conversationId = data.conversationId;
@@ -411,11 +500,17 @@ export function createRafiq(deps) {
             bubble.textContent = written;
             scrollDown(false);
           } else if (event === 'final') final = data.message;
+          else if (event === 'need') need = data;
           else if (event === 'error') failure = data.code ?? 'upstream';
         });
       } catch {
         failure = failure ?? 'offline';
       }
+      if (!need || final || failure) break;
+      status('يدوّر لك في الأعمال…');
+      const anilist = await fetchCatalog(need.requests ?? []);
+      status('يختار لك…');
+      extra = { anilist, intent: need.intent, round: need.round };
     }
     state.busy = false;
     sendBtn.disabled = !input.value.trim();
