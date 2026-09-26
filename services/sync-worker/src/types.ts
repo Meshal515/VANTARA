@@ -56,6 +56,8 @@ export interface Env {
   /** من يُفتح له رفيق (أسماء أو معرّفات بفواصل). غير مضبوط: من فُتحت له الترجمة (صاحب الحساب). */
   RAFIQ_USERS?: string;
   RAFIQ_MONTHLY_BUDGET_USD?: string;
+  /** مالك المجلس (أسماء أو معرّفات بفواصل): شارة المالك وحذف رسائل غيره واسم المجلس. غير مضبوط: من فُتحت له الترجمة. */
+  VANTARA_OWNERS?: string;
 }
 
 export interface ExecutionContext {

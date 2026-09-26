@@ -82,6 +82,15 @@ export function createAnimeAccount(sync) {
     sync.enqueue('view.add', { ...descriptor(m), chapterLabel: `الحلقة ${episode}`, chapterNumber: episode });
   }
 
+  /** «أنهى الحلقة N» للأصدقاء (حسب خصوصيتك في الخادم). مرة لكل حلقة في الجلسة. */
+  const completed = new Set();
+  function completeEpisode(m, episode) {
+    const k = `${m.id}:${episode}`;
+    if (completed.has(k)) return;
+    completed.add(k);
+    sync.enqueue('episode.complete', { ...descriptor(m), episode });
+  }
+
   /** أعمال الأنمي في رف من رفوف الحساب، الأحدث أولًا. */
   function shelf(kind) {
     const refs =
@@ -127,5 +136,5 @@ export function createAnimeAccount(sync) {
     }
   }
 
-  return { descriptor, inLibrary, inCollection, isCompleted, setLibrary, setCollection, setCompleted, isSeen, seenCount, markRange, markEpisode, clearAll, recordView, shelf, migrate };
+  return { descriptor, inLibrary, inCollection, isCompleted, setLibrary, setCollection, setCompleted, isSeen, seenCount, markRange, markEpisode, clearAll, recordView, completeEpisode, shelf, migrate };
 }

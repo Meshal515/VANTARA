@@ -97,6 +97,11 @@ const KEYS = {
   // «آخر المشاهدات»: صف لكل عمل في حسابك، والحذف شاهد قبر
   work_views: (row) => `${row.user_id}/${row.series_ref}`,
   settings: (row) => row.user_id,
+  // المجلس محادثة: رسائل، و«إخفاء لدي»، واسمه وصورته، وآخر ما قرأه كل عضو
+  majlis_messages: (row) => row.id,
+  majlis_hidden: (row) => `${row.user_id}/${row.target}`,
+  majlis_meta: (row) => row.id,
+  majlis_reads: (row) => row.user_id,
 };
 
 function readJson(key, fallback) {

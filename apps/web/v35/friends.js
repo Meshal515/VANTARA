@@ -1,656 +1,499 @@
 /**
  * الأصدقاء — مدخل الاجتماع.
  *
- * ثلاث طبقات، بلا صناديق فوق بعض:
+ * ثلاث طبقات تفصلها المسافة ووزن الخط، لا الصناديق:
  *
- *   1. الشريط: وجوه أصدقائك وحالهم الآن (نقطة حيّة لمن هو متصل، غلاف صغير
- *      لمن يقرأ أو يشاهد). الوجه يفتح ملفه، والغلاف يفتح بطاقة العمل.
- *   2. المجلس: صفّ واحد بوجوه أعضائه وآخر ما وصل فيه وعدد ما لم تره.
- *      المجلس نفسه صفحة أخرى؛ هذا بابه فقط.
- *   3. آخر ما صار: سطور خفيفة لا بطاقات — من خلّص ماذا، ومن رشّح ماذا —
- *      لقسمك الحالي (المانجا ترى المانجا، والأنمي يرى الأنمي). ضغطة مطوّلة
- *      على سطر: تفاعل، «إخفاء لدي»، و«حذف للجميع» لما هو لك.
+ *   1. الأصدقاء: وجوههم وحالهم الآن. من يقرأ/يشاهد يظهر تحت الشريط بسطر
+ *      فيه العمل نفسه (بطاقة العمل بلمسة) — أو «العمل مخفي» إن أخفاه.
+ *   2. المجلس: صفّ محادثة واحد (صورته، اسمه، آخر رسالة، غير المقروء). المجلس
+ *      نفسه شاشة أخرى؛ هذا بابه.
+ *   3. آخر ما صار: سطور لقسمك الحالي (المانجا ترى المانجا، والأنمي الأنمي)،
+ *      والمحادثة لكل الأقسام. ضغطة مطوّلة: إخفاء لدي، وحذف للجميع لما هو لك
+ *      (أو لكل شيء إن كنت المالك) — والخادم هو الحكم.
  *
- * كل ما هنا من المزامنة والحضور. لا بيانات مصطنعة.
+ * «نشاط القراءة ← إخفاء لدي» (الإعدادات) يُطبَّق هنا: مصفاتك أنت، لا تمسّ غيرك.
  */
 
 import { glyph } from './icons.js';
 import { displayTitle, refForTitle } from './work-ref.js';
-import { REACTIONS } from './majlis.js';
-import { gsap } from '../vendor/gsap.esm.js';
-
-const LONG_PRESS_MS = 420;
-const HIDDEN_KEY = (userId) => `vantara.feed.hidden.${userId}`;
-
-const MANGA_FILTERS = [
-  ['all', 'الكل'],
-  ['reading', 'قراءة'],
-  ['recs', 'ترشيحات'],
-  ['frames', 'فريمات'],
-];
-const ANIME_FILTERS = [
-  ['all', 'الكل'],
-  ['recs', 'ترشيحات ولحظات'],
-];
+import { actionList, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceState, pressable, roomInitial, shortAgo } from './social-kit.js';
 
 const VERB_COPY = {
-  CHAPTER_DONE: (p) => (p?.chapter != null ? `خلّص الفصل ${p.chapter}` : 'خلّص فصلًا'),
+  CHAPTER_DONE: (p) => (p?.chapter != null ? `خلّص الفصل ${p.chapter} من` : 'خلّص فصلًا من'),
+  EPISODE_DONE: (p) => (p?.episode != null ? `أنهى الحلقة ${p.episode} من` : 'أنهى حلقة من'),
   LIBRARY_ADD: () => 'أضاف لمكتبته',
   FAVORITED: () => 'أضاف للمفضلة',
   RATED_WORK: (p) => (p?.score ? `قيّم ${Math.round(p.score / 2)} من 5` : 'قيّم'),
   COMMENTED: () => 'علّق على',
 };
-const VERB_ICON = { CHAPTER_DONE: 'check', LIBRARY_ADD: 'library', FAVORITED: 'heart', RATED_WORK: 'star', COMMENTED: 'edit' };
+const COMPLETION = new Set(['CHAPTER_DONE', 'EPISODE_DONE']);
+const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
 
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text;
-  return n;
-};
-const parse = (text, fallback) => {
-  try {
-    return JSON.parse(text ?? '') ?? fallback;
-  } catch {
-    return fallback;
-  }
-};
-const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-const motion = () => (reduced() ? null : gsap);
-
-/** «قبل 5 د» قصيرة: تحت الوجه وبجانب السطر لا مكان لجملة. */
-export function shortAgo(at, now = Date.now()) {
-  if (!at) return '';
-  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
-  if (minutes < 1) return 'الآن';
-  if (minutes < 60) return `${minutes} د`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} س`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return 'أمس';
-  if (days < 7) return `${days} ي`;
-  return new Date(at).toLocaleDateString('ar', { day: 'numeric', month: 'short', numberingSystem: 'latn' });
+/** المصافي لكل قسم: المحادثة في الكل، والقراءة/المشاهدة لقسمها. */
+export function feedFilters(anime, readingHidden = false) {
+  return [
+    ['all', 'الكل'],
+    ['chat', 'الشات'],
+    ['recs', 'الترشيحات'],
+    ...(readingHidden ? [] : [['reading', anime ? 'المشاهدة' : 'القراءة']]),
+  ];
 }
 
 /**
- * أحداث «آخر ما صار» لقسم واحد، بعد ما حُذف للجميع وما أخفيته لديك.
- * منفصلة عن الرسم لتُختبر وحدها.
+ * أحداث «آخر ما صار» لقسم واحد: بلا المحذوف للجميع، وبلا ما أخفيته لديك،
+ * وبلا إنهاءات غيرك إن أخفيت «نشاط القراءة» لديك.
  */
-export function feedEvents(sync, { anime, filter, hidden = new Set(), limit = 80 }) {
-  const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
-  const onSide = (ref) => isAnime(ref) === anime;
+export function feedEvents(sync, { anime, filter, me, readingHidden = false, limit = 80 }) {
+  const hidden = new Set(sync.rows('majlis_hidden', (h) => h.user_id === me).map((h) => h.target));
   const out = [];
-  if (!anime) {
-    for (const f of sync.rows('frames', (x) => !x.removed)) out.push({ kind: 'frame', id: f.id, at: f.created_at, actor: f.from_id, row: f });
+  for (const m of sync.rows('majlis_messages', (x) => !x.deleted && (x.kind === 'text' || x.kind === 'voice'))) out.push({ kind: 'msg', id: m.id, at: m.created_at, actor: m.sender_id, row: m });
+  if (!anime) for (const f of sync.rows('frames', (x) => !x.removed)) out.push({ kind: 'frame', id: f.id, at: f.created_at, actor: f.from_id, row: f });
+  for (const r of sync.rows('recommendations', (x) => !x.removed && isAnime(x.series_ref) === anime)) out.push({ kind: 'rec', id: r.id, at: r.created_at, actor: r.from_id, row: r });
+  for (const a of sync.rows('activity', (x) => !x.removed && x.verb in VERB_COPY && isAnime(x.series_ref) === anime)) {
+    if (readingHidden && COMPLETION.has(a.verb) && a.actor_id !== me) continue;
+    out.push({ kind: 'activity', id: a.id, at: a.created_at, actor: a.actor_id, row: a });
   }
-  for (const r of sync.rows('recommendations', (x) => !x.removed && onSide(x.series_ref))) out.push({ kind: 'rec', id: r.id, at: r.created_at, actor: r.from_id, row: r });
-  for (const a of sync.rows('activity', (x) => !x.removed && x.verb in VERB_COPY && onSide(x.series_ref))) out.push({ kind: 'activity', id: a.id, at: a.created_at, actor: a.actor_id, row: a });
+  const bucket = { msg: 'chat', frame: 'chat', rec: 'recs', activity: 'reading' };
   return out
     .filter((e) => !hidden.has(`${e.kind}:${e.id}`))
-    .filter((e) => filter === 'all' || (filter === 'frames' && e.kind === 'frame') || (filter === 'recs' && e.kind === 'rec') || (filter === 'reading' && e.kind === 'activity'))
+    .filter((e) => filter === 'all' || bucket[e.kind] === filter)
     .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
     .slice(0, limit);
 }
 
 /**
  * @param {{
- *   sync: any, host: HTMLElement,
+ *   sync: any, host: HTMLElement, section: () => string,
  *   presence: () => Promise<any[]>,
  *   avatarNode: (person: object, size: number) => HTMLElement,
  *   mountImage: (container: HTMLElement, work: object) => Promise<unknown>,
  *   workFromRef: (ref: string, title?: string, cover?: string) => object,
  *   preview: (work: object, opts?: object) => void,
- *   openFrame: (id: string) => void,
- *   openProfile: (userId: string) => void,
- *   openMajlis: () => void,
+ *   openFrame: (id: string) => void, openProfile: (id: string) => void, openRoom: (focus?: string) => void,
  *   markSeen: (kind: string, id: string) => void,
- *   openSheet: (build: (body: HTMLElement) => unknown) => void,
- *   closeSheet: () => void,
- *   toast: (text: string) => void,
- *   section: () => 'manga' | 'anime',
- *   visible: () => boolean,
+ *   openSheet: Function, closeSheet: Function, toast: (t: string) => void,
+ *   visible: () => boolean, mediaUrl: (key: string) => string,
  * }} ctx
  */
 export function createFriends(ctx) {
   const { sync, host } = ctx;
-  const me = () => sync.user?.userId;
+  const kit = people(sync);
+  const me = kit.me;
   let presence = [];
   let timer = null;
   let filter = 'all';
-  let firstPaint = true;
-  const shownRows = new Set();
+  let entered = false;
+  const seenRows = new Set();
 
-  const profile = (userId) => sync.rows('profiles', (p) => p.user_id === userId)[0];
-  const nameOf = (userId) =>
-    userId === me() ? 'أنت' : profile(userId)?.display_name || sync.rows('accounts', (a) => a.user_id === userId)[0]?.username || 'صديق';
-  const personOf = (userId) => ({ userId, displayName: nameOf(userId), avatarKey: profile(userId)?.avatar_key ?? null });
-  const presenceOf = (userId) => presence.find((p) => p.userId === userId) ?? null;
-  const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
   const anime = () => ctx.section() === 'anime';
-  const watching = (p) => p?.screen === 'ANIME' || isAnime(p?.seriesRef);
-  const filters = () => (anime() ? ANIME_FILTERS : MANGA_FILTERS);
-  const friendIds = () =>
-    sync
-      .rows('accounts', () => true)
-      .map((a) => a.user_id)
-      .filter((id) => id !== me());
+  const settings = () => parse(sync.row?.('settings', me())?.data, {});
+  const readingHidden = () => settings().feedReading === 'hide';
+  const presenceOf = (id) => presence.find((p) => p.userId === id) ?? null;
+  const rank = (id) => ({ READING: 0, ONLINE: 1, IDLE: 2 })[presenceOf(id)?.status] ?? 3;
   const workOf = (ref, title, cover) => {
     const id = ref ?? refForTitle(title) ?? 'ext:عمل';
     const known = sync.rows('works', (w) => w.series_ref === id)[0];
     return ctx.workFromRef(id, known?.title ?? title, known?.cover_url ?? cover);
   };
+  const titleOfWork = (w, fallback) => displayTitle(w.id, w.title?.english) || fallback || 'عمل';
 
-  // ── «إخفاء لدي»: على هذا الجهاز، لا يمسّ ما يراه غيرك ──
-  const readHidden = () => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY(me())) ?? '[]'));
-    } catch {
-      return new Set();
-    }
-  };
-  function hideForMe(key) {
-    const set = readHidden();
-    set.add(key);
-    try {
-      localStorage.setItem(HIDDEN_KEY(me()), JSON.stringify([...set].slice(-500)));
-    } catch {
-      // تخزين ممتلئ: يختفي الآن فقط
-    }
+  // ───────────────────────── الأصدقاء ─────────────────────────
+
+  function face(id) {
+    const p = presenceOf(id);
+    const st = presenceState(p);
+    const b = pressable(el('button', `sx-pal sx-pal--${st.tone}`));
+    b.type = 'button';
+    const pic = el('span', 'sx-pal-pic');
+    pic.append(ctx.avatarNode(kit.personOf(id), 56));
+    if (st.tone !== 'off') pic.append(el('span', 'sx-dot'));
+    b.append(pic, nameNode(kit, id, { cls: 'sx-pal-name' }));
+    b.append(el('span', 'sx-pal-state', st.verb));
+    b.setAttribute('aria-label', `${kit.nameOf(id)}${st.verb ? `، ${st.verb}` : ''}`);
+    b.onclick = () => ctx.openProfile(id);
+    return b;
   }
 
-  // ── لمسة ضاغطة: كل ما يُضغط ينكمش قليلًا ويرجع بنابض ──
-  function pressable(node) {
-    node.addEventListener('pointerdown', () => motion()?.to(node, { scale: 0.965, duration: 0.12, ease: 'power2.out' }));
-    const up = () => motion()?.to(node, { scale: 1, duration: 0.45, ease: 'elastic.out(1, 0.5)' });
-    node.addEventListener('pointerup', up);
-    node.addEventListener('pointercancel', up);
-    node.addEventListener('pointerleave', up);
-    return node;
-  }
-
-  // ───────────────────────── الشريط ─────────────────────────
-
-  function stateOf(userId) {
-    const p = presenceOf(userId);
-    const status = p?.status ?? 'OFFLINE';
-    if (status === 'READING') return { tone: 'live', text: watching(p) ? 'يشاهد' : 'يقرأ', p };
-    if (status === 'ONLINE') return { tone: 'on', text: 'متصل', p };
-    if (status === 'IDLE') return { tone: 'idle', text: 'خامل', p };
-    return { tone: 'off', text: p?.lastSeenAt ? shortAgo(p.lastSeenAt) : '', p };
-  }
-  const rank = (id) => ({ READING: 0, ONLINE: 1, IDLE: 2 })[presenceOf(id)?.status] ?? 3;
-
-  function friendFace(userId) {
-    const { tone, text, p } = stateOf(userId);
-    const item = el('div', `fr-pal fr-pal--${tone}`);
-    const face = pressable(el('button', 'fr-pal-face'));
-    face.type = 'button';
-    face.setAttribute('aria-label', `ملف ${nameOf(userId)}${text ? `، ${text}` : ''}`);
-    const ring = el('span', 'fr-pal-ring');
-    ring.append(ctx.avatarNode(personOf(userId), 62));
-    face.append(ring);
-    if (tone === 'on' || tone === 'idle') face.append(el('span', 'fr-dot'));
-    face.onclick = () => ctx.openProfile(userId);
-    item.append(face);
-    // يقرأ الآن: غلاف صغير على كتف الوجه، يفتح بطاقة العمل
-    if (tone === 'live' && p?.seriesTitle) {
-      const work = workOf(p.seriesRef, p.seriesTitle);
-      const chip = pressable(el('button', 'fr-pal-work'));
-      chip.type = 'button';
-      chip.setAttribute('aria-label', `${text} ${p.seriesTitle}`);
-      void ctx.mountImage(chip, work);
-      chip.onclick = (e) => {
-        e.stopPropagation();
-        ctx.preview(work, p.chapterLabel ? { chapter: { label: p.chapterLabel, number: p.chapterNumber ?? null } } : {});
-      };
-      item.append(chip);
+  /** من يقرأ/يشاهد الآن في قسمك: سطر بالعمل، أو «العمل مخفي». */
+  function nowRows() {
+    const rows = presence.filter((p) => p.status === 'READING' && p.userId !== me() && presenceState(p).watching === anime());
+    if (!rows.length) return null;
+    const box = el('div', 'sx-now');
+    for (const p of rows) {
+      const st = presenceState(p);
+      const row = el('button', 'sx-now-row');
+      row.type = 'button';
+      const text = el('span', 'sx-now-text');
+      const who = el('span', 'sx-now-who');
+      who.append(nameNode(kit, p.userId), document.createTextNode(` ${st.verb} الآن`));
+      text.append(who);
+      if (p.workHidden || !p.seriesTitle) {
+        const hid = el('span', 'sx-now-title sx-now-title--hidden');
+        hid.innerHTML = glyph('lock', { size: 13 });
+        hid.append(el('span', null, 'العمل مخفي'));
+        text.append(hid);
+        row.disabled = true;
+        row.append(el('span', 'sx-now-live'), text);
+      } else {
+        const work = workOf(p.seriesRef, p.seriesTitle);
+        const cover = el('span', 'sx-cover sx-cover--sm');
+        void ctx.mountImage(cover, work);
+        const title = el('bdi', 'sx-now-title', p.seriesTitle);
+        text.append(title);
+        if (p.chapterLabel) text.append(el('span', 'sx-now-sub', p.chapterLabel));
+        row.append(cover, text);
+        row.onclick = () => ctx.preview(work, p.chapterLabel ? { chapter: { label: p.chapterLabel, number: p.chapterNumber ?? null } } : {});
+        pressable(row, 0.985);
+      }
+      box.append(row);
     }
-    const name = el('bdi', 'fr-pal-name', nameOf(userId));
-    item.append(name);
-    if (text) item.append(el('span', 'fr-pal-state', text));
-    return item;
-  }
-
-  /** من يقرأ/يشاهد الآن في قسمك: العمل نفسه بطاقة صغيرة تُفتح. */
-  function nowRow() {
-    const now = presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me() && watching(p) === anime());
-    if (!now.length) return null;
-    const row = el('div', 'fr-now');
-    for (const p of now) {
-      const work = workOf(p.seriesRef, p.seriesTitle);
-      const b = pressable(el('button', 'fr-now-card'));
-      b.type = 'button';
-      const cover = el('span', 'fr-now-cover');
-      void ctx.mountImage(cover, work);
-      const copy = el('span', 'fr-now-copy');
-      const who = el('span', 'fr-now-who');
-      who.append(el('i', 'fr-live'), el('span', null, `${nameOf(p.userId)} ${watching(p) ? 'يشاهد' : 'يقرأ'}`));
-      copy.append(who, el('bdi', 'fr-now-title', p.seriesTitle));
-      if (p.chapterLabel) copy.append(el('span', 'fr-now-sub', p.chapterLabel));
-      b.append(cover, copy);
-      b.onclick = () => ctx.preview(work, p.chapterLabel ? { chapter: { label: p.chapterLabel, number: p.chapterNumber ?? null } } : {});
-      row.append(b);
-    }
-    return row;
+    return box;
   }
 
   // ───────────────────────── باب المجلس ─────────────────────────
 
-  /** ما لم تره من رسائل المجلس (فريمات وترشيحات لك أو للجميع). */
-  function unseen() {
+  function roomLast() {
+    const hidden = new Set(sync.rows('majlis_hidden', (h) => h.user_id === me()).map((h) => h.target));
+    const items = [
+      ...sync.rows('majlis_messages', (m) => !hidden.has(`msg:${m.id}`)).map((m) => ({
+        at: m.created_at,
+        who: m.sender_id,
+        text: m.deleted ? 'حُذفت رسالة' : m.kind === 'voice' ? 'رسالة صوتية' : m.body,
+        voice: m.kind === 'voice' && !m.deleted,
+      })),
+      ...sync.rows('recommendations', (r) => !r.removed && !hidden.has(`rec:${r.id}`)).map((r) => ({ at: r.created_at, who: r.from_id, text: `رشّح ${r.series_title || 'عملًا'}` })),
+      ...sync.rows('frames', (f) => !f.removed && !hidden.has(`frame:${f.id}`)).map((f) => ({ at: f.created_at, who: f.from_id, text: `فريم من ${f.series_title || 'عمل'}` })),
+    ];
+    return items.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0] ?? null;
+  }
+  function unread() {
+    const readAt = sync.rows('majlis_reads', (r) => r.user_id === me())[0]?.read_at ?? 0;
     const mine = me();
-    const seen = (kind, id) => sync.rows('majlis_receipts', (r) => r.target_kind === kind && r.target_id === id && r.user_id === mine && r.seen_at).length > 0;
-    let n = 0;
-    for (const f of sync.rows('frames', (x) => !x.removed && x.from_id !== mine)) if (!seen('frame', f.id)) n++;
-    for (const r of sync.rows('recommendations', (x) => !x.removed && x.from_id !== mine)) if (!seen('rec', r.id)) n++;
-    return n;
+    const after = (x, who) => (x.created_at ?? 0) > readAt && who !== mine;
+    return (
+      sync.rows('majlis_messages', (m) => !m.deleted && after(m, m.sender_id)).length +
+      sync.rows('recommendations', (r) => !r.removed && after(r, r.from_id)).length +
+      sync.rows('frames', (f) => !f.removed && after(f, f.from_id)).length
+    );
   }
-  function lastMessage() {
-    const frames = sync.rows('frames', (x) => !x.removed).map((f) => ({ at: f.created_at, who: f.from_id, text: `أرسل فريم من ${f.series_title || 'عمل'}` }));
-    const recs = sync
-      .rows('recommendations', (x) => !x.removed)
-      .map((r) => ({ at: r.created_at, who: r.from_id, text: r.message ? r.message : `رشّح ${r.series_title || 'عملًا'}` }));
-    return [...frames, ...recs].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0] ?? null;
-  }
-  function majlisDoor() {
-    const members = [me(), ...friendIds()];
-    const online = friendIds().filter((id) => rank(id) < 3).length;
-    const door = pressable(el('button', 'fr-door'));
-    door.type = 'button';
-    const crest = el('span', 'fr-door-crest');
-    const faces = el('span', 'fr-door-faces');
-    for (const id of friendIds()
-      .sort((a, b) => rank(a) - rank(b))
-      .slice(0, 3)) {
-      const f = el('span', 'fr-door-face');
-      f.append(ctx.avatarNode(personOf(id), 30));
-      faces.append(f);
+  function door() {
+    const meta = sync.rows('majlis_meta', (m) => m.id === 'main')[0];
+    const b = pressable(el('button', 'sx-door'), 0.985);
+    b.type = 'button';
+    const pic = el('span', 'sx-door-pic');
+    if (meta?.avatar_key) {
+      const img = new Image();
+      img.alt = '';
+      img.src = ctx.mediaUrl(meta.avatar_key);
+      pic.append(img);
+    } else {
+      pic.classList.add('is-initial');
+      pic.textContent = roomInitial(meta?.name);
     }
-    faces.dataset.count = String(faces.childElementCount);
-    crest.append(faces);
-    const copy = el('span', 'fr-door-copy');
-    const title = el('span', 'fr-door-title');
-    title.append(el('b', null, 'المجلس'), el('span', 'fr-door-count', `${members.length} أعضاء${online ? ` · ${online} متصل` : ''}`));
-    copy.append(title);
-    const last = lastMessage();
-    const line = el('span', 'fr-door-line');
+    const text = el('span', 'sx-door-text');
+    const top = el('span', 'sx-door-top');
+    top.append(el('b', 'sx-door-name', meta?.name || 'المجلس'));
+    const last = roomLast();
+    if (last) top.append(el('time', 'sx-door-time', shortAgo(last.at)));
+    const line = el('span', 'sx-door-line');
     if (last) {
-      line.append(el('bdi', 'fr-door-who', `${nameOf(last.who)}:`), document.createTextNode(' '));
+      line.append(nameNode(kit, last.who, { cls: 'sx-door-who', you: true }), document.createTextNode(': '));
+      if (last.voice) line.insertAdjacentHTML('beforeend', glyph('mic', { size: 13 }));
       const t = el('bdi', null, last.text);
       line.append(t);
-    } else line.textContent = 'رشّح عملًا أو أرسل فريمًا، ويبدأ الكلام';
-    copy.append(line);
-    const end = el('span', 'fr-door-end');
-    if (last) end.append(el('time', 'fr-door-time', shortAgo(last.at)));
-    const count = unseen();
-    if (count) end.append(el('span', 'fr-badge', count > 99 ? '99+' : String(count)));
-    else end.insertAdjacentHTML('beforeend', `<span class="fr-door-go">${glyph('chevron', { size: 18 })}</span>`);
-    door.append(crest, copy, end);
-    door.setAttribute('aria-label', `المجلس${count ? `، ${count} جديد` : ''}`);
-    door.onclick = () => ctx.openMajlis();
-    return door;
+    } else line.textContent = `${kit.memberIds().length} أعضاء · ابدأ الكلام`;
+    const bottom = el('span', 'sx-door-bottom');
+    bottom.append(line);
+    const n = unread();
+    if (n) bottom.append(el('span', 'sx-unread', n > 99 ? '99+' : String(n)));
+    text.append(top, bottom);
+    b.append(pic, text);
+    b.setAttribute('aria-label', `${meta?.name || 'المجلس'}${n ? `، ${n} غير مقروءة` : ''}`);
+    b.onclick = () => ctx.openRoom();
+    return b;
   }
 
   // ───────────────────────── آخر ما صار ─────────────────────────
 
-  function reactionSummary(kind, id) {
-    const rows = sync.rows('majlis_reactions', (r) => r.target_kind === kind && r.target_id === id && r.emoji);
-    if (!rows.length) return null;
-    const counts = new Map();
-    for (const r of rows) counts.set(r.emoji, (counts.get(r.emoji) ?? 0) + 1);
-    const span = el('span', 'fr-row-reacts');
-    for (const [emoji, n] of [...counts].slice(0, 3)) span.append(el('span', null, n > 1 ? `${emoji}${n}` : emoji));
-    return span;
-  }
-
-  function rowOf(e) {
+  function feedRow(e) {
     const r = e.row;
-    const row = el('div', 'fr-row');
+    const row = el('div', 'sx-row');
     row.dataset.key = `${e.kind}:${e.id}`;
-    const face = el('span', 'fr-row-face');
-    face.append(ctx.avatarNode(personOf(e.actor), 36));
-    const icon = el('span', `fr-row-icon fr-row-icon--${e.kind === 'activity' ? r.verb.toLowerCase() : e.kind}`);
-    icon.innerHTML = glyph(e.kind === 'frame' ? 'camera' : e.kind === 'rec' ? 'send' : (VERB_ICON[r.verb] ?? 'activity'), { size: 10 });
-    face.append(icon);
-
-    const text = el('span', 'fr-row-text');
-    const line = el('span', 'fr-row-line');
-    line.append(el('bdi', 'fr-row-name', nameOf(e.actor)), document.createTextNode(' '));
+    const main = el('button', 'sx-row-main');
+    main.type = 'button';
+    const pic = el('span', 'sx-row-pic');
+    pic.append(ctx.avatarNode(kit.personOf(e.actor), 34));
+    const text = el('span', 'sx-row-text');
+    const line = el('span', 'sx-row-line');
+    line.append(nameNode(kit, e.actor, { you: true }), document.createTextNode(' '));
     let work = null;
     let chapter = null;
-    if (e.kind === 'activity') {
+    let sub = null;
+    if (e.kind === 'msg') {
+      line.append(document.createTextNode('في المجلس'));
+      sub = r.kind === 'voice' ? 'رسالة صوتية' : r.body;
+    } else if (e.kind === 'frame') {
+      line.append(document.createTextNode('أرسل فريم من'));
+      work = workOf(null, r.series_title, r.cover_url);
+      chapter = r.chapter_label || null;
+    } else if (e.kind === 'rec') {
+      const to = !r.to_id ? 'للكل' : r.to_id === me() ? 'لك' : `لـ${kit.nameOf(r.to_id)}`;
+      line.append(document.createTextNode(`رشّح ${to}`));
+      work = workOf(r.series_ref, r.series_title, r.cover_url);
+      chapter = r.chapter_label || null;
+      sub = r.message || null;
+    } else {
       line.append(document.createTextNode(VERB_COPY[r.verb](parse(r.payload, {}))));
       if (r.series_ref) work = workOf(r.series_ref);
-    } else if (e.kind === 'rec') {
-      chapter = r.chapter_label ? { label: r.chapter_label, number: r.chapter_number ?? null } : null;
-      const moment = isAnime(r.series_ref) && chapter?.label.includes('·');
-      const to = !r.to_id ? 'للكل' : r.to_id === me() ? 'لك' : `لـ${nameOf(r.to_id)}`;
-      line.append(document.createTextNode(moment ? `شارك لحظة ${to}` : `رشّح ${to}`));
-      work = workOf(r.series_ref, r.series_title, r.cover_url);
-    } else {
-      line.append(document.createTextNode('أرسل فريم'));
-      work = workOf(null, r.series_title, r.cover_url);
+    }
+    if (work) {
+      const title = el('bdi', 'sx-row-work', titleOfWork(work, r.series_title));
+      line.append(document.createTextNode(' '), title);
     }
     text.append(line);
-    const title = work ? displayTitle(work.id, work.title?.english) || r.series_title : null;
-    const meta = el('span', 'fr-row-meta');
-    if (title) meta.append(el('bdi', 'fr-row-work', title));
-    const sub = e.kind === 'frame' ? r.chapter_label : chapter?.label;
-    if (sub) meta.append(el('span', 'fr-row-sub', sub));
-    if (meta.childNodes.length) text.append(meta);
-    if (e.kind === 'rec' && r.message) {
-      const q = el('span', 'fr-row-quote', r.message);
+    if (chapter) text.append(el('span', 'sx-row-meta', chapter));
+    if (sub) {
+      const q = el('span', 'sx-row-quote', sub);
       q.dir = 'auto';
       text.append(q);
     }
-    const foot = el('span', 'fr-row-foot');
-    foot.append(el('time', 'fr-row-time', shortAgo(e.at)));
-    const reacts = reactionSummary(e.kind, e.id);
-    if (reacts) foot.append(reacts);
-    text.append(foot);
-
-    const main = el('button', 'fr-row-main');
-    main.type = 'button';
-    main.append(face, text);
+    text.append(el('time', 'sx-row-time', shortAgo(e.at)));
+    main.append(pic, text);
     if (work) {
-      const thumb = el('span', 'fr-row-cover');
-      void ctx.mountImage(thumb, work);
-      main.append(thumb);
+      const cover = el('span', 'sx-cover');
+      void ctx.mountImage(cover, work);
+      main.append(cover);
     }
     main.onclick = () => {
-      if (main.dataset.longPressed) return void delete main.dataset.longPressed;
+      if (e.kind === 'msg') return ctx.openRoom(`msg:${r.id}`);
       if (e.kind === 'frame') {
         ctx.markSeen('frame', r.id);
-        ctx.openFrame(r.id);
-      } else if (work) {
+        return ctx.openFrame(r.id);
+      }
+      if (work) {
         if (e.kind === 'rec') ctx.markSeen('rec', r.id);
-        ctx.preview(work, chapter ? { chapter } : {});
+        ctx.preview(work, chapter ? { chapter: { label: chapter, number: r.chapter_number ?? null } } : {});
       }
     };
-    bindLongPress(main, () => openActions(e, row, work, chapter));
+    onLongPress(main, () => openRowActions(e, row, work));
     row.append(main);
     return row;
   }
 
-  function bindLongPress(node, onLong) {
-    let t = null;
-    let start = null;
-    node.addEventListener('pointerdown', (ev) => {
-      start = { x: ev.clientX, y: ev.clientY };
-      motion()?.to(node, { scale: 0.975, duration: 0.35, ease: 'power2.out' });
-      t = setTimeout(() => {
-        t = null;
-        node.dataset.longPressed = '1';
-        navigator.vibrate?.(12);
-        motion()?.to(node, { scale: 1, duration: 0.5, ease: 'elastic.out(1, 0.45)' });
-        onLong();
-      }, LONG_PRESS_MS);
-    });
-    const cancel = () => {
-      clearTimeout(t);
-      t = null;
-      motion()?.to(node, { scale: 1, duration: 0.4, ease: 'elastic.out(1, 0.5)' });
-    };
-    node.addEventListener('pointermove', (ev) => {
-      if (start && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 8) cancel();
-    });
-    node.addEventListener('pointerup', cancel);
-    node.addEventListener('pointercancel', cancel);
-    node.addEventListener('contextmenu', (ev) => {
-      ev.preventDefault();
-      cancel();
-      node.dataset.longPressed = '1';
-      onLong();
-    });
-  }
-
-  /** ورقة السطر: تفاعل سريع، ثم فتح، إخفاء لدي، وحذف للجميع لما هو لك. */
-  function openActions(e, rowNode, work, chapter) {
-    const mine = e.actor === me();
-    const kind = e.kind;
+  function openRowActions(e, rowNode, work) {
+    const canDelete = e.actor === me() || kit.isOwner(me());
+    const target = `${e.kind}:${e.id}`;
     ctx.openSheet((body) => {
-      body.classList.add('fr-sheet');
-      const reacts = el('div', 'fr-sheet-reacts');
-      const current = sync.rows('majlis_reactions', (r) => r.target_kind === kind && r.target_id === e.id && r.user_id === me())[0]?.emoji ?? null;
-      REACTIONS.forEach((emoji) => {
-        const b = el('button', `fr-sheet-react${emoji === current ? ' on' : ''}`, emoji);
-        b.type = 'button';
-        b.onclick = () => {
-          sync.enqueue('majlis.react', { targetKind: kind, targetId: e.id, emoji: emoji === current ? null : emoji });
-          navigator.vibrate?.(8);
-          ctx.closeSheet();
-        };
-        reacts.append(b);
-      });
-      body.append(reacts);
-      const list = el('div', 'fr-sheet-list');
-      const action = (icon, label, run, danger = false) => {
-        const b = el('button', `fr-sheet-item${danger ? ' fr-sheet-item--danger' : ''}`);
-        b.type = 'button';
-        b.innerHTML = glyph(icon, { size: 20 });
-        b.append(el('span', null, label));
-        b.onclick = () => {
-          ctx.closeSheet();
-          run();
-        };
-        list.append(b);
-      };
-      if (kind === 'frame') action('camera', 'افتح الفريم', () => ctx.openFrame(e.id));
-      else if (work) action('book', 'افتح العمل', () => ctx.preview(work, chapter ? { chapter } : {}));
-      action('eye', 'إخفاء لدي', () => {
-        hideForMe(`${kind}:${e.id}`);
-        collapse(rowNode, () => ctx.toast('اختفى من عندك، وباقي عند غيرك'));
-      });
-      if (mine) {
-        action(
-          'trash',
-          'حذف للجميع',
-          () => {
-            sync.enqueue('majlis.unsend', { targetKind: kind, targetId: e.id });
-            collapse(rowNode, () => ctx.toast('انحذف عند الكل'));
-          },
-          true,
-        );
-      }
-      body.append(list);
-      const g = motion();
-      if (g) {
-        g.fromTo(reacts.children, { y: 14, opacity: 0, scale: 0.6 }, { y: 0, opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(2)', stagger: 0.035 });
-        g.fromTo(list.children, { x: -12, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out', stagger: 0.05, delay: 0.08 });
-      }
+      body.append(
+        actionList(
+          [
+            e.kind === 'msg' ? { icon: glyph('members'), label: 'افتح في المجلس', run: () => ctx.openRoom(target) } : null,
+            work && e.kind !== 'msg' ? { icon: glyph('book'), label: 'افتح العمل', run: () => ctx.preview(work) } : null,
+            {
+              icon: glyph('eye'),
+              label: 'إخفاء لدي',
+              run: () => {
+                sync.enqueue('majlis.delete', { target, scope: 'me' });
+                collapse(rowNode, 'اختفى من عندك فقط');
+              },
+            },
+            canDelete
+              ? {
+                  icon: glyph('trash'),
+                  label: e.actor === me() ? 'حذف للجميع' : 'حذف للجميع (المالك)',
+                  danger: true,
+                  run: () => {
+                    sync.enqueue('majlis.delete', { target, scope: 'everyone' });
+                    collapse(rowNode, 'انحذف عند الكل');
+                  },
+                }
+              : null,
+          ],
+          ctx.closeSheet,
+        ),
+      );
     });
   }
 
-  function collapse(node, done) {
+  function collapse(node, message) {
     const g = motion();
-    if (!g) {
+    const done = () => {
       render();
-      return done();
-    }
-    g.timeline({
-      onComplete: () => {
-        render();
-        done();
-      },
-    })
-      .to(node, { x: 40, opacity: 0, duration: 0.22, ease: 'power2.in' })
-      .to(node, { height: 0, marginTop: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0, duration: 0.26, ease: 'power3.inOut' });
+      ctx.toast(message);
+    };
+    if (!g) return done();
+    g.timeline({ onComplete: done })
+      .to(node, { opacity: 0, duration: 0.16, ease: 'power1.in' })
+      .to(node, { height: 0, paddingTop: 0, paddingBottom: 0, duration: 0.22, ease: 'power2.inOut' });
   }
 
-  function dayLabel(at) {
-    const start = new Date().setHours(0, 0, 0, 0);
-    if (at >= start) return 'اليوم';
-    if (at >= start - 86_400_000) return 'أمس';
-    return new Date(at).toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', numberingSystem: 'latn' });
-  }
-
-  function filterBar(onPick) {
-    const bar = el('div', 'fr-chips');
+  function tabs(onPick) {
+    const bar = el('div', 'sx-tabs');
     bar.setAttribute('role', 'tablist');
-    const pill = el('span', 'fr-chip-pill');
-    bar.append(pill);
-    for (const [k, label] of filters()) {
-      const c = el('button', `fr-chip${k === filter ? ' active' : ''}`, label);
-      c.type = 'button';
-      c.setAttribute('role', 'tab');
-      c.setAttribute('aria-selected', String(k === filter));
-      c.dataset.key = k;
-      c.onclick = () => {
+    const line = el('span', 'sx-tabs-line');
+    for (const [k, label] of feedFilters(anime(), readingHidden())) {
+      const t = el('button', `sx-tab${k === filter ? ' is-on' : ''}`, label);
+      t.type = 'button';
+      t.setAttribute('role', 'tab');
+      t.setAttribute('aria-selected', String(k === filter));
+      t.onclick = () => {
         if (filter === k) return;
         filter = k;
-        for (const x of bar.querySelectorAll('.fr-chip')) {
-          x.classList.toggle('active', x === c);
-          x.setAttribute('aria-selected', String(x === c));
+        for (const x of bar.querySelectorAll('.sx-tab')) {
+          x.classList.toggle('is-on', x === t);
+          x.setAttribute('aria-selected', String(x === t));
         }
-        movePill(bar, true);
+        placeLine(bar, true);
         onPick();
       };
-      bar.append(c);
+      bar.append(t);
     }
-    requestAnimationFrame(() => movePill(bar, false));
+    bar.append(line);
+    requestAnimationFrame(() => placeLine(bar, false));
     return bar;
   }
-  /** الحبة المضيئة تنزلق تحت المصفاة المختارة، لا تقفز. */
-  function movePill(bar, animate) {
-    const active = bar.querySelector('.fr-chip.active');
-    const pill = bar.querySelector('.fr-chip-pill');
-    if (!active || !pill) return;
-    const to = { x: active.offsetLeft, width: active.offsetWidth };
+  /** الخط تحت المصفاة المختارة ينزلق إليها. */
+  function placeLine(bar, animate) {
+    const on = bar.querySelector('.sx-tab.is-on');
+    const line = bar.querySelector('.sx-tabs-line');
+    if (!on || !line) return;
+    const to = { x: on.offsetLeft + 10, width: Math.max(0, on.offsetWidth - 20) };
     const g = motion();
-    if (animate && g) g.to(pill, { ...to, duration: 0.42, ease: 'expo.out' });
-    else Object.assign(pill.style, { transform: `translateX(${to.x}px)`, width: `${to.width}px` });
+    if (animate && g) g.to(line, { ...to, duration: 0.3, ease: 'power3.out' });
+    else Object.assign(line.style, { transform: `translateX(${to.x}px)`, width: `${to.width}px` });
   }
 
   function feedList() {
-    const list = el('div', 'fr-feed-list');
-    const events = feedEvents(sync, { anime: anime(), filter, hidden: readHidden() });
+    const list = el('div', 'sx-feed');
+    const events = feedEvents(sync, { anime: anime(), filter, me: me(), readingHidden: readingHidden() });
     if (!events.length) {
-      const empty = el('div', 'fr-empty');
-      empty.innerHTML = `<span class="fr-empty-art">${glyph(filter === 'recs' ? 'send' : filter === 'frames' ? 'camera' : 'activity', { size: 26 })}</span>`;
-      empty.append(
-        el('b', null, filter === 'recs' ? 'أول ترشيح بيظهر هنا' : filter === 'frames' ? 'ما وصل فريم بعد' : 'لسه ما صار شي هنا'),
-        el('span', null, anime() ? 'رشّح أنمي، أو شارك لحظة من المشغّل.' : 'رشّح عملًا، أو أرسل فريمًا من القارئ.'),
-      );
+      const empty = el('p', 'sx-empty', filter === 'recs' ? 'أول ترشيح بيظهر هنا' : filter === 'chat' ? 'المجلس هادي. قل شي' : 'لسه ما صار شي هنا');
       list.append(empty);
       return list;
     }
+    // رسائل المجلس المتتالية سطرٌ واحد: «آخر ما صار» ملخّص، والمحادثة نفسها في المجلس
     let day = null;
-    for (const e of events) {
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
       const d = dayLabel(e.at ?? 0);
       if (d !== day) {
         day = d;
-        list.append(el('div', 'fr-day', d));
+        list.append(el('div', 'sx-day', d));
       }
-      list.append(rowOf(e));
+      if (e.kind === 'msg') {
+        const run = [e];
+        while (events[i + 1]?.kind === 'msg' && dayLabel(events[i + 1].at ?? 0) === d) run.push(events[++i]);
+        list.append(run.length > 1 ? chatRun(run) : feedRow(e));
+        continue;
+      }
+      list.append(feedRow(e));
     }
     return list;
   }
 
+  /** عدة رسائل متتالية: من تكلّم، وآخر ما قيل، وكم رسالة. */
+  function chatRun(run) {
+    const last = run[0];
+    const row = el('div', 'sx-row');
+    row.dataset.key = `run:${last.id}`;
+    const main = el('button', 'sx-row-main');
+    main.type = 'button';
+    const pics = el('span', 'sx-row-pics');
+    const who = [...new Set(run.map((e) => e.actor))];
+    for (const id of who.slice(0, 3)) pics.append(ctx.avatarNode(kit.personOf(id), 26));
+    const text = el('span', 'sx-row-text');
+    const line = el('span', 'sx-row-line');
+    who.slice(0, 3).forEach((id, i) => {
+      if (i) line.append(document.createTextNode('، '));
+      line.append(nameNode(kit, id, { you: true }));
+    });
+    line.append(document.createTextNode(` في المجلس · ${run.length} رسائل`));
+    const q = el('span', 'sx-row-quote', last.row.kind === 'voice' ? 'رسالة صوتية' : last.row.body);
+    q.dir = 'auto';
+    text.append(line, q, el('time', 'sx-row-time', shortAgo(last.at)));
+    main.append(pics, text);
+    main.onclick = () => ctx.openRoom(`msg:${last.id}`);
+    row.append(main);
+    return row;
+  }
+
   // ───────────────────────── الرسم ─────────────────────────
 
-  function section(title, extra) {
-    const head = el('div', 'fr-head');
-    head.append(el('h2', 'fr-title', title));
-    if (extra) head.append(extra);
-    return head;
+  function heading(text, extra) {
+    const h = el('div', 'sx-heading');
+    h.append(el('h2', null, text));
+    if (extra) h.append(extra);
+    return h;
   }
 
   function render() {
-    // إعادة الرسم (حضور كل 15 ثانية، مزامنة) لا ترجع الشريط لأوله تحت إصبعك
-    const scrolls = [...host.querySelectorAll('.fr-strip, .fr-now, .fr-chips')].map((n) => [n.className, n.scrollLeft]);
+    const keepScroll = host.querySelector('.sx-strip')?.scrollLeft ?? 0;
     const parts = [];
-    const ids = friendIds().sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b), 'ar'));
+    const ids = kit.friendIds().sort((a, b) => rank(a) - rank(b) || kit.nameOf(a).localeCompare(kit.nameOf(b), 'ar'));
 
-    // ١. الشريط
-    const top = el('section', 'fr-top');
+    const friends = el('section', 'sx-section sx-friends');
+    const live = ids.filter((id) => rank(id) < 3).length;
+    friends.append(heading('الأصدقاء', el('span', 'sx-heading-meta', live ? `${live} الآن` : '')));
     if (ids.length) {
-      const live = ids.filter((id) => rank(id) < 3).length;
-      top.append(section('الأصدقاء', el('span', 'fr-head-meta', live ? `${live} متصل الآن` : `${ids.length}`)));
-      const strip = el('div', 'fr-strip');
-      strip.append(...ids.map(friendFace));
-      top.append(strip);
-      const now = nowRow();
-      if (now) top.append(now);
-    } else {
-      const empty = el('div', 'fr-empty fr-empty--top');
-      empty.innerHTML = `<span class="fr-empty-art">${glyph('users', { size: 26 })}</span>`;
-      empty.append(el('b', null, 'ما وصل أحد بعد'), el('span', null, 'أصدقاؤك يظهرون هنا أول ما يدخلون.'));
-      top.append(empty);
-    }
-    parts.push(top);
+      const strip = el('div', 'sx-strip');
+      strip.append(...ids.map(face));
+      friends.append(strip);
+      const now = nowRows();
+      if (now) friends.append(now);
+    } else friends.append(el('p', 'sx-empty', 'أصدقاؤك يظهرون هنا أول ما يدخلون'));
+    parts.push(friends);
 
-    // ٢. باب المجلس
-    const door = el('section', 'fr-door-wrap');
-    door.append(majlisDoor());
-    parts.push(door);
+    const room = el('section', 'sx-section sx-room');
+    room.append(door());
+    parts.push(room);
 
-    // ٣. آخر ما صار
-    const feed = el('section', 'fr-feed');
-    if (!filters().some(([k]) => k === filter)) filter = 'all';
+    const feed = el('section', 'sx-section sx-feed-section');
+    if (!feedFilters(anime(), readingHidden()).some(([k]) => k === filter)) filter = 'all';
     let list = feedList();
-    const bar = filterBar(() => {
+    const bar = tabs(() => {
       const next = feedList();
       const g = motion();
-      if (g) {
-        g.to(list, {
-          opacity: 0,
-          y: 8,
-          duration: 0.14,
-          ease: 'power2.in',
-          onComplete: () => {
-            list.replaceWith(next);
-            list = next;
-            enterRows(next, true);
-          },
-        });
-      } else {
+      if (!g) {
         list.replaceWith(next);
         list = next;
+        return;
       }
+      g.to(list, {
+        opacity: 0,
+        duration: 0.12,
+        onComplete: () => {
+          list.replaceWith(next);
+          list = next;
+          reveal([...next.children].slice(0, 14), 0);
+        },
+      });
     });
-    feed.append(section('آخر ما صار'), bar, list);
+    feed.append(heading('آخر ما صار'), bar, list);
     parts.push(feed);
 
     host.replaceChildren(...parts);
-    for (const [cls, left] of scrolls) {
-      const n = host.querySelector(`.${cls.split(' ')[0]}`);
-      if (n) n.scrollLeft = left;
-    }
-    if (firstPaint) {
-      firstPaint = false;
-      entrance();
-    } else enterRows(list, false);
-  }
+    const strip = host.querySelector('.sx-strip');
+    if (strip) strip.scrollLeft = keepScroll;
 
-  /** أول دخول: الوجوه تطلع واحدًا واحدًا، ثم الباب، ثم السطور. */
-  function entrance() {
-    const g = motion();
-    const rows = [...host.querySelectorAll('.fr-row')];
-    for (const r of rows) shownRows.add(r.dataset.key);
-    if (!g) return;
-    const faces = host.querySelectorAll('.fr-pal');
-    g.timeline()
-      .fromTo(host.querySelectorAll('.fr-head'), { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power3.out', stagger: 0.08, clearProps: 'all' }, 0)
-      .fromTo(faces, { opacity: 0, y: 18, scale: 0.82 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: 'back.out(1.7)', stagger: 0.06, clearProps: 'all' }, 0.05)
-      .fromTo(host.querySelectorAll('.fr-now-card'), { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.55, ease: 'expo.out', stagger: 0.06, clearProps: 'all' }, 0.2)
-      .fromTo(host.querySelector('.fr-door'), { opacity: 0, y: 22, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: 'expo.out', clearProps: 'all' }, 0.18)
-      .fromTo(rows.slice(0, 12), { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out', stagger: 0.04, clearProps: 'all' }, 0.3);
-    const badge = host.querySelector('.fr-badge');
-    if (badge) g.fromTo(badge, { scale: 0 }, { scale: 1, duration: 0.6, ease: 'back.out(3)', delay: 0.7, clearProps: 'all' });
-  }
-  /** سطر جديد وصل والصفحة مفتوحة: ينزلق داخلًا ويتوهّج لحظة. */
-  function enterRows(list, all) {
-    const g = motion();
-    const rows = [...list.querySelectorAll('.fr-row')];
-    const fresh = all ? rows.slice(0, 12) : rows.filter((r) => !shownRows.has(r.dataset.key));
-    for (const r of rows) shownRows.add(r.dataset.key);
-    if (!g || !fresh.length) {
-      if (g) g.set(list, { clearProps: 'opacity,transform' });
-      return;
+    const rows = [...host.querySelectorAll('.sx-row')];
+    if (!entered) {
+      entered = true;
+      for (const r of rows) seenRows.add(r.dataset.key);
+      const g = motion();
+      g?.fromTo(host.querySelectorAll('.sx-pal'), { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.36, ease: 'power2.out', stagger: 0.035, clearProps: 'all' });
+      g?.fromTo(host.querySelector('.sx-door'), { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.36, ease: 'power2.out', delay: 0.08, clearProps: 'all' });
+      reveal(rows.slice(0, 14), 0.14);
+    } else {
+      const fresh = rows.filter((r) => !seenRows.has(r.dataset.key));
+      for (const r of rows) seenRows.add(r.dataset.key);
+      if (fresh.length) {
+        reveal(fresh, 0);
+        for (const r of fresh) r.classList.add('sx-row--fresh');
+      }
     }
-    g.set(list, { clearProps: 'opacity,transform' });
-    g.fromTo(fresh, { opacity: 0, y: all ? 12 : -10 }, { opacity: 1, y: 0, duration: 0.45, ease: 'power3.out', stagger: 0.035, clearProps: 'all' });
-    if (!all) for (const r of fresh) r.classList.add('fr-row--new');
+  }
+  function reveal(nodes, delay) {
+    motion()?.fromTo(nodes, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out', stagger: 0.025, delay, clearProps: 'all' });
   }
 
   async function refreshPresence() {
@@ -664,7 +507,7 @@ export function createFriends(ctx) {
 
   return {
     show() {
-      firstPaint = true;
+      entered = false;
       render();
       void refreshPresence();
       clearInterval(timer);
@@ -678,7 +521,8 @@ export function createFriends(ctx) {
     },
     onChange(tables) {
       if (!ctx.visible()) return;
-      if (tables.some((t) => ['frames', 'recommendations', 'activity', 'majlis_receipts', 'majlis_reactions', 'profiles', 'accounts', 'works'].includes(t))) render();
+      const watched = ['frames', 'recommendations', 'activity', 'majlis_messages', 'majlis_hidden', 'majlis_meta', 'majlis_reads', 'profiles', 'accounts', 'works', 'settings'];
+      if (tables.some((t) => watched.includes(t))) render();
     },
     render,
   };

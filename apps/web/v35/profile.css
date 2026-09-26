@@ -973,3 +973,54 @@
 .v35 .pf-section .rv-list {
   margin: 0 var(--gutter);
 }
+
+/* الأرقام كاملة: قسم تحت قسم، بلا صناديق — عنوان صغير وصفوف بشعرة */
+.v35 .pf-stats-sheet h3 {
+  margin: 0 0 6px;
+}
+.v35 .pf-sblock {
+  padding: 14px 0 6px;
+}
+.v35 .pf-sblock + .pf-sblock {
+  border-top: 1px solid var(--line);
+}
+.v35 .pf-sblock h4 {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  direction: ltr;
+  text-align: right;
+}
+.v35 .pf-srow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+}
+.v35 .pf-srow-label {
+  display: grid;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.v35 .pf-srow-label small {
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+.v35 .pf-srow b {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .pf-snote {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.v35 .pf-name .sx-badge {
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-start: 8px;
+}

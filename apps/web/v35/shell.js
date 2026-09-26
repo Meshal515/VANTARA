@@ -30,6 +30,9 @@ import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
 import { createFriends } from './friends.js';
+import { createRoom } from './majlis-chat.js';
+import { encodeStatic } from './media-encode.js';
+import { endpoints } from '../lib/config.js';
 import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
@@ -40,7 +43,7 @@ import { createAnimeAccount, isAnimeRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
-import { menuIn, menuOut, stripIn, swapViews } from './motion.js';
+import { menuIn, menuOut, swapViews } from './motion.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -2910,12 +2913,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'rafiq') return showPage('rafiq');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
-    if (key === 'majlisFeed') return openSocial('majlis');
+    if (key === 'majlisFeed') return openRoom();
     if (key === 'profile') return openProfile(me());
     // التوصيات والنشاط صارا في المجلس نفسه: لا شاشة قديمة موازية
     if (key === 'recommendations') return openSocial('recs');
     if (key === 'friends') return openSocial('friends');
-    if (key === 'activity') return openSocial('majlis');
+    if (key === 'activity') return openSocial('friends');
   }
   function confirmSwitchAccount() {
     openSheet((body) => {
@@ -2980,7 +2983,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
         sync.enqueue('notification.read', { id: n.id });
       }
-    } else majlis.hide();
+    } else {
+      majlis.hide();
+      friends.hide();
+      // صفحة أخرى فُتحت (إشعار، رابط): المحادثة لا تبقى معلّقة فوقها
+      room.close();
+    }
     if (id !== 'profile') profile?.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -2990,7 +2998,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage(id);
   }
   function openMajlis(only) {
-    openSocial(only === 'recs' ? 'recs' : 'majlis');
+    if (only === 'recs') return openSocial('recs');
+    openRoom();
+  }
+  /** المجلس محادثة فوق صفحة الأصدقاء: الرجوع منه يرجعك لبابه. */
+  function openRoom(focus) {
+    if (currentPage() !== 'majlis' || state.socialTab !== 'friends') openSocial('friends');
+    room.open(focus);
   }
 
   // ───────────────────────── الاجتماع ─────────────────────────
@@ -3026,10 +3040,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return b;
       }),
     );
-    // داخل المجلس لا تبويبات: له رأسه ورجوعه
-    q('socialTabs').hidden = tab === 'majlis';
     q('friendsBody').hidden = tab !== 'friends';
-    q('majlisBody').hidden = tab !== 'majlis' && tab !== 'recs';
+    q('majlisBody').hidden = tab !== 'recs';
     q('socialNotifs').hidden = tab !== 'notifications';
     if (tab === 'friends') {
       majlis.hide();
@@ -3040,7 +3052,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderNotifications();
     } else {
       friends.hide();
-      majlis.show(tab === 'recs' ? 'recs' : 'all', { room: tab === 'majlis' });
+      majlis.show('recs');
     }
   }
 
@@ -3283,6 +3295,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       requestAnimationFrame(() => input.focus());
     });
   }
+  /** إعداداتك المتزامنة (`settings.data`): الخصوصية ومصفاة «آخر ما صار». */
+  function mySettings() {
+    try {
+      return JSON.parse(sync.row('settings', me())?.data ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  }
+  function setMySettings(fields) {
+    sync.enqueue('settings.patch', { fields });
+  }
+
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -3351,6 +3375,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
+    // الخصوصية: اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    const privacy = mySettings();
+    group(
+      'الخصوصية · ماذا يرى الآخرون عني',
+      [
+        toggle(
+          'eye',
+          'عرض ماذا أشاهد الآن',
+          privacy.shareCurrent === false ? 'يشوفون «يقرأ» أو «يشاهد» بدون العمل، وآخر مشاهداتك توصلهم بعد ساعة' : 'أصدقاؤك يشوفون العمل اللي تقرأه أو تشاهده',
+          privacy.shareCurrent !== false,
+          (on) => {
+            setMySettings({ shareCurrent: on });
+            renderSettings();
+          },
+        ),
+        toggle(
+          'check',
+          'إظهار إنهاء الفصول والحلقات',
+          privacy.shareCompletions === false ? 'ما يوصلهم «خلّص الفصل» ولا «أنهى الحلقة». تقدّمك يبقى محفوظ لك' : '«خلّص الفصل 72» و«أنهى الحلقة 8» تظهر لأصدقائك',
+          privacy.shareCompletions !== false,
+          (on) => {
+            setMySettings({ shareCompletions: on });
+            renderSettings();
+          },
+        ),
+      ],
+      { note: 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
+    );
+    group('الخصوصية · ما أراه أنا', [
+      row('activity', 'نشاط القراءة', '«خلّص الفصل» و«أنهى الحلقة» من أصدقائك في «آخر ما صار». يخصّك أنت، وما يغيّر شي عندهم', {
+        value: privacy.feedReading === 'hide' ? 'إخفاء لدي' : 'إظهار لدي',
+        run: () => {
+          setMySettings({ feedReading: privacy.feedReading === 'hide' ? 'show' : 'hide' });
+          renderSettings();
+        },
+      }),
+    ]);
+
     if (sync.pendingDevices && !pendingAsked) {
       pendingAsked = true;
       sync.pendingDevices().then((n) => {
@@ -3841,7 +3903,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    majlis.onChange(tables, { visible: currentPage() === 'majlis' && (state.socialTab === 'majlis' || state.socialTab === 'recs') });
+    majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
+    room.onChange(tables);
     profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
@@ -3854,12 +3917,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function handleBack() {
     if (editor?.open) return editor.handleBack();
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
-    if (majlis.closeBar() || closeSheet() || closeDrawer()) return true;
-    // رجوع أندرويد من داخل المجلس: لبابه في الأصدقاء، لا لصفحة سابقة
-    if (currentPage() === 'majlis' && state.socialTab === 'majlis') {
-      openSocial('friends');
-      return true;
-    }
+    // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
+    if (majlis.closeBar() || closeSheet() || closeDrawer() || room.close()) return true;
     return goBack();
   }
 
@@ -3876,24 +3935,66 @@ export function mountV35(deps, { page = 'home' } = {}) {
     preview: (w, opts) => previewWork(w, opts),
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
-    openMajlis: () => {
-      openSocial('majlis');
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    },
+    openRoom: (focus) => room.open(focus),
     markSeen: (kind, id) => majlis.markSeen(kind, id),
     openSheet,
     closeSheet,
     toast,
-    visible: () => currentPage() === 'majlis' && state.socialTab === 'friends',
+    mediaUrl,
+    visible: () => currentPage() === 'majlis' && state.socialTab === 'friends' && !room.isOpen(),
   });
+  const room = createRoom({
+    sync,
+    mount: root,
+    avatarNode,
+    mountImage,
+    workFromRef,
+    preview: (w, opts) => previewWork(w, opts),
+    openFrame: (id) => void deps.go({ name: 'frame', id }),
+    openProfile: (userId) => openProfile(userId),
+    openSheet,
+    closeSheet,
+    toast,
+    presence: () => deps.presence?.() ?? Promise.resolve([]),
+    mediaUrl,
+    pageImage: available() ? deps.pageImage : null,
+    markSeen: (kind, id) => majlis.markSeen(kind, id),
+    library: roomLibrary,
+    encodeAvatar,
+    onClose: () => friends.render(),
+  });
+  /** رابط ملف في خادم الوسائط (صورة المجلس، الرسائل الصوتية). */
+  function mediaUrl(hash) {
+    return `${endpoints().sync}/v1/media/${hash}`;
+  }
+  /** ما يُرشَّح من المحادثة: مكتبتك في المانجا والأنمي، بمراجعها الحقيقية. */
+  function roomLibrary() {
+    const seen = new Set();
+    const out = [];
+    const add = (w) => {
+      if (!w.ref || seen.has(w.ref)) return;
+      seen.add(w.ref);
+      out.push(w);
+    };
+    for (const w of libraryWorks('all')) add({ ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null, anime: false });
+    for (const kind of ['library', 'read_later', 'favorite', 'completed']) {
+      for (const m of animeAccount.shelf(kind)) add({ ref: `anime:${m.id}`, title: m.title, cover: m.poster, anime: true });
+    }
+    return out;
+  }
+  /** صورة المجلس: مربع من وسط الصورة، مضغوطة قبل الرفع. */
+  async function encodeAvatar(file) {
+    const bitmap = await createImageBitmap(file);
+    const side = Math.min(bitmap.width, bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 320;
+    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 320, 320);
+    bitmap.close?.();
+    return encodeStatic(canvas, 200_000);
+  }
   const majlis = createMajlis({
     sync,
     host: q('majlisBody'),
-    leaveRoom: () => {
-      openSocial('friends');
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    },
-    animateIn: (nodes) => stripIn(nodes),
     // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
     section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
     presence: () => deps.presence?.() ?? Promise.resolve([]),
@@ -3938,6 +4039,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const profile = createProfile({
     sync,
     host: q('profileBody'),
+    // بطاقة الأرقام تتبع القسم: المانجا فصول، والأنمي حلقات
+    section: () => root.dataset.section,
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,

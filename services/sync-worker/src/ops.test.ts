@@ -191,8 +191,12 @@ describe('cumulative ops', () => {
     });
     const activity = out.find((entry) => entry.sql.includes('INSERT INTO activity'));
     expect(activity?.values).toEqual(
-      expect.arrayContaining(['op-1:activity', 'dahmi', 'CHAPTER_DONE', 's1']),
+      // حدث واحد لكل مستخدم + فصل: إعادة القراءة وجهاز ثانٍ لا يكرّرانه
+      expect.arrayContaining(['done:dahmi:c1', 'dahmi', 'CHAPTER_DONE', 's1']),
     );
+    // ويحترم خصوصية صاحبه في SQL نفسه (إخفاء الإنهاء، ومهلة من أخفى عمله)
+    expect(activity?.sql).toContain('$.shareCompletions');
+    expect(activity?.sql).toContain('$.shareCurrent');
   });
 
   it('refuses a one-second open as a read', () => {

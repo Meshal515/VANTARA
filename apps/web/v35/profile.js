@@ -7,7 +7,8 @@
  * في بطاقة واحدة تُفتح بلمسة على تعريفها.
  *
  * «أفضل 5» تُعرض كاملة بلا تمرير: الأول بطاقة كبيرة وحده، والأربعة بعده
- * صفٌّ واحد. ثم سجلّ القراءة، و«أقرأ لاحقًا» لصاحب الملف وحده.
+ * صفٌّ واحد. ثم «آخر المشاهدات» والرفوف. لا سجلّ فصول: آخر المشاهدات تكفي،
+ * والتقدم نفسه (الاستئناف والأرقام والمكتمل) باقٍ في الحساب كما هو.
  *
  * الأرقام من الخادم (`/v1/stats`) وتعريفاتها منفصلة عمدًا:
  *   - الأعمال المتابعة: ما في مكتبته الآن (العدد وحده؛ المكتبة خاصة).
@@ -18,6 +19,7 @@
  */
 
 import { isAnimeRef } from './anime-account.js';
+import { ownerBadge } from './social-kit.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
@@ -32,7 +34,13 @@ const el = (tag, cls, text) => {
   return n;
 };
 const fmt = (n) => (Number(n) || 0).toLocaleString('en-US');
-const LOG_PREVIEW = 5;
+
+/** للبطاقة: «12س» أو «40د». */
+function shortDuration(ms) {
+  const minutes = Math.round((ms ?? 0) / 60_000);
+  if (minutes < 60) return `${minutes}د`;
+  return `${Math.floor(minutes / 60)}س`;
+}
 
 function duration(ms) {
   const minutes = Math.round((ms ?? 0) / 60_000);
@@ -41,17 +49,6 @@ function duration(ms) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} س ${rest} د` : `${hours} ساعة`;
-}
-
-/** «اليوم»، «أمس»، ثم التاريخ: السجل يُقرأ بالأيام لا بالساعات. */
-function dayLabel(at) {
-  const d = new Date(at);
-  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const days = Math.round((start(new Date()) - start(d)) / 86_400_000);
-  if (days <= 0) return 'اليوم';
-  if (days === 1) return 'أمس';
-  if (days < 7) return `قبل ${countLabel(days, 'day')}`;
-  return d.toLocaleDateString('ar', { day: 'numeric', month: 'short', numberingSystem: 'latn' });
 }
 
 /** صورة تُقرأ بكسلاتها بلا أن تختفي: أصلنا وخادم الوسائط يرسلان CORS، وغيرهما لا يُضمن. */
@@ -129,7 +126,6 @@ export function createProfile(ctx) {
     return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url ?? cover);
   };
   const titleOf = (w) => (w ? displayTitle(w.id, w.title?.english, typeof w.title === 'string' ? w.title : null) : '');
-  const knownTitle = (w) => Boolean(titleOf(w));
 
   function presenceLine(p) {
     if (!p) return { text: 'غير متصل', tone: 'off' };
@@ -145,55 +141,54 @@ export function createProfile(ctx) {
     return { text: `آخر ظهور قبل ${countLabel(Math.floor(h / 24), 'day')}`, tone: 'off' };
   }
 
-  /** سجلّ القراءة: عملٌ لكل صف، بآخر فصل قُرئ منه. */
-  function readingLog(userId) {
-    const byWork = new Map();
-    for (const r of sync.rows('chapter_reads', (x) => x.user_id === userId && x.read_count > 0)) {
-      const cur = byWork.get(r.series_ref);
-      if (!cur) byWork.set(r.series_ref, { ref: r.series_ref, at: r.last_read_at, chapter: r.chapter_number, count: 1 });
-      else {
-        cur.count += 1;
-        if (r.last_read_at > cur.at) {
-          cur.at = r.last_read_at;
-          cur.chapter = r.chapter_number;
-        }
-      }
-    }
-    return [...byWork.values()].sort((a, b) => b.at - a.at);
-  }
-
+  /**
+   * الأرقام كاملة: كل قسم وحده، ثم VANTARA كله (الوقت: اليوم، الأسبوع، الشهر،
+   * السنة، منذ البداية). البطاقة نفسها تعرض قسمك الحالي فقط.
+   */
   function openStatsSheet(stats, name, own) {
     ctx.openSheet((body) => {
-      body.append(el('h3', null, own ? 'قراءتك بالأرقام' : `قراءة ${name} بالأرقام`));
-      const rows = [
-        ['library', 'الأعمال المتابعة', fmt(stats.followedWorks), 'ما في المكتبة الآن.'],
-        ['book', 'الفصول الفريدة', fmt(stats.uniqueChapters), 'كل فصل يُحسب مرة واحدة، أول ما تقرؤه.'],
-        ['refresh', 'إجمالي القراءات', fmt(stats.totalReads), `منها ${fmt(stats.rereads)} إعادة قراءة.`],
-        ['clock', 'وقت القراءة اليوم', duration(stats.usage?.todayMs), null],
-        ['history', 'هذا الأسبوع', duration(stats.usage?.weekMs), null],
-        ['activity', 'منذ البداية', duration(stats.usage?.totalMs), null],
-        ...(stats.anime && (stats.anime.followed || stats.anime.watchedEpisodes)
-          ? [
-              ['play', 'أنمي يتابعه', fmt(stats.anime.followed), 'في مكتبة الأنمي الآن.'],
-              ['eye', 'حلقات شاهدها', fmt(stats.anime.watchedEpisodes), `من ${fmt(stats.anime.watchedAnime)} أنمي.`],
-            ]
-          : []),
-      ];
-      const list = el('div', 'settings-list');
-      list.style.marginTop = '12px';
-      for (const [icon, label, value, hint] of rows) {
-        const r = el('div', 'setting');
-        r.innerHTML = glyph(icon);
-        const t = el('div');
-        t.append(el('strong', null, label));
-        if (hint) t.append(el('small', null, hint));
-        r.append(t, el('span', 'value pf-stat-value', value));
-        list.append(r);
-      }
-      body.append(list);
-      const note = el('p', null, 'الفصل يُحسب مقروءًا حين تقرأ خُمسه مع وقت قراءة فعلي. فتح الفصل وحده لا يُحسب.');
-      note.style.marginTop = '12px';
-      body.append(note);
+      body.classList.add('pf-stats-sheet');
+      body.append(el('h3', null, own ? 'أرقامك' : `أرقام ${name}`));
+      const block = (title, rows, note) => {
+        const box = el('section', 'pf-sblock');
+        box.append(el('h4', null, title));
+        const list = el('div', 'pf-srows');
+        for (const [label, value, hint] of rows) {
+          const r = el('div', 'pf-srow');
+          const t = el('span', 'pf-srow-label', label);
+          if (hint) t.append(el('small', null, hint));
+          r.append(t, el('b', null, value));
+          list.append(r);
+        }
+        box.append(list);
+        if (note) box.append(el('p', 'pf-snote', note));
+        body.append(box);
+      };
+      const t = stats.time ?? {};
+      block('VANTARA MANGA', [
+        ['الأعمال المتابعة', fmt(stats.followedWorks)],
+        ['الفصول الفريدة', fmt(stats.uniqueChapters), 'كل فصل مرة، أول ما يُقرأ'],
+        ['إجمالي القراءات', fmt(stats.totalReads), stats.rereads ? `منها ${fmt(stats.rereads)} إعادة` : null],
+        ['وقت القراءة', duration(t.manga?.totalMs ?? stats.usage?.totalMs)],
+      ]);
+      block('VANTARA ANIME', [
+        ['أنمي يتابعه', fmt(stats.anime?.followed)],
+        ['حلقات شاهدها', fmt(stats.anime?.watchedEpisodes), stats.anime?.watchedAnime ? `من ${fmt(stats.anime.watchedAnime)} أنمي` : null],
+        ['وقت المشاهدة', duration(t.anime?.totalMs)],
+      ]);
+      block('VANTARA CINEMA', [['الأفلام والمسلسلات', 'قريبًا']]);
+      const all = t.all ?? { todayMs: stats.usage?.todayMs, weekMs: stats.usage?.weekMs, totalMs: stats.usage?.totalMs };
+      block(
+        'VANTARA',
+        [
+          ['اليوم', duration(all.todayMs)],
+          ['هذا الأسبوع', duration(all.weekMs)],
+          ['هذا الشهر', duration(all.monthMs)],
+          ['هذه السنة', duration(all.yearMs)],
+          ['منذ البداية', duration(all.totalMs)],
+        ],
+        'الوقت الفعلي فقط: صفحة مفتوحة بلا تفاعل، أو حلقة متوقفة، لا تُحسب.',
+      );
     });
   }
 
@@ -288,17 +283,25 @@ export function createProfile(ctx) {
     d.append(el('strong', null, value), el('span', null, label));
     return d;
   }
+  /** البطاقة تتبع قسمك: المانجا فصول، والأنمي حلقات. الضغط يعرض كل شيء معًا. */
   function statsCard(numbers) {
     const card = el('button', 'pf-stats');
     card.type = 'button';
-    card.setAttribute('aria-label', 'تفاصيل القراءة');
-    const v = (k) => (numbers ? fmt(numbers[k]) : '—');
-    card.append(
-      statCell(v('followedWorks'), 'أعمال متابَعة'),
-      statCell(v('uniqueChapters'), 'فصول فريدة'),
-      statCell(v('totalReads'), 'قراءات'),
-    );
-    if (numbers?.anime?.watchedEpisodes) card.append(statCell(fmt(numbers.anime.watchedEpisodes), 'حلقات'));
+    card.setAttribute('aria-label', 'كل الأرقام');
+    const v = (x) => (numbers ? fmt(x) : '—');
+    if (ctx.section?.() === 'anime') {
+      card.append(
+        statCell(v(numbers?.anime?.followed), 'أنمي متابَع'),
+        statCell(v(numbers?.anime?.watchedEpisodes), 'حلقات'),
+        statCell(numbers ? shortDuration(numbers.time?.anime?.totalMs) : '—', 'مشاهدة'),
+      );
+    } else {
+      card.append(
+        statCell(v(numbers?.followedWorks), 'أعمال متابَعة'),
+        statCell(v(numbers?.uniqueChapters), 'فصول فريدة'),
+        statCell(v(numbers?.totalReads), 'قراءات'),
+      );
+    }
     card.classList.toggle('pf-stats--loading', !numbers);
     return card;
   }
@@ -386,37 +389,6 @@ export function createProfile(ctx) {
     return wrap;
   }
 
-  // ───────────────────────── السجل ─────────────────────────
-
-  function logList(log) {
-    const list = el('div', 'pf-log');
-    const row = (item) => {
-      const work = workOf(item.ref);
-      const r = el('button', 'pf-log-row');
-      r.type = 'button';
-      const cover = el('span', 'pf-log-cover');
-      void ctx.mountImage(cover, work);
-      const copy = el('span', 'pf-log-copy');
-      copy.append(el('bdi', 'pf-log-title', knownTitle(work) ? titleOf(work) : 'عمل'));
-      copy.append(el('span', 'pf-log-meta', [item.chapter != null ? `الفصل ${item.chapter}` : null, countLabel(item.count, 'chapter')].filter(Boolean).join(' · ')));
-      r.append(cover, copy, el('span', 'pf-log-when', dayLabel(item.at)));
-      r.onclick = () => ctx.openWork(work);
-      return r;
-    };
-    list.append(...log.slice(0, LOG_PREVIEW).map(row));
-    if (log.length > LOG_PREVIEW) {
-      const more = el('button', 'pf-log-more');
-      more.type = 'button';
-      more.textContent = `اعرض السجل كامل · ${countLabel(log.length, 'work')}`;
-      more.onclick = () => {
-        more.remove();
-        list.append(...log.slice(LOG_PREVIEW, 40).map(row));
-      };
-      list.append(more);
-    }
-    return list;
-  }
-
   // ───────────────────────── الرفوف ─────────────────────────
 
   /**
@@ -489,6 +461,8 @@ export function createProfile(ctx) {
     }
     const nameEl = el('h1', 'pf-name', name);
     nameEl.dir = 'auto';
+    // شارة المالك من الخادم (accounts.badge)، لا من الملف
+    if (sync.rows('accounts', (a) => a.user_id === userId)[0]?.badge === 'owner') nameEl.append(ownerBadge());
     const sub = el('div', 'pf-sub');
     const handle = usernameOf(userId);
     if (handle) {
@@ -542,7 +516,7 @@ export function createProfile(ctx) {
       ctx.historyList(hist, { userId, own, limit: 5 });
       const sec = section('آخر المشاهدات', hist, { meta: countLabel(views.length, 'work') });
       if (views.length > 5) {
-        const more = el('button', 'pf-log-more', own ? 'اعرض السجل كامل' : `اعرض كل مشاهدات ${name}`);
+        const more = el('button', 'pf-log-more', own ? 'كل آخر المشاهدات' : `كل مشاهدات ${name}`);
         more.type = 'button';
         more.onclick = () => (own ? ctx.openHistory() : (more.remove(), ctx.historyList(hist, { userId, own, limit: 60 })));
         sec.append(more);
@@ -559,8 +533,6 @@ export function createProfile(ctx) {
     if (done.length) body.append(section('المكتمل', strip(done), { meta: countLabel(done.length, 'work') }));
     const doneAnime = shelf('completed', 'anime');
     if (doneAnime.length) body.append(section('أنمي أكمله', strip(doneAnime), { meta: `${fmt(doneAnime.length)} أنمي` }));
-    const log = readingLog(userId);
-    if (log.length) body.append(section(own ? 'سجلّ قراءتك' : 'سجلّ القراءة', logList(log)));
 
     const [presence, numbers, top5] = await Promise.all([
       ctx.presence().catch(() => []),

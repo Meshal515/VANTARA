@@ -29,6 +29,7 @@ import {
   isMajlisReaction,
   isMajlisTarget,
   sniffImageType,
+  sniffAudioType,
   isMediaHash,
   MAX_MEDIA_BYTES,
   MAX_MEDIA_BYTES_PER_USER,
@@ -173,6 +174,31 @@ function incognitoUntilFrom(raw: unknown): number {
   }
 }
 
+/**
+ * الخصوصية من `settings.data`. الافتراضي مشاركة: الغرض أن يعرف الأصدقاء ما
+ * يقرأه بعضهم، والإخفاء اختيار صريح.
+ *   - shareCurrent: عرض العمل الذي أقرأه/أشاهده الآن (ما يراه الآخرون عني)
+ *   - shareCompletions: إظهار إنهاء الفصول والحلقات (ما يراه الآخرون عني)
+ * أما «نشاط القراءة لدي» فمصفاة المشاهد نفسه، لا تمسّ الخادم.
+ */
+export function privacyFrom(raw: unknown): { shareCurrent: boolean; shareCompletions: boolean } {
+  let parsed: Record<string, unknown> = {};
+  if (typeof raw === 'string' && raw !== '') {
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      parsed = {};
+    }
+  }
+  return { shareCurrent: parsed['shareCurrent'] !== false, shareCompletions: parsed['shareCompletions'] !== false };
+}
+/** شرط SQL: صاحب الحساب أخفى عمله الحالي. قيمة واحدة: user_id. */
+const SQL_HIDES_CURRENT = "COALESCE(json_extract((SELECT data FROM settings WHERE user_id = ?), '$.shareCurrent'), 1) = 0";
+/** شرط SQL: صاحب الحساب يشارك إنهاء الفصول والحلقات. قيمة واحدة: user_id. */
+const SQL_SHARES_COMPLETIONS = "COALESCE(json_extract((SELECT data FROM settings WHERE user_id = ?), '$.shareCompletions'), 1) != 0";
+/** مهلة آخر المشاهدات لمن أخفى عمله الحالي. */
+export const SOCIAL_GRACE_MS = 60 * 60 * 1000;
+
 // ───────────────────────────── الحسابات ─────────────────────────────
 
 interface AccountRow {
@@ -247,7 +273,7 @@ const MAJLIS_VISIBLE_IDS: Record<'frame' | 'rec' | 'activity', string> = {
     "SELECT id FROM frames WHERE from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0)",
   rec:
     "SELECT id FROM recommendations WHERE from_id = ? OR to_id = ? OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0)",
-  activity: 'SELECT id FROM activity WHERE actor_id = ? OR target_user_id IS NULL OR target_user_id = ?',
+  activity: 'SELECT id FROM activity WHERE actor_id = ? OR ((target_user_id IS NULL OR target_user_id = ?) AND social_at IS NULL)',
 };
 /** أطول معرّف إشعار يُنشأ؛ وكل من يقرأ المعرّف أو يكتبه يلتزم به. */
 const NOTIFICATION_ID_MAX = 250;
@@ -263,7 +289,7 @@ const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) 
 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
-  ['accounts', 'user_id, username, created_at, rev'],
+  ['accounts', 'user_id, username, created_at, rev, badge'],
   ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [
@@ -288,14 +314,19 @@ const DELTA_TABLES = [
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
   // السجل يراه أصدقاؤك في ملفك كما تراه أنت: الأصدقاء الثلاثة مجلس واحد
-  ['work_views', 'user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev'],
+  ['work_views', 'user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev, social_at'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
   ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev'],
-  ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev, removed'],
+  ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev, removed, social_at'],
   ['activity_receipts', 'event_id, user_id, delivered_at, seen_at, rev'],
   ['settings', 'user_id, data, rev'],
+  // المجلس محادثة: الرسائل لكل الأعضاء، و«إخفاء لدي» لصاحبه
+  ['majlis_messages', 'id, sender_id, kind, body, reply_to, ref, media_key, meta_json, created_at, deleted, deleted_by, rev'],
+  ['majlis_hidden', 'user_id, target, hidden_at, rev'],
+  ['majlis_meta', 'id, name, avatar_key, updated_by, updated_at, rev'],
+  ['majlis_reads', 'user_id, read_at, rev'],
 ] as const;
 
 /** سقف الدفعة لكل جدول. دفعة ضخمة تتجاوز حد زمن الـWorker وتفشل كلها. */
@@ -307,7 +338,65 @@ const PAGE_SIZE = 500;
  * كل الجداول في `batch` واحد: D1 تنفّذه كمعاملة واحدة، فاللقطة متسقة. قراءة
  * كل جدول بطلب منفصل تسمح بكتابة بينها، فيرى العميل تعليقًا بلا صاحبه.
  */
-async function handleSync(url: URL, env: Env, userId: string): Promise<Response> {
+/**
+ * ينشر ما حلّ وقته من المعلّق (مهلة الساعة). يُستدعى مع كل سحب ونبضة: الوقت
+ * يُقرأ من الخادم لا من مؤقت في جهاز، فينشر مهما أُغلق التطبيق أو أُعيد
+ * تشغيل الخادم. rev جديد = يصل كل جهاز فاتته لحظة الكتابة الأولى.
+ */
+export async function publishDue(env: Env, now: number): Promise<number> {
+  const due = await env.DB.prepare(
+    `SELECT EXISTS (SELECT 1 FROM work_views WHERE social_at > 0 AND social_at <= ?)
+         OR EXISTS (SELECT 1 FROM activity WHERE social_at > 0 AND social_at <= ?) AS due`,
+  )
+    .bind(now, now)
+    .first<{ due: number }>();
+  if (!due?.due) return 0;
+  return commitAtNextRevision(env, now, [], (rev) => [
+    // وصف العمل يُكتب الآن (أُجّل مع المشاهدة كي لا يكشفها جدول الأعمال)
+    env.DB.prepare(
+      `INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev)
+       SELECT series_ref, series_title, cover_url, NULL, ?, ?
+         FROM work_views
+        WHERE social_at > 0 AND social_at <= ? AND removed = 0 AND (series_title IS NOT NULL OR cover_url IS NOT NULL)
+       ON CONFLICT (series_ref) DO UPDATE SET
+         title = COALESCE(works.title, excluded.title),
+         cover_url = COALESCE(works.cover_url, excluded.cover_url),
+         rev = excluded.rev`,
+    ).bind(now, rev, now),
+    env.DB.prepare('UPDATE work_views SET social_at = NULL, published = 1, rev = ? WHERE social_at > 0 AND social_at <= ?').bind(rev, now),
+    env.DB.prepare('UPDATE activity SET social_at = NULL, rev = ? WHERE social_at > 0 AND social_at <= ?').bind(rev, now),
+  ]);
+}
+
+/**
+ * مالك المجلس: `VANTARA_OWNERS` (أسماء أو معرّفات بفواصل)، وإلا نفس قاعدة
+ * الترجمة (من فُتحت له). الشارة تُكتب في `accounts.badge` من هنا وحده، وكل
+ * صلاحية (حذف رسالة غيرك، اسم المجلس) تُقرأ منها في SQL — العميل لا يقرّر.
+ */
+export async function ensureOwnerBadge(env: Env, now: number): Promise<void> {
+  const accounts = await env.DB.prepare('SELECT user_id, username, badge FROM accounts').all<{ user_id: string; username: string; badge: string | null }>();
+  const list = (env.VANTARA_OWNERS || env.TRANSLATE_USERS || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+  let owners: Set<string>;
+  if (list.length) {
+    owners = new Set(accounts.results.filter((a) => list.includes(a.user_id.toLowerCase()) || list.includes(a.username.toLowerCase())).map((a) => a.user_id));
+  } else {
+    const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1')
+      .first<{ created_by: string }>()
+      .catch(() => null);
+    owners = new Set(top ? [top.created_by] : []);
+  }
+  const wrong = accounts.results.filter((a) => (a.badge === 'owner') !== owners.has(a.user_id));
+  if (!wrong.length) return;
+  await commitAtNextRevision(env, now, [], (rev) =>
+    wrong.map((a) =>
+      env.DB.prepare('UPDATE accounts SET badge = ?, rev = ? WHERE user_id = ?').bind(owners.has(a.user_id) ? 'owner' : null, rev, a.user_id),
+    ),
+  );
+}
+
+async function handleSync(url: URL, env: Env, userId: string, now = Date.now()): Promise<Response> {
+  await publishDue(env, now);
+  await ensureOwnerBadge(env, now);
   const since = Number(url.searchParams.get('since') ?? '0');
   const cursor = Number.isFinite(since) && since > 0 ? Math.floor(since) : 0;
   const serverRev = await currentRev(env);
@@ -323,11 +412,19 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
   const deltaScope = (table: string): { sql: string; values: string[] } => {
     switch (table) {
       // المكتبة والقوائم ليست هنا بقصد: ملف صديقك يعرض ما يقرؤه ويؤجله وأكمله
+      // `chapter_reads` لصاحبه: لا واجهة تعرضه لغيره (أُلغي سجل القراءة)، وكان
+      // يكشف العمل الحالي لحظيًّا لمن أخفاه. الأرقام للأصدقاء من /v1/stats
       case 'progress':
       case 'chapter_marks':
+      case 'chapter_reads':
+      case 'majlis_hidden':
       case 'settings':
       case 'notifications':
         return { sql: ' AND user_id = ?', values: [userId] };
+
+      // آخر المشاهدات: صاحبها فورًا، والأصدقاء بعد نشرها (مهلة الساعة لمن أخفى)
+      case 'work_views':
+        return { sql: ' AND (user_id = ? OR social_at IS NULL)', values: [userId] };
 
       // المستلم يرى حالته فقط، والمرسل يحتاج حالات كل من أرسل إليهم.
       case 'recommendation_recipients':
@@ -357,7 +454,7 @@ async function handleSync(url: URL, env: Env, userId: string): Promise<Response>
       // النشاط الموجّه (رد/تفاعل/توصية لشخص) للفاعل والهدف فقط.
       case 'activity':
         return {
-          sql: ' AND (actor_id = ? OR target_user_id IS NULL OR target_user_id = ?)',
+          sql: ' AND (actor_id = ? OR ((target_user_id IS NULL OR target_user_id = ?) AND social_at IS NULL))',
           values: [userId, userId],
         };
 
@@ -649,15 +746,24 @@ function socialActivityStatements(
     payload?: Record<string, unknown>;
     now: number;
     rev: number;
+    /** معرّف ثابت للحدث (إنهاء فصل: واحد لكل مستخدم+فصل مهما تكرر). */
+    eventId?: string;
+    /**
+     * نشاط إنهاء: يحترم خصوصية الفاعل في SQL نفسه — لا يُنشأ إن أخفى
+     * الإنهاء، ويُعلَّق ساعة إن أخفى عمله الحالي.
+     */
+    completion?: boolean;
   },
 ): D1PreparedStatement[] {
-  const eventId = `${input.opId}:activity`;
+  const eventId = input.eventId ?? `${input.opId}:activity`;
+  const gate = input.completion ? ` WHERE ${SQL_SHARES_COMPLETIONS}` : '';
+  const socialAt = input.completion ? `CASE WHEN ${SQL_HIDES_CURRENT} THEN ? ELSE NULL END` : 'NULL';
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
         `INSERT INTO activity
-           (id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev, social_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ${socialAt}${gate}
          ON CONFLICT (id) DO NOTHING`,
       )
       .bind(
@@ -670,6 +776,7 @@ function socialActivityStatements(
         JSON.stringify(input.payload ?? {}),
         input.now,
         input.rev,
+        ...(input.completion ? [input.actorId, input.now + SOCIAL_GRACE_MS, input.actorId] : []),
       ),
   ];
 
@@ -685,10 +792,11 @@ function socialActivityStatements(
         .prepare(
           `INSERT INTO activity_receipts
              (event_id, user_id, delivered_at, seen_at, rev)
-           VALUES (?, ?, NULL, NULL, ?)
+           SELECT ?, ?, NULL, NULL, ?
+            WHERE EXISTS (SELECT 1 FROM activity WHERE id = ? AND rev = ?)
            ON CONFLICT (event_id, user_id) DO NOTHING`,
         )
-        .bind(eventId, viewer, input.rev),
+        .bind(eventId, viewer, input.rev, eventId, input.rev),
     );
   }
 
@@ -711,6 +819,11 @@ function workStatements(
     sourceId?: string | null;
     now: number;
     rev: number;
+    /**
+     * لا يُكتب وصف العمل إن كان هذا المستخدم أخفى عمله الحالي: جدول الأعمال
+     * يراه الجميع، وعملٌ جديد يظهر فيه لحظة قراءته يكشفه. يُكتب عند النشر.
+     */
+    unlessHiddenBy?: string;
   },
 ): D1PreparedStatement[] {
   // مرجعٌ داخلي ليس عنوانًا: جهازٌ لم يعرف اسم العمل لا يكتبه على الجميع
@@ -721,7 +834,8 @@ function workStatements(
     db
       .prepare(
         `INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev)
-         VALUES (?, ?, ?, ?, ?, ?)
+         SELECT ?, ?, ?, ?, ?, ?
+          WHERE ${input.unlessHiddenBy ? `NOT (${SQL_HIDES_CURRENT})` : '1'}
          ON CONFLICT (series_ref) DO UPDATE SET
            title = COALESCE(excluded.title, works.title),
            cover_url = COALESCE(excluded.cover_url, works.cover_url),
@@ -736,6 +850,7 @@ function workStatements(
         input.sourceId ?? null,
         input.now,
         input.rev,
+        ...(input.unlessHiddenBy ? [input.unlessHiddenBy] : []),
       ),
   ];
 }
@@ -831,6 +946,7 @@ export function statementsFor(
           coverUrl: asString(p['coverUrl'], 600),
           now,
           rev,
+          unlessHiddenBy: userId,
         }),
         db
           .prepare(
@@ -854,6 +970,43 @@ export function statementsFor(
           payload: { chapter: asNumber(p['chapterNumber']) },
           now,
           rev,
+          // حدث واحد لكل مستخدم + فصل: الإعادة وجهاز ثانٍ وإعادة المحاولة لا تكرّره
+          eventId: `done:${userId}:${chapterKey}`.slice(0, 250),
+          completion: true,
+        }),
+      ];
+    }
+
+    /**
+     * أنهى حلقة أنمي (المشغّل عند 90%). مثل إنهاء الفصل: حدث واحد لكل مستخدم +
+     * حلقة، ويحترم خصوصية صاحبه (إخفاء الإنهاء، ومهلة من أخفى عمله الحالي).
+     * لا يمسّ chapter_reads: الحلقات لا تُعدّ فصولًا.
+     */
+    case 'episode.complete': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      const episode = asNumber(p['episode']);
+      if (!seriesRef || !seriesRef.startsWith('anime:') || episode === null || !Number.isInteger(episode) || episode < 1 || episode > 100_000) return null;
+      return [
+        ...workStatements(db, {
+          seriesRef,
+          title: asString(p['seriesTitle'], 300),
+          coverUrl: asString(p['coverUrl'], 600),
+          now,
+          rev,
+          unlessHiddenBy: userId,
+        }),
+        ...socialActivityStatements(db, {
+          opId: op.opId,
+          actorId: userId,
+          verb: 'EPISODE_DONE',
+          accounts: ctx.accounts,
+          seriesRef,
+          link: socialLinkFor({ kind: 'work', seriesRef }),
+          payload: { episode },
+          now,
+          rev,
+          eventId: `done:${userId}:${seriesRef}#ep:${episode}`.slice(0, 250),
+          completion: true,
         }),
       ];
     }
@@ -936,6 +1089,28 @@ export function statementsFor(
                rev = excluded.rev`,
           )
           .bind(userId, day, ms, rev, op.opId),
+      ];
+    }
+
+    /** وقت المشاهدة في قسم غير المانجا (الأنمي من المشغّل). نفس سقف usage.add. */
+    case 'usage.watch': {
+      const ms = clampUsageCredit(asNumber(p['activeMs']) ?? 0);
+      const section = p['section'];
+      if (ms <= 0 || (section !== 'anime' && section !== 'cinema')) return null;
+      const today = new Date(now).toISOString().slice(0, 10);
+      const day = asString(p['day'], 10) ?? today;
+      if (!isIsoDay(day) || day > today) return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO usage_sections (user_id, day, section, active_ms, rev)
+             SELECT ?, ?, ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
+             ON CONFLICT (user_id, day, section) DO UPDATE SET
+               active_ms = usage_sections.active_ms + excluded.active_ms,
+               rev = excluded.rev`,
+          )
+          .bind(userId, day, section, ms, rev, op.opId),
       ];
     }
 
@@ -1428,35 +1603,150 @@ export function statementsFor(
     }
 
     /**
-     * «حذف للجميع»: صاحب الفريم أو الترشيح أو النشاط وحده (الشرط في SQL، لا
-     * في الواجهة). شاهد قبر يسافر في الفروقات فيختفي من كل جهاز، والمحتوى
-     * يُفرَّغ فلا يبقى في المرايا القديمة. مكرّره لا يلمس `rev`.
+     * رسالة في المجلس: نص أو صوت، وقد تكون ردًّا على أي شيء فيه (رسالة، ترشيح،
+     * فريم). المعرّف هو opId: إعادة الإرسال بعد انقطاع صفٌّ واحد. الصوت لا
+     * يُقبل إلا ملفًّا رفعه المرسل نفسه وهو صوت فعلًا (من بايتاته).
      */
-    case 'majlis.unsend': {
-      const targetKind = p['targetKind'];
-      const targetId = asString(p['targetId'], 200);
-      if (!isMajlisTarget(targetKind) || !targetId) return null;
-      if (targetKind === 'frame') {
+    case 'majlis.send': {
+      const kind = p['kind'];
+      const replyTo = asString(p['replyTo'], 160);
+      if (replyTo && !/^(msg|rec|frame):[A-Za-z0-9:_.-]{1,150}$/.test(replyTo)) return null;
+      if (kind === 'text') {
+        const body = typeof p['body'] === 'string' ? p['body'].trim().slice(0, 4000) : '';
+        if (!body) return null;
+        return [
+          db
+            .prepare(
+              `INSERT INTO majlis_messages (id, sender_id, kind, body, reply_to, created_at, rev)
+               VALUES (?, ?, 'text', ?, ?, ?, ?)
+               ON CONFLICT (id) DO NOTHING`,
+            )
+            .bind(op.opId, userId, body, replyTo, now, rev),
+        ];
+      }
+      if (kind === 'voice') {
+        const mediaKey = asString(p['mediaKey'], 64);
+        const meta = (p['meta'] ?? {}) as Record<string, unknown>;
+        const durationMs = asNumber(meta['durationMs']);
+        if (!mediaKey || !isMediaHash(mediaKey) || durationMs === null || durationMs < 300 || durationMs > 300_000) return null;
+        const wave = Array.isArray(meta['waveform'])
+          ? (meta['waveform'] as unknown[]).slice(0, 48).map((v) => Math.max(0, Math.min(1, Math.round((Number(v) || 0) * 100) / 100)))
+          : [];
+        return [
+          db
+            .prepare(
+              `INSERT INTO majlis_messages (id, sender_id, kind, body, reply_to, media_key, meta_json, created_at, rev)
+               SELECT ?, ?, 'voice', NULL, ?, ?, ?, ?, ?
+                WHERE EXISTS (SELECT 1 FROM media WHERE hash = ? AND owner_id = ? AND mime LIKE 'audio/%')
+               ON CONFLICT (id) DO NOTHING`,
+            )
+            .bind(op.opId, userId, replyTo, mediaKey, JSON.stringify({ durationMs: Math.round(durationMs), waveform: wave }), now, rev, mediaKey, userId),
+        ];
+      }
+      return null;
+    }
+
+    /**
+     * الحذف ثلاث عمليات منفصلة لا تختلط:
+     *   scope 'me'        إخفاء لدي: صفّ لي وحدي، لا يمسّ غيري أبدًا
+     *   scope 'everyone'  حذف للجميع: صاحب الشيء، أو مالك المجلس (الشارة من
+     *                     الخادم، لا من العميل) — والشرط في SQL نفسه
+     * الحذف للجميع يفرّغ المحتوى ويترك شاهد قبر يصل كل جهاز. مكرّره لا يلمس rev.
+     */
+    case 'majlis.delete': {
+      const target = asString(p['target'], 200);
+      const match = target ? /^(msg|rec|frame|activity):(.+)$/.exec(target) : null;
+      if (!target || !match) return null;
+      const [, kind, id] = match as unknown as [string, string, string];
+      if (p['scope'] === 'me') {
+        return [
+          db
+            .prepare(
+              `INSERT INTO majlis_hidden (user_id, target, hidden_at, rev) VALUES (?, ?, ?, ?)
+               ON CONFLICT (user_id, target) DO NOTHING`,
+            )
+            .bind(userId, target, now, rev),
+        ];
+      }
+      if (p['scope'] !== 'everyone') return null;
+      const OWNER = "EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND badge = 'owner')";
+      if (kind === 'msg') {
+        return [
+          // الصوت المحذوف يُمسح ملفّه أيضًا، فلا يبقى رابطه يعمل
+          db
+            .prepare(
+              `DELETE FROM media WHERE hash IN (
+                 SELECT media_key FROM majlis_messages
+                  WHERE id = ? AND deleted = 0 AND media_key IS NOT NULL AND (sender_id = ? OR ${OWNER}))
+                 AND NOT EXISTS (SELECT 1 FROM majlis_messages m2 WHERE m2.media_key = media.hash AND m2.id != ?)`,
+            )
+            .bind(id, userId, userId, id),
+          db
+            .prepare(
+              `UPDATE majlis_messages
+                  SET deleted = CASE WHEN sender_id = ? THEN 1 ELSE 2 END, deleted_by = ?,
+                      body = NULL, media_key = NULL, meta_json = '{}', rev = ?
+                WHERE id = ? AND deleted = 0 AND (sender_id = ? OR ${OWNER})`,
+            )
+            .bind(userId, userId, rev, id, userId, userId),
+        ];
+      }
+      if (kind === 'frame') {
         return [
           db
             .prepare(
               `UPDATE frames SET removed = 1, message = NULL, pages_json = '[]', rev = ?
-                WHERE id = ? AND from_id = ? AND removed = 0`,
+                WHERE id = ? AND removed = 0 AND (from_id = ? OR ${OWNER})`,
             )
-            .bind(rev, targetId, userId),
+            .bind(rev, id, userId, userId),
         ];
       }
-      if (targetKind === 'rec') {
+      if (kind === 'rec') {
         return [
           db
-            .prepare('UPDATE recommendations SET removed = 1, message = NULL, rev = ? WHERE id = ? AND from_id = ? AND removed = 0')
-            .bind(rev, targetId, userId),
+            .prepare(`UPDATE recommendations SET removed = 1, message = NULL, rev = ? WHERE id = ? AND removed = 0 AND (from_id = ? OR ${OWNER})`)
+            .bind(rev, id, userId, userId),
         ];
       }
       return [
         db
-          .prepare(`UPDATE activity SET removed = 1, payload = '{}', rev = ? WHERE id = ? AND actor_id = ? AND removed = 0`)
-          .bind(rev, targetId, userId),
+          .prepare(`UPDATE activity SET removed = 1, payload = '{}', rev = ? WHERE id = ? AND removed = 0 AND (actor_id = ? OR ${OWNER})`)
+          .bind(rev, id, userId, userId),
+      ];
+    }
+
+    /** وصلتُ لهنا في المجلس: عدد غير المقروء فقط. لا يرجع للخلف. */
+    case 'majlis.read': {
+      const at = Math.min(asNumber(p['at']) ?? now, now);
+      return [
+        db
+          .prepare(
+            `INSERT INTO majlis_reads (user_id, read_at, rev) VALUES (?, ?, ?)
+             ON CONFLICT (user_id) DO UPDATE SET read_at = excluded.read_at, rev = excluded.rev
+             WHERE excluded.read_at > majlis_reads.read_at`,
+          )
+          .bind(userId, at, rev),
+      ];
+    }
+
+    /** اسم المجلس وصورته: المالك وحده (الشارة من الخادم). */
+    case 'majlis.meta': {
+      const name = typeof p['name'] === 'string' ? p['name'].trim().slice(0, 40) : null;
+      const avatarKey = asString(p['avatarKey'], 64);
+      if (avatarKey && !isMediaHash(avatarKey)) return null;
+      if (!name && !avatarKey) return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO majlis_meta (id, name, avatar_key, updated_by, updated_at, rev)
+             SELECT 'main', ?, ?, ?, ?, ?
+              WHERE EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND badge = 'owner')
+             ON CONFLICT (id) DO UPDATE SET
+               name = COALESCE(excluded.name, majlis_meta.name),
+               avatar_key = COALESCE(excluded.avatar_key, majlis_meta.avatar_key),
+               updated_by = excluded.updated_by, updated_at = excluded.updated_at, rev = excluded.rev`,
+          )
+          .bind(name, avatarKey, userId, now, rev, userId),
       ];
     }
 
@@ -1667,13 +1957,19 @@ export function statementsFor(
       const coverUrl = asString(p['coverUrl'], 600);
       const at = Math.min(asNumber(p['at']) ?? now, now);
       return [
-        ...workStatements(db, { seriesRef, title, coverUrl, now, rev }),
+        ...workStatements(db, { seriesRef, title, coverUrl, now, rev, unlessHiddenBy: userId }),
         db
           .prepare(
             `INSERT INTO work_views
-               (user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+               (user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev,
+                social_at, published)
+             SELECT ?, ?, ?, ?, ?, ?, ?, 0, ?,
+                    CASE WHEN ${SQL_HIDES_CURRENT} THEN ? ELSE NULL END,
+                    CASE WHEN ${SQL_HIDES_CURRENT} THEN 0 ELSE 1 END
              ON CONFLICT (user_id, series_ref) DO UPDATE SET
+               -- أخفى عمله الحالي: الأصدقاء يبقون على ما رأوه، والجديد بعد ساعة
+               social_at = excluded.social_at,
+               published = CASE WHEN excluded.social_at IS NULL THEN 1 ELSE work_views.published END,
                series_title = COALESCE(excluded.series_title, work_views.series_title),
                cover_url = COALESCE(excluded.cover_url, work_views.cover_url),
                chapter_label = COALESCE(excluded.chapter_label, work_views.chapter_label),
@@ -1691,6 +1987,9 @@ export function statementsFor(
             asNumber(p['chapterNumber']),
             at,
             rev,
+            userId,
+            now + SOCIAL_GRACE_MS,
+            userId,
           ),
       ];
     }
@@ -1701,11 +2000,23 @@ export function statementsFor(
       return [
         db
           .prepare(
-            `INSERT INTO work_views (user_id, series_ref, viewed_at, removed, rev)
-             VALUES (?, ?, ?, 1, ?)
-             ON CONFLICT (user_id, series_ref) DO UPDATE SET removed = 1, viewed_at = MAX(work_views.viewed_at, excluded.viewed_at), rev = excluded.rev`,
+            `INSERT INTO work_views (user_id, series_ref, viewed_at, removed, rev, social_at, published)
+             VALUES (?, ?, ?, 1, ?, -1, 0)
+             ON CONFLICT (user_id, series_ref) DO UPDATE SET
+               removed = 1,
+               viewed_at = MAX(work_views.viewed_at, excluded.viewed_at),
+               -- ما لم يُنشر قط لا يصلهم أبدًا، حتى شاهد قبره. وما رأوه يُسحب منهم
+               -- بلا الفصل الأخير (قد يكون من فترة الإخفاء)
+               social_at = CASE WHEN work_views.published = 1 THEN NULL ELSE -1 END,
+               chapter_label = CASE WHEN work_views.published = 1 AND work_views.social_at IS NOT NULL THEN NULL ELSE work_views.chapter_label END,
+               chapter_number = CASE WHEN work_views.published = 1 AND work_views.social_at IS NOT NULL THEN NULL ELSE work_views.chapter_number END,
+               rev = excluded.rev`,
           )
           .bind(userId, seriesRef, now, rev),
+        // وإنهاء فصوله المعلّق في المهلة لا يُنشر أيضًا: لا يعرفون ما كان
+        db
+          .prepare('UPDATE activity SET social_at = -1, rev = ? WHERE actor_id = ? AND series_ref = ? AND social_at > 0')
+          .bind(rev, userId, seriesRef),
       ];
     }
 
@@ -1777,6 +2088,7 @@ const ACCOUNT_AWARE_KINDS = new Set([
   'comment.add',
   'reaction.set',
   'chapter.complete',
+  'episode.complete',
   'library.add',
   'favorite.set',
 ]);
@@ -2163,8 +2475,10 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
         { incognito },
       );
       // العمل والفصل يُعرضان فقط وهو يقرأ فعلًا: آخر فصل قرأه قبل ساعة ليس
-      // «يقرأ الآن»، وعرضه هكذا يكذب على الأصدقاء
-      const reading = visible.status === 'READING' && !incognito;
+      // «يقرأ الآن»، وعرضه هكذا يكذب على الأصدقاء. ومن أطفأ «عرض ماذا أشاهد
+      // الآن» يبقى «يقرأ/يشاهد» بلا عمل ولا فصل ولا مرجع — لا يختفي.
+      const workHidden = !privacyFrom(row['settings_data']).shareCurrent;
+      const reading = visible.status === 'READING' && !incognito && !workHidden;
       return {
         userId: visible.userId,
         username: visible.username,
@@ -2177,6 +2491,7 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
         chapterLabel: reading ? (visible.chapterLabel ?? null) : null,
         chapterNumber: reading ? row['chapter_number'] : null,
         incognito,
+        workHidden: visible.status === 'READING' && workHidden,
         lastSeenAt: beatAt || null,
       };
     }),
@@ -2252,7 +2567,8 @@ async function handleWeek(env: Env, now: number): Promise<Response> {
 
   const hidden = new Set(
     settings.results
-      .filter((row) => incognitoUntilFrom(row['data']) > now)
+      // من أخفى عمله الحالي لا يُسمّى عمله في الملخص أيضًا
+      .filter((row) => incognitoUntilFrom(row['data']) > now || !privacyFrom(row['data']).shareCurrent)
       .map((row) => String(row['user_id'])),
   );
 
@@ -2351,7 +2667,7 @@ async function handlePendingProgress(env: Env, userId: string): Promise<Response
 // ───────────────────────────── الإحصائيات ─────────────────────────────
 
 async function handleStats(env: Env, targetId: string, now: number): Promise<Response> {
-  const [reads, usage, followed, marks] = await env.DB.batch<Record<string, unknown>>([
+  const [reads, usage, followed, marks, sectionUsage] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(
       'SELECT chapter_key, read_count FROM chapter_reads WHERE user_id = ? AND read_count > 0',
     ).bind(targetId),
@@ -2361,6 +2677,7 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
       "SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN series_ref LIKE 'anime:%' THEN 1 ELSE 0 END), 0) AS anime FROM library WHERE user_id = ? AND removed = 0",
     ).bind(targetId),
     env.DB.prepare('SELECT chapter_key, series_ref, read FROM chapter_marks WHERE user_id = ?').bind(targetId),
+    env.DB.prepare('SELECT day, section, active_ms FROM usage_sections WHERE user_id = ?').bind(targetId),
   ]);
   // الأنمي يشارك عين الفصل بمفتاح `anime:<id>#ep:<n>`: حلقاته تُعدّ وحدها، لا فصولًا
   const isAnime = (row: Record<string, unknown>) => String(row['series_ref'] ?? '').startsWith('anime:');
@@ -2389,9 +2706,32 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     if (day >= weekStart && day <= today) weekMs += ms;
   }
 
+  // الوقت لكل قسم: اليوم، الأسبوع، الشهر، السنة، ومنذ البداية. «all» مجموعها
+  const monthStart = today.slice(0, 7);
+  const yearStart = today.slice(0, 4);
+  const windowOf = (rows: Array<{ day: string; ms: number }>) => {
+    const w = { todayMs: 0, weekMs: 0, monthMs: 0, yearMs: 0, totalMs: 0 };
+    for (const { day, ms } of rows) {
+      w.totalMs += ms;
+      if (day === today) w.todayMs += ms;
+      if (day >= weekStart && day <= today) w.weekMs += ms;
+      if (day.startsWith(monthStart)) w.monthMs += ms;
+      if (day.startsWith(yearStart)) w.yearMs += ms;
+    }
+    return w;
+  };
+  const mangaDays = (usage?.results ?? []).map((row) => ({ day: String(row['day']), ms: Number(row['active_ms'] ?? 0) }));
+  const sectionDays = (name: string) =>
+    (sectionUsage?.results ?? []).filter((row) => row['section'] === name).map((row) => ({ day: String(row['day']), ms: Number(row['active_ms'] ?? 0) }));
+  const time = {
+    manga: windowOf(mangaDays),
+    anime: windowOf(sectionDays('anime')),
+    cinema: windowOf(sectionDays('cinema')),
+    all: windowOf([...mangaDays, ...sectionDays('anime'), ...sectionDays('cinema')]),
+  };
   const followedAnime = Number(followed?.results?.[0]?.['anime'] ?? 0);
   const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0) - followedAnime;
-  return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, usage: { todayMs, weekMs, totalMs } });
+  return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, usage: { todayMs, weekMs, totalMs }, time });
 }
 
 // ───────────────────────────── الصور ─────────────────────────────
@@ -2420,7 +2760,8 @@ async function handleMediaUpload(request: Request, env: Env, userId: string, url
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.length === 0) return json({ error: 'empty' }, { status: 400 });
   if (bytes.length > MAX_MEDIA_BYTES) return json({ error: 'too_large', max: MAX_MEDIA_BYTES }, { status: 413 });
-  const mime = sniffImageType(bytes);
+  // صورة، أو رسالة صوتية للمجلس — النوع من البايتات لا من الترويسة
+  const mime = sniffImageType(bytes) ?? sniffAudioType(bytes);
   if (!mime) return json({ error: 'not_an_image' }, { status: 415 });
 
   const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM media WHERE owner_id = ?')
@@ -2498,7 +2839,7 @@ export default {
       if (!userId) return json({ error: 'unauthorized' }, { status: 401 }, cors);
 
       let response: Response | null = null;
-      if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId);
+      if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'GET') response = await handlePresenceList(env, now);
@@ -2508,7 +2849,10 @@ export default {
       else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, now);
       // نبض خفيف: رقم آخر كتابة فقط. الجهاز يسأله كل ثوانٍ ويسحب حين يتقدّم —
       // رسالة صديقك تصلك في ثوانٍ لا بعد دقيقة، بلا سحب كامل كل مرة
-      else if (path === '/v1/pulse' && request.method === 'GET') response = json({ rev: await currentRev(env) });
+      else if (path === '/v1/pulse' && request.method === 'GET') {
+        await publishDue(env, now);
+        response = json({ rev: await currentRev(env) });
+      }
       else if (path === '/v1/progress/pending' && request.method === 'GET') {
         response = await handlePendingProgress(env, userId);
       }

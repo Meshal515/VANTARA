@@ -27,12 +27,6 @@ const ANIME_FILTERS = [
   ['all', 'الكل'],
   ['recs', 'ترشيحات ولحظات'],
 ];
-/** المجلس نفسه (من بابه في الأصدقاء): رسائله فقط، وكل الأقسام فيه. */
-const ROOM_FILTERS = [
-  ['all', 'الكل'],
-  ['recs', 'ترشيحات'],
-  ['frames', 'فريمات'],
-];
 const FILTERS = [
   ['all', 'الكل'],
   ['frames', 'فريمات'],
@@ -83,9 +77,6 @@ export function createMajlis(ctx) {
   const { sync, host } = ctx;
   const me = () => sync.user?.userId;
   let filter = 'all';
-  // `room`: دخلت المجلس من بابه — رسائل الأصدقاء (فريمات وترشيحات) لكل الأقسام،
-  // والوجوه و«آخر ما صار» مكانها صفحة الأصدقاء
-  let room = false;
   let presence = [];
   let timer = null;
 
@@ -410,8 +401,8 @@ export function createMajlis(ctx) {
 
   // مجلسان: قسم الأنمي يرى الأنمي وحده، والمانجا ترى المانجا وحدها — نفس الأصدقاء
   const animeSide = () => ctx.section?.() === 'anime';
-  const onThisSide = (ref) => room || isAnime(ref) === animeSide();
-  const filters = () => (room ? ROOM_FILTERS : animeSide() ? ANIME_FILTERS : FILTERS);
+  const onThisSide = (ref) => isAnime(ref) === animeSide();
+  const filters = () => (animeSide() ? ANIME_FILTERS : FILTERS);
 
   function readingNow() {
     return presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me() && watching(p) === animeSide());
@@ -440,16 +431,19 @@ export function createMajlis(ctx) {
 
   function events() {
     const out = [];
+    // ما حُذف للجميع أو أخفيته لديك لا يظهر هنا أيضًا
+    const hidden = new Set(sync.rows('majlis_hidden', (h) => h.user_id === me()).map((h) => h.target));
+    const shown = (kind, x) => !x.removed && !hidden.has(`${kind}:${x.id}`);
     // الفريمات صفحات مانجا: مكانها مجلس المانجا
-    if (room || !animeSide()) {
-      for (const f of sync.rows('frames', (x) => !x.removed)) {
+    if (!animeSide()) {
+      for (const f of sync.rows('frames', (x) => shown('frame', x))) {
         out.push({ kind: 'frame', at: f.created_at, actor: f.from_id, row: f });
       }
     }
-    for (const r of sync.rows('recommendations', (x) => !x.removed && onThisSide(x.series_ref))) {
+    for (const r of sync.rows('recommendations', (x) => shown('rec', x) && onThisSide(x.series_ref))) {
       out.push({ kind: 'rec', at: r.created_at, actor: r.from_id, row: r });
     }
-    for (const a of room ? [] : sync.rows('activity', (x) => !x.removed && x.verb in VERB_COPY && onThisSide(x.series_ref))) {
+    for (const a of sync.rows('activity', (x) => shown('activity', x) && x.verb in VERB_COPY && onThisSide(x.series_ref))) {
       out.push({ kind: 'act', at: a.created_at, actor: a.actor_id, row: a });
     }
     return out
@@ -640,79 +634,6 @@ export function createMajlis(ctx) {
     return new Date(at).toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', numberingSystem: 'latn' });
   }
 
-  // ── رأس المجلس ──
-  // رجوع، وجه المجلس واسمه، ومن فيه — وزر الأعضاء يفتح ورقة فوق المحادثة
-  // بلا مغادرتها، فترجع لنفس مكانك.
-
-  function roomHead() {
-    const head = el('header', 'mj-room');
-    const back = el('button', 'mj-room-back');
-    back.type = 'button';
-    back.setAttribute('aria-label', 'رجوع للأصدقاء');
-    back.innerHTML = glyph('back', { size: 22 });
-    back.onclick = () => ctx.leaveRoom?.();
-    // وجه المجلس: وجوه أعضائه على شارته، نفس شارة الباب في الأصدقاء
-    const crest = el('span', 'fr-door-crest mj-room-crest');
-    const faces = el('span', 'fr-door-faces');
-    for (const u of members()
-      .filter((x) => x !== me())
-      .sort((x, y) => statusRank(x) - statusRank(y))
-      .slice(0, 3)) {
-      const f = el('span', 'fr-door-face');
-      f.append(ctx.avatarNode(personOf(u), 26));
-      faces.append(f);
-    }
-    faces.dataset.count = String(faces.childElementCount);
-    crest.append(faces);
-    const copy = el('span', 'mj-room-copy');
-    const online = members().filter((u) => u !== me() && ['ONLINE', 'READING', 'IDLE'].includes(presenceOf(u)?.status)).length;
-    copy.append(el('b', null, 'المجلس'), el('span', null, `${members().length} أعضاء${online ? ` · ${online} متصل` : ''}`));
-    const who = el('button', 'mj-room-members');
-    who.type = 'button';
-    who.setAttribute('aria-label', 'أعضاء المجلس');
-    who.innerHTML = glyph('members', { size: 24 });
-    who.onclick = openMembers;
-    head.append(back, crest, copy, who);
-    return head;
-  }
-  function openMembers() {
-    if (!ctx.openSheet) return;
-    ctx.openSheet((body) => {
-      body.classList.add('mj-members-sheet');
-      body.append(el('h3', null, 'في المجلس'));
-      const list = el('div', 'mj-mlist');
-      const ids = members().sort((a, b) => (a === me() ? -1 : b === me() ? 1 : statusRank(a) - statusRank(b)));
-      for (const u of ids) {
-        const p = presenceOf(u);
-        const status = p?.status ?? 'OFFLINE';
-        const row = el('button', `mj-mrow mj-mrow--${status.toLowerCase()}`);
-        row.type = 'button';
-        const face = el('span', 'mj-mrow-face');
-        face.append(ctx.avatarNode(personOf(u), 46));
-        if (status !== 'OFFLINE') face.append(el('span', 'mj-mrow-dot'));
-        const copy = el('span', 'mj-mrow-copy');
-        copy.append(el('bdi', 'mj-mrow-name', nameOf(u)));
-        const line =
-          u === me()
-            ? 'هذا أنت'
-            : status === 'READING' && p?.seriesTitle
-              ? `${watching(p) ? 'يشاهد' : 'يقرأ'} ${p.seriesTitle}`
-              : ({ READING: watching(p) ? 'يشاهد الآن' : 'يقرأ الآن', ONLINE: 'متصل الآن', IDLE: 'خامل' }[status] ?? lastSeen(p?.lastSeenAt));
-        const l = el('span', 'mj-mrow-line', line);
-        l.dir = 'auto';
-        copy.append(l);
-        row.append(face, copy);
-        row.onclick = () => {
-          ctx.closeSheet?.();
-          ctx.openProfile(u);
-        };
-        list.append(row);
-      }
-      body.append(list);
-      ctx.animateIn?.([...list.children]);
-    });
-  }
-
   // ── الرسم ──
 
   function render() {
@@ -720,15 +641,14 @@ export function createMajlis(ctx) {
     for (const t of seenTimers.values()) clearTimeout(t);
     seenTimers.clear();
     const parts = [];
-    if (room) parts.push(roomHead());
 
     const strip = el('section', 'mj-members');
     strip.setAttribute('aria-label', 'الحاضرون');
     const ids = members().sort((a, b) => (a === me() ? -1 : b === me() ? 1 : statusRank(a) - statusRank(b)));
     strip.append(...ids.map(memberFace));
-    if (!room) parts.push(strip);
+    parts.push(strip);
 
-    const now = room ? [] : readingNow();
+    const now = readingNow();
     if (now.length) {
       const sec = el('section', 'mj-section');
       const h = el('h2', 'mj-title');
@@ -742,7 +662,7 @@ export function createMajlis(ctx) {
 
     const feed = el('section', 'mj-section mj-feed');
     const head = el('div', 'mj-feed-head');
-    head.append(el('h2', 'mj-title', room ? 'الرسائل' : 'آخر ما صار'));
+    head.append(el('h2', 'mj-title', 'آخر ما صار'));
     const chips = el('div', 'segmented mj-filters');
     chips.setAttribute('role', 'tablist');
     if (!filters().some(([k]) => k === filter)) filter = 'all';
@@ -813,9 +733,7 @@ export function createMajlis(ctx) {
 
   return {
     /** `only`: يُفتح على مصفاة بعينها (التوصيات من القائمة تفتح «ترشيحات»). */
-    show(only, opts = {}) {
-      room = Boolean(opts.room);
-      if (!filters().some(([k]) => k === filter)) filter = 'all';
+    show(only) {
       if (only && filters().some(([k]) => k === only)) filter = only;
       render();
       void refreshPresence();
@@ -832,7 +750,7 @@ export function createMajlis(ctx) {
       if (tables.includes('majlis_reactions')) pendingReaction.clear();
       if (tables.some((t) => t === 'frames' || t === 'recommendations')) acknowledgeDelivered();
       if (!visible) return;
-      if (tables.some((t) => ['frames', 'recommendations', 'majlis_receipts', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions'].includes(t))) render();
+      if (tables.some((t) => ['frames', 'recommendations', 'majlis_receipts', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions', 'majlis_hidden'].includes(t))) render();
     },
     acknowledgeDelivered,
     /** فتح الرسالة من خارج المجلس (الإشعار، الرابط) = رآها. */
