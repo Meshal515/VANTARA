@@ -19,7 +19,7 @@ import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
-import { titlesMatch } from '../lib/catalog.js';
+import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
 import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
@@ -626,11 +626,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
     a.setAttribute('aria-label', `${titleOf(work)}، اضغط مطولًا لخيارات المكتبة`);
+    // الغلاف غلافٌ فقط: التقييم وعدد الفصول تحت العنوان، لا فوق الصورة
     const frame = el('div', 'work-card-frame');
     const p = el('div', 'poster');
     const score = el('span', 'work-score');
     score.hidden = true;
-    frame.append(p, score);
+    frame.append(p);
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
     const chapter = work._latestChapter;
@@ -643,9 +644,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const count = el('span', 'work-count');
     const firstCount = Number.isInteger(work.chapters) ? work.chapters : savedCount(work);
     count.hidden = firstCount == null;
-    count.innerHTML = `${glyph('chapterMark', { size: 16 })}<span>${firstCount ?? ''}</span>`;
+    count.innerHTML = `<span>${firstCount ?? ''}</span> فصل`;
     count.setAttribute('aria-label', firstCount == null ? 'عدد الفصول غير متاح' : `${firstCount} فصلًا`);
-    facts.append(count);
+    facts.append(score, count);
     void mountImage(p, work);
     a.append(frame, t, m, facts);
     onLongPress(a, () => openCardActions(a._work));
@@ -653,7 +654,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!a.isConnected) return;
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
-        score.innerHTML = `${glyph('star', { size: 15, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
+        score.innerHTML = `${glyph('star', { size: 11, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);
         score.hidden = false;
@@ -1909,7 +1910,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('progressText').textContent = readCount ? `قرأت ${readCount} من ${all.length}` : 'لم تبدأ بعد';
 
     const rows = visibleRows(w);
-    q('chapterCount').textContent = String(rows.length);
+    // العدد فصولٌ صحيحة فقط؛ الجانبية (128.1) تُعرض في القائمة ولا تُعدّ
+    const main = countMainChapters(rows);
+    q('chapterCount').textContent = main < rows.length ? `${main} · +${rows.length - main} جانبي` : String(main);
     const list = el('div', 'chapter-list');
     const fragment = document.createDocumentFragment();
     const nextKey = chapterKeyOf(ref, next);

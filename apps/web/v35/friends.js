@@ -321,10 +321,11 @@ export function createFriends(ctx) {
       render();
       ctx.toast(message);
     };
-    if (!g) return done();
-    g.timeline({ onComplete: done })
-      .to(node, { opacity: 0, duration: 0.16, ease: 'power1.in' })
-      .to(node, { height: 0, paddingTop: 0, paddingBottom: 0, duration: 0.22, ease: 'power2.inOut' });
+    // لا حركة تُخفي ثم تنتظر: إن توقّف مؤقت الرسم في WebView يبقى السطر شفافًا.
+    // الإزالة فورية، والحركة على الجار (ينزلق مكانه) لا على المحذوف
+    const next = node.nextElementSibling;
+    done();
+    if (g && next?.isConnected) g.fromTo(next, { y: 12 }, { y: 0, duration: 0.24, ease: 'power2.out', clearProps: 'transform' });
   }
 
   function tabs(onPick) {

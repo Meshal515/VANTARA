@@ -250,6 +250,20 @@ export function groupWorks(entries) {
  * وما لا رقم له يُذيَّل بلا دمج عددي — يُنقّى من التكرار بالاسم وحده، إذ لا
  * سبيل إلى ترتيب فصلٍ لا يقول أين موضعه.
  */
+/**
+ * عدد الفصول كما يعدّه القارئ: الفصول الصحيحة فقط (128، 129)، والجانبية
+ * (128.1، 128.2) والتمهيد (0) إضافات لا تُعدّ فصلًا. بهذا يطابق عددنا العدد
+ * الرسمي (AniList) بدل 234 لعمل من 200 فصل. عملٌ بلا أرقام أصلًا يُعدّ بصفوفه.
+ */
+export function countMainChapters(rows) {
+	let main = 0;
+	for (const r of rows ?? []) {
+		const n = Number(r?.number ?? chapterNumberOf(r));
+		if (Number.isInteger(n) && n >= 1) main++;
+	}
+	return main || (rows?.length ?? 0);
+}
+
 export function mergeChapters(editions, { rank = null } = {}) {
 	const byNumber = new Map();
 	const loose = new Map();

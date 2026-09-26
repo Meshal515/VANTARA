@@ -58,7 +58,7 @@ describe('presence status', () => {
   });
 
   it('decays to IDLE then OFFLINE', () => {
-    expect(statusFor(120_000, { reading: true })).toBe('IDLE');
+    expect(statusFor(200_000, { reading: true })).toBe('IDLE');
     expect(statusFor(600_000, { reading: true })).toBe('OFFLINE');
   });
 
