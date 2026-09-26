@@ -2859,7 +2859,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     const here = currentPage();
     // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
-    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['سينباي', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     q('drawerContent').replaceChildren(
       ...groups.map(([label, items]) => {
         const g = el('div', 'drawer-group');

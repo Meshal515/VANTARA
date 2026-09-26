@@ -14,9 +14,9 @@ import { glyph } from './icons.js';
 
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', NOT_YET_RELEASED: 'لم يبدأ', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
 const ERRORS = {
-  rafiq_locked: 'رفيق لسا تحت التجربة ومفتوح لحساب واحد بس 🔒',
-  rafiq_not_configured: 'رفيق مو مربوط بمفتاحه في الخادم للحين.',
-  budget: 'خلص سقف رفيق لهالشهر 💸 يرجع أول الشهر الجاي.',
+  rafiq_locked: 'سينباي لسا تحت التجربة ومفتوح لحساب واحد بس 🔒',
+  rafiq_not_configured: 'سينباي مو مربوط بمفتاحه في الخادم للحين.',
+  budget: 'خلص سقف سينباي لهالشهر 💸 يرجع أول الشهر الجاي.',
   upstream: 'DeepSeek ما رد علينا 😵 جرّب مرة ثانية.',
   bad_output: 'الرد جاء خربان، جرّب مرة ثانية.',
   offline: 'ما فيه نت؟ تأكد من الاتصال وجرّب.',
@@ -120,8 +120,8 @@ export function createRafiq(deps) {
     input = el('textarea', 'rf-input');
     input.rows = 1;
     input.maxLength = 800;
-    input.placeholder = 'قول لرفيق وش مزاجك اليوم…';
-    input.setAttribute('aria-label', 'رسالتك لرفيق');
+    input.placeholder = 'قول لسينباي وش مزاجك اليوم…';
+    input.setAttribute('aria-label', 'رسالتك لسينباي');
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
@@ -165,7 +165,7 @@ export function createRafiq(deps) {
   function welcome() {
     const box = el('div', 'rf-welcome');
     box.insertAdjacentHTML('beforeend', `<div class="rf-mark">${glyph('spark')}</div>`);
-    box.append(el('h2', null, 'هلا! أنا رفيق 👋'));
+    box.append(el('h2', null, 'هلا! أنا سينباي 👋'));
     box.append(el('p', null, 'أعرف وش قريت ووش شاهدت، وأطلع لك الشي اللي فعلًا يناسبك — مو أي شي مشهور وخلاص. قول لي مزاجك 🔥'));
     if (!state.configured) box.append(el('p', 'rf-warn', ERRORS.rafiq_not_configured));
     return box;
@@ -400,7 +400,7 @@ export function createRafiq(deps) {
   async function memory() {
     deps.openSheet((body) => {
       body.classList.add('rf-sheet');
-      body.append(el('h3', null, 'ذاكرة رفيق 🧠'));
+      body.append(el('h3', null, 'ذاكرة سينباي 🧠'));
       body.append(el('p', 'rf-alt', 'اللي يعرفه عن ذوقك. أي شي غلط احذفه.'));
       const box = el('div', 'rf-memory');
       box.append(el('p', 'rf-alt', 'لحظة…'));
