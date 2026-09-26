@@ -19,6 +19,7 @@ import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, relativeAr, searchAnime } from '../lib/anime-meta.js';
 import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
+import { createAnimeAccount } from './anime-account.js';
 
 const HOME_KEY = 'anime.home.v2';
 const LIST_KEY = 'vantara.anime.list';
@@ -85,6 +86,17 @@ export function recordWatch(m, episode, position, duration) {
  */
 export function createAnime(deps) {
   const { q, el, toast, genreAr } = deps;
+  // حسابك: القوائم وعين الحلقة وآخر المشاهدات تُزامَن مثل المانجا (وتظهر في ملفك)
+  const account = deps.sync ? createAnimeAccount(deps.sync) : null;
+  setTimeout(() => account?.migrate({ list: readJson(LIST_KEY, {}), watch: readWatch() }), 3000);
+  const signedIn = () => Boolean(account && deps.sync?.user?.userId);
+  // رفوف المكتبة تُرسم من المرآة: متى وصل جديد من الخادم (جهاز ثانٍ مثلًا) تُعاد
+  let shelfPaint = 0;
+  deps.sync?.onChange?.(() => {
+    if (deps.root?.dataset.section !== 'anime' || deps.currentPage() !== 'library' || state.libraryTab === 'history' || state.libraryTab === 'sources') return;
+    cancelAnimationFrame(shelfPaint);
+    shelfPaint = requestAnimationFrame(() => renderLibrary());
+  });
   const state = {
     home: null,
     loading: null,
@@ -429,8 +441,9 @@ export function createAnime(deps) {
 
   // ───────────── قائمتي ─────────────
 
-  const inList = (id) => Boolean(readJson(LIST_KEY, {})[id]);
+  const inList = (id) => (signedIn() ? account.inLibrary(id) : Boolean(readJson(LIST_KEY, {})[id]));
   function toggleList(m) {
+    if (signedIn()) return account.setLibrary(m, !account.inLibrary(m.id));
     const all = readJson(LIST_KEY, {});
     if (all[m.id]) delete all[m.id];
     else {
@@ -561,7 +574,29 @@ export function createAnime(deps) {
     const watch = button('an-btn an-btn--primary an-btn--wide', `${glyph('play', { size: 20, filled: true })}<span>${resume ? 'تابع' : 'شاهد'} الحلقة ${startEp}</span>`, () => playEpisode(m, startEp));
     // ترشيح لصديق أو للمجلس (بدل زر «مشاهدة جماعية» لم يكن يعمل)
     const recommend = button('an-btn an-btn--icon', glyph('send', { size: 20 }), () => shareCurrent(), 'رشّح لصديق');
-    actions.append(watch, listButton(m, 'an-btn an-btn--glass'), recommend);
+    const toggleBtn = (kind, icon, onLabel, offLabel) => {
+      const b = el('button', 'an-btn an-btn--icon');
+      b.type = 'button';
+      const paint = () => {
+        const on = account?.inCollection(kind, m.id);
+        b.setAttribute('aria-pressed', String(Boolean(on)));
+        b.setAttribute('aria-label', on ? onLabel : offLabel);
+        b.title = on ? onLabel : offLabel;
+        b.innerHTML = glyph(icon, { size: 20, filled: Boolean(on) });
+      };
+      paint();
+      b.onclick = () => {
+        const on = !account?.inCollection(kind, m.id);
+        account?.setCollection(kind, m, on);
+        setTimeout(paint, 60);
+        pop(b);
+        toast(on ? onLabel : kind === 'favorite' ? 'أُزيل من المفضلة' : 'أُزيل من «شاهد لاحقًا»');
+      };
+      return b;
+    };
+    actions.append(watch, listButton(m, 'an-btn an-btn--glass'));
+    if (signedIn()) actions.append(toggleBtn('read_later', 'clock', 'في «شاهد لاحقًا»', 'شاهد لاحقًا'), toggleBtn('favorite', 'heart', 'في المفضلة', 'المفضلة'));
+    actions.append(recommend);
 
     const sourcesStrip = el('div', 'an-sources');
     sourcesStrip.id = 'animeSources';
@@ -625,7 +660,15 @@ export function createAnime(deps) {
     writeJson(WATCH_KEY, all);
   }
 
+  /**
+   * «شوهدت»: حسابك هو المرجع متى سجّلت دخولك (كل أجهزتك، والإلغاء يلغي فعلًا)،
+   * وسجل هذا الجهاز لمن لم يسجّل. سجل الجهاز القديم يُرحَّل للحساب مرة واحدة.
+   */
+  const seenEp = (m, n, e) => (signedIn() ? account.isSeen(m.id, n) : Boolean(e?.done));
+
   function episodeRow(m, n, e) {
+    const done = seenEp(m, n, e);
+    e = e ? { ...e, done } : done ? { done: true, position: 0, duration: 0 } : e;
     const ratio = e?.duration ? Math.min(1, e.position / e.duration) : 0;
     const row = el('div', `an-er${e?.done ? ' seen' : ''}`);
     row.dataset.ep = String(n);
@@ -650,6 +693,7 @@ export function createAnime(deps) {
     main.onclick = () => playEpisode(m, n);
     const eye = button(`an-er-icon${e?.done ? ' on' : ''}`, glyph('eye', { size: 20 }), () => {
       setSeen(m, n, !e?.done);
+      account?.markEpisode(m, n, !e?.done);
       const box = q('animeEpisodes');
       if (box) renderEpisodes(box, m);
     }, e?.done ? 'ألغِ «شوهدت»' : 'علّمها شوهدت');
@@ -687,7 +731,10 @@ export function createAnime(deps) {
       renderEpisodes(host, m);
     }, state.newestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا');
     tools.append(jump, order);
+    if (signedIn()) tools.append(button('an-er-icon', glyph('eye', { size: 20 }), () => openMarkSheet(host, m, total), 'علّم حلقات: من ← إلى'));
     host.append(tools);
+    const seasons = seasonsStrip(m);
+    if (seasons) host.insertBefore(seasons, tools);
 
     if (ranges > 1) {
       const tabs = el('div', 'an-ranges');
@@ -711,6 +758,108 @@ export function createAnime(deps) {
     list.append(...nums.map((n) => episodeRow(m, n, seen[n])));
     host.append(list);
     stripIn([...list.children].slice(0, 8));
+  }
+
+  /**
+   * المواسم: السابق ← هذا ← التالي من علاقات AniList (كل موسم عمل مستقل هناك)،
+   * فتنتقل بينها بلمسة بدل البحث عنها.
+   */
+  function seasonsStrip(m) {
+    const prev = (m.relations ?? []).filter((r) => r.relation === 'الجزء السابق');
+    const next = (m.relations ?? []).filter((r) => r.relation === 'الجزء التالي');
+    if (!prev.length && !next.length) return null;
+    const strip = el('div', 'an-seasons');
+    const chip = (r, label, current = false) => {
+      const b = el('button', `an-season${current ? ' active' : ''}`);
+      b.type = 'button';
+      const t = el('b', null, r.title);
+      t.dir = 'auto';
+      b.append(el('span', null, label), t);
+      if (!current) b.onclick = () => void openAnime(r);
+      else b.setAttribute('aria-current', 'true');
+      return b;
+    };
+    strip.append(...prev.map((r) => chip(r, 'الموسم السابق')), chip(m, [SEASON_AR[m.season], m.year].filter(Boolean).join(' ') || 'هذا الموسم', true), ...next.map((r) => chip(r, 'الموسم التالي')));
+    requestAnimationFrame(() => strip.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
+    return strip;
+  }
+
+  /**
+   * عين الحلقات: «من ← إلى» دفعة واحدة، «شاهدته كله»، «ألغِ الكل»، و«أكملته».
+   * تُحفظ في حسابك فتظهر في كل أجهزتك وفي ملفك.
+   */
+  function openMarkSheet(host, m, total) {
+    deps.openSheet((body) => {
+      const head = el('div', 'an-sheet-head');
+      const t = el('div', 'an-sheet-title', m.title);
+      t.dir = 'auto';
+      const count = () => account.seenCount(m.id);
+      const kicker = el('div', 'an-sheet-kicker');
+      const paintCount = () => (kicker.textContent = `شاهدت ${count()} من ${total}`);
+      paintCount();
+      head.append(kicker, t);
+      const field = (label, value) => {
+        const f = el('label', 'field');
+        f.append(el('span', 'field-label', label));
+        const input = el('input', 'field-input');
+        input.type = 'number';
+        input.inputMode = 'numeric';
+        input.min = '1';
+        input.max = String(total);
+        input.value = String(value);
+        f.append(input);
+        return { f, input };
+      };
+      // البداية بعد آخر حلقة معلّمة: الغالب أنك تكمل من حيث وقفت
+      let last = 0;
+      for (let n = 1; n <= total; n++) if (account.isSeen(m.id, n)) last = n;
+      const from = field('من الحلقة', Math.min(total, last + 1));
+      const to = field('إلى الحلقة', total);
+      const pair = el('div', 'an-mark-range');
+      pair.append(from.f, to.f);
+      const clamp = (v) => Math.max(1, Math.min(total, Math.round(Number(v) || 1)));
+      const done = (changed, msg) => {
+        paintCount();
+        renderEpisodes(host, m);
+        toast(changed ? msg : 'ما تغيّر شيء');
+      };
+      const act = el('div', 'an-mark-actions');
+      const seenBtn = button('btn btn-primary', 'علّمها شوهدت', () => {
+        const a = clamp(from.input.value);
+        const b = clamp(to.input.value);
+        const n = account.markRange(m, a, b, true);
+        done(n, `عُلّمت ${n} حلقة (${Math.min(a, b)}–${Math.max(a, b)})`);
+      });
+      const unseenBtn = button('btn', 'ألغِ تعليمها', () => {
+        const a = clamp(from.input.value);
+        const b = clamp(to.input.value);
+        const n = account.markRange(m, a, b, false);
+        done(n, `أُلغي تعليم ${n} حلقة`);
+      });
+      act.append(seenBtn, unseenBtn);
+      const quick = el('div', 'an-mark-actions');
+      quick.append(
+        button('btn', 'شاهدته كله', () => {
+          const n = account.markRange(m, 1, total, true);
+          done(n, `عُلّمت كل الحلقات (${total})`);
+        }),
+        button('btn', 'ألغِ الكل', () => {
+          const had = count();
+          account.clearAll(m);
+          done(had, 'أُلغي تعليم كل الحلقات');
+        }),
+      );
+      const completed = el('label', 'an-mark-toggle');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = account.isCompleted(m.id);
+      box.onchange = () => {
+        account.setCompleted(m, box.checked);
+        toast(box.checked ? 'أُضيف إلى «المكتمل»' : 'أُزيل من «المكتمل»');
+      };
+      completed.append(box, el('span', null, 'أكملته (يظهر في «المكتمل» بملفك)'));
+      body.append(head, pair, act, quick, completed);
+    });
   }
 
   function bindDetailScroll(page, bar) {
@@ -798,7 +947,12 @@ export function createAnime(deps) {
     const cur = state.playing;
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
     const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
-    if (p.duration > 0) recordWatch(cur.m, n, p.position, p.duration);
+    if (p.duration > 0) {
+      recordWatch(cur.m, n, p.position, p.duration);
+      account?.recordView(cur.m, n);
+      // 90% = شوهدت، في حسابك (مرة واحدة)
+      if (p.position / p.duration >= 0.9 && account && !account.isSeen(cur.m.id, n)) account.markEpisode(cur.m, n, true);
+    }
     if (p.code) rememberCode(cur.m.id, p.code);
     cur.n = n;
     if (p.final) {
@@ -1266,7 +1420,14 @@ export function createAnime(deps) {
     const tabs = el('div', 'an-seg');
     for (const [k, label] of [
       ['history', 'سجل المشاهدة'],
-      ['list', 'قائمتي'],
+      ['list', signedIn() ? 'أتابعها' : 'قائمتي'],
+      ...(signedIn()
+        ? [
+            ['read_later', 'شاهد لاحقًا'],
+            ['favorite', 'المفضلة'],
+            ['completed', 'المكتمل'],
+          ]
+        : []),
       ...(engine.available() ? [['sources', 'المصادر']] : []),
     ]) {
       tabs.append(
@@ -1301,15 +1462,26 @@ export function createAnime(deps) {
         nodes.push(list, el('div', 'an-foot', 'تم حفظ هذه المشاهدات على جهازك'));
       }
     } else {
-      const items = Object.values(readJson(LIST_KEY, {})).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+      // رفوف الحساب (تظهر في ملفك ولأصدقائك)، أو قائمة الجهاز لمن لم يسجّل
+      const kind = state.libraryTab;
+      const SHELF = {
+        list: ['library', 'أتابعها', 'اضغط «قائمتي» على أي أنمي ليظهر هنا.', 'تتابعها'],
+        read_later: ['clock', 'شاهد لاحقًا', 'اضغط الساعة في صفحة أي أنمي تنوي تشاهده.', 'في «شاهد لاحقًا»'],
+        favorite: ['heart', 'المفضلة', 'اضغط القلب في صفحة الأنمي اللي تحبه.', 'في المفضلة'],
+        completed: ['check', 'المكتمل', 'علّم «أكملته» من زر العين في قائمة الحلقات.', 'أكملتها'],
+      };
+      const [icon, title, hint, unit] = SHELF[kind] ?? SHELF.list;
+      const items = signedIn()
+        ? account.shelf(kind === 'list' ? 'library' : kind)
+        : Object.values(readJson(LIST_KEY, {})).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
       if (!items.length) {
-        const box = emptyBox('library', 'قائمتك فارغة', 'اضغط «قائمتي» على أي أنمي ليظهر هنا.');
+        const box = emptyBox(icon, `${title}: فارغة`, hint);
         box.append(button('an-btn an-btn--primary', 'اكتشف أنمي', () => openDiscover({})));
         nodes.push(box);
       } else {
         const grid = el('div', 'an-grid');
         grid.append(...items.map((m) => posterCard(m)));
-        nodes.push(el('p', 'an-count', `${items.length} في قائمتك`), grid);
+        nodes.push(el('p', 'an-count', `${items.length} ${unit}`), grid);
       }
     }
     host.replaceChildren(...nodes);

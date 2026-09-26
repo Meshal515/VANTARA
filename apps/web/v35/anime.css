@@ -1766,3 +1766,75 @@
   color: var(--text-3);
   overflow-wrap: anywhere;
 }
+
+/* ───────────── المواسم: السابق ← هذا ← التالي ───────────── */
+.v35 .an-seasons {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.v35 .an-season {
+  flex: none;
+  display: grid;
+  gap: 2px;
+  max-width: 220px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .an-season span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.v35 .an-season b {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.v35 .an-season.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+  cursor: default;
+}
+
+/* ───────────── عين الحلقات: من ← إلى ───────────── */
+.v35 .an-mark-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+.v35 .an-mark-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.v35 .an-mark-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+.v35 .an-mark-toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}

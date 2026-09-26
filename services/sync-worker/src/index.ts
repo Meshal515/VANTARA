@@ -2324,16 +2324,23 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     ).bind(targetId),
     env.DB.prepare('SELECT day, active_ms FROM usage_daily WHERE user_id = ?').bind(targetId),
     // المكتبة نفسها خاصة ولا تُزامَن للأصدقاء؛ عددها وحده إحصاء في الملف
-    env.DB.prepare('SELECT COUNT(*) AS n FROM library WHERE user_id = ? AND removed = 0').bind(targetId),
-    env.DB.prepare('SELECT chapter_key, read FROM chapter_marks WHERE user_id = ?').bind(targetId),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN series_ref LIKE 'anime:%' THEN 1 ELSE 0 END), 0) AS anime FROM library WHERE user_id = ? AND removed = 0",
+    ).bind(targetId),
+    env.DB.prepare('SELECT chapter_key, series_ref, read FROM chapter_marks WHERE user_id = ?').bind(targetId),
   ]);
+  // الأنمي يشارك عين الفصل بمفتاح `anime:<id>#ep:<n>`: حلقاته تُعدّ وحدها، لا فصولًا
+  const isAnime = (row: Record<string, unknown>) => String(row['series_ref'] ?? '').startsWith('anime:');
+  const animeMarks = (marks?.results ?? []).filter(isAnime);
+  const watchedEpisodes = animeMarks.filter((row) => Number(row['read']) === 1).length;
+  const watchedAnime = new Set(animeMarks.filter((row) => Number(row['read']) === 1).map((row) => String(row['series_ref']))).size;
 
   const stats = readStats(
     (reads?.results ?? []).map((row) => ({
       chapterKey: String(row['chapter_key']),
       readCount: Number(row['read_count'] ?? 0),
     })),
-    (marks?.results ?? []).map((row) => ({ chapterKey: String(row['chapter_key']), read: Number(row['read']) === 1 })),
+    (marks?.results ?? []).filter((row) => !isAnime(row)).map((row) => ({ chapterKey: String(row['chapter_key']), read: Number(row['read']) === 1 })),
   );
 
   const today = new Date(now).toISOString().slice(0, 10);
@@ -2349,8 +2356,9 @@ async function handleStats(env: Env, targetId: string, now: number): Promise<Res
     if (day >= weekStart && day <= today) weekMs += ms;
   }
 
-  const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0);
-  return json({ userId: targetId, ...stats, followedWorks, usage: { todayMs, weekMs, totalMs } });
+  const followedAnime = Number(followed?.results?.[0]?.['anime'] ?? 0);
+  const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0) - followedAnime;
+  return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, usage: { todayMs, weekMs, totalMs } });
 }
 
 // ───────────────────────────── الصور ─────────────────────────────

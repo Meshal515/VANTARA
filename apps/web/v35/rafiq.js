@@ -607,7 +607,8 @@ export function createRafiq(deps) {
         body.append(b);
       };
       if (isAnime) {
-        opt('أضف لقائمتي', 'plus', async () => (deps.addAnime?.(card) ? 'أضيف لقائمة الأنمي' : false));
+        opt('أتابعه', 'plus', async () => (deps.addAnime?.(card, 'library') ? 'أضيف لمكتبة الأنمي' : false));
+        opt('شاهد لاحقًا', 'clock', async () => (deps.addAnime?.(card, 'later') ? 'أضيف لـ«شاهد لاحقًا»' : false));
       } else {
         opt('أضف لمكتبتي', 'library', async () => (await deps.addManga?.(card, 'library')) ?? false);
         opt('أقرأ لاحقًا', 'clock', async () => (await deps.addManga?.(card, 'later')) ?? false);
