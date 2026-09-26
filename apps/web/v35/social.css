@@ -395,17 +395,6 @@
 .v35 .sx-row + .sx-row .sx-row-main {
   box-shadow: inset 0 1px 0 var(--line);
 }
-.v35 .sx-row--fresh .sx-row-main {
-  animation: sx-fresh 1.6s ease-out;
-}
-@keyframes sx-fresh {
-  from {
-    background: var(--surface-1);
-  }
-  to {
-    background: transparent;
-  }
-}
 .v35 .sx-row-pic {
   flex: none;
   padding-top: 1px;
@@ -1227,7 +1216,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .v35 .mc-rec-dot,
-  .v35 .sx-row--fresh .sx-row-main,
   .v35 .mc-bubble.is-flash {
     animation: none;
   }

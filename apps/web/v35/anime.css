@@ -29,7 +29,7 @@
   --accent-text: #8fb8ff;
   --accent-soft: rgba(59, 130, 246, 0.16);
   --accent-line: rgba(59, 130, 246, 0.42);
-  --accent-glow: rgba(59, 130, 246, 0.45);
+  --accent-glow: transparent; /* لا توهّج ملوّن تحت الأزرار */
   accent-color: #3b82f6;
   caret-color: #8fb8ff;
 }
@@ -49,7 +49,7 @@
   --accent-text: #ffb27a;
   --accent-soft: rgba(249, 115, 22, 0.15);
   --accent-line: rgba(249, 115, 22, 0.42);
-  --accent-glow: rgba(249, 115, 22, 0.4);
+  --accent-glow: transparent; /* لا توهّج ملوّن تحت الأزرار */
   accent-color: #f97316;
   caret-color: #ffb27a;
 }
@@ -109,11 +109,8 @@
   height: 18px;
 }
 .v35 .an-btn--primary {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
+  background: var(--accent);
   color: #fff;
-  box-shadow:
-    0 10px 28px var(--accent-glow, var(--accent-soft)),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .v35 .an-btn--glass {
   background: rgba(255, 255, 255, 0.09);
@@ -241,7 +238,6 @@
   font-size: 11px;
   font-weight: 850;
   direction: ltr;
-  box-shadow: 0 4px 14px var(--accent-glow, transparent);
 }
 .v35 .an-car-title {
   margin: 0;
@@ -298,7 +294,6 @@
 .v35 .an-dot.active {
   width: 24px;
   background: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow, transparent);
 }
 
 /* ───────────── الشرائط ───────────── */
@@ -624,7 +619,6 @@
 }
 .v35 .an-chip.active {
   background: var(--accent);
-  box-shadow: 0 6px 18px var(--accent-glow, transparent);
   color: #fff;
 }
 
@@ -852,13 +846,6 @@
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-  animation: an-pulse 1.8s ease-in-out infinite;
-}
-@keyframes an-pulse {
-  50% {
-    opacity: 0.35;
-    transform: scale(0.75);
-  }
 }
 .v35 .an-stats {
   display: grid;
