@@ -423,6 +423,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         .catch(() => null);
       throw error;
     }
+    if (options.raw) return response;
     return response.status === 204 ? null : response.json();
   }
 
@@ -867,6 +868,21 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  /**
+   * طلب بثّ (SSE): الرد كما هو ليُقرأ وهو يصل. الجلسة تتجدد كالعادة، والخطأ يرجع
+   * بحالته ورمز الخادم (`rafiq_locked`…).
+   */
+  async function stream(path, body, { signal } = {}) {
+    if (!token) return { status: 401, error: 'unauthorized' };
+    try {
+      return { status: 200, response: await request(path, { method: 'POST', body, signal, raw: true }) };
+    } catch (error) {
+      if (error?.name === 'AbortError') return { status: 0, error: 'aborted' };
+      if (!error?.status) return { status: 0, error: 'offline' };
+      return { status: error.status, error: error.translationError ?? `http_${error.status}` };
+    }
+  }
+
   async function stats(userId) {
     if (!token) return null;
     try {
@@ -1012,6 +1028,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     topWorks,
     stats,
     translation,
+    stream,
     pendingProgress,
     health,
     retryQuarantined,

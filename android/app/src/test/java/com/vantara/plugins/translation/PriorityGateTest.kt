@@ -32,4 +32,30 @@ class PriorityGateTest {
         (waiting + first).awaitAll()
         assertEquals(listOf("holder", "detect", "reader-render", "reader-analyze", "job-render", "job-analyze-1", "job-analyze-2"), order)
     }
+
+    @Test
+    fun `reader pages go by distance from the page in front of you, decided at hand-over`() = runBlocking {
+        val gate = PriorityGate()
+        val order = Collections.synchronizedList(ArrayList<String>())
+        val holding = CompletableDeferred<Unit>()
+        gate.focus(PriorityGate.Page("c1", 0))
+        val first = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), PriorityGate.Page("c1", 0)) { runBlocking { holding.await() }; order.add("p0") } }
+        delay(50)
+        val waiting = listOf(
+            "p1" to PriorityGate.Page("c1", 1),
+            "p2" to PriorityGate.Page("c1", 2),
+            "p3" to PriorityGate.Page("c1", 3),
+            "p6" to PriorityGate.Page("c1", 6),
+            "next-chapter" to PriorityGate.Page("c2", 0),
+        ).map { (name, page) ->
+            async { gate.run(PriorityGate.ANALYZE_READER, Perf(), page) { order.add(name) } }.also { delay(20) }
+        }
+        // قفزت للصفحة 6 وهي في الانتظار: تتقدّم على ما طُلب قبلها
+        gate.focus(PriorityGate.Page("c1", 6))
+        val job = async { gate.run(PriorityGate.ANALYZE_JOB, Perf()) { order.add("job") } }
+        delay(20)
+        holding.complete(Unit)
+        (waiting + first + job).awaitAll()
+        assertEquals(listOf("p0", "p6", "p3", "p2", "p1", "next-chapter", "job"), order)
+    }
 }

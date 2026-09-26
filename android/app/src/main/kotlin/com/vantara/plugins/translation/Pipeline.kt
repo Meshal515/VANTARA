@@ -43,7 +43,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private val typeface: Typeface by lazy { Typeface.createFromAsset(context.assets, "fonts/BalooBhaijaan2.ttf") }
     private val layout by lazy { ArabicLayout(typeface) }
     private val analyses = lru<Analysis>(24)
-    private val images = lru<Decoded>(3)
+    private val images = lru<Decoded>(5)
     private val detections = lru<List<Detection>>(12)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */

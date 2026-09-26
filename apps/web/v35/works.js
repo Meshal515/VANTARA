@@ -598,6 +598,29 @@ export function editionRows(v35work, sourceId) {
   return localizeFiller(mergeChapters([edition]), { keepLabel: true });
 }
 
+/**
+ * وين وصل العربي ووين وصل الإنجليزي لعمل من نسخه بفصولها: المصادر الإنجليزية
+ * (`@`) تكمّل، وكل ما عداها عربي. لرفيق: «العربي واقف عند 22 والإنجليزي 72».
+ */
+export function chapterSpan(editions) {
+  let ar = 0;
+  let en = 0;
+  for (const e of editions ?? []) {
+    if (!e?.chapters?.length) continue;
+    let max = 0;
+    for (const row of mergeChapters([e])) if (Number.isFinite(row.number) && row.number > max) max = row.number;
+    if (isFiller(e.sourceId)) en = Math.max(en, max);
+    else ar = Math.max(ar, max);
+  }
+  return { ar, en };
+}
+
+/** نفسه من المحفوظ على الجهاز، بلا شبكة. `null` = ما جُمعت فصوله بعد. */
+export async function cachedSpan(id) {
+  const cached = await readWork(String(id)).catch(() => null);
+  return cached?.editions?.some((e) => e.chapters?.length) ? chapterSpan(cached.editions) : null;
+}
+
 const described = new Map();
 
 /**

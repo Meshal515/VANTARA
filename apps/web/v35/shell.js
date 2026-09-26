@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, checkAllSources, describe, editionRows, loadWork, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -34,7 +34,8 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
-import { createAnime } from './anime.js';
+import { createAnime, readWatch } from './anime.js';
+import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
@@ -1327,7 +1328,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * «ترجم فصولًا مقدمًا»: المصدر (إنجليزي)، من فصل إلى فصل، عدد الصفحات
    * والحصة والوقت المتوقع، والوضع (أعلى جودة / أسرع)، ثم ابدأ.
    */
-  function openTranslateAhead(w) {
+  function openTranslateAhead(w, preset = null) {
     const ref = String(w.id);
     const sources = (w._sources ?? []).filter((x) => x.lang === 'en');
     let alive = true;
@@ -1488,6 +1489,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const ordered = rowsOf(sourceId).map((row) => row.number).filter((n) => Number.isFinite(n) && n >= lo).sort((a, b) => a - b);
         from.input.value = String(lo);
         to.input.value = String(ordered[Math.min(ordered.length - 1, 9)] ?? r.max);
+        // رفيق حدّد النطاق (بعد آخر فصل عربي إلى آخر إنجليزي): يبدأ منه، وتقدر تعدّله
+        if (preset && preset.to >= r.min && preset.from <= r.max) {
+          from.input.value = String(Math.max(r.min, preset.from));
+          to.input.value = String(Math.min(r.max, preset.to));
+          preset = null;
+        }
         from.input.min = to.input.min = String(r.min);
         from.input.max = to.input.max = String(r.max);
         void recount();
@@ -2857,8 +2864,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const unread = unreadNotifications();
     const here = currentPage();
+    // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
+    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     q('drawerContent').replaceChildren(
-      ...drawerGroups.map(([label, items]) => {
+      ...groups.map(([label, items]) => {
         const g = el('div', 'drawer-group');
         if (label) g.append(el('div', 'drawer-label', label));
         for (const [text, key, ic] of items) {
@@ -2894,6 +2903,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
+    if (key === 'rafiq') return showPage('rafiq');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
     if (key === 'majlisFeed') return openSocial('majlis');
@@ -2951,6 +2961,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (inAnime) anime.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
+    if (id === 'rafiq') void rafiq.show();
     if (id === 'settings') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
@@ -3825,6 +3836,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (e.target === q('drawerBackdrop')) closeDrawer();
     },
     drawerNavigate: (_e, t) => drawerNavigate(t.dataset.arg),
+    rafiqMemory: () => void rafiq.memory(),
+    rafiqNew: () => void rafiq.fresh(),
     sheetBackdrop: (e) => {
       if (e.target === q('sheet')) closeSheet();
     },
@@ -3914,6 +3927,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const majlis = createMajlis({
     sync,
     host: q('majlisBody'),
+    // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
+    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4012,6 +4027,78 @@ export function mountV35(deps, { page = 'home' } = {}) {
         work,
       }),
   });
+  // «رفيق»: مساعد التوصيات. البطاقة تفتح العمل الحقيقي: الأنمي بمعرّفه، والمانجا
+  // بعنوانها في مصادرنا العربية (وإلا صفحة البحث بالعنوان)
+  const rafiq = createRafiq({
+    sync,
+    host: q('rafiqBody'),
+    el,
+    toast,
+    openSheet,
+    closeSheet,
+    genreAr,
+    readWatch,
+    openAnime: (card) => openAnimeRef(card.workId, { title: card.title, cover: card.cover }),
+    openManga: async (card) => {
+      const found = await resolveManga(card);
+      if (found) {
+        void openWork(found);
+        return String(found.id);
+      }
+      toast('ما لقيته باسمه بالضبط في مصادرنا، هذي نتائج البحث 👀');
+      showPage('search');
+      searchFor(card.title);
+      return null;
+    },
+    // مكتبتك وآخر ما فتحت: وين وصل العربي والإنجليزي، من المحفوظ بلا شبكة
+    gaps: async () => {
+      const seen = new Set();
+      const works = [...libraryWorks('all'), ...historyWorks().slice(0, 40)].filter((w) => String(w.id).startsWith('ext:') && !seen.has(w.id) && seen.add(w.id)).slice(0, 80);
+      const out = [];
+      for (const w of works) {
+        const span = await cachedSpan(w.id);
+        if (span && (span.ar || span.en)) out.push({ ref: String(w.id), title: titleOf(w), ...span });
+      }
+      return out;
+    },
+    // عمل ما جُمعت فصوله: يُبحث عنه ويُجمع من كل المصادر، ثم نرجع وين وصل كل لسان
+    checkChapters: async (card) => {
+      const w = await resolveManga(card);
+      if (!w) return null;
+      const full = await loadWorkOnce(w, {});
+      return { ref: String(full.id), ...chapterSpan(full._editions) };
+    },
+    translationOpen: () => !translationLocked(),
+    translateAhead: async (card, range) => {
+      const w = await resolveManga(card);
+      if (!w) return toast('ما لقيت العمل في مصادرنا 😭');
+      const full = await loadWorkOnce(w, {});
+      openTranslateAhead(full, range);
+    },
+  });
+  /** عمل مانجا من بطاقة رفيق: مرجعك إن كان، وإلا بحث بعناوينه في مصادرنا. */
+  async function resolveManga(card) {
+    if (card.ref?.startsWith('ext:')) return workFromRef(card.ref, card.title, card.cover);
+    if (root.dataset.section !== 'manga') {
+      writeSection('manga');
+      applySection('manga');
+      q('mangaHome').hidden = false;
+      q('animeHome').hidden = true;
+    }
+    const titles = [card.title, ...(card.titles ?? [])].filter(Boolean);
+    for (const t of [...new Set(titles)].slice(0, 3)) {
+      try {
+        const { items } = await browse({ query: t, keepWestern: true });
+        const found = items.find((w) => titles.some((x) => titlesMatch(titleOf(w), x)));
+        if (found) return found;
+      } catch {
+        // المصدر ما ردّ: العنوان التالي
+      }
+    }
+    return null;
+  }
+  setTimeout(() => void rafiq.check(), 2500);
+
   const startSection = readSection();
   applySection(startSection);
   q('mangaHome').hidden = startSection !== 'manga';

@@ -41,6 +41,22 @@ class TranslationPlugin : Plugin() {
 
     /** «high»: الصفحة أمام القارئ. غيرها (الترجمة المقدّمة، الإكمال) بعدها. */
     private fun high(call: PluginCall) = call.getString("priority", "high") != "low"
+
+    /** موضع الصفحة في فصلها (من القارئ): دورها بالمسافة من صفحتك الآن. */
+    private fun pageOf(call: PluginCall): PriorityGate.Page? {
+        val chapter = call.getString("chapterKey") ?: return null
+        val index = call.getInt("pageIndex") ?: return null
+        return PriorityGate.Page(chapter, index)
+    }
+
+    /** القارئ على هذه الصفحة الآن: ما أمامها يتقدّم في الدور. */
+    @PluginMethod
+    fun focusPage(call: PluginCall) {
+        val chapter = call.getString("chapterKey")
+        val index = call.getInt("pageIndex")
+        gate.focus(if (chapter != null && index != null) PriorityGate.Page(chapter, index) else null)
+        call.resolve()
+    }
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
@@ -103,11 +119,12 @@ class TranslationPlugin : Plugin() {
                 require(file.exists()) { "page file missing" }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val done = gate.run(PriorityGate.DETECT, perf) { pipeline.detectStage(file, perf) }
+                val page = pageOf(call)
+                val done = gate.run(PriorityGate.DETECT, perf, page) { pipeline.detectStage(file, perf) }
                 val (a, thumb) = if (done != null) {
                     done to ""
                 } else {
-                    gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf) { pipeline.finishForLuna(file, perf) }
+                    gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) { pipeline.finishForLuna(file, perf) }
                 }
                 val regions = JSArray()
                 for (r in a.regions) {
@@ -161,7 +178,7 @@ class TranslationPlugin : Plugin() {
                 call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val (out, translated) = gate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf) {
+                val (out, translated) = gate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf, pageOf(call)) {
                     pipeline.render(File(path), byId, outDir, perf, leave)
                 }
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))

@@ -102,4 +102,47 @@ class EdgeInkTest {
         Cleaner.planErase(img, region, null)
         assertEquals(0, region.eraseMask!![303, 118].toInt())
     }
+
+    @Test
+    fun `a bold word whose letters touch is erased as one piece`() {
+        val img = page()
+        for (k in 0 until 10) letter(img, 90 + k * 12, 110)
+        // «MEAN» بخط عريض: حروف ملتحمة = مكوّن واحد عرضه 60 (أكبر من 3 أسطر)
+        for (y in 132 until 148) for (x in 240 until 300) if (y == 132 || y == 147 || x % 6 == 0) { val i = (y * w + x) * 3; img.data[i] = 20; img.data[i + 1] = 20; img.data[i + 2] = 20 }
+        val glyph = ByteMask(w, h)
+        for (k in 0 until 10) glyph.fillRect(90 + k * 12, 110, 98 + k * 12, 126)
+        val bubble = ByteMask(w, h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val e = Math.pow((x - 200.0) / 170.0, 2.0) + Math.pow((y - 130.0) / 90.0, 2.0)
+            if (e <= 1.0) bubble[x, y] = 1
+        }
+        val region = Region("r1", Box(90, 110, 210, 150), 0.9f, "speech", Bubble(Box(30, 40, 370, 220), 0.9f, bubble), null, glyph, glyph.count(), false)
+        Cleaner.planErase(img, region, null)
+        val erase = region.eraseMask!!
+        for (y in 132 until 148) for (x in 240 until 300) if (y == 132 || y == 147 || x % 6 == 0) assertTrue("word pixel at $x,$y", erase[x, y].toInt() != 0)
+    }
+
+    @Test
+    fun `a bubble cut by the bottom of the image is erased down to the edge`() {
+        // الصفحة تنتهي وسط الفقاعة (تكمل في الصورة التالية): آخر سطر ملاصق للحافة
+        val hh = 150
+        val img = RgbImage(w, hh, ByteArray(w * hh * 3))
+        java.util.Arrays.fill(img.data, 250.toByte())
+        val bubble = ByteMask(w, hh)
+        for (y in 0 until hh) for (x in 0 until w) {
+            val e = Math.pow((x - 200.0) / 170.0, 2.0) + Math.pow((y - 150.0) / 110.0, 2.0)
+            if (e <= 1.0) bubble[x, y] = 1 else if (e <= 1.08) { val i = (y * w + x) * 3; img.data[i] = 15; img.data[i + 1] = 15; img.data[i + 2] = 15 }
+        }
+        val glyph = ByteMask(w, hh)
+        for (row in 0 until 2) for (k in 0 until 10) {
+            val x = 90 + k * 12; val y = 114 + row * 20
+            for (yy in y until minOf(hh, y + 16)) for (xx in x until x + 8) { val i = (yy * w + xx) * 3; img.data[i] = 20; img.data[i + 1] = 20; img.data[i + 2] = 20 }
+            glyph.fillRect(x, y, x + 8, minOf(hh, y + 16))
+        }
+        val region = Region("r1", Box(90, 114, 210, 150), 0.9f, "speech", Bubble(Box(30, 40, 370, 150), 0.9f, bubble), null, glyph, glyph.count(), false)
+        Cleaner.planErase(img, region, null)
+        assertEquals("fill", region.cleanMode)
+        val erase = region.eraseMask!!
+        for (x in 90 until 210) if (glyph[x, hh - 1].toInt() != 0) assertTrue("edge row ink at $x", erase[x, hh - 1].toInt() != 0)
+    }
 }

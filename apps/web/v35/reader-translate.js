@@ -6,8 +6,9 @@
  *   ويستمر للعمل إلى أن تخرج من بطاقته.
  * - أول تفعيل بلا نماذج على الجهاز: بطاقة «تحميل ملفات الترجمة» بالحجم، مرة
  *   واحدة، ثم تعمل محليًّا.
- * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من صفحتك للأمام بالترتيب، ثلاث
- *   صفحات معًا، ثم ما عبرته خلفك، ثم الفصل التالي. صفحة تفشل لسبب عابر تُعاد.
+ * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من صفحتك للأمام بالترتيب، أربع
+ *   صفحات معًا (صفحتك وثلاث أمامها)، ثم ما عبرته خلفك، ثم الفصل التالي. على
+ *   الجهاز الصفحة التي أمامك تسبق غيرها في المعالج. صفحة تفشل لسبب عابر تُعاد.
  * - «نجهّز الفصل بالعربي» حتى تجهز أول ثلاث صفحات، ثم تقرأ والباقي يكمل
  *   أمامك. «اقرأ الآن» يتخطى الانتظار.
  * - الصفحة المترجمة **صورة** جاهزة؛ القارئ يبدّل `<img src>` ويحتفظ بالأصل.
@@ -17,7 +18,7 @@ import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings, setTranslationLocked } from '../lib/translate-settings.js';
 import { readJobs } from '../lib/translate-jobs.js';
-import { downloadModels, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
+import { downloadModels, focusPage, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
@@ -50,9 +51,9 @@ const store = {
   },
 };
 
-// صفحة كاملة تُحلَّل وتُرسم على الجهاز: طلبان متزامنان يكفيان ولا يخنقان الجوال
-// ثلاث صفحات معًا: الرؤية على الجوال واحدة تلو الأخرى، وLuna تتداخل معها
-const queue = createQueue({ concurrency: 3 });
+// أربع صفحات في الطريق معًا: صفحتك وثلاث أمامها. على الجوال المعالج لصفحة واحدة في كل
+// مرة، والدور للأقرب من صفحتك الآن (`focusPage`)، وLuna تترجم الباقي في الوقت نفسه
+const queue = createQueue({ concurrency: 4 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -250,6 +251,7 @@ export function createReaderTranslation(deps) {
     if (segs[i - 1]) ranks[keyOf(segs[i - 1].row)] = 2;
     ranks[keyOf(seg.row)] = 0;
     queue.focus(keyOf(seg.row), index, ranks);
+    focusPage(keyOf(seg.row), index);
     if (!isOn()) return;
     if (!ensureModelsOrOffer()) return;
     startLesson();

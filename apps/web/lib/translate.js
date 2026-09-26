@@ -335,7 +335,7 @@ const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps) }));
+    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -366,7 +366,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
-    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps) }));
+    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
   } catch {
     return { error: 'device_failed', native };
   }
