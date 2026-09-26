@@ -34,7 +34,8 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
-import { createAnime, readWatch } from './anime.js';
+import { addToAnimeList, createAnime, readWatch } from './anime.js';
+import { createAnimeAccount, isAnimeRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
@@ -264,7 +265,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (tries < 60) setTimeout(() => resumeJobsWhenSignedIn(tries + 1), 5000);
   })();
 
-  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed);
+  // الأنمي يشارك هذه الجداول بمرجع `anime:<id>`: شاشات المانجا لا تعرضه (له مكتبته)
+  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isAnimeRef(r.series_ref));
   const inCollection = (kind, ref) =>
     kind === 'completed'
       ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
@@ -280,8 +282,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function libraryWorks(filter = 'all') {
     const refs = new Set([
       ...libraryRows().map((r) => r.series_ref),
-      ...sync.rows('collections', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
-      ...sync.rows('completions', (r) => r.user_id === me() && r.member).map((r) => r.series_ref),
+      ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
+      ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
     ]);
     return [...refs]
       .map((ref) => {
@@ -325,7 +327,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const viewRows = (userId = me()) =>
     sync
-      .rows('work_views', (r) => r.user_id === userId && !r.removed)
+      .rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref))
       .filter((r) => userId !== me() || qualifiesOwnView(r))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
   function recordChapterView(w, row) {
@@ -614,7 +616,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function friendsReading() {
     const since = Date.now() - 14 * 86_400_000;
     const byRef = new Map();
-    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label)) {
+    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isAnimeRef(r.series_ref))) {
       const e = byRef.get(v.series_ref) ?? { ref: v.series_ref, users: new Set(), at: 0, title: v.series_title, cover: v.cover_url };
       e.users.add(v.user_id);
       e.at = Math.max(e.at, v.viewed_at ?? 0);
@@ -1825,7 +1827,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع الأنمي `anime:<AniList id>`: يفتح صفحة الأنمي في قسمه، واللحظة
   // المرسلة («الحلقة 12 · 12:10–12:20») تفتح ورقة سيرفراتها من ثانيتها.
 
-  const isAnimeRef = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
   function openAnimeRef(ref, { title = null, cover = null, chapter = null } = {}) {
     const id = Number(ref.slice('anime:'.length));
     if (!Number.isFinite(id) || id <= 0) return toast('ما قدرنا نفتح هذا الأنمي');
@@ -2888,6 +2889,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     );
   }
   function openDrawer() {
+    // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
+    if (rafiq.enabled !== true) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
@@ -4012,6 +4015,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     void profile.show(userId);
   }
 
+  const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     sync,
@@ -4073,6 +4077,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return { ref: String(full.id), ...chapterSpan(full._editions) };
     },
     translationOpen: () => !translationLocked(),
+    // «أضف» من بطاقة رفيق: نفس عمليات المكتبة في صفحة العمل (لا نظام موازٍ)
+    addManga: async (card, where) => {
+      const w = await resolveManga(card);
+      if (!w) return false;
+      const d = descriptorOf(w);
+      if (where === 'later') {
+        sync.enqueue('readLater.set', { ...d, member: true });
+        return 'في «أقرأ لاحقًا»';
+      }
+      if (!libraryEntry(d.seriesRef)?.row) sync.enqueue('library.add', d);
+      afterLibraryChange();
+      return 'أضيف لمكتبتك';
+    },
+    // الأنمي في حسابك (أتابعها / شاهد لاحقًا)، وقائمة الجهاز لمن لم يسجّل
+    addAnime: (card, where = 'library') => {
+      const id = Number(String(card.workId).slice('anime:'.length));
+      if (!Number.isFinite(id)) return false;
+      const m = { id, title: card.title, poster: card.cover, posterSmall: card.cover, banner: card.banner, color: card.color, score: card.score, status: card.status, episodes: card.count };
+      if (!sync.user?.userId) return addToAnimeList(m);
+      if (where === 'later') animeAccount.setCollection('read_later', m, true);
+      else if (!animeAccount.inLibrary(id)) animeAccount.setLibrary(m, true);
+      return true;
+    },
     translateAhead: async (card, range) => {
       const w = await resolveManga(card);
       if (!w) return toast('ما لقيت العمل في مصادرنا 😭');

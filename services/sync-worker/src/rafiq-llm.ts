@@ -1,12 +1,16 @@
 /**
- * «رفيق» — عميل DeepSeek (واجهة متوافقة مع OpenAI Chat Completions).
+ * «رفيق» — عميل DeepSeek (صيغة OpenAI Chat Completions).
  *
- * النموذج للمحادثة والترتيب والشرح فقط، ومخرجه JSON بمخطط نتحقق منه (`json_object`).
- * البث: الخادم يقرأ دفق النموذج ويستخرج حقل `message` وهو يُكتب، فيصل للجهاز حرفًا
- * حرفًا، والبطاقات تُرسل بعد التحقق منها لا قبل.
+ * كل نداء يمرّ بالموجّه (`rafiq-models.ts`): نموذج وتفكير حسب المهمة، ويُسجَّل في
+ * `rafiq_usage` بكلفته الفعلية (محفوظ/جديد/إخراج، الذروة ضعف) ولأي مهارة وطلب.
+ * التفكير الداخلي (`reasoning_content`) لا يُحفظ ولا يُرسل للجهاز أبدًا.
+ *
+ * البث: نقرأ دفق النموذج ونستخرج حقل `message` من JSON وهو يُكتب، فيصل للجهاز
+ * حرفًا حرفًا، والبطاقات تُرسل بعد التحقق منها لا قبل.
  */
 
 import type { D1Database } from './types.ts';
+import { DEFAULT_MODEL, type Effort, type Usage, costOf, thinkingParams } from './rafiq-models.ts';
 
 type Fetch = typeof fetch;
 
@@ -22,16 +26,17 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface Usage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  prompt_cache_hit_tokens?: number;
-  prompt_cache_miss_tokens?: number;
+export interface CallOpts {
+  effort?: Effort;
+  maxTokens?: number;
+  /** للمحاسبة: من طلب ولأي غرض. */
+  userId?: string;
+  requestId?: string;
+  skill?: string;
+  purpose?: string;
+  model?: string;
 }
 
-export const DEFAULT_MODEL = 'deepseek-chat';
-/** دولار لكل مليون توكن: إدخال محفوظ، إدخال جديد، إخراج (أسعار DeepSeek المنشورة؛ تقدير للسقف لا فاتورة). */
-const PRICE = { hit: 0.07, miss: 0.27, out: 1.1 };
 const DEFAULT_BUDGET_USD = 5;
 
 export class LlmError extends Error {
@@ -42,52 +47,105 @@ export class LlmError extends Error {
 
 const month = (now: number) => new Date(now).toISOString().slice(0, 7);
 
-export function costOf(u: Usage | undefined): number {
-  if (!u) return 0;
-  const hit = u.prompt_cache_hit_tokens ?? 0;
-  const miss = u.prompt_cache_miss_tokens ?? Math.max(0, (u.prompt_tokens ?? 0) - hit);
-  return (hit * PRICE.hit + miss * PRICE.miss + (u.completion_tokens ?? 0) * PRICE.out) / 1_000_000;
+export function budgetOf(env: LlmEnv): number {
+  const n = Number(env.RAFIQ_MONTHLY_BUDGET_USD);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BUDGET_USD;
 }
 
-async function underBudget(db: D1Database, env: LlmEnv, now: number): Promise<boolean> {
-  const cap = Number(env.RAFIQ_MONTHLY_BUDGET_USD ?? DEFAULT_BUDGET_USD);
+/** نسبة الباقي من ميزانية الشهر (0..1): الموجّه يخفّف التفكير حين تضيق. */
+export async function budgetLeft(db: D1Database, env: LlmEnv, now: number): Promise<number> {
   const row = await db.prepare('SELECT usd FROM rafiq_spend WHERE month = ?').bind(month(now)).first<{ usd: number }>();
-  return (row?.usd ?? 0) < cap;
+  return Math.max(0, 1 - (row?.usd ?? 0) / budgetOf(env));
 }
 
-async function record(db: D1Database, now: number, usage: Usage | undefined): Promise<void> {
-  await db
-    .prepare('INSERT INTO rafiq_spend (month, usd, calls) VALUES (?, ?, 1) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, calls = calls + 1')
-    .bind(month(now), costOf(usage))
-    .run();
+async function record(db: D1Database, now: number, model: string, effort: Effort, usage: Usage | undefined, opts: CallOpts, latency: number, ok: boolean): Promise<void> {
+  const usd = costOf(usage, model, now);
+  const hit = usage?.prompt_cache_hit_tokens ?? 0;
+  const miss = usage?.prompt_cache_miss_tokens ?? Math.max(0, (usage?.prompt_tokens ?? 0) - hit);
+  await db.batch([
+    db
+      .prepare('INSERT INTO rafiq_spend (month, usd, calls) VALUES (?, ?, 1) ON CONFLICT (month) DO UPDATE SET usd = usd + excluded.usd, calls = calls + 1')
+      .bind(month(now), usd),
+    db
+      .prepare(
+        `INSERT INTO rafiq_usage (id, user_id, request_id, skill, purpose, model, effort, input_hit, input_miss, output_tokens, reasoning_tokens, usd, latency_ms, ok, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        opts.userId ?? '',
+        opts.requestId ?? null,
+        opts.skill ?? null,
+        opts.purpose ?? 'chat',
+        model,
+        effort,
+        hit,
+        miss,
+        usage?.completion_tokens ?? 0,
+        usage?.completion_tokens_details?.reasoning_tokens ?? 0,
+        usd,
+        latency,
+        ok ? 1 : 0,
+        now,
+      ),
+  ]);
 }
 
 function endpoint(env: LlmEnv) {
   return `${(env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`;
 }
 
-/** نداء JSON كامل (بلا بث): تحليل الطلب، الملخّص. */
-export async function chatJson<T>(db: D1Database, env: LlmEnv, fetchImpl: Fetch, messages: ChatMessage[], now: number, maxTokens = 700): Promise<T> {
+async function begin(db: D1Database, env: LlmEnv, now: number) {
   if (!env.DEEPSEEK_API_KEY) throw new LlmError('not_configured');
-  if (!(await underBudget(db, env, now))) throw new LlmError('budget');
+  if ((await budgetLeft(db, env, now)) <= 0) throw new LlmError('budget');
+}
+
+function body(env: LlmEnv, messages: ChatMessage[], opts: CallOpts, extra: Record<string, unknown>) {
+  const model = opts.model ?? env.RAFIQ_MODEL ?? DEFAULT_MODEL;
+  const effort = opts.effort ?? 'none';
+  return {
+    model,
+    effort,
+    payload: {
+      model,
+      messages,
+      response_format: { type: 'json_object' },
+      max_tokens: opts.maxTokens ?? 900,
+      // «ثابت أولًا»: تعليمات النظام نفسها في كل طلب، فيحفظها DeepSeek (سعر المحفوظ أرخص 50 مرة)
+      ...thinkingParams(effort),
+      ...(effort === 'none' ? { temperature: 0.3 } : {}),
+      ...extra,
+    },
+  };
+}
+
+/** نداء JSON كامل (بلا بث): فهم الطلب، الملخّص. */
+export async function chatJson<T>(db: D1Database, env: LlmEnv, fetchImpl: Fetch, messages: ChatMessage[], now: number, opts: CallOpts = {}): Promise<T> {
+  await begin(db, env, now);
+  const { model, effort, payload } = body(env, messages, { maxTokens: 700, ...opts }, {});
+  const started = Date.now();
   let res: Response;
   try {
     res = await fetchImpl(endpoint(env), {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
-      body: JSON.stringify({ model: env.RAFIQ_MODEL ?? DEFAULT_MODEL, messages, response_format: { type: 'json_object' }, temperature: 0.2, max_tokens: maxTokens }),
+      body: JSON.stringify(payload),
     });
   } catch {
     throw new LlmError('upstream');
   }
   if (!res.ok) throw new LlmError('upstream');
-  const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: Usage };
-  await record(db, now, body.usage);
+  const out = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: Usage };
+  const content = out.choices?.[0]?.message?.content ?? '';
+  let parsed: T;
   try {
-    return JSON.parse(body.choices?.[0]?.message?.content ?? '') as T;
+    parsed = JSON.parse(content) as T;
   } catch {
+    await record(db, now, model, effort, out.usage, opts, Date.now() - started, false);
     throw new LlmError('bad_output');
   }
+  await record(db, now, model, effort, out.usage, opts, Date.now() - started, true);
+  return parsed;
 }
 
 /**
@@ -124,6 +182,7 @@ export function partialString(json: string, field: string): { text: string; clos
 
 /**
  * نداء مبثوث: `onText` يستلم نص الحقل `message` كلما زاد، والوعد يرجع JSON الكامل.
+ * في وضع التفكير يصل `reasoning_content` أولًا: يُتجاهل تمامًا (لا يُحفظ ولا يُبث).
  */
 export async function chatStream<T>(
   db: D1Database,
@@ -132,24 +191,17 @@ export async function chatStream<T>(
   messages: ChatMessage[],
   now: number,
   onText: (text: string) => void,
-  maxTokens = 1400,
+  opts: CallOpts = {},
 ): Promise<T> {
-  if (!env.DEEPSEEK_API_KEY) throw new LlmError('not_configured');
-  if (!(await underBudget(db, env, now))) throw new LlmError('budget');
+  await begin(db, env, now);
+  const { model, effort, payload } = body(env, messages, { maxTokens: 1600, ...opts }, { stream: true, stream_options: { include_usage: true } });
+  const started = Date.now();
   let res: Response;
   try {
     res = await fetchImpl(endpoint(env), {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
-      body: JSON.stringify({
-        model: env.RAFIQ_MODEL ?? DEFAULT_MODEL,
-        messages,
-        response_format: { type: 'json_object' },
-        temperature: 0.5,
-        max_tokens: maxTokens,
-        stream: true,
-        stream_options: { include_usage: true },
-      }),
+      body: JSON.stringify(payload),
     });
   } catch {
     throw new LlmError('upstream');
@@ -188,10 +240,13 @@ export async function chatStream<T>(
       }
     }
   }
-  await record(db, now, usage);
+  let parsed: T;
   try {
-    return JSON.parse(json) as T;
+    parsed = JSON.parse(json) as T;
   } catch {
+    await record(db, now, model, effort, usage, opts, Date.now() - started, false);
     throw new LlmError('bad_output');
   }
+  await record(db, now, model, effort, usage, opts, Date.now() - started, true);
+  return parsed;
 }

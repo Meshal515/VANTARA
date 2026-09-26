@@ -293,7 +293,9 @@
 /* ── الأرقام: بطاقة واحدة بثلاث خانات متساوية ── */
 .v35 .pf-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* ثلاث خانات، ورابعة للحلقات متى شاهد أنمي */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   margin-top: 16px;
   padding: 14px 0;
   border: 0;

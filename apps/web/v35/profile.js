@@ -17,6 +17,7 @@
  * لا يزيد شيئًا.
  */
 
+import { isAnimeRef } from './anime-account.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
@@ -119,13 +120,13 @@ export function createProfile(ctx) {
     for (const [key, value] of Object.entries(local)) merged[COLUMN[key]] = value;
     return withIdentity(merged, usernameOf(userId));
   };
-  const workOf = (ref, title) => {
+  const workOf = (ref, title, cover = null) => {
     // مرجع الأنمي (`anime:<id>`) لا يُطابَق بالعنوان: «Steins;Gate» الأنمي ليس المانجا بنفس الاسم
     const anime = typeof ref === 'string' && ref.startsWith('anime:');
     const row =
       sync.rows('works', (w) => w.series_ref === ref)[0] ??
       (title && !anime ? sync.rows('works', (w) => String(w.title).toLowerCase() === String(title).toLowerCase())[0] : null);
-    return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url);
+    return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url ?? cover);
   };
   const titleOf = (w) => (w ? displayTitle(w.id, w.title?.english, typeof w.title === 'string' ? w.title : null) : '');
   const knownTitle = (w) => Boolean(titleOf(w));
@@ -171,6 +172,12 @@ export function createProfile(ctx) {
         ['clock', 'وقت القراءة اليوم', duration(stats.usage?.todayMs), null],
         ['history', 'هذا الأسبوع', duration(stats.usage?.weekMs), null],
         ['activity', 'منذ البداية', duration(stats.usage?.totalMs), null],
+        ...(stats.anime && (stats.anime.followed || stats.anime.watchedEpisodes)
+          ? [
+              ['play', 'أنمي يتابعه', fmt(stats.anime.followed), 'في مكتبة الأنمي الآن.'],
+              ['eye', 'حلقات شاهدها', fmt(stats.anime.watchedEpisodes), `من ${fmt(stats.anime.watchedAnime)} أنمي.`],
+            ]
+          : []),
       ];
       const list = el('div', 'settings-list');
       list.style.marginTop = '12px';
@@ -291,6 +298,7 @@ export function createProfile(ctx) {
       statCell(v('uniqueChapters'), 'فصول فريدة'),
       statCell(v('totalReads'), 'قراءات'),
     );
+    if (numbers?.anime?.watchedEpisodes) card.append(statCell(fmt(numbers.anime.watchedEpisodes), 'حلقات'));
     card.classList.toggle('pf-stats--loading', !numbers);
     return card;
   }
@@ -415,7 +423,8 @@ export function createProfile(ctx) {
    * رفٌّ من مكتبة صاحب الملف: «reading» مكتبته، والبقية قوائمه. الأحدث مشاهدةً
    * أولًا، ومع كل عمل آخر فصل فتحه.
    */
-  function shelfOf(userId, kind) {
+  function shelfOf(userId, kind, media = 'all') {
+    const keep = (ref) => media === 'all' || (media === 'anime') === isAnimeRef(ref);
     const refs =
       kind === 'reading'
         ? sync.rows('library', (r) => r.user_id === userId && !r.removed).map((r) => r.series_ref)
@@ -424,6 +433,7 @@ export function createProfile(ctx) {
           : sync.rows('collections', (r) => r.user_id === userId && r.kind === kind && r.member).map((r) => r.series_ref);
     const viewAt = (ref) => sync.rows('work_views', (v) => v.user_id === userId && v.series_ref === ref)[0];
     return [...new Set(refs)]
+      .filter(keep)
       .map((ref) => ({ ref, view: viewAt(ref) }))
       .sort((a, b) => (b.view?.viewed_at ?? 0) - (a.view?.viewed_at ?? 0))
       .map(({ ref, view }) => ({ work: workOf(ref, view?.series_title), view }));
@@ -513,10 +523,20 @@ export function createProfile(ctx) {
     body.append(section('أفضل 5', topHost, { meta: own ? null : `اختيارات ${name}` }));
 
     // مكتبة صاحب الملف كما هي عنده: نفس الصفوف التي تقرؤها مكتبته وسجلّه، لا نسخة
-    const shelf = (kind) => shelfOf(userId, kind);
-    const reading = shelf('reading');
+    // كل شيء في مكان واحد: المانجا والأنمي كلٌّ برفوفه (الأنمي بمرجع `anime:<id>`)
+    const shelf = (kind, media = 'all') => shelfOf(userId, kind, media);
+    const reading = shelf('reading', 'manga');
     if (reading.length) body.append(section('يقرأ الآن', strip(reading, { chapters: true }), { meta: countLabel(reading.length, 'work') }));
-    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed);
+    const watchingNow = shelf('reading', 'anime');
+    if (watchingNow.length) body.append(section('يشاهد الآن', strip(watchingNow, { chapters: true }), { meta: `${fmt(watchingNow.length)} أنمي` }));
+    const animeViews = sync
+      .rows('work_views', (r) => r.user_id === userId && !r.removed && isAnimeRef(r.series_ref))
+      .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
+    if (animeViews.length) {
+      const items = animeViews.map((v) => ({ work: workOf(v.series_ref, v.series_title, v.cover_url), view: v }));
+      body.append(section('آخر ما شاهد', strip(items, { chapters: true }), { meta: `${fmt(animeViews.length)} أنمي` }));
+    }
+    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref));
     if (views.length) {
       const hist = el('div');
       ctx.historyList(hist, { userId, own, limit: 5 });
@@ -529,10 +549,16 @@ export function createProfile(ctx) {
       }
       body.append(sec);
     }
-    const later = shelf('read_later');
+    const later = shelf('read_later', 'manga');
     if (later.length) body.append(section('أقرأ لاحقًا', strip(later), { meta: countLabel(later.length, 'work') }));
-    const done = shelf('completed');
+    const watchLater = shelf('read_later', 'anime');
+    if (watchLater.length) body.append(section('شاهد لاحقًا', strip(watchLater), { meta: `${fmt(watchLater.length)} أنمي` }));
+    const favorite = shelf('favorite');
+    if (favorite.length) body.append(section('المفضلة', strip(favorite), { meta: countLabel(favorite.length, 'work') }));
+    const done = shelf('completed', 'manga');
     if (done.length) body.append(section('المكتمل', strip(done), { meta: countLabel(done.length, 'work') }));
+    const doneAnime = shelf('completed', 'anime');
+    if (doneAnime.length) body.append(section('أنمي أكمله', strip(doneAnime), { meta: `${fmt(doneAnime.length)} أنمي` }));
     const log = readingLog(userId);
     if (log.length) body.append(section(own ? 'سجلّ قراءتك' : 'سجلّ القراءة', logList(log)));
 

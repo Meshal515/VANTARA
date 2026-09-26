@@ -124,4 +124,22 @@ describe('chapter.markMany', () => {
     const body = (await (await worker.fetch(new Request(`https://sync.test/v1/stats/${A}`, { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as { uniqueChapters: number };
     expect(body.uniqueChapters).toBe(2);
   });
+
+  it('anime episodes share the eye but count as episodes, not chapters', async () => {
+    const { env } = testEnv();
+    await send(env, A, 'library.add', { seriesRef: 'anime:20', seriesTitle: 'Naruto' });
+    await send(env, A, 'library.add', { seriesRef: 'ext:y', seriesTitle: 'Y' });
+    await send(env, A, 'chapter.markMany', { seriesRef: 'anime:20', keys: ['anime:20#ep:1', 'anime:20#ep:2', 'anime:20#ep:3'], read: true });
+    await send(env, A, 'chapter.markMany', { seriesRef: 'anime:21', keys: ['anime:21#ep:1'], read: true });
+    await send(env, A, 'chapter.markMany', { seriesRef: 'ext:y', keys: ['ext:y#n:1'], read: true });
+    const token = await mintToken(A, SECRET);
+    const body = (await (await worker.fetch(new Request(`https://sync.test/v1/stats/${A}`, { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as {
+      uniqueChapters: number;
+      followedWorks: number;
+      anime: { followed: number; watchedEpisodes: number; watchedAnime: number };
+    };
+    expect(body.uniqueChapters).toBe(1);
+    expect(body.followedWorks).toBe(1);
+    expect(body.anime).toEqual({ followed: 1, watchedEpisodes: 4, watchedAnime: 2 });
+  });
 });

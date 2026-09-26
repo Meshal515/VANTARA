@@ -18,7 +18,9 @@
 import type { D1Database, Env } from './types.ts';
 import { ANILIST, GENRES, type Meta, TAGS, candidates, metaFor, metaKeyForAnime, metaKeyForManga, metaKeyForTitle, searchTitle, similarTo, titleMatches } from './rafiq-anilist.ts';
 import { quotaState, translationAllowed, type TranslationEnv } from './translate.ts';
-import { type ChatMessage, LlmError, type LlmEnv, chatJson, chatStream } from './rafiq-llm.ts';
+import { type ChatMessage, LlmError, type LlmEnv, budgetLeft, chatJson, chatStream } from './rafiq-llm.ts';
+import { route } from './rafiq-models.ts';
+import { SKILL_PROMPTS, SKILL_TIER, type FitLabel, type SkillId, compareSkill, rankingSkill, tasteFit, tasteSkill, workSkill } from './rafiq-skills.ts';
 import { type LocalAnime, type Preference, type TasteProfile, type UserWork, buildProfile, preferences, progressLabel, userWorks } from './rafiq-profile.ts';
 
 type Fetch = typeof fetch;
@@ -44,6 +46,9 @@ export async function rafiqAllowed(env: RafiqEnv, userId: string): Promise<boole
     const row = await env.DB.prepare('SELECT username FROM accounts WHERE user_id = ?').bind(userId).first<{ username: string }>();
     return Boolean(row && list.includes(row.username.toLowerCase()));
   }
+  // من استخدم رفيق قبل يبقى له: الإتاحة لا تتقلب إذا ترجم غيره صفحات أكثر
+  const used = await env.DB.prepare('SELECT 1 AS x FROM rafiq_conversations WHERE user_id = ? LIMIT 1').bind(userId).first<{ x: number }>();
+  if (used) return true;
   const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1').first<{ created_by: string }>();
   return Boolean(top && top.created_by === userId);
 }
@@ -133,6 +138,7 @@ interface StoredMessage {
   content: string;
   cards_json: string | null;
   chips_json: string | null;
+  extra_json?: string | null;
   created_at: number;
 }
 
@@ -150,7 +156,7 @@ async function conversationOf(db: D1Database, userId: string, id: string | null,
 
 async function recentMessages(db: D1Database, conversationId: string, limit: number): Promise<StoredMessage[]> {
   const { results } = await db
-    .prepare('SELECT id, role, content, cards_json, chips_json, created_at FROM rafiq_messages WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
+    .prepare('SELECT id, role, content, cards_json, chips_json, extra_json, created_at FROM rafiq_messages WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
     .bind(conversationId, limit)
     .all<StoredMessage>();
   return results.reverse();
@@ -159,7 +165,14 @@ async function recentMessages(db: D1Database, conversationId: string, limit: num
 // ───────────────────────── فهم الطلب ─────────────────────────
 
 export interface Intent {
-  intent: 'recommend' | 'resume' | 'similar' | 'explain' | 'lookup' | 'feedback' | 'chat';
+  intent: 'recommend' | 'resume' | 'similar' | 'explain' | 'lookup' | 'feedback' | 'chat' | 'ranking' | 'compare' | 'work' | 'taste';
+  /** ranking: كيف يُرتّب وكم. */
+  sort: 'SCORE_DESC' | 'POPULARITY_DESC' | 'TRENDING_DESC';
+  count: number;
+  /** work: وش يسأل عن العمل. */
+  question: 'about' | 'continue' | 'when_good' | 'ending' | 'consensus' | 'adaptation';
+  /** وصل لأي فصل/حلقة في العمل المذكور (لو قاله): حدّ الحرق. */
+  progress: number | null;
   format: 'MANGA' | 'ANIME' | 'ANY';
   genres_in: string[];
   genres_out: string[];
@@ -185,7 +198,10 @@ export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «�
 دقّتك هي اللي تحدد جودة الاقتراحات: كل وسم تختاره يصير شرط بحث في الكتالوج، فاختر الوسوم اللي تصف الطلب فعلًا.
 
 الحقول:
-- intent: recommend (يريد اقتراحات) | resume (يكمل شيء بدأه أو تركه) | similar (يشبه عملًا بعينه) | explain (يسأل لماذا اقتُرح عمل أو عن عمل في الرسائل السابقة) | lookup (يسأل عن عمل بعينه بالاسم) | feedback (رأي في اقتراح سابق فقط) | chat (كلام عام بلا طلب).
+- intent: recommend (يريد اقتراحات) | similar (يشبه عملًا بعينه) | ranking (توب/أفضل/أشهر N: «توب 10 مانهوا»، «أفضل أنمي هالسنة») | compare (يقارن عملين أو أكثر: «لوكيسم ولا فيرال هيت؟») | work (سؤال عن عمل بعينه: قصته، يستاهل؟، أكمل ولا أوقف؟، متى يحلو؟، النهاية؟، وش رأي الناس؟، الأنمي وين وقف؟) | taste (يسأل عن ذوقه: «وش ذوقي؟»، «حلل ذوقي») | resume (يكمل شيء بدأه أو تركه) | explain (ليش اقترحت كذا) | feedback (رأي في اقتراح سابق فقط) | chat (كلام عام).
+- sort (لـranking): SCORE_DESC «أفضل/أقوى» | POPULARITY_DESC «أشهر» | TRENDING_DESC «الرائج الحين/هالموسم». count: العدد المطلوب (افتراضي 10، أقصى 15).
+- question (لـwork): about «وش قصتها/وش هي» | continue «أكمل ولا أوقف/يستاهل أكمل» | when_good «متى تحلو» | ending «النهاية حلوة؟» | consensus «وش رأي الناس/يستاهل؟» | adaptation «الأنمي وين وقف/أكمل مانجا من وين».
+- progress: رقم الفصل/الحلقة اللي قال إنه وصل له في العمل المذكور، وإلا null.
 - format: MANGA أو ANIME أو ANY. المانهوا والمانها والويبتون = MANGA. إن ذكر عملًا مرجعًا ولم يحدد، format = نوع ذلك العمل (Lookism مانهوا → MANGA).
 - country: KR إن قال مانهوا/كوري، JP إن قال مانجا يابانية صراحة، CN إن قال مانها/صيني، وإلا ANY.
 - genres_in / genres_out: من هذه القائمة حرفيًّا فقط: ${GENRES.join(', ')}.
@@ -209,6 +225,11 @@ export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «�
 - «ابي زي لوكيسم وقتال شوارع» → {"intent":"similar","format":"MANGA","country":"KR","references":["Lookism"],"reference":"Lookism","genres_in":["Action"],"genres_out":["Romance","Slice of Life"],"tags_in":["Delinquents","Fist Fighting","School"],...}
 - «رشح لي انمي قصير يضحك» → {"intent":"recommend","format":"ANIME","genres_in":["Comedy"],"length":"short",...}
 - «عندك عمل جبار؟» → {"intent":"recommend","format":"ANY","exploration":"normal",...} (بلا شروط: الذوق العام يقرر)
+- «عطني توب 10 مانهوا» → {"intent":"ranking","format":"MANGA","country":"KR","sort":"SCORE_DESC","count":10,...}
+- «أشهر أنمي أكشن مكتمل» → {"intent":"ranking","format":"ANIME","genres_in":["Action"],"status":"FINISHED","sort":"POPULARITY_DESC","count":10,...}
+- «لوكيسم ولا فيرال هيت؟» → {"intent":"compare","format":"MANGA","references":["Lookism","Viral Hit"],...}
+- «أنا فصل 60 في تاور أوف قود، أكمل؟» → {"intent":"work","question":"continue","references":["Tower of God"],"progress":60,...}
+- «وش ذوقي؟» → {"intent":"taste",...}
 
 أرجع JSON فقط بكل الحقول.`;
 
@@ -221,6 +242,10 @@ const INTENT_DEFAULT: Intent = {
   tags_out: [],
   length: 'any',
   status: 'ANY',
+  sort: 'SCORE_DESC',
+  count: 10,
+  question: 'about',
+  progress: null,
   reference: null,
   references: [],
   country: 'ANY',
@@ -238,7 +263,11 @@ export function cleanIntent(raw: unknown): Intent {
   const r = (raw ?? {}) as Record<string, unknown>;
   const tags = TAGS;
   return {
-    intent: pickEnum(r.intent, ['recommend', 'resume', 'similar', 'explain', 'lookup', 'feedback', 'chat'] as const, 'recommend'),
+    intent: pickEnum(r.intent, ['recommend', 'resume', 'similar', 'explain', 'lookup', 'feedback', 'chat', 'ranking', 'compare', 'work', 'taste'] as const, 'recommend'),
+    sort: pickEnum(r.sort, ['SCORE_DESC', 'POPULARITY_DESC', 'TRENDING_DESC'] as const, 'SCORE_DESC'),
+    count: Math.max(3, Math.min(15, Math.round(Number(r.count) || 10))),
+    question: pickEnum(r.question, ['about', 'continue', 'when_good', 'ending', 'consensus', 'adaptation'] as const, 'about'),
+    progress: Number.isFinite(Number(r.progress)) && Number(r.progress) > 0 ? Math.round(Number(r.progress)) : null,
     format: pickEnum(r.format, ['MANGA', 'ANIME', 'ANY'] as const, 'ANY'),
     genres_in: pickList(r.genres_in, GENRES),
     genres_out: pickList(r.genres_out, GENRES),
@@ -338,6 +367,8 @@ export async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent:
   const strong = works.filter((w) => w.state === 'strong');
   const knownIds = new Set<number>();
   for (const w of works) if (w.meta && (w.progress > 0 || w.completed || w.state === 'disliked' || w.feedback)) knownIds.add(w.meta.anilistId);
+  // معرّف الكتالوج نفسه (قريته برا، أنمي من الجهاز): يُستبعد ولو ما وصلت بياناته
+  for (const w of works) if (/^(manga|anime):\d+$/.test(w.ref) && (w.progress > 0 || w.completed || w.state === 'disliked' || w.state === 'listed')) knownIds.add(Number(w.ref.slice(6)));
   for (const id of lastCards) {
     const n = Number(id.split(':')[1]);
     if (Number.isInteger(n)) knownIds.add(n);
@@ -509,9 +540,11 @@ export async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent:
 
 // ───────────────────────── الرد ─────────────────────────
 
-export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: صاحب أوتاكو سعودي من جيل Z، متابع أنمي ومانجا ومانهوا من زمان وشايف كل شي تقريبًا، ومتحمّس لأي شي حلو.
-أسلوبك: عامية سعودية/خليجية شبابية ("والله"، "يا رجل"، "لا يفوتك"، "صدقني"، "بطل"، "مرّه"، "خلاص تبيها؟")، جمل قصيرة، طاقة وحماس حقيقي، إيموجيات بذوق (🔥😭💀✨👀🫡🤝) — اثنين ثلاثة في الرد، مو في كل كلمة. تكلّم كأنك تعرف العمل وعشته، وكأنك تعرف ذوق صاحبك من سجله. لا فصحى رسمية ولا "بالتأكيد!" ولا نبرة موظف خدمة عملاء.
-الحماس ما يعني الكذب: كل معلومة عن عمل (عدد، تقييم، حالة، قصة) من البيانات المرسلة فقط؛ وإذا ما تعرف شي قلها بأسلوبك ("ما عندي رقم أكيد لعدد فصولها صراحة").
+export const ANSWER_PROMPT = `أنت «رفيق»: خبير أنمي ومانجا ومانهوا داخل تطبيق VANTARA، وصاحب يعرف ذوق اللي يكلمه من سجله الحقيقي.
+الصوت: عربي سعودي طبيعي، زي صاحب فاهم يكلمك بجد. طابق طول كلامه ونبرته: سؤال قصير = جواب قصير، طلب تحليل = عمق. إيموجي واحد إذا جا طبيعي، مو في كل رد.
+ممنوع تكرار العبارات: لا تبدأ بـ«يا رجل» ولا «يا صاحبي» ولا «هلا» ولا «أكيد» ولا «رهيب» ولا «بناءً على ذوقك»، ولا تبدأ ردّين بنفس الكلمة. ادخل في الموضوع من أول كلمة.
+عندك رأي: تقدر تقول «مشهور بس ما أتوقع يناسبك» وتشرح ليش. لا توافقه على كل شي، ولا تبالغ بالحماس. إذا ما تعرف قل ما أعرف.
+كل معلومة عن عمل (عدد، تقييم، حالة، قصة، آراء القرّاء) من البيانات المرسلة فقط. فرّق بين: حقيقة («12 حلقة»)، رأي القرّاء («كثير يقولون الوسط يبطا»)، واستنتاجك أنت («هذا البطء غالبًا يضايقك»).
 
 قواعد صارمة:
 1. لا تقترح أي عمل خارج قائمة candidates. كل بطاقة معرّفها (id) من القائمة حرفيًّا.
@@ -531,6 +564,7 @@ export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: �
 
 interface AnswerOut {
   message?: string;
+  ranking?: Array<{ id?: string; reason?: string }>;
   cards?: Array<{ id?: string; reason?: string; exploration?: boolean; summary?: string; translate?: { from?: unknown; to?: unknown } | null }>;
   chips?: string[];
 }
@@ -556,6 +590,8 @@ export interface Card {
   ref: string | null;
   /** نبذة عربية قصيرة بلا حرق (من النموذج، مبنية على النبذة المرسلة). */
   summary: string | null;
+  /** يناسبك؟ منفصل عن جودته العامة (score). */
+  fit: FitLabel;
   span: { ar: number; en: number } | null;
   /** نطاق يُقترح ترجمته مقدمًا بنظامنا (بعد التحقق والحصة). */
   translate: { from: number; to: number } | null;
@@ -587,7 +623,7 @@ function compactCandidate(c: Candidate) {
   };
 }
 
-function toCard(c: Candidate, reason: string, exploration: boolean, recId: string, summary: string | null = null, translate: { from: number; to: number } | null = null): Card {
+function toCard(c: Candidate, reason: string, exploration: boolean, recId: string, summary: string | null = null, translate: { from: number; to: number } | null = null, fit: FitLabel = 'unknown'): Card {
   const m = c.meta;
   return {
     recId,
@@ -609,6 +645,7 @@ function toCard(c: Candidate, reason: string, exploration: boolean, recId: strin
     progress: c.own ? progressLabel(c.own) : null,
     ref: c.own?.ref ?? (c.id.startsWith('ext:') ? c.id : null),
     summary: summary ? summary.slice(0, 280) : null,
+    fit,
     span: c.span ? { ar: c.span.ar, en: c.span.en } : null,
     translate,
   };
@@ -616,18 +653,44 @@ function toCard(c: Candidate, reason: string, exploration: boolean, recId: strin
 
 /** ما يُجاب بلا نموذج: أسئلة أرقام من سجلك. */
 export function statsAnswer(text: string, works: UserWork[], now: number): string | null {
-  const t = text.replace(/[ًٌٍَُِّْ]/g, '');
+  const t = text.replace(/[ًٌٍَُِّْ]/g, '').toLowerCase();
   const week = now - 7 * 86_400_000;
-  if (/كم\s*(فصل|فصول)/.test(t)) {
-    const manga = works.filter((w) => w.kind === 'manga');
-    const total = manga.reduce((s, w) => s + w.progress, 0);
-    const recent = manga.filter((w) => w.lastAt >= week);
-    return `قريت ${total} فصل في ${manga.filter((w) => w.progress > 0).length} عمل. هذا الأسبوع رجعت لـ${recent.length} ${recent.length === 1 ? 'عمل' : 'أعمال'}.`;
+  const fold = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  // عمل بعينه من أعمالك مذكور بالاسم (كما هو في التطبيق)
+  const named = works
+    .filter((w) => fold(w.title).length >= 4 && fold(t).includes(fold(w.title)))
+    .sort((a, b) => b.title.length - a.title.length)[0];
+  const total = (w: UserWork) => (w.meta ? (w.kind === 'anime' ? w.meta.episodes : w.meta.chapters) : null);
+  const unit = (w: UserWork) => (w.kind === 'anime' ? 'حلقة' : 'فصل');
+  // «وين وقفت؟» — من سجلك مباشرة
+  if (/(وين|فين)\s*(وقفت|وصلت)|آخر\s*(شي|شيء|فصل)\s*(قريت|قرأت)|وش\s*كنت\s*(اقرا|أقرأ)/.test(t)) {
+    if (named) {
+      const n = total(named);
+      return named.progress
+        ? `في ${named.title} وصلت ${unit(named)} ${named.progress}${n ? ` من ${n}` : ''}${named.completed ? ' — وخلّصته' : ''}.`
+        : `ما عندي أنك بديت ${named.title} للحين.`;
+    }
+    const current = works.filter((w) => w.progress > 0 && !w.completed).sort((a, b) => b.lastAt - a.lastAt).slice(0, 3);
+    if (!current.length) return 'ما عندي شي بديته وما خلّصته.';
+    return `آخر اللي كنت عليه: ${current.map((w) => `${w.title} (${unit(w)} ${w.progress}${total(w) ? ` من ${total(w)}` : ''})`).join('، ')}.`;
   }
-  if (/كم\s*(حلقة|حلقات)/.test(t)) {
+  // «كم فصل قريت؟» — مجموع قراءتك (مو «كم فصل في عمل»)
+  if (/كم\s*(فصل|فصول)[^؟?]*(قريت|قرأت)|(قريت|قرأت)\s*كم\s*(فصل|فصول)/.test(t)) {
+    const manga = works.filter((w) => w.kind === 'manga');
+    const sum = manga.reduce((s, w) => s + w.progress, 0);
+    const recent = manga.filter((w) => w.lastAt >= week);
+    return `قريت ${sum} فصل في ${manga.filter((w) => w.progress > 0).length} عمل. هذا الأسبوع رجعت لـ${recent.length} ${recent.length === 1 ? 'عمل' : 'أعمال'}.`;
+  }
+  if (/كم\s*(حلقة|حلقات)[^؟?]*(شفت|شاهدت|تابعت)|(شفت|شاهدت)\s*كم\s*(حلقة|حلقات)/.test(t)) {
     const anime = works.filter((w) => w.kind === 'anime');
-    const total = anime.reduce((s, w) => s + w.progress, 0);
-    return total ? `شاهدت ${total} حلقة في ${anime.filter((w) => w.progress > 0).length} أنمي (من سجل هذا الجوال).` : 'ما عندي سجل مشاهدة أنمي على هذا الجوال بعد.';
+    const sum = anime.reduce((s, w) => s + w.progress, 0);
+    return sum ? `شاهدت ${sum} حلقة في ${anime.filter((w) => w.progress > 0).length} أنمي (من سجل هذا الجوال).` : 'ما عندي سجل مشاهدة أنمي على هذا الجوال بعد.';
+  }
+  // «X كم فصل؟» لعمل في مكتبتك وبياناته عندنا
+  if (named && /كم\s*(فصل|فصول|حلقة|حلقات)|مكتمل|خلص/.test(t) && named.meta) {
+    const n = total(named);
+    const status = named.meta.status === 'FINISHED' ? 'مكتمل' : named.meta.status === 'RELEASING' ? 'مستمر' : null;
+    if (n || status) return `${named.title}: ${n ? `${n} ${unit(named)}` : 'عدد الفصول غير معروف'}${status ? ` · ${status}` : ''}${named.progress ? ` — وأنت عند ${named.progress}` : ''}.`;
   }
   return null;
 }
@@ -719,6 +782,7 @@ const present = (m: StoredMessage) => ({
   content: m.content,
   cards: parseJson<Card[]>(m.cards_json, []),
   chips: parseJson<string[]>(m.chips_json, []),
+  extra: parseJson<Record<string, unknown> | null>(m.extra_json ?? null, null),
   at: m.created_at,
 });
 
@@ -798,6 +862,54 @@ export async function handleRafiqConversations(request: Request, url: URL, env: 
   return reply({
     conversations: results.filter((r) => r.n > 0).map((r) => ({ id: r.id, title: (r.first ?? 'محادثة').slice(0, 70), messages: r.n, at: r.updated_at })),
   });
+}
+
+/**
+ * POST /v1/rafiq/external — «قريته/شاهدته برا التطبيق»: {workId, title, kind, status,
+ * progress?, rating?}. لا يُقترح ثانية، ويدخل ذوقك بمصدره. DELETE ?workId= يتراجع.
+ */
+export async function handleRafiqExternal(request: Request, url: URL, env: RafiqEnv, userId: string, now: number): Promise<Response> {
+  if (!(await rafiqAllowed(env, userId))) return reply({ error: 'rafiq_locked' }, 403);
+  if (request.method === 'DELETE') {
+    const workId = url.searchParams.get('workId');
+    if (!workId) return reply({ error: 'bad_request' }, 400);
+    await env.DB.prepare('DELETE FROM rafiq_external WHERE user_id = ? AND work_id = ?').bind(userId, workId).run();
+    return reply({ ok: true });
+  }
+  const b = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const workId = typeof b?.workId === 'string' && /^(manga|anime):\d+$|^ext:/.test(b.workId) ? b.workId.slice(0, 300) : null;
+  const title = typeof b?.title === 'string' ? b.title.trim().slice(0, 200) : '';
+  const kind = b?.kind === 'anime' ? 'anime' : b?.kind === 'manga' ? 'manga' : null;
+  const status = ['completed', 'reading', 'dropped', 'planning'].includes(String(b?.status)) ? String(b!.status) : null;
+  if (!workId || !title || !kind || !status) return reply({ error: 'bad_request' }, 400);
+  const progress = Number.isFinite(Number(b?.progress)) && Number(b?.progress) >= 0 ? Math.min(100000, Math.round(Number(b?.progress))) : null;
+  const rating = Number.isFinite(Number(b?.rating)) && Number(b?.rating) >= 1 && Number(b?.rating) <= 10 ? Math.round(Number(b?.rating)) : null;
+  await env.DB.prepare(
+    `INSERT INTO rafiq_external (id, user_id, work_id, title, kind, status, progress, rating, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, work_id) DO UPDATE SET status = excluded.status, progress = COALESCE(excluded.progress, rafiq_external.progress),
+       rating = COALESCE(excluded.rating, rafiq_external.rating), title = excluded.title, updated_at = excluded.updated_at`,
+  )
+    .bind(crypto.randomUUID(), userId, workId, title, kind, status, progress, rating, now, now)
+    .run();
+  return reply({ ok: true });
+}
+
+/** GET /v1/rafiq/usage — وين راح الرصيد: اليوم والأسبوع والشهر، لكل مهارة ونموذج، ونسبة الكاش. */
+export async function handleRafiqUsage(env: RafiqEnv, userId: string, now: number): Promise<Response> {
+  if (!(await rafiqAllowed(env, userId))) return reply({ error: 'rafiq_locked' }, 403);
+  const since = { day: now - 86_400_000, week: now - 7 * 86_400_000, month: now - 30 * 86_400_000 };
+  const totals = async (from: number) =>
+    env.DB.prepare('SELECT COUNT(*) AS calls, COALESCE(SUM(usd), 0) AS usd, COALESCE(SUM(input_hit), 0) AS hit, COALESCE(SUM(input_miss), 0) AS miss, COALESCE(SUM(output_tokens), 0) AS out, COALESCE(AVG(latency_ms), 0) AS latency FROM rafiq_usage WHERE created_at > ?')
+      .bind(from)
+      .first<{ calls: number; usd: number; hit: number; miss: number; out: number; latency: number }>();
+  const [day, week, month] = await Promise.all([totals(since.day), totals(since.week), totals(since.month)]);
+  const { results: bySkill } = await env.DB.prepare('SELECT COALESCE(skill, purpose) AS skill, model, effort, COUNT(*) AS calls, SUM(usd) AS usd FROM rafiq_usage WHERE created_at > ? GROUP BY 1, 2, 3 ORDER BY usd DESC')
+    .bind(since.month)
+    .all<{ skill: string; model: string; effort: string; calls: number; usd: number }>();
+  const round = (x: number) => Math.round(x * 10000) / 10000;
+  const shape = (t: typeof day) => (t ? { calls: t.calls, usd: round(t.usd), cacheHitRatio: t.hit + t.miss ? Math.round((t.hit / (t.hit + t.miss)) * 100) : 0, outputTokens: t.out, avgLatencyMs: Math.round(t.latency) } : null);
+  return reply({ today: shape(day), week: shape(week), month: shape(month), bySkill: bySkill.map((r) => ({ ...r, usd: round(r.usd) })), budgetUsd: Number(env.RAFIQ_MONTHLY_BUDGET_USD) || 5 });
 }
 
 /** POST /v1/rafiq/new — محادثة جديدة (الذاكرة تبقى). */
@@ -884,7 +996,7 @@ export async function handleRafiqMessage(
   const conv = await conversationOf(db, userId, typeof body?.conversationId === 'string' ? body.conversationId : null, now);
   const existing = await db.prepare('SELECT id FROM rafiq_messages WHERE id = ? AND user_id = ?').bind(clientId, userId).first<{ id: string }>();
   const stored = existing
-    ? await db.prepare("SELECT id, role, content, cards_json, chips_json, created_at FROM rafiq_messages WHERE reply_to = ? AND role = 'assistant'").bind(clientId).first<StoredMessage>()
+    ? await db.prepare("SELECT id, role, content, cards_json, chips_json, extra_json, created_at FROM rafiq_messages WHERE reply_to = ? AND role = 'assistant'").bind(clientId).first<StoredMessage>()
     : null;
   if (!existing) {
     const shown = text || (action?.type === 'similar' ? `شيء مشابه لـ ${action.title ?? 'هذا'}` : 'أعطني غيرها');
@@ -948,6 +1060,7 @@ export async function handleRafiqMessage(
             },
           ],
           now,
+          { effort: 'none', userId, requestId: clientId, skill: 'router', purpose: 'intent' },
         );
         intent = cleanIntent(raw);
       }
@@ -959,12 +1072,40 @@ export async function handleRafiqMessage(
       // تفضيل جديد أو رأي: الملف يُعاد بمعطياته الجديدة
       const fresh = intent.preference_updates.length || intent.feedback.length ? await profileFor(env, net, userId, local, now) : bundle;
 
+      // المهارة: سير العمل اللي يناسب الطلب (أدواته، تفكيره، شكل رده)
+      const skill: SkillId = intent.gap
+        ? 'gap'
+        : intent.intent === 'lookup'
+          ? 'work'
+          : (['ranking', 'compare', 'work', 'taste', 'resume', 'explain', 'similar'] as const).includes(intent.intent as never)
+            ? (intent.intent as SkillId)
+            : 'recommend';
+      const spanOf = (m: Meta) => gaps.find((g) => titleMatches(g.title, m.titles)) ?? null;
       let pool: Candidate[] = [];
-      if (intent.intent === 'explain') {
+      let extra: Record<string, unknown> | null = null;
+      let evidence: Record<string, unknown> | null = null;
+      if (skill === 'explain') {
         const metas = await metaFor(db, net, lastCards.map((c) => { const n = Number(c.workId.split(':')[1]); return Number.isInteger(n) ? { key: c.workId, anilistId: n } : { key: c.workId }; }), now);
         pool = lastCards
           .map((c) => ({ c, m: metas.get(c.workId) ?? null }))
           .map(({ c, m }) => ({ id: c.workId, kind: c.workId.startsWith('anime:') ? 'anime' : 'manga', meta: m, title: c.title, own: null, relation: null, exploration: false, fit: 0 }) as Candidate);
+      } else if (skill === 'ranking') {
+        const r = await rankingSkill(db, net, intent, fresh.profile, section, now);
+        pool = r.pool;
+        extra = { ranking: r.extra };
+      } else if (skill === 'compare') {
+        const r = await compareSkill(db, net, intent.references, intent.format, fresh.profile, spanOf, now);
+        pool = r.pool;
+        if (r.extra) extra = { comparison: r.extra };
+        evidence = { works: r.profiles.map((p) => ({ id: p.meta.type === 'ANIME' ? `anime:${p.meta.anilistId}` : `manga:${p.meta.anilistId}`, authors: p.authors, rankings: p.rankings.map((x) => `#${x.rank} ${x.context}`), review_summaries: p.reviews.slice(0, 4) })) };
+      } else if (skill === 'work') {
+        const r = await workSkill(db, net, intent.reference ?? intent.references[0] ?? null, intent.format, fresh.works, fresh.profile, now);
+        pool = r.pool;
+        evidence = r.evidence ? { ...r.evidence, asked: intent.question, said_progress: intent.progress } : null;
+      } else if (skill === 'taste') {
+        const r = tasteSkill(fresh.works, fresh.profile);
+        evidence = r.evidence;
+        extra = { taste: r.extra };
       } else {
         // ما عُرض في الأسبوعين الماضيين لا يتكرر (إلا إن سأل عنه بالاسم)
         const { results: shown } = await db
@@ -972,11 +1113,11 @@ export async function handleRafiqMessage(
           .bind(userId, now - 14 * 86_400_000)
           .all<{ work_id: string }>();
         pool = await gatherCandidates(db, net, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now, section);
-        // أي مرشّح مانجا نعرف فصوله على الجهاز: يعرف النموذج وين وصل العربي والإنجليزي
-        for (const c of pool) {
-          if (c.span || c.kind !== 'manga') continue;
-          c.span = gaps.find((g) => g.ref === c.id || titleMatches(g.title, c.meta?.titles ?? [c.title])) ?? null;
-        }
+      }
+      // أي مرشّح مانجا نعرف فصوله على الجهاز: يعرف النموذج وين وصل العربي والإنجليزي
+      for (const c of pool) {
+        if (c.span || c.kind !== 'manga') continue;
+        c.span = gaps.find((g) => g.ref === c.id || titleMatches(g.title, c.meta?.titles ?? [c.title])) ?? null;
       }
       // الكتالوج ما وصلنا مباشرة: الجهاز يجيبه ويرجع (ثلاث جولات بالكثير)
       if (catalog.pending.size && round < 3) {
@@ -986,11 +1127,13 @@ export async function handleRafiqMessage(
       // المعرّفات المرشّحة تُحفظ مع بياناتها: «ليش؟» و«أقل من هذا» تعرفها لاحقًا
       await cacheMeta(db, pool, now);
       // لا مرشّحين لطلب يحتاجهم: لا نسأل النموذج عن فراغ (كان يقول «ما عندي candidates»)
-      if (!pool.length && intent.intent !== 'explain') {
+      if (!pool.length && skill !== 'explain' && skill !== 'taste') {
         const none =
-          intent.intent === 'resume'
-            ? 'دوّرت في اللي بديته وما لقيت شي واقف عليه 👀 تبي أرشّح لك شي جديد؟'
-            : 'ما قدرت أوصل لكتالوج الأعمال الحين 😵 جرّب بعد شوي، أو قول لي اسم عمل تحبه وأطلع لك شي يشبهه.';
+          skill === 'resume'
+            ? 'دوّرت في اللي بديته وما لقيت شي واقف عليه. تبي أرشّح لك شي جديد؟'
+            : skill === 'work' || skill === 'compare'
+              ? `ما لقيت ${intent.references.length ? `«${intent.references.join('» و«')}»` : 'العمل'} في الكتالوج. اكتب الاسم بالإنجليزي أو زي ما هو في التطبيق.`
+              : 'ما قدرت أوصل لكتالوج الأعمال الحين. جرّب بعد شوي، أو قول لي اسم عمل تحبه وأطلع لك شي يشبهه.';
         const msg = await saveAssistant(db, userId, conv.id, clientId, none, [], ['رشّح لي شي', 'أكمل شي تركته'], now);
         await send('delta', { text: none });
         await send('final', { message: msg });
@@ -999,22 +1142,36 @@ export async function handleRafiqMessage(
 
       const payload = {
         request: text || (action?.type === 'similar' ? `شيء مشابه لـ ${action.title}` : 'أعطني اقتراحات أخرى'),
-        understood: { intent: intent.intent, format: intent.format, length: intent.length, mood: intent.mood, genres: intent.genres_in, themes: intent.tags_in, avoid: [...intent.genres_out, ...intent.tags_out] },
+        skill,
+        understood: { intent: intent.intent, format: intent.format, length: intent.length, mood: intent.mood, genres: intent.genres_in, themes: intent.tags_in, avoid: [...intent.genres_out, ...intent.tags_out], count: intent.count, question: intent.question },
         taste_profile: fresh.profile,
-        candidates: pool.map(compactCandidate),
+        candidates: pool.map((c) => ({ ...compactCandidate(c), fits_you: c.meta ? tasteFit(c.meta, fresh.profile).label : 'unknown' })),
+        ...(evidence ? { evidence } : {}),
         conversation_summary: conv.summary,
         recent: prior.slice(-6).map((m) => ({ role: m.role, text: m.content.slice(0, 500) })),
       };
+      // تعليمات النظام ثابتة أولًا (يحفظها DeepSeek فتصير أرخص 50 مرة)، وتعليمات المهارة بعدها
       const messages: ChatMessage[] = [
         { role: 'system', content: ANSWER_PROMPT },
+        ...(SKILL_PROMPTS[skill] ? [{ role: 'system' as const, content: SKILL_PROMPTS[skill]! }] : []),
         { role: 'user', content: JSON.stringify(payload) },
       ];
+      const plan = route(SKILL_TIER[skill], { budgetLeft: await budgetLeft(db, env, now) });
+      await send('status', { skill });
       let lastSent = '';
-      const out = await chatStream<AnswerOut>(db, env, fetchImpl, messages, now, (t) => {
-        const add = t.slice(lastSent.length);
-        lastSent = t;
-        if (add) void send('delta', { text: add });
-      });
+      const out = await chatStream<AnswerOut>(
+        db,
+        env,
+        fetchImpl,
+        messages,
+        now,
+        (t) => {
+          const add = t.slice(lastSent.length);
+          lastSent = t;
+          if (add) void send('delta', { text: add });
+        },
+        { ...plan, userId, requestId: clientId, skill, purpose: 'answer', maxTokens: plan.effort === 'none' ? 1600 : 6000 },
+      );
       const byId = new Map(pool.map((c) => [c.id, c]));
       // الترجمة المسبقة لمن فُتحت له الترجمة، وبقدر ما بقي من حصة الأسبوع
       let chaptersLeft = 0;
@@ -1043,12 +1200,22 @@ export async function handleRafiqMessage(
         if (intent.format !== 'ANY' && cand.kind !== intent.format.toLowerCase()) continue;
         seen.add(cand.id);
         cards.push(
-          toCard(cand, typeof c.reason === 'string' ? c.reason : '', Boolean(c.exploration) && cand.exploration, crypto.randomUUID(), typeof c.summary === 'string' && c.summary.trim() ? c.summary.trim() : null, rangeOf(cand, c.translate)),
+          toCard(cand, typeof c.reason === 'string' ? c.reason : '', Boolean(c.exploration) && cand.exploration, crypto.randomUUID(), typeof c.summary === 'string' && c.summary.trim() ? c.summary.trim() : null, rangeOf(cand, c.translate), cand.meta ? tasteFit(cand.meta, fresh.profile).label : 'unknown'),
         );
+      }
+      // الترتيب: ترتيب الكتالوج يبقى، والنموذج يكتب السبب ويحذف ما يناقض الطلب فقط
+      if (skill === 'ranking' && extra?.ranking) {
+        const reasons = new Map((out.ranking ?? []).filter((x) => typeof x?.id === 'string').map((x) => [x.id!, typeof x.reason === 'string' ? x.reason : '']));
+        const keep = pool.filter((c) => reasons.has(c.id));
+        const items = (keep.length >= 3 ? keep : pool)
+          .slice(0, intent.count)
+          .map((c, i) => ({ rank: i + 1, ...toCard(c, reasons.get(c.id) ?? '', false, crypto.randomUUID(), null, null, c.meta ? tasteFit(c.meta, fresh.profile).label : 'unknown') }));
+        extra = { ranking: { ...(extra.ranking as object), items } };
+        cards.length = 0;
       }
       const message = typeof out.message === 'string' && out.message.trim() ? out.message.trim().slice(0, 1600) : 'والله دوّرت وما لقيت شي يستاهل بهالشروط 😭 غيّر الطلب شوي وأبشر.';
       const chips = Array.isArray(out.chips) ? out.chips.filter((x) => typeof x === 'string' && x.trim() && !/candidate|النظام|القائمة/i.test(x)).map((x) => x.trim().slice(0, 40)).slice(0, 3) : [];
-      const msg = await saveAssistant(db, userId, conv.id, clientId, message, cards, chips, now);
+      const msg = await saveAssistant(db, userId, conv.id, clientId, message, cards, chips, now, extra);
       if (message !== lastSent) await send('delta', { text: message.slice(lastSent.length), replace: !message.startsWith(lastSent) ? message : undefined });
       await send('final', { message: msg });
       waitUntil(summarize(db, env, fetchImpl, conv.id, now).catch(() => {}));
@@ -1078,19 +1245,19 @@ async function cacheMeta(db: D1Database, pool: Candidate[], now: number) {
   );
 }
 
-async function saveAssistant(db: D1Database, userId: string, conversationId: string, replyTo: string, content: string, cards: Card[], chips: string[], now: number) {
+async function saveAssistant(db: D1Database, userId: string, conversationId: string, replyTo: string, content: string, cards: Card[], chips: string[], now: number, extra: Record<string, unknown> | null = null) {
   const id = crypto.randomUUID();
   const at = now + 1;
   await db.batch([
     db
-      .prepare("INSERT INTO rafiq_messages (id, conversation_id, user_id, role, content, cards_json, chips_json, reply_to, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)")
-      .bind(id, conversationId, userId, content, cards.length ? JSON.stringify(cards) : null, chips.length ? JSON.stringify(chips) : null, replyTo, at),
+      .prepare("INSERT INTO rafiq_messages (id, conversation_id, user_id, role, content, cards_json, chips_json, extra_json, reply_to, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)")
+      .bind(id, conversationId, userId, content, cards.length ? JSON.stringify(cards) : null, chips.length ? JSON.stringify(chips) : null, extra ? JSON.stringify(extra) : null, replyTo, at),
     ...cards.map((c) =>
       db.prepare('INSERT INTO rafiq_recs (id, user_id, message_id, work_id, title, reason, shown_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(c.recId, userId, id, c.workId, c.title, c.reason, at),
     ),
     db.prepare('UPDATE rafiq_conversations SET updated_at = ? WHERE id = ?').bind(at, conversationId),
   ]);
-  return { id, role: 'assistant' as const, content, cards, chips, at };
+  return { id, role: 'assistant' as const, content, cards, chips, extra, at };
 }
 
 /** بعد كل 12 رسالة: ما قبل آخر 8 يُلخَّص (ما قاله عن ذوقه، ما رُشّح وردّه). */
@@ -1109,7 +1276,7 @@ async function summarize(db: D1Database, env: RafiqEnv, fetchImpl: Fetch, conver
       { role: 'user', content: JSON.stringify({ previous_summary: conv.summary, messages: slice.map((m) => ({ role: m.role, text: m.content.slice(0, 400) })) }) },
     ],
     now,
-    400,
+    { maxTokens: 400, purpose: 'summary' },
   );
   if (typeof out.summary === 'string') {
     await db.prepare('UPDATE rafiq_conversations SET summary = ?, summarized = ? WHERE id = ?').bind(out.summary.slice(0, 1200), upto, conversationId).run();

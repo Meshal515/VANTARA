@@ -23,7 +23,7 @@ export const GENRES = [
 /** كل وسوم AniList (بلا البالغين) بأسمائها الدقيقة. */
 export const TAGS = ANILIST_TAGS;
 
-const FIELDS = `id type format status episodes chapters averageScore popularity genres isAdult seasonYear
+export const FIELDS = `id type format status episodes chapters averageScore popularity genres isAdult seasonYear
   startDate { year } countryOfOrigin title { romaji english native } synonyms
   coverImage { large extraLarge color } bannerImage description(asHtml: false)
   tags { name rank isMediaSpoiler isGeneralSpoiler } relations { edges { relationType(version: 2) node { format } } }`;
@@ -99,7 +99,7 @@ export function toMeta(m: any): Meta {
   };
 }
 
-async function gql(fetchImpl: Fetch, query: string, variables: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+export async function gql(fetchImpl: Fetch, query: string, variables: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetchImpl(ANILIST, {
       method: 'POST',
