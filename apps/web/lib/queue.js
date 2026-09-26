@@ -77,6 +77,7 @@ const OPS = {
   'work.describe': { class: STATE, key: (p) => `work/${p.seriesRef}` },
   'majlis.receipt': { class: STATE, key: (p) => `receipt/${p.targetKind}/${p.targetId}/${p.seen ? 's' : 'd'}` },
   'notification.seen': { class: STATE, key: (p) => `notification-seen/${p.id}` },
+  'majlis.unsend': { class: STATE, key: (p) => `unsend/${p.targetKind}/${p.targetId}` },
   'chapter.complete': { class: CUMULATIVE },
   'usage.add': { class: CUMULATIVE },
   'comment.add': { class: EVENT },

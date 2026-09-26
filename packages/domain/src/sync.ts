@@ -160,6 +160,7 @@ export type OpKind =
   | 'frame.send'
   | 'majlis.react'
   | 'majlis.receipt'
+  | 'majlis.unsend'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'

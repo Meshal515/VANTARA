@@ -170,6 +170,13 @@ export const PROJECTIONS = {
   },
   // رسالتك تظهر في المجلس لحظة الإرسال بـ«يُرسَل…»، ثم يحلّ صفّ الخادم محلها
   // بنفس المعرّف (op_id هو معرّف الفريم والترشيح عند الخادم)
+  // «حذف للجميع»: يختفي من شاشتك فورًا، والخادم يسحبه من عند الكل
+  'majlis.unsend': (op, get) => {
+    const p = op.payload ?? {};
+    const table = { frame: 'frames', rec: 'recommendations', activity: 'activity' }[p.targetKind];
+    const prev = table ? get(table, p.targetId) : null;
+    return prev ? [{ table, key: p.targetId, row: { ...prev, removed: 1 } }] : [];
+  },
   'frame.send': (op, get, userId) => {
     const p = op.payload ?? {};
     if (!p.work || !p.chapter) return [];

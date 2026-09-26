@@ -268,7 +268,7 @@ const DELTA_TABLES = [
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [
     'frames',
-    'id, from_id, to_id, source_id, series_title, chapter_label, cover_url, work_json, chapter_json, pages_json, message, created_at, rev, audience, hidden_json, broadcast',
+    'id, from_id, to_id, source_id, series_title, chapter_label, cover_url, work_json, chapter_json, pages_json, message, created_at, rev, audience, hidden_json, broadcast, removed',
   ],
   // `owner_synced` يسافر مع الصف: العميل يجب أن يعرف أن هذه القيمة لم يرها
   // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
@@ -284,7 +284,7 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
   // السجل يراه أصدقاؤك في ملفك كما تراه أنت: الأصدقاء الثلاثة مجلس واحد
@@ -293,7 +293,7 @@ const DELTA_TABLES = [
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
   ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev'],
-  ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev'],
+  ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev, removed'],
   ['activity_receipts', 'event_id, user_id, delivered_at, seen_at, rev'],
   ['settings', 'user_id, data, rev'],
 ] as const;
@@ -1424,6 +1424,39 @@ export function statementsFor(
              WHERE majlis_receipts.seen_at IS NULL AND excluded.seen_at IS NOT NULL`,
           )
           .bind(targetKind, targetId, userId, now, seenAt, rev, targetId, ...majlisViewerValues(targetKind, userId), targetId, userId),
+      ];
+    }
+
+    /**
+     * «حذف للجميع»: صاحب الفريم أو الترشيح أو النشاط وحده (الشرط في SQL، لا
+     * في الواجهة). شاهد قبر يسافر في الفروقات فيختفي من كل جهاز، والمحتوى
+     * يُفرَّغ فلا يبقى في المرايا القديمة. مكرّره لا يلمس `rev`.
+     */
+    case 'majlis.unsend': {
+      const targetKind = p['targetKind'];
+      const targetId = asString(p['targetId'], 200);
+      if (!isMajlisTarget(targetKind) || !targetId) return null;
+      if (targetKind === 'frame') {
+        return [
+          db
+            .prepare(
+              `UPDATE frames SET removed = 1, message = NULL, pages_json = '[]', rev = ?
+                WHERE id = ? AND from_id = ? AND removed = 0`,
+            )
+            .bind(rev, targetId, userId),
+        ];
+      }
+      if (targetKind === 'rec') {
+        return [
+          db
+            .prepare('UPDATE recommendations SET removed = 1, message = NULL, rev = ? WHERE id = ? AND from_id = ? AND removed = 0')
+            .bind(rev, targetId, userId),
+        ];
+      }
+      return [
+        db
+          .prepare(`UPDATE activity SET removed = 1, payload = '{}', rev = ? WHERE id = ? AND actor_id = ? AND removed = 0`)
+          .bind(rev, targetId, userId),
       ];
     }
 
