@@ -170,7 +170,7 @@ export function createRoom(ctx) {
         box.append(row);
       }
       body.append(box);
-      motion()?.fromTo(box.children, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, ease: 'power2.out', stagger: 0.04, clearProps: 'all' });
+      motion()?.fromTo(box.children, { y: 8 }, { y: 0, duration: 0.28, ease: 'power2.out', stagger: 0.04, clearProps: 'all' });
     });
   }
 
@@ -556,7 +556,7 @@ export function createRoom(ctx) {
     if (!firstPaint && fresh.length) {
       const g = motion();
       const fresher = fresh.map((it) => list.querySelector(`[data-key="${CSS.escape(it.key)}"]`)).filter(Boolean);
-      g?.fromTo(fresher, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.26, ease: 'power2.out', stagger: 0.03, clearProps: 'all' });
+      g?.fromTo(fresher, { y: 10 }, { y: 0, duration: 0.26, ease: 'power2.out', stagger: 0.03, clearProps: 'all' });
     }
     markRead(items);
   }
@@ -597,7 +597,7 @@ export function createRoom(ctx) {
     x.innerHTML = glyph('close', { size: 18 });
     x.onclick = () => setReply(null);
     replyBar.append(el('span', 'mc-replybar-rule'), text, x);
-    motion()?.fromTo(replyBar, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out', clearProps: 'all' });
+    motion()?.fromTo(replyBar, { y: 6 }, { y: 0, duration: 0.2, ease: 'power2.out', clearProps: 'all' });
     field.focus();
   }
 
@@ -612,8 +612,8 @@ export function createRoom(ctx) {
     const swap = () => (action.innerHTML = glyph(want, { size: 22 }));
     if (!g) return swap();
     g.timeline()
-      .to(action, { scale: 0.6, opacity: 0, duration: 0.08, ease: 'power1.in', onComplete: swap })
-      .to(action, { scale: 1, opacity: 1, duration: 0.18, ease: 'power2.out', clearProps: 'all' });
+      .to(action, { scale: 0.7, duration: 0.08, ease: 'power1.in', onComplete: swap })
+      .to(action, { scale: 1, duration: 0.18, ease: 'power2.out', clearProps: 'transform' });
   }
   function grow() {
     field.style.height = 'auto';
@@ -669,7 +669,7 @@ export function createRoom(ctx) {
     recBar.replaceChildren(cancel, live, levels, send);
     bar.hidden = true;
     recBar.hidden = false;
-    motion()?.fromTo(recBar, { opacity: 0 }, { opacity: 1, duration: 0.18 });
+    
   }
   function showBar() {
     recBar.hidden = true;

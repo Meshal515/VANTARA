@@ -10,7 +10,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
-import { chapterNumberOf, createWorkIndex, gather, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
+import { chapterNumberOf, countMainChapters, createWorkIndex, gather, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
@@ -200,7 +200,7 @@ export async function cachedWorkChapterCount(v35work) {
   if (Number.isInteger(v35work?.chapters) && v35work.chapters >= 0) return v35work.chapters;
   const cached = await readWork(String(v35work?.id)).catch(() => null);
   return cached?.editions?.some((e) => e.chapters?.length)
-    ? mergeChapters(cached.editions, { rank: sourceRank }).length : null;
+    ? countMainChapters(mergeChapters(cached.editions, { rank: sourceRank })) : null;
 }
 
 /**
@@ -215,7 +215,7 @@ export const sourceLabel = (s) => (isFiller(s?.sourceId) ? `${s.label} · إنج
 const sourceList = (editions) =>
   [...editions]
     .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)))
-    .map((v) => ({ sourceId: v.sourceId, label: sourceLabel(v), count: v.chapters?.length ?? 0, lang: isFiller(v.sourceId) ? 'en' : 'ar' }));
+    .map((v) => ({ sourceId: v.sourceId, label: sourceLabel(v), count: countMainChapters(v.chapters), lang: isFiller(v.sourceId) ? 'en' : 'ar' }));
 const listingSources = async ({ query = '', includeFillers = false } = {}) => (await sources()).filter((s) => query || includeFillers || !s.filler);
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
@@ -449,7 +449,7 @@ export async function detail(v35work) {
     ...v35work,
     ...covered,
     ...(main ? detailFields(main.detail) : {}),
-    chapters: chapters.length || null,
+    chapters: countMainChapters(chapters) || null,
     _chapters: chapters,
     _editions: values,
     _sources: sourceList(values),
@@ -507,7 +507,7 @@ function assemble(v35work, editions, detail, failed = []) {
     ...(cover && !v35work.coverImage?.large ? { coverImage: { extraLarge: cover, large: cover, medium: cover, color: null }, bannerImage: cover } : {}),
     ...(detail ? detailFields(detail) : {}),
     _work: work,
-    chapters: chapters.length || null,
+    chapters: countMainChapters(chapters) || null,
     _chapters: chapters,
     _editions: editions,
     _sources: sourceList(editions),
@@ -736,7 +736,7 @@ export async function withEditions(full, found) {
   return {
     ...full,
     _work: work,
-    chapters: chapters.length || null,
+    chapters: countMainChapters(chapters) || null,
     _chapters: chapters,
     _editions: editions,
     _sources: sourceList(editions),
@@ -809,7 +809,7 @@ export function describe(v35work) {
       ...detailFields(out.manga),
       _work: { ...work._work, thumbnailUrl: thumb },
       ...(thumb && !work.coverImage?.large ? { coverImage: { extraLarge: thumb, large: thumb, medium: thumb, color: null }, bannerImage: thumb } : {}),
-      _chapterCount: out.chapters?.length ?? null,
+      _chapterCount: out.chapters ? countMainChapters(out.chapters) : null,
     };
   })();
   promise.catch(() => described.delete(key));

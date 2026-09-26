@@ -276,3 +276,14 @@ describe('rankListing', () => {
 		expect(rankListing([w('old'), w('new')], pos, 'latest').map((x) => x.key)).toEqual(['new', 'old']);
 	});
 });
+
+import { countMainChapters as countMain } from './catalog.js';
+describe('countMainChapters', () => {
+  it('counts whole chapters only: side chapters and prologue are extras', () => {
+    const rows = [128, 128.1, 128.2, 129, 0, 1].map((number) => ({ number }));
+    expect(countMain(rows)).toBe(3);
+  });
+  it('a work with no numbers counts its rows', () => {
+    expect(countMain([{ number: -1 }, { number: -1 }])).toBe(2);
+  });
+});

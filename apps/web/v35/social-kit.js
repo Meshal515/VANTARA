@@ -163,7 +163,7 @@ export function actionList(items, close) {
     };
     list.append(b);
   }
-  motion()?.fromTo(list.children, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.24, ease: 'power2.out', stagger: 0.03, clearProps: 'all' });
+  motion()?.fromTo(list.children, { y: 6 }, { y: 0, duration: 0.24, ease: 'power2.out', stagger: 0.03, clearProps: 'all' });
   return list;
 }
 
