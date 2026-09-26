@@ -78,9 +78,9 @@ export const SHELL_HTML = `<div class="app">
 
     <div class="shortcuts">
       ${shortcut('grid', 'التصنيفات', 'openCategories')}
-      ${shortcut('flame', 'الأكثر رواجًا', 'openCollection', 'trending')}
-      ${shortcut('star', 'المميزة', 'openCollection', 'popular')}
-      ${shortcut('clock', 'المضافة حديثًا', 'openCollection', 'recent')}
+      ${shortcut('flame', 'رائج في المصادر', 'openCollection', 'trending')}
+      ${shortcut('book', 'كل الأعمال', 'openCollection', 'catalogue')}
+      ${shortcut('clock', 'آخر تحديثات الفصول', 'openCollection', 'recent')}
     </div>
     <main id="homeSections"></main>
     </div>

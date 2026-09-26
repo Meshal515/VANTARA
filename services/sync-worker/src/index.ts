@@ -369,22 +369,14 @@ export async function publishDue(env: Env, now: number): Promise<number> {
 }
 
 /**
- * مالك المجلس: `VANTARA_OWNERS` (أسماء أو معرّفات بفواصل)، وإلا نفس قاعدة
- * الترجمة (من فُتحت له). الشارة تُكتب في `accounts.badge` من هنا وحده، وكل
+ * مالك المجلس: `VANTARA_OWNERS` (أسماء أو معرّفات بفواصل)، وإلا معرّف حساب
+ * ngm الثابت. لا يُستنتج المالك من أكثر من استعمل الترجمة. الشارة تُكتب في `accounts.badge` من هنا وحده، وكل
  * صلاحية (حذف رسالة غيرك، اسم المجلس) تُقرأ منها في SQL — العميل لا يقرّر.
  */
 export async function ensureOwnerBadge(env: Env, now: number): Promise<void> {
   const accounts = await env.DB.prepare('SELECT user_id, username, badge FROM accounts').all<{ user_id: string; username: string; badge: string | null }>();
-  const list = (env.VANTARA_OWNERS || env.TRANSLATE_USERS || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
-  let owners: Set<string>;
-  if (list.length) {
-    owners = new Set(accounts.results.filter((a) => list.includes(a.user_id.toLowerCase()) || list.includes(a.username.toLowerCase())).map((a) => a.user_id));
-  } else {
-    const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1')
-      .first<{ created_by: string }>()
-      .catch(() => null);
-    owners = new Set(top ? [top.created_by] : []);
-  }
+  const list = (env.VANTARA_OWNERS || 'bedcf897-a6f0-4730-b757-402b14891ca5').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+  const owners = new Set(accounts.results.filter((a) => list.includes(a.user_id.toLowerCase()) || list.includes(a.username.toLowerCase())).map((a) => a.user_id));
   const wrong = accounts.results.filter((a) => (a.badge === 'owner') !== owners.has(a.user_id));
   if (!wrong.length) return;
   await commitAtNextRevision(env, now, [], (rev) =>

@@ -435,7 +435,10 @@ export function createAnime(deps) {
 
   function show() {
     // «آخر المشاهدات» تتغيّر بعد كل حلقة: تُرسم من جديد عند العودة
-    if (state.home && !state.loading) renderHome(state.home);
+    if (state.home && !state.loading) {
+      try { renderHome(state.home); }
+      catch (error) { console.error('تعذّر رسم رئيسية الأنمي', error); renderError(() => void loadHome({ force: true })); }
+    }
     void loadHome();
   }
 

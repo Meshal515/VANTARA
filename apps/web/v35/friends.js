@@ -452,21 +452,10 @@ export function createFriends(ctx) {
     let list = feedList();
     const bar = tabs(() => {
       const next = feedList();
-      const g = motion();
-      if (!g) {
-        list.replaceWith(next);
-        list = next;
-        return;
-      }
-      g.to(list, {
-        opacity: 0,
-        duration: 0.12,
-        onComplete: () => {
-          list.replaceWith(next);
-          list = next;
-          reveal([...next.children].slice(0, 14), 0);
-        },
-      });
+      motion()?.killTweensOf(list);
+      list.replaceWith(next);
+      list = next;
+      reveal([...next.children].slice(0, 14), 0);
     });
     feed.append(heading('آخر ما صار'), bar, list);
     parts.push(feed);
@@ -480,8 +469,8 @@ export function createFriends(ctx) {
       entered = true;
       for (const r of rows) seenRows.add(r.dataset.key);
       const g = motion();
-      g?.fromTo(host.querySelectorAll('.sx-pal'), { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.36, ease: 'power2.out', stagger: 0.035, clearProps: 'all' });
-      g?.fromTo(host.querySelector('.sx-door'), { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.36, ease: 'power2.out', delay: 0.08, clearProps: 'all' });
+      g?.fromTo(host.querySelectorAll('.sx-pal'), { y: 8 }, { y: 0, duration: 0.36, ease: 'power2.out', stagger: 0.035, clearProps: 'transform' });
+      g?.fromTo(host.querySelector('.sx-door'), { y: 8 }, { y: 0, duration: 0.36, ease: 'power2.out', delay: 0.08, clearProps: 'transform' });
       reveal(rows.slice(0, 14), 0.14);
     } else {
       const fresh = rows.filter((r) => !seenRows.has(r.dataset.key));
@@ -493,7 +482,7 @@ export function createFriends(ctx) {
     }
   }
   function reveal(nodes, delay) {
-    motion()?.fromTo(nodes, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out', stagger: 0.025, delay, clearProps: 'all' });
+    motion()?.fromTo(nodes, { y: 6 }, { y: 0, duration: 0.3, ease: 'power2.out', stagger: 0.025, delay, clearProps: 'transform' });
   }
 
   async function refreshPresence() {

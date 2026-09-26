@@ -38,6 +38,16 @@ async function pull(env: ReturnType<typeof testEnv>['env'], as: string) {
 const row = (db: ReturnType<typeof testEnv>['db'], id: string) => db.prepare('SELECT * FROM majlis_messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
 
 describe('majlis chat', () => {
+  it('defaults ownership to the immutable ngm account when no owner is configured', async () => {
+    const { env, db } = sqliteEnv({
+      VANTARA_SESSION_SECRET: SECRET,
+      VANTARA_IDENTITY_SECRET: 'identity-secret-for-tests-only-32-chars',
+      VANTARA_DEVICE_PEPPER: 'device-pepper-for-tests-only-32-chars-x',
+      TRANSLATE_USERS: '',
+    });
+    await call(env, OWNER, '/v1/sync?since=0');
+    expect(db.prepare("SELECT user_id FROM accounts WHERE badge = 'owner'").all()).toEqual([{ user_id: B }]);
+  });
   it('text reaches every member; resending the same op after a reconnect is one message', async () => {
     const { env, db } = testEnv();
     const id = await op(env, B, 'majlis.send', { kind: 'text', body: '  هلا  ' }, 'op-same');

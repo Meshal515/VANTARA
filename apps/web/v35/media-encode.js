@@ -174,3 +174,24 @@ export async function encodeAnimated(file, type, rect, kind, onProgress) {
     decoded.decoder.close();
   }
 }
+
+/** صورة المجلس: أبقِ الإطارات المتحركة، واقصص الثابتة من الوسط. */
+export async function prepareRoomAvatar(file) {
+  const header = new Uint8Array(await file.slice(0, 6).arrayBuffer());
+  const gif = String.fromCharCode(...header).startsWith('GIF8');
+  const animated = gif ? 'image/gif' : await sniffAnimated(file);
+  if (animated) {
+    // الملف الصغير الأصلي يحتفظ بإطاراته وجودته حتى في WebView بلا ImageDecoder.
+    if (file.size <= MAX_UPLOAD) return file;
+    const bitmap = await createImageBitmap(file);
+    const side = Math.min(bitmap.width, bitmap.height);
+    const rect = { sx: (bitmap.width - side) / 2, sy: (bitmap.height - side) / 2, sw: side, sh: side };
+    bitmap.close?.();
+    return encodeAnimated(file, animated, rect, 'avatar');
+  }
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = drawCrop(bitmap, { sx: (bitmap.width - side) / 2, sy: (bitmap.height - side) / 2, sw: side, sh: side }, { w: 320, h: 320 });
+  bitmap.close?.();
+  return encodeStatic(canvas, 200_000);
+}

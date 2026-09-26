@@ -10,8 +10,8 @@
  */
 
 import engine from '../lib/extension-engine.js';
-import { createWorkIndex, gather, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
-import { readWork, writeWork } from '../lib/chapter-store.js';
+import { chapterNumberOf, createWorkIndex, gather, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
+import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -83,6 +83,84 @@ function sources() {
 
 export const available = () => engine.isAvailable();
 
+const CHAPTER_UPDATES_KEY = 'chapterUpdates.v2';
+const chapterId = (chapter) => {
+  const number = chapterNumberOf(chapter);
+  return number >= 0 ? `n:${number}` : `name:${normalizeTitle(chapter?.name) || chapter?.url || ''}`;
+};
+/** نطابق هوية الفصل عبر المسوحات؛ لا نعتمد تاريخ رفع قد يغيب أو يخطئ. */
+export async function collectLatestChapters(list, page, {
+  latest = (id, p) => engine.latest(id, p),
+  chapters = (id, manga) => engine.chapters(id, manga),
+  now = Date.now(),
+  onUpdate = () => {},
+  known = { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} },
+} = {}) {
+  known ??= { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} };
+  const entries = [];
+  const next = { initialized: true, workChapters: { ...(known.workChapters ?? {}) }, observed: { ...(known.observed ?? {}) }, lastUpdate: { ...(known.lastUpdate ?? {}) } };
+  let hasNextPage = false;
+  const pages = await Promise.allSettled(list.map(async (source) => ({
+    source,
+    value: await withTimeout(latest(source.id, page), LISTING_TIMEOUT_MS),
+  })));
+  const tasks = [];
+  for (const result of pages) {
+    if (result.status !== 'fulfilled') continue;
+    const { source, value } = result.value;
+    hasNextPage ||= Boolean(value?.hasNextPage);
+    for (const [position, manga] of (value?.mangas ?? []).entries()) tasks.push({ source, manga, position });
+  }
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < tasks.length) {
+      const { source, manga, position } = tasks[cursor++];
+      try {
+        const rows = await withTimeout(chapters(source.id, manga), LISTING_TIMEOUT_MS);
+        if (!rows.length) continue;
+        const id = normalizeTitle(manga.title);
+        if (!id) continue;
+        const before = new Set(known.workChapters?.[id] ?? []);
+        const unseen = known.initialized ? rows.filter((r) => !before.has(chapterId(r))) : [];
+        const latestKnown = rows.find((r) => chapterId(r) === known.lastUpdate?.[id]);
+        const pick = latestKnown && !unseen.length ? latestKnown : (unseen.length ? unseen : rows).reduce((best, row) =>
+          !best || chapterNumberOf(row) > chapterNumberOf(best) ? row : best, null);
+        const observedAt = unseen.length ? now : known.observed?.[id] ?? 0;
+        next.workChapters[id] = [...new Set([...(next.workChapters[id] ?? []), ...rows.map(chapterId)])];
+        next.observed[id] = Math.max(next.observed[id] ?? 0, observedAt);
+        if (unseen.length) next.lastUpdate[id] = chapterId(pick);
+        entries.push({ source, manga, chapter: pick, chapterCount: rows.length, observedAt, position });
+        onUpdate(entries, hasNextPage);
+      } catch {
+        // مصدر معطّل لا يسقط النتائج الموثقة من المصادر الأخرى.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, tasks.length) }, worker));
+  entries.sort((a, b) => b.observedAt - a.observedAt || a.position - b.position || sourceRank(a.source.id) - sourceRank(b.source.id));
+  return { entries, hasNextPage, known: next };
+}
+
+function recentWorks(entries) {
+  const index = createWorkIndex();
+  const observed = new Map();
+  const counts = new Map();
+  for (const { source, manga, chapter, chapterCount, observedAt } of entries) {
+    const hit = index.add({ sourceId: source.id, label: source.label, manga });
+    if (!hit) continue;
+    if (!observed.has(hit.work.key) || observedAt > observed.get(hit.work.key).at) observed.set(hit.work.key, { chapter, at: observedAt });
+    counts.set(hit.work.key, Math.max(chapterCount, counts.get(hit.work.key) ?? 0));
+  }
+  const works = index.list().filter((w) => !isWestern(w));
+  for (const w of works) {
+    w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
+    w.title = w.editions[0]?.manga?.title ?? w.title;
+    w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
+  }
+  works.sort((a, b) => observed.get(b.key).at - observed.get(a.key).at);
+  return works.map((w) => ({ ...toV35Work(w), chapters: counts.get(w.key), _latestChapter: observed.get(w.key).chapter }));
+}
+
 /**
  * مصدر «تكملة» (`<pkg>@<lang>`، الإنجليزية: MangaDex وWeeb Central وغيرهما):
  * العربي أولًا دائمًا. لا يبني قوائم؛ يملأ فقط فصول عملٍ له نسخة عربية، والفصل
@@ -96,7 +174,7 @@ const sourceList = (editions) =>
   [...editions]
     .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)))
     .map((v) => ({ sourceId: v.sourceId, label: sourceLabel(v), count: v.chapters?.length ?? 0, lang: isFiller(v.sourceId) ? 'en' : 'ar' }));
-const listingSources = async ({ query = '' } = {}) => (await sources()).filter((s) => query || !s.filler);
+const listingSources = async ({ query = '', includeFillers = false } = {}) => (await sources()).filter((s) => query || includeFillers || !s.filler);
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
  * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
@@ -180,7 +258,13 @@ export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editi
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
-  const list = await listingSources({ query });
+  const list = await listingSources({ query, includeFillers: kind === 'latest' });
+  if (kind === 'latest' && !query && !genre) {
+    const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
+    const { entries, hasNextPage, known } = await collectLatestChapters(list, page, { known: prior });
+    void writeKv(CHAPTER_UPDATES_KEY, known);
+    return { items: recentWorks(entries), hasNextPage, page };
+  }
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
     withTimeout(genre
@@ -232,7 +316,16 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
  * يبقى العمل «عاشقيًّا» لأن العاشق ردّ أولًا.
  */
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}) {
-  const list = await listingSources({ query });
+  const list = await listingSources({ query, includeFillers: kind === 'latest' });
+  if (kind === 'latest' && !query && !genre) {
+    const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
+    const { entries, hasNextPage, known } = await collectLatestChapters(list, page, {
+      known: prior,
+      onUpdate: (found, next) => onUpdate({ items: recentWorks(found), hasNextPage: next, page }),
+    });
+    void writeKv(CHAPTER_UPDATES_KEY, known);
+    return { items: recentWorks(entries), hasNextPage, page };
+  }
   const index = createWorkIndex();
   const positions = new Map();
   const mode = query || genre ? 'search' : kind;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, isWestern, isWesternManga, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work } from './works.js';
 import { mergeChapters } from '../lib/catalog.js';
+import * as listing from './works.js';
 
 /**
  * أعمال المحرّك بشكل v35.
@@ -64,6 +65,51 @@ describe('v35 work shape', () => {
     expect(d.genres).toEqual([]);
     expect(d.status).toBeNull();
     expect(d.staff.edges).toEqual([]);
+  });
+});
+
+describe('latest chapter evidence', () => {
+  const now = Date.UTC(2026, 8, 26);
+  it('promotes newly detected chapters from any source without trusting upload dates', async () => {
+    const sources = [{ id: 'a', label: 'أ' }, { id: 'b', label: 'ب' }];
+    const rows = {
+      a: [{ title: 'عمل ألف', url: '/a' }],
+      b: [{ title: 'عمل باء', url: '/b' }],
+    };
+    let bChapter = 4;
+    const deps = {
+      latest: async (id) => ({ mangas: rows[id], hasNextPage: false }),
+      chapters: async (_id, manga) => Array.from({ length: manga.url === '/b' ? bChapter : 8 }, (_, i) => ({ url: `${manga.url}/${i + 1}`, chapterNumber: i + 1, dateUpload: 0 })),
+      now,
+    };
+    const baseline = await listing.collectLatestChapters(sources, 1, deps);
+    expect(baseline.entries).toHaveLength(2);
+    bChapter = 5;
+    const update = await listing.collectLatestChapters(sources, 1, { ...deps, known: baseline.known, now: now + 1000 });
+    expect(update.entries[0].manga.title).toBe('عمل باء');
+    expect(update.entries[0].chapter.chapterNumber).toBe(5);
+    expect(update.entries[0].observedAt).toBe(now + 1000);
+    expect(update.entries[1].observedAt).toBe(0);
+  });
+  it('does not promote the same work and chapter again when another source publishes it later', async () => {
+    const sources = [{ id: 'a', label: 'أ' }, { id: 'b', label: 'ب' }];
+    let first = 7;
+    let second = 6;
+    const scan = (known, time) => listing.collectLatestChapters(sources, 1, {
+      latest: async (id) => ({ mangas: [{ title: 'نفس العمل', url: `/${id}` }] }),
+      chapters: async (id) => Array.from({ length: id === 'a' ? first : second }, (_, i) => ({
+        url: `/${id}/chapter/${i + 1}`, name: `الفصل ${i + 1}`, chapterNumber: i + 1,
+      })),
+      known, now: time,
+    });
+    const base = await scan(undefined, now);
+    first = 8;
+    const released = await scan(base.known, now + 1000);
+    expect(released.entries.some((e) => e.observedAt === now + 1000)).toBe(true);
+    second = 8;
+    const mirrored = await scan(released.known, now + 86_400_000);
+    expect(mirrored.entries.map((e) => e.observedAt)).toEqual([now + 1000, now + 1000]);
+    expect(mirrored.entries[0].chapter.chapterNumber).toBe(8);
   });
 });
 

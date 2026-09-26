@@ -31,7 +31,7 @@ import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
 import { createFriends } from './friends.js';
 import { createRoom } from './majlis-chat.js';
-import { encodeStatic } from './media-encode.js';
+import { prepareRoomAvatar } from './media-encode.js';
 import { endpoints } from '../lib/config.js';
 import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
@@ -556,7 +556,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const p = el('div', 'poster');
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
-    const m = el('div', 'work-meta', meta ?? (STATUS_AR[work.status] || ''));
+    const chapter = work._latestChapter;
+    const recentLabel = chapter
+      ? (Number.isFinite(Number(chapter.chapterNumber)) && Number(chapter.chapterNumber) >= 0
+        ? `الفصل ${chapter.chapterNumber}` : String(chapter.name ?? '').slice(0, 44))
+      : null;
+    const m = el('div', 'work-meta', meta ?? recentLabel ?? (STATUS_AR[work.status] || ''));
     void mountImage(p, work);
     a.append(p, t, m);
     a.onclick = () => void openWork(work);
@@ -638,12 +643,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - أعمال تتابعها: مكتبتك.
    *   - يقرأها أصدقاؤك: سجلّات أصدقائك.
    *   - الأكثر رواجًا: «الرائج» عند كل المصادر، مرتّبًا بحضوره فيها وموضعه.
-   *   - آخر التحديثات: «الأحدث» عند كل المصادر، بأقرب موضع.
+   *   - آخر التحديثات: فصول رُصدت حديثًا في قوائم المصادر، بغض النظر عن تاريخ الرفع.
    * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
    */
   // آخر ما عُرض: إعادة البناء لنفس القوائم تُسقط الصور لحظةً ثم تعيدها
   // (وميض مع كل نبض مزامنة). نفس الأعمال بنفس الترتيب = لا شيء يُلمس.
   let homeSignature = '';
+  let homeBusy = false;
+  let homeCheckedAt = 0;
   function renderHome() {
     const blocks = [];
     const history = historyWorks();
@@ -652,8 +659,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
     const friends = friendsReading();
     if (friends.length) blocks.push(sectionBlock('يقرأها أصدقاؤك', null, friends.slice(0, 20)));
-    if (state.home.trending.length) blocks.push(sectionBlock('الأكثر رواجًا', 'trending', state.home.trending));
-    if (state.home.recent.length) blocks.push(sectionBlock('آخر التحديثات', 'recent', state.home.recent));
+    if (state.home.trending.length) blocks.push(sectionBlock('رائج في المصادر', 'trending', state.home.trending));
+    if (state.home.recent.length) blocks.push(sectionBlock('آخر تحديثات الفصول', 'recent', state.home.recent));
     if (!blocks.length) return;
     const signature = blocks.map((b) => b.dataset.signature ?? '').join('|');
     if (signature === homeSignature && q('homeSections').childElementCount === blocks.length) return;
@@ -662,7 +669,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
-      ...['الأكثر رواجًا', 'آخر التحديثات'].map((title) => {
+      ...['رائج في المصادر', 'آخر تحديثات الفصول'].map((title) => {
         const s = el('section', 'section');
         s.setAttribute('aria-busy', 'true');
         const h = el('div', 'section-head');
@@ -675,6 +682,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     );
   }
   async function loadHome() {
+    if (homeBusy) return;
+    homeBusy = true;
+    try {
     if (!available()) {
       renderHeroFallback();
       const box = el('div');
@@ -685,7 +695,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
     // لا شاشة تنتظر أبطأ مصدر من ستة عشر. قائمتان حقيقيتان: الرائج والأحدث.
-    const cached = (await readKv('home.v2'))?.value;
+    const cached = (await readKv('home.v3'))?.value;
     const hasCache = Boolean(cached?.trending?.length || cached?.recent?.length);
     const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
     if (hasCache) {
@@ -717,7 +727,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (!hasCache && !saveTimer) {
           saveTimer = setTimeout(() => {
             saveTimer = null;
-            void writeKv('home.v2', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+            void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
           }, 1500);
         }
       }, 120);
@@ -746,7 +756,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       renderHome();
       if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
-      void writeKv('home.v2', { trending: tr.items.slice(0, 40), recent: re.items.slice(0, 40) });
+      void writeKv('home.v3', { trending: tr.items.slice(0, 40), recent: re.items.slice(0, 40) });
     } catch {
       // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
       if (hasCache) return;
@@ -760,6 +770,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void loadHome() },
       });
       q('homeSections').replaceChildren(box.firstElementChild);
+    }
+    } finally {
+      homeCheckedAt = Date.now();
+      homeBusy = false;
     }
   }
 
@@ -2419,8 +2433,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── المجموعات والاستكشاف والبحث ─────────────────────────
 
   const COLLECTIONS = {
-    trending: { title: 'الأكثر رواجًا', kind: 'popular' },
-    recent: { title: 'آخر التحديثات', kind: 'latest' },
+    trending: { title: 'رائج في المصادر', kind: 'popular' },
+    recent: { title: 'آخر تحديثات الفصول', kind: 'latest' },
+    catalogue: { title: 'كل الأعمال', kind: 'catalogue' },
   };
   async function openCollection(kind) {
     if (kind === 'history') {
@@ -2978,7 +2993,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     if (id !== 'majlis' || state.socialTab !== 'notifications') state.notifFresh = null;
     if (id === 'majlis') {
-      renderSocial();
+      try {
+        renderSocial();
+      } catch (error) {
+        console.error('تعذّر رسم الاجتماع', error);
+        q('friendsBody').hidden = false;
+        q('majlisBody').hidden = true;
+        q('socialNotifs').hidden = true;
+        emptyState(q('friendsBody'), { icon: 'offline', error: true, title: 'تعذّر عرض الاجتماع', text: 'أعد فتح القسم للمحاولة.', action: { label: 'أعد المحاولة', icon: 'refresh', run: () => renderSocial() } });
+      }
       // وصلتَ للمجلس = رأيت التفاعلات على رسائلك فيه
       for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
         sync.enqueue('notification.read', { id: n.id });
@@ -3982,15 +4005,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     return out;
   }
-  /** صورة المجلس: مربع من وسط الصورة، مضغوطة قبل الرفع. */
+  /** صورة المجلس: GIF يبقى متحركًا، والثابتة تُقص وتُضغط. */
   async function encodeAvatar(file) {
-    const bitmap = await createImageBitmap(file);
-    const side = Math.min(bitmap.width, bitmap.height);
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 320;
-    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 320, 320);
-    bitmap.close?.();
-    return encodeStatic(canvas, 200_000);
+    return prepareRoomAvatar(file);
   }
   const majlis = createMajlis({
     sync,
@@ -4202,6 +4219,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   paintNotifyDots();
   void loadHome();
+  const refreshChapters = () => {
+    if (!document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= 60_000) void loadHome();
+  };
+  const chapterRefreshTimer = setInterval(refreshChapters, 60_000);
+  document.addEventListener('visibilitychange', refreshChapters);
   showPage(page);
 
   // الرجوع من القارئ أو الأصدقاء يعيد الصفحة كما تُركت، بتمريرها
@@ -4233,10 +4255,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       if (state.heroItems.length) restartHero();
       if (currentPage() === 'majlis') renderSocial();
+      refreshChapters();
     },
     destroy() {
       majlis.hide();
       clearInterval(state.heroTimer);
+      clearInterval(chapterRefreshTimer);
+      document.removeEventListener('visibilitychange', refreshChapters);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);
       unsubscribe?.();
