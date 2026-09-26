@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, cachedWorkChapterCount, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -577,28 +577,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
   }
-  const countPromises = new Map();
-  const chapterCounts = readJson('vantara.v35.chapter-counts', {});
-  const savedCount = (work) => {
-    const row = chapterCounts[String(work.id)];
-    return row && Date.now() - row.at < 10 * 60_000 && Number.isInteger(row.count) ? row.count : null;
-  };
-  function countFor(work) {
-    if (Number.isInteger(work.chapters) && work.chapters >= 0) return Promise.resolve(work.chapters);
-    const saved = savedCount(work);
-    if (saved != null) return Promise.resolve(saved);
-    const id = String(work.id);
-    if (!countPromises.has(id)) {
-      countPromises.set(id, cachedWorkChapterCount(work).then((count) => {
-        if (count != null) {
-          chapterCounts[id] = { count, at: Date.now() };
-          writeJson('vantara.v35.chapter-counts', chapterCounts);
-        } else countPromises.delete(id);
-        return count;
-      }, () => { countPromises.delete(id); return null; }));
-    }
-    return countPromises.get(id);
-  }
   function openCardActions(work) {
     const ref = String(work.id);
     openSheet((body) => {
@@ -627,7 +605,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
     a.setAttribute('aria-label', `${titleOf(work)}، اضغط مطولًا لخيارات المكتبة`);
-    // الغلاف غلافٌ فقط: التقييم وعدد الفصول تحت العنوان، لا فوق الصورة
+    // الغلاف غلافٌ فقط؛ التقييم تحت العنوان، والفصول في صفحة العمل.
     const frame = el('div', 'work-card-frame');
     const p = el('div', 'poster');
     const score = el('span', 'work-score');
@@ -642,12 +620,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       : null;
     const m = el('div', 'work-meta', meta ?? recentLabel ?? '');
     const facts = el('div', 'work-facts');
-    const count = el('span', 'work-count');
-    const firstCount = Number.isInteger(work.chapters) ? work.chapters : savedCount(work);
-    count.hidden = firstCount == null;
-    count.innerHTML = `<span>${firstCount ?? ''}</span> فصل`;
-    count.setAttribute('aria-label', firstCount == null ? 'عدد الفصول غير متاح' : `${firstCount} فصلًا`);
-    facts.append(score, count);
+    facts.append(score);
     void mountImage(p, work);
     a.append(frame, t, m, facts);
     onLongPress(a, () => openCardActions(a._work));
@@ -659,12 +632,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);
         score.hidden = false;
-      });
-      void countFor(work).then((chapters) => {
-        if (!a.isConnected || chapters == null) return;
-        count.querySelector('span').textContent = String(chapters);
-        count.setAttribute('aria-label', `${chapters} فصلًا`);
-        count.hidden = false;
       });
     });
     a.onclick = () => void openWork(a._work);
@@ -685,12 +652,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? `الفصل ${recent.chapterNumber}` : String(recent.name ?? '').slice(0, 44)) : '';
       const meta = node.querySelector('.work-meta');
       if (meta && meta.textContent !== label) meta.textContent = label;
-      const knownCount = node.querySelector('.work-count');
-      if (knownCount && Number.isInteger(work.chapters)) {
-        knownCount.querySelector('span').textContent = String(work.chapters);
-        knownCount.setAttribute('aria-label', `${work.chapters} فصلًا`);
-        knownCount.hidden = false;
-      }
     });
   }
   const renderStrip = (target, items) => reconcileCards(target, items.slice(0, 14));
