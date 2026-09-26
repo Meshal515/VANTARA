@@ -129,7 +129,7 @@ export async function collectLatestChapters(list, page, {
         next.workChapters[id] = [...new Set([...(next.workChapters[id] ?? []), ...rows.map(chapterId)])];
         next.observed[id] = Math.max(next.observed[id] ?? 0, observedAt);
         if (unseen.length) next.lastUpdate[id] = chapterId(pick);
-        entries.push({ source, manga, chapter: pick, chapterCount: rows.length, observedAt, position });
+        entries.push({ source, manga, chapter: pick, chapters: rows, observedAt, position });
         onUpdate(entries, hasNextPage);
       } catch {
         // مصدر معطّل لا يسقط النتائج الموثقة من المصادر الأخرى.
@@ -144,12 +144,10 @@ export async function collectLatestChapters(list, page, {
 function recentWorks(entries) {
   const index = createWorkIndex();
   const observed = new Map();
-  const counts = new Map();
-  for (const { source, manga, chapter, chapterCount, observedAt } of entries) {
-    const hit = index.add({ sourceId: source.id, label: source.label, manga });
+  for (const { source, manga, chapter, chapters, observedAt } of entries) {
+    const hit = index.add({ sourceId: source.id, label: source.label, manga, chapters });
     if (!hit) continue;
     if (!observed.has(hit.work.key) || observedAt > observed.get(hit.work.key).at) observed.set(hit.work.key, { chapter, at: observedAt });
-    counts.set(hit.work.key, Math.max(chapterCount, counts.get(hit.work.key) ?? 0));
   }
   const works = index.list().filter((w) => !isWestern(w));
   for (const w of works) {
@@ -158,7 +156,26 @@ function recentWorks(entries) {
     w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
   }
   works.sort((a, b) => observed.get(b.key).at - observed.get(a.key).at);
-  return works.map((w) => ({ ...toV35Work(w), chapters: counts.get(w.key), _latestChapter: observed.get(w.key).chapter }));
+  return works.map((w) => {
+    const count = mergeChapters(w.editions, { rank: sourceRank }).length;
+    const light = { ...w, editions: w.editions.map(({ chapters, ...edition }) => edition) };
+    return { ...toV35Work(light), chapters: count || null, _latestChapter: observed.get(w.key).chapter };
+  });
+}
+
+/** عدد الفصول المتاحة من اتحاد المصادر، أو null إن لم يرد أي مصدر. */
+export async function countWorkChapters(v35work) {
+  if (Number.isInteger(v35work?.chapters) && v35work.chapters >= 0) return v35work.chapters;
+  const cached = await readWork(String(v35work?.id));
+  if (cached?.editions?.some((e) => e.chapters?.length) && Date.now() - (cached.at ?? 0) < 10 * 60_000)
+    return mergeChapters(cached.editions, { rank: sourceRank }).length;
+  const editions = v35work?._work?.editions ?? [];
+  if (!editions.length) return null;
+  const { ok } = await gather(editions, async (e) => ({
+    ...e, chapters: await withTimeout(engine.chapters(e.sourceId, e.manga), LISTING_TIMEOUT_MS),
+  }));
+  if (!ok.length) return null;
+  return mergeChapters(ok.map((r) => r.value), { rank: sourceRank }).length;
 }
 
 /**

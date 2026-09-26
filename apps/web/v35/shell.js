@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, countWorkChapters, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -43,6 +43,7 @@ import { createAnimeAccount, isAnimeRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
+import { fetchMangaRatings } from '../lib/manga-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
 
 const AR_GENRE = {
@@ -548,12 +549,83 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else coverWaiting.push(run);
   }
 
+  const ratingPromises = new Map();
+  const ratingQueue = [];
+  let ratingTimer = null;
+  function ratingFor(title) {
+    if (!ratingPromises.has(title)) {
+      ratingPromises.set(title, new Promise((resolve) => {
+        ratingQueue.push({ title, resolve });
+        ratingTimer ??= setTimeout(flushRatings, 50);
+      }));
+    }
+    return ratingPromises.get(title);
+  }
+  async function flushRatings() {
+    ratingTimer = null;
+    const batch = ratingQueue.splice(0, 8);
+    if (!batch.length) return;
+    try {
+      const matches = await fetchMangaRatings(batch.map((b) => b.title));
+      batch.forEach(({ title, resolve }) => resolve(matches.get(title) ?? null));
+    } catch {
+      batch.forEach(({ title, resolve }) => { ratingPromises.delete(title); resolve(null); });
+    }
+    if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
+  }
+  const countPromises = new Map();
+  const countQueue = [];
+  let counting = 0;
+  function countFor(work) {
+    if (Number.isInteger(work.chapters) && work.chapters >= 0) return Promise.resolve(work.chapters);
+    const id = String(work.id);
+    if (!countPromises.has(id)) {
+      countPromises.set(id, new Promise((resolve) => {
+        countQueue.push({ work, resolve });
+        drainCounts();
+      }));
+    }
+    return countPromises.get(id);
+  }
+  function drainCounts() {
+    while (counting < 2 && countQueue.length) {
+      const { work, resolve } = countQueue.shift();
+      counting += 1;
+      countWorkChapters(work).then(resolve, () => { countPromises.delete(String(work.id)); resolve(null); })
+        .finally(() => { counting -= 1; drainCounts(); });
+    }
+  }
+  function openCardActions(work) {
+    const ref = String(work.id);
+    openSheet((body) => {
+      const title = el('h3', null, titleOf(work));
+      title.dir = 'auto';
+      body.append(title);
+      body.append(
+        sheetItem('library', libraryEntry(ref)?.row ? 'في المكتبة' : 'أضف إلى المكتبة', () => {
+          closeSheet();
+          if (!libraryEntry(ref)?.row) { sync.enqueue('library.add', descriptorOf(work)); toast('أضيف إلى مكتبتك'); }
+          else toast('العمل في مكتبتك');
+        }, { pressed: !!libraryEntry(ref)?.row }),
+        sheetItem('clock', inCollection('read_later', ref) ? 'في أقرأ لاحقًا' : 'اقرأ لاحقًا', () => {
+          closeSheet();
+          if (!inCollection('read_later', ref)) { sync.enqueue('readLater.set', { ...descriptorOf(work), member: true }); toast('في «أقرأ لاحقًا»'); }
+          else toast('العمل في «أقرأ لاحقًا»');
+        }, { pressed: inCollection('read_later', ref) }),
+      );
+    }, { tone: 'manga' });
+  }
+
   function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
     a.setAttribute('aria-label', titleOf(work));
+    const frame = el('div', 'work-card-frame');
     const p = el('div', 'poster');
+    const score = el('span', 'work-score');
+    score.hidden = true;
+    frame.append(p, score);
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
     const chapter = work._latestChapter;
@@ -562,11 +634,32 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? `الفصل ${chapter.chapterNumber}` : String(chapter.name ?? '').slice(0, 44))
       : null;
     const m = el('div', 'work-meta', meta ?? recentLabel ?? (STATUS_AR[work.status] || ''));
+    const facts = el('div', 'work-facts');
+    const count = el('span', 'work-count', Number.isInteger(work.chapters) ? `${work.chapters} فصلًا` : 'نجمع الفصول…');
+    const quick = el('button', 'work-quick');
+    quick.type = 'button';
+    quick.setAttribute('aria-label', `خيارات ${titleOf(work)}`);
+    quick.innerHTML = glyph('more', { size: 19 });
+    quick.onclick = (event) => { event.stopPropagation(); openCardActions(work); };
+    facts.append(count, quick);
     void mountImage(p, work);
-    a.append(p, t, m);
-    a.onclick = () => void openWork(work);
+    a.append(frame, t, m, facts);
+    void nearViewport(a).then(async () => {
+      if (!a.isConnected) return;
+      void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
+        if (!a.isConnected || !rated) return;
+        score.textContent = `★ ${rated.score.toFixed(1)}`;
+        score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
+        score.setAttribute('aria-label', score.title);
+        score.hidden = false;
+      });
+      void countFor(work).then((chapters) => {
+        if (a.isConnected) count.textContent = chapters == null ? 'الفصول غير متاحة' : `${chapters} فصلًا`;
+      });
+    });
+    a.onclick = (event) => { if (!event.target.closest('button')) void openWork(work); };
     a.onkeydown = (e) => {
-      if (e.key === 'Enter') void openWork(work);
+      if (e.key === 'Enter' && e.target === a) void openWork(work);
     };
     return a;
   }
