@@ -75,6 +75,7 @@ export interface TasteProfile {
 }
 
 const DAY = 86_400_000;
+const PLAIN_TAGS = new Set(['Full Color', 'Long Strip', 'Web Comic', 'Male Protagonist', 'Female Protagonist', 'Heterosexual', 'Primarily Male Cast', 'Primarily Female Cast', 'Primarily Adult Cast', 'Primarily Teen Cast', 'Ensemble Cast', 'Adapted Mangaka', '4-koma']);
 
 export function classify(w: Omit<UserWork, 'state' | 'meta'>, now: number): UserWork['state'] {
   const age = now - (w.lastAt || 0);
@@ -235,7 +236,8 @@ export async function preferences(db: D1Database, userId: string): Promise<Prefe
 /** ملف الذوق المختصر الذي يراه النموذج. */
 export function buildProfile(works: UserWork[], prefs: Preference[], now: number): TasteProfile {
   const genres = weigh(works, (m) => m.genres);
-  const themes = weigh(works, (m) => m.tags);
+  // وسوم تنطبق على نص الكتالوج (ملوّن، بطل ذكر…) ما تقول شي عن الذوق
+  const themes = weigh(works, (m) => m.tags.filter((t) => !PLAIN_TAGS.has(t)));
   const strong = works.filter((w) => w.state === 'strong');
   const recent = works.filter((w) => w.lastAt >= now - 14 * DAY && w.meta && (w.state === 'current' || w.state === 'strong'));
   const recentKeys = new Map<string, number>();

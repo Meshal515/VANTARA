@@ -485,6 +485,7 @@ export function createRafiq(deps) {
         text: text || undefined,
         action: action ?? undefined,
         local: { anime: localSignals(deps.readWatch?.()), gaps },
+        section: deps.section?.() ?? undefined,
         ...extra,
       });
       if (res.status !== 200) {

@@ -10,6 +10,7 @@
  */
 
 import type { D1Database } from './types.ts';
+import { ANILIST_TAGS } from './rafiq-tags.ts';
 
 export const ANILIST = 'https://graphql.anilist.co';
 
@@ -19,25 +20,13 @@ export const GENRES = [
   'Mystery', 'Psychological', 'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller',
 ] as const;
 
-/** وسوم شائعة يُسمح للنموذج باختيارها (أسماء AniList الدقيقة). */
-export const TAGS = [
-  'Isekai', 'Reincarnation', 'Time Manipulation', 'Revenge', 'Tragedy', 'Survival', 'Martial Arts', 'Cultivation',
-  'Magic', 'Swordplay', 'Dungeon', 'Video Games', 'Virtual World', 'School', 'Military', 'Politics', 'Crime',
-  'Detective', 'Assassins', 'Mafia', 'Post-Apocalyptic', 'Dystopian', 'Demons', 'Vampire', 'Zombie', 'Gore',
-  'Anti-Hero', 'Villainess', 'Female Protagonist', 'Male Protagonist', 'Overpowered Main Characters',
-  'Weak to Strong', 'Genius', 'Found Family', 'Coming of Age', 'Iyashikei', 'Cute Girls Doing Cute Things',
-  'Workplace', 'Cooking', 'Family Life', 'Office Lady', 'Historical', 'Mythology', 'Gods', 'Philosophy',
-  'Suspense', 'Twist', 'Time Skip', 'Tournament', 'Super Power', 'Ensemble Cast',
-  'Love Triangle', 'Harem', 'Reverse Harem', 'Shoujo Ai', 'Shounen Ai', 'Episodic', 'Parody', 'Satire',
-  'Seinen', 'Shounen', 'Josei', 'Shoujo', 'Full Color', 'Web Comic', 'Long Strip', 'Dragons',
-  'Elf', 'Monster Girl', 'Kingdom Management', 'Nobility', 'Royal Affairs', 'Space', 'Aliens', 'Robots',
-  'Cyberpunk', 'Hacking', 'Medicine', 'Band', 'Idol', 'Boxing', 'Basketball', 'Football',
-];
+/** كل وسوم AniList (بلا البالغين) بأسمائها الدقيقة. */
+export const TAGS = ANILIST_TAGS;
 
 const FIELDS = `id type format status episodes chapters averageScore popularity genres isAdult seasonYear
   startDate { year } countryOfOrigin title { romaji english native } synonyms
   coverImage { large extraLarge color } bannerImage description(asHtml: false)
-  tags { name rank isMediaSpoiler isGeneralSpoiler }`;
+  tags { name rank isMediaSpoiler isGeneralSpoiler } relations { edges { relationType(version: 2) node { format } } }`;
 
 export interface Meta {
   anilistId: number;
@@ -58,6 +47,8 @@ export interface Meta {
   banner: string | null;
   color: string | null;
   synopsis: string | null;
+  /** تكملة لعمل قبلها بنفس الشكل (موسم ثاني، جزء ثاني): يُقترح الأول لا هي. */
+  sequel?: boolean;
 }
 
 type Fetch = typeof fetch;
@@ -81,9 +72,9 @@ export function cleanSynopsis(text: string | null | undefined): string | null {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function toMeta(m: any): Meta {
   const tags = (m.tags ?? [])
-    .filter((t: { isMediaSpoiler?: boolean; isGeneralSpoiler?: boolean; rank?: number }) => !t.isMediaSpoiler && !t.isGeneralSpoiler && (t.rank ?? 0) >= 55)
+    .filter((t: { isMediaSpoiler?: boolean; isGeneralSpoiler?: boolean; rank?: number }) => !t.isMediaSpoiler && !t.isGeneralSpoiler && (t.rank ?? 0) >= 40)
     .map((t: { name: string }) => t.name)
-    .slice(0, 12);
+    .slice(0, 14);
   const titles = [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms ?? [])].filter(Boolean) as string[];
   return {
     anilistId: m.id,
@@ -104,6 +95,7 @@ export function toMeta(m: any): Meta {
     banner: m.bannerImage ?? null,
     color: m.coverImage?.color ?? null,
     synopsis: cleanSynopsis(m.description),
+    sequel: (m.relations?.edges ?? []).some((e: { relationType?: string; node?: { format?: string } }) => e.relationType === 'PREQUEL' && e.node?.format === m.format),
   };
 }
 
@@ -230,6 +222,9 @@ export interface CandidateQuery {
   sort?: 'POPULARITY_DESC' | 'SCORE_DESC' | 'TRENDING_DESC';
   exclude?: number[];
   page?: number;
+  /** بلد المنشأ: KR مانهوا، JP مانجا، CN مانها. */
+  country?: 'KR' | 'JP' | 'CN' | null;
+  perPage?: number;
 }
 
 /** مرشّحون حقيقيون من الكتالوج بشروط الطلب (30 لكل صفحة). */
@@ -256,6 +251,7 @@ export async function candidates(fetchImpl: Fetch, q: CandidateQuery): Promise<M
   add('tagOut', '[String]', 'tag_not_in', q.tagsOut);
   add('status', 'MediaStatus', 'status', q.status ?? undefined);
   add('notIn', '[Int]', 'id_not_in', q.exclude?.slice(0, 200));
+  add('country', 'CountryCode', 'countryOfOrigin', q.country ?? undefined);
   const unit = q.type === 'ANIME' ? 'episodes' : 'chapters';
   const bounds = q.type === 'ANIME' ? { short: 14, medium: 27 } : { short: 60, medium: 160 };
   if (q.length === 'short') {
@@ -268,7 +264,7 @@ export async function candidates(fetchImpl: Fetch, q: CandidateQuery): Promise<M
     add('lenLess', 'Int', `${unit}_lesser`, bounds.medium);
   }
   if (q.length === 'long') add('lenGreater', 'Int', `${unit}_greater`, bounds.medium - 1);
-  const query = `query(${decl.join(', ')}) { Page(page: $page, perPage: 30) { media(${args.join(', ')}) { ${FIELDS} } } }`;
+  const query = `query(${decl.join(', ')}) { Page(page: $page, perPage: ${q.perPage ?? 30}) { media(${args.join(', ')}) { ${FIELDS} } } }`;
   const data = await gql(fetchImpl, query, vars);
   const media = ((data?.Page as { media?: unknown[] } | undefined)?.media ?? []) as unknown[];
   return media.map(toMeta);
