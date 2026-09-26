@@ -102,7 +102,9 @@ object Cleaner {
         val (labels, comps) = enclosed.components(true)
         for (c in comps) {
             val cy = (c.y0 + c.y1) / 2
-            if (c.y1 - c.y0 > gh * 2 || c.x1 - c.x0 > gh * 3 || cy < rowTop || cy > rowBottom) continue
+            // كلمة بخط عريض تلتحم حروفها («MEAN») فتصير مكوّنًا واحدًا أعرض من حرف:
+            // الطول بقدر سطر هو الحدّ، والعرض بقدر الفقاعة (محاطة بالورق كليًّا أصلًا)
+            if (c.y1 - c.y0 > gh * 2 || c.x1 - c.x0 > maxOf(gh * 3, bb[2] - bb[0]) || cy < rowTop || cy > rowBottom) continue
             var touchesSibling = false
             for (y in c.y0 until c.y1) for (x in c.x0 until c.x1) if (labels[y * img.width + x] == c.label && sib[x, y].toInt() != 0) touchesSibling = true
             if (touchesSibling) continue
@@ -121,6 +123,26 @@ object Cleaner {
 
     private val NEIGHBOURS = arrayOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
 
+    /**
+     * داخل الفقاعة بعيدًا عن إطارها. فقاعة يقطعها طرف الصورة (الويبتون مقسوم صورًا،
+     * والفقاعة تكمل في التالية) لا إطار لها هناك: التآكل من طرف الصورة كان يترك
+     * آخر سطر ملاصق للحافة بلا مسح. حيث تصل الفقاعة الحافة يبقى داخلها كما هو.
+     */
+    internal fun innerOf(bubbleMask: ByteMask, erode: Int): ByteMask {
+        val inner = bubbleMask.erode(erode)
+        val w = bubbleMask.width; val h = bubbleMask.height
+        val e = minOf(erode, w, h)
+        for (x in 0 until w) {
+            if (bubbleMask[x, h - 1].toInt() != 0) for (y in h - e until h) if (bubbleMask[x, y].toInt() != 0) inner[x, y] = 1
+            if (bubbleMask[x, 0].toInt() != 0) for (y in 0 until e) if (bubbleMask[x, y].toInt() != 0) inner[x, y] = 1
+        }
+        for (y in 0 until h) {
+            if (bubbleMask[w - 1, y].toInt() != 0) for (x in w - e until w) if (bubbleMask[x, y].toInt() != 0) inner[x, y] = 1
+            if (bubbleMask[0, y].toInt() != 0) for (x in 0 until e) if (bubbleMask[x, y].toInt() != 0) inner[x, y] = 1
+        }
+        return inner
+    }
+
     fun planErase(img: RgbImage, region: Region, siblings: List<Region>?) {
         val gh = glyphHeight(region.glyph, region.box)
         val core = region.glyph.close(2)
@@ -132,7 +154,7 @@ object Cleaner {
 
         if (bubbleMask != null) {
             val erode = maxOf(3, (gh * 0.25).toInt())
-            val inner = bubbleMask.erode(erode)
+            val inner = innerOf(bubbleMask, erode)
             val grow = maxOf(7, (gh * 0.45).toInt())
             val near = core.dilate(grow)
             val (color, spread) = flatColor(img, inner, core.or(others).dilate((grow * 3) / 2))

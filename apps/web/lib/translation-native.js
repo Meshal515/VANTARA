@@ -60,17 +60,30 @@ export async function removeModels() {
 }
 
 /** الهندسة وOCR على الجهاز. `path` مسار ملف الصفحة كما أعطته الإضافة `ExtensionEngine.image`. */
-export async function analyzePage({ path, sourceLang = 'auto', priority = 'high' }) {
+export async function analyzePage({ path, sourceLang = 'auto', priority = 'high', chapterKey = null, pageIndex = null }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.analyzePage({ path, sourceLang, priority });
+  return p.analyzePage({ path, sourceLang, priority, ...where(chapterKey, pageIndex) });
 }
 
 /** التبييض والرسم على الجهاز. يرجع مسار الصورة المترجمة. */
-export async function renderPage({ path, regions, leave = [], priority = 'high' }) {
+export async function renderPage({ path, regions, leave = [], priority = 'high', chapterKey = null, pageIndex = null }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.renderPage({ path, regions, leave, priority });
+  return p.renderPage({ path, regions, leave, priority, ...where(chapterKey, pageIndex) });
+}
+
+/** موضع الصفحة في فصلها: الجهاز يقدّم الأقرب لصفحتك في دور المعالج. */
+const where = (chapterKey, pageIndex) => (chapterKey && Number.isInteger(pageIndex) ? { chapterKey: String(chapterKey), pageIndex } : {});
+
+/**
+ * القارئ على هذه الصفحة الآن: على الجهاز، الصفحة التي أمامك ثم التي بعدها تأخذ
+ * المعالج قبل غيرها (والحساب لحظة تسليم الدور). APK أقدم بلا الدالة: لا شيء.
+ */
+export function focusPage(chapterKey, pageIndex) {
+  const p = plugin();
+  if (!p?.focusPage) return;
+  void Promise.resolve(p.focusPage(where(chapterKey, pageIndex))).catch(() => {});
 }
 
 /**

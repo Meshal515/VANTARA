@@ -49,6 +49,13 @@ export interface Env {
   TRANSLATE_USERS?: string;
   TRANSLATE_WEEKLY_CHAPTERS?: string;
   TRANSLATE_MONTHLY_BUDGET_USD?: string;
+  /** اختياري: «رفيق» على DeepSeek. غياب المفتاح = «رفيق غير مهيّأ». */
+  DEEPSEEK_API_KEY?: string;
+  DEEPSEEK_BASE_URL?: string;
+  RAFIQ_MODEL?: string;
+  /** من يُفتح له رفيق (أسماء أو معرّفات بفواصل). غير مضبوط: من فُتحت له الترجمة (صاحب الحساب). */
+  RAFIQ_USERS?: string;
+  RAFIQ_MONTHLY_BUDGET_USD?: string;
 }
 
 export interface ExecutionContext {

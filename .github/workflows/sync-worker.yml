@@ -106,6 +106,8 @@ jobs:
           VANTARA_DEVICE_PEPPER: ${{ secrets.VANTARA_DEVICE_PEPPER }}
           # اختياري: مفتاح الترجمة. غيابه لا يُسقط النشر، والقارئ يقول «الترجمة غير مفعّلة»
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # اختياري: مفتاح «رفيق» (DeepSeek). غيابه يُظهر «رفيق غير مهيّأ» فقط
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           secrets_file="$(mktemp)"
@@ -116,11 +118,13 @@ jobs:
             --arg identity "$VANTARA_IDENTITY_SECRET" \
             --arg pepper "$VANTARA_DEVICE_PEPPER" \
             --arg openai "${OPENAI_API_KEY:-}" \
+            --arg deepseek "${DEEPSEEK_API_KEY:-}" \
             '{
               VANTARA_SESSION_SECRET: $session,
               VANTARA_IDENTITY_SECRET: $identity,
               VANTARA_DEVICE_PEPPER: $pepper
-            } + (if $openai != "" then { OPENAI_API_KEY: $openai } else {} end)' > "$secrets_file"
+            } + (if $openai != "" then { OPENAI_API_KEY: $openai } else {} end)
+              + (if $deepseek != "" then { DEEPSEEK_API_KEY: $deepseek } else {} end)' > "$secrets_file"
           npx --yes wrangler@4 deploy --secrets-file "$secrets_file"
 
       - name: Smoke test /health

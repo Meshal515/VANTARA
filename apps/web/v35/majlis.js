@@ -22,6 +22,11 @@ import { EMOJI_GROUPS } from './emoji.js';
 export const REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
 const LONG_PRESS_MS = 420;
 
+/** مجلس الأنمي: لا فريمات صفحات ولا قراءة؛ ترشيحات الأنمي ولحظات المشغّل. */
+const ANIME_FILTERS = [
+  ['all', 'الكل'],
+  ['recs', 'ترشيحات ولحظات'],
+];
 const FILTERS = [
   ['all', 'الكل'],
   ['frames', 'فريمات'],
@@ -394,8 +399,13 @@ export function createMajlis(ctx) {
 
   // ── يقرأون الآن ──
 
+  // مجلسان: قسم الأنمي يرى الأنمي وحده، والمانجا ترى المانجا وحدها — نفس الأصدقاء
+  const animeSide = () => ctx.section?.() === 'anime';
+  const onThisSide = (ref) => isAnime(ref) === animeSide();
+  const filters = () => (animeSide() ? ANIME_FILTERS : FILTERS);
+
   function readingNow() {
-    return presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me());
+    return presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me() && watching(p) === animeSide());
   }
   function readingCard(p) {
     const work = workOf(p.seriesRef, p.seriesTitle);
@@ -421,13 +431,16 @@ export function createMajlis(ctx) {
 
   function events() {
     const out = [];
-    for (const f of sync.rows('frames', () => true)) {
-      out.push({ kind: 'frame', at: f.created_at, actor: f.from_id, row: f });
+    // الفريمات صفحات مانجا: مكانها مجلس المانجا
+    if (!animeSide()) {
+      for (const f of sync.rows('frames', () => true)) {
+        out.push({ kind: 'frame', at: f.created_at, actor: f.from_id, row: f });
+      }
     }
-    for (const r of sync.rows('recommendations', () => true)) {
+    for (const r of sync.rows('recommendations', (x) => onThisSide(x.series_ref))) {
       out.push({ kind: 'rec', at: r.created_at, actor: r.from_id, row: r });
     }
-    for (const a of sync.rows('activity', (x) => x.verb in VERB_COPY)) {
+    for (const a of sync.rows('activity', (x) => x.verb in VERB_COPY && onThisSide(x.series_ref))) {
       out.push({ kind: 'act', at: a.created_at, actor: a.actor_id, row: a });
     }
     return out
@@ -636,7 +649,7 @@ export function createMajlis(ctx) {
     if (now.length) {
       const sec = el('section', 'mj-section');
       const h = el('h2', 'mj-title');
-      h.append(el('span', 'mj-live mj-live--inline'), document.createTextNode('يقرأون الآن'));
+      h.append(el('span', 'mj-live mj-live--inline'), document.createTextNode(animeSide() ? 'يشاهدون الآن' : 'يقرأون الآن'));
       sec.append(h);
       const row = el('div', 'mj-now-row');
       row.append(...now.map(readingCard));
@@ -649,7 +662,8 @@ export function createMajlis(ctx) {
     head.append(el('h2', 'mj-title', 'آخر ما صار'));
     const chips = el('div', 'segmented mj-filters');
     chips.setAttribute('role', 'tablist');
-    for (const [k, label] of FILTERS) {
+    if (!filters().some(([k]) => k === filter)) filter = 'all';
+    for (const [k, label] of filters()) {
       const c = el('button', `library-tab${k === filter ? ' active' : ''}`, label);
       c.type = 'button';
       c.setAttribute('role', 'tab');
@@ -668,11 +682,12 @@ export function createMajlis(ctx) {
       const empty = el('div', 'empty mj-empty');
       const inner = el('div');
       inner.innerHTML = `<div class="empty-art">${glyph('users')}</div>`;
-      inner.append(el('h3', null, filter === 'all' ? 'المجلس هادي' : 'ما فيه شي هنا بعد'));
-      inner.append(el('p', null, 'رشّح عملًا لأصدقائك، أو أرسل فريمًا من القارئ بزرّ الكاميرا.'));
+      const anime = animeSide();
+      inner.append(el('h3', null, filter === 'all' ? (anime ? 'مجلس الأنمي هادي' : 'المجلس هادي') : 'ما فيه شي هنا بعد'));
+      inner.append(el('p', null, anime ? 'رشّح أنمي لأصدقائك، أو شارك لحظة من المشغّل بزرّ الكاميرا.' : 'رشّح عملًا لأصدقائك، أو أرسل فريمًا من القارئ بزرّ الكاميرا.'));
       const cta = el('button', 'btn btn-secondary');
       cta.type = 'button';
-      cta.innerHTML = `${glyph('compass')}<span>اكتشف عملًا ترشّحه</span>`;
+      cta.innerHTML = `${glyph('compass')}<span>${anime ? 'اكتشف أنمي ترشّحه' : 'اكتشف عملًا ترشّحه'}</span>`;
       cta.onclick = ctx.openShare;
       inner.append(cta);
       empty.append(inner);
@@ -716,7 +731,7 @@ export function createMajlis(ctx) {
   return {
     /** `only`: يُفتح على مصفاة بعينها (التوصيات من القائمة تفتح «ترشيحات»). */
     show(only) {
-      if (only && FILTERS.some(([k]) => k === only)) filter = only;
+      if (only && filters().some(([k]) => k === only)) filter = only;
       render();
       void refreshPresence();
       clearInterval(timer);

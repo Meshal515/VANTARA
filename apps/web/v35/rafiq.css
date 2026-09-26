@@ -1,0 +1,402 @@
+/*
+ * «رفيق» — محادثة التوصيات.
+ *
+ * نظيفة وهادئة: رد رفيق بلا فقاعة ثقيلة (نص على الخلفية)، رسالتك فقاعة بنفسجية
+ * خفيفة، والبطاقات أفقية تحت الرد: غلاف، عنوان، حقائق من الكتالوج، ثم السبب.
+ * خانة الكتابة ملتصقة بالأسفل فوق حافة الجوال.
+ */
+
+.v35 #rafiq .rf {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--top-h) - var(--safe-top));
+}
+.v35 .rf-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px var(--gutter) 16px;
+}
+.v35 .rf-loading,
+.v35 .rf-warn {
+  color: var(--text-3);
+  font-size: var(--fs-body);
+  text-align: center;
+  padding: 40px 0;
+}
+.v35 .rf-warn {
+  color: var(--warning);
+  padding: 8px 0 0;
+}
+
+/* ── الترحيب ── */
+.v35 .rf-welcome {
+  margin: 12vh auto 0;
+  max-width: 340px;
+  text-align: center;
+}
+.v35 .rf-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.v35 .rf-mark .icon {
+  width: 28px;
+  height: 28px;
+}
+.v35 .rf-welcome h2 {
+  font-size: var(--fs-title);
+  margin: 0 0 8px;
+}
+.v35 .rf-welcome p {
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ── الرسائل ── */
+.v35 .rf-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.v35 .rf-msg--user {
+  align-items: flex-start; /* RTL: البداية يمين */
+}
+.v35 .rf-bubble {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-body-lg);
+  line-height: 1.75;
+  color: var(--text-1);
+}
+.v35 .rf-msg--user .rf-bubble {
+  max-width: 85%;
+  padding: 9px 14px;
+  border-radius: 18px 18px 18px 6px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.v35 .rf-msg--assistant .rf-bubble {
+  padding: 2px 2px;
+}
+.v35 .rf-bubble--typing {
+  padding: 6px 2px;
+}
+.v35 .rf-dots {
+  display: inline-flex;
+  gap: 5px;
+}
+.v35 .rf-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: rf-dot 1.1s infinite ease-in-out;
+}
+.v35 .rf-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.v35 .rf-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes rf-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .rf-dots i { animation: none; opacity: 0.6; }
+}
+
+/* ── البطاقات ── */
+.v35 .rf-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.v35 .rf-card {
+  --rf-tint: var(--accent);
+  position: relative;
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  grid-template-areas: 'cover info' 'actions actions';
+  gap: 10px 12px;
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: opacity 0.2s var(--ease);
+}
+.v35 .rf-card--explore {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.v35 .rf-card--dismissed {
+  opacity: 0.4;
+}
+.v35 .rf-nope {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-4);
+}
+.v35 .rf-nope .icon {
+  width: 16px;
+  height: 16px;
+}
+.v35 .rf-nope:disabled {
+  visibility: hidden;
+}
+.v35 .rf-cover {
+  grid-area: cover;
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--rf-tint) 22%, var(--surface-2));
+}
+.v35 .rf-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.v35 .rf-kind {
+  position: absolute;
+  inset-inline-start: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+}
+.v35 .rf-info {
+  grid-area: info;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.v35 .rf-info h3 {
+  margin: 0;
+  padding-inline-end: 22px;
+  font-size: var(--fs-title-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.v35 .rf-explore {
+  align-self: flex-start;
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 .rf-facts,
+.v35 .rf-genres,
+.v35 .rf-progress {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .rf-progress {
+  color: var(--success);
+}
+.v35 .rf-reason {
+  margin: 4px 0 0;
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  color: var(--text-2);
+}
+.v35 .rf-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.v35 .rf-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: var(--fs-meta);
+  font-weight: 650;
+  color: var(--text-1);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .rf-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+.v35 .rf-btn--primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+}
+.v35 .rf-btn:disabled {
+  opacity: 0.55;
+}
+.v35 .rf-btn.is-busy {
+  opacity: 0.7;
+}
+
+/* ── الفشل ── */
+.v35 .rf-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+}
+
+/* ── الاقتراحات السريعة والكتابة: شريط واحد ملتصق بالأسفل ── */
+.v35 .rf-dock {
+  position: sticky;
+  bottom: 0;
+  padding-top: 18px;
+  background: linear-gradient(to top, var(--bg) 78%, transparent);
+}
+.v35 .rf-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 var(--gutter) 8px;
+  scrollbar-width: none;
+}
+.v35 .rf-chips::-webkit-scrollbar {
+  display: none;
+}
+.v35 .rf-chip {
+  flex: none;
+  border: 0;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  white-space: nowrap;
+}
+.v35 .rf-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 2px var(--gutter) calc(10px + var(--safe-bottom));
+}
+.v35 .rf-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 140px;
+  resize: none;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-body-lg);
+  line-height: 1.45;
+}
+.v35 .rf-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.v35 .rf-send {
+  flex: none;
+  border: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+.v35 .rf-send:disabled {
+  background: var(--surface-3);
+  color: var(--text-4);
+}
+.v35 .rf-send .icon {
+  width: 20px;
+  height: 20px;
+  transform: scaleX(-1); /* السهم للأمام في RTL */
+}
+
+/* ── الأوراق: التفاصيل والذاكرة ── */
+.v35 .rf-sheet h3 {
+  margin: 0 0 4px;
+}
+.v35 .rf-sheet-art {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: var(--r-md);
+  margin-bottom: 12px;
+}
+.v35 .rf-alt {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  margin: 0 0 10px;
+}
+.v35 .rf-synopsis {
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+}
+.v35 .rf-sheet .btn {
+  width: 100%;
+  margin-top: 12px;
+}
+.v35 .rf-memory h4 {
+  margin: 16px 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+.v35 .rf-mem-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.v35 .rf-mem-line strong {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .rf-mem-pref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.v35 .rf-mem-pref small {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+}

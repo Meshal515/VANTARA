@@ -53,6 +53,7 @@ import {
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
+import { handleRafiqFeedback, handleRafiqMessage, handleRafiqNew, handleRafiqPrefs, handleRafiqState, type RafiqEnv } from './rafiq.ts';
 import { bearerFrom, verifyToken } from './session.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -2428,7 +2429,7 @@ async function handleMediaGet(env: Env, hash: string): Promise<Response> {
 // ───────────────────────────── التوجيه ─────────────────────────────
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
@@ -2499,6 +2500,15 @@ export default {
       else if (path === '/v1/translate/glossary' && request.method === 'GET') {
         response = await handleTranslateGlossary(url, env as TranslationEnv);
       }
+      // «رفيق»: الرسالة بث SSE يخرج كما هو (لا يُلفّ بترويسة JSON)
+      else if (path === '/v1/rafiq/message' && request.method === 'POST') {
+        const res = await handleRafiqMessage(request, env as RafiqEnv, userId, now, fetch, (p) => ctx?.waitUntil?.(p));
+        return new Response(res.body, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'application/json; charset=utf-8', 'cache-control': 'no-cache', ...cors } });
+      }
+      else if (path === '/v1/rafiq/state' && request.method === 'GET') response = await handleRafiqState(url, env as RafiqEnv, userId, now);
+      else if (path === '/v1/rafiq/feedback' && request.method === 'POST') response = await handleRafiqFeedback(request, env as RafiqEnv, userId, now);
+      else if (path === '/v1/rafiq/prefs' && (request.method === 'GET' || request.method === 'DELETE')) response = await handleRafiqPrefs(request, url, env as RafiqEnv, userId);
+      else if (path === '/v1/rafiq/new' && request.method === 'POST') response = await handleRafiqNew(env as RafiqEnv, userId, now);
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
       }

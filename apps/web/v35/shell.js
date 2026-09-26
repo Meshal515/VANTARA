@@ -34,7 +34,8 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
-import { createAnime } from './anime.js';
+import { createAnime, readWatch } from './anime.js';
+import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
@@ -2857,8 +2858,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const unread = unreadNotifications();
     const here = currentPage();
+    // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
+    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     q('drawerContent').replaceChildren(
-      ...drawerGroups.map(([label, items]) => {
+      ...groups.map(([label, items]) => {
         const g = el('div', 'drawer-group');
         if (label) g.append(el('div', 'drawer-label', label));
         for (const [text, key, ic] of items) {
@@ -2894,6 +2897,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
+    if (key === 'rafiq') return showPage('rafiq');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
     if (key === 'majlisFeed') return openSocial('majlis');
@@ -2951,6 +2955,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (inAnime) anime.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
+    if (id === 'rafiq') void rafiq.show();
     if (id === 'settings') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
@@ -3825,6 +3830,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (e.target === q('drawerBackdrop')) closeDrawer();
     },
     drawerNavigate: (_e, t) => drawerNavigate(t.dataset.arg),
+    rafiqMemory: () => void rafiq.memory(),
+    rafiqNew: () => void rafiq.fresh(),
     sheetBackdrop: (e) => {
       if (e.target === q('sheet')) closeSheet();
     },
@@ -3914,6 +3921,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const majlis = createMajlis({
     sync,
     host: q('majlisBody'),
+    // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
+    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4012,6 +4021,50 @@ export function mountV35(deps, { page = 'home' } = {}) {
         work,
       }),
   });
+  // «رفيق»: مساعد التوصيات. البطاقة تفتح العمل الحقيقي: الأنمي بمعرّفه، والمانجا
+  // بعنوانها في مصادرنا العربية (وإلا صفحة البحث بالعنوان)
+  const rafiq = createRafiq({
+    sync,
+    host: q('rafiqBody'),
+    el,
+    toast,
+    openSheet,
+    closeSheet,
+    genreAr,
+    readWatch,
+    openAnime: (card) => openAnimeRef(card.workId, { title: card.title, cover: card.cover }),
+    openManga: async (card) => {
+      if (card.ref?.startsWith('ext:')) {
+        void openWork(workFromRef(card.ref, card.title, card.cover));
+        return card.ref;
+      }
+      if (root.dataset.section !== 'manga') {
+        writeSection('manga');
+        applySection('manga');
+        q('mangaHome').hidden = false;
+        q('animeHome').hidden = true;
+      }
+      const titles = [card.title, ...(card.titles ?? [])].filter(Boolean);
+      for (const t of [...new Set(titles)].slice(0, 3)) {
+        try {
+          const { items } = await browse({ query: t, keepWestern: true });
+          const found = items.find((w) => titles.some((x) => titlesMatch(titleOf(w), x)));
+          if (found) {
+            void openWork(found);
+            return String(found.id);
+          }
+        } catch {
+          // المصدر ما ردّ: نجرب العنوان التالي، ثم البحث
+        }
+      }
+      toast('ما لقيته باسمه بالضبط في مصادرنا، هذي نتائج البحث 👀');
+      showPage('search');
+      searchFor(card.title);
+      return null;
+    },
+  });
+  setTimeout(() => void rafiq.check(), 2500);
+
   const startSection = readSection();
   applySection(startSection);
   q('mangaHome').hidden = startSection !== 'manga';
