@@ -36,6 +36,7 @@ import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { createAnime } from './anime.js';
 import { momentStart } from '../lib/anime-engine.js';
+import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
 
 const AR_GENRE = {
@@ -404,6 +405,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * ويرجع. الآن يوضع المعروف في نفس اللحظة، والذاكرة تعطيه بلا انتظار.
    */
   const shownCovers = new Map();
+  const animePosters = new Map();
+  /** ملصق أنمي بمعرّف AniList، مرة لكل أنمي في الجلسة. */
+  function animePoster(id) {
+    if (!animePosters.has(id)) {
+      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.posterSmall ?? m?.poster ?? null).catch(() => null));
+    }
+    return animePosters.get(id);
+  }
+
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
@@ -450,6 +460,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ...[knownCover(id), serverCover].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? work?._work?.editions?.[0]?.sourceId ?? null })),
       ...coverCandidates(work),
     ].filter((c) => !seen.has(c.url) && seen.add(c.url));
+    // أنمي من المجلس أو الحضور بلا غلاف محفوظ: ملصقه من AniList
+    if (!candidates.length && id.startsWith('anime:')) {
+      const poster = await animePoster(id.slice('anime:'.length));
+      if (container.dataset.imageToken !== token) return null;
+      if (poster) candidates.push({ url: poster, sourceId: null });
+    }
     // المحفوظ أولًا وبلا هيكل لامع: الغلاف الذي رأيته أمس يظهر كما هو
     for (const { url } of candidates) {
       const local = cachedCover(url);

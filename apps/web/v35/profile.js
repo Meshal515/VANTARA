@@ -120,9 +120,11 @@ export function createProfile(ctx) {
     return withIdentity(merged, usernameOf(userId));
   };
   const workOf = (ref, title) => {
+    // مرجع الأنمي (`anime:<id>`) لا يُطابَق بالعنوان: «Steins;Gate» الأنمي ليس المانجا بنفس الاسم
+    const anime = typeof ref === 'string' && ref.startsWith('anime:');
     const row =
       sync.rows('works', (w) => w.series_ref === ref)[0] ??
-      (title ? sync.rows('works', (w) => String(w.title).toLowerCase() === String(title).toLowerCase())[0] : null);
+      (title && !anime ? sync.rows('works', (w) => String(w.title).toLowerCase() === String(title).toLowerCase())[0] : null);
     return ctx.workFromRef(row?.series_ref ?? ref, row?.title ?? title, row?.cover_url);
   };
   const titleOf = (w) => (w ? displayTitle(w.id, w.title?.english, typeof w.title === 'string' ? w.title : null) : '');
@@ -263,7 +265,9 @@ export function createProfile(ctx) {
     void ctx.mountImage(cover, work);
     const copy = el('span', 'pf-now-copy');
     const label = el('span', 'pf-now-label');
-    label.append(el('i', 'pf-pulse'), document.createTextNode(own ? 'تقرأ الآن' : 'يقرأ الآن'));
+    const watching = p.screen === 'ANIME' || String(p.seriesRef ?? '').startsWith('anime:');
+    if (watching) card.dataset.tone = 'anime';
+    label.append(el('i', 'pf-pulse'), document.createTextNode(watching ? (own ? 'تشاهد الآن' : 'يشاهد الآن') : own ? 'تقرأ الآن' : 'يقرأ الآن'));
     copy.append(label, el('bdi', 'pf-now-title', p.seriesTitle));
     if (p.chapterLabel) copy.append(el('span', 'pf-now-chapter', p.chapterLabel));
     card.append(cover, copy);

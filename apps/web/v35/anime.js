@@ -920,9 +920,17 @@ export function createAnime(deps) {
       };
       const filtered = () => filter.q !== 'all' || filter.v !== null;
 
+      // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
+      const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some((r) => r.state === 'READY');
       const paintBest = () => {
         const pool = filtered() ? shownGroups().flatMap(([, rs]) => rs) : sheet.routes;
         const ready = pool.some((r) => r.state === 'READY');
+        if (exhausted()) {
+          bestBtn.disabled = false;
+          bestBtn.classList.remove('waiting');
+          bestBtn.innerHTML = `${glyph('refresh', { size: 20 })}<span>أعد المحاولة</span>`;
+          return;
+        }
         bestBtn.disabled = sheet.busy || (!ready && (sheet.done || filtered()));
         const label = sheet.busy ? 'نجهّز أفضل سيرفر…' : filter.q !== 'all' ? `شغّل أفضل ${filter.q}` : 'شغّل الأفضل';
         bestBtn.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${label}</span>`;
@@ -1021,6 +1029,11 @@ export function createAnime(deps) {
       };
 
       bestBtn.onclick = async () => {
+        if (exhausted()) {
+          deps.closeSheet();
+          playEpisode(m, n, { position });
+          return;
+        }
         if (sheet.busy || !sheet.session) return;
         // فلتر مختار (جودة/لغة): الأفضل داخله — السيرفر المفضّل أولًا ثم الأول الجاهز
         if (filtered()) {

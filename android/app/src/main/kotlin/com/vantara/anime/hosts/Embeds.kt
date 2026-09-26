@@ -11,6 +11,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import org.jsoup.Jsoup
 
@@ -57,6 +59,8 @@ class EmbedResolver(
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
             (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> megamax(url, referer)
+            host.endsWith("videa.hu") -> videa(url, referer).ifEmpty { sniff(url, referer) }
+            host.contains("yonaplay") && depth == 0 -> yonaplay(url, referer)
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
                 runCatching { fetch(url, referer) }.getOrNull()?.let { Vk.parse(it.body, headersFor(it.url)) }.orEmpty()
                     .ifEmpty { sniff(url, referer) }
@@ -76,6 +80,56 @@ class EmbedResolver(
         // تحدٍّ (403) أو مشغّل يبني الرابط بسكربت: المتصفح المخفي آخر حل
         return sniff(url, referer)
     }
+
+    private suspend fun videa(url: String, referer: String?): List<Stream> {
+        val page = fetch(url, referer)
+        val token = Videa.token(page.body) ?: return emptyList()
+        val seed = (1..8).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
+        val q = page.url.toHttpUrlOrNull()?.queryParameter("v") ?: url.toHttpUrlOrNull()?.queryParameter("v") ?: return emptyList()
+        val xmlUrl = "https://videa.hu/player/xml?v=$q&_s=$seed&_t=${token.take(16)}"
+        val headers = Headers.Builder().add("Referer", page.url).apply { userAgent()?.let { add("User-Agent", it) } }.build()
+        val xml = client.newCall(GET(xmlUrl, headers)).await().use { r ->
+            val body = r.body.string()
+            if (body.trimStart().startsWith("<?xml")) body
+            else {
+                val xs = r.header("x-videa-xs") ?: return emptyList()
+                String(Videa.rc4(java.util.Base64.getMimeDecoder().decode(body.trim()), token.substring(16) + seed + xs), Charsets.UTF_8)
+            }
+        }
+        return Videa.toStreams(Videa.sources(xml), page.url, userAgent())
+    }
+
+    /** yonaplay يغلّف سيرفرات أخرى: نفك قائمته ونحل كل سيرفر فيها (عدا Mega). */
+    private suspend fun yonaplay(url: String, referer: String?): List<Stream> {
+        val page = fetch(url, referer)
+        val origin = page.url.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}" } ?: return emptyList()
+        suspend fun post(path: String, body: String): String {
+            val req = okhttp3.Request.Builder().url("$origin/api/$path")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "application/json")
+                .header("Referer", page.url)
+                .header("Origin", origin)
+                .apply { userAgent()?.let { header("User-Agent", it) } }
+                .build()
+            return client.newCall(req).await().use { it.body.string() }
+        }
+        val session = Yonaplay.session(post("init-session.php", "{}")) ?: return emptyList()
+        val servers = Yonaplay.servers(post("sources.php", """{"code":${quote(session.code)}}"""))
+        val out = mutableListOf<Stream>()
+        for (s in servers) {
+            if (s.name.contains("mega", ignoreCase = true)) continue
+            val body = """{"code":${quote(session.code)},"token":${quote(s.token)},"key":${quote(session.key)}}"""
+            val target = Yonaplay.payload(post("api.php", body))?.let { Yonaplay.decrypt(it, session.key) } ?: continue
+            if (target.contains("mega.nz")) continue
+            val got = runCatching { resolve(target, page.url, depth = 1) }.getOrDefault(emptyList())
+            out += got.map { it.copy(quality = it.quality ?: s.quality, label = "yonaplay/${s.name.lowercase()}") }
+            if (out.size >= 2) break
+        }
+        return out
+    }
+
+    private fun quote(s: String) = kotlinx.serialization.json.JsonPrimitive(s).toString()
 
     private suspend fun sniff(url: String, referer: String?): List<Stream> =
         sniffer?.sniff(url, referer)?.let(::listOf).orEmpty()
