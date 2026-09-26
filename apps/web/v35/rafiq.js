@@ -508,7 +508,8 @@ export function createRafiq(deps) {
       }
       if (!need || final || failure) break;
       status('يدوّر لك في الأعمال…');
-      const anilist = await fetchCatalog(need.requests ?? []);
+      // ردود الجولات السابقة تبقى معها: الخادم ما يعيد طلب شي جابه الجهاز
+      const anilist = [...(extra.anilist ?? []), ...(await fetchCatalog(need.requests ?? []))].slice(-40);
       status('يختار لك…');
       extra = { anilist, intent: need.intent, round: need.round };
     }
