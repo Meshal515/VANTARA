@@ -174,3 +174,16 @@ describe('no western comics or cartoons, only manga, manhwa and manhua', () => {
     expect(isWestern({ key: 'k2', editions: [ed('High class', 'أكشن'), ed('High Class', 'Manhwa')] })).toBe(false);
   });
 });
+
+describe('chapterSpan', () => {
+  it('splits Arabic sources from English fillers', async () => {
+    const { chapterSpan } = await import('./works.js');
+    const ch = (n) => ({ name: `Chapter ${n}`, chapter_number: n, url: `/c/${n}` });
+    const span = chapterSpan([
+      { sourceId: 'ar.one', chapters: [ch(1), ch(22)] },
+      { sourceId: 'en.two@filler', chapters: [ch(1), ch(72)] },
+      { sourceId: 'ar.three', chapters: null },
+    ]);
+    expect(span).toEqual({ ar: 22, en: 72 });
+  });
+});

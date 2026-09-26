@@ -14,9 +14,9 @@ import { glyph } from './icons.js';
 
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', NOT_YET_RELEASED: 'لم يبدأ', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
 const ERRORS = {
-  rafiq_locked: 'سينباي لسا تحت التجربة ومفتوح لحساب واحد بس 🔒',
-  rafiq_not_configured: 'سينباي مو مربوط بمفتاحه في الخادم للحين.',
-  budget: 'خلص سقف سينباي لهالشهر 💸 يرجع أول الشهر الجاي.',
+  rafiq_locked: 'رفيق لسا تحت التجربة ومفتوح لحساب واحد بس 🔒',
+  rafiq_not_configured: 'رفيق مو مربوط بمفتاحه في الخادم للحين.',
+  budget: 'خلص سقف رفيق لهالشهر 💸 يرجع أول الشهر الجاي.',
   upstream: 'DeepSeek ما رد علينا 😵 جرّب مرة ثانية.',
   bad_output: 'الرد جاء خربان، جرّب مرة ثانية.',
   offline: 'ما فيه نت؟ تأكد من الاتصال وجرّب.',
@@ -120,8 +120,8 @@ export function createRafiq(deps) {
     input = el('textarea', 'rf-input');
     input.rows = 1;
     input.maxLength = 800;
-    input.placeholder = 'قول لسينباي وش مزاجك اليوم…';
-    input.setAttribute('aria-label', 'رسالتك لسينباي');
+    input.placeholder = 'قول لرفيق وش مزاجك اليوم…';
+    input.setAttribute('aria-label', 'رسالتك لرفيق');
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
@@ -165,7 +165,7 @@ export function createRafiq(deps) {
   function welcome() {
     const box = el('div', 'rf-welcome');
     box.insertAdjacentHTML('beforeend', `<div class="rf-mark">${glyph('spark')}</div>`);
-    box.append(el('h2', null, 'هلا! أنا سينباي 👋'));
+    box.append(el('h2', null, 'هلا! أنا رفيق 👋'));
     box.append(el('p', null, 'أعرف وش قريت ووش شاهدت، وأطلع لك الشي اللي فعلًا يناسبك — مو أي شي مشهور وخلاص. قول لي مزاجك 🔥'));
     if (!state.configured) box.append(el('p', 'rf-warn', ERRORS.rafiq_not_configured));
     return box;
@@ -229,6 +229,12 @@ export function createRafiq(deps) {
     if (facts.length) info.append(el('div', 'rf-facts', facts.join(' · ')));
     if (card.genres?.length) info.append(el('div', 'rf-genres', card.genres.slice(0, 3).map(deps.genreAr).join('، ')));
     if (card.progress) info.append(el('div', 'rf-progress', card.progress));
+    const spanLine = el('div', 'rf-span');
+    info.append(spanLine);
+    if (card.summary) {
+      const sum = el('p', 'rf-summary', card.summary);
+      info.append(sum);
+    }
     if (card.reason) info.append(el('p', 'rf-reason', card.reason));
 
     const actions = el('div', 'rf-actions');
@@ -252,6 +258,43 @@ export function createRafiq(deps) {
       toast('تمام، ما راح أرجعه لك 🫡');
     };
     actions.append(primary, more, similar);
+
+    // العربي والإنجليزي: وين وصل كل واحد، وترجمة الفرق مقدمًا بنظامنا
+    const ahead = button('', 'rf-btn rf-btn--ahead', 'translate');
+    ahead.hidden = true;
+    const paintSpan = (span, range) => {
+      spanLine.replaceChildren();
+      if (!span) return;
+      spanLine.append(el('span', null, `عربي حتى ${span.ar || '—'}`), el('span', null, `إنجليزي حتى ${span.en || '—'}`));
+      const gap = span.en > span.ar;
+      const r = range ?? (gap ? { from: Math.floor(span.ar) + 1, to: Math.floor(span.en) } : null);
+      if (r && deps.translationOpen?.()) {
+        ahead.hidden = false;
+        ahead.querySelector('span').textContent = `ترجم ${r.from}–${r.to} مسبقًا`;
+        ahead.onclick = () => {
+          void feedback(card, 'opened', card.ref ?? null);
+          void deps.translateAhead(card, r);
+        };
+      }
+    };
+    paintSpan(card.span, card.translate);
+    if (card.kind === 'manga' && !card.span && deps.checkChapters) {
+      const check = button('كم وصل عربي وإنجليزي؟', 'rf-btn', 'layers');
+      check.onclick = async () => {
+        check.disabled = true;
+        check.querySelector('span').textContent = 'أشيّك المصادر…';
+        const got = await deps.checkChapters(card).catch(() => null);
+        if (!got) {
+          check.querySelector('span').textContent = 'ما لقيته في مصادرنا';
+          return;
+        }
+        card.ref = card.ref ?? got.ref;
+        check.remove();
+        paintSpan({ ar: got.ar, en: got.en }, null);
+      };
+      actions.append(check);
+    }
+    actions.append(ahead);
     box.append(nope, media, info, actions);
     return box;
   }
@@ -343,12 +386,19 @@ export function createRafiq(deps) {
     let written = '';
     let final = null;
     let failure = null;
+    // وين وصل العربي والإنجليزي في أعمالك (محفوظ على الجهاز): رفيق يعرف الفرق
+    let gaps = [];
+    try {
+      gaps = (await deps.gaps?.()) ?? [];
+    } catch {
+      // بدونها يكمل
+    }
     const res = await sync.stream('/v1/rafiq/message', {
       conversationId: state.conversationId,
       clientId,
       text: text || undefined,
       action: action ?? undefined,
-      local: { anime: localSignals(deps.readWatch?.()) },
+      local: { anime: localSignals(deps.readWatch?.()), gaps },
     });
     if (res.status !== 200) failure = res.error;
     else {
@@ -400,7 +450,7 @@ export function createRafiq(deps) {
   async function memory() {
     deps.openSheet((body) => {
       body.classList.add('rf-sheet');
-      body.append(el('h3', null, 'ذاكرة سينباي 🧠'));
+      body.append(el('h3', null, 'ذاكرة رفيق 🧠'));
       body.append(el('p', 'rf-alt', 'اللي يعرفه عن ذوقك. أي شي غلط احذفه.'));
       const box = el('div', 'rf-memory');
       box.append(el('p', 'rf-alt', 'لحظة…'));

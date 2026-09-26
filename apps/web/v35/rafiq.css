@@ -214,6 +214,33 @@
 .v35 .rf-progress {
   color: var(--success);
 }
+.v35 .rf-span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.v35 .rf-span:empty {
+  display: none;
+}
+.v35 .rf-span span {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-caption);
+  font-weight: 650;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.v35 .rf-summary {
+  margin: 4px 0 0;
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  color: var(--text-1);
+}
+.v35 .rf-btn.rf-btn--ahead {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
 .v35 .rf-reason {
   margin: 4px 0 0;
   font-size: var(--fs-body);

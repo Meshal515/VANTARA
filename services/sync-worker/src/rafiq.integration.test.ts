@@ -226,6 +226,29 @@ describe('rafiq', () => {
     expect(payload.candidates.map((c) => c.id)).not.toContain('manga:102');
   });
 
+  it('knows where Arabic stops and English goes on, and proposes a pre-translation range within the quota', async () => {
+    const env = testEnv({ TRANSLATE_USERS: 'mishal', TRANSLATE_WEEKLY_CHAPTERS: '10' });
+    await seedAccounts(env);
+    const f = fake(
+      { ...INTENT, intent: 'recommend', gap: true },
+      { message: 'العربي واقف عند 22 والإنجليزي واصل 72 🔥', cards: [{ id: 'ext:the breaker', reason: 'كملتها لين العربي خلص', summary: 'فتى ضعيف يتعلم فنون قتالية سرًا', translate: { from: 5, to: 500 } }], chips: [] },
+    );
+    const gaps = [
+      { ref: 'ext:the breaker', title: 'The Breaker', ar: 22, en: 72 },
+      { ref: 'ext:done', title: 'Done Work', ar: 50, en: 50 },
+    ];
+    const evs = await events(await handleRafiqMessage(send({ clientId: 'msg-00000007', text: 'مانهوا عربيها متأخر عن الإنجليزي', local: { anime: [], gaps } }), env, A, NOW, f.fetch));
+    const card = evs.find((e) => e.event === 'final')!.data.message.cards[0];
+    expect(card).toMatchObject({ workId: 'ext:the breaker', ref: 'ext:the breaker', span: { ar: 22, en: 72 }, summary: 'فتى ضعيف يتعلم فنون قتالية سرًا' });
+    // النموذج طلب 5–500: الخادم صحّحه لما بعد العربي، وقصّه على حصة الأسبوع (10 فصول)
+    expect(card.translate).toEqual({ from: 23, to: 32 });
+    const payload = JSON.parse((f.llm.find((b) => b.stream)!.messages as Array<{ content: string }>)[1]!.content) as { candidates: Array<{ id: string; arabic_until: number; english_until: number }> };
+    // عمل واحد بفجوة معروفة: أوله، وبعده مانجا مرشّحة يشيّك الجهاز فصولها
+    expect(payload.candidates[0]!.id).toBe('ext:the breaker');
+    expect(payload.candidates.some((c) => c.id === 'ext:done')).toBe(false);
+    expect(payload.candidates[0]).toMatchObject({ arabic_until: 22, english_until: 72 });
+  });
+
   it('refuses without a key, before any call', async () => {
     const env = testEnv({ DEEPSEEK_API_KEY: '' });
     await seedAccounts(env);

@@ -16,7 +16,8 @@
  */
 
 import type { D1Database, Env } from './types.ts';
-import { GENRES, type Meta, TAGS, candidates, metaFor, metaKeyForAnime, metaKeyForManga, searchTitle, similarTo } from './rafiq-anilist.ts';
+import { GENRES, type Meta, TAGS, candidates, metaFor, metaKeyForAnime, metaKeyForManga, metaKeyForTitle, searchTitle, similarTo, titleMatches } from './rafiq-anilist.ts';
+import { quotaState, translationAllowed, type TranslationEnv } from './translate.ts';
 import { type ChatMessage, LlmError, type LlmEnv, chatJson, chatStream } from './rafiq-llm.ts';
 import { type LocalAnime, type Preference, type TasteProfile, type UserWork, buildProfile, preferences, progressLabel, userWorks } from './rafiq-profile.ts';
 
@@ -68,6 +69,24 @@ function cleanLocal(raw: unknown): LocalAnime[] {
       if (Number.isFinite(Number(a.at))) out.at = Number(a.at);
       return out;
     });
+}
+
+/** أين وصل العربي وأين وصل الإنجليزي لأعمال يعرف الجهاز فصولها (مكتبتك وآخر ما فتحت). */
+export interface Gap {
+  ref: string;
+  title: string;
+  ar: number;
+  en: number;
+}
+
+function cleanGaps(raw: unknown): Gap[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .slice(0, 150)
+    .map((g) => g as Record<string, unknown>)
+    .filter((g) => typeof g.ref === 'string' && g.ref.startsWith('ext:') && typeof g.title === 'string')
+    .map((g) => ({ ref: String(g.ref).slice(0, 300), title: String(g.title).slice(0, 200), ar: Math.max(0, Number(g.ar) || 0), en: Math.max(0, Number(g.en) || 0) }))
+    .filter((g) => g.en > 0 || g.ar > 0);
 }
 
 async function profileFor(env: RafiqEnv, fetchImpl: Fetch, userId: string, local: LocalAnime[] | null, now: number): Promise<ProfileBundle> {
@@ -151,11 +170,13 @@ export interface Intent {
   reference: string | null;
   exploration: 'low' | 'normal' | 'high';
   mood: string | null;
+  /** يسأل عن أعمال عربيها متأخر عن الإنجليزي (أو يبي يترجم فصولًا مقدمًا). */
+  gap: boolean;
   preference_updates: Array<{ kind: string; key: string; polarity: 1 | -1; note?: string | null }>;
   feedback: Array<{ target: 'last' | string; kind: 'not_for_me' | 'like' | 'seen' | 'less_like' | 'more_like' }>;
 }
 
-export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «سينباي»، مساعد توصيات الأنمي والمانجا في تطبيق VANTARA.
+export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «رفيق»، مساعد توصيات الأنمي والمانجا في تطبيق VANTARA.
 مهمتك: تحويل رسالة المستخدم إلى JSON منظّم فقط. لا تقترح أعمالًا ولا تكتب ردًّا للمستخدم.
 
 الحقول:
@@ -168,6 +189,7 @@ export const INTENT_PROMPT = `أنت وحدة فهم الطلبات داخل «�
 - reference: عنوان العمل المذكور (للتشابه أو السؤال عنه) بعنوانه الإنجليزي أو الروماجي المعروف، حتى لو كتبه المستخدم بالعربي («سولو ليفلنق» → "Solo Leveling")، وإلا null.
 - exploration: high إن طلب شيئًا مختلفًا أو «فاجئني»، low إن طلب شيئًا قريبًا جدًّا من ذوقه، وإلا normal.
 - mood: وصف قصير بالعربي للمزاج الحالي إن ذُكر («هادي قبل النوم»، «يحمّس»)، وإلا null.
+- gap: true إن سأل عن أعمال ترجمتها العربية متأخرة عن الإنجليزية («العربي واقف عند 22 والإنجليزي 72»)، أو طلب يترجم/يجهّز فصولًا مقدمًا، وإلا false.
 - preference_updates: تفضيلات **دائمة** قالها صراحة فقط («لا عاد تقترح أعمال مدرسية» → {kind:"tag", key:"School", polarity:-1}). kind: genre | tag | length | format | pacing | other. الكلام العابر («تعبان اليوم») ليس تفضيلًا دائمًا.
 - feedback: رأيه في اقتراح سابق («ذا سيئ لا تجيب لي زيه» → {target:"last", kind:"less_like"}؛ «شفته» → seen؛ «مو لي» → not_for_me؛ «عجبني» → like). target: "last" أو عنوان العمل.
 
@@ -186,6 +208,7 @@ const INTENT_DEFAULT: Intent = {
   reference: null,
   exploration: 'normal',
   mood: null,
+  gap: false,
   preference_updates: [],
   feedback: [],
 };
@@ -208,6 +231,7 @@ export function cleanIntent(raw: unknown): Intent {
     reference: typeof r.reference === 'string' && r.reference.trim() ? r.reference.trim().slice(0, 200) : null,
     exploration: pickEnum(r.exploration, ['low', 'normal', 'high'] as const, 'normal'),
     mood: typeof r.mood === 'string' && r.mood.trim() ? r.mood.trim().slice(0, 80) : null,
+    gap: r.gap === true,
     preference_updates: Array.isArray(r.preference_updates)
       ? r.preference_updates
           .map((p) => p as Record<string, unknown>)
@@ -241,6 +265,8 @@ export interface Candidate {
   relation: string | null;
   exploration: boolean;
   fit: number;
+  /** وين وصل العربي والإنجليزي (من الجهاز)؛ null = ما نعرف. */
+  span?: Gap | null;
 }
 
 const candidateId = (m: Meta) => (m.type === 'ANIME' ? `anime:${m.anilistId}` : `manga:${m.anilistId}`);
@@ -271,7 +297,7 @@ function affinity(m: Meta, p: TasteProfile, intent: Intent): number {
   return s;
 }
 
-async function gatherCandidates(fetchImpl: Fetch, intent: Intent, bundle: ProfileBundle, lastCards: string[]): Promise<Candidate[]> {
+async function gatherCandidates(db: D1Database, fetchImpl: Fetch, intent: Intent, bundle: ProfileBundle, lastCards: string[], gaps: Gap[], now: number): Promise<Candidate[]> {
   const { profile, works } = bundle;
   const strong = works.filter((w) => w.state === 'strong');
   const knownIds = new Set<number>();
@@ -290,6 +316,21 @@ async function gatherCandidates(fetchImpl: Fetch, intent: Intent, bundle: Profil
     exploration,
     fit: affinity(m, profile, intent),
   });
+
+  // العربي متأخر عن الإنجليزي: أعمالك اللي يعرف الجهاز فصولها، الأكبر فجوة أولًا
+  if (intent.gap) {
+    const behind = gaps.filter((g) => g.en > g.ar).sort((a, b) => b.en - b.ar - (a.en - a.ar)).slice(0, 12);
+    const metas = await metaFor(db, fetchImpl, behind.map((g) => ({ key: metaKeyForTitle(g.title), title: g.title, type: 'MANGA' as const })), now);
+    const own = new Map(works.map((w) => [w.ref, w]));
+    const mine = behind.map((g): Candidate => {
+      const w = own.get(g.ref) ?? null;
+      return { id: g.ref, kind: 'manga', meta: metas.get(metaKeyForTitle(g.title)) ?? null, title: g.title, own: w, relation: w ? progressLabel(w) : null, exploration: false, fit: g.en - g.ar, span: g };
+    });
+    if (mine.length >= 2) return mine;
+    // ما عندنا أعمال كفاية بفجوة معروفة: مانهوا مرشّحة، والجهاز يشيّك فصولها
+    const more = await candidates(fetchImpl, { type: 'MANGA', genresIn: intent.genres_in, genresOut: intent.genres_out, tagsIn: intent.tags_in, tagsOut: intent.tags_out, length: intent.length, status: null, sort: 'POPULARITY_DESC', exclude: [...knownIds] });
+    return [...mine, ...more.slice(0, 16).map((m) => wrap(m))];
+  }
 
   if (intent.intent === 'resume') {
     const mine = works
@@ -353,7 +394,7 @@ async function gatherCandidates(fetchImpl: Fetch, intent: Intent, bundle: Profil
 
 // ───────────────────────── الرد ─────────────────────────
 
-export const ANSWER_PROMPT = `أنت «سينباي» داخل تطبيق VANTARA: صاحب أوتاكو سعودي من جيل Z، متابع أنمي ومانجا ومانهوا من زمان وشايف كل شي تقريبًا، ومتحمّس لأي شي حلو.
+export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: صاحب أوتاكو سعودي من جيل Z، متابع أنمي ومانجا ومانهوا من زمان وشايف كل شي تقريبًا، ومتحمّس لأي شي حلو.
 أسلوبك: عامية سعودية/خليجية شبابية ("والله"، "يا رجل"، "لا يفوتك"، "صدقني"، "بطل"، "مرّه"، "خلاص تبيها؟")، جمل قصيرة، طاقة وحماس حقيقي، إيموجيات بذوق (🔥😭💀✨👀🫡🤝) — اثنين ثلاثة في الرد، مو في كل كلمة. تكلّم كأنك تعرف العمل وعشته، وكأنك تعرف ذوق صاحبك من سجله. لا فصحى رسمية ولا "بالتأكيد!" ولا نبرة موظف خدمة عملاء.
 الحماس ما يعني الكذب: كل معلومة عن عمل (عدد، تقييم، حالة، قصة) من البيانات المرسلة فقط؛ وإذا ما تعرف شي قلها بأسلوبك ("ما عندي رقم أكيد لعدد فصولها صراحة").
 
@@ -366,13 +407,15 @@ export const ANSWER_PROMPT = `أنت «سينباي» داخل تطبيق VANTAR
 6. 2 إلى 4 بطاقات عادةً. بطاقة استكشاف واحدة كحد أقصى (exploration: true) واشرح لماذا تستحق رغم اختلافها.
 7. إن كان الطلب سؤالًا أو شرحًا لا يحتاج اقتراحات: cards فارغة.
 8. إن لم تجد في القائمة ما يناسب فعلًا، قلها بصراحة واقترح تعديل الطلب.
+9. لكل بطاقة summary: نبذة عربية بسطر أو سطرين من synopsis المرسلة فقط، بلا حرق وبنفس أسلوبك.
+10. arabic_until وenglish_until = آخر فصل عربي وآخر فصل إنجليزي في مصادرنا. إن كان الإنجليزي أبعد، قلها بالأرقام («العربي واقف عند 22 والإنجليزي واصل 72») واقترح translate: {"from": أول فصل بعد العربي, "to": آخر إنجليزي} — نظام VANTARA هو اللي يترجم مقدمًا، أنت تحدد النطاق. إن كانت null فلا تخترع أرقامًا ولا translate.
 
 أرجع JSON فقط بهذا الترتيب:
-{"message": "ردك بأسلوبك (سطران إلى أربعة، بلا قوائم طويلة)", "cards": [{"id": "…", "reason": "سبب شخصي بجملة أو جملتين بنفس الأسلوب", "exploration": false}], "chips": ["اقتراحان أو ثلاثة لرسالته التالية، قصيرة وبنفس اللهجة"]}`;
+{"message": "ردك بأسلوبك (سطران إلى أربعة، بلا قوائم طويلة)", "cards": [{"id": "…", "reason": "سبب شخصي بجملة أو جملتين بنفس الأسلوب", "summary": "نبذة عربية قصيرة", "exploration": false, "translate": null}], "chips": ["اقتراحان أو ثلاثة لرسالته التالية، قصيرة وبنفس اللهجة"]}`;
 
 interface AnswerOut {
   message?: string;
-  cards?: Array<{ id?: string; reason?: string; exploration?: boolean }>;
+  cards?: Array<{ id?: string; reason?: string; exploration?: boolean; summary?: string; translate?: { from?: unknown; to?: unknown } | null }>;
   chips?: string[];
 }
 
@@ -395,6 +438,11 @@ export interface Card {
   exploration: boolean;
   progress: string | null;
   ref: string | null;
+  /** نبذة عربية قصيرة بلا حرق (من النموذج، مبنية على النبذة المرسلة). */
+  summary: string | null;
+  span: { ar: number; en: number } | null;
+  /** نطاق يُقترح ترجمته مقدمًا بنظامنا (بعد التحقق والحصة). */
+  translate: { from: number; to: number } | null;
 }
 
 function compactCandidate(c: Candidate) {
@@ -416,10 +464,12 @@ function compactCandidate(c: Candidate) {
     relation: c.relation,
     progress: c.own ? progressLabel(c.own) : null,
     exploration_pool: c.exploration,
+    arabic_until: c.span ? c.span.ar : null,
+    english_until: c.span ? c.span.en : null,
   };
 }
 
-function toCard(c: Candidate, reason: string, exploration: boolean, recId: string): Card {
+function toCard(c: Candidate, reason: string, exploration: boolean, recId: string, summary: string | null = null, translate: { from: number; to: number } | null = null): Card {
   const m = c.meta;
   return {
     recId,
@@ -439,7 +489,10 @@ function toCard(c: Candidate, reason: string, exploration: boolean, recId: strin
     reason: reason.slice(0, 360),
     exploration,
     progress: c.own ? progressLabel(c.own) : null,
-    ref: c.own?.ref ?? null,
+    ref: c.own?.ref ?? (c.id.startsWith('ext:') ? c.id : null),
+    summary: summary ? summary.slice(0, 280) : null,
+    span: c.span ? { ar: c.span.ar, en: c.span.en } : null,
+    translate,
   };
 }
 
@@ -611,7 +664,7 @@ interface MessageBody {
   clientId?: unknown;
   text?: unknown;
   action?: unknown;
-  local?: { anime?: unknown };
+  local?: { anime?: unknown; gaps?: unknown };
 }
 
 /**
@@ -635,6 +688,7 @@ export async function handleRafiqMessage(
   const action = (body?.action ?? null) as { type?: string; workId?: string; title?: string } | null;
   if ((!text && !action) || !clientId) return reply({ error: 'bad_request' }, 400);
   const local = body?.local && Array.isArray(body.local.anime) ? cleanLocal(body.local.anime) : null;
+  const gaps = cleanGaps((body?.local as { gaps?: unknown } | undefined)?.gaps);
 
   const db = env.DB;
   const conv = await conversationOf(db, userId, typeof body?.conversationId === 'string' ? body.conversationId : null, now);
@@ -723,7 +777,12 @@ export async function handleRafiqMessage(
           .prepare('SELECT DISTINCT work_id FROM rafiq_recs WHERE user_id = ? AND shown_at > ?')
           .bind(userId, now - 14 * 86_400_000)
           .all<{ work_id: string }>();
-        pool = await gatherCandidates(fetchImpl, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)]);
+        pool = await gatherCandidates(db, fetchImpl, intent, fresh, [...lastCards.map((c) => c.workId), ...shown.map((r) => r.work_id)], gaps, now);
+        // أي مرشّح مانجا نعرف فصوله على الجهاز: يعرف النموذج وين وصل العربي والإنجليزي
+        for (const c of pool) {
+          if (c.span || c.kind !== 'manga') continue;
+          c.span = gaps.find((g) => g.ref === c.id || titleMatches(g.title, c.meta?.titles ?? [c.title])) ?? null;
+        }
       }
       // المعرّفات المرشّحة تُحفظ مع بياناتها: «ليش؟» و«أقل من هذا» تعرفها لاحقًا
       await cacheMeta(db, pool, now);
@@ -747,6 +806,23 @@ export async function handleRafiqMessage(
         if (add) void send('delta', { text: add });
       });
       const byId = new Map(pool.map((c) => [c.id, c]));
+      // الترجمة المسبقة لمن فُتحت له الترجمة، وبقدر ما بقي من حصة الأسبوع
+      let chaptersLeft = 0;
+      if (pool.some((c) => c.span && c.span.en > c.span.ar) && (await translationAllowed(env as unknown as TranslationEnv, userId))) {
+        const q = await quotaState(env as unknown as TranslationEnv, userId, now);
+        chaptersLeft = Math.max(0, q.chapterLimit - q.chapters);
+      }
+      const rangeOf = (cand: Candidate, asked: { from?: unknown; to?: unknown } | null | undefined): { from: number; to: number } | null => {
+        const sp = cand.span;
+        if (!sp || sp.en <= sp.ar || chaptersLeft <= 0 || !asked) return null;
+        let from = Number(asked.from);
+        let to = Number(asked.to);
+        // النموذج يحدد، والخادم يصحّح: لا قبل العربي ولا بعد الإنجليزي ولا فوق الحصة
+        if (!Number.isFinite(from) || from <= sp.ar || from > sp.en) from = Math.floor(sp.ar) + 1;
+        if (!Number.isFinite(to) || to > sp.en || to < from) to = Math.floor(sp.en);
+        to = Math.min(to, from + chaptersLeft - 1);
+        return to >= from ? { from, to } : null;
+      };
       const seen = new Set<string>();
       const cards: Card[] = [];
       for (const c of out.cards ?? []) {
@@ -756,7 +832,9 @@ export async function handleRafiqMessage(
         // طلبت مانجا = مانجا: لا بطاقة أنمي ولو رشّحها النموذج (والعكس)
         if (intent.format !== 'ANY' && cand.kind !== intent.format.toLowerCase()) continue;
         seen.add(cand.id);
-        cards.push(toCard(cand, typeof c.reason === 'string' ? c.reason : '', Boolean(c.exploration) && cand.exploration, crypto.randomUUID()));
+        cards.push(
+          toCard(cand, typeof c.reason === 'string' ? c.reason : '', Boolean(c.exploration) && cand.exploration, crypto.randomUUID(), typeof c.summary === 'string' && c.summary.trim() ? c.summary.trim() : null, rangeOf(cand, c.translate)),
+        );
       }
       const message = typeof out.message === 'string' && out.message.trim() ? out.message.trim().slice(0, 1600) : 'والله دوّرت وما لقيت شي يستاهل بهالشروط 😭 غيّر الطلب شوي وأبشر.';
       const chips = Array.isArray(out.chips) ? out.chips.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 40)).slice(0, 3) : [];
