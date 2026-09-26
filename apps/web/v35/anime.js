@@ -943,15 +943,36 @@ export function createAnime(deps) {
 
   // تقدّم المشغّل الأصلي ← سجل المشاهدة (الاستئناف و«آخر المشاهدات»). الحلقة
   // من الحدث نفسه: التبديل لحلقة أخرى داخل المشغّل يُسجَّل لها لا للأولى.
+  // وقت المشاهدة لقسم الأنمي في ملفك: تقدّم الموضع الفعلي فقط (قفزة أو توقف لا تُحسب)
+  const watchClock = { pos: null, acc: 0 };
+  const flushWatch = () => {
+    if (watchClock.acc < 1000 || !deps.sync) return;
+    deps.sync.enqueue('usage.watch', { section: 'anime', day: new Date().toISOString().slice(0, 10), activeMs: Math.round(watchClock.acc) });
+    watchClock.acc = 0;
+  };
   engine.on('playback', (p) => {
     const cur = state.playing;
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
+    if (Number.isFinite(p.position)) {
+      const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
+      if (d > 0 && d <= 15_000) watchClock.acc += d;
+      watchClock.pos = p.position;
+      if (watchClock.acc >= 60_000) flushWatch();
+    }
+    if (p.final) {
+      flushWatch();
+      watchClock.pos = null;
+    }
     const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
       recordWatch(cur.m, n, p.position, p.duration);
       account?.recordView(cur.m, n);
       // 90% = شوهدت، في حسابك (مرة واحدة)
-      if (p.position / p.duration >= 0.9 && account && !account.isSeen(cur.m.id, n)) account.markEpisode(cur.m, n, true);
+      if (p.position / p.duration >= 0.9 && account) {
+        if (!account.isSeen(cur.m.id, n)) account.markEpisode(cur.m, n, true);
+        // «أنهى الحلقة N» من المشغّل وحده: تعليم العين يدويًّا لا يعلن شيئًا
+        account.completeEpisode(cur.m, n);
+      }
     }
     if (p.code) rememberCode(cur.m.id, p.code);
     cur.n = n;
@@ -1419,7 +1440,7 @@ export function createAnime(deps) {
     if (!host) return;
     const tabs = el('div', 'an-seg');
     for (const [k, label] of [
-      ['history', 'سجل المشاهدة'],
+      ['history', 'آخر المشاهدات'],
       ['list', signedIn() ? 'أتابعها' : 'قائمتي'],
       ...(signedIn()
         ? [

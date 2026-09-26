@@ -29,6 +29,10 @@ import { cachedPage, readerQuiet, translatePage } from '../lib/translate.js';
 import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
+import { createFriends } from './friends.js';
+import { createRoom } from './majlis-chat.js';
+import { encodeStatic } from './media-encode.js';
+import { endpoints } from '../lib/config.js';
 import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
@@ -2909,12 +2913,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'rafiq') return showPage('rafiq');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
-    if (key === 'majlisFeed') return openSocial('majlis');
+    if (key === 'majlisFeed') return openRoom();
     if (key === 'profile') return openProfile(me());
     // التوصيات والنشاط صارا في المجلس نفسه: لا شاشة قديمة موازية
     if (key === 'recommendations') return openSocial('recs');
     if (key === 'friends') return openSocial('friends');
-    if (key === 'activity') return openSocial('majlis');
+    if (key === 'activity') return openSocial('friends');
   }
   function confirmSwitchAccount() {
     openSheet((body) => {
@@ -2979,7 +2983,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       for (const n of sync.rows('notifications', (x) => x.user_id === me() && !x.read && x.kind === 'REACTION' && String(x.link ?? '').startsWith('vantara://majlis/'))) {
         sync.enqueue('notification.read', { id: n.id });
       }
-    } else majlis.hide();
+    } else {
+      majlis.hide();
+      friends.hide();
+      // صفحة أخرى فُتحت (إشعار، رابط): المحادثة لا تبقى معلّقة فوقها
+      room.close();
+    }
     if (id !== 'profile') profile?.hide();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -2989,16 +2998,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage(id);
   }
   function openMajlis(only) {
-    openSocial(only === 'recs' ? 'recs' : 'majlis');
+    if (only === 'recs') return openSocial('recs');
+    openRoom();
+  }
+  /** المجلس محادثة فوق صفحة الأصدقاء: الرجوع منه يرجعك لبابه. */
+  function openRoom(focus) {
+    if (currentPage() !== 'majlis' || state.socialTab !== 'friends') openSocial('friends');
+    room.open(focus);
   }
 
   // ───────────────────────── الاجتماع ─────────────────────────
-  // أربعة أقسام تحت سقف واحد: الأصدقاء أولًا (من هنا ومن يقرأ ماذا)، ثم
-  // المجلس، ثم الإشعارات، ثم التوصيات.
+  // ثلاثة أقسام تحت سقف واحد: الأصدقاء (ومنهم باب المجلس وآخر ما صار)، ثم
+  // الإشعارات، ثم التوصيات. المجلس نفسه ليس تبويبًا: يُدخل من بابه.
 
   const SOCIAL_TABS = [
     ['friends', 'الأصدقاء'],
-    ['majlis', 'المجلس'],
     ['notifications', 'الإشعارات'],
     ['recs', 'التوصيات'],
   ];
@@ -3027,96 +3041,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     );
     q('friendsBody').hidden = tab !== 'friends';
-    q('majlisBody').hidden = tab !== 'majlis' && tab !== 'recs';
+    q('majlisBody').hidden = tab !== 'recs';
     q('socialNotifs').hidden = tab !== 'notifications';
     if (tab === 'friends') {
       majlis.hide();
-      renderFriends();
-      void refreshFriendsPresence();
+      friends.show();
     } else if (tab === 'notifications') {
       majlis.hide();
+      friends.hide();
       renderNotifications();
     } else {
-      majlis.show(tab === 'recs' ? 'recs' : 'all');
+      friends.hide();
+      majlis.show('recs');
     }
-    if (tab !== 'friends') clearInterval(state.friendsTimer);
   }
 
-  // ── الأصدقاء: وجه، اسم، وما يفعله الآن ──
-  let friendsPresence = [];
-  async function refreshFriendsPresence() {
-    clearInterval(state.friendsTimer);
-    state.friendsTimer = setInterval(() => {
-      if (currentPage() === 'majlis' && state.socialTab === 'friends' && !document.hidden) void refreshFriendsPresence();
-    }, 15_000);
-    try {
-      friendsPresence = (await deps.presence?.()) ?? [];
-    } catch {
-      return;
-    }
-    if (currentPage() === 'majlis' && state.socialTab === 'friends') renderFriends();
-  }
-  function lastSeenLine(at) {
-    if (!at) return 'غير متصل';
-    const minutes = Math.floor((Date.now() - at) / 60_000);
-    if (minutes < 2) return 'كان هنا قبل شوي';
-    return `آخر ظهور ${timeAgo(at)}`;
-  }
-  function renderFriends() {
-    const body = q('friendsBody');
-    const ids = sync
-      .rows('accounts', () => true)
-      .map((a) => a.user_id)
-      .filter((id) => id !== me());
-    if (!ids.length) {
-      emptyState(body, { icon: 'users', title: 'ما فيه أصدقاء بعد', text: 'أصدقاؤك يظهرون هنا أول ما يوصلون.' });
-      return;
-    }
-    const pOf = (id) => friendsPresence.find((p) => p.userId === id) ?? null;
-    const rank = (id) => ({ READING: 0, ONLINE: 1, IDLE: 2 })[pOf(id)?.status] ?? 3;
-    ids.sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b), 'ar'));
-    const list = el('div', 'pal-list');
-    for (const id of ids) {
-      const p = pOf(id);
-      const status = p?.status ?? 'OFFLINE';
-      const row = el('div', `pal-row pal-row--${status.toLowerCase()}`);
-      const face = el('button', 'pal-face');
-      face.type = 'button';
-      face.setAttribute('aria-label', `ملف ${nameOf(id)}`);
-      face.append(avatarNode(personOf(id), 56));
-      if (status !== 'OFFLINE') face.append(el('span', 'pal-dot'));
-      face.onclick = () => openProfile(id);
-      const copy = el('div', 'pal-copy');
-      const name = el('button', 'pal-name', nameOf(id));
-      name.type = 'button';
-      name.onclick = () => openProfile(id);
-      copy.append(name);
-      const line = el('div', 'pal-line');
-      if (status === 'READING' && p?.seriesTitle) {
-        line.append(el('span', null, 'يقرأ الآن: '));
-        const work = workFromRef(p.seriesRef ?? `ext:${p.seriesTitle}`, p.seriesTitle);
-        const title = el('button', 'pal-work');
-        title.type = 'button';
-        title.append(el('bdi', null, titleOf(work)));
-        title.onclick = () => void openWork(work);
-        line.append(title);
-        if (p.chapterLabel) line.append(el('span', 'pal-chapter', ` · ${p.chapterLabel}`));
-      } else if (status === 'ONLINE' || status === 'IDLE') {
-        line.append(el('span', status === 'IDLE' ? 'pal-idle' : 'pal-on', status === 'IDLE' ? 'خامل' : 'متصل الآن'));
-      } else {
-        line.append(el('span', null, lastSeenLine(p?.lastSeenAt)));
-      }
-      copy.append(line);
-      const go = el('button', 'icon-btn pal-go');
-      go.type = 'button';
-      go.setAttribute('aria-label', `ملف ${nameOf(id)}`);
-      go.innerHTML = glyph('chevron');
-      go.onclick = () => openProfile(id);
-      row.append(face, copy, go);
-      list.append(row);
-    }
-    body.replaceChildren(list);
-  }
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
     const prev = state.stack.pop();
@@ -3356,6 +3295,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       requestAnimationFrame(() => input.focus());
     });
   }
+  /** إعداداتك المتزامنة (`settings.data`): الخصوصية ومصفاة «آخر ما صار». */
+  function mySettings() {
+    try {
+      return JSON.parse(sync.row('settings', me())?.data ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  }
+  function setMySettings(fields) {
+    sync.enqueue('settings.patch', { fields });
+  }
+
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -3424,6 +3375,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
+    // الخصوصية: اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    const privacy = mySettings();
+    group(
+      'الخصوصية · ماذا يرى الآخرون عني',
+      [
+        toggle(
+          'eye',
+          'عرض ماذا أشاهد الآن',
+          privacy.shareCurrent === false ? 'يشوفون «يقرأ» أو «يشاهد» بدون العمل، وآخر مشاهداتك توصلهم بعد ساعة' : 'أصدقاؤك يشوفون العمل اللي تقرأه أو تشاهده',
+          privacy.shareCurrent !== false,
+          (on) => {
+            setMySettings({ shareCurrent: on });
+            renderSettings();
+          },
+        ),
+        toggle(
+          'check',
+          'إظهار إنهاء الفصول والحلقات',
+          privacy.shareCompletions === false ? 'ما يوصلهم «خلّص الفصل» ولا «أنهى الحلقة». تقدّمك يبقى محفوظ لك' : '«خلّص الفصل 72» و«أنهى الحلقة 8» تظهر لأصدقائك',
+          privacy.shareCompletions !== false,
+          (on) => {
+            setMySettings({ shareCompletions: on });
+            renderSettings();
+          },
+        ),
+      ],
+      { note: 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
+    );
+    group('الخصوصية · ما أراه أنا', [
+      row('activity', 'نشاط القراءة', '«خلّص الفصل» و«أنهى الحلقة» من أصدقائك في «آخر ما صار». يخصّك أنت، وما يغيّر شي عندهم', {
+        value: privacy.feedReading === 'hide' ? 'إخفاء لدي' : 'إظهار لدي',
+        run: () => {
+          setMySettings({ feedReading: privacy.feedReading === 'hide' ? 'show' : 'hide' });
+          renderSettings();
+        },
+      }),
+    ]);
+
     if (sync.pendingDevices && !pendingAsked) {
       pendingAsked = true;
       sync.pendingDevices().then((n) => {
@@ -3914,22 +3903,95 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderRating();
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
-    majlis.onChange(tables, { visible: currentPage() === 'majlis' && (state.socialTab === 'majlis' || state.socialTab === 'recs') });
+    majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
+    room.onChange(tables);
     profile.onChange(tables);
     if (tables.includes('notifications')) {
       paintNotifyDots();
       if (notificationsVisible()) renderNotifications();
     }
-    if (currentPage() === 'majlis' && state.socialTab === 'friends' && tables.some((t) => ['profiles', 'accounts', 'works'].includes(t))) renderFriends();
+    friends.onChange(tables);
   });
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
     if (editor?.open) return editor.handleBack();
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
-    return majlis.closeBar() || closeSheet() || closeDrawer() || goBack();
+    // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
+    if (majlis.closeBar() || closeSheet() || closeDrawer() || room.close()) return true;
+    return goBack();
   }
 
+  const friendsHost = q('friendsBody');
+  friendsHost.classList.add('fr-host');
+  const friends = createFriends({
+    sync,
+    host: friendsHost,
+    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
+    presence: () => deps.presence?.() ?? Promise.resolve([]),
+    avatarNode,
+    mountImage,
+    workFromRef,
+    preview: (w, opts) => previewWork(w, opts),
+    openFrame: (id) => void deps.go({ name: 'frame', id }),
+    openProfile: (userId) => openProfile(userId),
+    openRoom: (focus) => room.open(focus),
+    markSeen: (kind, id) => majlis.markSeen(kind, id),
+    openSheet,
+    closeSheet,
+    toast,
+    mediaUrl,
+    visible: () => currentPage() === 'majlis' && state.socialTab === 'friends' && !room.isOpen(),
+  });
+  const room = createRoom({
+    sync,
+    mount: root,
+    avatarNode,
+    mountImage,
+    workFromRef,
+    preview: (w, opts) => previewWork(w, opts),
+    openFrame: (id) => void deps.go({ name: 'frame', id }),
+    openProfile: (userId) => openProfile(userId),
+    openSheet,
+    closeSheet,
+    toast,
+    presence: () => deps.presence?.() ?? Promise.resolve([]),
+    mediaUrl,
+    pageImage: available() ? deps.pageImage : null,
+    markSeen: (kind, id) => majlis.markSeen(kind, id),
+    library: roomLibrary,
+    encodeAvatar,
+    onClose: () => friends.render(),
+  });
+  /** رابط ملف في خادم الوسائط (صورة المجلس، الرسائل الصوتية). */
+  function mediaUrl(hash) {
+    return `${endpoints().sync}/v1/media/${hash}`;
+  }
+  /** ما يُرشَّح من المحادثة: مكتبتك في المانجا والأنمي، بمراجعها الحقيقية. */
+  function roomLibrary() {
+    const seen = new Set();
+    const out = [];
+    const add = (w) => {
+      if (!w.ref || seen.has(w.ref)) return;
+      seen.add(w.ref);
+      out.push(w);
+    };
+    for (const w of libraryWorks('all')) add({ ref: String(w.id), title: titleOf(w), cover: w.coverImage?.large ?? null, anime: false });
+    for (const kind of ['library', 'read_later', 'favorite', 'completed']) {
+      for (const m of animeAccount.shelf(kind)) add({ ref: `anime:${m.id}`, title: m.title, cover: m.poster, anime: true });
+    }
+    return out;
+  }
+  /** صورة المجلس: مربع من وسط الصورة، مضغوطة قبل الرفع. */
+  async function encodeAvatar(file) {
+    const bitmap = await createImageBitmap(file);
+    const side = Math.min(bitmap.width, bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 320;
+    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 320, 320);
+    bitmap.close?.();
+    return encodeStatic(canvas, 200_000);
+  }
   const majlis = createMajlis({
     sync,
     host: q('majlisBody'),
@@ -3977,6 +4039,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const profile = createProfile({
     sync,
     host: q('profileBody'),
+    // بطاقة الأرقام تتبع القسم: المانجا فصول، والأنمي حلقات
+    section: () => root.dataset.section,
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,

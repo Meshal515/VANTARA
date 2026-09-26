@@ -77,12 +77,18 @@ const OPS = {
   'work.describe': { class: STATE, key: (p) => `work/${p.seriesRef}` },
   'majlis.receipt': { class: STATE, key: (p) => `receipt/${p.targetKind}/${p.targetId}/${p.seen ? 's' : 'd'}` },
   'notification.seen': { class: STATE, key: (p) => `notification-seen/${p.id}` },
+  'majlis.delete': { class: STATE, key: (p) => `majlis-delete/${p.scope}/${p.target}` },
+  'majlis.read': { class: STATE, key: () => 'majlis-read' },
+  'majlis.meta': { class: STATE, key: (p) => `majlis-meta/${Object.keys(p).sort().join(',')}` },
   'chapter.complete': { class: CUMULATIVE },
   'usage.add': { class: CUMULATIVE },
+  'usage.watch': { class: CUMULATIVE },
   'comment.add': { class: EVENT },
   // دفعة فصول: لا تُضغط مع غيرها (نطاقان مختلفان لا يستبدل أحدهما الآخر)
   'chapter.markMany': { class: EVENT },
   'recommendation.send': { class: EVENT },
+  'episode.complete': { class: EVENT },
+  'majlis.send': { class: EVENT },
   'activity.add': { class: EVENT },
 };
 

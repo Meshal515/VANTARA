@@ -87,8 +87,8 @@
   height: 84px;
   padding: 2.5px;
   border-radius: 99px;
-  background: conic-gradient(from 200deg, var(--pf-tint), var(--pf-tint-deep), var(--pf-tint));
-  box-shadow: 0 0 0 3.5px var(--bg), 0 10px 24px rgba(0, 0, 0, 0.45);
+  background: var(--pf-tint);
+  box-shadow: 0 0 0 3.5px var(--bg);
   transition: background 0.4s var(--ease);
 }
 .v35 .pf-face-img {
@@ -264,12 +264,6 @@
   height: 7px;
   border-radius: 99px;
   background: currentColor;
-  animation: pf-pulse 1.8s ease-in-out infinite;
-}
-@keyframes pf-pulse {
-  50% {
-    opacity: 0.35;
-  }
 }
 .v35 .pf-now-title {
   font-size: var(--fs-body);
@@ -681,8 +675,7 @@
   background: center / cover no-repeat;
 }
 .v35 .pe-banner-img--empty {
-  background: radial-gradient(120% 90% at 80% 0%, rgba(143, 92, 255, 0.28), transparent 60%),
-    radial-gradient(90% 90% at 10% 100%, rgba(95, 212, 154, 0.08), transparent 60%), var(--surface-1);
+  background: var(--surface-1);
 }
 .v35 .pe-banner::after {
   content: '';
@@ -972,4 +965,55 @@
 /* آخر المشاهدات داخل الملف: بنفس هامش بقية أقسامه */
 .v35 .pf-section .rv-list {
   margin: 0 var(--gutter);
+}
+
+/* الأرقام كاملة: قسم تحت قسم، بلا صناديق — عنوان صغير وصفوف بشعرة */
+.v35 .pf-stats-sheet h3 {
+  margin: 0 0 6px;
+}
+.v35 .pf-sblock {
+  padding: 14px 0 6px;
+}
+.v35 .pf-sblock + .pf-sblock {
+  border-top: 1px solid var(--line);
+}
+.v35 .pf-sblock h4 {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  direction: ltr;
+  text-align: right;
+}
+.v35 .pf-srow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+}
+.v35 .pf-srow-label {
+  display: grid;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.v35 .pf-srow-label small {
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+.v35 .pf-srow b {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .pf-snote {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.v35 .pf-name .sx-badge {
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-start: 8px;
 }

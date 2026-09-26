@@ -170,6 +170,47 @@ export const PROJECTIONS = {
   },
   // رسالتك تظهر في المجلس لحظة الإرسال بـ«يُرسَل…»، ثم يحلّ صفّ الخادم محلها
   // بنفس المعرّف (op_id هو معرّف الفريم والترشيح عند الخادم)
+  // رسالتك تظهر فورًا بحالة «يُرسل»؛ الخادم يثبتها بنفس المعرّف (opId) فلا تتكرر
+  'majlis.send': (op, get, userId) => {
+    const p = op.payload ?? {};
+    return [
+      {
+        table: 'majlis_messages',
+        key: op.opId,
+        row: {
+          id: op.opId,
+          sender_id: userId,
+          kind: p.kind,
+          body: p.kind === 'text' ? String(p.body ?? '').trim() : null,
+          reply_to: p.replyTo ?? null,
+          media_key: p.mediaKey ?? null,
+          meta_json: JSON.stringify(p.meta ?? {}),
+          created_at: op.at ?? now(),
+          deleted: 0,
+          _pending: true,
+        },
+      },
+    ];
+  },
+  // الحذف: «لدي» صفٌّ لي، و«للجميع» يفرّغ الشيء عندي فورًا والخادم يقرّر للبقية
+  'majlis.delete': (op, get, userId) => {
+    const p = op.payload ?? {};
+    const [kind, ...rest] = String(p.target ?? '').split(':');
+    const id = rest.join(':');
+    if (p.scope === 'me') return [{ table: 'majlis_hidden', key: `${userId}/${p.target}`, row: { user_id: userId, target: p.target, hidden_at: now() } }];
+    if (kind === 'msg') {
+      const prev = get('majlis_messages', id);
+      return prev ? [{ table: 'majlis_messages', key: id, row: { ...prev, deleted: prev.sender_id === userId ? 1 : 2, body: null, media_key: null, meta_json: '{}' } }] : [];
+    }
+    const table = { frame: 'frames', rec: 'recommendations', activity: 'activity' }[kind];
+    const prev = table ? get(table, id) : null;
+    return prev ? [{ table, key: id, row: { ...prev, removed: 1 } }] : [];
+  },
+  'majlis.read': (op, get, userId) => {
+    const prev = get('majlis_reads', userId);
+    const at = op.payload?.at ?? now();
+    return prev && prev.read_at >= at ? [] : [{ table: 'majlis_reads', key: userId, row: { user_id: userId, read_at: at } }];
+  },
   'frame.send': (op, get, userId) => {
     const p = op.payload ?? {};
     if (!p.work || !p.chapter) return [];
@@ -223,6 +264,17 @@ export const PROJECTIONS = {
         },
       },
     ];
+  },
+  // الإعدادات (منها الخصوصية): تظهر في جهازك فورًا، والخادم يدمجها حقلًا حقلًا
+  'settings.patch': (op, get, userId) => {
+    const prev = get('settings', userId);
+    let data = {};
+    try {
+      data = JSON.parse(prev?.data ?? '{}') ?? {};
+    } catch {
+      data = {};
+    }
+    return [{ table: 'settings', key: userId, row: { ...(prev ?? {}), user_id: userId, data: JSON.stringify({ ...data, ...(op.payload?.fields ?? {}) }) } }];
   },
   'profile.patch': (op, get, userId) => {
     const fields = op.payload?.fields ?? {};

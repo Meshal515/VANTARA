@@ -19,6 +19,20 @@ export const MAX_MEDIA_BYTES = 1_400_000;
 export const MAX_MEDIA_BYTES_PER_USER = 25_000_000;
 
 export type MediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+export type AudioType = 'audio/webm' | 'audio/ogg' | 'audio/mp4';
+
+/**
+ * رسالة المجلس الصوتية: النوع من بايتاتها أيضًا. WebM/Opus من MediaRecorder في
+ * أندرويد، وOgg وMP4 لغيره. يُخدَم بنوعه ومعه nosniff، فلا يُنفَّذ شيء.
+ */
+export function sniffAudioType(bytes: Uint8Array): AudioType | null {
+  const at = (i: number) => bytes[i] ?? -1;
+  if (at(0) === 0x1a && at(1) === 0x45 && at(2) === 0xdf && at(3) === 0xa3) return 'audio/webm';
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.slice(from, to));
+  if (ascii(0, 4) === 'OggS') return 'audio/ogg';
+  if (ascii(4, 8) === 'ftyp') return 'audio/mp4';
+  return null;
+}
 
 /** نوع الصورة من أول بايتاتها، أو `null` إن لم تكن صورة مقبولة. */
 export function sniffImageType(bytes: Uint8Array): MediaType | null {

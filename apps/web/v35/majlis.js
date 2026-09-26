@@ -431,16 +431,19 @@ export function createMajlis(ctx) {
 
   function events() {
     const out = [];
+    // ما حُذف للجميع أو أخفيته لديك لا يظهر هنا أيضًا
+    const hidden = new Set(sync.rows('majlis_hidden', (h) => h.user_id === me()).map((h) => h.target));
+    const shown = (kind, x) => !x.removed && !hidden.has(`${kind}:${x.id}`);
     // الفريمات صفحات مانجا: مكانها مجلس المانجا
     if (!animeSide()) {
-      for (const f of sync.rows('frames', () => true)) {
+      for (const f of sync.rows('frames', (x) => shown('frame', x))) {
         out.push({ kind: 'frame', at: f.created_at, actor: f.from_id, row: f });
       }
     }
-    for (const r of sync.rows('recommendations', (x) => onThisSide(x.series_ref))) {
+    for (const r of sync.rows('recommendations', (x) => shown('rec', x) && onThisSide(x.series_ref))) {
       out.push({ kind: 'rec', at: r.created_at, actor: r.from_id, row: r });
     }
-    for (const a of sync.rows('activity', (x) => x.verb in VERB_COPY && onThisSide(x.series_ref))) {
+    for (const a of sync.rows('activity', (x) => shown('activity', x) && x.verb in VERB_COPY && onThisSide(x.series_ref))) {
       out.push({ kind: 'act', at: a.created_at, actor: a.actor_id, row: a });
     }
     return out
@@ -747,7 +750,7 @@ export function createMajlis(ctx) {
       if (tables.includes('majlis_reactions')) pendingReaction.clear();
       if (tables.some((t) => t === 'frames' || t === 'recommendations')) acknowledgeDelivered();
       if (!visible) return;
-      if (tables.some((t) => ['frames', 'recommendations', 'majlis_receipts', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions'].includes(t))) render();
+      if (tables.some((t) => ['frames', 'recommendations', 'majlis_receipts', 'activity', 'profiles', 'accounts', 'works', 'majlis_reactions', 'majlis_hidden'].includes(t))) render();
     },
     acknowledgeDelivered,
     /** فتح الرسالة من خارج المجلس (الإشعار، الرابط) = رآها. */

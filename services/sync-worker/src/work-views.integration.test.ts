@@ -142,4 +142,18 @@ describe('chapter.markMany', () => {
     expect(body.followedWorks).toBe(1);
     expect(body.anime).toEqual({ followed: 1, watchedEpisodes: 4, watchedAnime: 2 });
   });
+
+  it('time per section: manga reading + anime watching, and VANTARA total', async () => {
+    const { env } = testEnv();
+    await send(env, A, 'usage.add', { activeMs: 60_000 });
+    await send(env, A, 'usage.watch', { section: 'anime', activeMs: 120_000 });
+    await send(env, A, 'usage.watch', { section: 'nope', activeMs: 120_000 });
+    const token = await mintToken(A, SECRET);
+    const body = (await (await worker.fetch(new Request(`https://sync.test/v1/stats/${A}`, { headers: { authorization: `Bearer ${token}` } }), env, ctx)).json()) as {
+      time: { manga: { todayMs: number }; anime: { totalMs: number }; all: Record<string, number> };
+    };
+    expect(body.time.manga.todayMs).toBe(60_000);
+    expect(body.time.anime.totalMs).toBe(120_000);
+    expect(body.time.all).toMatchObject({ todayMs: 180_000, monthMs: 180_000, yearMs: 180_000, totalMs: 180_000 });
+  });
 });
