@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, countWorkChapters, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, cachedWorkChapterCount, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -45,6 +45,8 @@ import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaRatings } from '../lib/manga-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
+import { onLongPress } from './social-kit.js';
+import { reconcileCardNodes } from './card-reconcile.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -134,6 +136,7 @@ const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?
 export function mountV35(deps, { page = 'home' } = {}) {
   const { sync } = deps;
   const root = el('div', 'v35');
+  if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
   deps.mount(root);
   const q = (id) => root.querySelector(`#${id}`);
@@ -574,26 +577,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
   }
   const countPromises = new Map();
-  const countQueue = [];
-  let counting = 0;
+  const chapterCounts = readJson('vantara.v35.chapter-counts', {});
+  const savedCount = (work) => {
+    const row = chapterCounts[String(work.id)];
+    return row && Date.now() - row.at < 10 * 60_000 && Number.isInteger(row.count) ? row.count : null;
+  };
   function countFor(work) {
     if (Number.isInteger(work.chapters) && work.chapters >= 0) return Promise.resolve(work.chapters);
+    const saved = savedCount(work);
+    if (saved != null) return Promise.resolve(saved);
     const id = String(work.id);
     if (!countPromises.has(id)) {
-      countPromises.set(id, new Promise((resolve) => {
-        countQueue.push({ work, resolve });
-        drainCounts();
-      }));
+      countPromises.set(id, cachedWorkChapterCount(work).then((count) => {
+        if (count != null) {
+          chapterCounts[id] = { count, at: Date.now() };
+          writeJson('vantara.v35.chapter-counts', chapterCounts);
+        } else countPromises.delete(id);
+        return count;
+      }, () => { countPromises.delete(id); return null; }));
     }
     return countPromises.get(id);
-  }
-  function drainCounts() {
-    while (counting < 2 && countQueue.length) {
-      const { work, resolve } = countQueue.shift();
-      counting += 1;
-      countWorkChapters(work).then(resolve, () => { countPromises.delete(String(work.id)); resolve(null); })
-        .finally(() => { counting -= 1; drainCounts(); });
-    }
   }
   function openCardActions(work) {
     const ref = String(work.id);
@@ -618,9 +621,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
+    a.dataset.workId = String(work.id);
+    a._work = work;
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
-    a.setAttribute('aria-label', titleOf(work));
+    a.setAttribute('aria-label', `${titleOf(work)}، اضغط مطولًا لخيارات المكتبة`);
     const frame = el('div', 'work-card-frame');
     const p = el('div', 'poster');
     const score = el('span', 'work-score');
@@ -633,38 +638,61 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ? (Number.isFinite(Number(chapter.chapterNumber)) && Number(chapter.chapterNumber) >= 0
         ? `الفصل ${chapter.chapterNumber}` : String(chapter.name ?? '').slice(0, 44))
       : null;
-    const m = el('div', 'work-meta', meta ?? recentLabel ?? (STATUS_AR[work.status] || ''));
+    const m = el('div', 'work-meta', meta ?? recentLabel ?? '');
     const facts = el('div', 'work-facts');
-    const count = el('span', 'work-count', Number.isInteger(work.chapters) ? `${work.chapters} فصلًا` : 'نجمع الفصول…');
-    const quick = el('button', 'work-quick');
-    quick.type = 'button';
-    quick.setAttribute('aria-label', `خيارات ${titleOf(work)}`);
-    quick.innerHTML = glyph('more', { size: 19 });
-    quick.onclick = (event) => { event.stopPropagation(); openCardActions(work); };
-    facts.append(count, quick);
+    const count = el('span', 'work-count');
+    const firstCount = Number.isInteger(work.chapters) ? work.chapters : savedCount(work);
+    count.hidden = firstCount == null;
+    count.innerHTML = `${glyph('chapterMark', { size: 16 })}<span>${firstCount ?? ''}</span>`;
+    count.setAttribute('aria-label', firstCount == null ? 'عدد الفصول غير متاح' : `${firstCount} فصلًا`);
+    facts.append(count);
     void mountImage(p, work);
     a.append(frame, t, m, facts);
+    onLongPress(a, () => openCardActions(a._work));
     void nearViewport(a).then(async () => {
       if (!a.isConnected) return;
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
-        score.textContent = `★ ${rated.score.toFixed(1)}`;
+        score.innerHTML = `${glyph('star', { size: 15, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);
         score.hidden = false;
       });
       void countFor(work).then((chapters) => {
-        if (a.isConnected) count.textContent = chapters == null ? 'الفصول غير متاحة' : `${chapters} فصلًا`;
+        if (!a.isConnected || chapters == null) return;
+        count.querySelector('span').textContent = String(chapters);
+        count.setAttribute('aria-label', `${chapters} فصلًا`);
+        count.hidden = false;
       });
     });
-    a.onclick = (event) => { if (!event.target.closest('button')) void openWork(work); };
+    a.onclick = () => void openWork(a._work);
     a.onkeydown = (e) => {
-      if (e.key === 'Enter' && e.target === a) void openWork(work);
+      if (e.key === 'Enter' && e.target === a) void openWork(a._work);
+      if ((e.key === ' ' || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && e.target === a) {
+        e.preventDefault();
+        openCardActions(a._work);
+      }
     };
     return a;
   }
-  const renderStrip = (target, items) => target.replaceChildren(...items.slice(0, 14).map((w) => card(w)));
-  const renderGrid = (target, items) => target.replaceChildren(...items.map((w) => card(w)));
+  function reconcileCards(target, items) {
+    reconcileCardNodes(target, items, card, (node, work) => {
+      node._work = work;
+      const recent = work._latestChapter;
+      const label = recent ? (Number.isFinite(Number(recent.chapterNumber)) && Number(recent.chapterNumber) >= 0
+        ? `الفصل ${recent.chapterNumber}` : String(recent.name ?? '').slice(0, 44)) : '';
+      const meta = node.querySelector('.work-meta');
+      if (meta && meta.textContent !== label) meta.textContent = label;
+      const knownCount = node.querySelector('.work-count');
+      if (knownCount && Number.isInteger(work.chapters)) {
+        knownCount.querySelector('span').textContent = String(work.chapters);
+        knownCount.setAttribute('aria-label', `${work.chapters} فصلًا`);
+        knownCount.hidden = false;
+      }
+    });
+  }
+  const renderStrip = (target, items) => reconcileCards(target, items.slice(0, 14));
+  const renderGrid = (target, items) => reconcileCards(target, items);
   const skeletonCards = (n) =>
     Array.from({ length: n }, () => {
       const x = el('div', 'work-card');
@@ -695,7 +723,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function sectionBlock(title, kind, items) {
     const s = el('section', 'section');
-    s.dataset.signature = `${title}:${items.map((w) => String(w?.id ?? w?.title ?? '')).join(',')}`;
+    s.dataset.kind = kind ?? 'friends';
     const h = el('div', 'section-head');
     h.append(el('h2', null, title));
     if (kind) {
@@ -739,26 +767,52 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - آخر التحديثات: فصول رُصدت حديثًا في قوائم المصادر، بغض النظر عن تاريخ الرفع.
    * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
    */
-  // آخر ما عُرض: إعادة البناء لنفس القوائم تُسقط الصور لحظةً ثم تعيدها
-  // (وميض مع كل نبض مزامنة). نفس الأعمال بنفس الترتيب = لا شيء يُلمس.
-  let homeSignature = '';
   let homeBusy = false;
   let homeCheckedAt = 0;
+  let chapterScanBusy = false;
+  const keepChapterFacts = (items, before) => {
+    const prior = new Map(before.map((w) => [String(w.id), w]));
+    return items.map((w) => {
+      const old = prior.get(String(w.id));
+      return old ? { ...w, chapters: w.chapters ?? old.chapters, _latestChapter: w._latestChapter ?? old._latestChapter } : w;
+    });
+  };
+  async function refreshChapterEvidence() {
+    if (chapterScanBusy || document.hidden || currentPage() !== 'home' || root.dataset.section !== 'manga') return;
+    chapterScanBusy = true;
+    try {
+      const updated = await scanLatestChapterUpdates({
+        shouldContinue: () => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga',
+      });
+      if (!updated.length) return;
+      state.home.recent = uniqueById([...updated, ...state.home.recent]).slice(0, 40);
+      if (currentPage() === 'home') renderHome();
+      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent });
+    } catch (error) {
+      console.warn('تعذّر تحديث فصول المصادر في الخلفية', error);
+    } finally {
+      chapterScanBusy = false;
+    }
+  }
   function renderHome() {
-    const blocks = [];
+    const specs = [];
     const history = historyWorks();
-    if (history.length) blocks.push(sectionBlock('آخر المشاهدات', 'history', history.slice(0, 20)));
+    if (history.length) specs.push(['آخر المشاهدات', 'history', history.slice(0, 20)]);
     const reading = libraryWorks('reading');
-    if (reading.length) blocks.push(sectionBlock('أعمال تتابعها', 'libraryReading', reading));
+    if (reading.length) specs.push(['أعمال تتابعها', 'libraryReading', reading]);
     const friends = friendsReading();
-    if (friends.length) blocks.push(sectionBlock('يقرأها أصدقاؤك', null, friends.slice(0, 20)));
-    if (state.home.trending.length) blocks.push(sectionBlock('رائج في المصادر', 'trending', state.home.trending));
-    if (state.home.recent.length) blocks.push(sectionBlock('آخر تحديثات الفصول', 'recent', state.home.recent));
-    if (!blocks.length) return;
-    const signature = blocks.map((b) => b.dataset.signature ?? '').join('|');
-    if (signature === homeSignature && q('homeSections').childElementCount === blocks.length) return;
-    homeSignature = signature;
-    q('homeSections').replaceChildren(...blocks);
+    if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
+    if (state.home.trending.length) specs.push(['رائج في المصادر', 'trending', state.home.trending]);
+    if (state.home.recent.length) specs.push(['آخر تحديثات الفصول', 'recent', state.home.recent]);
+    if (!specs.length) return;
+    const host = q('homeSections');
+    const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
+    const blocks = specs.map(([title, kind, items]) => {
+      const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, items);
+      if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), items);
+      return section;
+    });
+    if (blocks.length !== host.children.length || blocks.some((block, i) => block !== host.children[i])) host.replaceChildren(...blocks);
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
@@ -789,16 +843,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
     // لا شاشة تنتظر أبطأ مصدر من ستة عشر. قائمتان حقيقيتان: الرائج والأحدث.
     const cached = (await readKv('home.v3'))?.value;
-    const hasCache = Boolean(cached?.trending?.length || cached?.recent?.length);
+    const hasCache = Boolean(cached?.trending?.length || cached?.recent?.length || state.home.trending.length || state.home.recent.length);
     const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
     if (hasCache) {
-      state.home.trending = cached.trending ?? [];
-      state.home.recent = cached.recent ?? [];
-      state.heroItems = heroFrom(state.home.trending);
-      renderHero();
+      if (cached?.trending?.length) state.home.trending = cached.trending;
+      if (cached?.recent?.length) state.home.recent = cached.recent;
+      const previousHero = heroFrom(state.home.trending);
+      if (previousHero.length && (previousHero.length !== state.heroItems.length || previousHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
+        state.heroItems = previousHero;
+        renderHero();
+      }
       renderHome();
     } else {
-      renderHomeSkeleton();
+      if (!q('homeSections').childElementCount) renderHomeSkeleton();
       renderHeroSkeleton();
     }
     let heroDone = hasCache;
@@ -827,17 +884,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     const live = (key) => ({ items }) => {
       // أول ردٍّ لا يمحو رئيسية محفوظة أكمل منه
-      if (cached?.[key]?.length && items.length < Math.min(cached[key].length, 12)) return;
-      state.home[key] = items;
+      if (state.home[key]?.length && items.length < Math.min(state.home[key].length, 12)) return;
+      state.home[key] = key === 'recent' ? keepChapterFacts(items, state.home.recent) : items;
       paint();
     };
     try {
       const [tr, re] = await Promise.all([
-        browseLive({ kind: 'popular', page: 1 }, live('trending')),
-        browseLive({ kind: 'latest', page: 1 }, live('recent')),
+        browseLive({ kind: 'popular', page: 1 }, live('trending'), {
+          concurrency: 3, shouldContinue: () => currentPage() === 'home' && root.dataset.section === 'manga',
+        }),
+        browseLive({ kind: 'latestListing', page: 1 }, live('recent'), {
+          concurrency: 3, shouldContinue: () => currentPage() === 'home' && root.dataset.section === 'manga',
+        }),
       ]);
-      state.home.trending = tr.items;
-      state.home.recent = re.items;
+      // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
+      if (tr.items.length) state.home.trending = tr.items;
+      if (re.items.length) state.home.recent = keepChapterFacts(re.items, state.home.recent);
       clearTimeout(saveTimer);
       const finalHero = heroFrom(tr.items);
       // لا يُعاد بناء بانرٍ يلفّ أمام المستخدم بنفس الأعمال
@@ -849,7 +911,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       renderHome();
       if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
-      void writeKv('home.v3', { trending: tr.items.slice(0, 40), recent: re.items.slice(0, 40) });
+      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+      setTimeout(() => void refreshChapterEvidence(), 8000);
     } catch {
       // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
       if (hasCache) return;
@@ -2527,7 +2590,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const COLLECTIONS = {
     trending: { title: 'رائج في المصادر', kind: 'popular' },
-    recent: { title: 'آخر تحديثات الفصول', kind: 'latest' },
+    recent: { title: 'آخر تحديثات الفصول', kind: 'latestListing' },
     catalogue: { title: 'كل الأعمال', kind: 'catalogue' },
   };
   async function openCollection(kind) {
@@ -2542,25 +2605,37 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return;
     }
     const c = COLLECTIONS[kind] || COLLECTIONS.trending;
-    state.collection = { kind: c.kind, page: 0, hasNext: true, items: [], genre: null };
+    const initial = kind === 'recent' ? state.home.recent : kind === 'trending' ? state.home.trending : [];
+    state.collection = { kind: c.kind, page: 0, hasNext: true, items: [...initial], genre: null };
     q('collectionTitle').textContent = c.title;
-    q('collectionGrid').replaceChildren(...skeletonCards(9));
+    if (initial.length) renderGrid(q('collectionGrid'), initial);
+    else q('collectionGrid').replaceChildren(...skeletonCards(9));
     q('collectionMore').hidden = true;
     showPage('collection');
     await loadMoreCollection();
   }
   async function loadMoreCollection() {
     if (!state.collection.hasNext) return;
+    const requested = state.collection;
     const btn = q('collectionMore');
     btn.disabled = true;
     btn.textContent = 'جارٍ التحميل…';
     try {
+      const page = state.collection.page + 1;
       const r = state.collection.genre
-        ? await browse({ genre: state.collection.genre.names, page: state.collection.page + 1 })
-        : await browse({ kind: state.collection.kind, page: state.collection.page + 1 });
+        ? await browse({ genre: state.collection.genre.names, page })
+        : state.collection.kind === 'latestListing' && page === 1
+          ? await browseLive({ kind: 'latestListing', page }, ({ items }) => {
+              if (requested !== state.collection || !items.length) return;
+              state.collection.items = uniqueById([...items, ...requested.items]);
+              renderGrid(q('collectionGrid'), state.collection.items);
+            })
+          : await browse({ kind: state.collection.kind, page });
+      if (requested !== state.collection) return;
       state.collection.page = r.page;
       state.collection.hasNext = r.hasNextPage;
-      state.collection.items = uniqueById([...state.collection.items, ...r.items]);
+      state.collection.items = uniqueById(state.collection.page === 1 && requested.items.length
+        ? [...r.items, ...requested.items] : [...requested.items, ...r.items]);
       if (!state.collection.items.length) {
         emptyState(q('collectionGrid'), {
           icon: 'search',
@@ -2686,7 +2761,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function runSearch(term, grid, stillWanted) {
     grid.replaceChildren(...skeletonCards(6));
     try {
-      const { items } = await browse({ query: term });
+      const { items } = await browseLive({ query: term }, ({ items: partial }) => {
+        if (stillWanted() === term && partial.length) renderGrid(grid, partial);
+      });
       if (stillWanted() !== term) return 0;
       if (items.length) renderGrid(grid, items);
       else emptyState(grid, { icon: 'search', title: 'لا نتائج', text: 'جرّب اسمًا آخر، أو الاسم بالإنجليزي.' });
@@ -3138,6 +3215,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else renderSocial();
   }
   function renderSocial() {
+    try {
+      renderSocialContent();
+    } catch (error) {
+      console.error('تعذّر رسم الاجتماع', error);
+      q('friendsBody').hidden = false;
+      q('majlisBody').hidden = true;
+      q('socialNotifs').hidden = true;
+      emptyState(q('friendsBody'), { icon: 'offline', error: true, title: 'تعذّر عرض الاجتماع', text: 'حدث خلل في المحتوى.', action: { label: 'أعد المحاولة', icon: 'refresh', run: renderSocial } });
+    }
+  }
+  function renderSocialContent() {
     const tab = (state.socialTab ??= 'friends');
     const unread = unreadNotifications();
     q('socialTabs').replaceChildren(
@@ -3162,6 +3250,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (tab === 'friends') {
       majlis.hide();
       friends.show();
+      if (!q('friendsBody').childElementCount) throw new Error('Friends screen rendered empty');
     } else if (tab === 'notifications') {
       majlis.hide();
       friends.hide();
@@ -4077,7 +4166,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     markSeen: (kind, id) => majlis.markSeen(kind, id),
     library: roomLibrary,
     encodeAvatar,
-    onClose: () => friends.render(),
+    onClose: () => {
+      if (currentPage() === 'majlis' && state.socialTab === 'friends') friends.render();
+    },
   });
   /** رابط ملف في خادم الوسائط (صورة المجلس، الرسائل الصوتية). */
   function mediaUrl(hash) {
@@ -4138,13 +4229,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     majlis.acknowledgeDelivered();
     migrateLocalHistory();
   }, 0);
-  // مكتبتك وآخر ما فتحت تُجمع فصولها من كل المصادر في الخلفية: تُفتح جاهزة
+  // التسخين مؤجل إلى سكون الرئيسية، ولا يزاحم البحث أو مسح الفصل الجديد.
   setTimeout(() => {
-    if (!available()) return;
+    const idle = () => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && !chapterScanBusy;
+    if (!available() || !idle()) return;
     const seen = new Set();
     const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
-    void prewarm(works, { onDone: (full) => rememberWork(full) });
-  }, 6000);
+    void prewarm(works, { onDone: (full) => rememberWork(full), shouldContinue: idle });
+  }, 30_000);
 
   const profile = createProfile({
     sync,
@@ -4311,6 +4403,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   if (startSection === 'anime') anime.show();
 
   paintNotifyDots();
+  renderHome();
   void loadHome();
   const refreshChapters = () => {
     if (!document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= 60_000) void loadHome();

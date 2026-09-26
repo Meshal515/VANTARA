@@ -95,25 +95,42 @@ export async function collectLatestChapters(list, page, {
   now = Date.now(),
   onUpdate = () => {},
   known = { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} },
+  concurrency = 8,
+  shouldContinue = () => true,
 } = {}) {
   known ??= { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} };
   const entries = [];
   const next = { initialized: true, workChapters: { ...(known.workChapters ?? {}) }, observed: { ...(known.observed ?? {}) }, lastUpdate: { ...(known.lastUpdate ?? {}) } };
   let hasNextPage = false;
-  const pages = await Promise.allSettled(list.map(async (source) => ({
-    source,
-    value: await withTimeout(latest(source.id, page), LISTING_TIMEOUT_MS),
-  })));
   const tasks = [];
-  for (const result of pages) {
-    if (result.status !== 'fulfilled') continue;
-    const { source, value } = result.value;
-    hasNextPage ||= Boolean(value?.hasNextPage);
-    for (const [position, manga] of (value?.mangas ?? []).entries()) tasks.push({ source, manga, position });
-  }
   let cursor = 0;
+  let pendingPages = list.length;
+  const waiters = [];
+  const wake = () => { while (waiters.length) waiters.shift()(); };
+  let sourceCursor = 0;
+  const pageWorker = async () => {
+    while (sourceCursor < list.length && shouldContinue()) {
+      const source = list[sourceCursor++];
+      try {
+        const value = await withTimeout(latest(source.id, page), LISTING_TIMEOUT_MS);
+        hasNextPage ||= Boolean(value?.hasNextPage);
+        for (const [position, manga] of (value?.mangas ?? []).entries()) tasks.push({ source, manga, position });
+      } catch {
+        // مصدر لا يرد لا يحبس المصادر الأسرع.
+      } finally {
+        pendingPages -= 1;
+        wake();
+      }
+    }
+    if (!shouldContinue()) { pendingPages = 0; wake(); }
+  };
+  const pages = Array.from({ length: Math.min(concurrency, list.length) }, pageWorker);
   const worker = async () => {
-    while (cursor < tasks.length) {
+    while (shouldContinue() && (pendingPages || cursor < tasks.length)) {
+      if (cursor >= tasks.length) {
+        await new Promise((resolve) => waiters.push(resolve));
+        continue;
+      }
       const { source, manga, position } = tasks[cursor++];
       try {
         const rows = await withTimeout(chapters(source.id, manga), LISTING_TIMEOUT_MS);
@@ -136,7 +153,7 @@ export async function collectLatestChapters(list, page, {
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(8, tasks.length) }, worker));
+  await Promise.all([...pages, ...Array.from({ length: Math.min(concurrency, Math.max(1, list.length)) }, worker)]);
   entries.sort((a, b) => b.observedAt - a.observedAt || a.position - b.position || sourceRank(a.source.id) - sourceRank(b.source.id));
   return { entries, hasNextPage, known: next };
 }
@@ -176,6 +193,14 @@ export async function countWorkChapters(v35work) {
   }));
   if (!ok.length) return null;
   return mergeChapters(ok.map((r) => r.value), { rank: sourceRank }).length;
+}
+
+/** بطاقة العمل تقرأ العدد المحفوظ فقط؛ لا تسأل المصادر أثناء رسم الرئيسية أو البحث. */
+export async function cachedWorkChapterCount(v35work) {
+  if (Number.isInteger(v35work?.chapters) && v35work.chapters >= 0) return v35work.chapters;
+  const cached = await readWork(String(v35work?.id)).catch(() => null);
+  return cached?.editions?.some((e) => e.chapters?.length)
+    ? mergeChapters(cached.editions, { rank: sourceRank }).length : null;
 }
 
 /**
@@ -275,7 +300,7 @@ export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editi
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
-  const list = await listingSources({ query, includeFillers: kind === 'latest' });
+  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   if (kind === 'latest' && !query && !genre) {
     const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
     const { entries, hasNextPage, known } = await collectLatestChapters(list, page, { known: prior });
@@ -290,7 +315,7 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
       ? engine.search(source.id, query, page)
       : kind === 'popular'
         ? engine.popular(source.id, page)
-        : kind === 'latest'
+        : kind === 'latest' || kind === 'latestListing'
           ? engine.latest(source.id, page)
           : engine.catalogue(source.id, page), LISTING_TIMEOUT_MS),
   );
@@ -324,7 +349,7 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
     w.title = w.editions[0]?.manga?.title ?? w.title;
     w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
   }
-  return rankListing(works, positions, kind === 'latest' ? 'latest' : 'popular');
+  return rankListing(works, positions, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
 }
 
 /**
@@ -332,8 +357,10 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
  * بالقائمة المدموجة حتى الآن. مصدرٌ ثانٍ عنده نفس العمل يُضاف إليه نسخةً، فلا
  * يبقى العمل «عاشقيًّا» لأن العاشق ردّ أولًا.
  */
-export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}) {
-  const list = await listingSources({ query, includeFillers: kind === 'latest' });
+export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}, {
+  concurrency = Infinity, shouldContinue = () => true,
+} = {}) {
+  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   if (kind === 'latest' && !query && !genre) {
     const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
     const { entries, hasNextPage, known } = await collectLatestChapters(list, page, {
@@ -345,7 +372,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   }
   const index = createWorkIndex();
   const positions = new Map();
-  const mode = query || genre ? 'search' : kind;
+  const mode = query || genre ? 'search' : kind === 'latestListing' ? 'latest' : kind;
   let hasNextPage = false;
   let timer = null;
   const flush = () => {
@@ -353,28 +380,49 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
     timer = null;
     onUpdate({ items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page });
   };
-  await Promise.allSettled(
-    list.map(async (source) => {
-      const value = await withTimeout(
-        genre
-          ? engine.genre(source.id, genre, page)
-          : query
-            ? engine.search(source.id, query, page)
-            : kind === 'popular'
-              ? engine.popular(source.id, page)
-              : kind === 'latest'
-                ? engine.latest(source.id, page)
-                : engine.catalogue(source.id, page),
-        LISTING_TIMEOUT_MS,
-      );
-      hasNextPage ||= Boolean(value?.hasNextPage);
-      addPage(index, positions, source, value);
-      // الردود المتلاحقة تُجمع في رسمة واحدة كل ربع ثانية
-      timer ??= setTimeout(flush, 250);
-    }),
-  );
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < list.length && shouldContinue()) {
+      const source = list[cursor++];
+      try {
+        const value = await withTimeout(
+          genre
+            ? engine.genre(source.id, genre, page)
+            : query
+              ? engine.search(source.id, query, page)
+              : kind === 'popular'
+                ? engine.popular(source.id, page)
+                : kind === 'latest' || kind === 'latestListing'
+                  ? engine.latest(source.id, page)
+                  : engine.catalogue(source.id, page),
+          LISTING_TIMEOUT_MS,
+        );
+        hasNextPage ||= Boolean(value?.hasNextPage);
+        addPage(index, positions, source, value);
+        // الردود المتلاحقة تُجمع في رسمة واحدة كل ربع ثانية
+        timer ??= setTimeout(flush, 250);
+      } catch {
+        // مصدر غير متاح لا يؤخر نتائج بقية المصادر.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
   flush();
   return { items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page };
+}
+
+/** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
+export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
+  const list = await listingSources({ includeFillers: true });
+  const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
+  const { entries, known } = await collectLatestChapters(list, 1, {
+    known: prior,
+    concurrency: 1,
+    shouldContinue,
+    onUpdate: (found) => onUpdate(recentWorks(found)),
+  });
+  if (entries.length) await writeKv(CHAPTER_UPDATES_KEY, known);
+  return recentWorks(entries);
 }
 
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
@@ -592,9 +640,10 @@ export function loadWorkOnce(v35work, opts) {
  * تسخين مسبق: أعمال مكتبتك وآخر ما فتحت تُجمع فصولها في الخلفية، واحدًا
  * واحدًا وبلا استعجال، فتُفتح جاهزة. عملٌ جُمع خلال ست ساعات يُترك.
  */
-export async function prewarm(works, { onDone = () => {}, maxAgeMs = 6 * 3600e3 } = {}) {
+export async function prewarm(works, { onDone = () => {}, maxAgeMs = 6 * 3600e3, shouldContinue = () => true } = {}) {
   if (!available()) return;
   for (const w of works) {
+    if (!shouldContinue()) return;
     if (!w?._work?.editions?.length) continue;
     const cached = await readWork(String(w.id));
     if (cached && Date.now() - (cached.at ?? 0) < maxAgeMs) continue;
