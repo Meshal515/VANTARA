@@ -53,6 +53,14 @@ const dateAr = (ts) => {
   return `${d.getDate()} ${MONTHS_AR[d.getMonth()]} ${d.getFullYear()} - ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 };
 
+/** يضيف أنمي لـ«قائمتي» من خارج صفحته (رفيق): إضافة فقط، لا تبديل. */
+export function addToAnimeList(m) {
+  const all = readJson(LIST_KEY, {});
+  if (!all[m.id]) all[m.id] = { ...m, at: Date.now() };
+  writeJson(LIST_KEY, all);
+  return true;
+}
+
 /** سجل المشاهدة: لكل أنمي آخر حلقة وموضعها، ولكل حلقة تقدّمها. */
 export function readWatch() {
   return readJson(WATCH_KEY, {});

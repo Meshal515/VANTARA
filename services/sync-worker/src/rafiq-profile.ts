@@ -10,7 +10,7 @@
  */
 
 import type { D1Database } from './types.ts';
-import { type Meta, metaFor, metaKeyForAnime, metaKeyForTitle } from './rafiq-anilist.ts';
+import { type Meta, metaFor, metaKeyForAnime, metaKeyForManga, metaKeyForTitle } from './rafiq-anilist.ts';
 
 type Fetch = typeof fetch;
 
@@ -149,6 +149,10 @@ export async function userWorks(db: D1Database, fetchImpl: Fetch, userId: string
     q<{ series_ref: string; series_title: string | null; viewed_at: number }>('SELECT series_ref, series_title, viewed_at FROM work_views WHERE user_id = ? AND removed = 0'),
     q<{ work_id: string; opened_ref: string | null; feedback: string }>('SELECT work_id, opened_ref, feedback FROM rafiq_recs WHERE user_id = ? AND feedback IS NOT NULL'),
   ]);
+  // قرأه أو شاهده برا التطبيق (قاله لرفيق أو علّمه من البطاقة)
+  const external = await q<{ work_id: string; title: string; kind: 'manga' | 'anime'; status: string; progress: number | null; rating: number | null; updated_at: number }>(
+    'SELECT work_id, title, kind, status, progress, rating, updated_at FROM rafiq_external WHERE user_id = ?',
+  );
   const refs = new Set<string>([...lib, ...reads, ...done, ...ratings, ...cols, ...views].map((r) => r.series_ref));
   const titles = new Map<string, string>();
   for (const r of [...lib, ...views]) if (r.series_title) titles.set(r.series_ref, r.series_title);
@@ -210,19 +214,58 @@ export async function userWorks(db: D1Database, fetchImpl: Fetch, userId: string
       feedback: fb.get(ref) ?? null,
     });
   }
+  const extStatus = new Map<string, string>();
+  for (const e of external) {
+    extStatus.set(e.work_id, e.status);
+    base.push({
+      ref: e.work_id,
+      kind: e.kind,
+      title: e.title,
+      progress: Math.max(0, e.progress ?? (e.status === 'completed' ? 1 : 0)),
+      lastAt: e.updated_at,
+      firstAt: e.updated_at,
+      completed: e.status === 'completed',
+      rating: e.rating,
+      favorite: false,
+      inLibrary: e.status === 'planning',
+      readLater: e.status === 'planning',
+      feedback: null,
+    });
+  }
   // الأحدث أولًا، وسقف معقول: الذوق يُقرأ من ~120 عملًا لا من كل شيء
   base.sort((x, y) => y.lastAt - x.lastAt);
   const top = base.slice(0, 120);
   const meta = await metaFor(
     db,
     fetchImpl,
-    top.map((w) => (w.kind === 'anime' ? { key: metaKeyForAnime(Number(w.ref.slice(6))), anilistId: Number(w.ref.slice(6)) } : { key: metaKeyForTitle(w.title), title: w.title, type: 'MANGA' as const })),
+    top.map((w) => (w.ref.startsWith('anime:') ? { key: metaKeyForAnime(Number(w.ref.slice(6))), anilistId: Number(w.ref.slice(6)) } : w.ref.startsWith('manga:') ? { key: metaKeyForManga(Number(w.ref.slice(6))), anilistId: Number(w.ref.slice(6)) } : { key: metaKeyForTitle(w.title), title: w.title, type: 'MANGA' as const })),
     now,
   );
-  return top.map((w) => {
-    const m = w.kind === 'anime' ? meta.get(metaKeyForAnime(Number(w.ref.slice(6)))) : meta.get(metaKeyForTitle(w.title));
-    return { ...w, meta: m ?? null, state: classify(w, now) };
+  const out = top.map((w): UserWork => {
+    const m = w.ref.startsWith('anime:') ? meta.get(metaKeyForAnime(Number(w.ref.slice(6)))) : w.ref.startsWith('manga:') ? meta.get(metaKeyForManga(Number(w.ref.slice(6)))) : meta.get(metaKeyForTitle(w.title));
+    const ext = extStatus.get(w.ref);
+    // ما قاله صراحة عن عمل قرأه برا يغلب الاستنتاج من السلوك
+    const state: UserWork['state'] =
+      ext === 'dropped' ? 'abandoned' : ext === 'completed' ? (w.rating !== null && w.rating < 6 ? 'disliked' : 'strong') : ext === 'planning' ? 'listed' : classify(w, now);
+    return { ...w, meta: m ?? null, state };
   });
+  // نفس العمل من التطبيق ومن «برا»: نسخة واحدة بأقوى إشارة
+  const seen = new Map<number, UserWork>();
+  const merged: UserWork[] = [];
+  for (const w of out) {
+    const id = w.meta?.anilistId;
+    const had = id ? seen.get(id) : undefined;
+    if (!had) {
+      if (id) seen.set(id, w);
+      merged.push(w);
+      continue;
+    }
+    had.progress = Math.max(had.progress, w.progress);
+    had.completed = had.completed || w.completed;
+    if (w.rating !== null) had.rating = w.rating;
+    if (extStatus.has(w.ref)) had.state = w.state;
+  }
+  return merged;
 }
 
 export async function preferences(db: D1Database, userId: string): Promise<Preference[]> {

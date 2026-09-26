@@ -53,7 +53,7 @@ import {
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
-import { handleRafiqConversations, handleRafiqFeedback, handleRafiqMessage, handleRafiqNew, handleRafiqPrefs, handleRafiqState, type RafiqEnv } from './rafiq.ts';
+import { handleRafiqConversations, handleRafiqExternal, handleRafiqFeedback, handleRafiqUsage, handleRafiqMessage, handleRafiqNew, handleRafiqPrefs, handleRafiqState, type RafiqEnv } from './rafiq.ts';
 import { bearerFrom, verifyToken } from './session.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -2509,6 +2509,8 @@ export default {
       else if (path === '/v1/rafiq/feedback' && request.method === 'POST') response = await handleRafiqFeedback(request, env as RafiqEnv, userId, now);
       else if (path === '/v1/rafiq/prefs' && (request.method === 'GET' || request.method === 'DELETE')) response = await handleRafiqPrefs(request, url, env as RafiqEnv, userId);
       else if (path === '/v1/rafiq/new' && request.method === 'POST') response = await handleRafiqNew(env as RafiqEnv, userId, now);
+      else if (path === '/v1/rafiq/external' && (request.method === 'POST' || request.method === 'DELETE')) response = await handleRafiqExternal(request, url, env as RafiqEnv, userId, now);
+      else if (path === '/v1/rafiq/usage' && request.method === 'GET') response = await handleRafiqUsage(env as RafiqEnv, userId, now);
       else if (path === '/v1/rafiq/conversations' && (request.method === 'GET' || request.method === 'DELETE')) response = await handleRafiqConversations(request, url, env as RafiqEnv, userId);
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);

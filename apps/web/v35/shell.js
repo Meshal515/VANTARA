@@ -34,7 +34,7 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
-import { createAnime, readWatch } from './anime.js';
+import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
@@ -2888,6 +2888,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     );
   }
   function openDrawer() {
+    // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
+    if (rafiq.enabled !== true) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
@@ -4073,6 +4075,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return { ref: String(full.id), ...chapterSpan(full._editions) };
     },
     translationOpen: () => !translationLocked(),
+    // «أضف» من بطاقة رفيق: نفس عمليات المكتبة في صفحة العمل (لا نظام موازٍ)
+    addManga: async (card, where) => {
+      const w = await resolveManga(card);
+      if (!w) return false;
+      const d = descriptorOf(w);
+      if (where === 'later') {
+        sync.enqueue('readLater.set', { ...d, member: true });
+        return 'في «أقرأ لاحقًا»';
+      }
+      if (!libraryEntry(d.seriesRef)?.row) sync.enqueue('library.add', d);
+      afterLibraryChange();
+      return 'أضيف لمكتبتك';
+    },
+    addAnime: (card) => {
+      const id = Number(String(card.workId).slice('anime:'.length));
+      if (!Number.isFinite(id)) return false;
+      return addToAnimeList({ id, title: card.title, poster: card.cover, posterSmall: card.cover, banner: card.banner, color: card.color, score: card.score, status: card.status, episodes: card.count });
+    },
     translateAhead: async (card, range) => {
       const w = await resolveManga(card);
       if (!w) return toast('ما لقيت العمل في مصادرنا 😭');

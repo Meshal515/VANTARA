@@ -22,6 +22,15 @@ const ERRORS = {
   offline: 'ما فيه نت؟ تأكد من الاتصال وجرّب.',
 };
 
+const SKILL_STATUS = {
+  ranking: 'يرتّب لك من الكتالوج…',
+  compare: 'يقارن بينهم…',
+  work: 'يقرأ آراء القرّاء…',
+  taste: 'يحلل ذوقك…',
+  recommend: 'يختار لك…',
+  similar: 'يدوّر على الأقرب…',
+};
+
 const uid = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `m-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
 
 /** سجل المشاهدة المحلي → إشارات مختصرة للخادم (حلقات شوهدت، هل اكتمل، آخر مرة). */
@@ -98,9 +107,19 @@ export async function readEvents(response, on) {
  */
 export function createRafiq(deps) {
   const { sync, host, el, toast } = deps;
+  // آخر ما عرفناه عن الإتاحة يبقى على الجهاز: رفيق لا يختفي من القائمة لأن
+  // أول سؤال للخادم تعثّر (شبكة ضعيفة، تجديد الجلسة)
+  const ENABLED_KEY = 'vantara.rafiq.enabled';
+  const remembered = (() => {
+    try {
+      return localStorage.getItem(ENABLED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })();
   const state = {
     loaded: false,
-    enabled: null,
+    enabled: remembered ? true : null,
     configured: true,
     conversationId: null,
     messages: [],
@@ -114,10 +133,21 @@ export function createRafiq(deps) {
   let sendBtn;
 
   // ── الإتاحة ──
+  let retry = 0;
   async function check(conversationId = null) {
     const res = await sync.translation(`/v1/rafiq/state${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`).catch(() => null);
-    if (res?.status !== 200) return state.enabled;
+    if (res?.status !== 200) {
+      // تعثّر عابر: نعيد المحاولة بتراجع (5ث، 15ث، دقيقة) بدل ما نحكم بالإخفاء
+      if (retry < 3) setTimeout(() => void check(conversationId), [5000, 15000, 60000][retry++]);
+      return state.enabled;
+    }
+    retry = 0;
     state.enabled = Boolean(res.body?.enabled);
+    try {
+      localStorage.setItem(ENABLED_KEY, state.enabled ? '1' : '0');
+    } catch {
+      // التخزين ممتلئ: تبقى للجلسة
+    }
     if (state.enabled) {
       state.configured = res.body.configured !== false;
       state.conversationId = res.body.conversationId ?? null;
@@ -243,12 +273,129 @@ export function createRafiq(deps) {
       tools.append(copy);
       row.append(tools);
     }
+    if (m.extra?.ranking?.items?.length) row.append(rankingNode(m.extra.ranking));
+    if (m.extra?.comparison?.rows?.length) row.append(comparisonNode(m.extra.comparison));
+    if (m.extra?.taste) row.append(tasteNode(m.extra.taste));
     if (m.cards?.length) {
       const cards = el('div', 'rf-cards');
       for (const c of m.cards) cards.append(cardNode(c));
       row.append(cards);
     }
     return row;
+  }
+
+  // ── يناسبك؟ (منفصل عن التقييم) ──
+  const FIT = { high: ['يناسبك جدًا', 'rf-fit--high'], medium: ['يناسبك', 'rf-fit--mid'], low: ['بعيد عن ذوقك', 'rf-fit--low'] };
+  function fitBadge(fit) {
+    const f = FIT[fit];
+    return f ? el('span', `rf-fit ${f[1]}`, f[0]) : null;
+  }
+
+  // ── قائمة الترتيب: الأول بطل، والباقي صفوف ──
+  function rankingNode(r) {
+    const box = el('section', 'rf-rank');
+    box.append(el('h4', 'rf-rank-title', r.title ?? 'الترتيب'));
+    const [first, ...rest] = r.items;
+    const hero = el('article', 'rf-rank-hero');
+    const art = el('div', 'rf-rank-art');
+    if (first.banner || first.cover) {
+      const img = el('img');
+      img.src = first.banner ?? first.cover;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.onerror = () => img.remove();
+      art.append(img);
+    }
+    art.append(el('span', 'rf-rank-num rf-rank-num--hero', '1'));
+    const hi = el('div', 'rf-rank-hero-info');
+    hi.append(el('h3', null, first.title));
+    hi.append(factsLine(first));
+    const badge = fitBadge(first.fit);
+    if (badge) hi.append(badge);
+    if (first.reason) hi.append(el('p', 'rf-reason', first.reason));
+    hero.append(art, hi);
+    hero.onclick = () => details(first);
+    box.append(hero);
+    for (const it of rest) {
+      const row = el('button', 'rf-rank-row');
+      row.type = 'button';
+      row.append(el('span', 'rf-rank-num', String(it.rank)));
+      const thumb = el('div', 'rf-rank-thumb');
+      if (it.cover) {
+        const img = el('img');
+        img.src = it.cover;
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = () => img.remove();
+        thumb.append(img);
+      }
+      const info = el('div', 'rf-rank-info');
+      info.append(el('strong', null, it.title), factsLine(it));
+      if (it.reason) info.append(el('small', null, it.reason));
+      const b = fitBadge(it.fit);
+      if (b) info.append(b);
+      row.append(thumb, info);
+      row.onclick = () => details(it);
+      box.append(row);
+    }
+    return box;
+  }
+  function factsLine(card) {
+    const facts = [];
+    if (card.score) facts.push(`★ ${(card.score / 10).toFixed(1)}`);
+    if (card.count) facts.push(card.kind === 'anime' ? `${card.count} حلقة` : `${card.count} فصل`);
+    if (card.status && STATUS_AR[card.status]) facts.push(STATUS_AR[card.status]);
+    return el('div', 'rf-facts', facts.join(' · '));
+  }
+
+  // ── جدول المقارنة (من البيانات لا من النموذج) ──
+  function comparisonNode(c) {
+    const wrap = el('div', 'rf-cmp-wrap');
+    const table = el('table', 'rf-cmp');
+    const head = el('tr');
+    head.append(el('th'));
+    for (const t of c.titles) head.append(el('th', null, t));
+    table.append(head);
+    for (const row of c.rows) {
+      const tr = el('tr');
+      tr.append(el('td', 'rf-cmp-label', row.label));
+      for (const v of row.values) tr.append(el('td', null, v));
+      table.append(tr);
+    }
+    wrap.append(table);
+    if (c.shared?.length) wrap.append(el('p', 'rf-alt', `يشتركون في: ${c.shared.map(deps.genreAr).join('، ')}`));
+    return wrap;
+  }
+
+  // ── بطاقة الذوق ──
+  function tasteNode(t) {
+    const box = el('section', 'rf-taste');
+    box.append(el('h4', null, 'بصمة ذوقك'));
+    const counts = el('div', 'rf-taste-counts');
+    for (const [n, label] of [[t.counts?.engaged, 'بديتها'], [t.counts?.completed, 'خلّصتها'], [t.counts?.abandoned, 'تركتها']]) {
+      const c = el('div');
+      c.append(el('strong', null, String(n ?? 0)), el('span', null, label));
+      counts.append(c);
+    }
+    box.append(counts);
+    const bars = (title, list, cls) => {
+      if (!list?.length) return;
+      box.append(el('h5', null, title));
+      for (const x of list) {
+        const r = el('div', 'rf-bar');
+        r.append(el('span', null, deps.genreAr(x.key)));
+        const track = el('div', 'rf-bar-track');
+        const fill = el('div', `rf-bar-fill ${cls}`);
+        fill.style.width = `${Math.max(4, x.rate)}%`;
+        track.append(fill);
+        r.append(track, el('small', null, `${x.rate}% من ${x.of}`));
+        box.append(r);
+      }
+    };
+    bars('تكملها', t.finishes, 'rf-bar-fill--good');
+    bars('تتركها', t.drops, 'rf-bar-fill--bad');
+    if (t.countries?.length) box.append(el('p', 'rf-alt', t.countries.map((c) => `${{ KR: 'مانهوا', JP: 'مانجا', CN: 'مانها' }[c.key] ?? c.key} ${c.share}%`).join(' · ')));
+    return box;
   }
 
   function authorLine() {
@@ -305,6 +452,8 @@ export function createRafiq(deps) {
     if (card.score) facts.push(`★ ${(card.score / 10).toFixed(1)}`);
     if (facts.length) info.append(el('div', 'rf-facts', facts.join(' · ')));
     if (card.genres?.length) info.append(el('div', 'rf-genres', card.genres.slice(0, 3).map(deps.genreAr).join('، ')));
+    const fb = fitBadge(card.fit);
+    if (fb) info.append(fb);
     if (card.progress) info.append(el('div', 'rf-progress', card.progress));
     const spanLine = el('div', 'rf-span');
     info.append(spanLine);
@@ -334,7 +483,9 @@ export function createRafiq(deps) {
       nope.disabled = true;
       toast('تمام، ما راح أرجعه لك 🫡');
     };
-    actions.append(primary, more, similar);
+    const addBtn = button('أضف', 'rf-btn', 'plus');
+    addBtn.onclick = () => addSheet(card);
+    actions.append(primary, addBtn, more, similar);
 
     // العربي والإنجليزي: وين وصل كل واحد، وترجمة الفرق مقدمًا بنظامنا
     const ahead = button('', 'rf-btn rf-btn--ahead', 'translate');
@@ -430,7 +581,48 @@ export function createRafiq(deps) {
         deps.closeSheet();
         void open(card, go);
       };
-      body.append(go);
+      const add = button('أضف…', 'btn btn-secondary', 'plus');
+      add.onclick = () => {
+        deps.closeSheet();
+        setTimeout(() => addSheet(card), 180);
+      };
+      body.append(go, add);
+    });
+  }
+
+  // ── «أضف»: مكتبتي / لاحقًا / قريته برا ──
+  function addSheet(card) {
+    const isAnime = card.kind === 'anime';
+    deps.openSheet((body) => {
+      body.classList.add('rf-sheet');
+      body.append(el('h3', null, card.title));
+      const opt = (label, icon, run) => {
+        const b = button(label, 'rf-opt', icon);
+        b.onclick = async () => {
+          b.disabled = true;
+          const ok = await run().catch(() => false);
+          deps.closeSheet();
+          toast(ok === false ? 'ما قدرت الحين، جرّب بعد شوي' : typeof ok === 'string' ? ok : 'تم ✓');
+        };
+        body.append(b);
+      };
+      if (isAnime) {
+        opt('أضف لقائمتي', 'plus', async () => (deps.addAnime?.(card) ? 'أضيف لقائمة الأنمي' : false));
+      } else {
+        opt('أضف لمكتبتي', 'library', async () => (await deps.addManga?.(card, 'library')) ?? false);
+        opt('أقرأ لاحقًا', 'clock', async () => (await deps.addManga?.(card, 'later')) ?? false);
+      }
+      body.append(el('h4', 'rf-opt-head', isAnime ? 'شاهدته برا التطبيق' : 'قريته برا التطبيق'));
+      const external = (status, label) =>
+        opt(label, status === 'dropped' ? 'close' : 'check', async () => {
+          const res = await sync.translation('/v1/rafiq/external', { method: 'POST', body: { workId: card.workId, title: card.title, kind: card.kind, status } });
+          if (res.status !== 200) return false;
+          void feedback(card, 'seen');
+          return 'تمام، حفظته وما راح أرجع أقترحه';
+        });
+      external('completed', isAnime ? 'خلّصته' : 'خلّصته');
+      external('reading', isAnime ? 'أتابعه برا' : 'أقرأه برا');
+      external('dropped', 'تركته');
     });
   }
 
@@ -502,6 +694,7 @@ export function createRafiq(deps) {
             scrollDown(false);
           } else if (event === 'final') final = data.message;
           else if (event === 'need') need = data;
+          else if (event === 'status' && data.skill) status(SKILL_STATUS[data.skill] ?? 'يكتب…');
           else if (event === 'error') failure = data.code ?? 'upstream';
         });
       } catch {
@@ -549,6 +742,18 @@ export function createRafiq(deps) {
       body.classList.add('rf-sheet');
       body.append(el('h3', null, 'ذاكرة رفيق 🧠'));
       body.append(el('p', 'rf-alt', 'اللي يعرفه عن ذوقك. أي شي غلط احذفه.'));
+      // وين راح الرصيد (هذا الشهر): نداءات، كلفة، نسبة الكاش
+      const usage = el('div', 'rf-usage');
+      body.append(usage);
+      void sync.translation('/v1/rafiq/usage').then((res) => {
+        const m = res.status === 200 ? res.body?.month : null;
+        if (!m) return usage.remove();
+        for (const [v, label] of [[`$${m.usd.toFixed(3)}`, `من $${res.body.budgetUsd} هالشهر`], [String(m.calls), 'نداء'], [`${m.cacheHitRatio}%`, 'من الكاش']]) {
+          const c = el('div');
+          c.append(el('strong', null, v), el('span', null, label));
+          usage.append(c);
+        }
+      });
       const box = el('div', 'rf-memory');
       box.append(el('p', 'rf-alt', 'لحظة…'));
       body.append(box);
