@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, cachedWorkChapterCount, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, cachedWorkChapterCount, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -47,6 +47,7 @@ import { fetchMangaRatings } from '../lib/manga-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
 import { onLongPress } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
+import { imageLoadingNode } from './image-loading.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -489,7 +490,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       forgetCover(url);
     }
-    container.replaceChildren(el('div', 'skeleton'));
+    container.replaceChildren(imageLoadingNode());
     // ما لم يُحفظ بعد يُجلب حين يقترب من الشاشة: الظاهر أولًا، والشبكة لا
     // تنشغل بستين غلافًا في آخر الصفحة قبل الذي أمامك
     await nearViewport(container);
@@ -765,36 +766,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - أعمال تتابعها: مكتبتك.
    *   - يقرأها أصدقاؤك: سجلّات أصدقائك.
    *   - الأكثر رواجًا: «الرائج» عند كل المصادر، مرتّبًا بحضوره فيها وموضعه.
-   *   - آخر التحديثات: فصول رُصدت حديثًا في قوائم المصادر، بغض النظر عن تاريخ الرفع.
+   *   - آخر التحديثات: أعمال صفحات Latest من المصادر، بترتيب المصدر. رقم الفصل
+   *     لا يصل في SManga، لذلك لا ندّعيه حتى يقدمه المصدر بصراحة.
    * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
    */
   let homeBusy = false;
   let homeCheckedAt = 0;
-  let chapterScanBusy = false;
   const keepChapterFacts = (items, before) => {
     const prior = new Map(before.map((w) => [String(w.id), w]));
     return items.map((w) => {
       const old = prior.get(String(w.id));
-      return old ? { ...w, chapters: w.chapters ?? old.chapters, _latestChapter: w._latestChapter ?? old._latestChapter } : w;
+      return old ? {
+        ...w,
+        chapters: w.chapters ?? old.chapters,
+        _work: { ...w._work, editions: mergeEditions(w._work?.editions, old._work?.editions) },
+      } : w;
     });
   };
-  async function refreshChapterEvidence() {
-    if (chapterScanBusy || document.hidden || currentPage() !== 'home' || root.dataset.section !== 'manga') return;
-    chapterScanBusy = true;
-    try {
-      const updated = await scanLatestChapterUpdates({
-        shouldContinue: () => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga',
-      });
-      if (!updated.length) return;
-      state.home.recent = uniqueById([...updated, ...state.home.recent]).slice(0, 40);
-      if (currentPage() === 'home') renderHome();
-      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent });
-    } catch (error) {
-      console.warn('تعذّر تحديث فصول المصادر في الخلفية', error);
-    } finally {
-      chapterScanBusy = false;
-    }
-  }
+  const recentFromLatest = (fresh, previous) =>
+    uniqueById([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
   function renderHome() {
     const specs = [];
     const history = historyWorks();
@@ -804,7 +794,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
     if (state.home.trending.length) specs.push(['رائج في المصادر', 'trending', state.home.trending]);
-    if (state.home.recent.length) specs.push(['آخر تحديثات الفصول', 'recent', state.home.recent]);
+    if (state.home.recent.length) specs.push(['آخر التحديثات في المصادر', 'recent', state.home.recent]);
     if (!specs.length) return;
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
@@ -813,11 +803,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), items);
       return section;
     });
-    if (blocks.length !== host.children.length || blocks.some((block, i) => block !== host.children[i])) host.replaceChildren(...blocks);
+    blocks.forEach((block, i) => {
+      if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
+    });
+    for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
-      ...['رائج في المصادر', 'آخر تحديثات الفصول'].map((title) => {
+      ...['رائج في المصادر', 'آخر التحديثات في المصادر'].map((title) => {
         const s = el('section', 'section');
         s.setAttribute('aria-busy', 'true');
         const h = el('div', 'section-head');
@@ -848,7 +841,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
     if (hasCache) {
       if (cached?.trending?.length) state.home.trending = cached.trending;
-      if (cached?.recent?.length) state.home.recent = cached.recent;
+      if (cached?.recent?.length) state.home.recent = cached.recent.map(({ _latestChapter, ...w }) => w);
       const previousHero = heroFrom(state.home.trending);
       if (previousHero.length && (previousHero.length !== state.heroItems.length || previousHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
         state.heroItems = previousHero;
@@ -884,9 +877,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }, 120);
     };
     const live = (key) => ({ items }) => {
-      // أول ردٍّ لا يمحو رئيسية محفوظة أكمل منه
-      if (state.home[key]?.length && items.length < Math.min(state.home[key].length, 12)) return;
-      state.home[key] = key === 'recent' ? keepChapterFacts(items, state.home.recent) : items;
+      // أول مصدر يدخل فوق اللقطة المحفوظة فورًا؛ لا ينتظر اثني عشر عملًا.
+      if (key === 'recent') state.home.recent = recentFromLatest(items, state.home.recent);
+      else {
+        if (state.home[key]?.length && items.length < Math.min(state.home[key].length, 12)) return;
+        state.home[key] = items;
+      }
       paint();
     };
     try {
@@ -900,7 +896,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
       // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
       if (tr.items.length) state.home.trending = tr.items;
-      if (re.items.length) state.home.recent = keepChapterFacts(re.items, state.home.recent);
+      if (re.items.length) state.home.recent = recentFromLatest(re.items, state.home.recent);
       clearTimeout(saveTimer);
       const finalHero = heroFrom(tr.items);
       // لا يُعاد بناء بانرٍ يلفّ أمام المستخدم بنفس الأعمال
@@ -913,7 +909,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderHome();
       if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
       void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
-      setTimeout(() => void refreshChapterEvidence(), 8000);
     } catch {
       // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
       if (hasCache) return;
@@ -2593,7 +2588,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const COLLECTIONS = {
     trending: { title: 'رائج في المصادر', kind: 'popular' },
-    recent: { title: 'آخر تحديثات الفصول', kind: 'latestListing' },
+    recent: { title: 'آخر التحديثات في المصادر', kind: 'latestListing' },
     catalogue: { title: 'كل الأعمال', kind: 'catalogue' },
   };
   async function openCollection(kind) {
@@ -4232,9 +4227,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     majlis.acknowledgeDelivered();
     migrateLocalHistory();
   }, 0);
-  // التسخين مؤجل إلى سكون الرئيسية، ولا يزاحم البحث أو مسح الفصل الجديد.
+  // التسخين مؤجل إلى سكون الرئيسية، ولا يزاحم البحث.
   setTimeout(() => {
-    const idle = () => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && !chapterScanBusy;
+    const idle = () => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga';
     if (!available() || !idle()) return;
     const seen = new Set();
     const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
