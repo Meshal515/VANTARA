@@ -15,7 +15,7 @@ export const HEARTBEAT_INTERVAL_MS = 25_000;
 export const MAX_BEAT_CREDIT_MS = HEARTBEAT_INTERVAL_MS * 2;
 
 /** بعد هذا الصمت تُعتبر الجلسة خاملة، وبعد ضعفه تُغلق. */
-export const IDLE_AFTER_MS = 90_000;
+export const IDLE_AFTER_MS = 180_000;
 export const OFFLINE_AFTER_MS = 300_000;
 
 export type PresenceStatus = 'READING' | 'ONLINE' | 'IDLE' | 'OFFLINE';
