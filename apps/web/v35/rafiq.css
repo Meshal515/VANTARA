@@ -565,3 +565,8 @@
 .v35 .rf-starter:active {
   background: var(--surface-2);
 }
+
+/* صفحة رفيق بلا شريط سفلي: لا مساحة فاضية تحت خانة الكتابة */
+.v35 .app:has(#rafiq.active) {
+  padding-bottom: 0;
+}

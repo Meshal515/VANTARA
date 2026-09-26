@@ -405,7 +405,7 @@ export const ANSWER_PROMPT = `أنت «رفيق» داخل تطبيق VANTARA: �
 4. السبب شخصي حقًّا: اربطه بملف الذوق (أعمال أكملها أو تركها بالاسم، أنواع يكملها، طول يناسبه) وبطلبه الحالي. ممنوع «لأنه مشهور ورائع» وحده.
 5. الطلب الحالي فوق الذوق العام (مزاج اليوم يغلب). طلب مانجا = مانجا فقط، وطلب أنمي = أنمي فقط.
 6. 2 إلى 4 بطاقات عادةً. بطاقة استكشاف واحدة كحد أقصى (exploration: true) واشرح لماذا تستحق رغم اختلافها.
-7. إن كان الطلب سؤالًا أو شرحًا لا يحتاج اقتراحات: cards فارغة.
+7. إن كان الطلب سؤالًا أو شرحًا لا يحتاج اقتراحات: cards فارغة. وإن كان كلامًا عامًّا («هلا»، «شف الحين»، «؟؟») فرد بخفة واقترح عملين من القائمة يناسبون ذوقه.
 8. إن لم تجد في القائمة ما يناسب فعلًا، قلها بصراحة واقترح تعديل الطلب. لا تذكر أبدًا كلمات داخلية مثل candidates أو «القائمة المرسلة» أو «النظام»: تكلّم كأنك تعرف الأعمال بنفسك.
 9. لكل بطاقة summary: نبذة عربية بسطر أو سطرين من synopsis المرسلة فقط، بلا حرق وبنفس أسلوبك.
 10. arabic_until وenglish_until = آخر فصل عربي وآخر فصل إنجليزي في مصادرنا. إن كان الإنجليزي أبعد، قلها بالأرقام («العربي واقف عند 22 والإنجليزي واصل 72») واقترح translate: {"from": أول فصل بعد العربي, "to": آخر إنجليزي} — نظام VANTARA هو اللي يترجم مقدمًا، أنت تحدد النطاق. إن كانت null فلا تخترع أرقامًا ولا translate.
@@ -844,7 +844,7 @@ export async function handleRafiqMessage(
         pool = lastCards
           .map((c) => ({ c, m: metas.get(c.workId) ?? null }))
           .map(({ c, m }) => ({ id: c.workId, kind: c.workId.startsWith('anime:') ? 'anime' : 'manga', meta: m, title: c.title, own: null, relation: null, exploration: false, fit: 0 }) as Candidate);
-      } else if (intent.intent !== 'chat' && !(intent.intent === 'feedback' && !/(غير|ثاني|بدل|عطني|أعطني|اقترح)/.test(text))) {
+      } else if (!(intent.intent === 'feedback' && !/(غير|ثاني|بدل|عطني|أعطني|اقترح)/.test(text))) {
         // ما عُرض في الأسبوعين الماضيين لا يتكرر (إلا إن سأل عنه بالاسم)
         const { results: shown } = await db
           .prepare('SELECT DISTINCT work_id FROM rafiq_recs WHERE user_id = ? AND shown_at > ?')
@@ -865,7 +865,7 @@ export async function handleRafiqMessage(
       // المعرّفات المرشّحة تُحفظ مع بياناتها: «ليش؟» و«أقل من هذا» تعرفها لاحقًا
       await cacheMeta(db, pool, now);
       // لا مرشّحين لطلب يحتاجهم: لا نسأل النموذج عن فراغ (كان يقول «ما عندي candidates»)
-      if (!pool.length && ['recommend', 'similar', 'lookup', 'resume'].includes(intent.intent)) {
+      if (!pool.length && ['recommend', 'similar', 'lookup', 'resume', 'chat'].includes(intent.intent)) {
         const none =
           intent.intent === 'resume'
             ? 'دوّرت في اللي بديته وما لقيت شي واقف عليه 👀 تبي أرشّح لك شي جديد؟'
