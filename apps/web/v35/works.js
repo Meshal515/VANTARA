@@ -301,12 +301,6 @@ export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editi
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
-  if (kind === 'latest' && !query && !genre) {
-    const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
-    const { entries, hasNextPage, known } = await collectLatestChapters(list, page, { known: prior });
-    void writeKv(CHAPTER_UPDATES_KEY, known);
-    return { items: recentWorks(entries), hasNextPage, page };
-  }
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
     withTimeout(genre
@@ -361,20 +355,12 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
-  if (kind === 'latest' && !query && !genre) {
-    const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
-    const { entries, hasNextPage, known } = await collectLatestChapters(list, page, {
-      known: prior,
-      onUpdate: (found, next) => onUpdate({ items: recentWorks(found), hasNextPage: next, page }),
-    });
-    void writeKv(CHAPTER_UPDATES_KEY, known);
-    return { items: recentWorks(entries), hasNextPage, page };
-  }
   const index = createWorkIndex();
   const positions = new Map();
   const mode = query || genre ? 'search' : kind === 'latestListing' ? 'latest' : kind;
   let hasNextPage = false;
   let timer = null;
+  let showedFirst = false;
   const flush = () => {
     clearTimeout(timer);
     timer = null;
@@ -399,8 +385,11 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
         );
         hasNextPage ||= Boolean(value?.hasNextPage);
         addPage(index, positions, source, value);
-        // الردود المتلاحقة تُجمع في رسمة واحدة كل ربع ثانية
-        timer ??= setTimeout(flush, 250);
+        // أول مصدر يظهر مباشرة؛ الردود التالية المتلاحقة تُجمع في رسمة واحدة.
+        if (!showedFirst && positions.size) {
+          showedFirst = true;
+          flush();
+        } else timer ??= setTimeout(flush, 250);
       } catch {
         // مصدر غير متاح لا يؤخر نتائج بقية المصادر.
       }

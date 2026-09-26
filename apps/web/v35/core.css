@@ -2834,7 +2834,7 @@ html,
   top: calc(var(--top-h) + var(--safe-top));
   z-index: 5;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   margin: 0 var(--gutter);
   padding: 4px;
