@@ -66,6 +66,11 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // نسخة الاختبار تعيش بجانب النسخة الموقعة الأساسية على نفس الهاتف.
+            applicationIdSuffix '.debug'
+            resValue 'string', 'app_name', 'VANTARA اختبار'
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
