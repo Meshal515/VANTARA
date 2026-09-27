@@ -1,7 +1,7 @@
 /**
  * قطع الاجتماع المشتركة: الأصدقاء والمجلس يرسمان الأشخاص والأوقات بنفس اليد.
  *
- * شارة المالك تأتي من الخادم (`accounts.badge`) — لا يضعها أحد لنفسه.
+ * صلاحية المالك تأتي من الخادم (`accounts.badge`) دون عرض شارة في الأسماء.
  */
 
 import { gsap } from '../vendor/gsap.esm.js';
@@ -23,19 +23,7 @@ const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)'
 /** GSAP ما لم يطلب النظام تقليل الحركة؛ `null` = الحالة النهائية فورًا. */
 export const motion = () => (reduced() ? null : gsap);
 
-/**
- * شارة المالك: نجمة بنفسجية ذات علامة صح بيضاء، وحجمها من حجم السطر.
- */
-export function ownerBadge() {
-  const s = el('span', 'sx-badge');
-  s.setAttribute('role', 'img');
-  s.setAttribute('aria-label', 'مالك VANTARA');
-  s.innerHTML =
-    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 0.9 2.2 1.7 2.8-.1 1.1 2.6 2.5 1.3-.3 2.8 1.2 2.5-1.8 2.2-.1 2.8-2.7.9-1.5 2.4-2.8-.5-2.6 1.1-2.2-1.8-2.8-.1-.9-2.7-2.4-1.5.5-2.8L.9 9.1l1.8-2.2.1-2.8 2.7-.9L7 0.8l2.8.5Z" fill="currentColor" transform="translate(0 .1) scale(.97)"/><path d="m5.8 10.1 2.7 2.6 5.7-5.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  return s;
-}
-
-/** الأشخاص من المرآة: الاسم، الصورة، والشارة. */
+/** الأشخاص من المرآة: الاسم، الصورة، وصلاحية المالك. */
 export function people(sync) {
   const me = () => sync.user?.userId;
   const profile = (id) => sync.rows('profiles', (p) => p.user_id === id)[0];
@@ -55,11 +43,10 @@ export function people(sync) {
   };
 }
 
-/** اسمٌ بشارته إن كان المالك. `you`: «أنت» مكان اسمك. */
+/** الاسم فقط. `you`: «أنت» مكان اسمك. */
 export function nameNode(kit, id, { cls = 'sx-name', you = false } = {}) {
   const wrap = el('span', `${cls}-wrap`);
   wrap.append(el('bdi', cls, you && id === kit.me() ? 'أنت' : kit.nameOf(id)));
-  if (kit.isOwner(id)) wrap.append(ownerBadge());
   return wrap;
 }
 

@@ -38,6 +38,25 @@ async function pull(env: ReturnType<typeof testEnv>['env'], as: string) {
 const row = (db: ReturnType<typeof testEnv>['db'], id: string) => db.prepare('SELECT * FROM majlis_messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
 
 describe('majlis chat', () => {
+  it('records server-timed per-message reads only for actual recipients and syncs them to the sender', async () => {
+    const { env, db } = testEnv();
+    const first = await op(env, B, 'majlis.send', { kind: 'text', body: 'الأولى' });
+    const second = await op(env, B, 'majlis.send', { kind: 'text', body: 'الثانية' });
+    const at = Number(row(db, second)?.['created_at']);
+    await op(env, C, 'majlis.read', { at });
+    const receipts = db.prepare('SELECT message_id, user_id, seen_at FROM majlis_message_receipts ORDER BY message_id').all() as Array<{ message_id: string; user_id: string; seen_at: number }>;
+    expect(receipts.map(({ message_id, user_id }) => [message_id, user_id])).toEqual([[first, C], [second, C]]);
+    expect(receipts.every((receipt) => receipt.seen_at > 0 && receipt.seen_at >= at)).toBe(true);
+    expect(((await pull(env, B)).majlis_message_receipts ?? []).map((r) => r.message_id)).toEqual([first, second]);
+    await op(env, C, 'majlis.read', { at });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_message_receipts').get()).toEqual({ n: 2 });
+    const third = await op(env, B, 'majlis.send', { kind: 'text', body: 'الثالثة' });
+    const nextAt = Number(row(db, third)?.['created_at']);
+    await op(env, C, 'majlis.read', { at: nextAt });
+    expect(db.prepare('SELECT message_id FROM majlis_message_receipts WHERE user_id = ? ORDER BY rowid DESC LIMIT 1').get(C))
+      .toEqual({ message_id: third });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_message_receipts WHERE user_id = ?').get(B)).toEqual({ n: 0 });
+  });
   it('defaults ownership to the immutable ngm account when no owner is configured', async () => {
     const { env, db } = sqliteEnv({
       VANTARA_SESSION_SECRET: SECRET,

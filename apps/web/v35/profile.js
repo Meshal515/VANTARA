@@ -19,7 +19,6 @@
  */
 
 import { isAnimeRef } from './anime-account.js';
-import { ownerBadge } from './social-kit.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
@@ -461,8 +460,6 @@ export function createProfile(ctx) {
     }
     const nameEl = el('h1', 'pf-name', name);
     nameEl.dir = 'auto';
-    // شارة المالك من الخادم (accounts.badge)، لا من الملف
-    if (sync.rows('accounts', (a) => a.user_id === userId)[0]?.badge === 'owner') nameEl.append(ownerBadge());
     const sub = el('div', 'pf-sub');
     const handle = usernameOf(userId);
     if (handle) {

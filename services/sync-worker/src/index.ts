@@ -331,6 +331,7 @@ const DELTA_TABLES = [
   ['majlis_hidden', 'user_id, target, hidden_at, rev'],
   ['majlis_meta', 'id, name, avatar_key, updated_by, updated_at, rev'],
   ['majlis_reads', 'user_id, read_at, rev'],
+  ['majlis_message_receipts', 'message_id, user_id, seen_at, rev'],
 ] as const;
 
 /** سقف الدفعة لكل جدول. دفعة ضخمة تتجاوز حد زمن الـWorker وتفشل كلها. */
@@ -1777,6 +1778,16 @@ export function statementsFor(
     case 'majlis.read': {
       const at = Math.min(asNumber(p['at']) ?? now, now);
       return [
+        // Only messages after this member's old watermark are new. The
+        // server clock records when they were actually viewed; replay stays
+        // idempotent and polling does not rescan the entire chat history.
+        db.prepare(
+          `INSERT INTO majlis_message_receipts (message_id, user_id, seen_at, rev)
+           SELECT id, ?, ?, ? FROM majlis_messages
+            WHERE created_at >= COALESCE((SELECT read_at FROM majlis_reads WHERE user_id = ?), 0)
+              AND created_at <= ? AND sender_id <> ? AND deleted = 0
+           ON CONFLICT (message_id, user_id) DO NOTHING`,
+        ).bind(userId, now, rev, userId, at, userId),
         db
           .prepare(
             `INSERT INTO majlis_reads (user_id, read_at, rev) VALUES (?, ?, ?)

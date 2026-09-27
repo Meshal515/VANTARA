@@ -9,20 +9,6 @@
 }
 
 /* ── القطع المشتركة ── */
-.v35 .sx-badge {
-  display: inline-grid;
-  place-items: center;
-  width: 0.95em;
-  height: 0.95em;
-  margin-inline-start: 4px;
-  color: #a78bfa;
-  vertical-align: -0.1em;
-  flex: none;
-}
-.v35 .sx-badge svg {
-  width: 100%;
-  height: 100%;
-}
 .v35 .sx-name-wrap,
 .v35 .sx-pal-name-wrap,
 .v35 .mc-sender-wrap,
@@ -602,6 +588,7 @@
   align-items: flex-end;
   gap: 8px;
   max-width: 100%;
+  position: relative;
 }
 .v35 .mc-ava {
   flex: none;
@@ -617,7 +604,54 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  touch-action: pan-y;
+  transition: transform 160ms ease;
 }
+.v35 .mc-swipe-cue {
+  position: absolute;
+  top: 50%;
+  right: -27px;
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.v35 .mc-item--mine .mc-swipe-cue { right: auto; left: -27px; }
+.v35 .mc-readers {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  margin: 2px 2px 3px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+.v35 .mc-reader-faces { display: inline-flex; align-items: center; padding-inline: 4px; }
+.v35 .mc-reader-face {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  margin-inline-start: -5px;
+  overflow: hidden;
+  border: 2px solid var(--surface-1);
+  border-radius: 50%;
+  opacity: .6;
+  filter: grayscale(1);
+}
+.v35 .mc-reader-face.is-seen { opacity: 1; filter: none; }
+.v35 .mc-reader-face > * { width: 100% !important; height: 100% !important; border-radius: 50%; }
+.v35 .mc-reader-row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }
+.v35 .mc-reader-row + .mc-reader-row { border-top: 1px solid var(--line); }
+.v35 .mc-reader-row .mc-reader-face { width: 40px; height: 40px; margin: 0; border-width: 2px; }
+.v35 .mc-reader-info { display: grid; gap: 3px; min-width: 0; }
+.v35 .mc-reader-info bdi { color: var(--text-1); font-weight: 650; }
+.v35 .mc-reader-info small { color: var(--text-3); font-size: 12px; }
 /* الزاوية الملاصقة للمرسل تضيق داخل المجموعة */
 .v35 .mc-item--theirs:not(.is-first) .mc-bubble {
   border-start-start-radius: 6px;
@@ -728,9 +762,12 @@
   padding: 8px 10px 6px 12px;
 }
 .v35 .mc-voice {
-  display: flex;
+  display: grid;
+  grid-template-columns: 36px minmax(76px, 1fr) 34px;
+  grid-template-rows: 28px 17px;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
+  width: min(68vw, 290px);
 }
 .v35 .mc-voice-play {
   display: grid;
@@ -743,6 +780,7 @@
   background: var(--surface-3);
   color: var(--text-1);
   cursor: pointer;
+  grid-row: 1 / 3;
 }
 .v35 .mc-voice--mine .mc-voice-play {
   background: rgba(255, 255, 255, 0.2);
@@ -750,8 +788,8 @@
 }
 .v35 .mc-voice-bars {
   display: flex;
-  flex: none;
-  width: min(38vw, 160px);
+  min-width: 0;
+  width: 100%;
   align-items: center;
   gap: 2px;
   height: 28px;
@@ -768,14 +806,16 @@
   opacity: 1;
 }
 .v35 .mc-voice-time {
-  flex: none;
-  min-width: 32px;
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
   font-size: 11.5px;
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
 .v35 .mc-voice-speed {
-  flex: none;
+  grid-column: 3;
+  grid-row: 1;
   min-width: 34px;
   height: 22px;
   padding: 0 6px;
