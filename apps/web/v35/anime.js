@@ -1382,6 +1382,7 @@ export function createAnime(deps) {
       for (const [ep, e] of Object.entries(watch)) if (!e.done && e.position > 5000) resume[ep] = e.position;
       state.playing = { session, m, n };
       deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
+      const presence = await deps.playerPresence?.();
       await engine.open({
         session,
         candidate,
@@ -1398,6 +1399,11 @@ export function createAnime(deps) {
           : sheet.work.copies,
         malId: m.idMal ?? null,
         resume,
+        presenceEndpoint: presence?.endpoint ?? null,
+        presenceAuthorization: presence?.authorization ?? null,
+        presenceUserId: presence?.userId ?? null,
+        presenceDeviceId: presence?.deviceId ?? null,
+        presenceDeviceCredential: presence?.deviceCredential ?? null,
       });
     }
   }

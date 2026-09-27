@@ -90,6 +90,11 @@ class AnimeEnginePlugin : Plugin() {
                 quality = call.getInt("quality") ?: 1080,
                 variant = call.getString("variant") ?: "SUB",
                 resume = call.getObject("resume")?.toString(),
+                presenceEndpoint = call.getString("presenceEndpoint"),
+                presenceAuthorization = call.getString("presenceAuthorization"),
+                presenceUserId = call.getString("presenceUserId"),
+                presenceDeviceId = call.getString("presenceDeviceId"),
+                presenceDeviceCredential = call.getString("presenceDeviceCredential"),
             ),
         )
         activity.startActivity(intent)

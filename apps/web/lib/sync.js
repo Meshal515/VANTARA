@@ -1031,6 +1031,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     get authorizationHeader() {
       return token ? `Bearer ${token}` : null;
     },
+    async playerPresence() {
+      if (!token || !user?.userId) return null;
+      return { authorization: `Bearer ${token}`, userId: user.userId, ...(await deviceProof(deviceIdProvider)) };
+    },
     get pendingWrites() {
       return queue.length;
     },

@@ -167,8 +167,8 @@ function startHeartbeat() {
   let sinceFlush = 0;
   beatTimer = setInterval(() => {
     tickUsage();
-    // المشغّل الأصلي فوق الواجهة يخفيها، والمشاهدة ما زالت حضورًا
-    if (document.visibilityState !== 'visible' && !state.reading?.watching) return;
+    // المشغّل الأصلي يرسل نبضته بنفسه؛ مؤقت WebView يتوقف في الخلفية.
+    if (document.visibilityState !== 'visible') return;
     void sync.beat(presencePayload());
     void refreshPresence();
     sinceFlush += BEAT_MS;
@@ -1446,6 +1446,7 @@ function screenV35(page) {
             void sync.beat(presencePayload());
           }
         },
+        playerPresence: async () => ({ endpoint: endpoints().sync, ...(await sync.playerPresence()) }),
         pageImage: async (sourceId, page) => (await engine.pageImage(sourceId, page)).src,
         // البلاغ يمرّ بخادم المحتوى؛ بلا عنوان له يفشل ويقول ذلك، لا يدّعي الوصول
         report: (input) => submitReport({ api, ...input, context: { screen: 'SERIES' } }),

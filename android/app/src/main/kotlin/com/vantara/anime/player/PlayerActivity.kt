@@ -66,8 +66,13 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -109,6 +114,11 @@ class PlayerActivity : Activity() {
         val variant: String = "SUB",
         /** مواضع الحلقات غير المكتملة (JSON: {"12": 61000}). */
         val resume: String? = null,
+        val presenceEndpoint: String? = null,
+        val presenceAuthorization: String? = null,
+        val presenceUserId: String? = null,
+        val presenceDeviceId: String? = null,
+        val presenceDeviceCredential: String? = null,
     )
 
     private lateinit var launch: Launch
@@ -144,6 +154,59 @@ class PlayerActivity : Activity() {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val presenceClient = OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()
+    private var presenceJob: Job? = null
+    private var presenceAuthorization: String? = null
+    private var presenceActive = false
+    private val presenceTick = object : Runnable {
+        override fun run() {
+            sendPresence()
+            if (presenceActive) main.postDelayed(this, 25_000)
+        }
+    }
+
+    private fun sendPresence() {
+        val endpoint = launch.presenceEndpoint?.trimEnd('/')?.takeIf { it.startsWith("https://") } ?: return
+        val authorization = presenceAuthorization?.takeIf { it.startsWith("Bearer ") } ?: return
+        if (presenceJob?.isActive == true) return
+        val watching = ::player.isInitialized && current != null && player.playbackState != Player.STATE_ENDED
+        val body = JSONObject().put("status", if (watching) "READING" else "ONLINE")
+            .put("screen", "ANIME")
+        if (watching) body.put("seriesId", "anime:${launch.animeId}")
+            .put("seriesTitle", launch.title)
+            .put("chapterLabel", "الحلقة ${fmtEpisode(episode)}")
+            .put("chapterNumber", episode.toDouble())
+        presenceJob = scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val request = Request.Builder().url("$endpoint/v1/presence")
+                        .header("Authorization", authorization)
+                        .post(body.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    val expired = presenceClient.newCall(request).execute().use { it.code == 401 }
+                    if (expired) refreshPresenceToken(endpoint)?.let { fresh ->
+                        presenceAuthorization = "Bearer $fresh"
+                        presenceClient.newCall(request.newBuilder().header("Authorization", "Bearer $fresh").build())
+                            .execute().use { /* best effort retry */ }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun refreshPresenceToken(endpoint: String): String? {
+        val user = launch.presenceUserId ?: return null
+        val device = launch.presenceDeviceId ?: return null
+        val credential = launch.presenceDeviceCredential ?: return null
+        val body = JSONObject().put("userId", user).put("deviceId", device)
+            .put("deviceCredential", credential).toString()
+        val request = Request.Builder().url("$endpoint/v1/session")
+            .post(body.toRequestBody("application/json".toMediaType())).build()
+        return presenceClient.newCall(request).execute().use { response ->
+            if (response.isSuccessful) response.body?.string()?.let { JSONObject(it).optString("token").takeIf(String::isNotBlank) }
+            else null
+        }
+    }
 
     private var sessionId = ""
     private var episode = 1f
@@ -204,6 +267,7 @@ class PlayerActivity : Activity() {
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
         sessionId = launch.session
+        presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
         preferCode = launch.preferCode
         copies = launch.copies?.let { runCatching { json.decodeFromString(ListSerializer(SourceAnime.serializer()), it) }.getOrNull() }.orEmpty()
@@ -275,6 +339,7 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_READY) {
                 spinner.visibility = View.GONE
+                if (presenceActive) sendPresence()
                 if (!reportedStart) {
                     reportedStart = true
                     main.removeCallbacks(startupWatchdog)
@@ -490,6 +555,7 @@ class PlayerActivity : Activity() {
         )
         if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
         episode = n.toFloat()
+        if (presenceActive) sendPresence()
         intro = null
         introRequestedEpisode = -1
         if (::skipIntroButton.isInitialized) skipIntroButton.visibility = View.GONE
@@ -1394,11 +1460,21 @@ class PlayerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        presenceActive = false
+        main.removeCallbacks(presenceTick)
         player.playWhenReady = false
         report(final = false)
     }
 
+    override fun onResume() {
+        super.onResume()
+        presenceActive = true
+        main.removeCallbacks(presenceTick)
+        main.post(presenceTick)
+    }
+
     override fun onDestroy() {
+        presenceActive = false
         clip?.release()
         unlisten?.invoke()
         scope.cancel()

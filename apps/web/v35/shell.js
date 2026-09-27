@@ -47,7 +47,7 @@ import { fetchMangaRatings } from '../lib/manga-meta.js';
 import { menuIn, menuOut, swapViews } from './motion.js';
 import { onLongPress } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
-import { imageLoadingNode } from './image-loading.js';
+import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
 
@@ -427,9 +427,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
-    const d = el('div', 'image-fallback');
-    d.append(el('span', null, initialOf(label)));
-    container.replaceChildren(d);
+    container.replaceChildren(imageFallbackNode(initialOf(label)));
   }
   /**
    * الصورة بعد تحميلها فقط، ومكانها هيكلٌ لامع حتى ذلك. التسابق محروس
@@ -4344,6 +4342,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     friends: () => deps.friends?.() ?? [],
     // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
     setWatching: (info) => deps.setWatching?.(info),
+    playerPresence: () => deps.playerPresence?.(),
     // ترشيح الأنمي: نفس ورقة المانجا، بمرجع `anime:<id>` يفتحه المجلس في قسم الأنمي
     share: (work) =>
       openShareSheet({
