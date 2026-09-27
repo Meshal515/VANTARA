@@ -81,8 +81,54 @@ jobs:
             for (const row of database.queries.slice(0, 25)) console.log(JSON.stringify(row));
           }
           NODE
+      - name: Probe actual indexed reads on production D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const root = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/d1/database`;
+          const headers = { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' };
+          const databases = await (await fetch(`${root}?name=vantara`, { headers })).json();
+          const database = databases.result?.find((row) => row.name === 'vantara');
+          if (!database) throw new Error('D1 vantara not found');
+          const query = async (sql, params = []) => {
+            const response = await fetch(`${root}/${database.uuid}/query`, {
+              method: 'POST', headers, body: JSON.stringify({ sql, params }),
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success || !payload.result?.[0]?.success) {
+              throw new Error(`D1 read-only probe failed: HTTP ${response.status}`);
+            }
+            return payload.result[0];
+          };
+          // This is the documented owner ID, not a discovered or printed user record.
+          const userId = 'bedcf897-a6f0-4730-b757-402b14891ca5';
+          const cases = [
+            ['chapter_marks',
+              'SELECT user_id, chapter_key, series_ref, read, updated_at, rev FROM chapter_marks WHERE rev > ? AND user_id = ? ORDER BY rev LIMIT 500',
+              [0, userId]],
+            ['activity_receipts',
+              'SELECT event_id, user_id, delivered_at, seen_at, rev FROM activity_receipts WHERE rev > ? AND rowid IN (SELECT rowid FROM activity_receipts WHERE user_id = ? AND rev > ? UNION SELECT r.rowid FROM activity_receipts r JOIN activity a ON a.id = r.event_id WHERE a.actor_id = ? AND r.rev > ?) ORDER BY rev LIMIT 500',
+              [0, userId, 0, userId, 0]],
+            ['translation_owner',
+              'SELECT created_by FROM translation_creator_totals ORDER BY page_count DESC, first_at LIMIT 1', []],
+          ];
+          const report = [];
+          for (const [name, sql, params] of cases) {
+            const result = await query(sql, params);
+            const plan = await query(`EXPLAIN QUERY PLAN ${sql}`, params);
+            report.push({ name, rowsRead: result.meta?.rows_read ?? null,
+              returned: result.results?.length ?? 0, plan: plan.results?.map((row) => row.detail) ?? [] });
+          }
+          writeFileSync('d1-audit/probe.json', JSON.stringify(report, null, 2));
+          for (const row of report) console.log(JSON.stringify(row));
+          NODE
       - uses: actions/upload-artifact@v4
         with:
           name: d1-read-audit
-          path: d1-audit/report.json
+          path: |
+            d1-audit/report.json
+            d1-audit/probe.json
           retention-days: 7
