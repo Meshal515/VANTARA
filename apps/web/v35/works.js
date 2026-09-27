@@ -83,6 +83,12 @@ function sources() {
 
 export const available = () => engine.isAvailable();
 
+let sharedLatest = null;
+export function setSharedLatest(fetchShared) { sharedLatest = fetchShared; }
+const sourceLatest = (sourceId, page) => page === 1 && sharedLatest
+  ? sharedLatest(sourceId, () => engine.latest(sourceId, page))
+  : engine.latest(sourceId, page);
+
 const CHAPTER_UPDATES_KEY = 'chapterUpdates.v2';
 const chapterId = (chapter) => {
   const number = chapterNumberOf(chapter);
@@ -310,7 +316,7 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
       : kind === 'popular'
         ? engine.popular(source.id, page)
         : kind === 'latest' || kind === 'latestListing'
-          ? engine.latest(source.id, page)
+        ? sourceLatest(source.id, page)
           : engine.catalogue(source.id, page), LISTING_TIMEOUT_MS),
   );
   const index = createWorkIndex();
@@ -379,7 +385,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
               : kind === 'popular'
                 ? engine.popular(source.id, page)
                 : kind === 'latest' || kind === 'latestListing'
-                  ? engine.latest(source.id, page)
+                  ? sourceLatest(source.id, page)
                   : engine.catalogue(source.id, page),
           LISTING_TIMEOUT_MS,
         );

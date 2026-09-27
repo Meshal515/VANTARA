@@ -96,6 +96,8 @@ const KEYS = {
   majlis_receipts: (row) => `${row.target_kind}/${row.target_id}/${row.user_id}`,
   // «آخر المشاهدات»: صف لكل عمل في حسابك، والحذف شاهد قبر
   work_views: (row) => `${row.user_id}/${row.series_ref}`,
+  public_work_views: (row) => `${row.user_id}/${row.series_ref}`,
+  view_privacy: (row) => row.user_id,
   settings: (row) => row.user_id,
   // المجلس محادثة: رسائل، و«إخفاء لدي»، واسمه وصورته، وآخر ما قرأه كل عضو
   majlis_messages: (row) => row.id,
@@ -174,6 +176,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
+  // ترقية المرآة القديمة: الصفوف الاجتماعية السابقة كانت مختلطة بسجل المالك.
+  // لا نعرضها قبل أن يعيد الخادم إرسال projection الحالي وصلاحية كل حساب.
+  if (localStorage.getItem('vantara.public-views.v1') !== '1') {
+    for (const [key, row] of Object.entries(mirror.work_views ?? {})) {
+      if (row?.user_id !== user?.userId) delete mirror.work_views[key];
+    }
+    cursor = 0;
+    localStorage.setItem(CURSOR_KEY, '0');
+    writeJson(MIRROR_KEY, mirror);
+    localStorage.setItem('vantara.public-views.v1', '1');
+  }
   let quarantine = readJson(QUARANTINE_KEY, []);
   /** أثر الكتابات التي لم يُقرّها الخادم بعد (`lib/optimistic.js`). يُحسب ولا يُحفظ. */
   let overlay = {};
@@ -622,9 +635,19 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         for (const [table, rows] of Object.entries(payload.changes ?? {})) {
           const keyOf = KEYS[table];
           if (!keyOf || !Array.isArray(rows) || rows.length === 0) continue;
-          const bucket = (mirror[table] ??= {});
+          const bucket = (mirror[table === 'public_work_views' ? 'work_views' : table] ??= {});
           for (const row of rows) bucket[keyOf(row)] = row;
-          touched.push(table);
+          touched.push(table === 'public_work_views' ? 'work_views' : table);
+        }
+        for (const privacy of Object.values(mirror.view_privacy ?? {})) {
+          if (privacy?.visible !== 0 || privacy.user_id === pullUserId) continue;
+          let purged = false;
+          for (const [key, row] of Object.entries(mirror.work_views ?? {})) {
+            if (row.user_id !== privacy.user_id) continue;
+            delete mirror.work_views[key];
+            purged = true;
+          }
+          if (purged) touched.push('work_views');
         }
 
         persistMirror();
@@ -1035,6 +1058,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     translation,
     stream,
     pendingProgress,
+    latestSnapshots: () => request('/v1/source-latest'),
+    privacyCapability: () => request('/v1/privacy/capabilities'),
+    claimLatest: (sourceId) => request('/v1/source-latest/claim', { method: 'POST', body: { sourceId } }),
+    publishLatest: (sourceId, value, leaseUntil) => request('/v1/source-latest', { method: 'POST', body: { sourceId, value, leaseUntil } }),
     health,
     retryQuarantined,
     /**
