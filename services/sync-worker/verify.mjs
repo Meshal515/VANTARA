@@ -134,10 +134,13 @@ async function cleanup() {
   // op_id ثابتة عمدًا لاختبار replay، لذلك إبقاء claim من Run سابق يجعل
   // أول كتابة في الـRun التالي تصطدم بالمفتاح الفريد وتظهر كـ500 زائف.
   // نحذف claims الخاصة بالـfixtures فقط؛ claims المستخدمين الحقيقيين لا تُمس.
-  await d1Query("DELETE FROM op_claims WHERE op_id LIKE '__verify__%'");
-  await d1Query("DELETE FROM notifications WHERE id LIKE '__verify__%'");
-  await d1Query("DELETE FROM applied_ops WHERE user_id = ? OR op_id LIKE '__verify__%'", [USER_ID]);
-  await d1Query("DELETE FROM works WHERE series_ref LIKE '__verify__%'");
+  // A LIKE prefix does not use the default case-insensitive SQLite index.
+  // The verifier owns this exact ASCII prefix; a key range uses the PK index.
+  await d1Query("DELETE FROM op_claims WHERE op_id >= '__verify__' AND op_id < '__verify_`'");
+  await d1Query("DELETE FROM notifications WHERE id >= '__verify__' AND id < '__verify_`'");
+  await d1Query('DELETE FROM applied_ops WHERE user_id = ?', [USER_ID]);
+  await d1Query("DELETE FROM applied_ops WHERE op_id >= '__verify__' AND op_id < '__verify_`'");
+  await d1Query("DELETE FROM works WHERE series_ref >= '__verify__' AND series_ref < '__verify_`'");
   await d1Query('DELETE FROM pairing_tokens WHERE user_id = ?', [USER_ID]);
   await d1Query('DELETE FROM accounts WHERE user_id = ? OR username = ?', [USER_ID, USERNAME]);
 }
