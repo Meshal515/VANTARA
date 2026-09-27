@@ -457,6 +457,7 @@ class PlayerActivity : Activity() {
             id, copies, next.toFloat(),
             Preferences(launch.quality, runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB)),
             warmSourceId = source,
+            preferredServer = current?.server,
         )
     }
 

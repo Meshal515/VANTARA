@@ -1346,7 +1346,7 @@ export function createAnime(deps) {
           const copies = autoServer?.sourceId
             ? [...work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
             : work.copies;
-          const out = await engine.prepare({ copies, episode: n });
+          const out = await engine.prepare({ copies, episode: n, preferredSourceId: autoServer?.sourceId, preferredServer: autoServer?.server });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;

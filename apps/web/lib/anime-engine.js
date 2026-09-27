@@ -93,8 +93,8 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB' }) {
-  return (await call('prepare', { copies, episode, quality, variant })) ?? null;
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null }) {
+  return (await call('prepare', { copies, episode, quality, variant, preferredSourceId, preferredServer })) ?? null;
 }
 
 /** اسم السيرفر ومعرّف المصدر ثابتان بين الأعمال؛ رمز البطاقة ورابط الحلقة ليسا كذلك. */

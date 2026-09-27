@@ -110,7 +110,11 @@ class AnimeEnginePlugin : Plugin() {
             variant = runCatching { Variant.valueOf(call.getString("variant") ?: "SUB") }.getOrDefault(Variant.SUB),
         )
         val session = call.getString("session") ?: "s-${System.nanoTime()}"
-        val prep = engine.prepare(session, copies, number, prefs)
+        val prep = engine.prepare(
+            session, copies, number, prefs,
+            preferredSourceId = call.getString("preferredSourceId"),
+            preferredServer = call.getString("preferredServer"),
+        )
         prep.listen { route ->
             if (route == null) notifyListeners("prepared", JSObject().put("session", session))
             else notifyListeners("route", JSObject().put("session", session).put("route", route, com.vantara.anime.stream.Route.serializer()))
