@@ -13,7 +13,7 @@
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -48,6 +48,8 @@ import { menuIn, menuOut, swapViews } from './motion.js';
 import { onLongPress } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode } from './image-loading.js';
+import { copyableText, editableText } from './text-actions.js';
+import { createSourceLatest } from './source-latest.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -136,6 +138,7 @@ const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?
  */
 export function mountV35(deps, { page = 'home' } = {}) {
   const { sync } = deps;
+  setSharedLatest(createSourceLatest(sync));
   const root = el('div', 'v35');
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
@@ -210,6 +213,54 @@ export function mountV35(deps, { page = 'home' } = {}) {
     b.onclick = run;
     return b;
   }
+
+  function openTextActions(value) {
+    openSheet((body) => {
+      const preview = el('p', 'copy-preview', value.length > 180 ? `${value.slice(0, 180)}…` : value);
+      preview.dir = 'auto';
+      body.append(preview,
+        sheetItem('copy', 'نسخ', async () => {
+          try { await navigator.clipboard.writeText(value); toast('نُسخ النص'); }
+          catch { toast('تعذّر النسخ'); }
+          closeSheet();
+        }),
+        sheetItem('share', 'مشاركة', async () => {
+          closeSheet();
+          try {
+            if (navigator.share) await navigator.share({ text: value });
+            else { await navigator.clipboard.writeText(value); toast('نُسخ النص للمشاركة'); }
+          } catch (error) { if (error?.name !== 'AbortError') toast('تعذّرت المشاركة'); }
+        }),
+      );
+    });
+  }
+  let textPress = null;
+  const cancelTextPress = () => { if (textPress) clearTimeout(textPress.timer); textPress = null; };
+  root.addEventListener('pointerdown', (event) => {
+    cancelTextPress();
+    const value = copyableText(event.target);
+    if (!value) return;
+    const press = { x: event.clientX, y: event.clientY, value, timer: null };
+    press.timer = setTimeout(() => {
+      if (textPress !== press) return;
+      openTextActions(value);
+      textPress = null;
+    }, 500);
+    textPress = press;
+  });
+  root.addEventListener('pointermove', (event) => {
+    if (textPress && Math.hypot(event.clientX - textPress.x, event.clientY - textPress.y) > 8) cancelTextPress();
+  });
+  for (const kind of ['pointerup', 'pointercancel']) root.addEventListener(kind, cancelTextPress);
+  root.addEventListener('contextmenu', (event) => {
+    if (editableText(event.target)) return;
+    event.preventDefault();
+    cancelTextPress();
+    const value = copyableText(event.target);
+    if (!value) return; // بطاقة العمل تعالج ضغطتها المطوّلة بنفسها.
+    event.stopPropagation();
+    if (!q('sheet').classList.contains('show')) openTextActions(value);
+  }, true);
 
   // ───────────────────────── الأعمال المحفوظة ─────────────────────────
   // المزامنة تحفظ عنوان العمل وغلافه؛ ونُسخه (أي مصدر يحمله) تُحفظ هنا ليُفتح
@@ -746,6 +797,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   const recentFromLatest = (fresh, previous) =>
     uniqueById([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
+  let latestJob = null;
+  let latestResult = null;
+  let latestPartial = null;
+  const latestListeners = new Set();
+  function latestFirstPage() {
+    if (latestJob) return latestJob;
+    if (latestResult && Date.now() - latestResult.at < 60_000) return Promise.resolve(latestResult);
+    latestJob = browseLive({ kind: 'latestListing', page: 1 }, ({ items, hasNextPage }) => {
+      if (!items.length) return;
+      latestPartial = { items, hasNextPage, page: 1 };
+      state.home.recent = recentFromLatest(items, state.home.recent);
+      for (const listener of latestListeners) listener(latestPartial);
+      if (state.collection?.kind === 'latestListing' && state.collection.page === 0) {
+        state.collection.items = recentFromLatest(items, state.collection.items);
+        renderGrid(q('collectionGrid'), state.collection.items);
+      }
+      if (currentPage() === 'home') renderHome();
+      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+    }, { concurrency: 3 }).then((result) => {
+      latestResult = { ...result, at: Date.now() };
+      return latestResult;
+    }).finally(() => { latestJob = null; });
+    return latestJob;
+  }
   function renderHome() {
     const specs = [];
     const history = historyWorks();
@@ -802,7 +877,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
     if (hasCache) {
       if (cached?.trending?.length) state.home.trending = cached.trending;
-      if (cached?.recent?.length) state.home.recent = cached.recent.map(({ _latestChapter, ...w }) => w);
+      if (cached?.recent?.length) state.home.recent = recentFromLatest(state.home.recent, cached.recent.map(({ _latestChapter, ...w }) => w));
       const previousHero = heroFrom(state.home.trending);
       if (previousHero.length && (previousHero.length !== state.heroItems.length || previousHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
         state.heroItems = previousHero;
@@ -846,14 +921,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       paint();
     };
+    const onLatest = ({ items }) => live('recent')({ items });
+    latestListeners.add(onLatest);
     try {
       const [tr, re] = await Promise.all([
         browseLive({ kind: 'popular', page: 1 }, live('trending'), {
           concurrency: 3, shouldContinue: () => currentPage() === 'home' && root.dataset.section === 'manga',
         }),
-        browseLive({ kind: 'latestListing', page: 1 }, live('recent'), {
-          concurrency: 3, shouldContinue: () => currentPage() === 'home' && root.dataset.section === 'manga',
-        }),
+        latestFirstPage(),
       ]);
       // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
       if (tr.items.length) state.home.trending = tr.items;
@@ -885,6 +960,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       q('homeSections').replaceChildren(box.firstElementChild);
     }
     } finally {
+      latestListeners.delete(onLatest);
       homeCheckedAt = Date.now();
       homeBusy = false;
     }
@@ -2564,13 +2640,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return;
     }
     const c = COLLECTIONS[kind] || COLLECTIONS.trending;
-    const initial = kind === 'recent' ? state.home.recent : kind === 'trending' ? state.home.trending : [];
+    const initial = kind === 'recent'
+      ? recentFromLatest(latestPartial?.items ?? [], state.home.recent)
+      : kind === 'trending' ? state.home.trending : [];
     state.collection = { kind: c.kind, page: 0, hasNext: true, items: [...initial], genre: null };
     q('collectionTitle').textContent = c.title;
     if (initial.length) renderGrid(q('collectionGrid'), initial);
     else q('collectionGrid').replaceChildren(...skeletonCards(9));
     q('collectionMore').hidden = true;
     showPage('collection');
+    if (c.kind === 'latestListing') void latestFirstPage();
     await loadMoreCollection();
   }
   async function loadMoreCollection() {
@@ -2584,11 +2663,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const r = state.collection.genre
         ? await browse({ genre: state.collection.genre.names, page })
         : state.collection.kind === 'latestListing' && page === 1
-          ? await browseLive({ kind: 'latestListing', page }, ({ items }) => {
-              if (requested !== state.collection || !items.length) return;
-              state.collection.items = uniqueById([...items, ...requested.items]);
-              renderGrid(q('collectionGrid'), state.collection.items);
-            })
+          ? await latestFirstPage()
           : await browse({ kind: state.collection.kind, page });
       if (requested !== state.collection) return;
       state.collection.page = r.page;
@@ -3547,11 +3622,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
         toggle(
           'eye',
           'عرض ماذا أشاهد الآن',
-          privacy.shareCurrent === false ? 'يشوفون «يقرأ» أو «يشاهد» بدون العمل، وآخر مشاهداتك توصلهم بعد ساعة' : 'أصدقاؤك يشوفون العمل اللي تقرأه أو تشاهده',
+          privacy.shareCurrent === false
+            ? `يشوفون «يقرأ» أو «يشاهد» بدون العمل${privacy.showRecentViews === false ? '' : '، وآخر مشاهداتك توصلهم بعد ساعة'}`
+            : 'أصدقاؤك يشوفون العمل اللي تقرأه أو تشاهده',
           privacy.shareCurrent !== false,
           (on) => {
             setMySettings({ shareCurrent: on });
             renderSettings();
+          },
+        ),
+        toggle(
+          'clock',
+          'إظهار آخر المشاهدات في ملفي',
+          privacy.showRecentViews === false
+            ? 'سجلّك لك وحدك؛ يُسحب من أجهزة الأصدقاء بعد مزامنتها'
+            : 'آخر الأعمال والفصول التي شاهدتها تظهر في ملفك عند أصدقائك',
+          privacy.showRecentViews !== false,
+          async (on) => {
+            try {
+              if (!(await sync.privacyCapability()).recentViewsRevocable) throw new Error('privacy_not_ready');
+              setMySettings({ showRecentViews: on });
+              renderSettings();
+            } catch {
+              toast('حماية السجل تنتظر تحديث الخادم؛ حاول بعد قليل');
+              renderSettings();
+            }
           },
         ),
         toggle(
@@ -3565,7 +3660,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           },
         ),
       ],
-      { note: 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
+      { note: privacy.showRecentViews === false
+        ? 'آخر المشاهدات مخفية عن الأصدقاء؛ العمل الحالي ونشاط الإنهاء لهما خياران مستقلان.'
+        : 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
     );
     group('الخصوصية · ما أراه أنا', [
       row('activity', 'نشاط القراءة', '«خلّص الفصل» و«أنهى الحلقة» من أصدقائك في «آخر ما صار». يخصّك أنت، وما يغيّر شي عندهم', {
@@ -4363,6 +4460,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   paintNotifyDots();
   renderHome();
+  // ابدأ Latest عند دخول التطبيق مباشرة؛ loadHome وصفحته يتشاركان نفس الطلب.
+  if (available()) void latestFirstPage();
   void loadHome();
   const refreshChapters = () => {
     if (!document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= 60_000) void loadHome();

@@ -34,7 +34,8 @@ async function send(env: ReturnType<typeof testEnv>['env'], as: string, kind: st
 async function views(env: ReturnType<typeof testEnv>['env'], as: string) {
   const token = await mintToken(as, SECRET);
   const res = await worker.fetch(new Request('https://sync.test/v1/sync?since=0', { headers: { authorization: `Bearer ${token}` } }), env, ctx);
-  return ((await res.json()) as { changes: Record<string, Array<Record<string, unknown>>> }).changes.work_views ?? [];
+  const changes = ((await res.json()) as { changes: Record<string, Array<Record<string, unknown>>> }).changes;
+  return (as === A ? changes.work_views : changes.public_work_views) ?? [];
 }
 
 describe('work views', () => {

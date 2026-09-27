@@ -96,6 +96,26 @@
 .v35 *::after {
   box-sizing: border-box;
 }
+/* Android WebView: نص الواجهة لا يدخل ActionMode والتظليل الأصلي.
+   حقول التحرير وحدها تحتفظ بالتحديد الحقيقي. */
+.v35, .v35 * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.v35 input, .v35 textarea, .v35 [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.v35 .copy-preview {
+  margin: 12px 16px;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  max-height: 6.4em;
+  overflow: hidden;
+}
 .v35 button,
 /*
  * لا تظليل أزرق عند اللمس، في أي مكان. أندرويد يرسمه فوق كل ما يُنقر (بطاقة،
@@ -563,17 +583,14 @@ html,
 .v35 .page-body {
   padding: 16px var(--gutter) 28px;
 }
-/* WebView أندرويد: كل طبقة بـbackdrop-filter أو filter: blur سطحٌ مركّب
-   إضافي على الـGPU، وعلى أجهزة كثيرة يُرسم أسود بالكامل حين يتغيّر المحتوى
-   تحتها أو تمتلئ ذاكرة الطبقات (هذا سبب «الاجتماع شاشة سوداء»). في التطبيق
-   الأصلي لا زجاج إطلاقًا: الخلفيات شبه الشفافة تكفي وحدها. */
+/* نخفف الزجاج المتكرر على Android؛ بنر الغلاف يحتفظ بضبابيته المقصودة.
+   غطاء الاجتماع كان هيكل الصورة المطلق خارج حاويته، وقد عولج في mountImage. */
 .v35.native-android *,
 .v35.native-android *::before,
 .v35.native-android *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-.v35.native-android .hero-backdrop,
 .v35.native-android .detail-glow i {
   filter: none !important;
 }

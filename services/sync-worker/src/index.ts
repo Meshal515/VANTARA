@@ -179,9 +179,10 @@ function incognitoUntilFrom(raw: unknown): number {
  * يقرأه بعضهم، والإخفاء اختيار صريح.
  *   - shareCurrent: عرض العمل الذي أقرأه/أشاهده الآن (ما يراه الآخرون عني)
  *   - shareCompletions: إظهار إنهاء الفصول والحلقات (ما يراه الآخرون عني)
+ *   - showRecentViews: نشر سجلّ آخر المشاهدات في الملف (مستقل عن الحضور والنشاط)
  * أما «نشاط القراءة لدي» فمصفاة المشاهد نفسه، لا تمسّ الخادم.
  */
-export function privacyFrom(raw: unknown): { shareCurrent: boolean; shareCompletions: boolean } {
+export function privacyFrom(raw: unknown): { shareCurrent: boolean; shareCompletions: boolean; showRecentViews: boolean } {
   let parsed: Record<string, unknown> = {};
   if (typeof raw === 'string' && raw !== '') {
     try {
@@ -190,12 +191,13 @@ export function privacyFrom(raw: unknown): { shareCurrent: boolean; shareComplet
       parsed = {};
     }
   }
-  return { shareCurrent: parsed['shareCurrent'] !== false, shareCompletions: parsed['shareCompletions'] !== false };
+  return { shareCurrent: parsed['shareCurrent'] !== false, shareCompletions: parsed['shareCompletions'] !== false, showRecentViews: parsed['showRecentViews'] !== false };
 }
 /** شرط SQL: صاحب الحساب أخفى عمله الحالي. قيمة واحدة: user_id. */
 const SQL_HIDES_CURRENT = "COALESCE(json_extract((SELECT data FROM settings WHERE user_id = ?), '$.shareCurrent'), 1) = 0";
 /** شرط SQL: صاحب الحساب يشارك إنهاء الفصول والحلقات. قيمة واحدة: user_id. */
 const SQL_SHARES_COMPLETIONS = "COALESCE(json_extract((SELECT data FROM settings WHERE user_id = ?), '$.shareCompletions'), 1) != 0";
+const SQL_SHARES_HISTORY = "COALESCE(json_extract((SELECT data FROM settings WHERE user_id = ?), '$.showRecentViews'), 1) != 0";
 /** مهلة آخر المشاهدات لمن أخفى عمله الحالي. */
 export const SOCIAL_GRACE_MS = 60 * 60 * 1000;
 
@@ -313,8 +315,10 @@ const DELTA_TABLES = [
   ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
-  // السجل يراه أصدقاؤك في ملفك كما تراه أنت: الأصدقاء الثلاثة مجلس واحد
+  // سجلّ المالك خاص. النسخة الاجتماعية في جدول مستقل وقابلة للسحب.
   ['work_views', 'user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev, social_at'],
+  ['public_work_views', 'user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev, social_at'],
+  ['view_privacy', 'user_id, visible, rev'],
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
@@ -345,7 +349,7 @@ const PAGE_SIZE = 500;
  */
 export async function publishDue(env: Env, now: number): Promise<number> {
   const due = await env.DB.prepare(
-    `SELECT EXISTS (SELECT 1 FROM work_views WHERE social_at > 0 AND social_at <= ?)
+    `SELECT EXISTS (SELECT 1 FROM public_work_views WHERE social_at > 0 AND social_at <= ?)
          OR EXISTS (SELECT 1 FROM activity WHERE social_at > 0 AND social_at <= ?) AS due`,
   )
     .bind(now, now)
@@ -356,15 +360,34 @@ export async function publishDue(env: Env, now: number): Promise<number> {
     env.DB.prepare(
       `INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev)
        SELECT series_ref, series_title, cover_url, NULL, ?, ?
-         FROM work_views
+         FROM public_work_views
         WHERE social_at > 0 AND social_at <= ? AND removed = 0 AND (series_title IS NOT NULL OR cover_url IS NOT NULL)
        ON CONFLICT (series_ref) DO UPDATE SET
          title = COALESCE(works.title, excluded.title),
          cover_url = COALESCE(works.cover_url, excluded.cover_url),
          rev = excluded.rev`,
     ).bind(now, rev, now),
-    env.DB.prepare('UPDATE work_views SET social_at = NULL, published = 1, rev = ? WHERE social_at > 0 AND social_at <= ?').bind(rev, now),
+    env.DB.prepare('UPDATE public_work_views SET social_at = NULL, published = 1, rev = ? WHERE social_at > 0 AND social_at <= ?').bind(rev, now),
     env.DB.prepare('UPDATE activity SET social_at = NULL, rev = ? WHERE social_at > 0 AND social_at <= ?').bind(rev, now),
+  ]);
+}
+
+/** ينقل المنشور القديم إلى الإسقاط الاجتماعي مرة واحدة بعد ترقية Worker. */
+async function ensurePublicViewBackfill(env: Env): Promise<void> {
+  const state = await env.DB.prepare('SELECT migrated FROM view_projection_meta WHERE id = 1').first<{ migrated: number }>();
+  if (state?.migrated) return;
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO public_work_views
+         (user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev, social_at, published)
+       SELECT w.user_id, w.series_ref, w.series_title, w.cover_url, w.chapter_label, w.chapter_number,
+              w.viewed_at, 0, w.rev, w.social_at, w.published
+         FROM work_views w LEFT JOIN settings s ON s.user_id = w.user_id
+        WHERE w.removed = 0 AND (w.social_at IS NULL OR w.social_at > 0)
+          AND COALESCE(json_extract(s.data, '$.showRecentViews'), 1) != 0
+          AND NOT EXISTS (SELECT 1 FROM view_privacy p WHERE p.user_id = w.user_id)`,
+    ),
+    env.DB.prepare('INSERT OR REPLACE INTO view_projection_meta (id, migrated) VALUES (1, 1)'),
   ]);
 }
 
@@ -387,6 +410,7 @@ export async function ensureOwnerBadge(env: Env, now: number): Promise<void> {
 }
 
 async function handleSync(url: URL, env: Env, userId: string, now = Date.now()): Promise<Response> {
+  await ensurePublicViewBackfill(env);
   await publishDue(env, now);
   await ensureOwnerBadge(env, now);
   const since = Number(url.searchParams.get('since') ?? '0');
@@ -414,9 +438,15 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       case 'notifications':
         return { sql: ' AND user_id = ?', values: [userId] };
 
-      // آخر المشاهدات: صاحبها فورًا، والأصدقاء بعد نشرها (مهلة الساعة لمن أخفى)
+      // المالك وحده يستلم صفوفه الخاصة حتى عندما يخفي الملف عن الكل.
       case 'work_views':
-        return { sql: ' AND (user_id = ? OR social_at IS NULL)', values: [userId] };
+        return { sql: ' AND user_id = ?', values: [userId] };
+      // سجل اجتماعي مستقل؛ إطفاء الخيار يوقفه على الخادم، بما فيه السحب الكامل.
+      case 'public_work_views':
+        return {
+          sql: " AND user_id <> ? AND social_at IS NULL AND COALESCE((SELECT visible FROM view_privacy WHERE view_privacy.user_id = public_work_views.user_id), 1) = 1",
+          values: [userId],
+        };
 
       // المستلم يرى حالته فقط، والمرسل يحتاج حالات كل من أرسل إليهم.
       case 'recommendation_recipients':
@@ -559,6 +589,36 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
     more: next.more,
     changes,
   });
+}
+
+/** لقطة عامة بلا بيانات مستخدمين. لا نضعها في جدول المزامنة الشخصي. */
+async function handleSourceLatest(request: Request, env: Env, path: string, now: number): Promise<Response> {
+  if (request.method === 'GET' && path === '/v1/source-latest') {
+    const { results } = await env.DB.prepare('SELECT source_id, payload, fetched_at FROM source_latest WHERE payload IS NOT NULL').all<{ source_id: string; payload: string; fetched_at: number }>();
+    return json({ sources: results.map((row) => ({ sourceId: row.source_id, value: JSON.parse(row.payload), fetchedAt: row.fetched_at })) });
+  }
+  if (request.method !== 'POST') return json({ error: 'method' }, { status: 405 });
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const sourceId = asString(body?.['sourceId'], 120);
+  if (!sourceId || !/^[\w.:-]+$/.test(sourceId)) return json({ error: 'source' }, { status: 400 });
+  if (path === '/v1/source-latest/claim') {
+    const out = await env.DB.prepare(
+      `INSERT INTO source_latest (source_id, lease_until) VALUES (?, ?)
+       ON CONFLICT (source_id) DO UPDATE SET lease_until = excluded.lease_until
+       WHERE source_latest.fetched_at < ? AND source_latest.lease_until < ?`,
+    ).bind(sourceId, now + 20_000, now - 60_000, now).run();
+    return json({ claimed: Number(out.meta?.changes ?? 0) > 0, leaseUntil: now + 20_000 });
+  }
+  if (path !== '/v1/source-latest') return json({ error: 'not_found' }, { status: 404 });
+  const value = body?.['value'] as { mangas?: unknown[]; hasNextPage?: unknown } | null;
+  if (!value || !Array.isArray(value.mangas) || value.mangas.length > 100) return json({ error: 'listing' }, { status: 400 });
+  const payload = JSON.stringify({ mangas: value.mangas, hasNextPage: Boolean(value.hasNextPage) });
+  if (payload.length > 160_000) return json({ error: 'listing_too_large' }, { status: 413 });
+  const leaseUntil = asNumber(body?.['leaseUntil']);
+  const published = await env.DB.prepare(
+    'UPDATE source_latest SET payload = ?, fetched_at = ?, lease_until = 0 WHERE source_id = ? AND lease_until = ?',
+  ).bind(payload, now, sourceId, leaseUntil).run();
+  return json({ ok: Number(published.meta?.changes ?? 0) > 0, fetchedAt: now });
 }
 
 // ───────────────────────────── الكتابة ─────────────────────────────
@@ -1983,6 +2043,28 @@ export function statementsFor(
             now + SOCIAL_GRACE_MS,
             userId,
           ),
+        db.prepare(
+          `INSERT INTO public_work_views
+             (user_id, series_ref, series_title, cover_url, chapter_label, chapter_number, viewed_at, removed, rev, social_at, published)
+           SELECT ?, ?, ?, ?, ?, ?, ?, 0, ?,
+                  CASE WHEN ${SQL_HIDES_CURRENT} THEN ? ELSE NULL END,
+                  CASE WHEN ${SQL_HIDES_CURRENT} THEN 0 ELSE 1 END
+            WHERE ${SQL_SHARES_HISTORY}
+           ON CONFLICT (user_id, series_ref) DO UPDATE SET
+             social_at = excluded.social_at,
+             published = CASE WHEN excluded.social_at IS NULL THEN 1 ELSE public_work_views.published END,
+             series_title = COALESCE(excluded.series_title, public_work_views.series_title),
+             cover_url = COALESCE(excluded.cover_url, public_work_views.cover_url),
+             chapter_label = COALESCE(excluded.chapter_label, public_work_views.chapter_label),
+             chapter_number = COALESCE(excluded.chapter_number, public_work_views.chapter_number),
+             viewed_at = MAX(public_work_views.viewed_at, excluded.viewed_at),
+             removed = CASE WHEN excluded.viewed_at > public_work_views.viewed_at THEN 0 ELSE public_work_views.removed END,
+             rev = excluded.rev`,
+        ).bind(
+          userId, seriesRef, title && !/^ext:/i.test(title) ? title : null, coverUrl,
+          asString(p['chapterLabel'], 120), asNumber(p['chapterNumber']), at, rev,
+          userId, now + SOCIAL_GRACE_MS, userId, userId,
+        ),
       ];
     }
 
@@ -2005,6 +2087,15 @@ export function statementsFor(
                rev = excluded.rev`,
           )
           .bind(userId, seriesRef, now, rev),
+        db.prepare(
+          `UPDATE public_work_views
+              SET removed = 1, viewed_at = MAX(viewed_at, ?),
+                  social_at = CASE WHEN published = 1 THEN NULL ELSE -1 END,
+                  chapter_label = CASE WHEN social_at IS NOT NULL THEN NULL ELSE chapter_label END,
+                  chapter_number = CASE WHEN social_at IS NOT NULL THEN NULL ELSE chapter_number END,
+                  rev = ?
+            WHERE user_id = ? AND series_ref = ?`,
+        ).bind(now, rev, userId, seriesRef),
         // وإنهاء فصوله المعلّق في المهلة لا يُنشر أيضًا: لا يعرفون ما كان
         db
           .prepare('UPDATE activity SET social_at = -1, rev = ? WHERE actor_id = ? AND series_ref = ? AND social_at > 0')
@@ -2229,6 +2320,17 @@ async function applyFieldMerge(
                   AND NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)`,
             ).bind(path, JSON.stringify(value), path, rev, rev, userId, rev, path, op.opId),
           );
+        }
+        // هذا الصف لا يحمل أعمالًا؛ يطلب من كل جهاز سبق أن خزّن السجل حذفه.
+        // الحذف والضبط في نفس revision، فلا يرى صديق حالة وسطية.
+        const history = safeFields.find(([key, value]) => key === 'showRecentViews' && typeof value === 'boolean');
+        if (history) {
+          const visible = history[1] === true ? 1 : 0;
+          statements.push(env.DB.prepare(
+            `INSERT INTO view_privacy (user_id, visible, rev) VALUES (?, ?, ?)
+             ON CONFLICT (user_id) DO UPDATE SET visible = excluded.visible, rev = excluded.rev`,
+          ).bind(userId, visible, rev));
+          if (!visible) statements.push(env.DB.prepare('DELETE FROM public_work_views WHERE user_id = ?').bind(userId));
         }
       } else {
         statements.push(
@@ -2831,7 +2933,9 @@ export default {
       if (!userId) return json({ error: 'unauthorized' }, { status: 401 }, cors);
 
       let response: Response | null = null;
-      if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);
+      if (path === '/v1/privacy/capabilities' && request.method === 'GET') response = json({ recentViewsRevocable: true });
+      else if (path.startsWith('/v1/source-latest') && (request.method === 'GET' || request.method === 'POST')) response = await handleSourceLatest(request, env, path, now);
+      else if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'GET') response = await handlePresenceList(env, now);

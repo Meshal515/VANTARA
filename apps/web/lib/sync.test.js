@@ -54,6 +54,43 @@ beforeEach(() => {
   storage = fakeStorage();
   storage.setItem('vantara.token', 'token-1');
   storage.setItem('vantara.user', JSON.stringify(SIGNED_IN));
+  storage.setItem('vantara.public-views.v1', '1');
+});
+
+describe('revoking a friend’s recent views', () => {
+  it('clears legacy peer rows once and replays the public projection from the server', async () => {
+    storage.removeItem('vantara.public-views.v1');
+    storage.setItem('vantara.cursor', '42');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: {
+      'u1/own': { user_id: 'u1', series_ref: 'own' },
+      'friend/old': { user_id: 'friend', series_ref: 'old' },
+    } }));
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ error: 'offline' }, 503)) });
+    expect(sync.rows('work_views').map((r) => r.series_ref)).toEqual(['own']);
+    expect(storage.getItem('vantara.cursor')).toBe('0');
+  });
+
+  it('erases old local copies and rejects a public row delivered in the same pull', async () => {
+    storage.setItem('vantara.public-views.v1', '1');
+    storage.setItem('vantara.mirror', JSON.stringify({
+      accounts: { u1: { user_id: 'u1' } },
+      work_views: {
+        'u1/own': { user_id: 'u1', series_ref: 'own' },
+        'friend/old': { user_id: 'friend', series_ref: 'old' },
+      },
+    }));
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      cursor: 4, more: false,
+      changes: {
+        public_work_views: [{ user_id: 'friend', series_ref: 'new', rev: 3 }],
+        view_privacy: [{ user_id: 'friend', visible: 0, rev: 4 }],
+      },
+    }));
+    const sync = await loadSync({ storage, fetchImpl });
+    await sync.pull();
+    expect(sync.rows('work_views').map((r) => r.series_ref)).toEqual(['own']);
+    expect(JSON.stringify(storage.getItem('vantara.mirror'))).not.toContain('friend/');
+  });
 });
 
 describe('queue durability', () => {
