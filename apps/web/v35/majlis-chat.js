@@ -15,7 +15,7 @@
 import { glyph } from './icons.js';
 import { REACTIONS } from './majlis.js';
 import { displayTitle, refForTitle } from './work-ref.js';
-import { actionList, clockTime, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceState, pressable, roomInitial } from './social-kit.js';
+import { clockTime, dayLabel, el, motion, nameNode, parse, people, presenceState, pressable, roomInitial } from './social-kit.js';
 import { formatDuration, isPlaying, nextSpeed, seekVoice, setVoiceSpeed, startRecording, toggleVoice } from './voice.js';
 
 const GROUP_GAP_MS = 5 * 60_000;
@@ -50,6 +50,7 @@ export function timeline(sync, me) {
 function receiptState(sync) {
   return {
     receipts: new Map(sync.rows('majlis_message_receipts').map((r) => [`${r.message_id}/${r.user_id}`, r])),
+    social: new Map(sync.rows('majlis_receipts').map((r) => [`${r.target_kind}/${r.target_id}/${r.user_id}`, r])),
     watermarks: new Map(sync.rows('majlis_reads').map((r) => [r.user_id, r.read_at])),
   };
 }
@@ -60,6 +61,28 @@ export function messageReaders(sync, message, members, state = receiptState(sync
     const watermark = state.watermarks.get(id) ?? 0;
     return { id, seen: Boolean(receipt?.seen_at || watermark >= message.created_at), seenAt: receipt?.seen_at ?? null };
   });
+}
+
+/** الترشيح والفريم لهما إيصالات سابقة؛ لا نعرض من أُخفي عنه أو لم يُرسل له. */
+export function itemReaders(sync, item, members, state = receiptState(sync)) {
+  if (item.type === 'msg') return messageReaders(sync, item.row, members, state);
+  const row = item.row;
+  const hiddenIds = parse(row.hidden_json, []);
+  const hidden = new Set(Array.isArray(hiddenIds) ? hiddenIds : []);
+  const directed = row.to_id && !row.broadcast && row.to_id !== row.from_id;
+  const audience = directed ? members.filter((id) => id === row.to_id) : members.filter((id) => id !== row.from_id && !hidden.has(id));
+  return audience.map((id) => {
+    const receipt = state.social.get(`${item.type}/${row.id}/${id}`);
+    return { id, seen: Boolean(receipt?.seen_at), seenAt: receipt?.seen_at ?? null };
+  });
+}
+
+/** القائمة العائمة تبقى داخل مساحة المجلس حتى عند أطراف الشاشة. */
+export function actionPosition(anchor, viewport, menu) {
+  const left = Math.max(12, Math.min(viewport.width - menu.width - 12, anchor.left + anchor.width / 2 - menu.width / 2));
+  const above = anchor.top - menu.height - 10;
+  const top = above >= 12 ? above : Math.max(12, Math.min(viewport.height - menu.height - 12, anchor.top + anchor.height + 10));
+  return { left, top };
 }
 
 /**
@@ -89,6 +112,8 @@ export function createRoom(ctx) {
   const speeds = new Map();
   let lastRead = 0;
   let lastReadKey = null;
+  let actionsLayer = null;
+  let actionsTimer = null;
 
   const meta = () => sync.rows('majlis_meta', (m) => m.id === 'main')[0] ?? null;
   const roomName = () => meta()?.name || 'المجلس';
@@ -427,8 +452,8 @@ export function createRoom(ctx) {
     return box;
   }
 
-  function readersButton(message, state) {
-    const readers = messageReaders(sync, message, kit.memberIds(), state);
+  function readersButton(item, state) {
+    const readers = itemReaders(sync, item, kit.memberIds(), state);
     if (!readers.length) return null;
     const button = el('button', 'mc-readers');
     button.type = 'button';
@@ -446,7 +471,7 @@ export function createRoom(ctx) {
       ctx.openSheet((body) => {
         body.classList.add('mc-sheet', 'mc-receipts-sheet');
         body.append(el('h3', null, 'مشاهدات الرسالة'));
-        for (const reader of messageReaders(sync, message, kit.memberIds())) {
+        for (const reader of itemReaders(sync, item, kit.memberIds())) {
           const row = el('div', 'mc-reader-row');
           const face = el('span', `mc-reader-face${reader.seen ? ' is-seen' : ''}`);
           face.append(ctx.avatarNode(kit.personOf(reader.id), 38));
@@ -464,8 +489,8 @@ export function createRoom(ctx) {
     return button;
   }
 
-  /** A physical swipe: your message goes right, a friend's goes left. */
-  function swipeToReply(bubble, line, it, mine) {
+  /** السحب للرد والضغط المطوّل يشتركان في إيماءة واحدة كي لا تتسابق قائمتان. */
+  function bindMessageGestures(bubble, line, it, mine) {
     if (it.type === 'msg' && it.row.deleted) return;
     const cue = el('span', 'mc-swipe-cue');
     cue.innerHTML = glyph('reply', { size: 19 });
@@ -473,22 +498,42 @@ export function createRoom(ctx) {
     let start = null;
     let moved = false;
     let suppressClick = false;
+    let awaitingTouchRelease = false;
     const direction = mine ? 1 : -1;
     const reset = () => {
+      clearTimeout(start?.timer);
       bubble.style.removeProperty('transform');
       cue.style.removeProperty('opacity');
       start = null;
       moved = false;
     };
+    const showActionsAfterRelease = () => {
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 700);
+      clearTimeout(actionsTimer);
+      // Android قد يولّد click بعد pointerup: لا تُنشأ الأزرار تحت الإصبع.
+      actionsTimer = setTimeout(() => {
+        actionsTimer = null;
+        if (bubble.isConnected && node) openActions(it, bubble);
+      }, 80);
+    };
     bubble.addEventListener('pointerdown', (event) => {
       if (event.button !== 0 || event.target.closest('button, a, input')) return;
-      start = { x: event.clientX, y: event.clientY, id: event.pointerId };
+      start = { x: event.clientX, y: event.clientY, id: event.pointerId, held: false, timer: null };
+      const press = start;
+      press.timer = setTimeout(() => {
+        if (start !== press || moved) return;
+        press.held = true;
+        navigator.vibrate?.(10);
+      }, 420);
     });
     bubble.addEventListener('pointermove', (event) => {
       if (!start || event.pointerId !== start.id) return;
       const dx = event.clientX - start.x;
       const dy = event.clientY - start.y;
       if (!moved && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return reset();
+      if (Math.hypot(dx, dy) > 8) clearTimeout(start.timer);
+      if (start.held) return;
       const distance = dx * direction;
       if (distance <= 8) return;
       moved = true;
@@ -498,15 +543,40 @@ export function createRoom(ctx) {
     });
     bubble.addEventListener('pointerup', (event) => {
       if (!start || event.pointerId !== start.id) return;
+      const held = start.held;
       const complete = moved && (event.clientX - start.x) * direction >= 54;
       reset();
+      if (held) {
+        showActionsAfterRelease();
+        event.preventDefault();
+        return;
+      }
       if (!complete) return;
       suppressClick = true;
       navigator.vibrate?.(12);
       setReply(it.key);
       event.preventDefault();
     });
-    bubble.addEventListener('pointercancel', reset);
+    bubble.addEventListener('pointercancel', (event) => {
+      const held = start?.held;
+      reset();
+      if (held) {
+        if (event.pointerType === 'touch') awaitingTouchRelease = true;
+        else showActionsAfterRelease();
+      }
+    });
+    bubble.addEventListener('touchend', () => {
+      if (!awaitingTouchRelease) return;
+      awaitingTouchRelease = false;
+      showActionsAfterRelease();
+    });
+    bubble.addEventListener('touchcancel', () => { awaitingTouchRelease = false; });
+    bubble.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (start) start.held = true;
+      else showActionsAfterRelease();
+    });
     bubble.addEventListener('click', (event) => {
       if (!suppressClick) return;
       suppressClick = false;
@@ -556,67 +626,91 @@ export function createRoom(ctx) {
       bubble.append(meta);
     }
     line.append(bubble);
-    swipeToReply(bubble, line, it, mine);
+    bindMessageGestures(bubble, line, it, mine);
     item.append(line);
-    if (mine && it.type === 'msg' && !r.deleted && !r._pending) {
-      const receipts = readersButton(r, readState);
+    if (mine && !(it.type === 'msg' && r.deleted) && !r._pending) {
+      const receipts = readersButton(it, readState);
       if (receipts) item.append(receipts);
     }
     if (it.type !== 'msg') {
       const chips = reactionsOf(it.type === 'rec' ? 'rec' : 'frame', r.id);
       if (chips) item.append(chips);
     }
-    onLongPress(bubble, () => openActions(it));
     return item;
   }
 
-  function openActions(it) {
+  function closeActions() {
+    clearTimeout(actionsTimer);
+    actionsTimer = null;
+    actionsLayer?.remove();
+    actionsLayer = null;
+    return true;
+  }
+
+  function openActions(it, bubble) {
+    closeActions();
     const r = it.row;
     const mine = it.from === me();
     const canDelete = (mine || kit.isOwner(me())) && !(it.type === 'msg' && r.deleted);
     const isText = it.type === 'msg' && r.kind === 'text' && !r.deleted;
-    ctx.openSheet((body) => {
-      body.classList.add('mc-sheet');
-      if (it.type !== 'msg') {
-        const kind = it.type;
-        const current = sync.rows('majlis_reactions', (x) => x.target_kind === kind && x.target_id === r.id && x.user_id === me())[0]?.emoji ?? null;
-        const row = el('div', 'mc-react-row');
-        for (const emoji of REACTIONS) {
-          const b = el('button', `mc-react${emoji === current ? ' is-on' : ''}`, emoji);
-          b.type = 'button';
-          b.onclick = () => {
-            sync.enqueue('majlis.react', { targetKind: kind, targetId: r.id, emoji: emoji === current ? null : emoji });
-            ctx.closeSheet();
-          };
-          row.append(b);
-        }
-        body.append(row);
+    const layer = el('div', 'mc-actions-layer');
+    const dismiss = el('button', 'mc-actions-dismiss');
+    dismiss.type = 'button';
+    dismiss.setAttribute('aria-label', 'إغلاق خيارات الرسالة');
+    dismiss.onclick = closeActions;
+    const menu = el('div', 'mc-actions');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'خيارات الرسالة');
+    const preview = snippetOf(it.key);
+    if (preview) menu.append(el('div', 'mc-actions-preview', preview.text));
+    if (it.type !== 'msg') {
+      const kind = it.type;
+      const current = sync.rows('majlis_reactions', (x) => x.target_kind === kind && x.target_id === r.id && x.user_id === me())[0]?.emoji ?? null;
+      const reactions = el('div', 'mc-actions-reactions');
+      for (const emoji of REACTIONS) {
+        const button = el('button', `mc-actions-emoji${emoji === current ? ' is-on' : ''}`, emoji);
+        button.type = 'button';
+        button.setAttribute('aria-label', `تفاعل ${emoji}`);
+        button.onclick = () => {
+          closeActions();
+          sync.enqueue('majlis.react', { targetKind: kind, targetId: r.id, emoji: emoji === current ? null : emoji });
+        };
+        reactions.append(button);
       }
-      body.append(
-        actionList(
-          [
-            !(it.type === 'msg' && r.deleted) ? { icon: glyph('reply'), label: 'رد', run: () => setReply(it.key) } : null,
-            isText
-              ? {
-                  icon: glyph('copy'),
-                  label: 'نسخ',
-                  run: () => navigator.clipboard?.writeText(r.body ?? '').then(() => ctx.toast('انسخت'), () => ctx.toast('ما قدرنا ننسخ')),
-                }
-              : null,
-            { icon: glyph('eye'), label: 'إخفاء لدي', run: () => sync.enqueue('majlis.delete', { target: it.key, scope: 'me' }) },
-            canDelete
-              ? {
-                  icon: glyph('trash'),
-                  label: mine ? 'حذف للجميع' : 'حذف للجميع (المالك)',
-                  danger: true,
-                  run: () => sync.enqueue('majlis.delete', { target: it.key, scope: 'everyone' }),
-                }
-              : null,
-          ],
-          ctx.closeSheet,
-        ),
-      );
+      menu.append(reactions);
+    }
+    const options = el('div', 'mc-actions-options');
+    const option = (icon, label, run, danger = false) => {
+      const button = el('button', `mc-actions-option${danger ? ' is-danger' : ''}`);
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.innerHTML = glyph(icon, { size: 18 });
+      button.append(el('span', null, label));
+      button.onclick = () => {
+        closeActions();
+        run();
+      };
+      options.append(button);
+    };
+    if (!(it.type === 'msg' && r.deleted)) option('reply', 'رد', () => setReply(it.key));
+    if (isText) option('copy', 'نسخ', () => {
+      navigator.clipboard?.writeText(r.body ?? '').then(() => ctx.toast('انسخت'), () => ctx.toast('ما قدرنا ننسخ'));
     });
+    option('eye', 'إخفاء لدي', () => sync.enqueue('majlis.delete', { target: it.key, scope: 'me' }));
+    if (canDelete) option('trash', mine ? 'حذف للجميع' : 'حذف للجميع (المالك)', () => sync.enqueue('majlis.delete', { target: it.key, scope: 'everyone' }), true);
+    menu.append(options);
+    layer.append(dismiss, menu);
+    node.append(layer);
+    actionsLayer = layer;
+    const origin = node.getBoundingClientRect();
+    const anchor = bubble.getBoundingClientRect();
+    const position = actionPosition(
+      { left: anchor.left - origin.left, top: anchor.top - origin.top, width: anchor.width, height: anchor.height },
+      { width: origin.width, height: origin.height },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+    );
+    menu.style.left = `${position.left}px`;
+    menu.style.top = `${position.top}px`;
   }
 
   function jumpTo(key) {
@@ -633,6 +727,7 @@ export function createRoom(ctx) {
 
   function renderList() {
     if (!list) return;
+    if (actionsLayer) closeActions();
     const fromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const items = timeline(sync, me());
     const readState = receiptState(sync);
@@ -676,10 +771,10 @@ export function createRoom(ctx) {
     if (!list) return;
     const readState = receiptState(sync);
     for (const it of timeline(sync, me())) {
-      if (it.type !== 'msg' || it.from !== me() || it.row.deleted || it.row._pending) continue;
+      if (it.from !== me() || (it.type === 'msg' && it.row.deleted) || it.row._pending) continue;
       const item = list.querySelector(`[data-key="${CSS.escape(it.key)}"]`);
       if (!item) continue;
-      const next = readersButton(it.row, readState);
+      const next = readersButton(it, readState);
       const old = item.querySelector(':scope > .mc-readers');
       if (next && old) old.replaceWith(next);
       else if (next) item.append(next);
@@ -964,6 +1059,7 @@ export function createRoom(ctx) {
     scroller.addEventListener(
       'scroll',
       () => {
+        if (actionsLayer) closeActions();
         if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80) {
           jump.hidden = true;
           markRead();
@@ -996,6 +1092,9 @@ export function createRoom(ctx) {
 
   function close() {
     if (!node) return false;
+    if (actionsLayer) return closeActions();
+    clearTimeout(actionsTimer);
+    actionsTimer = null;
     recording?.cancel();
     recording = null;
     const n = node;
@@ -1018,7 +1117,7 @@ export function createRoom(ctx) {
       if (!node) return;
       const watched = ['majlis_messages', 'majlis_hidden', 'recommendations', 'frames', 'majlis_reactions', 'profiles', 'accounts', 'works'];
       if (tables.some((t) => watched.includes(t))) renderList();
-      else if (tables.includes('majlis_message_receipts') || tables.includes('majlis_reads')) refreshReaders();
+      else if (tables.includes('majlis_message_receipts') || tables.includes('majlis_reads') || tables.includes('majlis_receipts')) refreshReaders();
       if (tables.includes('majlis_meta') || tables.includes('accounts')) node.querySelector('.mc-head')?.replaceWith(header());
     },
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { feedEvents, feedFilters } from './friends.js';
-import { messageReaders, timeline } from './majlis-chat.js';
+import { actionPosition, itemReaders, messageReaders, timeline } from './majlis-chat.js';
 import { shortAgo } from './social-kit.js';
 import { toWaveform, formatDuration } from './voice.js';
 
@@ -71,6 +71,29 @@ describe('آخر ما صار', () => {
 });
 
 describe('المجلس', () => {
+  it('shows viewers for voice, recommendation and frame with their actual audience', () => {
+    const sync = fakeSync({
+      majlis_receipts: [
+        { target_kind: 'rec', target_id: 'r', user_id: 'a', seen_at: 4000 },
+        { target_kind: 'frame', target_id: 'f', user_id: 'b', seen_at: 5000 },
+      ],
+      majlis_reads: [],
+      majlis_message_receipts: [],
+    });
+    const members = ['me', 'a', 'b', 'c'];
+    expect(itemReaders(sync, { type: 'msg', row: { id: 'v', sender_id: 'me', kind: 'voice', created_at: 3000 } }, members).map((r) => r.id))
+      .toEqual(['a', 'b', 'c']);
+    expect(itemReaders(sync, { type: 'rec', row: { id: 'r', from_id: 'me', hidden_json: '["c"]' } }, members))
+      .toEqual([{ id: 'a', seen: true, seenAt: 4000 }, { id: 'b', seen: false, seenAt: null }]);
+    expect(itemReaders(sync, { type: 'frame', row: { id: 'f', from_id: 'me', to_id: 'b', broadcast: 0 } }, members))
+      .toEqual([{ id: 'b', seen: true, seenAt: 5000 }]);
+  });
+  it('keeps floating actions within both screen edges', () => {
+    const viewport = { width: 360, height: 700 };
+    const menu = { width: 290, height: 210 };
+    expect(actionPosition({ left: 0, top: 30, width: 50, height: 40 }, viewport, menu)).toEqual({ left: 12, top: 80 });
+    expect(actionPosition({ left: 325, top: 650, width: 35, height: 40 }, viewport, menu)).toEqual({ left: 58, top: 430 });
+  });
   it('shows exact read times only for real receipts, with legacy watermarks marked without a time', () => {
     const sync = fakeSync({
       majlis_message_receipts: [{ message_id: 'm', user_id: 'a', seen_at: 4500 }],
