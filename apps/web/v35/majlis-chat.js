@@ -46,6 +46,22 @@ export function timeline(sync, me) {
   return out;
 }
 
+/** The old room watermark proves a read, but cannot supply its exact time. */
+function receiptState(sync) {
+  return {
+    receipts: new Map(sync.rows('majlis_message_receipts').map((r) => [`${r.message_id}/${r.user_id}`, r])),
+    watermarks: new Map(sync.rows('majlis_reads').map((r) => [r.user_id, r.read_at])),
+  };
+}
+
+export function messageReaders(sync, message, members, state = receiptState(sync)) {
+  return members.filter((id) => id !== message.sender_id).map((id) => {
+    const receipt = state.receipts.get(`${message.id}/${id}`);
+    const watermark = state.watermarks.get(id) ?? 0;
+    return { id, seen: Boolean(receipt?.seen_at || watermark >= message.created_at), seenAt: receipt?.seen_at ?? null };
+  });
+}
+
 /**
  * @param {{
  *   sync: any, mount: HTMLElement,
@@ -72,6 +88,7 @@ export function createRoom(ctx) {
   const shown = new Set();
   const speeds = new Map();
   let lastRead = 0;
+  let lastReadKey = null;
 
   const meta = () => sync.rows('majlis_meta', (m) => m.id === 'main')[0] ?? null;
   const roomName = () => meta()?.name || 'المجلس';
@@ -410,7 +427,95 @@ export function createRoom(ctx) {
     return box;
   }
 
-  function itemNode(it) {
+  function readersButton(message, state) {
+    const readers = messageReaders(sync, message, kit.memberIds(), state);
+    if (!readers.length) return null;
+    const button = el('button', 'mc-readers');
+    button.type = 'button';
+    button.setAttribute('aria-label', `مشاهدات الرسالة: ${readers.filter((r) => r.seen).length} من ${readers.length}`);
+    const faces = el('span', 'mc-reader-faces');
+    for (const reader of readers.slice(0, 4)) {
+      const face = el('span', `mc-reader-face${reader.seen ? ' is-seen' : ''}`);
+      face.append(ctx.avatarNode(kit.personOf(reader.id), 19));
+      face.title = `${kit.nameOf(reader.id)} · ${reader.seen ? 'شاهدها' : 'لم يشاهدها'}`;
+      faces.append(face);
+    }
+    button.append(faces);
+    button.onclick = (event) => {
+      event.stopPropagation();
+      ctx.openSheet((body) => {
+        body.classList.add('mc-sheet', 'mc-receipts-sheet');
+        body.append(el('h3', null, 'مشاهدات الرسالة'));
+        for (const reader of messageReaders(sync, message, kit.memberIds())) {
+          const row = el('div', 'mc-reader-row');
+          const face = el('span', `mc-reader-face${reader.seen ? ' is-seen' : ''}`);
+          face.append(ctx.avatarNode(kit.personOf(reader.id), 38));
+          const info = el('span', 'mc-reader-info');
+          info.append(el('bdi', null, kit.nameOf(reader.id)));
+          const status = reader.seenAt
+            ? `شاهدها ${new Intl.DateTimeFormat('ar-SA', { calendar: 'gregory', dateStyle: 'medium', timeStyle: 'short' }).format(reader.seenAt)}`
+            : reader.seen ? 'شاهدها قبل حفظ أوقات المشاهدة' : 'لم يشاهدها بعد';
+          info.append(el('small', null, status));
+          row.append(face, info);
+          body.append(row);
+        }
+      });
+    };
+    return button;
+  }
+
+  /** A physical swipe: your message goes right, a friend's goes left. */
+  function swipeToReply(bubble, line, it, mine) {
+    if (it.type === 'msg' && it.row.deleted) return;
+    const cue = el('span', 'mc-swipe-cue');
+    cue.innerHTML = glyph('reply', { size: 19 });
+    line.append(cue);
+    let start = null;
+    let moved = false;
+    let suppressClick = false;
+    const direction = mine ? 1 : -1;
+    const reset = () => {
+      bubble.style.removeProperty('transform');
+      cue.style.removeProperty('opacity');
+      start = null;
+      moved = false;
+    };
+    bubble.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || event.target.closest('button, a, input')) return;
+      start = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    });
+    bubble.addEventListener('pointermove', (event) => {
+      if (!start || event.pointerId !== start.id) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (!moved && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return reset();
+      const distance = dx * direction;
+      if (distance <= 8) return;
+      moved = true;
+      const offset = Math.min(68, distance);
+      bubble.style.transform = `translateX(${offset * direction}px)`;
+      cue.style.opacity = String(Math.min(1, offset / 55));
+    });
+    bubble.addEventListener('pointerup', (event) => {
+      if (!start || event.pointerId !== start.id) return;
+      const complete = moved && (event.clientX - start.x) * direction >= 54;
+      reset();
+      if (!complete) return;
+      suppressClick = true;
+      navigator.vibrate?.(12);
+      setReply(it.key);
+      event.preventDefault();
+    });
+    bubble.addEventListener('pointercancel', reset);
+    bubble.addEventListener('click', (event) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }, true);
+  }
+
+  function itemNode(it, readState) {
     const mine = it.from === me();
     const r = it.row;
     const item = el('div', `mc-item ${mine ? 'mc-item--mine' : 'mc-item--theirs'}${it.first ? ' is-first' : ''}${it.last ? ' is-last' : ''}`);
@@ -451,7 +556,12 @@ export function createRoom(ctx) {
       bubble.append(meta);
     }
     line.append(bubble);
+    swipeToReply(bubble, line, it, mine);
     item.append(line);
+    if (mine && it.type === 'msg' && !r.deleted && !r._pending) {
+      const receipts = readersButton(r, readState);
+      if (receipts) item.append(receipts);
+    }
     if (it.type !== 'msg') {
       const chips = reactionsOf(it.type === 'rec' ? 'rec' : 'frame', r.id);
       if (chips) item.append(chips);
@@ -525,6 +635,7 @@ export function createRoom(ctx) {
     if (!list) return;
     const fromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const items = timeline(sync, me());
+    const readState = receiptState(sync);
     const nodes = [];
     let day = null;
     for (const it of items) {
@@ -533,7 +644,7 @@ export function createRoom(ctx) {
         day = d;
         nodes.push(el('div', 'mc-day', d));
       }
-      nodes.push(itemNode(it));
+      nodes.push(itemNode(it, readState));
     }
     if (!items.length) {
       const empty = el('div', 'mc-empty');
@@ -561,13 +672,34 @@ export function createRoom(ctx) {
     markRead(items);
   }
 
+  function refreshReaders() {
+    if (!list) return;
+    const readState = receiptState(sync);
+    for (const it of timeline(sync, me())) {
+      if (it.type !== 'msg' || it.from !== me() || it.row.deleted || it.row._pending) continue;
+      const item = list.querySelector(`[data-key="${CSS.escape(it.key)}"]`);
+      if (!item) continue;
+      const next = readersButton(it.row, readState);
+      const old = item.querySelector(':scope > .mc-readers');
+      if (next && old) old.replaceWith(next);
+      else if (next) item.append(next);
+      else old?.remove();
+    }
+  }
+
   /** وصلت لآخر المحادثة = قرأتها. مرة لكل جديد، لا مع كل تمرير. */
   function markRead(items = timeline(sync, me())) {
     if (!scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 120) return;
-    const latest = items.filter((it) => it.from !== me()).at(-1)?.at ?? 0;
+    const newest = items.filter((it) => it.from !== me()).at(-1);
+    const latest = newest?.at ?? 0;
     const readAt = sync.rows('majlis_reads', (r) => r.user_id === me())[0]?.read_at ?? 0;
-    if (latest > readAt && latest > lastRead) {
+    const newestMessage = items.filter((it) => it.type === 'msg' && it.from !== me() && !it.row.deleted).at(-1);
+    const needsReceipt = newestMessage && newestMessage.at >= readAt &&
+      !sync.rows('majlis_message_receipts', (r) => r.message_id === newestMessage.row.id && r.user_id === me()).length &&
+      lastReadKey !== newestMessage.key;
+    if ((latest > readAt && latest > lastRead) || needsReceipt) {
       lastRead = latest;
+      lastReadKey = newestMessage?.key ?? newest?.key ?? null;
       sync.enqueue('majlis.read', { at: latest });
     }
   }
@@ -813,6 +945,8 @@ export function createRoom(ctx) {
       return;
     }
     shown.clear();
+    lastRead = 0;
+    lastReadKey = null;
     node = el('div', 'mc');
     node.setAttribute('role', 'dialog');
     node.setAttribute('aria-label', roomName());
@@ -884,6 +1018,7 @@ export function createRoom(ctx) {
       if (!node) return;
       const watched = ['majlis_messages', 'majlis_hidden', 'recommendations', 'frames', 'majlis_reactions', 'profiles', 'accounts', 'works'];
       if (tables.some((t) => watched.includes(t))) renderList();
+      else if (tables.includes('majlis_message_receipts') || tables.includes('majlis_reads')) refreshReaders();
       if (tables.includes('majlis_meta') || tables.includes('accounts')) node.querySelector('.mc-head')?.replaceWith(header());
     },
   };

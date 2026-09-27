@@ -104,6 +104,7 @@ const KEYS = {
   majlis_hidden: (row) => `${row.user_id}/${row.target}`,
   majlis_meta: (row) => row.id,
   majlis_reads: (row) => row.user_id,
+  majlis_message_receipts: (row) => `${row.message_id}/${row.user_id}`,
 };
 
 function readJson(key, fallback) {

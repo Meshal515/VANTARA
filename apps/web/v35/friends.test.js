@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { feedEvents, feedFilters } from './friends.js';
-import { timeline } from './majlis-chat.js';
+import { messageReaders, timeline } from './majlis-chat.js';
 import { shortAgo } from './social-kit.js';
 import { toWaveform, formatDuration } from './voice.js';
 
@@ -71,6 +71,14 @@ describe('آخر ما صار', () => {
 });
 
 describe('المجلس', () => {
+  it('shows exact read times only for real receipts, with legacy watermarks marked without a time', () => {
+    const sync = fakeSync({
+      majlis_message_receipts: [{ message_id: 'm', user_id: 'a', seen_at: 4500 }],
+      majlis_reads: [{ user_id: 'b', read_at: 3500 }],
+    });
+    expect(messageReaders(sync, { id: 'm', sender_id: 'me', created_at: 3000 }, ['me', 'a', 'b', 'c']))
+      .toEqual([{ id: 'a', seen: true, seenAt: 4500 }, { id: 'b', seen: true, seenAt: null }, { id: 'c', seen: false, seenAt: null }]);
+  });
   it('oldest first, messages + recs + frames, deleted messages stay as a placeholder', () => {
     const out = timeline(fakeSync(base()), 'me');
     expect(out.map((i) => i.key)).toEqual(['rec:r1', 'frame:f1', 'rec:r2', 'msg:m1', 'msg:m2']);
