@@ -39,11 +39,11 @@ class Node {
 }
 class Text extends Node { constructor(value) { super('#text'); this.text = value; } }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('friends screen with uncached reading covers', () => {
   it('keeps both the reading-now and activity placeholders inside their static cover hosts', async () => {
-    const doc = { createElement: (tag) => new Node(tag), createTextNode: (text) => new Text(text) };
+    const doc = { createElement: (tag) => new Node(tag), createTextNode: (text) => new Text(text), addEventListener() {}, removeEventListener() {} };
     vi.stubGlobal('document', doc);
     vi.stubGlobal('requestAnimationFrame', () => 1);
     const host = new Node('div');
@@ -67,7 +67,7 @@ describe('friends screen with uncached reading covers', () => {
       mediaUrl: () => '',
     });
     friends.show();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mounted.some((cover) => cover.className === 'sx-cover')).toBe(true);
     expect(mounted.some((cover) => cover.className === 'sx-cover sx-cover--sm')).toBe(true);
     for (const cover of mounted) {
@@ -75,5 +75,51 @@ describe('friends screen with uncached reading covers', () => {
       expect(cover.children[0].style).toMatchObject({ position: 'relative', inset: 'auto', width: '100%', height: '100%' });
     }
     friends.hide();
+  });
+});
+
+describe('friends live presence', () => {
+  it('refreshes visible friends within five seconds without waiting for a profile, and stops when hidden', async () => {
+    vi.useFakeTimers();
+    const listeners = new Map();
+    const doc = {
+      hidden: false, createElement: (tag) => new Node(tag), createTextNode: (value) => new Text(value),
+      addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: (type) => listeners.delete(type),
+    };
+    vi.stubGlobal('document', doc);
+    vi.stubGlobal('requestAnimationFrame', () => 1);
+    const host = new Node('div');
+    const tables = { accounts: [{ user_id: 'me' }, { user_id: 'friend' }], profiles: [{ user_id: 'friend', display_name: 'صديق' }] };
+    const sync = { user: { userId: 'me' }, rows: (table, filter) => (tables[table] ?? []).filter(filter ?? (() => true)) };
+    let status = 'ONLINE';
+    let calls = 0;
+    const friends = createFriends({
+      sync, host, section: () => 'manga', visible: () => true,
+      presence: async () => { calls++; return [{ userId: 'friend', status, lastSeenAt: Date.now() }]; },
+      avatarNode: () => new Node('span'),
+      workFromRef: (id) => ({ id }), mountImage: () => Promise.resolve(null), mediaUrl: () => '',
+    });
+    friends.show();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.querySelector('.sx-pal--on')).toBeTruthy();
+    status = 'OFFLINE';
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(calls).toBe(2);
+    expect(host.querySelector('.sx-pal--off')).toBeTruthy();
+    const face = host.querySelector('.sx-pal--off');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(calls).toBe(3);
+    expect(host.querySelector('.sx-pal--off')).toBe(face);
+    doc.hidden = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(calls).toBe(3);
+    doc.hidden = false;
+    listeners.get('visibilitychange')();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(4);
+    friends.hide();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(calls).toBe(4);
+    expect(listeners.has('visibilitychange')).toBe(false);
   });
 });

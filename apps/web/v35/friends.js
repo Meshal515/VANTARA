@@ -81,6 +81,8 @@ export function createFriends(ctx) {
   const me = kit.me;
   let presence = [];
   let timer = null;
+  let presenceRequest = null;
+  let presenceKey = null;
   let filter = 'all';
   let entered = false;
   const seenRows = new Set();
@@ -496,16 +498,33 @@ export function createFriends(ctx) {
     motion()?.fromTo(nodes, { y: 6 }, { y: 0, duration: 0.3, ease: 'power2.out', stagger: 0.025, delay, clearProps: 'transform' });
   }
 
-  async function refreshPresence() {
-    try {
-      presence = (await ctx.presence()) ?? [];
-    } catch {
-      return;
-    }
-    if (ctx.visible()) {
+  // وقت النبضة يتغير كل 25 ثانية، لكنه لا يغير ما يراه المستخدم. لا تُعد بناء
+  // الأغلفة والقوائم لمجرد تغير lastSeenAt لدى صديق لا يزال متصلًا.
+  function visiblePresenceKey(rows) {
+    return JSON.stringify(rows.map((p) => {
+      const state = presenceState(p);
+      return [p.userId, p.status, state.verb, p.screen, p.seriesRef, p.seriesTitle,
+        p.chapterLabel, p.chapterNumber, p.workHidden, p.incognito];
+    }));
+  }
+
+  function refreshPresence() {
+    if (presenceRequest) return presenceRequest;
+    presenceRequest = Promise.resolve().then(() => ctx.presence()).then((rows) => {
+      // انقطاع مؤقت لا يمحو الوجوه؛ sync.presence يرجع [] عند فشل الشبكة.
+      if (!Array.isArray(rows) || !rows.length) return;
+      const key = visiblePresenceKey(rows);
+      presence = rows;
+      if (key === presenceKey || !ctx.visible()) return;
+      presenceKey = key;
       try { render(); }
       catch (error) { console.error('تعذّر تحديث الأصدقاء', error); }
-    }
+    }).catch(() => {}).finally(() => { presenceRequest = null; });
+    return presenceRequest;
+  }
+
+  function onVisibilityChange() {
+    if (!document.hidden && ctx.visible()) void refreshPresence();
   }
 
   return {
@@ -514,13 +533,16 @@ export function createFriends(ctx) {
       render();
       void refreshPresence();
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.addEventListener('visibilitychange', onVisibilityChange);
       timer = setInterval(() => {
         if (ctx.visible() && !document.hidden) void refreshPresence();
-      }, 15_000);
+      }, 5_000);
     },
     hide() {
       clearInterval(timer);
       timer = null;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     },
     onChange(tables) {
       if (!ctx.visible()) return;
