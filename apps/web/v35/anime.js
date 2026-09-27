@@ -945,7 +945,9 @@ export function createAnime(deps) {
 
   /** آخر سيرفر نجح أو اختاره المستخدم لكل أنمي: ترجيح في «الأفضل» لا قفل. */
   const SERVER_KEY = 'vantara.anime.servers';
+  const WORKING_SERVER_KEY = 'vantara.anime.working-server';
   const preferredCode = (id) => readJson(SERVER_KEY, {})[id] ?? null;
+  const workingServer = (id) => readJson(WORKING_SERVER_KEY, {})[id] ?? null;
   const rememberCode = (id, code) => {
     if (!id || !code) return;
     const all = readJson(SERVER_KEY, {});
@@ -1005,7 +1007,14 @@ export function createAnime(deps) {
     cur.n = e.episode;
   });
   engine.on('server', (e) => {
-    if (e?.animeId && e.code) rememberCode(e.animeId, e.code);
+    if (e?.animeId && e.code) {
+      rememberCode(e.animeId, e.code);
+      if (e.sourceId && e.server) {
+        const working = readJson(WORKING_SERVER_KEY, {});
+        working[e.animeId] = { sourceId: e.sourceId, server: e.server, quality: e.quality ?? null };
+        writeJson(WORKING_SERVER_KEY, working);
+      }
+    }
   });
 
   /**
@@ -1066,7 +1075,9 @@ export function createAnime(deps) {
     const saved = readWatch()[m.id]?.episodes?.[n];
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
+    const autoServer = workingServer(m.id);
     const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, work: null };
+    let autoAttempted = false;
     let paintQueued = false;
     let off = [];
 
@@ -1218,6 +1229,17 @@ export function createAnime(deps) {
         }
       };
 
+      // سيرفر بدأ الفيديو بنجاح من قبل: شغّل الحلقة الجديدة عند جاهزيته بلا ضغط إضافي.
+      // إن لم يظهر أو فشل، تبقى ورقة السيرفرات العادية متاحة للاختيار.
+      const maybeAutoPlay = () => {
+        if (!autoServer || autoAttempted || sheet.closed || sheet.busy || !sheet.session) return;
+        const ready = sheet.routes.find((r) => r.sourceId === autoServer.sourceId && r.server === autoServer.server &&
+          (autoServer.quality == null || r.quality === autoServer.quality) && r.state === 'READY');
+        if (!ready) return;
+        autoAttempted = true;
+        void playRoute(ready);
+      };
+
       const tile = (r) => {
         let b = routeNodes.get(r.id);
         if (b) {
@@ -1294,6 +1316,7 @@ export function createAnime(deps) {
             if (e.session !== sheet.session || !e.route) return;
             sheet.routes = engine.upsertRoute(sheet.routes, e.route);
             queuePaint();
+            maybeAutoPlay();
           }),
           engine.on('prepared', (e) => {
             if (e.session !== sheet.session) return;
@@ -1313,6 +1336,7 @@ export function createAnime(deps) {
           sheet.routes = snap?.routes ?? out.routes ?? [];
           sheet.done = Boolean(snap?.done ?? out.done);
           queuePaint();
+          maybeAutoPlay();
         } catch (e) {
           status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
         }

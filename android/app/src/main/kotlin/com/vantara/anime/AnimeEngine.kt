@@ -278,7 +278,11 @@ class AnimeEngine(context: Context) {
      * لحظة يتغيّر ([com.vantara.anime.stream.PreparedEpisode.listen]). الجلسة
      * تمتلئ وهي تعمل، فالمشغّل يبدأ بأول ما يجهز ويجد الاحتياط خلفه.
      */
-    fun prepare(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): com.vantara.anime.stream.PreparedEpisode {
+    fun prepare(
+        sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences,
+        /** تجهيز الحلقة التالية: المصدر الذي اشتغل الآن فقط، والبقية عند العطل. */
+        warmSourceId: String? = null,
+    ): com.vantara.anime.stream.PreparedEpisode {
         prepared.remove(sessionId)?.job?.cancel()
         val session = PlaybackSession(emptyList(), health)
         val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health)
@@ -287,6 +291,7 @@ class AnimeEngine(context: Context) {
         prepared[sessionId] = prep
         prep.job = background.launch {
             val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
+                .filter { warmSourceId == null || it.sourceId == warmSourceId }
             kotlinx.coroutines.coroutineScope {
                 for (copy in ordered) {
                     launch {
@@ -297,7 +302,10 @@ class AnimeEngine(context: Context) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
                                 val ep = resolver.pick(resolver.episodes(c), number) ?: return@withTimeout
                                 val a = adapter(copy.sourceId) ?: return@withTimeout
-                                a.candidates(ep, trace = com.vantara.anime.adapters.ResolveTrace(prep::report))
+                                a.candidates(
+                                    ep, trace = com.vantara.anime.adapters.ResolveTrace(prep::report),
+                                    enough = if (warmSourceId == null) Int.MAX_VALUE else 1,
+                                )
                                     .also { prep.adopt(copy.sourceId, it) }
                             }
                         }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }

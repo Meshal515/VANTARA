@@ -154,6 +154,8 @@ class PlayerActivity : Activity() {
     private var reportedStart = false
     private var expanded = false
     private var waiting: Job? = null
+    private var warmedSessionId: String? = null
+    private var warmedEpisode = -1
     private var locked = false
     private var fill = false
     private var copies: List<SourceAnime> = emptyList()
@@ -170,6 +172,7 @@ class PlayerActivity : Activity() {
     private val progressTick = object : Runnable {
         override fun run() {
             report(final = false)
+            maybePrepareNext()
             main.postDelayed(this, PROGRESS_EVERY_MS)
         }
     }
@@ -269,7 +272,13 @@ class PlayerActivity : Activity() {
                     main.removeCallbacks(startupWatchdog)
                     current?.let { c ->
                         session?.started(c, System.currentTimeMillis() - startedAt)
-                        codeOf(c)?.let { code -> PlaybackEvents.emit("server", JSONObject().put("animeId", launch.animeId).put("code", code)) }
+                        codeOf(c)?.let { code ->
+                            preferCode = code
+                            PlaybackEvents.emit(
+                                "server", JSONObject().put("animeId", launch.animeId).put("code", code)
+                                    .put("sourceId", c.sourceId).put("server", c.server).put("quality", c.quality),
+                            )
+                        }
                     }
                     updateQualityLabel()
                 }
@@ -427,6 +436,28 @@ class PlayerActivity : Activity() {
 
     private fun hasNext() = copies.isNotEmpty() && launch.total > 0 && episodeInt() + 1 <= launch.total
 
+    /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
+    private fun maybePrepareNext() {
+        if (!reportedStart || !hasNext() || warmedSessionId != null || player.playbackState != Player.STATE_READY) return
+        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position())) return
+        val source = current?.sourceId ?: return
+        val next = episodeInt() + 1
+        val id = "warm-${System.nanoTime()}"
+        warmedSessionId = id
+        warmedEpisode = next
+        engine.prepare(
+            id, copies, next.toFloat(),
+            Preferences(launch.quality, runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB)),
+            warmSourceId = source,
+        )
+    }
+
+    private fun discardWarmup() {
+        warmedSessionId?.let(engine::closeSession)
+        warmedSessionId = null
+        warmedEpisode = -1
+    }
+
     private fun switchEpisode(n: Int) {
         if (copies.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
         cancelCountdown()
@@ -439,18 +470,21 @@ class PlayerActivity : Activity() {
         main.removeCallbacks(stallWatchdog)
         player.stop()
         current = null
+        val warmed = warmedSessionId?.takeIf { warmedEpisode == n && engine.prepared(it)?.best() != null }
+        if (warmed == null) discardWarmup()
+        else { warmedSessionId = null; warmedEpisode = -1 }
         engine.closeSession(sessionId)
-        val id = "s-${System.nanoTime()}"
+        val id = warmed ?: "s-${System.nanoTime()}"
         val prefs = Preferences(
             quality = launch.quality,
             variant = runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB),
         )
-        engine.prepare(id, copies, n.toFloat(), prefs)
+        if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
         episode = n.toFloat()
         attach(id)
         hideError()
         spinner.visibility = View.VISIBLE
-        message("نجهّز الحلقة $n…", long = true)
+        if (warmed == null) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
         val p = prep ?: return
         val s = session ?: return
@@ -1335,6 +1369,7 @@ class PlayerActivity : Activity() {
         report(final = true)
         player.release()
         engine.closeSession(sessionId)
+        discardWarmup()
         // لا أثر على مساحة الجهاز: المقاطع المؤقتة وكاش البث يُحذفان مع المشغّل
         MediaCache.purgeClips(this)
         MediaCache.release(this)
