@@ -943,11 +943,14 @@ export function createAnime(deps) {
 
   // ───────────── التشغيل: ورقة السيرفرات ثم المشغّل الأصلي ─────────────
 
-  /** آخر سيرفر نجح أو اختاره المستخدم لكل أنمي: ترجيح في «الأفضل» لا قفل. */
+  /** الرابط خاص بالحلقة؛ هوية المصدر والسيرفر الناجح تصلح لترجيح الأعمال الأخرى. */
   const SERVER_KEY = 'vantara.anime.servers';
   const WORKING_SERVER_KEY = 'vantara.anime.working-server';
   const preferredCode = (id) => readJson(SERVER_KEY, {})[id] ?? null;
-  const workingServer = (id) => readJson(WORKING_SERVER_KEY, {})[id] ?? null;
+  const workingServer = (id) => {
+    const known = readJson(WORKING_SERVER_KEY, {});
+    return known.lastWorking ?? known[id] ?? null;
+  };
   const rememberCode = (id, code) => {
     if (!id || !code) return;
     const all = readJson(SERVER_KEY, {});
@@ -1011,7 +1014,9 @@ export function createAnime(deps) {
       rememberCode(e.animeId, e.code);
       if (e.sourceId && e.server) {
         const working = readJson(WORKING_SERVER_KEY, {});
-        working[e.animeId] = { sourceId: e.sourceId, server: e.server, quality: e.quality ?? null };
+        const route = { sourceId: e.sourceId, server: e.server, quality: e.quality ?? null };
+        working[e.animeId] = route;
+        working.lastWorking = route;
         writeJson(WORKING_SERVER_KEY, working);
       }
     }
@@ -1078,6 +1083,7 @@ export function createAnime(deps) {
     const autoServer = workingServer(m.id);
     const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, work: null };
     let autoAttempted = false;
+    let fallbackTimer = null;
     let paintQueued = false;
     let off = [];
 
@@ -1229,15 +1235,27 @@ export function createAnime(deps) {
         }
       };
 
-      // سيرفر بدأ الفيديو بنجاح من قبل: شغّل الحلقة الجديدة عند جاهزيته بلا ضغط إضافي.
-      // إن لم يظهر أو فشل، تبقى ورقة السيرفرات العادية متاحة للاختيار.
+      // جرّب المصدر والسيرفر اللذين بدآ الفيديو فعلًا، حتى في أنمي مختلف.
+      // الرابط نفسه لا يُعاد استخدامه: يجب استخراجه للحلقة الجديدة.
       const maybeAutoPlay = () => {
         if (!autoServer || autoAttempted || sheet.closed || sheet.busy || !sheet.session) return;
-        const ready = sheet.routes.find((r) => r.sourceId === autoServer.sourceId && r.server === autoServer.server &&
-          (autoServer.quality == null || r.quality === autoServer.quality) && r.state === 'READY');
-        if (!ready) return;
-        autoAttempted = true;
-        void playRoute(ready);
+        const preferred = engine.matchingWorkingRoute(sheet.routes, autoServer);
+        if (preferred) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+          autoAttempted = true;
+          void playRoute(preferred);
+          return;
+        }
+        const ready = sheet.routes.find((r) => r.state === 'READY');
+        if (!ready || fallbackTimer) return;
+        // المصدر القديم قد يكون غائبًا عن هذا العمل: لا نتركه ينتظر بلا نهاية.
+        fallbackTimer = setTimeout(() => {
+          fallbackTimer = null;
+          if (sheet.closed || sheet.busy || autoAttempted) return;
+          const pick = engine.matchingWorkingRoute(sheet.routes, autoServer) ?? sheet.routes.find((r) => r.state === 'READY');
+          if (pick) { autoAttempted = true; void playRoute(pick); }
+        }, sheet.done ? 0 : 1800);
       };
 
       const tile = (r) => {
@@ -1325,7 +1343,10 @@ export function createAnime(deps) {
           }),
         );
         try {
-          const out = await engine.prepare({ copies: work.copies, episode: n });
+          const copies = autoServer?.sourceId
+            ? [...work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+            : work.copies;
+          const out = await engine.prepare({ copies, episode: n });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;
@@ -1344,6 +1365,7 @@ export function createAnime(deps) {
 
       return () => {
         sheet.closed = true;
+        clearTimeout(fallbackTimer);
         for (const f of off) f();
         off = [];
         // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
@@ -1371,7 +1393,10 @@ export function createAnime(deps) {
         position: startAt,
         poster: m.posterSmall ?? m.poster ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
-        copies: sheet.work.copies,
+        copies: autoServer?.sourceId
+          ? [...sheet.work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+          : sheet.work.copies,
+        malId: m.idMal ?? null,
         resume,
       });
     }

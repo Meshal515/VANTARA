@@ -91,6 +91,7 @@ class PlayerActivity : Activity() {
         val session: String,
         val title: String,
         val animeId: String = "",
+        val malId: Int? = null,
         val episode: Float = 1f,
         /** آخر حلقة متاحة (لقائمة الحلقات و«التالية»). */
         val total: Int = 0,
@@ -133,6 +134,7 @@ class PlayerActivity : Activity() {
     private lateinit var seekLeft: TextView
     private lateinit var seekRight: TextView
     private lateinit var unlockButton: ImageView
+    private lateinit var skipIntroButton: TextView
     private var errorCard: View? = null
     private var countdownCard: View? = null
     private var clip: ClipEditor? = null
@@ -156,6 +158,8 @@ class PlayerActivity : Activity() {
     private var waiting: Job? = null
     private var warmedSessionId: String? = null
     private var warmedEpisode = -1
+    private var intro: IntroSkip.Interval? = null
+    private var introRequestedEpisode = -1
     private var locked = false
     private var fill = false
     private var copies: List<SourceAnime> = emptyList()
@@ -179,6 +183,10 @@ class PlayerActivity : Activity() {
     private val clockTick = object : Runnable {
         override fun run() {
             updateTime()
+            maybeLoadIntro()
+            if (::skipIntroButton.isInitialized) {
+                skipIntroButton.visibility = if (IntroSkip.visible(intro, position()) && !locked && clip == null) View.VISIBLE else View.GONE
+            }
             main.postDelayed(this, 500)
         }
     }
@@ -481,6 +489,9 @@ class PlayerActivity : Activity() {
         )
         if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
         episode = n.toFloat()
+        intro = null
+        introRequestedEpisode = -1
+        if (::skipIntroButton.isInitialized) skipIntroButton.visibility = View.GONE
         attach(id)
         hideError()
         spinner.visibility = View.VISIBLE
@@ -588,6 +599,18 @@ class PlayerActivity : Activity() {
         buildTop()
         buildBottom()
         root.addView(controls, match())
+
+        skipIntroButton = pillButton("تخطي المقدمة  »", primary = true) {
+            intro?.let { player.seekTo(it.endMs) }
+            skipIntroButton.visibility = View.GONE
+        }.apply {
+            contentDescription = "تخطي المقدمة"
+            visibility = View.GONE
+        }
+        root.addView(skipIntroButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.RIGHT or Gravity.BOTTOM).apply {
+            rightMargin = dp(28)
+            bottomMargin = dp(142)
+        })
 
         pill = label("", 13.5f, Color.WHITE, bold = true).apply {
             setPadding(dp(16), dp(9), dp(16), dp(9))
@@ -768,6 +791,19 @@ class PlayerActivity : Activity() {
     }
 
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
+
+    /** جلب مستقل بعد بدء الفيديو: لا يؤخر التشغيل، ولا يظهر الزر إلا لتوقيت موثوق. */
+    private fun maybeLoadIntro() {
+        val malId = launch.malId ?: return
+        val duration = player.duration.takeIf { it > 0 } ?: return
+        if (!reportedStart || introRequestedEpisode == episodeInt()) return
+        val requested = episodeInt()
+        introRequestedEpisode = requested
+        scope.launch {
+            val found = withContext(Dispatchers.IO) { IntroSkip.fetch(network.client, malId, requested, duration) }
+            if (episodeInt() == requested) intro = found
+        }
+    }
 
     private fun togglePlay() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)

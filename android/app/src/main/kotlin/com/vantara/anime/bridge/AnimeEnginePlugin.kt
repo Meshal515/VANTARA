@@ -78,6 +78,7 @@ class AnimeEnginePlugin : Plugin() {
                 session = session,
                 title = call.getString("title").orEmpty(),
                 animeId = call.getString("animeId").orEmpty(),
+                malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
                 total = call.getInt("total") ?: 0,
                 positionMs = (call.getDouble("position") ?: 0.0).toLong(),

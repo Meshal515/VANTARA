@@ -97,6 +97,14 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   return (await call('prepare', { copies, episode, quality, variant })) ?? null;
 }
 
+/** اسم السيرفر ومعرّف المصدر ثابتان بين الأعمال؛ رمز البطاقة ورابط الحلقة ليسا كذلك. */
+export function matchingWorkingRoute(routes, working) {
+  if (!working?.sourceId || !working?.server) return null;
+  return routes.filter((r) => r.state === 'READY' && r.sourceId === working.sourceId && r.server === working.server)
+    .sort((a, b) => Math.abs((a.quality ?? 0) - (working.quality ?? a.quality ?? 0)) -
+      Math.abs((b.quality ?? 0) - (working.quality ?? b.quality ?? 0)))[0] ?? null;
+}
+
 export async function routes(session) {
   return (await call('routes', { session })) ?? null;
 }

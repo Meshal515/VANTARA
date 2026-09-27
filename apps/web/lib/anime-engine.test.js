@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, momentLabel, momentStart, pickWork, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, upsertRoute } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -48,6 +48,16 @@ describe('anime-engine bridge', () => {
     const list = [{ id: 'x', state: 'RESOLVING' }];
     expect(upsertRoute(list, { id: 'x', state: 'READY' })).toEqual([{ id: 'x', state: 'READY' }]);
     expect(upsertRoute(list, { id: 'y', state: 'READY' })).toHaveLength(2);
+  });
+
+  it('reuses a working host across titles without trusting the unstable tile code or episode URL', () => {
+    const routes = [
+      { sourceId: 'ok', server: 'MMX', code: 'MMX2', quality: 720, state: 'READY' },
+      { sourceId: 'wit', server: 'MMX', code: 'MMX', quality: 1080, state: 'READY' },
+      { sourceId: 'ok', server: 'MMX', code: 'MMX', quality: 1080, state: 'READY' },
+    ];
+    expect(matchingWorkingRoute(routes, { sourceId: 'ok', server: 'MMX', quality: 720 })).toBe(routes[0]);
+    expect(matchingWorkingRoute(routes.map((r) => ({ ...r, state: 'FAILED' })), { sourceId: 'ok', server: 'MMX' })).toBe(null);
   });
 
   it('round-trips a shared moment through its Majlis label', () => {
