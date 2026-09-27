@@ -291,13 +291,15 @@ class AnimeEngine(context: Context) {
                 for (copy in ordered) {
                     launch {
                         runCatching {
-                            val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                            val ep = resolver.pick(resolver.episodes(c), number) ?: return@runCatching
-                            val a = adapter(copy.sourceId) ?: return@runCatching
-                            val list = withTimeout(PREPARE_TIMEOUT_MS) {
+                            // المهلة تشمل العثور على الحلقة وتحميل الإضافة أيضًا؛ وإلا قد
+                            // يظل التحضير مفتوحًا بلا نهاية قبل ظهور أي سيرفر.
+                            withTimeout(PREPARE_TIMEOUT_MS) {
+                                val c = EpisodeResolver.Copy(copy.sourceId, copy)
+                                val ep = resolver.pick(resolver.episodes(c), number) ?: return@withTimeout
+                                val a = adapter(copy.sourceId) ?: return@withTimeout
                                 a.candidates(ep, trace = com.vantara.anime.adapters.ResolveTrace(prep::report))
+                                    .also { prep.adopt(copy.sourceId, it) }
                             }
-                            prep.adopt(copy.sourceId, list)
                         }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
                     }
                 }

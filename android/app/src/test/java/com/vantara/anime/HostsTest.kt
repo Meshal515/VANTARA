@@ -118,6 +118,29 @@ class HostsTest {
         assertTrue(seen.any { it.header("X-Inertia-Version") == "a601a2d0d16b8ae7121ceb1fd46c1f5a" })
     }
 
+    @Test fun `megamax does not wait for a slow mirror when another is ready`() = runBlocking {
+        val mirrorJson = """{"props":{"streams":{"data":[{"label":"720p","mirrors":[
+            {"driver":"mp4upload","link":"https://slow.test/embed"},
+            {"driver":"earnvids","link":"https://fast.test/embed"}
+        ]}]}}}"""
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val r = chain.request()
+            val body = if (r.header("X-Inertia") == "true") mirrorJson else if (r.url.host == "share4max.com") fixture("megamax.html") else ""
+            Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody("text/html".toMediaType())).build()
+        }.build()
+        val resolver = EmbedResolver(client, sniffer = { url, _ ->
+            if (url.contains("slow.test")) delay(2_000) else delay(40)
+            com.vantara.anime.hosts.Stream("https://cdn.test/video.mp4")
+        })
+        val start = System.currentTimeMillis()
+        val streams = resolver.resolve("https://share4max.com/iframe/nRcSlqx5tF9nn", null)
+        assertEquals(720, streams.single().quality)
+        assertTrue("waited ${System.currentTimeMillis() - start}ms", System.currentTimeMillis() - start < 1_000)
+        assertTrue(AnimeHostRouter.isHiddenOnly("slow.test"))
+        assertTrue(AnimeHostRouter.isHiddenOnly("fast.test"))
+    }
+
     @Test fun `a page the extractor cannot read falls back to the sniffer`() = runBlocking {
         val web = fakeWeb(mapOf("uqload.is/embed-x.html" to (403 to "<title>Just a moment...</title>")))
         var sniffed: String? = null

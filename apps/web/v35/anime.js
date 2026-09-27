@@ -107,6 +107,7 @@ export function createAnime(deps) {
     episodeRange: 0,
     work: null,
     workFor: null,
+    workPending: null,
     playing: null,
     newestFirst: false,
     malTitles: {},
@@ -883,19 +884,27 @@ export function createAnime(deps) {
   async function locateWork(m, token = state.detailToken) {
     if (!engine.available()) return null;
     if (state.workFor === m.id && state.work) return state.work;
+    // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
+    if (state.workFor === m.id && state.workPending) return state.workPending;
     state.work = null;
     state.workFor = m.id;
     paintSources(m, 'loading');
-    try {
-      const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
-      if (token !== state.detailToken) return null;
-      state.work = work;
-      paintSources(m, work ? 'found' : 'none');
-      return work;
-    } catch {
-      if (token === state.detailToken) paintSources(m, 'error');
-      return null;
-    }
+    const pending = (async () => {
+      try {
+        const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
+        if (token !== state.detailToken || state.workFor !== m.id) return null;
+        state.work = work;
+        paintSources(m, work ? 'found' : 'none');
+        return work;
+      } catch {
+        if (token === state.detailToken && state.workFor === m.id) paintSources(m, 'error');
+        return null;
+      } finally {
+        if (state.workPending === pending) state.workPending = null;
+      }
+    })();
+    state.workPending = pending;
+    return pending;
   }
 
   function paintSources(m, phase = state.work ? 'found' : engine.available() ? 'loading' : 'web') {
@@ -1090,6 +1099,15 @@ export function createAnime(deps) {
       const status = el('div', 'an-srv-status');
       const filters = el('div', 'an-pick-filters');
       const list = el('div', 'an-srv-list');
+      const routeNodes = new Map();
+      const groupNodes = new Map();
+      // أبقِ عناصر السيرفرات كما هي عند وصول نتيجة جديدة؛ غيّر موضع ما تبدّل فقط.
+      const reconcile = (parent, nodes) => {
+        nodes.forEach((node, i) => {
+          if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
+        });
+        while (parent.children.length > nodes.length) parent.lastElementChild.remove();
+      };
       scroll.append(hero, status, filters, list);
 
       const foot = el('footer', 'an-pick-foot');
@@ -1157,18 +1175,22 @@ export function createAnime(deps) {
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
         if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
-        else if (!sheet.done) status.innerHTML = `<i class="an-sources-spin"></i><span>نجهّز السيرفرات… ${ready ? `${ready} جاهز` : ''}</span>`;
+        else if (!sheet.done && ready) status.textContent = `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} · البقية تصل بالخلفية`;
+        else if (!sheet.done) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
         else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
         if (sheet.work === false) status.querySelector('i')?.remove();
-        list.replaceChildren();
+        const sections = [];
         for (const [name, routes] of shownGroups()) {
-          const group = el('section', 'an-srv-group');
-          group.append(el('h4', 'an-srv-q', name));
-          const grid = el('div', 'an-srv-grid');
-          for (const r of routes) grid.append(tile(r));
-          group.append(grid);
-          list.append(group);
+          let group = groupNodes.get(name);
+          if (!group) {
+            group = el('section', 'an-srv-group');
+            group.append(el('h4', 'an-srv-q', name), el('div', 'an-srv-grid'));
+            groupNodes.set(name, group);
+          }
+          reconcile(group.lastElementChild, routes.map(tile));
+          sections.push(group);
         }
+        reconcile(list, sections);
       };
       const queuePaint = () => {
         if (paintQueued) return;
@@ -1197,7 +1219,16 @@ export function createAnime(deps) {
       };
 
       const tile = (r) => {
-        const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
+        let b = routeNodes.get(r.id);
+        if (b) {
+          b.className = `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`;
+          b.disabled = r.state !== 'READY';
+          b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
+          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
+          b.onclick = () => void playRoute(r);
+          return b;
+        }
+        b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
         b.type = 'button';
         b.disabled = r.state !== 'READY';
         const top = el('span', 'an-srv-top');
@@ -1211,6 +1242,7 @@ export function createAnime(deps) {
         b.append(top, line);
         b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
         b.onclick = () => void playRoute(r);
+        routeNodes.set(r.id, b);
         return b;
       };
 
