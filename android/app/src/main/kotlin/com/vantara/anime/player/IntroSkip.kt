@@ -2,7 +2,12 @@ package com.vantara.anime.player
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.TimeUnit
 
 /** AniSkip timings are tied to the MAL title, episode and actual video duration. */
@@ -11,17 +16,17 @@ internal object IntroSkip {
 
     fun parse(body: String, durationMs: Long): Interval? {
         if (durationMs <= 0) return null
-        val result = runCatching { JSONObject(body) }.getOrNull() ?: return null
-        if (!result.optBoolean("found")) return null
-        val rows = result.optJSONArray("results") ?: return null
-        for (i in 0 until rows.length()) {
-            val row = rows.optJSONObject(i) ?: continue
-            if (row.optString("skipType") !in setOf("op", "mixed-op")) continue
-            val length = row.optDouble("episodeLength", Double.NaN)
-            if (length.isFinite() && kotlin.math.abs(length * 1000 - durationMs) > durationMs * 0.08) continue
-            val interval = row.optJSONObject("interval") ?: continue
-            val start = interval.optDouble("startTime", Double.NaN)
-            val end = interval.optDouble("endTime", Double.NaN)
+        val result = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        if (result["found"]?.jsonPrimitive?.booleanOrNull != true) return null
+        val rows = result["results"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: return null
+        for (element in rows) {
+            val row = runCatching { element.jsonObject }.getOrNull() ?: continue
+            if (row["skipType"]?.jsonPrimitive?.content !in setOf("op", "mixed-op")) continue
+            val length = row["episodeLength"]?.jsonPrimitive?.doubleOrNull ?: Double.NaN
+            if (length.isFinite() && kotlin.math.abs(length * 1000 - durationMs) > durationMs * 0.01) continue
+            val interval = row["interval"]?.let { runCatching { it.jsonObject }.getOrNull() } ?: continue
+            val start = interval["startTime"]?.jsonPrimitive?.doubleOrNull ?: Double.NaN
+            val end = interval["endTime"]?.jsonPrimitive?.doubleOrNull ?: Double.NaN
             if (!start.isFinite() || !end.isFinite()) continue
             val from = (start * 1000).toLong()
             val to = (end * 1000).toLong()
