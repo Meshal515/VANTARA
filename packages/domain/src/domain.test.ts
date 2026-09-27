@@ -58,8 +58,10 @@ describe('presence status', () => {
   });
 
   it('decays to IDLE then OFFLINE', () => {
-    expect(statusFor(200_000, { reading: true })).toBe('IDLE');
-    expect(statusFor(600_000, { reading: true })).toBe('OFFLINE');
+    expect(statusFor(59_999, { reading: true })).toBe('READING');
+    expect(statusFor(60_000, { reading: true })).toBe('IDLE');
+    expect(statusFor(89_999, { reading: true })).toBe('IDLE');
+    expect(statusFor(90_000, { reading: true })).toBe('OFFLINE');
   });
 
   it('hides the work but keeps presence while incognito', () => {
