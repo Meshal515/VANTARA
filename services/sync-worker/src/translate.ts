@@ -863,7 +863,7 @@ export async function translationAllowed(env: TranslationEnv, userId: string): P
     const row = await env.DB.prepare('SELECT username FROM accounts WHERE user_id = ?').bind(userId).first<{ username: string }>();
     return Boolean(row && list.includes(row.username.toLowerCase()));
   }
-  const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1').first<{ created_by: string }>();
+  const top = await env.DB.prepare('SELECT created_by FROM translation_creator_totals ORDER BY page_count DESC, first_at LIMIT 1').first<{ created_by: string }>();
   return !top || top.created_by === userId;
 }
 

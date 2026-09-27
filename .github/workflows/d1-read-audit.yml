@@ -4,6 +4,10 @@ name: D1 read audit
 on:
   push:
     branches: [main]
+  workflow_run:
+    workflows: ['Deploy sync worker']
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
             safe=$(printf '%s' "$database" | sha256sum | cut -c1-12)
             npx --yes wrangler@4 d1 insights "$database" --timePeriod=2d --sort-type=sum --sort-by=reads --limit=100 --json > "d1-audit/$safe-reads.json"
             npx --yes wrangler@4 d1 insights "$database" --timePeriod=2d --sort-type=sum --sort-by=count --limit=100 --json > "d1-audit/$safe-count.json"
+            npx --yes wrangler@4 d1 insights "$database" --timePeriod=1h --sort-type=sum --sort-by=reads --limit=100 --json > "d1-audit/$safe-hour-reads.json"
             printf '%s %s\n' "$safe" "$database" >> d1-audit/map.txt
           done < d1-audit/database-names.txt
       - name: Summarize counts and scanned rows
@@ -62,6 +67,13 @@ jobs:
               });
             }
             report.push({ database: name, queries: [...rows.values()].sort((a, b) => b.totalRowsRead - a.totalRowsRead) });
+            const hour = read('hour-reads').map((item) => ({
+              query: String(item.query ?? '').replace(/'([^']|'')*'/g, '?').replace(/\s+/g, ' ').trim().slice(0, 420),
+              calls: Number(item.numberOfTimesRun ?? 0),
+              totalRowsRead: Number(item.totalRowsRead ?? 0),
+              avgRowsRead: Number(item.avgRowsRead ?? 0),
+            }));
+            report[report.length - 1].lastHour = hour;
           }
           writeFileSync('d1-audit/report.json', JSON.stringify(report, null, 2));
           for (const database of report) {

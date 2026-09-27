@@ -49,7 +49,7 @@ export async function rafiqAllowed(env: RafiqEnv, userId: string): Promise<boole
   // من استخدم رفيق قبل يبقى له: الإتاحة لا تتقلب إذا ترجم غيره صفحات أكثر
   const used = await env.DB.prepare('SELECT 1 AS x FROM rafiq_conversations WHERE user_id = ? LIMIT 1').bind(userId).first<{ x: number }>();
   if (used) return true;
-  const top = await env.DB.prepare('SELECT created_by FROM translation_pages GROUP BY created_by ORDER BY COUNT(*) DESC, MIN(created_at) LIMIT 1').first<{ created_by: string }>();
+  const top = await env.DB.prepare('SELECT created_by FROM translation_creator_totals ORDER BY page_count DESC, first_at LIMIT 1').first<{ created_by: string }>();
   return Boolean(top && top.created_by === userId);
 }
 

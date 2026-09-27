@@ -425,7 +425,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   // الفروقات نفسها حدّ أمان، لا مجرد transport. الصف الذي لا يحتاجه
   // هذا الحساب لا يصل إلى مرآته المحلية أصلًا؛ إخفاؤه في الواجهة بعد التنزيل
   // يعني أن البيانات كُشفت بالفعل.
-  const deltaScope = (table: string): { sql: string; values: string[] } => {
+  const deltaScope = (table: string, revision: number): { sql: string; values: Array<string | number> } => {
     switch (table) {
       // المكتبة والقوائم ليست هنا بقصد: ملف صديقك يعرض ما يقرؤه ويؤجله وأكمله
       // `chapter_reads` لصاحبه: لا واجهة تعرضه لغيره (أُلغي سجل القراءة)، وكان
@@ -484,9 +484,10 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       case 'majlis_reactions':
         return {
           sql:
-            ` AND ((target_kind = 'frame' AND target_id IN (${MAJLIS_VISIBLE_IDS.frame}))` +
-            ` OR (target_kind = 'rec' AND target_id IN (${MAJLIS_VISIBLE_IDS.rec}))` +
-            ` OR (target_kind = 'activity' AND target_id IN (${MAJLIS_VISIBLE_IDS.activity})))`,
+            ` AND (target_kind, target_id) IN (` +
+            ` SELECT 'frame', id FROM frames WHERE id IN (${MAJLIS_VISIBLE_IDS.frame})` +
+            ` UNION ALL SELECT 'rec', id FROM recommendations WHERE id IN (${MAJLIS_VISIBLE_IDS.rec})` +
+            ` UNION ALL SELECT 'activity', id FROM activity WHERE id IN (${MAJLIS_VISIBLE_IDS.activity}))`,
           values: [
             ...majlisViewerValues('frame', userId),
             ...majlisViewerValues('rec', userId),
@@ -507,8 +508,13 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       // المشاهد يرى إيصالاته، والفاعل يرى إيصالات حدثه لعرض delivered/seen.
       case 'activity_receipts':
         return {
-          sql: ' AND (user_id = ? OR event_id IN (SELECT id FROM activity WHERE actor_id = ?))',
-          values: [userId, userId],
+          // An OR across the recipient and sender makes SQLite walk the global
+          // rev index on every poll. Both arms seek within the relevant user.
+          sql: ` AND rowid IN (` +
+            `SELECT rowid FROM activity_receipts WHERE user_id = ? AND rev > ?` +
+            ` UNION SELECT r.rowid FROM activity_receipts r JOIN activity a ON a.id = r.event_id` +
+            ` WHERE a.actor_id = ? AND r.rev > ?)`,
+          values: [userId, revision, userId, revision],
         };
 
       default:
@@ -517,7 +523,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   };
 
   const statements = DELTA_TABLES.map(([table, columns]) => {
-    const scope = deltaScope(table);
+    const scope = deltaScope(table, cursor === 0 ? -1 : cursor);
     return env.DB.prepare(
       `SELECT ${columns} FROM ${table} WHERE rev > ?${scope.sql} ORDER BY rev LIMIT ${PAGE_SIZE}`,
     // سحبٌ كامل يبدأ من تحت الصفر: الحسابات الثلاثة وملفاتها زرعتها الهجرة
@@ -554,7 +560,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
         boundaryStart -= 1;
       }
 
-      const scope = deltaScope(table);
+      const scope = deltaScope(table, lastRev - 1);
       const boundaryStatement = env.DB.prepare(
         `SELECT ${columns} FROM ${table} WHERE rev = ?${scope.sql} ORDER BY rev`,
       );
