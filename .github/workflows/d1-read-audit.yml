@@ -1,0 +1,76 @@
+name: D1 read audit
+
+# Temporary read-only diagnostic. Remove after identifying and verifying the leak.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'Meshal515/VANTARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Query D1 insights without bound values
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          mkdir -p d1-audit
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?per_page=100" \
+            | jq -r '.result[].name' > d1-audit/database-names.txt
+          test -s d1-audit/database-names.txt
+          while IFS= read -r database; do
+            [ -n "$database" ] || continue
+            safe=$(printf '%s' "$database" | sha256sum | cut -c1-12)
+            npx --yes wrangler@4 d1 insights "$database" --timePeriod=2d --sort-type=sum --sort-by=reads --limit=100 --json > "d1-audit/$safe-reads.json"
+            npx --yes wrangler@4 d1 insights "$database" --timePeriod=2d --sort-type=sum --sort-by=count --limit=100 --json > "d1-audit/$safe-count.json"
+            printf '%s %s\n' "$safe" "$database" >> d1-audit/map.txt
+          done < d1-audit/database-names.txt
+      - name: Summarize counts and scanned rows
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const mapping = readFileSync('d1-audit/map.txt', 'utf8').trim().split('\n');
+          const report = [];
+          for (const line of mapping) {
+            const [id, name] = line.split(' ');
+            const read = (suffix) => {
+              const raw = readFileSync(`d1-audit/${id}-${suffix}.json`, 'utf8');
+              const parsed = JSON.parse(raw.slice(raw.indexOf('[')));
+              return Array.isArray(parsed) ? parsed : parsed.result ?? [];
+            };
+            const rows = new Map();
+            for (const item of [...read('reads'), ...read('count')]) {
+              const query = String(item.query ?? '').replace(/'([^']|'')*'/g, '?').replace(/\s+/g, ' ').trim();
+              rows.set(query, {
+                query: query.slice(0, 420),
+                calls: Number(item.numberOfTimesRun ?? 0),
+                totalRowsRead: Number(item.totalRowsRead ?? 0),
+                avgRowsRead: Number(item.avgRowsRead ?? 0),
+              });
+            }
+            report.push({ database: name, queries: [...rows.values()].sort((a, b) => b.totalRowsRead - a.totalRowsRead) });
+          }
+          writeFileSync('d1-audit/report.json', JSON.stringify(report, null, 2));
+          for (const database of report) {
+            console.log(`Database ${database.database}: top rows_read over 2d`);
+            for (const row of database.queries.slice(0, 25)) console.log(JSON.stringify(row));
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d1-read-audit
+          path: d1-audit/report.json
+          retention-days: 7
