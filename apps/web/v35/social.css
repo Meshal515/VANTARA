@@ -596,6 +596,7 @@
 }
 .v35 .mc-bubble {
   position: relative;
+  z-index: 1;
   max-width: min(78vw, 440px);
   padding: 7px 12px 6px;
   border-radius: 18px;
@@ -610,15 +611,20 @@
 .v35 .mc-swipe-cue {
   position: absolute;
   top: 50%;
-  right: -27px;
-  width: 22px;
-  height: 22px;
+  right: 36px;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
   color: var(--accent);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-50%);
 }
-.v35 .mc-item--mine .mc-swipe-cue { right: auto; left: -27px; }
+.v35 .mc-item--mine .mc-swipe-cue { right: auto; left: 4px; }
 .v35 .mc-readers {
   display: inline-flex;
   align-items: center;
@@ -644,6 +650,7 @@
   opacity: .6;
   filter: grayscale(1);
 }
+.v35 .mc-reader-face:first-child { margin-inline-start: 0; }
 .v35 .mc-reader-face.is-seen { opacity: 1; filter: none; }
 .v35 .mc-reader-face > * { width: 100% !important; height: 100% !important; border-radius: 50%; }
 .v35 .mc-reader-row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }
@@ -652,6 +659,70 @@
 .v35 .mc-reader-info { display: grid; gap: 3px; min-width: 0; }
 .v35 .mc-reader-info bdi { color: var(--text-1); font-weight: 650; }
 .v35 .mc-reader-info small { color: var(--text-3); font-size: 12px; }
+
+/* خيارات المجلس تطفو قرب الرسالة وتُنشأ بعد رفع الإصبع. */
+.v35 .mc-actions-layer { position: absolute; inset: 0; z-index: 20; }
+.v35 .mc-actions-dismiss {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgba(3, 3, 9, .22);
+}
+.v35 .mc-actions {
+  position: absolute;
+  box-sizing: border-box;
+  width: min(290px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface-2);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .36);
+  color: var(--text-1);
+}
+.v35 .mc-actions-preview {
+  overflow: hidden;
+  margin: 2px 4px 8px;
+  padding: 8px 10px;
+  border-inline-start: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.v35 .mc-actions-reactions { display: flex; justify-content: space-around; gap: 2px; padding-bottom: 6px; }
+.v35 .mc-actions-emoji {
+  width: 37px;
+  height: 37px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 21px;
+}
+.v35 .mc-actions-emoji.is-on { background: var(--accent-line); }
+.v35 .mc-actions-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.v35 .mc-actions-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: start;
+}
+.v35 .mc-actions-option .icon { flex: none; color: var(--accent); }
+.v35 .mc-actions-option.is-danger,
+.v35 .mc-actions-option.is-danger .icon { color: var(--danger); }
+.v35 .mc-actions-option:active { background: var(--surface-3); }
 /* الزاوية الملاصقة للمرسل تضيق داخل المجموعة */
 .v35 .mc-item--theirs:not(.is-first) .mc-bubble {
   border-start-start-radius: 6px;
