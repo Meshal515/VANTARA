@@ -79,6 +79,9 @@ class CloudflareInterceptor(
     private var lastSolvedHost: String? = null
     private var lastSolvedAt = 0L
 
+    /** فحص الخلفية لا يعيد فتح تحدّي تفاعلي لنفس المضيف مع كل سيرفر. */
+    private val passiveChallengeUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     /** Hosts known to gate on fingerprint (no cookie possible) → byte-fetch. */
     private val byteFetchHosts = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -103,6 +106,11 @@ class CloudflareInterceptor(
                 retry.close()
             }
 
+            if (eu.kanade.tachiyomi.network.HostRouting.hiddenOnly(host) &&
+                System.currentTimeMillis() < (passiveChallengeUntil[host] ?: 0L)) {
+                throw interactiveError(request)
+            }
+
             // Host previously found to be fingerprint-gated: skip the (useless)
             // cookie solve and fetch the bytes through the browser engine.
             if (host in byteFetchHosts) {
@@ -124,7 +132,12 @@ class CloudflareInterceptor(
                     }
                     // A human is needed. The byte-fetch below would only sit in
                     // front of the same widget for another timeout.
-                    SolveOutcome.INTERACTIVE -> throw interactiveError(request)
+                    SolveOutcome.INTERACTIVE -> {
+                        if (eu.kanade.tachiyomi.network.HostRouting.hiddenOnly(host)) {
+                            passiveChallengeUntil[host] = System.currentTimeMillis() + PASSIVE_CHALLENGE_COOLDOWN_MS
+                        }
+                        throw interactiveError(request)
+                    }
                     SolveOutcome.RENDERER_GONE -> throw rendererGoneError(request)
                     SolveOutcome.NOT_A_CHALLENGE, SolveOutcome.TIMEOUT -> Unit
                 }
@@ -558,6 +571,7 @@ class CloudflareInterceptor(
         private const val INTERACTIVE_TIMEOUT_SEC = 120L
         private const val POLL_MS = 400L
         private const val RECENT_SOLVE_MS = 15_000L
+        private const val PASSIVE_CHALLENGE_COOLDOWN_MS = 2 * 60_000L
         private const val MAX_WEBVIEW_IMAGE_BYTES = 12 * 1024 * 1024
         private val ERROR_CODES = listOf(403, 503)
         private val SERVER_CHECK = listOf("cloudflare-nginx", "cloudflare")

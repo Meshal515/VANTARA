@@ -1,6 +1,7 @@
 package com.vantara.anime.hosts
 
 import com.vantara.anime.stream.Container
+import com.vantara.anime.net.AnimeHostRouter
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import kotlinx.serialization.json.Json
@@ -15,6 +16,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import org.jsoup.Jsoup
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * سيرفرات الفيديو المضمّنة: من رابط صفحة المشغّل (`ok.ru/videoembed/…`) إلى
@@ -52,6 +58,7 @@ class EmbedResolver(
     private suspend fun resolve(embed: String, referer: String?, depth: Int): List<Stream> {
         val url = if (embed.startsWith("//")) "https:$embed" else embed
         val host = url.toHttpUrlOrNull()?.host?.lowercase() ?: return emptyList()
+        AnimeHostRouter.markPassiveVideoHost(host)
         return when {
             host.endsWith("ok.ru") || host.endsWith("odnoklassniki.ru") -> OkRu.parse(fetch(url, referer).body)
             // الفيديو مشفّر ويُفك داخل صفحة MEGA نفسها: لا رابط يلتقطه أحد
@@ -134,7 +141,7 @@ class EmbedResolver(
     private suspend fun sniff(url: String, referer: String?): List<Stream> =
         sniffer?.sniff(url, referer)?.let(::listOf).orEmpty()
 
-    /** megamax: صفحة Inertia تحمل «مرايا» كل جودة على مضيفات أخرى؛ نجرّبها بالترتيب. */
+    /** نُبقي محاولتين فقط قيد العمل، ونرجع عند أول مرآة صالحة بدل انتظار البطيئة. */
     private suspend fun megamax(url: String, referer: String?): List<Stream> {
         val first = fetch(url, referer)
         val version = Megamax.version(first.body) ?: return emptyList()
@@ -148,13 +155,40 @@ class EmbedResolver(
             add("Referer", first.url)
         }.build()
         val body = client.newCall(GET(first.url, headers)).await().use { it.body.string() }
-        val out = mutableListOf<Stream>()
-        for (m in Megamax.mirrors(body).take(MEGAMAX_TRIES)) {
-            val got = runCatching { resolve(m.link, first.url, depth = 1) }.getOrDefault(emptyList())
-            out += got.map { it.copy(quality = it.quality ?: m.quality, label = "megamax/${m.driver}") }
-            if (out.size >= 2) break
+        val mirrors = Megamax.mirrors(body).take(MEGAMAX_TRIES)
+        return coroutineScope {
+            val results = Channel<List<Stream>>(Channel.UNLIMITED)
+            val jobs = mutableListOf<kotlinx.coroutines.Job>()
+            var next = 0
+            var pending = 0
+            fun CoroutineScope.startNext() {
+                if (next >= mirrors.size) return
+                val mirror = mirrors[next++]
+                pending++
+                jobs += launch {
+                    val streams = try {
+                        resolve(mirror.link, first.url, depth = 1)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    results.send(streams.map { it.copy(quality = it.quality ?: mirror.quality, label = "megamax/${mirror.driver}") })
+                }
+            }
+            startNext()
+            startNext()
+            while (pending > 0) {
+                val streams = results.receive()
+                pending--
+                if (streams.isNotEmpty()) {
+                    jobs.forEach { it.cancel() }
+                    return@coroutineScope streams
+                }
+                startNext()
+            }
+            emptyList()
         }
-        return out
     }
 
     private fun headersFor(pageUrl: String): Map<String, String> {

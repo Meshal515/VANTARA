@@ -66,8 +66,13 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -91,6 +96,7 @@ class PlayerActivity : Activity() {
         val session: String,
         val title: String,
         val animeId: String = "",
+        val malId: Int? = null,
         val episode: Float = 1f,
         /** آخر حلقة متاحة (لقائمة الحلقات و«التالية»). */
         val total: Int = 0,
@@ -108,6 +114,11 @@ class PlayerActivity : Activity() {
         val variant: String = "SUB",
         /** مواضع الحلقات غير المكتملة (JSON: {"12": 61000}). */
         val resume: String? = null,
+        val presenceEndpoint: String? = null,
+        val presenceAuthorization: String? = null,
+        val presenceUserId: String? = null,
+        val presenceDeviceId: String? = null,
+        val presenceDeviceCredential: String? = null,
     )
 
     private lateinit var launch: Launch
@@ -133,6 +144,7 @@ class PlayerActivity : Activity() {
     private lateinit var seekLeft: TextView
     private lateinit var seekRight: TextView
     private lateinit var unlockButton: ImageView
+    private lateinit var skipIntroButton: TextView
     private var errorCard: View? = null
     private var countdownCard: View? = null
     private var clip: ClipEditor? = null
@@ -142,6 +154,59 @@ class PlayerActivity : Activity() {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val presenceClient = OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()
+    private var presenceJob: Job? = null
+    private var presenceAuthorization: String? = null
+    private var presenceActive = false
+    private val presenceTick = object : Runnable {
+        override fun run() {
+            sendPresence()
+            if (presenceActive) main.postDelayed(this, 25_000)
+        }
+    }
+
+    private fun sendPresence() {
+        val endpoint = launch.presenceEndpoint?.trimEnd('/')?.takeIf { it.startsWith("https://") } ?: return
+        val authorization = presenceAuthorization?.takeIf { it.startsWith("Bearer ") } ?: return
+        if (presenceJob?.isActive == true) return
+        val watching = ::player.isInitialized && current != null && player.playbackState != Player.STATE_ENDED
+        val body = JSONObject().put("status", if (watching) "READING" else "ONLINE")
+            .put("screen", "ANIME")
+        if (watching) body.put("seriesId", "anime:${launch.animeId}")
+            .put("seriesTitle", launch.title)
+            .put("chapterLabel", "الحلقة ${fmtEpisode(episode)}")
+            .put("chapterNumber", episode.toDouble())
+        presenceJob = scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val request = Request.Builder().url("$endpoint/v1/presence")
+                        .header("Authorization", authorization)
+                        .post(body.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    val expired = presenceClient.newCall(request).execute().use { it.code == 401 }
+                    if (expired) refreshPresenceToken(endpoint)?.let { fresh ->
+                        presenceAuthorization = "Bearer $fresh"
+                        presenceClient.newCall(request.newBuilder().header("Authorization", "Bearer $fresh").build())
+                            .execute().use { /* best effort retry */ }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun refreshPresenceToken(endpoint: String): String? {
+        val user = launch.presenceUserId ?: return null
+        val device = launch.presenceDeviceId ?: return null
+        val credential = launch.presenceDeviceCredential ?: return null
+        val body = JSONObject().put("userId", user).put("deviceId", device)
+            .put("deviceCredential", credential).toString()
+        val request = Request.Builder().url("$endpoint/v1/session")
+            .post(body.toRequestBody("application/json".toMediaType())).build()
+        return presenceClient.newCall(request).execute().use { response ->
+            if (response.isSuccessful) response.body?.string()?.let { JSONObject(it).optString("token").takeIf(String::isNotBlank) }
+            else null
+        }
+    }
 
     private var sessionId = ""
     private var episode = 1f
@@ -154,6 +219,10 @@ class PlayerActivity : Activity() {
     private var reportedStart = false
     private var expanded = false
     private var waiting: Job? = null
+    private var warmedSessionId: String? = null
+    private var warmedEpisode = -1
+    private var intro: IntroSkip.Interval? = null
+    private var introRequestedEpisode = -1
     private var locked = false
     private var fill = false
     private var copies: List<SourceAnime> = emptyList()
@@ -170,12 +239,17 @@ class PlayerActivity : Activity() {
     private val progressTick = object : Runnable {
         override fun run() {
             report(final = false)
+            maybePrepareNext()
             main.postDelayed(this, PROGRESS_EVERY_MS)
         }
     }
     private val clockTick = object : Runnable {
         override fun run() {
             updateTime()
+            maybeLoadIntro()
+            if (::skipIntroButton.isInitialized) {
+                skipIntroButton.visibility = if (IntroSkip.visible(intro, position()) && !locked && clip == null) View.VISIBLE else View.GONE
+            }
             main.postDelayed(this, 500)
         }
     }
@@ -193,6 +267,7 @@ class PlayerActivity : Activity() {
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
         sessionId = launch.session
+        presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
         preferCode = launch.preferCode
         copies = launch.copies?.let { runCatching { json.decodeFromString(ListSerializer(SourceAnime.serializer()), it) }.getOrNull() }.orEmpty()
@@ -264,12 +339,19 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_READY) {
                 spinner.visibility = View.GONE
+                if (presenceActive) sendPresence()
                 if (!reportedStart) {
                     reportedStart = true
                     main.removeCallbacks(startupWatchdog)
                     current?.let { c ->
                         session?.started(c, System.currentTimeMillis() - startedAt)
-                        codeOf(c)?.let { code -> PlaybackEvents.emit("server", JSONObject().put("animeId", launch.animeId).put("code", code)) }
+                        codeOf(c)?.let { code ->
+                            preferCode = code
+                            PlaybackEvents.emit(
+                                "server", JSONObject().put("animeId", launch.animeId).put("code", code)
+                                    .put("sourceId", c.sourceId).put("server", c.server).put("quality", c.quality),
+                            )
+                        }
                     }
                     updateQualityLabel()
                 }
@@ -427,6 +509,29 @@ class PlayerActivity : Activity() {
 
     private fun hasNext() = copies.isNotEmpty() && launch.total > 0 && episodeInt() + 1 <= launch.total
 
+    /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
+    private fun maybePrepareNext() {
+        if (!reportedStart || !hasNext() || warmedSessionId != null || player.playbackState != Player.STATE_READY) return
+        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position())) return
+        val source = current?.sourceId ?: return
+        val next = episodeInt() + 1
+        val id = "warm-${System.nanoTime()}"
+        warmedSessionId = id
+        warmedEpisode = next
+        engine.prepare(
+            id, copies, next.toFloat(),
+            Preferences(launch.quality, runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB)),
+            warmSourceId = source,
+            preferredServer = current?.server,
+        )
+    }
+
+    private fun discardWarmup() {
+        warmedSessionId?.let(engine::closeSession)
+        warmedSessionId = null
+        warmedEpisode = -1
+    }
+
     private fun switchEpisode(n: Int) {
         if (copies.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
         cancelCountdown()
@@ -439,18 +544,25 @@ class PlayerActivity : Activity() {
         main.removeCallbacks(stallWatchdog)
         player.stop()
         current = null
+        val warmed = warmedSessionId?.takeIf { warmedEpisode == n && engine.prepared(it)?.best() != null }
+        if (warmed == null) discardWarmup()
+        else { warmedSessionId = null; warmedEpisode = -1 }
         engine.closeSession(sessionId)
-        val id = "s-${System.nanoTime()}"
+        val id = warmed ?: "s-${System.nanoTime()}"
         val prefs = Preferences(
             quality = launch.quality,
             variant = runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB),
         )
-        engine.prepare(id, copies, n.toFloat(), prefs)
+        if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
         episode = n.toFloat()
+        if (presenceActive) sendPresence()
+        intro = null
+        introRequestedEpisode = -1
+        if (::skipIntroButton.isInitialized) skipIntroButton.visibility = View.GONE
         attach(id)
         hideError()
         spinner.visibility = View.VISIBLE
-        message("نجهّز الحلقة $n…", long = true)
+        if (warmed == null) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
         val p = prep ?: return
         val s = session ?: return
@@ -554,6 +666,18 @@ class PlayerActivity : Activity() {
         buildTop()
         buildBottom()
         root.addView(controls, match())
+
+        skipIntroButton = pillButton("تخطي المقدمة  »", primary = true) {
+            intro?.let { player.seekTo(it.endMs) }
+            skipIntroButton.visibility = View.GONE
+        }.apply {
+            contentDescription = "تخطي المقدمة"
+            visibility = View.GONE
+        }
+        root.addView(skipIntroButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.RIGHT or Gravity.BOTTOM).apply {
+            rightMargin = dp(28)
+            bottomMargin = dp(142)
+        })
 
         pill = label("", 13.5f, Color.WHITE, bold = true).apply {
             setPadding(dp(16), dp(9), dp(16), dp(9))
@@ -734,6 +858,19 @@ class PlayerActivity : Activity() {
     }
 
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
+
+    /** جلب مستقل بعد بدء الفيديو: لا يؤخر التشغيل، ولا يظهر الزر إلا لتوقيت موثوق. */
+    private fun maybeLoadIntro() {
+        val malId = launch.malId ?: return
+        val duration = player.duration.takeIf { it > 0 } ?: return
+        if (!reportedStart || introRequestedEpisode == episodeInt()) return
+        val requested = episodeInt()
+        introRequestedEpisode = requested
+        scope.launch {
+            val found = withContext(Dispatchers.IO) { IntroSkip.fetch(network.client, malId, requested, duration) }
+            if (episodeInt() == requested) intro = found
+        }
+    }
 
     private fun togglePlay() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
@@ -1323,11 +1460,21 @@ class PlayerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        presenceActive = false
+        main.removeCallbacks(presenceTick)
         player.playWhenReady = false
         report(final = false)
     }
 
+    override fun onResume() {
+        super.onResume()
+        presenceActive = true
+        main.removeCallbacks(presenceTick)
+        main.post(presenceTick)
+    }
+
     override fun onDestroy() {
+        presenceActive = false
         clip?.release()
         unlisten?.invoke()
         scope.cancel()
@@ -1335,6 +1482,7 @@ class PlayerActivity : Activity() {
         report(final = true)
         player.release()
         engine.closeSession(sessionId)
+        discardWarmup()
         // لا أثر على مساحة الجهاز: المقاطع المؤقتة وكاش البث يُحذفان مع المشغّل
         MediaCache.purgeClips(this)
         MediaCache.release(this)

@@ -107,6 +107,7 @@ export function createAnime(deps) {
     episodeRange: 0,
     work: null,
     workFor: null,
+    workPending: null,
     playing: null,
     newestFirst: false,
     malTitles: {},
@@ -883,19 +884,27 @@ export function createAnime(deps) {
   async function locateWork(m, token = state.detailToken) {
     if (!engine.available()) return null;
     if (state.workFor === m.id && state.work) return state.work;
+    // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
+    if (state.workFor === m.id && state.workPending) return state.workPending;
     state.work = null;
     state.workFor = m.id;
     paintSources(m, 'loading');
-    try {
-      const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
-      if (token !== state.detailToken) return null;
-      state.work = work;
-      paintSources(m, work ? 'found' : 'none');
-      return work;
-    } catch {
-      if (token === state.detailToken) paintSources(m, 'error');
-      return null;
-    }
+    const pending = (async () => {
+      try {
+        const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
+        if (token !== state.detailToken || state.workFor !== m.id) return null;
+        state.work = work;
+        paintSources(m, work ? 'found' : 'none');
+        return work;
+      } catch {
+        if (token === state.detailToken && state.workFor === m.id) paintSources(m, 'error');
+        return null;
+      } finally {
+        if (state.workPending === pending) state.workPending = null;
+      }
+    })();
+    state.workPending = pending;
+    return pending;
   }
 
   function paintSources(m, phase = state.work ? 'found' : engine.available() ? 'loading' : 'web') {
@@ -934,9 +943,14 @@ export function createAnime(deps) {
 
   // ───────────── التشغيل: ورقة السيرفرات ثم المشغّل الأصلي ─────────────
 
-  /** آخر سيرفر نجح أو اختاره المستخدم لكل أنمي: ترجيح في «الأفضل» لا قفل. */
+  /** الرابط خاص بالحلقة؛ هوية المصدر والسيرفر الناجح تصلح لترجيح الأعمال الأخرى. */
   const SERVER_KEY = 'vantara.anime.servers';
+  const WORKING_SERVER_KEY = 'vantara.anime.working-server';
   const preferredCode = (id) => readJson(SERVER_KEY, {})[id] ?? null;
+  const workingServer = (id) => {
+    const known = readJson(WORKING_SERVER_KEY, {});
+    return known.lastWorking ?? known[id] ?? null;
+  };
   const rememberCode = (id, code) => {
     if (!id || !code) return;
     const all = readJson(SERVER_KEY, {});
@@ -996,7 +1010,16 @@ export function createAnime(deps) {
     cur.n = e.episode;
   });
   engine.on('server', (e) => {
-    if (e?.animeId && e.code) rememberCode(e.animeId, e.code);
+    if (e?.animeId && e.code) {
+      rememberCode(e.animeId, e.code);
+      if (e.sourceId && e.server) {
+        const working = readJson(WORKING_SERVER_KEY, {});
+        const route = { sourceId: e.sourceId, server: e.server, quality: e.quality ?? null };
+        working[e.animeId] = route;
+        working.lastWorking = route;
+        writeJson(WORKING_SERVER_KEY, working);
+      }
+    }
   });
 
   /**
@@ -1057,7 +1080,10 @@ export function createAnime(deps) {
     const saved = readWatch()[m.id]?.episodes?.[n];
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
+    const autoServer = workingServer(m.id);
     const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, work: null };
+    let autoAttempted = false;
+    let fallbackTimer = null;
     let paintQueued = false;
     let off = [];
 
@@ -1090,6 +1116,15 @@ export function createAnime(deps) {
       const status = el('div', 'an-srv-status');
       const filters = el('div', 'an-pick-filters');
       const list = el('div', 'an-srv-list');
+      const routeNodes = new Map();
+      const groupNodes = new Map();
+      // أبقِ عناصر السيرفرات كما هي عند وصول نتيجة جديدة؛ غيّر موضع ما تبدّل فقط.
+      const reconcile = (parent, nodes) => {
+        nodes.forEach((node, i) => {
+          if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
+        });
+        while (parent.children.length > nodes.length) parent.lastElementChild.remove();
+      };
       scroll.append(hero, status, filters, list);
 
       const foot = el('footer', 'an-pick-foot');
@@ -1157,18 +1192,22 @@ export function createAnime(deps) {
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
         if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
-        else if (!sheet.done) status.innerHTML = `<i class="an-sources-spin"></i><span>نجهّز السيرفرات… ${ready ? `${ready} جاهز` : ''}</span>`;
+        else if (!sheet.done && ready) status.textContent = `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} · البقية تصل بالخلفية`;
+        else if (!sheet.done) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
         else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
         if (sheet.work === false) status.querySelector('i')?.remove();
-        list.replaceChildren();
+        const sections = [];
         for (const [name, routes] of shownGroups()) {
-          const group = el('section', 'an-srv-group');
-          group.append(el('h4', 'an-srv-q', name));
-          const grid = el('div', 'an-srv-grid');
-          for (const r of routes) grid.append(tile(r));
-          group.append(grid);
-          list.append(group);
+          let group = groupNodes.get(name);
+          if (!group) {
+            group = el('section', 'an-srv-group');
+            group.append(el('h4', 'an-srv-q', name), el('div', 'an-srv-grid'));
+            groupNodes.set(name, group);
+          }
+          reconcile(group.lastElementChild, routes.map(tile));
+          sections.push(group);
         }
+        reconcile(list, sections);
       };
       const queuePaint = () => {
         if (paintQueued) return;
@@ -1196,8 +1235,40 @@ export function createAnime(deps) {
         }
       };
 
+      // جرّب المصدر والسيرفر اللذين بدآ الفيديو فعلًا، حتى في أنمي مختلف.
+      // الرابط نفسه لا يُعاد استخدامه: يجب استخراجه للحلقة الجديدة.
+      const maybeAutoPlay = () => {
+        if (!autoServer || autoAttempted || sheet.closed || sheet.busy || !sheet.session) return;
+        const preferred = engine.matchingWorkingRoute(sheet.routes, autoServer);
+        if (preferred) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+          autoAttempted = true;
+          void playRoute(preferred);
+          return;
+        }
+        const ready = sheet.routes.find((r) => r.state === 'READY');
+        if (!ready || fallbackTimer) return;
+        // المصدر القديم قد يكون غائبًا عن هذا العمل: لا نتركه ينتظر بلا نهاية.
+        fallbackTimer = setTimeout(() => {
+          fallbackTimer = null;
+          if (sheet.closed || sheet.busy || autoAttempted) return;
+          const pick = engine.matchingWorkingRoute(sheet.routes, autoServer) ?? sheet.routes.find((r) => r.state === 'READY');
+          if (pick) { autoAttempted = true; void playRoute(pick); }
+        }, sheet.done ? 0 : 1800);
+      };
+
       const tile = (r) => {
-        const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
+        let b = routeNodes.get(r.id);
+        if (b) {
+          b.className = `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`;
+          b.disabled = r.state !== 'READY';
+          b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
+          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
+          b.onclick = () => void playRoute(r);
+          return b;
+        }
+        b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
         b.type = 'button';
         b.disabled = r.state !== 'READY';
         const top = el('span', 'an-srv-top');
@@ -1211,6 +1282,7 @@ export function createAnime(deps) {
         b.append(top, line);
         b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
         b.onclick = () => void playRoute(r);
+        routeNodes.set(r.id, b);
         return b;
       };
 
@@ -1262,6 +1334,7 @@ export function createAnime(deps) {
             if (e.session !== sheet.session || !e.route) return;
             sheet.routes = engine.upsertRoute(sheet.routes, e.route);
             queuePaint();
+            maybeAutoPlay();
           }),
           engine.on('prepared', (e) => {
             if (e.session !== sheet.session) return;
@@ -1270,7 +1343,10 @@ export function createAnime(deps) {
           }),
         );
         try {
-          const out = await engine.prepare({ copies: work.copies, episode: n });
+          const copies = autoServer?.sourceId
+            ? [...work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+            : work.copies;
+          const out = await engine.prepare({ copies, episode: n, preferredSourceId: autoServer?.sourceId, preferredServer: autoServer?.server });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;
@@ -1281,6 +1357,7 @@ export function createAnime(deps) {
           sheet.routes = snap?.routes ?? out.routes ?? [];
           sheet.done = Boolean(snap?.done ?? out.done);
           queuePaint();
+          maybeAutoPlay();
         } catch (e) {
           status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
         }
@@ -1288,6 +1365,7 @@ export function createAnime(deps) {
 
       return () => {
         sheet.closed = true;
+        clearTimeout(fallbackTimer);
         for (const f of off) f();
         off = [];
         // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
@@ -1304,6 +1382,7 @@ export function createAnime(deps) {
       for (const [ep, e] of Object.entries(watch)) if (!e.done && e.position > 5000) resume[ep] = e.position;
       state.playing = { session, m, n };
       deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
+      const presence = await deps.playerPresence?.();
       await engine.open({
         session,
         candidate,
@@ -1315,8 +1394,16 @@ export function createAnime(deps) {
         position: startAt,
         poster: m.posterSmall ?? m.poster ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
-        copies: sheet.work.copies,
+        copies: autoServer?.sourceId
+          ? [...sheet.work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+          : sheet.work.copies,
+        malId: m.idMal ?? null,
         resume,
+        presenceEndpoint: presence?.endpoint ?? null,
+        presenceAuthorization: presence?.authorization ?? null,
+        presenceUserId: presence?.userId ?? null,
+        presenceDeviceId: presence?.deviceId ?? null,
+        presenceDeviceCredential: presence?.deviceCredential ?? null,
       });
     }
   }

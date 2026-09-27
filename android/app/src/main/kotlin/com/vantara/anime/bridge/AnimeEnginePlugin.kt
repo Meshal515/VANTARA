@@ -78,6 +78,7 @@ class AnimeEnginePlugin : Plugin() {
                 session = session,
                 title = call.getString("title").orEmpty(),
                 animeId = call.getString("animeId").orEmpty(),
+                malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
                 total = call.getInt("total") ?: 0,
                 positionMs = (call.getDouble("position") ?: 0.0).toLong(),
@@ -89,6 +90,11 @@ class AnimeEnginePlugin : Plugin() {
                 quality = call.getInt("quality") ?: 1080,
                 variant = call.getString("variant") ?: "SUB",
                 resume = call.getObject("resume")?.toString(),
+                presenceEndpoint = call.getString("presenceEndpoint"),
+                presenceAuthorization = call.getString("presenceAuthorization"),
+                presenceUserId = call.getString("presenceUserId"),
+                presenceDeviceId = call.getString("presenceDeviceId"),
+                presenceDeviceCredential = call.getString("presenceDeviceCredential"),
             ),
         )
         activity.startActivity(intent)
@@ -109,7 +115,11 @@ class AnimeEnginePlugin : Plugin() {
             variant = runCatching { Variant.valueOf(call.getString("variant") ?: "SUB") }.getOrDefault(Variant.SUB),
         )
         val session = call.getString("session") ?: "s-${System.nanoTime()}"
-        val prep = engine.prepare(session, copies, number, prefs)
+        val prep = engine.prepare(
+            session, copies, number, prefs,
+            preferredSourceId = call.getString("preferredSourceId"),
+            preferredServer = call.getString("preferredServer"),
+        )
         prep.listen { route ->
             if (route == null) notifyListeners("prepared", JSObject().put("session", session))
             else notifyListeners("route", JSObject().put("session", session).put("route", route, com.vantara.anime.stream.Route.serializer()))

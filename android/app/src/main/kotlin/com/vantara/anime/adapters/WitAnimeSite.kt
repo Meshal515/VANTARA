@@ -98,13 +98,22 @@ class WitAnimeSiteAdapter(
         return Parse.episodes(html(anime.url), slug, id)
     }
 
-    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
+    override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> {
+        val focused = candidatesFor(episode, now, trace, 1, server)
+        return if (focused.isNotEmpty()) focused else candidates(episode, now, trace, enough = 1)
+    }
+
+    override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> =
+        candidatesFor(episode, now, trace, enough, null)
+
+    private suspend fun candidatesFor(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int, preferredServer: String?): List<Candidate> {
         val watch = abs(episode.url)
         val page = html(episode.url)
         val csrf = Parse.csrf(page) ?: error("لا رمز CSRF في صفحة الحلقة")
         val sourcesPath = Parse.sourcesUrl(page) ?: "${episode.url.trimEnd('/')}/sources"
         val all = Parse.servers(post(sourcesPath, csrf, watch))
-        val (skipped, servers) = all.partition { it.label.lowercase() in EmbedResolver.UNSUPPORTED }
+        val (skipped, supported) = all.partition { it.label.lowercase() in EmbedResolver.UNSUPPORTED }
+        val servers = if (preferredServer == null) supported else supported.filter { it.label.equals(preferredServer, ignoreCase = true) }
         if (all.isEmpty()) trace?.note("السيرفرات", "الموقع لم يُرجع أي سيرفر")
         fun report(s: Parse.Server, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
             trace?.route(

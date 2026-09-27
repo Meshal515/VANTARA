@@ -86,6 +86,10 @@ interface AnimeAdapter {
         /** توقف مبكر حين تتوفر روابط من هذا العدد من المضيفات المختلفة. */
         enough: Int = Int.MAX_VALUE,
     ): List<Candidate>
+
+    /** مسار سريع لسيرفر اشتغل سابقًا؛ جلب رابط هذه الحلقة فقط، ثم الفحص المعتاد عند الفشل. */
+    suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long = System.currentTimeMillis(), trace: ResolveTrace? = null): List<Candidate> =
+        candidates(episode, now, trace, enough = 1)
 }
 
 /**
@@ -224,15 +228,32 @@ class ExtensionAdapter(
         return pageCandidates(episode, rule, r, now, trace, enough)
     }
 
+    override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> {
+        val fromExtension = try { extensionCandidates(episode, now, trace, server) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { trace?.note("الإضافة", e.brief()); emptyList() }
+        if (fromExtension.isNotEmpty()) return fromExtension
+        val rule = pageEmbeds()
+        val r = resolver
+        if (rule != null && r != null) {
+            val fromPage = try { pageCandidates(episode, rule, r, now, trace, 1, server) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { trace?.note("صفحة الحلقة", e.brief()); emptyList() }
+            if (fromPage.isNotEmpty()) return fromPage
+        }
+        return candidates(episode, now, trace, enough = 1)
+    }
+
     private fun report(trace: ResolveTrace?, key: String, server: String, quality: Int?, variant: Variant, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
         trace?.route(RouteReport(id, key, server, quality, variant, state, list, reason))
 
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
-    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
+    private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int, preferredServer: String? = null): List<Candidate> {
         val (finalUrl, html) = fetchPage(episode.url)
         // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
         val referer = finalUrl
-        val embeds = rule.extract(html, finalUrl)
+        val allEmbeds = rule.extract(html, finalUrl)
+        val embeds = if (preferredServer == null) allEmbeds else allEmbeds.filter { it.name.equals(preferredServer, ignoreCase = true) }
         if (embeds.isEmpty()) trace?.note("صفحة الحلقة", "لا روابط سيرفرات بقاعدة البيان")
         val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
         val keyOf = { e: PageEmbeds.Embed -> "p" + Integer.toHexString(e.url.hashCode()) }
@@ -277,14 +298,15 @@ class ExtensionAdapter(
         )
     }
 
-    private suspend fun extensionCandidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
+    private suspend fun extensionCandidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, preferredServer: String? = null): List<Candidate> {
         val sEpisode = SEpisode.create().apply {
             url = episode.url
             name = episode.name
             episode_number = episode.number
         }
-        val hosters = source.getHosterList(sEpisode)
+        val allHosters = source.getHosterList(sEpisode)
         val nameOf = { h: Hoster -> h.hosterName.takeUnless { it == Hoster.NO_HOSTER_LIST || it.isBlank() } ?: name }
+        val hosters = if (preferredServer == null) allHosters else allHosters.filter { nameOf(it).equals(preferredServer, ignoreCase = true) }
         val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
         hosters.forEachIndexed { i, h -> report(trace, "h$i", nameOf(h), null, variant, RouteState.RESOLVING) }
         return coroutineScope {

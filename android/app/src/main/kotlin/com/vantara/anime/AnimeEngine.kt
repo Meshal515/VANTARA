@@ -278,7 +278,14 @@ class AnimeEngine(context: Context) {
      * لحظة يتغيّر ([com.vantara.anime.stream.PreparedEpisode.listen]). الجلسة
      * تمتلئ وهي تعمل، فالمشغّل يبدأ بأول ما يجهز ويجد الاحتياط خلفه.
      */
-    fun prepare(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): com.vantara.anime.stream.PreparedEpisode {
+    fun prepare(
+        sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences,
+        /** تجهيز الحلقة التالية: المصدر الذي اشتغل الآن فقط، والبقية عند العطل. */
+        warmSourceId: String? = null,
+        /** سيرفر مؤكد من تشغيل سابق؛ نفك رابط هذه الحلقة له أولًا. */
+        preferredSourceId: String? = null,
+        preferredServer: String? = null,
+    ): com.vantara.anime.stream.PreparedEpisode {
         prepared.remove(sessionId)?.job?.cancel()
         val session = PlaybackSession(emptyList(), health)
         val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health)
@@ -287,17 +294,24 @@ class AnimeEngine(context: Context) {
         prepared[sessionId] = prep
         prep.job = background.launch {
             val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
+                .filter { warmSourceId == null || it.sourceId == warmSourceId }
             kotlinx.coroutines.coroutineScope {
                 for (copy in ordered) {
                     launch {
                         runCatching {
-                            val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                            val ep = resolver.pick(resolver.episodes(c), number) ?: return@runCatching
-                            val a = adapter(copy.sourceId) ?: return@runCatching
-                            val list = withTimeout(PREPARE_TIMEOUT_MS) {
-                                a.candidates(ep, trace = com.vantara.anime.adapters.ResolveTrace(prep::report))
+                            // المهلة تشمل العثور على الحلقة وتحميل الإضافة أيضًا؛ وإلا قد
+                            // يظل التحضير مفتوحًا بلا نهاية قبل ظهور أي سيرفر.
+                            withTimeout(PREPARE_TIMEOUT_MS) {
+                                val c = EpisodeResolver.Copy(copy.sourceId, copy)
+                                val ep = resolver.pick(resolver.episodes(c), number) ?: return@withTimeout
+                                val a = adapter(copy.sourceId) ?: return@withTimeout
+                                val trace = com.vantara.anime.adapters.ResolveTrace(prep::report)
+                                val links = if (copy.sourceId == (preferredSourceId ?: warmSourceId) && preferredServer != null)
+                                    a.preferredCandidates(ep, preferredServer, trace = trace)
+                                else a.candidates(ep, trace = trace, enough = if (warmSourceId == null) Int.MAX_VALUE else 1)
+                                links
+                                    .also { prep.adopt(copy.sourceId, it) }
                             }
-                            prep.adopt(copy.sourceId, list)
                         }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
                     }
                 }
