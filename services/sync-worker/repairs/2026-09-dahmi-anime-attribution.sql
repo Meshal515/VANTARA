@@ -4,11 +4,12 @@
 -- already had the matching work and earlier library rows. Tombstones advance the
 -- shared cursor so every device withdraws these rows on its next sync.
 --
--- The guard deliberately aborts the entire D1 migration if any audited fact
--- changed before deployment. A fresh database (or a previously cleaned one)
+-- Run only after the Worker is deployed and verified. The guard deliberately
+-- aborts the entire D1 batch if any audited fact changed before execution.
+-- A fresh database (or a previously cleaned one)
 -- has no matching batch and performs no writes.
 INSERT INTO sync_tx_guard (token, ok)
-SELECT 'repair-dahmi-anime-0037',
+SELECT 'repair-dahmi-anime-202609',
        CASE WHEN
          (SELECT COUNT(*) FROM work_views v JOIN accounts a ON a.user_id = v.user_id
           WHERE lower(a.username) = 'dahmi' AND v.rev = 5407 AND v.removed = 0
@@ -44,7 +45,7 @@ WHERE EXISTS (
 );
 
 UPDATE sync_state SET rev = rev + 1
-WHERE id = 1 AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037');
+WHERE id = 1 AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609');
 
 UPDATE work_views
 SET removed = 1, rev = (SELECT rev FROM sync_state WHERE id = 1),
@@ -52,7 +53,7 @@ SET removed = 1, rev = (SELECT rev FROM sync_state WHERE id = 1),
 WHERE user_id = (SELECT user_id FROM accounts WHERE lower(username) = 'dahmi')
   AND rev = 5407 AND removed = 0
   AND series_ref LIKE 'anime:%'
-  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037');
+  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609');
 
 UPDATE public_work_views
 SET removed = 1, rev = (SELECT rev FROM sync_state WHERE id = 1),
@@ -64,20 +65,20 @@ WHERE user_id = (SELECT user_id FROM accounts WHERE lower(username) = 'dahmi')
     WHERE user_id = (SELECT user_id FROM accounts WHERE lower(username) = 'dahmi')
       AND rev = (SELECT rev FROM sync_state WHERE id = 1) AND removed = 1
   )
-  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037');
+  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609');
 
 UPDATE library
 SET removed = 1, rev = (SELECT rev FROM sync_state WHERE id = 1)
 WHERE user_id = (SELECT user_id FROM accounts WHERE lower(username) = 'dahmi')
   AND rev = 5407 AND removed = 0
   AND series_ref LIKE 'anime:%'
-  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037');
+  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609');
 
 UPDATE chapter_marks
 SET read = 0, rev = (SELECT rev FROM sync_state WHERE id = 1)
 WHERE user_id = (SELECT user_id FROM accounts WHERE lower(username) = 'dahmi')
   AND rev = 5407 AND read = 1
   AND series_ref LIKE 'anime:%'
-  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037');
+  AND EXISTS (SELECT 1 FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609');
 
-DELETE FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-0037';
+DELETE FROM sync_tx_guard WHERE token = 'repair-dahmi-anime-202609';

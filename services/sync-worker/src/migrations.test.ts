@@ -62,7 +62,7 @@ describe('D1 migrations', () => {
     const owner = 'bedcf897-a6f0-4730-b757-402b14891ca5';
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
-    for (const name of readdirSync(migrationsDir).filter((file) => file.endsWith('.sql') && !file.startsWith('0037_')).sort()) {
+    for (const name of readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).sort()) {
       db.exec(readFileSync(join(migrationsDir, name), 'utf8'));
     }
     db.prepare('UPDATE sync_state SET rev = ? WHERE id = 1').run(5500);
@@ -97,7 +97,7 @@ describe('D1 migrations', () => {
       db.prepare('INSERT INTO chapter_marks (user_id, chapter_key, series_ref, read, updated_at, rev) VALUES (?, ?, ?, 1, ?, ?)')
         .run(owner, key, 'anime:9253', 1790450050913, 3771);
     }
-    const repair = readFileSync(join(migrationsDir, '0037_repair_dahmi_anime_attribution.sql'), 'utf8');
+    const repair = readFileSync(join(migrationsDir, '../repairs/2026-09-dahmi-anime-attribution.sql'), 'utf8');
     db.exec('BEGIN');
     db.exec(repair);
     db.exec('COMMIT');
@@ -119,7 +119,7 @@ describe('D1 migrations', () => {
     // If a row changes between audit and deployment, the guard rejects the batch.
     const altered = new DatabaseSync(':memory:');
     altered.exec('PRAGMA foreign_keys = ON');
-    for (const name of readdirSync(migrationsDir).filter((file) => file.endsWith('.sql') && !file.startsWith('0037_')).sort()) {
+    for (const name of readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).sort()) {
       altered.exec(readFileSync(join(migrationsDir, name), 'utf8'));
     }
     altered.prepare('INSERT INTO work_views (user_id, series_ref, viewed_at, rev) VALUES (?, ?, ?, ?)')
