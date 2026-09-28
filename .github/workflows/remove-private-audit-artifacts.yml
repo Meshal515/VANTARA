@@ -1,0 +1,41 @@
+name: Remove temporary account audit artifacts
+
+# One-shot cleanup after the account attribution investigation. The repository
+# is public, so private viewing histories must not remain in Actions artifacts.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  purge:
+    if: github.repository == 'Meshal515/VANTARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete the six historical account attribution artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts"
+          for id in 10966691941 10966987897 10965888807 10966384458 10967942053 10967497006; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$base/$id")
+            if [ "$status" != 204 ] && [ "$status" != 404 ]; then
+              echo "Artifact $id deletion failed with HTTP $status"
+              exit 1
+            fi
+            public_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'Accept: application/vnd.github+json' "$base/$id")
+            if [ "$public_status" != 404 ]; then
+              echo "Artifact $id is still accessible (HTTP $public_status)"
+              exit 1
+            fi
+            echo "Artifact $id removed and inaccessible."
+          done
