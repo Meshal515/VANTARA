@@ -57,10 +57,9 @@ class EmbedResolver(
     private suspend fun resolve(embed: String, referer: String?, depth: Int): List<Stream> {
         val url = if (embed.startsWith("//")) "https:$embed" else embed
         val host = url.toHttpUrlOrNull()?.host?.lowercase() ?: return emptyList()
-        // مضيف المشغّل ليس «مصدرًا مخفيًا». وسمه عالميًا هنا كان يسمّم
-        // كل محاولاته اللاحقة: Cloudflare يحوّل طلب التشغيل الأمامي إلى
-        // FAIL_FAST بدل WebView التفاعلي، فتظهر كل سيرفراته «غير متاح».
-        // سياسة التفاعل تخص الطلب/المسار، لا اسم المضيف المكتشف.
+        // سيرفرات الفيديو قد يحجبها DNS المزوّد مثل مواقع المصادر؛ نفضّل لها
+        // DoH، لكن هذا الوسم لا يغيّر سياسة Cloudflare ولا يمنع WebView.
+        AnimeHostRouter.markVideoHost(host)
         return when {
             host.endsWith("ok.ru") || host.endsWith("odnoklassniki.ru") -> OkRu.parse(fetch(url, referer).body)
             // الفيديو مشفّر ويُفك داخل صفحة MEGA نفسها: لا رابط يلتقطه أحد

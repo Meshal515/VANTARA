@@ -76,7 +76,7 @@ class AnimeEngine(context: Context) {
     /** عمل خلفي لا يخص طلبًا (تحميل الإضافات مسبقًا). */
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    val dns = AnimeDns(AnimeHostRouter::isHiddenOnly)
+    val dns = AnimeDns(AnimeHostRouter::prefersDoh)
 
     init {
         AnimeHostRouter.health = health

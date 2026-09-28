@@ -28,7 +28,10 @@ object AnimeHostRouter : Interceptor {
 
     private val routes = ConcurrentHashMap<String, Route>()
     private val byId = ConcurrentHashMap<String, Route>()
+    /** مصادر الأنمي فقط: تحدّي Cloudflare التفاعلي لا يسرق الشاشة منها. */
     private val hiddenOnly: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    /** مضيفات نفضّل لها DoH قبل DNS النظام: المصادر + مشغلات الفيديو المكتشفة. */
+    private val dohFirst: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     @Volatile var health: HealthStore? = null
 
@@ -57,6 +60,7 @@ object AnimeHostRouter : Interceptor {
                 val host = bareHost(domain)
                 routes[host] = route
                 hiddenOnly += host
+                dohFirst += host
                 health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
             },
         )
@@ -64,13 +68,15 @@ object AnimeHostRouter : Interceptor {
         byId.put(sourceId, route)?.let { old ->
             val stale = routes.filterValues { it === old }.keys - hosts
             routes.entries.removeIf { it.value === old }
-            // مضيف لم يعد للمصدر لا يرث سلوكه القديم (إخفاء التحدي، التجزئة)
+            // مضيف لم يعد للمصدر لا يرث سلوكه القديم.
             hiddenOnly -= stale
+            dohFirst -= stale
             fragmentHosts -= stale
         }
         for (host in hosts) {
             routes[host] = route
             hiddenOnly += host
+            dohFirst += host
         }
         val rules = plan.limits.mapNotNull { l -> runCatching { RateGate.Rule(Regex(l.path), l.perMinute) }.getOrNull() }
         gates.compute(sourceId) { _, old -> if (old != null && old.rules == rules) old else RateGate(rules) }
@@ -99,7 +105,18 @@ object AnimeHostRouter : Interceptor {
     }
 
     /** Cloudflare يسأل: هل يُمنع إظهار التحدي لهذا المضيف؟ */
-    fun isHiddenOnly(host: String): Boolean = host in hiddenOnly
+    fun isHiddenOnly(host: String): Boolean = host.lowercase() in hiddenOnly
+
+    /** DNS يسأل: هل نفضّل DoH لهذا المضيف قبل DNS مزوّد الإنترنت؟ */
+    fun prefersDoh(host: String): Boolean = host.lowercase() in dohFirst
+
+    /**
+     * سيرفر فيديو اكتشفناه من صفحة حلقة. نحتاج تجاوزه من حجب DNS مثل المصدر،
+     * لكن لا يجوز أن يرث سياسة Cloudflare الخاصة بالفحص الخلفي.
+     */
+    fun markVideoHost(host: String) {
+        if (host.isNotBlank()) dohFirst += host.lowercase()
+    }
 
     /**
      * نمط حجب SNI الشائع: TCP يتصل، ومصافحة TLS تنقطع فورًا بإعادة تصفير —

@@ -138,8 +138,10 @@ class HostsTest {
         val streams = resolver.resolve("https://share4max.com/iframe/nRcSlqx5tF9nn", null)
         assertEquals(720, streams.single().quality)
         assertTrue("waited ${System.currentTimeMillis() - start}ms", System.currentTimeMillis() - start < 1_000)
-        // مرايا الفيديو ليست مضيفات مصادر. تحويلها إلى hidden-only كان يجعل
-        // Cloudflare التفاعلي يفشل سريعًا لكل أنمي يستخدم نفس المضيف.
+        // مرايا الفيديو تحتاج DoH-first لتجاوز DNS المزوّد، لكنها ليست مصادر
+        // hidden-only: Cloudflare التفاعلي يبقى مسموحًا لها.
+        assertTrue(AnimeHostRouter.prefersDoh("slow.test"))
+        assertTrue(AnimeHostRouter.prefersDoh("fast.test"))
         assertFalse(AnimeHostRouter.isHiddenOnly("slow.test"))
         assertFalse(AnimeHostRouter.isHiddenOnly("fast.test"))
     }
