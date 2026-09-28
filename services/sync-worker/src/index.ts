@@ -434,6 +434,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       case 'progress':
       case 'chapter_marks':
       case 'chapter_reads':
+      case 'usage_daily':
       case 'majlis_hidden':
       case 'settings':
       case 'notifications':
@@ -2641,7 +2642,7 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
  * ويُحجب اسم عمله. قاعدة `redactForViewers` تقول إن الوجود يبقى وما يُقرأ
  * يُحجب، وملخصٌ يسمّي عملًا أخفاه صاحبه يكسرها من باب آخر.
  */
-async function handleWeek(env: Env, now: number): Promise<Response> {
+async function handleWeek(env: Env, viewerId: string, now: number): Promise<Response> {
   const window = weekEnding(now);
 
   const [accounts, days, reads, ratings, settings] = await Promise.all([
@@ -2665,18 +2666,27 @@ async function handleWeek(env: Env, now: number): Promise<Response> {
     env.DB.prepare(`SELECT user_id, data FROM settings`).all<Record<string, unknown>>(),
   ]);
 
+  const permitted = new Map(settings.results.map((row) => {
+    let prefs: Record<string, unknown> = {};
+    try { prefs = JSON.parse(String(row['data'] ?? '{}')) as Record<string, unknown>; } catch { /* fail closed */ }
+    return [String(row['user_id']), {
+      time: prefs['shareInsights'] === true && prefs['shareInsightTime'] !== false,
+      progress: prefs['shareInsights'] === true && prefs['shareInsightProgress'] !== false,
+    }] as const;
+  }));
+  const shares = (id: string, kind: 'time' | 'progress') => id === viewerId || permitted.get(id)?.[kind] === true;
   const summary = summariseWeek(
     {
       accounts: accounts.results.map((row) => ({
         userId: String(row['user_id']),
         displayName: String(row['display_name'] ?? row['username'] ?? ''),
       })),
-      days: days.results.map((row) => ({
+      days: days.results.filter((row) => shares(String(row['user_id']), 'time')).map((row) => ({
         userId: String(row['user_id']),
         day: String(row['day'] ?? ''),
         activeMs: Number(row['active_ms'] ?? 0),
       })),
-      reads: reads.results.map((row) => ({
+      reads: reads.results.filter((row) => shares(String(row['user_id']), 'progress')).map((row) => ({
         userId: String(row['user_id']),
         seriesRef: String(row['series_ref'] ?? ''),
         chapterKey: String(row['chapter_key'] ?? ''),
@@ -3034,7 +3044,7 @@ export default {
       else if (path === '/v1/collections' && request.method === 'GET') {
         response = await handleCollection(url, env, userId);
       }
-      else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, now);
+      else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, userId, now);
       // نبض خفيف: رقم آخر كتابة فقط. الجهاز يسأله كل ثوانٍ ويسحب حين يتقدّم —
       // رسالة صديقك تصلك في ثوانٍ لا بعد دقيقة، بلا سحب كامل كل مرة
       else if (path === '/v1/pulse' && request.method === 'GET') {

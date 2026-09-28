@@ -49,4 +49,18 @@ describe('per-work insights privacy and attribution', () => {
     expect((await call(env, B, `/v1/insights/${A}?work=anime%3A123`)).status).toBe(403);
     expect((await call(env, A, `/v1/insights/${A}`)).status).toBe(200);
   });
+
+  it('keeps old daily usage and weekly time private in every server response', async () => {
+    const { env } = sqliteEnv({ VANTARA_SESSION_SECRET: SECRET });
+    await op(env, A, 'usage.add', { activeMs: 120000 });
+    const otherMirror = await (await call(env, B, '/v1/sync?since=0')).json() as any;
+    expect(JSON.stringify(otherMirror.changes?.usage_daily ?? [])).not.toContain(A);
+    const ownMirror = await (await call(env, A, '/v1/sync?since=0')).json() as any;
+    expect(JSON.stringify(ownMirror.changes?.usage_daily ?? [])).toContain(A);
+    const weekly = await (await call(env, B, '/v1/week')).json() as any;
+    expect(weekly.content.people.find((p: any) => p.userId === A)?.activeMs).toBe(0);
+    await op(env, A, 'settings.patch', { fields: { shareInsights: true, shareInsightTime: true } });
+    const shared = await (await call(env, B, '/v1/week')).json() as any;
+    expect(shared.content.people.find((p: any) => p.userId === A)?.activeMs).toBe(120000);
+  });
 });
