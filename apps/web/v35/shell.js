@@ -50,6 +50,8 @@ import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
+import { createInsights, duration as insightDuration } from './insights.js';
+import { paintWorkInsights } from './work-insights.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -170,12 +172,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── الرسائل والأوراق ─────────────────────────
 
-  function toast(msg) {
+  function toast(msg, ms = 2200) {
     const t = q('toast');
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(t._x);
-    t._x = setTimeout(() => t.classList.remove('show'), 2200);
+    t._x = setTimeout(() => t.classList.remove('show'), ms);
   }
 
   let sheetClose = null;
@@ -1269,6 +1271,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     refreshLibraryDetail();
     renderRating();
     renderInfo(w);
+    const insightHost = q('detailInsights');
+    insightHost.dataset.ref = String(w.id);
+    insightHost.replaceChildren();
+    void paintWorkInsights(insightHost, { sync, ref: String(w.id), openProfile });
   }
   function toggleSummary() {
     const d = q('description');
@@ -2470,6 +2476,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── المكتبة ─────────────────────────
 
   // ── «آخر المشاهدات»: قائمة لا شبكة — الغلاف، الاسم، آخر فصل ومتى، وحذف ──
+  let historyInsights = null;
+  let historyInsightsAt = 0;
+  let historyInsightsOwner = null;
   function viewedLabel(at) {
     const days = Math.floor((Date.now() - at) / 86_400_000);
     if (days < 7) return timeAgo(at).replace(/^الآن$/, 'منذ أقل من دقيقة');
@@ -2486,6 +2495,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * @param {{ userId?: string, own?: boolean, limit?: number }} [opts]
    */
   function renderHistoryList(target, { userId = me(), own = userId === me(), limit = Infinity } = {}) {
+    if (historyInsightsOwner !== me()) { historyInsights = null; historyInsightsOwner = me(); }
     const rows = viewRows(userId);
     if (!rows.length) {
       emptyState(target, {
@@ -2495,18 +2505,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       });
       return;
     }
-    // مجموعات بالأيام كما يُقرأ السجل: اليوم، أمس، هذا الأسبوع، أقدم
     const startOfDay = new Date().setHours(0, 0, 0, 0);
-    const dayOf = (at) => (at >= startOfDay ? 'اليوم' : at >= startOfDay - 86_400_000 ? 'أمس' : at >= startOfDay - 6 * 86_400_000 ? 'هذا الأسبوع' : 'أقدم');
+    const dayOf = (at) => (at >= startOfDay ? 'اليوم' : at >= startOfDay - 86_400_000 ? 'أمس' : viewedLabel(at));
     const list = el('div', 'rv-list');
-    let day = null;
     for (const v of rows.slice(0, limit)) {
       const at = v.viewed_at ?? Date.now();
       const d = dayOf(at);
-      if (d !== day) {
-        day = d;
-        list.append(el('div', 'rv-day', d));
-      }
       const work = workFromRef(v.series_ref, v.series_title, v.cover_url);
       const item = el('div', 'rv-row');
       const open = el('button', 'rv-open');
@@ -2522,22 +2526,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
         meta.append(ch);
       }
-      meta.append(el('time', 'rv-time', d === 'اليوم' || d === 'أمس' ? timeAgo(at).replace(/^الآن$/, 'الآن') : viewedLabel(at)));
-      copy.append(meta);
-      // تقدّم الفصل الأخير إن كان في منتصفه: شريط رفيع لا رقم «0%»
-      const ratio = chapterRatio(userId, v.series_ref, v.chapter_number);
-      if (ratio !== null && ratio > 0.02 && ratio < 0.98) {
-        const bar = el('span', 'rv-progress');
-        bar.style.setProperty('--p', `${Math.round(ratio * 100)}%`);
-        copy.append(bar);
+      if (own) {
+        const spent = el('span', 'rv-duration');
+        spent.dataset.ref = v.series_ref;
+        meta.append(spent);
       }
+      const when = el('time', 'rv-time', d);
+      when.innerHTML = glyph('clock', { size: 14 });
+      when.append(document.createTextNode(d));
+      meta.append(when);
+      copy.append(meta);
       open.append(cover, copy);
       open.onclick = () => void openWork(work);
       item.append(open);
       if (own) {
         const del = el('button', 'rv-del');
         del.type = 'button';
-        del.innerHTML = glyph('close', { size: 18 });
+        del.innerHTML = glyph('trash', { size: 18 });
         del.setAttribute('aria-label', `احذف ${titleOf(work)} من آخر المشاهدات`);
         del.onclick = () => {
           item.classList.add('rv-row--gone');
@@ -2548,6 +2553,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
       list.append(item);
     }
     target.replaceChildren(list);
+    if (own) {
+      const paintTime = (data) => {
+        if (!list.isConnected || !data?.content) return;
+        const byRef = new Map(data.content.map((x) => [x.seriesRef, x.activeMs]));
+        for (const span of list.querySelectorAll('.rv-duration')) {
+          const ms = byRef.get(span.dataset.ref);
+          if (ms >= 60000) {
+            span.innerHTML = glyph('clock', { size: 14 });
+            span.append(document.createTextNode(insightDuration(ms)));
+          }
+        }
+      };
+      if (historyInsights && Date.now() - historyInsightsAt < 60000) paintTime(historyInsights);
+      else void sync.insights(userId).then((data) => {
+        if (me() !== userId) return;
+        historyInsights = data;
+        historyInsightsAt = Date.now();
+        paintTime(data);
+      });
+    }
   }
 
   function renderLibrary() {
@@ -3173,6 +3198,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
     }
+    if (id === 'insights') void insights.show();
 
     if (id !== 'majlis' || state.socialTab !== 'notifications') state.notifFresh = null;
     if (id === 'majlis') {
@@ -3584,6 +3610,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     group('حسابك', [
       row('user', 'ملفّك الشخصي', 'اسمك وصورتك والبانر', { run: () => openProfile(me()) }),
+      row('clock', 'إحصائيات المتابعة', null, { run: () => showPage('insights') }),
       row('switchUser', 'تبديل الحساب', null, { value: sync.user?.username ? `@${sync.user.username}` : null, run: confirmSwitchAccount }),
       sync.approveDevice
         ? row('shield', 'اعتماد جوال جديد', 'اكتب الرمز اللي يطلع على الجوال الجديد', {
@@ -3598,6 +3625,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     group(
       'الخصوصية · ماذا يرى الآخرون عني',
       [
+        toggle('activity', 'إحصائيات المتابعة', 'مدة المتابعة والتقدم داخل صفحة العمل', privacy.shareInsights === true, (on) => {
+          setMySettings({ shareInsights: on });
+          renderSettings();
+        }),
+        ...(privacy.shareInsights === true ? [
+          toggle('clock', 'إظهار مدة المتابعة', null, privacy.shareInsightTime !== false, (on) => {
+            setMySettings({ shareInsightTime: on }); renderSettings();
+          }),
+          toggle('check', 'إظهار التقدم', 'الفصول والحلقات المكتملة', privacy.shareInsightProgress !== false, (on) => {
+            setMySettings({ shareInsightProgress: on }); renderSettings();
+          }),
+        ] : []),
         toggle(
           'eye',
           'عرض ماذا أشاهد الآن',
@@ -4059,6 +4098,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
 
+  const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
+
   const actions = {
     toggleSections: () => setSectionsOpen(!sectionsOpen()),
     pickSection,
@@ -4319,6 +4360,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     sync,
+    openProfile,
     friends: () => deps.friends?.() ?? [],
     // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
     setWatching: (info) => deps.setWatching?.(info),

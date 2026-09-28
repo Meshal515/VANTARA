@@ -1173,6 +1173,23 @@ export function statementsFor(
       ];
     }
 
+    case 'usage.work': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      const section = p['section'];
+      const ms = clampUsageCredit(asNumber(p['activeMs']) ?? 0);
+      if (!seriesRef || ms <= 0 || !['manga', 'anime', 'cinema'].includes(String(section))) return null;
+      if ((section === 'anime') !== seriesRef.startsWith('anime:')) return null;
+      return [db.prepare(
+        `INSERT INTO work_insights (user_id, series_ref, section, series_title, cover_url, active_ms, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM applied_ops WHERE op_id = ?)
+         ON CONFLICT (user_id, series_ref) DO UPDATE SET
+           active_ms = work_insights.active_ms + excluded.active_ms,
+           series_title = COALESCE(excluded.series_title, work_insights.series_title),
+           cover_url = COALESCE(excluded.cover_url, work_insights.cover_url),
+           updated_at = excluded.updated_at`,
+      ).bind(userId, seriesRef, section, asString(p['seriesTitle'], 300), asString(p['coverUrl'], 600), ms, now, op.opId)];
+    }
+
     case 'library.add': {
       const seriesRef = asString(p['seriesRef'], 200);
       if (!seriesRef) return null;
@@ -2777,7 +2794,65 @@ async function handlePendingProgress(env: Env, userId: string): Promise<Response
 
 // ───────────────────────────── الإحصائيات ─────────────────────────────
 
-async function handleStats(env: Env, targetId: string, now: number): Promise<Response> {
+/** Projection عند الطلب: الجدول خاص، ولا يصل أي صف إلى مرآة جهاز آخر. */
+async function handleInsights(env: Env, viewerId: string, targetId: string, workRef: string | null): Promise<Response> {
+  const owner = viewerId === targetId;
+  const account = await env.DB.prepare(
+    'SELECT a.user_id, s.data FROM accounts a LEFT JOIN settings s ON s.user_id = a.user_id WHERE a.user_id = ?',
+  ).bind(targetId).first<{ user_id: string; data: string | null }>();
+  if (!account) return json({ error: 'not_found' }, { status: 404 });
+  let prefs: Record<string, unknown> = {};
+  try { prefs = JSON.parse(account.data ?? '{}') as Record<string, unknown>; } catch { /* fail closed */ }
+  const timeShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightTime'] !== false);
+  const progressShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightProgress'] !== false);
+  if (!timeShared && !progressShared) return json({ locked: true }, { status: 403 });
+  if (workRef && workRef.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
+  const [times, manga, anime] = await env.DB.batch<Record<string, unknown>>([
+    timeShared
+      ? env.DB.prepare(`SELECT series_ref, section, series_title, cover_url, active_ms FROM work_insights
+                         WHERE user_id = ? ${workRef ? 'AND series_ref = ?' : ''} ORDER BY active_ms DESC`)
+          .bind(targetId, ...(workRef ? [workRef] : []))
+      : env.DB.prepare('SELECT series_ref FROM work_insights WHERE user_id = ? AND series_ref = ? AND 0').bind(targetId, workRef ?? ''),
+    progressShared
+      ? env.DB.prepare(`SELECT series_ref, COUNT(*) AS n FROM chapter_reads WHERE user_id = ? AND read_count > 0
+                         ${workRef ? 'AND series_ref = ?' : ''} GROUP BY series_ref`)
+          .bind(targetId, ...(workRef ? [workRef] : []))
+      : env.DB.prepare('SELECT series_ref FROM chapter_reads WHERE user_id = ? AND 0').bind(targetId),
+    progressShared
+      ? env.DB.prepare(`SELECT series_ref, COUNT(*) AS n FROM chapter_marks WHERE user_id = ? AND read = 1
+                         AND series_ref LIKE 'anime:%' ${workRef ? 'AND series_ref = ?' : ''} GROUP BY series_ref`)
+          .bind(targetId, ...(workRef ? [workRef] : []))
+      : env.DB.prepare('SELECT series_ref FROM chapter_marks WHERE user_id = ? AND 0').bind(targetId),
+  ]);
+  const items = new Map<string, { seriesRef: string; section: string; title: string | null; coverUrl: string | null; activeMs: number; completed: number }>();
+  const ensure = (ref: string) => {
+    if (!items.has(ref)) items.set(ref, { seriesRef: ref, section: ref.startsWith('anime:') ? 'anime' : 'manga', title: null, coverUrl: null, activeMs: 0, completed: 0 });
+    return items.get(ref)!;
+  };
+  for (const r of times?.results ?? []) {
+    const entry = ensure(String(r['series_ref']));
+    entry.section = String(r['section']);
+    entry.title = r['series_title'] == null ? null : String(r['series_title']);
+    entry.coverUrl = r['cover_url'] == null ? null : String(r['cover_url']);
+    entry.activeMs = Number(r['active_ms'] ?? 0);
+  }
+  for (const r of manga?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
+  for (const r of anime?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
+  const content = [...items.values()].sort((a, b) => b.activeMs - a.activeMs);
+  return json({ userId: targetId, timeShared, progressShared, totalMs: content.reduce((sum, item) => sum + item.activeMs, 0), content });
+}
+
+async function handleStats(env: Env, viewerId: string, targetId: string, now: number): Promise<Response> {
+  // الـendpoint القديم يعيد أرقام الوقت والتقدم معًا. لا نرسلها لصديق إلا
+  // إذا سمح صاحبها بكليهما؛ المشاركة الجزئية تمرّ من projection الجديد.
+  if (viewerId !== targetId) {
+    const raw = await env.DB.prepare('SELECT data FROM settings WHERE user_id = ?').bind(targetId).first<{ data: string }>();
+    let prefs: Record<string, unknown> = {};
+    try { prefs = JSON.parse(raw?.data ?? '{}') as Record<string, unknown>; } catch { /* fail closed */ }
+    if (prefs['shareInsights'] !== true || prefs['shareInsightTime'] === false || prefs['shareInsightProgress'] === false) {
+      return json({ locked: true }, { status: 403 });
+    }
+  }
   const [reads, usage, followed, marks, sectionUsage] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(
       'SELECT chapter_key, read_count FROM chapter_reads WHERE user_id = ? AND read_count > 0',
@@ -3011,7 +3086,10 @@ export default {
       else if (path === '/v1/rafiq/usage' && request.method === 'GET') response = await handleRafiqUsage(env as RafiqEnv, userId, now);
       else if (path === '/v1/rafiq/conversations' && (request.method === 'GET' || request.method === 'DELETE')) response = await handleRafiqConversations(request, url, env as RafiqEnv, userId);
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
-        response = await handleStats(env, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
+        response = await handleStats(env, userId, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
+      }
+      else if (path.startsWith('/v1/insights/') && request.method === 'GET') {
+        response = await handleInsights(env, userId, decodeURIComponent(path.slice('/v1/insights/'.length)), url.searchParams.get('work'));
       }
 
       if (!response) return json({ error: 'not_found' }, { status: 404 }, cors);

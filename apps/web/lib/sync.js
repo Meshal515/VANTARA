@@ -921,6 +921,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  async function insights(userId, seriesRef = null) {
+    if (!token) return null;
+    try {
+      const work = seriesRef ? `?work=${encodeURIComponent(seriesRef)}` : '';
+      return await request(`/v1/insights/${encodeURIComponent(userId)}${work}`);
+    } catch (error) {
+      if (error?.status === 403) return { locked: true };
+      return null;
+    }
+  }
+
   /**
    * رفع صورة ملف شخصي (الصورة أو البانر). يرجع `{ url, hash }`.
    *
@@ -1060,6 +1071,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     uploadMedia,
     topWorks,
     stats,
+    insights,
     translation,
     stream,
     pendingProgress,

@@ -146,6 +146,7 @@ export type OpKind =
   | 'chapter.markMany'
   | 'usage.add'
   | 'usage.watch'
+  | 'usage.work'
   | 'profile.patch'
   | 'library.add'
   | 'library.remove'
