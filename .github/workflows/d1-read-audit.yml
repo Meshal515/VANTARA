@@ -157,7 +157,7 @@ jobs:
             histories[username.toLowerCase()] = views;
             report.rows[username] = { views: views.length, publicViews: publicViews.length,
               // Account owner may review the private artifact; raw titles and refs never enter Actions logs.
-              library: libraries, marks: marks };
+              history: views, library: libraries, marks: marks, publicRefs: publicViews };
           }
           const owner = histories.ngm ?? [];
           const friend = histories.d7m ?? histories.dahmi ?? [];
