@@ -17,10 +17,10 @@ import java.util.concurrent.TimeUnit
  *
  * مزوّدو الإنترنت يحجبون كثيرًا من مواقع الأنمي العربية بالـDNS: الاسم لا
  * يُحلّ، أو يُحلّ إلى عنوان صفحة حجب/0.0.0.0. فـ:
- *  - مضيفات المصادر المسجّلة ([isSourceHost]): DNS عبر HTTPS أولًا
- *    (Cloudflare ثم Google)، ثم النظام.
- *  - غيرها (سيرفرات الفيديو، المانجا، كل شيء): النظام أولًا كما هو، و DoH
- *    فقط إن فشل النظام أو أعاد عنوانًا وهميًا.
+ *  - المضيفات المسجّلة في [preferDoh] (مصادر الأنمي ومشغلات الفيديو المكتشفة):
+ *    DNS عبر HTTPS أولًا (Cloudflare ثم Google)، ثم النظام.
+ *  - غيرها (المانجا وباقي الويب): النظام أولًا كما هو، وDoH فقط إن فشل
+ *    النظام أو أعاد عنوانًا وهميًا.
  *
  * وعناوين IPv6 من DoH لا تُعاد إلا إن كان للجوال مسار IPv6 فعلي: جوال بلا IPv6
  * يفشل عليها فورًا بـENETUNREACH (رأيناه على جوال حقيقي)، وOkHttp يبدأ بها.
@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
  * حتى لا يستدعي نفسه.
  */
 class AnimeDns(
-    private val isSourceHost: (String) -> Boolean,
+    private val preferDoh: (String) -> Boolean,
     private val system: Dns = Dns.SYSTEM,
     private val hasIpv6: () -> Boolean = ::deviceHasIpv6,
 ) : Dns {
@@ -63,7 +63,7 @@ class AnimeDns(
 
     override fun lookup(hostname: String): List<InetAddress> {
         cache[hostname]?.takeIf { it.until > System.currentTimeMillis() }?.let { return it.addresses }
-        return if (isSourceHost(hostname)) {
+        return if (preferDoh(hostname)) {
             runCatching { viaDoh(hostname) }.getOrNull()?.also { remember(hostname, it) }
                 ?: system.lookup(hostname)
         } else {
