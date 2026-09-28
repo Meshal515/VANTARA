@@ -1227,6 +1227,7 @@ class PlayerActivity : Activity() {
             .put("poster", launch.poster)
             .put("episode", episode.toDouble())
             .put("toId", to ?: JSONObject.NULL)
+            .put("userId", launch.presenceUserId ?: "")
         if (range != null) item.put("startMs", range.startMs).put("endMs", range.endMs).put("atMs", range.momentMs)
         Outbox.push(this, item)
         message(if (to == null) "انرسلت للمجلس" else "انرسلت لـ $name")

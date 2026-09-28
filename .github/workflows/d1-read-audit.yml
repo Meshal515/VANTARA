@@ -125,10 +125,59 @@ jobs:
           writeFileSync('d1-audit/probe.json', JSON.stringify(report, null, 2));
           for (const row of report) console.log(JSON.stringify(row));
           NODE
+      - name: Audit account attribution without modifying D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          const root = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/d1/database`;
+          const headers = { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' };
+          const databases = await (await fetch(`${root}?name=vantara`, { headers })).json();
+          const database = databases.result?.find((row) => row.name === 'vantara');
+          if (!database) throw new Error('D1 vantara not found');
+          const query = async (sql, params = []) => {
+            const response = await fetch(`${root}/${database.uuid}/query`, {
+              method: 'POST', headers, body: JSON.stringify({ sql, params }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success || !data.result?.[0]?.success) throw new Error(`D1 query failed: HTTP ${response.status}`);
+            return data.result[0].results ?? [];
+          };
+          const accounts = await query("SELECT user_id, username FROM accounts WHERE lower(username) IN ('ngm', 'd7m', 'dahmi')");
+          const report = { accounts: accounts.map(({ username }) => username), rows: {}, exactMatches: [] };
+          const histories = {};
+          for (const { user_id: id, username } of accounts) {
+            const views = await query('SELECT series_ref, chapter_number, viewed_at, rev FROM work_views WHERE user_id = ? AND removed = 0 LIMIT 2000', [id]);
+            const libraries = await query('SELECT series_ref, added_at, rev FROM library WHERE user_id = ? AND removed = 0 LIMIT 2000', [id]);
+            const marks = await query('SELECT series_ref, chapter_key, updated_at, rev FROM chapter_marks WHERE user_id = ? AND read = 1 LIMIT 4000', [id]);
+            const publicViews = await query('SELECT series_ref FROM public_work_views WHERE user_id = ? AND removed = 0 LIMIT 2000', [id]);
+            histories[username.toLowerCase()] = views;
+            report.rows[username] = { views: views.length, publicViews: publicViews.length,
+              // Account owner may review the private artifact; raw titles and refs never enter Actions logs.
+              library: libraries, marks: marks };
+          }
+          const owner = histories.ngm ?? [];
+          const friend = histories.d7m ?? histories.dahmi ?? [];
+          for (const a of owner) for (const b of friend) {
+            if (a.series_ref === b.series_ref && a.viewed_at === b.viewed_at && a.chapter_number === b.chapter_number) {
+              report.exactMatches.push({ seriesRef: a.series_ref, viewedAt: a.viewed_at, chapterNumber: a.chapter_number,
+                ownerRev: a.rev, friendRev: b.rev });
+            }
+          }
+          writeFileSync('d1-audit/account-attribution.json', JSON.stringify(report, null, 2));
+          console.log(JSON.stringify({ accountNames: report.accounts, counts: Object.fromEntries(Object.entries(report.rows).map(([k, v]) => [k, {
+            views: v.views, library: v.library.length, marks: v.marks.length, publicViews: v.publicViews,
+          }])), exactViewMatches: report.exactMatches.length,
+            matchedRefs: report.exactMatches.map((x) => createHash('sha256').update(x.seriesRef).digest('hex').slice(0, 12)) }));
+          NODE
       - uses: actions/upload-artifact@v4
         with:
           name: d1-read-audit
           path: |
             d1-audit/report.json
             d1-audit/probe.json
+            d1-audit/account-attribution.json
           retention-days: 7

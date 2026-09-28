@@ -130,8 +130,9 @@ export async function open(args) {
 export const closeSession = (session) => call('closeSession', { session });
 
 /** ما أرسله المشغّل (لحظات وترشيحات) ولم يصل المجلس بعد. يُفرَّغ بالقراءة. */
-export async function outbox() {
-  return (await call('outbox'))?.items ?? [];
+export async function outbox(userId) {
+  if (!userId) return [];
+  return (await call('outbox', { userId }))?.items ?? [];
 }
 
 // ───────────── نموذج ورقة السيرفرات (نفس قاعدة المشغّل الأصلي) ─────────────

@@ -8,11 +8,8 @@
  *   عين الحلقة       → chapter.mark / chapter.markMany  (مفتاح `anime:<id>#ep:<n>`)
  *   آخر المشاهدات    → view.add (بعنوان «الحلقة N»)
  *
- * فتصل لكل أجهزتك، وتظهر في ملفك الشخصي وعند أصدقائك مثل المانجا تمامًا. سجل
- * الجهاز القديم (قائمتي، الحلقات المشاهدة) يُرحَّل مرة واحدة.
+ * فتصل لكل أجهزتك، وتظهر في ملفك الشخصي وعند أصدقائك مثل المانجا تمامًا.
  */
-
-const MIGRATED_KEY = 'vantara.anime.account.v1';
 
 export const animeRef = (id) => `anime:${id}`;
 export const episodeKey = (id, n) => `anime:${id}#ep:${n}`;
@@ -76,7 +73,8 @@ export function createAnimeAccount(sync) {
   /** «آخر المشاهدات»: مرة لكل حلقة في الجلسة، لا مع كل ثانية تشغيل. */
   const viewed = new Set();
   function recordView(m, episode) {
-    const k = `${m.id}:${episode}`;
+    if (!me()) return;
+    const k = `${me()}:${m.id}:${episode}`;
     if (viewed.has(k)) return;
     viewed.add(k);
     sync.enqueue('view.add', { ...descriptor(m), chapterLabel: `الحلقة ${episode}`, chapterNumber: episode });
@@ -85,7 +83,8 @@ export function createAnimeAccount(sync) {
   /** «أنهى الحلقة N» للأصدقاء (حسب خصوصيتك في الخادم). مرة لكل حلقة في الجلسة. */
   const completed = new Set();
   function completeEpisode(m, episode) {
-    const k = `${m.id}:${episode}`;
+    if (!me()) return;
+    const k = `${me()}:${m.id}:${episode}`;
     if (completed.has(k)) return;
     completed.add(k);
     sync.enqueue('episode.complete', { ...descriptor(m), episode });
@@ -111,30 +110,6 @@ export function createAnimeAccount(sync) {
       });
   }
 
-  /**
-   * ترحيل سجل الجهاز القديم مرة واحدة: «قائمتي» المحلية → مكتبتك، والحلقات
-   * المشاهدة → عين الحلقة، وآخر ما شاهدت → «آخر المشاهدات».
-   */
-  function migrate({ list, watch }) {
-    if (!me()) return;
-    try {
-      if (localStorage.getItem(MIGRATED_KEY) === me()) return;
-    } catch {
-      return;
-    }
-    for (const m of Object.values(list ?? {})) if (m?.id && !inLibrary(m.id)) setLibrary(m, true);
-    for (const w of Object.values(watch ?? {})) {
-      if (!w?.id) continue;
-      const done = Object.entries(w.episodes ?? {}).filter(([, e]) => e?.done).map(([n]) => episodeKey(w.id, Number(n)));
-      if (done.length) sync.enqueue('chapter.markMany', { seriesRef: animeRef(w.id), keys: done.slice(0, 2000), read: true });
-      if (w.episode) sync.enqueue('view.add', { seriesRef: animeRef(w.id), seriesTitle: w.title ?? null, coverUrl: w.poster ?? null, chapterLabel: `الحلقة ${w.episode}`, chapterNumber: w.episode, at: w.at ?? Date.now() });
-    }
-    try {
-      localStorage.setItem(MIGRATED_KEY, me());
-    } catch {
-      // يُعاد في المرة الجاية: العمليات نفسها لا تكرر شيئًا
-    }
-  }
-
-  return { descriptor, inLibrary, inCollection, isCompleted, setLibrary, setCollection, setCompleted, isSeen, seenCount, markRange, markEpisode, clearAll, recordView, completeEpisode, shelf, migrate };
+  // سجل الجهاز القديم بلا مالك مثبت. لا يُنسَب لأي حساب تلقائيًا.
+  return { descriptor, inLibrary, inCollection, isCompleted, setLibrary, setCollection, setCompleted, isSeen, seenCount, markRange, markEpisode, clearAll, recordView, completeEpisode, shelf };
 }

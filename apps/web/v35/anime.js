@@ -22,8 +22,9 @@ import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
 
 const HOME_KEY = 'anime.home.v2';
-const LIST_KEY = 'vantara.anime.list';
-const WATCH_KEY = 'vantara.anime.watch';
+// Legacy unowned keys remain on disk for recovery, but are never read into a new account.
+const LIST_KEY = 'vantara.anime.list.v2.guest';
+const watchKey = (userId) => `vantara.anime.watch.v2.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;
 const STALE_MS = 30 * 60_000;
 const SLIDE_MS = 5500;
 
@@ -63,12 +64,12 @@ export function addToAnimeList(m) {
 }
 
 /** سجل المشاهدة: لكل أنمي آخر حلقة وموضعها، ولكل حلقة تقدّمها. */
-export function readWatch() {
-  return readJson(WATCH_KEY, {});
+export function readWatch(userId = null) {
+  return readJson(watchKey(userId), {});
 }
 /** يُنادى من المشغّل: يحفظ موضع الحلقة، ويعلّمها مُشاهدة عند 90%. */
-export function recordWatch(m, episode, position, duration) {
-  const all = readWatch();
+export function recordWatch(m, episode, position, duration, userId = null) {
+  const all = readWatch(userId);
   const w = all[m.id] ?? { id: m.id, episodes: {} };
   Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null });
   const done = duration > 0 && position / duration >= 0.9;
@@ -76,7 +77,7 @@ export function recordWatch(m, episode, position, duration) {
   w.episode = episode;
   w.at = Date.now();
   all[m.id] = w;
-  writeJson(WATCH_KEY, all);
+  writeJson(watchKey(userId), all);
 }
 
 /**
@@ -88,7 +89,9 @@ export function createAnime(deps) {
   const { q, el, toast, genreAr } = deps;
   // حسابك: القوائم وعين الحلقة وآخر المشاهدات تُزامَن مثل المانجا (وتظهر في ملفك)
   const account = deps.sync ? createAnimeAccount(deps.sync) : null;
-  setTimeout(() => account?.migrate({ list: readJson(LIST_KEY, {}), watch: readWatch() }), 3000);
+  const currentUser = () => deps.sync?.user?.userId ?? null;
+  const localWatch = () => readWatch(currentUser());
+  const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
   // رفوف المكتبة تُرسم من المرآة: متى وصل جديد من الخادم (جهاز ثانٍ مثلًا) تُعاد
   let shelfPaint = 0;
@@ -355,10 +358,23 @@ export function createAnime(deps) {
 
   // ───────────── الرئيسية ─────────────
 
-  const watching = () =>
-    Object.values(readWatch())
-      .filter((w) => w?.id && w.episode)
-      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  const watching = () => {
+    const entries = new Map(Object.values(localWatch()).filter((w) => w?.id && w.episode).map((w) => [String(w.id), w]));
+    // The owner's server history survives reinstall and is visible on every device.
+    // A local position is useful for resume, but never stands in for another user's data.
+    if (signedIn()) for (const row of deps.sync.rows('work_views', (r) => r.user_id === currentUser() && !r.removed && r.series_ref?.startsWith('anime:'))) {
+      const id = Number(row.series_ref.slice(6));
+      const episode = Number(row.chapter_number ?? /\d+(?:\.\d+)?/.exec(row.chapter_label ?? '')?.[0]);
+      if (!Number.isFinite(id) || !Number.isFinite(episode) || episode <= 0) continue;
+      const old = entries.get(String(id));
+      if (old && old.at >= row.viewed_at) continue;
+      entries.set(String(id), {
+        id, episode, at: row.viewed_at, title: row.series_title ?? old?.title ?? `#${id}`,
+        poster: row.cover_url ?? old?.poster ?? null, episodes: old?.episodes ?? {},
+      });
+    }
+    return [...entries.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  };
 
   function renderHome(data) {
     const blocks = el('div', 'an-home');
@@ -513,7 +529,7 @@ export function createAnime(deps) {
 
   /** من أين يكمل زر المشاهدة: الحلقة غير المكتملة الأخيرة، أو التالية لآخر مكتملة. */
   function resumePoint(m) {
-    const w = readWatch()[m.id];
+    const w = localWatch()[m.id];
     if (!w?.episode) return { episode: 1, resume: false };
     const e = w.episodes?.[w.episode];
     if (e && !e.done) return { episode: w.episode, resume: true };
@@ -650,7 +666,7 @@ export function createAnime(deps) {
   }
 
   function setSeen(m, n, on) {
-    const all = readWatch();
+    const all = localWatch();
     const w = all[m.id] ?? { id: m.id, episodes: {} };
     Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color });
     const prev = w.episodes[n] ?? { position: 0, duration: 0 };
@@ -661,7 +677,7 @@ export function createAnime(deps) {
       w.at = Date.now();
     }
     all[m.id] = w;
-    writeJson(WATCH_KEY, all);
+    saveWatch(all);
   }
 
   /**
@@ -753,7 +769,7 @@ export function createAnime(deps) {
       host.append(tabs);
       requestAnimationFrame(() => tabs.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
     }
-    const seen = readWatch()[m.id]?.episodes ?? {};
+    const seen = localWatch()[m.id]?.episodes ?? {};
     const list = el('div', 'an-er-list');
     const start = state.episodeRange * SIZE + 1;
     const nums = [];
@@ -970,6 +986,8 @@ export function createAnime(deps) {
   engine.on('playback', (p) => {
     const cur = state.playing;
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
+    // An old native player must never credit playback to the account now signed in.
+    if (cur.userId !== currentUser()) return;
     if (Number.isFinite(p.position)) {
       const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
       if (d > 0 && d <= 15_000) watchClock.acc += d;
@@ -982,7 +1000,7 @@ export function createAnime(deps) {
     }
     const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
-      recordWatch(cur.m, n, p.position, p.duration);
+      recordWatch(cur.m, n, p.position, p.duration, cur.userId);
       account?.recordView(cur.m, n);
       // 90% = شوهدت، في حسابك (مرة واحدة)
       if (p.position / p.duration >= 0.9 && account) {
@@ -1029,13 +1047,20 @@ export function createAnime(deps) {
    */
   async function flushOutbox() {
     if (!engine.available() || !deps.sync) return;
+    const userId = currentUser();
+    if (!userId) return;
+    const key = `vantara.anime.native-outbox.v1.${encodeURIComponent(userId)}`;
     let items = [];
     try {
-      items = await engine.outbox();
+      items = await engine.outbox(userId);
     } catch {
-      return;
+      // Still deliver items that made it to the account-bound web handoff.
     }
-    for (const it of items) {
+    // Persist the native handoff for its original owner before touching the active session.
+    const pending = [...readJson(key, []), ...items.filter((it) => it.userId === userId)];
+    writeJson(key, [...new Map(pending.map((it) => [it.id, it])).values()]);
+    if (currentUser() !== userId) return;
+    for (const it of pending) {
       const ep = Number(it.episode) || 1;
       const label = it.type === 'moment' ? engine.momentLabel(ep, it.startMs, it.endMs) : `الحلقة ${ep}`;
       deps.sync.enqueue('recommendation.send', {
@@ -1049,6 +1074,7 @@ export function createAnime(deps) {
         chapterNumber: ep,
       });
     }
+    writeJson(key, []);
   }
   engine.on('outbox', () => void flushOutbox());
   document.addEventListener('visibilitychange', () => {
@@ -1077,7 +1103,7 @@ export function createAnime(deps) {
       });
       return;
     }
-    const saved = readWatch()[m.id]?.episodes?.[n];
+    const saved = localWatch()[m.id]?.episodes?.[n];
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const autoServer = workingServer(m.id);
@@ -1377,10 +1403,10 @@ export function createAnime(deps) {
       sheet.launched = true;
       const session = sheet.session;
       deps.closeSheet();
-      const watch = readWatch()[m.id]?.episodes ?? {};
+      const watch = localWatch()[m.id]?.episodes ?? {};
       const resume = {};
       for (const [ep, e] of Object.entries(watch)) if (!e.done && e.position > 5000) resume[ep] = e.position;
-      state.playing = { session, m, n };
+      state.playing = { session, m, n, userId: currentUser() };
       deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
       const presence = await deps.playerPresence?.();
       await engine.open({
@@ -1514,9 +1540,10 @@ export function createAnime(deps) {
     art.append(image(w.poster));
     const x = button('an-hr-x', glyph('close'), (ev) => {
       ev.stopPropagation();
-      const all = readWatch();
+      const all = localWatch();
       delete all[w.id];
-      writeJson(WATCH_KEY, all);
+      saveWatch(all);
+      if (signedIn()) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
       r.remove();
       if (!Object.keys(all).length) renderLibrary();
     }, 'احذف من السجل');
@@ -1563,7 +1590,8 @@ export function createAnime(deps) {
       else {
         nodes.push(
           button('an-clear', 'مسح الكل', () => {
-            writeJson(WATCH_KEY, {});
+            saveWatch({});
+            if (signedIn()) for (const w of items) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
             renderLibrary();
             toast('مُسح سجل المشاهدة');
           }),

@@ -61,7 +61,9 @@ class AnimeEnginePlugin : Plugin() {
     /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
     @PluginMethod
     fun outbox(call: PluginCall) {
-        call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context).toString())))
+        val userId = call.getString("userId")?.takeIf { it.isNotBlank() }
+            ?: return call.reject("userId مطلوب")
+        call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context, userId).toString())))
     }
 
     /**
