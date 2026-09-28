@@ -138,9 +138,10 @@ describe('weak network: nothing is uploaded that is not needed', () => {
     const reading = translatePage({ ...deps(), sync, via: 'reader' }, 'http://localhost/_capacitor_file_/cache/pages/p11.jpg', { chapterKey: 'c1', pageIndex: 10 });
     let t = 0;
     let quiet = false;
-    const waiting = readerQuiet({ sleep: async () => { t += 500; if (t === 1500) release(); await new Promise((r) => setTimeout(r, 5)); }, now: () => Date.now() + t }).then(() => (quiet = true));
+    const waiting = readerQuiet({ sleep: async () => { t += 500; await new Promise((r) => setTimeout(r, 5)); }, now: () => Date.now() + t }).then(() => (quiet = true));
     await new Promise((r) => setTimeout(r, 20));
     expect(quiet).toBe(false);
+    release();
     await reading;
     await waiting;
     expect(quiet).toBe(true);
