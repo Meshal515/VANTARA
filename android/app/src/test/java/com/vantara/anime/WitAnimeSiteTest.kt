@@ -88,6 +88,19 @@ class WitAnimeSiteTest {
         assertEquals("https://hgcloud.to/e/d3", Parse.metaRefresh("""<meta http-equiv="refresh" content="0;url='https://hgcloud.to/e/d3'" />"""))
     }
 
+    @Test fun `meta refresh accepts reordered attributes and whitespace`() {
+        assertEquals("//hgcloud.to/e/1", Parse.metaRefresh("""<meta content="0; URL = '//hgcloud.to/e/1'" http-equiv="Refresh">"""))
+    }
+
+    @Test fun `videa fetch failure falls back to the browser`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { throw java.io.IOException("upstream timeout") }.build()
+        val resolver = EmbedResolver(client, com.vantara.anime.hosts.Sniffer { _, _ ->
+            com.vantara.anime.hosts.Stream("https://cdn.test/video.mp4")
+        })
+        assertEquals("https://cdn.test/video.mp4", resolver.resolve("https://videa.hu/player?v=one", null).single().url)
+
+    }
+
     // ── السيرفرات المضمّنة ──
 
     private val okHtml = """<div data-module="OKVideo" data-options="{&quot;flashvars&quot;:{&quot;metadata&quot;:&quot;{\&quot;videos\&quot;:[{\&quot;name\&quot;:\&quot;sd\&quot;,\&quot;url\&quot;:\&quot;https://vd1.okcdn.ru/?id=sd\&quot;},{\&quot;name\&quot;:\&quot;full\&quot;,\&quot;url\&quot;:\&quot;https://vd1.okcdn.ru/?id=full\&quot;}],\&quot;hlsManifestUrl\&quot;:\&quot;https://vd1.okcdn.ru/video.m3u8?id=1\&quot;}&quot;}}"></div>"""
@@ -134,7 +147,8 @@ class WitAnimeSiteTest {
                     reply(200, """{"players":{"FHD":[{"token":"$ok","label":"ok","version":"sub","lang":"jp"},{"token":"$mega","label":"mega","version":"sub","lang":"jp"}]}}""")
                 }
                 r.url.encodedPath.startsWith("/watch/stream-source/") -> reply(200, """{"sandbox":false}""")
-                r.url.encodedPath == "/watch/stream-gate/$ok" -> reply(302, "", "https://ok.ru/videoembed/16056762043078")
+                r.url.encodedPath == "/watch/stream-gate/$ok" -> reply(302, "", "/watch/player-hop")
+                r.url.encodedPath == "/watch/player-hop" -> reply(302, "", "//ok.ru/videoembed/16056762043078")
                 else -> reply(404, "")
             }
         }.build()
@@ -168,11 +182,13 @@ class WitAnimeSiteTest {
             }
         }.build()
         val adapter = WitAnimeSiteAdapter("witanime", "WitAnime", client, { "https://witanime.site" }, EmbedResolver(client))
-        val trace = com.vantara.anime.adapters.ResolveTrace()
+        val reports = java.util.concurrent.CopyOnWriteArrayList<com.vantara.anime.stream.RouteReport>()
+        val trace = com.vantara.anime.adapters.ResolveTrace { reports += it }
 
         val c = adapter.candidates(SourceEpisode("witanime", "/watch/x/1", "الحلقة 1", 1f), now = 0, trace = trace)
 
         assertTrue(c.isEmpty())
+        assertTrue(reports.last { it.server == "hgcloud" }.reason.orEmpty().contains("429"))
         val notes = trace.notes().joinToString(" | ")
         assertTrue(notes, notes.contains("mega") && notes.contains("غير مدعوم"))
         assertTrue(notes, notes.contains("hgcloud FHD") && notes.contains("البوابة"))

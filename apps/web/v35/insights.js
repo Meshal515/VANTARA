@@ -8,7 +8,10 @@ const el = (tag, cls, text) => {
 };
 
 export const duration = (ms) => {
-  const mins = Math.floor(Math.max(0, Number(ms) || 0) / 60000);
+  const value = Math.max(0, Number(ms) || 0);
+  const mins = Math.floor(value / 60000);
+  if (value > 0 && mins === 0) return 'أقل من دقيقة';
+  if (mins < 60) return `${mins} د`;
   return `${Math.floor(mins / 60)} س ${String(mins % 60).padStart(2, '0')} د`;
 };
 
@@ -62,13 +65,16 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
     const id = ++requestId;
     host.dataset.kind = filter;
     host.replaceChildren();
-    const total = el('div', 'insights-total', '—');
+    const total = el('div', 'insights-total');
+    total.setAttribute('aria-live', 'polite');
+    total.setAttribute('aria-label', 'إجمالي وقت المتابعة');
     const people = el('div', 'insights-people');
     people.setAttribute('aria-label', 'صاحب الإحصائيات');
     for (const a of sync.rows('accounts').sort((x, y) => Number(y.user_id === me()) - Number(x.user_id === me()))) {
       const profile = sync.rows('profiles', (p) => p.user_id === a.user_id)[0];
       const chip = el('button', `insights-person${a.user_id === person ? ' active' : ''}`);
       chip.type = 'button';
+      chip.disabled = true;
       chip.dataset.userId = a.user_id;
       chip.setAttribute('aria-pressed', String(a.user_id === person));
       if (profile?.avatar_key) {
@@ -81,7 +87,8 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
         // لا نمسح إحصائية ظاهرة إلا بعدما نتحقق أن الشخص فتح مشاركتها.
         const result = await sync.insights(a.user_id);
         if (selection !== requestId || !host.isConnected || viewer !== me()) return;
-        if (!result || result.locked || !result.timeShared) { toast('مقفلها', 3000); return; }
+        if (!result) { toast('تعذر تحميل الإحصائيات', 3000); return; }
+        if (result.locked || !result.timeShared) { toast('مقفلها', 3000); return; }
         person = a.user_id;
         currentResult = result;
         render(result);
@@ -108,10 +115,31 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
     }
     const ranking = el('div', 'insights-ranking');
     host.append(total, people, filters, ranking);
+    host.setAttribute('aria-busy', 'true');
+    if (!currentResult) {
+      total.classList.add('insights-loading');
+      for (let i = 0; i < 4; i++) ranking.append(el('div', 'insights-placeholder'));
+    }
     if (person === me() && currentResult?.userId === me()) render(currentResult);
     const result = await sync.insights(person);
     if (id !== requestId || !host.isConnected || viewer !== me()) return;
-    if (!result || result.locked || !result.timeShared) {
+    host.setAttribute('aria-busy', 'false');
+    for (const chip of people.children) chip.disabled = false;
+    total.classList.remove('insights-loading');
+    if (!result) {
+      currentResult = null;
+      total.textContent = '';
+      ranking.replaceChildren();
+      const retry = el('button', 'insights-retry');
+      retry.type = 'button';
+      retry.innerHTML = glyph('refresh', { size: 22 });
+      retry.append(el('span', null, 'تعذر تحميل الإحصائيات'));
+      retry.setAttribute('aria-label', 'تعذر تحميل الإحصائيات، أعد المحاولة');
+      retry.onclick = () => void show();
+      ranking.append(retry);
+      return;
+    }
+    if (result.locked || !result.timeShared) {
       if (person !== me()) { person = me(); toast('مقفلها', 3000); void show(); }
       return;
     }
@@ -123,32 +151,45 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
     const total = host.querySelector('.insights-total');
     const ranking = host.querySelector('.insights-ranking');
     if (!total || !ranking) return;
+    total.classList.remove('insights-loading');
+    host.setAttribute('aria-busy', 'false');
     host.dataset.kind = filter;
     for (const chip of host.querySelectorAll('.insights-person')) {
       const selected = chip.dataset.userId === person;
       chip.classList.toggle('active', selected);
       chip.setAttribute('aria-pressed', String(selected));
     }
-    const content = (result.content ?? []).filter((r) => r.section === filter || filter === 'all');
-    total.textContent = duration(content.reduce((sum, r) => sum + r.activeMs, 0));
+    const content = (result.content ?? []).filter((r) => (r.section === filter || filter === 'all') && r.activeMs > 0)
+      .sort((a, b) => b.activeMs - a.activeMs);
+    const sum = content.reduce((sum, r) => sum + r.activeMs, 0);
+    total.textContent = duration(sum);
+    total.classList.toggle('insights-total--short', sum > 0 && sum < 60000);
     ranking.replaceChildren();
+    if (!content.length) {
+      const empty = el('div', 'insights-empty');
+      empty.innerHTML = glyph('clock', { size: 28 });
+      empty.append(el('span', null, 'لا وقت مسجّل بعد'));
+      ranking.append(empty);
+    }
     const max = Math.max(1, ...content.map((r) => r.activeMs));
     for (const item of content) {
       if (!item.activeMs) continue;
       const row = el('button', 'insights-rank');
       row.type = 'button';
       const fill = el('span', 'insights-bar');
-      fill.style.width = `${Math.max(8, Math.round(item.activeMs / max * 100))}%`;
+      fill.style.width = `${item.activeMs / max * 100}%`;
+      const track = el('span', 'insights-track');
       const cover = el('span', 'insights-cover');
       const work = workFromRef(item.seriesRef, item.title, item.coverUrl);
-      void mountImage(cover, work).then(() => {
+      void Promise.resolve(mountImage(cover, work)).then(() => {
         const img = cover.querySelector('img');
         if (img) coverTone(img, item.coverUrl || item.seriesRef, fill);
-      });
+      }).catch(() => { /* retain the cover placeholder */ });
       fill.append(cover);
+      track.append(fill);
       const text = el('span', 'insights-rank-copy');
       text.append(el('strong', null, item.title || work.title?.english || '—'), el('small', null, duration(item.activeMs)));
-      row.append(fill, text);
+      row.append(track, text);
       row.setAttribute('aria-label', `${item.title || 'العمل'} · ${duration(item.activeMs)}`);
       row.onclick = () => void openWork(work);
       ranking.append(row);

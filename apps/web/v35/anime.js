@@ -1312,15 +1312,15 @@ export function createAnime(deps) {
         let b = routeNodes.get(r.id);
         if (b) {
           b.className = `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`;
-          b.disabled = r.state !== 'READY';
+          b.disabled = r.state === 'RESOLVING';
           b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
-          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
-          b.onclick = () => void playRoute(r);
+          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
+          b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
           return b;
         }
         b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
         b.type = 'button';
-        b.disabled = r.state !== 'READY';
+        b.disabled = r.state === 'RESOLVING';
         const top = el('span', 'an-srv-top');
         const code = el('b', 'an-srv-code', r.code);
         code.dir = 'ltr';
@@ -1330,8 +1330,8 @@ export function createAnime(deps) {
         const line = el('span', 'an-srv-state');
         line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
         b.append(top, line);
-        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
-        b.onclick = () => void playRoute(r);
+        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
+        b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
         routeNodes.set(r.id, b);
         return b;
       };

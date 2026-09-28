@@ -47,10 +47,11 @@ class WebViewSniffer(
     private suspend fun sniffNow(url: String, referer: String?): Stream? {
         val found = CompletableDeferred<Stream>()
         var view: WebView? = null
-        main.post { view = open(url, referer, found) }
+        main.post { if (!found.isCompleted) view = open(url, referer, found) }
         return try {
             withTimeoutOrNull(timeoutMs) { found.await() }
         } finally {
+            found.cancel()
             main.post {
                 view?.let { v ->
                     (v.parent as? ViewGroup)?.removeView(v)
@@ -77,7 +78,7 @@ class WebViewSniffer(
             val origin = pageUrl?.let { runCatching { java.net.URI(it) }.getOrNull() }?.let { "${it.scheme}://${it.host}" }
             val headers = buildMap {
                 put("User-Agent", ua)
-                origin?.let { put("Referer", "$it/"); put("Origin", it) }
+                origin?.let { put("Referer", pageUrl!!); put("Origin", it) }
             }
             found.complete(Stream(u, headers, null, "sniffed"))
         }
@@ -92,6 +93,7 @@ class WebViewSniffer(
             }
 
             override fun onPageFinished(v: WebView, u: String) {
+                if (found.isCompleted) return
                 v.evaluateJavascript(PLAY_JS, null)
                 v.evaluateJavascript("document.documentElement.outerHTML") { raw ->
                     val html = runCatching { json.parseToJsonElement(raw).jsonPrimitive.content }.getOrNull() ?: return@evaluateJavascript

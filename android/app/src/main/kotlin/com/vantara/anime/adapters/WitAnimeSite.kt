@@ -8,6 +8,7 @@ import com.vantara.anime.stream.StreamClassifier
 import com.vantara.anime.stream.Variant
 import eu.kanade.tachiyomi.network.GET
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
@@ -130,16 +131,22 @@ class WitAnimeSiteAdapter(
             servers.map { s ->
                 suspend {
                     val label = "${s.label} ${s.quality}"
+                    var failure: String? = null
                     val got = withTimeoutOrNull(serverTimeoutMs) {
-                        runCatching { streamsOf(s, watch, episode, now, trace) }
-                            .fold({ it }, { report(s, RouteState.UNAVAILABLE, reason = it.brief()); emptyList() })
+                        try { streamsOf(s, watch, episode, now, trace) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) {
+                            failure = e.brief()
+                            trace?.note(label, failure!!)
+                            emptyList()
+                        }
                     }
                     when {
                         got == null -> emptyList<Candidate>().also {
                             trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
                             report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
                         }
-                        got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = "لا رابط فيديو") }
+                        got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = failure ?: "لم يُستخرج رابط فيديو من المشغّل") }
                         else -> got.also { report(s, RouteState.READY, it) }
                     }
                 }
@@ -186,10 +193,21 @@ class WitAnimeSiteAdapter(
 
     /** البوابة تحوّل (302) إلى صفحة المشغّل؛ وإن أعادت صفحة فمنها `meta refresh`. */
     private suspend fun gate(token: String, referer: String): String? {
-        val req = Request.Builder().url(abs("/watch/stream-gate/$token")).header("Referer", referer).build()
-        return noRedirect.newCall(req).await().use { r ->
-            r.header("Location")?.takeIf { it.startsWith("http") } ?: Parse.metaRefresh(r.body.string())
+        var url = abs("/watch/stream-gate/$token").toHttpUrl()
+        val sourceHost = url.host
+        val visited = mutableSetOf<String>()
+        repeat(5) {
+            check(visited.add(url.toString())) { "البوابة: حلقة تحويل متكررة" }
+            val req = Request.Builder().url(url).header("Referer", referer).build()
+            val next = noRedirect.newCall(req).await().use { r ->
+                check(r.isSuccessful || r.code in 300..399) { "البوابة: HTTP ${r.code}" }
+                val location = r.header("Location") ?: Parse.metaRefresh(r.body.string())
+                location?.let { r.request.url.resolve(it) }
+            } ?: return null
+            if (next.host != sourceHost) return next.toString()
+            url = next
         }
+        error("البوابة: تحويلات أكثر من الحد")
     }
 
     internal object Parse {
@@ -278,8 +296,12 @@ class WitAnimeSiteAdapter(
             else -> StreamClassifier.quality(label)
         }
 
-        fun metaRefresh(html: String): String? =
-            Regex("""http-equiv=["']refresh["'][^>]*url=['"]?([^'">\s]+)""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+        fun metaRefresh(html: String): String? {
+            val content = Jsoup.parse(html).select("meta[http-equiv]")
+                .firstOrNull { it.attr("http-equiv").equals("refresh", ignoreCase = true) }?.attr("content") ?: return null
+            return Regex("""url\s*=\s*(.+)$""", RegexOption.IGNORE_CASE).find(content)
+                ?.groupValues?.get(1)?.trim()?.trim('\'', '"')?.takeIf { it.isNotBlank() }
+        }
 
         private val WORK = Regex("""^/(anime|movie)/[^/]+/?$""")
         private val TOKEN = Regex("^[a-f0-9]{64}$")

@@ -62,23 +62,34 @@ class EmbedResolver(
         // DoH، لكن هذا الوسم لا يغيّر سياسة Cloudflare ولا يمنع WebView.
         AnimeHostRouter.markVideoHost(host)
         return when {
-            host.endsWith("ok.ru") || host.endsWith("odnoklassniki.ru") -> OkRu.parse(fetch(url, referer).body)
+            host.endsWith("ok.ru") || host.endsWith("odnoklassniki.ru") -> fallback(url, referer) { OkRu.parse(fetch(url, referer).body) }
             // الفيديو مشفّر ويُفك داخل صفحة MEGA نفسها: لا رابط يلتقطه أحد
             host.endsWith("mega.nz") || host.endsWith("mega.co.nz") -> emptyList()
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
-            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> megamax(url, referer)
-            host.endsWith("videa.hu") -> videa(url, referer).ifEmpty { sniff(url, referer) }
-            host.contains("yonaplay") && depth == 0 -> yonaplay(url, referer)
+            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> fallback(url, referer) { megamax(url, referer) }
+            host.endsWith("videa.hu") -> fallback(url, referer) { videa(url, referer) }
+            host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
-                runCatching { fetch(url, referer) }.getOrNull()?.let { Vk.parse(it.body, headersFor(it.url)) }.orEmpty()
-                    .ifEmpty { sniff(url, referer) }
+                fallback(url, referer) { fetch(url, referer).let { Vk.parse(it.body, headersFor(it.url)) } }
             else -> generic(url, referer)
         }
     }
 
+    /** An extractor exception must still allow the browser path, but never after cancellation. */
+    private suspend fun fallback(url: String, referer: String?, extract: suspend () -> List<Stream>): List<Stream> {
+        var failure: Exception? = null
+        val streams = try { extract() }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { failure = e; emptyList() }
+        if (streams.isNotEmpty()) return streams
+        val captured = sniff(url, referer)
+        if (captured.isEmpty()) failure?.let { throw it }
+        return captured
+    }
+
     private suspend fun generic(url: String, referer: String?): List<Stream> {
-        val page = runCatching { fetch(url, referer) }.getOrNull()
+        val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         if (page != null && page.ok) {
             val found = Generic.streams(page.body, page.url)
             if (found.isNotEmpty()) {
@@ -131,7 +142,7 @@ class EmbedResolver(
             val body = """{"code":${quote(session.code)},"token":${quote(s.token)},"key":${quote(session.key)}}"""
             val target = Yonaplay.payload(post("api.php", body))?.let { Yonaplay.decrypt(it, session.key) } ?: continue
             if (target.contains("mega.nz")) continue
-            val got = runCatching { resolve(target, page.url, depth = 1) }.getOrDefault(emptyList())
+            val got = try { resolve(target, page.url, depth = 1) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
             out += got.map { it.copy(quality = it.quality ?: s.quality, label = "yonaplay/${s.name.lowercase()}") }
             if (out.size >= 2) break
         }
@@ -196,7 +207,7 @@ class EmbedResolver(
     private fun headersFor(pageUrl: String): Map<String, String> {
         val origin = pageUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}" } ?: return emptyMap()
         return buildMap {
-            put("Referer", "$origin/")
+            put("Referer", pageUrl)
             put("Origin", origin)
             userAgent()?.let { put("User-Agent", it) }
         }

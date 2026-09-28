@@ -50,6 +50,15 @@ describe('per-work insights privacy and attribution', () => {
     expect((await call(env, A, `/v1/insights/${A}`)).status).toBe(200);
   });
 
+  it('adds short visits in milliseconds without rounding them away or replaying an operation twice', async () => {
+    const { env } = sqliteEnv({ VANTARA_SESSION_SECRET: SECRET });
+    const first = await op(env, A, 'usage.work', { seriesRef: 'manga:short', section: 'manga', activeMs: 2300 });
+    await call(env, A, '/v1/ops', first);
+    await op(env, A, 'usage.work', { seriesRef: 'manga:short', section: 'manga', activeMs: 3700 });
+    const mine = await (await call(env, A, `/v1/insights/${A}`)).json() as any;
+    expect(mine.content[0].activeMs).toBe(6000);
+  });
+
   it('keeps old daily usage and weekly time private in every server response', async () => {
     const { env } = sqliteEnv({ VANTARA_SESSION_SECRET: SECRET });
     await op(env, A, 'usage.add', { activeMs: 120000 });

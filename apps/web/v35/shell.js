@@ -2559,7 +2559,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const byRef = new Map(data.content.map((x) => [x.seriesRef, x.activeMs]));
         for (const span of list.querySelectorAll('.rv-duration')) {
           const ms = byRef.get(span.dataset.ref);
-          if (ms >= 60000) {
+          if (ms > 0) {
             span.innerHTML = glyph('clock', { size: 14 });
             span.append(document.createTextNode(insightDuration(ms)));
           }
