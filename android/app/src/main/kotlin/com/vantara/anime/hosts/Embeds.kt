@@ -1,5 +1,6 @@
 package com.vantara.anime.hosts
 
+import com.vantara.anime.net.AnimeHostRouter
 import com.vantara.anime.stream.Container
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
