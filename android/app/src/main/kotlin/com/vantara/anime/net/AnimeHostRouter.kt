@@ -101,11 +101,6 @@ object AnimeHostRouter : Interceptor {
     /** Cloudflare يسأل: هل يُمنع إظهار التحدي لهذا المضيف؟ */
     fun isHiddenOnly(host: String): Boolean = host in hiddenOnly
 
-    /** صفحات مشغّل تكتشفها الحلقة: فحصها خلفي فلا يستولي تحدّيها على الشاشة. */
-    fun markPassiveVideoHost(host: String) {
-        if (host.isNotBlank()) hiddenOnly += host.lowercase()
-    }
-
     /**
      * نمط حجب SNI الشائع: TCP يتصل، ومصافحة TLS تنقطع فورًا بإعادة تصفير —
      * لا مهلة ولا رفض عادي. مصافحة فاشلة لأي سبب آخر (شهادة، مهلة) لا تُطابق.

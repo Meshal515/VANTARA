@@ -1,7 +1,6 @@
 package com.vantara.anime.hosts
 
 import com.vantara.anime.stream.Container
-import com.vantara.anime.net.AnimeHostRouter
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import kotlinx.serialization.json.Json
@@ -58,7 +57,10 @@ class EmbedResolver(
     private suspend fun resolve(embed: String, referer: String?, depth: Int): List<Stream> {
         val url = if (embed.startsWith("//")) "https:$embed" else embed
         val host = url.toHttpUrlOrNull()?.host?.lowercase() ?: return emptyList()
-        AnimeHostRouter.markPassiveVideoHost(host)
+        // مضيف المشغّل ليس «مصدرًا مخفيًا». وسمه عالميًا هنا كان يسمّم
+        // كل محاولاته اللاحقة: Cloudflare يحوّل طلب التشغيل الأمامي إلى
+        // FAIL_FAST بدل WebView التفاعلي، فتظهر كل سيرفراته «غير متاح».
+        // سياسة التفاعل تخص الطلب/المسار، لا اسم المضيف المكتشف.
         return when {
             host.endsWith("ok.ru") || host.endsWith("odnoklassniki.ru") -> OkRu.parse(fetch(url, referer).body)
             // الفيديو مشفّر ويُفك داخل صفحة MEGA نفسها: لا رابط يلتقطه أحد
