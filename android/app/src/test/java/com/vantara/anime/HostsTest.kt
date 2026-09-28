@@ -26,6 +26,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.SocketException
@@ -137,8 +138,10 @@ class HostsTest {
         val streams = resolver.resolve("https://share4max.com/iframe/nRcSlqx5tF9nn", null)
         assertEquals(720, streams.single().quality)
         assertTrue("waited ${System.currentTimeMillis() - start}ms", System.currentTimeMillis() - start < 1_000)
-        assertTrue(AnimeHostRouter.isHiddenOnly("slow.test"))
-        assertTrue(AnimeHostRouter.isHiddenOnly("fast.test"))
+        // مرايا الفيديو ليست مضيفات مصادر. تحويلها إلى hidden-only كان يجعل
+        // Cloudflare التفاعلي يفشل سريعًا لكل أنمي يستخدم نفس المضيف.
+        assertFalse(AnimeHostRouter.isHiddenOnly("slow.test"))
+        assertFalse(AnimeHostRouter.isHiddenOnly("fast.test"))
     }
 
     @Test fun `a page the extractor cannot read falls back to the sniffer`() = runBlocking {
