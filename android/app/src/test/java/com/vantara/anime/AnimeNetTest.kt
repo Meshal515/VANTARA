@@ -91,16 +91,16 @@ class AnimeNetTest {
     @Test fun `ordinary hosts use the system resolver untouched`() {
         var asked = 0
         val system = Dns { asked++; listOf(ip("93.184.216.34")) }
-        val dns = AnimeDns(isSourceHost = { false }, system = system)
+        val dns = AnimeDns(preferDoh = { false }, system = system)
         assertEquals(listOf(ip("93.184.216.34")), dns.lookup("example.org"))
         assertEquals(1, asked)
     }
 
     @Test fun `DoH answers keep IPv6 only when the phone has an IPv6 route`() {
         val answer = listOf(ip("2606:4700::1"), ip("104.21.1.1"), ip("172.67.1.1"))
-        val noV6 = AnimeDns(isSourceHost = { true }, hasIpv6 = { false })
+        val noV6 = AnimeDns(preferDoh = { true }, hasIpv6 = { false })
         assertEquals(listOf(ip("104.21.1.1"), ip("172.67.1.1")), noV6.usable(answer))
-        val withV6 = AnimeDns(isSourceHost = { true }, hasIpv6 = { true })
+        val withV6 = AnimeDns(preferDoh = { true }, hasIpv6 = { true })
         assertEquals(listOf(ip("104.21.1.1"), ip("172.67.1.1"), ip("2606:4700::1")), withV6.usable(answer))
         // موقع IPv6 فقط يبقى قابلًا للمحاولة
         assertEquals(listOf(ip("2606:4700::1")), noV6.usable(listOf(ip("2606:4700::1"))))
