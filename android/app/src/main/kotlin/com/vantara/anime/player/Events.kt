@@ -48,10 +48,17 @@ object Outbox {
     }
 
     @Synchronized
-    fun drain(context: Context): JSONArray {
+    fun drain(context: Context, userId: String): JSONArray {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val list = runCatching { JSONArray(prefs.getString(KEY, "[]")) }.getOrDefault(JSONArray())
-        prefs.edit().remove(KEY).apply()
-        return list
+        val mine = JSONArray()
+        val others = JSONArray()
+        for (i in 0 until list.length()) {
+            val item = list.optJSONObject(i) ?: continue
+            // Unowned legacy items stay quarantined: we cannot infer who sent them.
+            if (item.optString("userId") == userId) mine.put(item) else others.put(item)
+        }
+        prefs.edit().putString(KEY, others.toString()).apply()
+        return mine
     }
 }

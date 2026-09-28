@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { animeRef, createAnimeAccount, episodeKey, isAnimeRef } from './anime-account.js';
+import { readWatch, recordWatch } from './anime.js';
 
 /**
  * الأنمي في حسابك.
  *
  * السؤال: هل تُحفظ القوائم وعين الحلقة في جداول الحساب نفسها (فتظهر في كل
- * أجهزتك وفي ملفك)؟ وهل «من ← إلى» عملية واحدة لا تكرر ما عُلّم؟ وهل يُرحَّل
- * سجل الجهاز القديم مرة واحدة فقط؟
+ * أجهزتك وفي ملفك)؟ وهل «من ← إلى» عملية واحدة لا تكرر ما عُلّم؟
  */
 function fakeSync(tables = {}) {
   const ops = [];
@@ -125,18 +125,35 @@ describe('anime in the account', () => {
     expect(shelf[1]).toMatchObject({ title: 'Naruto', poster: 'c20' });
   });
 
-  it('migrates the device list and watched episodes once', () => {
+  it('does not import an unowned device list or history into another account', () => {
     const sync = fakeSync();
     const a = createAnimeAccount(sync);
     const list = { 20: { id: 20, title: 'Naruto' } };
     const watch = { 20: { id: 20, title: 'Naruto', episode: 3, at: 5, episodes: { 1: { done: true }, 2: { done: true }, 3: { done: false, position: 10 } } } };
-    a.migrate({ list, watch });
-    expect(a.inLibrary(20)).toBe(true);
-    expect(a.isSeen(20, 1) && a.isSeen(20, 2)).toBe(true);
-    expect(a.isSeen(20, 3)).toBe(false);
-    expect(sync.ops.find((o) => o.kind === 'view.add').payload).toMatchObject({ chapterLabel: 'الحلقة 3', at: 5 });
-    const before = sync.ops.length;
-    a.migrate({ list, watch });
-    expect(sync.ops.length).toBe(before);
+    localStorage.setItem('vantara.anime.list', JSON.stringify(list));
+    localStorage.setItem('vantara.anime.watch', JSON.stringify(watch));
+    expect(a.migrate).toBeUndefined();
+    expect(sync.ops).toEqual([]);
+    expect(a.inLibrary(20)).toBe(false);
+  });
+
+  it('keeps local playback separate across account switches, and preserves old data for recovery', () => {
+    localStorage.setItem('vantara.anime.watch', JSON.stringify({ legacy: { id: 'legacy' } }));
+    recordWatch(naruto, 3, 12_000, 30_000, 'ngm');
+    expect(readWatch('ngm')[20].episode).toBe(3);
+    expect(readWatch('d7m')).toEqual({});
+    recordWatch({ id: 21, title: 'Other' }, 2, 4_000, 40_000, 'd7m');
+    expect(readWatch('d7m')[21].episode).toBe(2);
+    expect(readWatch('ngm')[21]).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem('vantara.anime.watch'))).toEqual({ legacy: { id: 'legacy' } });
+  });
+
+  it('does not suppress a real view of the same episode in another account', () => {
+    const sync = fakeSync();
+    const account = createAnimeAccount(sync);
+    account.recordView(naruto, 3);
+    sync.user = { userId: 'd7m' };
+    account.recordView(naruto, 3);
+    expect(sync.ops.filter((o) => o.kind === 'view.add')).toHaveLength(2);
   });
 });

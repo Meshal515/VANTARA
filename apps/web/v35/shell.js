@@ -96,7 +96,6 @@ const drawerGroups = [
 ];
 
 const WORKS_KEY = 'vantara.v35.works';
-const HISTORY_KEY = 'vantara.v35.history';
 
 function readJson(key, fallback) {
   try {
@@ -406,24 +405,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync.enqueue('view.remove', { seriesRef: ref });
   }
   const historyWorks = () => viewRows().map((v) => workFromRef(v.series_ref, v.series_title, v.cover_url));
-  /** السجل القديم كان في الجهاز: يُنقل مرة إلى الحساب بترتيبه ثم يُترك. */
-  function migrateLocalHistory() {
-    const flag = `${HISTORY_KEY}.moved.${me()}`;
-    if (!me() || localStorage.getItem(flag)) return;
-    const local = readJson(HISTORY_KEY, []);
-    if (!viewRows().length) {
-      const t = Date.now();
-      local.slice(0, 60).forEach((h, i) => {
-        if (h?.ref) sync.enqueue('view.add', { seriesRef: h.ref, seriesTitle: h.title ?? null, coverUrl: h.cover ?? null, at: t - (i + 1) * 60_000 });
-      });
-    }
-    try {
-      localStorage.setItem(flag, '1');
-    } catch {
-      // يُعاد النقل مرة أخرى فقط، والخادم يدمج المكرر
-    }
-  }
-
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -4281,7 +4262,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ما وصل هذا الجهاز قبل فتح الشاشة: المرسل يرى «وصله» الآن لا عند أول مجلس
   setTimeout(() => {
     majlis.acknowledgeDelivered();
-    migrateLocalHistory();
   }, 0);
   // التسخين مؤجل إلى سكون الرئيسية، ولا يزاحم البحث.
   setTimeout(() => {
@@ -4365,7 +4345,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openSheet,
     closeSheet,
     genreAr,
-    readWatch,
+    readWatch: () => readWatch(sync.user?.userId ?? null),
     section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
     openAnime: (card) => openAnimeRef(card.workId, { title: card.title, cover: card.cover }),
     openManga: async (card) => {

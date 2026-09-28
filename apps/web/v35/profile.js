@@ -497,9 +497,9 @@ export function createProfile(ctx) {
     // كل شيء في مكان واحد: المانجا والأنمي كلٌّ برفوفه (الأنمي بمرجع `anime:<id>`)
     const shelf = (kind, media = 'all') => shelfOf(userId, kind, media);
     const reading = shelf('reading', 'manga');
-    if (reading.length) body.append(section('يقرأ الآن', strip(reading, { chapters: true }), { meta: countLabel(reading.length, 'work') }));
+    if (reading.length) body.append(section('في مكتبة المانجا', strip(reading), { meta: countLabel(reading.length, 'work') }));
     const watchingNow = shelf('reading', 'anime');
-    if (watchingNow.length) body.append(section('يشاهد الآن', strip(watchingNow, { chapters: true }), { meta: `${fmt(watchingNow.length)} أنمي` }));
+    if (watchingNow.length) body.append(section('أنمي في قائمته', strip(watchingNow), { meta: `${fmt(watchingNow.length)} أنمي` }));
     const animeViews = sync
       .rows('work_views', (r) => r.user_id === userId && !r.removed && isAnimeRef(r.series_ref))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
