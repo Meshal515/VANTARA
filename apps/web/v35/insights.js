@@ -1,3 +1,4 @@
+import { flushFollowTime } from '../lib/follow-time.js';
 import { glyph } from './icons.js';
 
 const el = (tag, cls, text) => {
@@ -121,6 +122,10 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
       for (let i = 0; i < 4; i++) ranking.append(el('div', 'insights-placeholder'));
     }
     if (person === me() && currentResult?.userId === me()) render(currentResult);
+    if (person === me()) {
+      await flushFollowTime(sync).catch(() => {});
+      await sync.push();
+    }
     const result = await sync.insights(person);
     if (id !== requestId || !host.isConnected || viewer !== me()) return;
     host.setAttribute('aria-busy', 'false');

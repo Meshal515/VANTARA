@@ -51,3 +51,15 @@ it('leaves the native credit untouched when the local sync queue cannot be saved
   await expect(flushFollowTime(sync)).rejects.toThrow();
   expect(pending).toEqual([item]);
 });
+
+it('drains a six-episode backlog instead of showing only the first hundred minutes', async () => {
+  let pending = Array.from({ length: 156 }, (_, i) => ({ ...item, id: `credit-${i}` }));
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    pending: async () => ({ items: pending.slice(0, 100) }),
+    acknowledge: async ({ ids }) => { pending = pending.filter(x => !ids.includes(x.id)); },
+  } } };
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+  await flushFollowTime(sync);
+  expect(pending).toEqual([]);
+  expect(JSON.parse(store.get('vantara.queue')).filter(x => x.kind === 'usage.work').reduce((sum, x) => sum + x.payload.activeMs, 0)).toBe(9360000);
+});

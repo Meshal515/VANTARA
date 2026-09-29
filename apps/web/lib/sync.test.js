@@ -487,3 +487,25 @@ describe('durable native time handoff', () => {
     expect(ops.find(o => o.opId === 'native-time-1').payload.activeMs).toBe(5000);
   });
 });
+
+it('waits for an in-flight time write before a second caller reads statistics', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const sync = await loadSync({ storage, fetchImpl: async (url, options) => {
+    if (String(url).includes('/v1/ops')) {
+      await gate;
+      return jsonResponse({ applied: JSON.parse(options.body).ops.map(x => x.opId), skipped: [], cursor: 1 });
+    }
+    return jsonResponse({ reset: false, cursor: 1, changes: {} });
+  } });
+  sync.enqueue('usage.work', { section: 'anime', seriesRef: 'anime:1', activeMs: 5000 });
+  const first = sync.push();
+  let settled = false;
+  const second = sync.push().then(() => { settled = true; });
+  await Promise.resolve(); await Promise.resolve();
+  const premature = settled;
+  release();
+  await Promise.all([first, second]);
+  expect(premature).toBe(false);
+  expect(sync.pendingWrites).toBe(0);
+});

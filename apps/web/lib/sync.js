@@ -218,6 +218,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let pullAgain = false;
   let sessionGeneration = 0;
   let pushing = false;
+  let pushWaiters = [];
 
   /** محاولات متتالية لكل عملية، بمفتاح op_id. لا تُحفظ: العدّ لكل جلسة. */
   const attemptsOf = new Map();
@@ -714,6 +715,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     const existing = queue.find((op) => op.opId === opId);
     if (existing) {
       if (!persistQueue() && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
+      schedulePush();
       return opId;
     }
     const op = { opId, kind, payload, at: Date.now() };
@@ -768,7 +770,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (pushing) {
       // طلب أثناء إرسال جارٍ لا يُهمل: الدفعة الحالية قد لا تحمل آخر عملية
       pushAgain = true;
-      return;
+      await new Promise(resolve => pushWaiters.push(resolve));
+      return push({ force });
     }
     if (!force && Date.now() < nextPushAt) return;
     if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return;
@@ -833,6 +836,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       emit(['sync']);
     } finally {
       pushing = false;
+      const waiters = pushWaiters;
+      pushWaiters = [];
+      for (const resolve of waiters) resolve();
       if (pushAgain) {
         pushAgain = false;
         schedulePush();

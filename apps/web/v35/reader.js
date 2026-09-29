@@ -891,12 +891,14 @@ export function openSmartReader(deps, ctx) {
       if (nativeTime) continue;
       let credit = Math.floor(part.activeMs - (part.creditedMs ?? 0));
       while (credit > 0) {
-        const amount = Math.min(credit, 15 * 60_000);
+        part.pendingCredit ??= { amount: Math.min(credit, 15 * 60_000), id: crypto.randomUUID() };
+        const { amount, id } = part.pendingCredit;
         sync.enqueue('usage.work', {
           seriesRef: ref, seriesTitle: ctx.title,
           coverUrl: ctx.work?.coverImage?.large ?? part.row.manga?.thumbnailUrl ?? null,
           section: 'manga', activeMs: amount,
-        }, { requireDurable: true });
+        }, { opId: id, requireDurable: true });
+        part.pendingCredit = null;
         part.creditedMs = (part.creditedMs ?? 0) + amount;
         credit -= amount;
       }

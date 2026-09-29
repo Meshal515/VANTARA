@@ -14,22 +14,27 @@ export function flushFollowTime(sync) {
   if (flights.has(sync)) return flights.get(sync);
   const userId = sync.user.userId;
   const job = (async () => {
-    const { items = [] } = await plugin().pending({ userId });
-    const ids = [];
-    for (const item of items) {
-      if (sync.user?.userId !== userId) break;
-      const owner = item.owner;
-      if (owner?.userId !== userId || !item.id || !(item.activeMs > 0)) continue;
-      sync.enqueue('usage.work', {
-        section: owner.section, seriesRef: owner.seriesRef, seriesTitle: owner.title,
-        coverUrl: owner.coverUrl, activeMs: item.activeMs,
-      }, { opId: `${item.id}:work`, requireDurable: true });
-      if (owner.section === 'anime') sync.enqueue('usage.watch', {
-        section: 'anime', day: item.day, activeMs: item.activeMs,
-      }, { opId: `${item.id}:watch`, requireDurable: true });
-      ids.push(item.id);
+    for (let batch = 0; batch < 20; batch++) {
+      const { items = [] } = await plugin().pending({ userId });
+      if (!items.length || sync.user?.userId !== userId) break;
+      const ids = [];
+      for (const item of items) {
+        if (sync.user?.userId !== userId) break;
+        const owner = item.owner;
+        if (owner?.userId !== userId || !item.id || !(item.activeMs > 0)) continue;
+        sync.enqueue('usage.work', {
+          section: owner.section, seriesRef: owner.seriesRef, seriesTitle: owner.title,
+          coverUrl: owner.coverUrl, activeMs: item.activeMs,
+        }, { opId: `${item.id}:work`, requireDurable: true });
+        if (owner.section === 'anime') sync.enqueue('usage.watch', {
+          section: 'anime', day: item.day, activeMs: item.activeMs,
+        }, { opId: `${item.id}:watch`, requireDurable: true });
+        ids.push(item.id);
+      }
+      if (!ids.length) break;
+      await plugin().acknowledge({ userId, ids });
+      if (items.length < 100) break;
     }
-    if (ids.length) await plugin().acknowledge({ userId, ids });
   })().finally(() => flights.delete(sync));
   flights.set(sync, job);
   return job;
