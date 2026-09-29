@@ -132,6 +132,7 @@ class WitAnimeSiteTest {
         val mega = "2".repeat(64)
         val seen = mutableListOf<String>()
         var csrfSent: String? = null
+        var initialized = false
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val r = chain.request()
             seen += "${r.method} ${r.url.encodedPath}"
@@ -146,8 +147,14 @@ class WitAnimeSiteTest {
                     csrfSent = r.header("X-CSRF-TOKEN")
                     reply(200, """{"players":{"FHD":[{"token":"$ok","label":"ok","version":"sub","lang":"jp"},{"token":"$mega","label":"mega","version":"sub","lang":"jp"}]}}""")
                 }
-                r.url.encodedPath.startsWith("/watch/stream-source/") -> reply(200, """{"sandbox":false}""")
-                r.url.encodedPath == "/watch/stream-gate/$ok" -> reply(302, "", "/watch/player-hop")
+                r.url.encodedPath.startsWith("/watch/stream-source/") -> {
+                    assertEquals("POST", r.method)
+                    assertEquals("tok123", r.header("X-CSRF-TOKEN"))
+                    assertEquals("https://witanime.site/watch/one-piece/1", r.header("Referer"))
+                    initialized = true
+                    reply(200, """{"sandbox":false}""")
+                }
+                r.url.encodedPath == "/watch/stream-gate/$ok" -> if (initialized) reply(302, "", "/watch/player-hop") else reply(404, "")
                 r.url.encodedPath == "/watch/player-hop" -> reply(302, "", "//ok.ru/videoembed/16056762043078")
                 else -> reply(404, "")
             }
@@ -162,9 +169,9 @@ class WitAnimeSiteTest {
         assertEquals(1080, c.first { it.url.endsWith("id=full") }.quality)
         // mega لا يُطلب أصلًا: فيديوه مشفّر ولا نشغّله بعد
         assertTrue(seen.none { mega in it })
-        // البوابة وحدها تكفي: stream-source يستهلك من حد الطلبات بلا فائدة
+        // لا تعمل البوابة قبل تهيئتها بنفس CSRF وصفحة الحلقة
         assertTrue(seen.contains("GET /watch/stream-gate/$ok"))
-        assertTrue(seen.none { it.contains("stream-source") })
+        assertTrue(seen.indexOf("POST /watch/stream-source/$ok") < seen.indexOf("GET /watch/stream-gate/$ok"))
     }
 
     @Test fun `the trace says why each server gave nothing`() = runBlocking {
@@ -192,6 +199,27 @@ class WitAnimeSiteTest {
         val notes = trace.notes().joinToString(" | ")
         assertTrue(notes, notes.contains("mega") && notes.contains("غير مدعوم"))
         assertTrue(notes, notes.contains("hgcloud FHD") && notes.contains("البوابة"))
+    }
+
+    @Test fun `failed preferred server is not fetched and attempted twice`() = runBlocking {
+        val token = "9".repeat(64)
+        val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val r = chain.request()
+            seen += r.url.encodedPath
+            val (code, body) = when (r.url.encodedPath) {
+                "/watch/x/1" -> 200 to """<meta name="csrf-token" content="t">"""
+                "/watch/x/1/sources" -> 200 to """{"players":{"FHD":[{"token":"$token","label":"videa"}]}}"""
+                "/watch/stream-source/$token" -> 200 to """{"sandbox":false}"""
+                else -> 404 to ""
+            }
+            Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(code).message("x")
+                .body(body.toResponseBody("text/html".toMediaType())).build()
+        }.build()
+        val adapter = WitAnimeSiteAdapter("witanime", "WitAnime", client, { "https://witanime.site" }, EmbedResolver(client))
+        assertTrue(adapter.preferredCandidates(SourceEpisode("witanime", "/watch/x/1", "1", 1f), "videa", 0, null).isEmpty())
+        assertEquals(1, seen.count { it == "/watch/x/1/sources" })
+        assertEquals(1, seen.count { it == "/watch/stream-gate/$token" })
     }
 
     @Test fun `a movie is one episode on its own watch path`() = runBlocking {
