@@ -1266,6 +1266,25 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
   assert.throws(() => buildManifest({ ...manifest, native: 'dev' }), /native fingerprint/);
 });
 
+
+test('optional follow-time accounting can never precede the first application mount', () => {
+  const shell = read('apps/web/v35/shell.js');
+  const mount = shell.indexOf('deps.mount(root)');
+  const collector = shell.indexOf('collectFollowTime(sync)');
+  assert.ok(mount >= 0 && collector >= 0, 'shell must keep both mount and follow-time collector');
+  assert.ok(
+    mount < collector,
+    'follow-time is non-critical accounting and must never run before the shell mounts',
+  );
+
+  const follow = read('apps/web/lib/follow-time.js');
+  assert.match(
+    follow,
+    /try\s*\{[\s\S]*?native\.addListener\?\.\('foreground'/,
+    'native listener registration must stay behind a synchronous error boundary',
+  );
+});
+
 /**
  * كل استيراد مسمّى في الواجهة يجد تصديره. استيراد ناقص يُسقط وحدة القشرة كلها
  * فيبقى التطبيق على شاشة البداية بلا رسالة.
