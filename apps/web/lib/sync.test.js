@@ -475,3 +475,15 @@ describe('adversarial session races', () => {
     expect(sync.signedIn).toBe(true);
   });
 });
+
+describe('durable native time handoff', () => {
+  it('keeps a stable operation id across repeated delivery and persists only one pending credit', async () => {
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({}, 503)) });
+    const payload = { section: 'anime', seriesRef: 'anime:1', activeMs: 5000 };
+    sync.enqueue('usage.work', payload, { opId: 'native-time-1', requireDurable: true });
+    sync.enqueue('usage.work', payload, { opId: 'native-time-1', requireDurable: true });
+    const ops = JSON.parse(storage.getItem('vantara.queue'));
+    expect(ops.filter(o => o.opId === 'native-time-1')).toHaveLength(1);
+    expect(ops.find(o => o.opId === 'native-time-1').payload.activeMs).toBe(5000);
+  });
+});
