@@ -188,6 +188,15 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     writeJson(MIRROR_KEY, mirror);
     localStorage.setItem('vantara.public-views.v1', '1');
   }
+  // الإحصاء اليومي كان يصل إلى مرآة كل حساب. بعد حصره بالمالك على الخادم،
+  // امسح نسخه القديمة من الأجهزة دون تصفير المؤشر أو سجل المالك.
+  if (localStorage.getItem('vantara.private-usage.v1') !== '1') {
+    for (const [key, row] of Object.entries(mirror.usage_daily ?? {})) {
+      if (row?.user_id !== user?.userId) delete mirror.usage_daily[key];
+    }
+    writeJson(MIRROR_KEY, mirror);
+    localStorage.setItem('vantara.private-usage.v1', '1');
+  }
   let quarantine = readJson(QUARANTINE_KEY, []);
   /** أثر الكتابات التي لم يُقرّها الخادم بعد (`lib/optimistic.js`). يُحسب ولا يُحفظ. */
   let overlay = {};
@@ -921,6 +930,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  async function insights(userId, seriesRef = null) {
+    if (!token) return null;
+    try {
+      const work = seriesRef ? `?work=${encodeURIComponent(seriesRef)}` : '';
+      return await request(`/v1/insights/${encodeURIComponent(userId)}${work}`);
+    } catch (error) {
+      if (error?.status === 403) return { locked: true };
+      return null;
+    }
+  }
+
   /**
    * رفع صورة ملف شخصي (الصورة أو البانر). يرجع `{ url, hash }`.
    *
@@ -1060,6 +1080,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     uploadMedia,
     topWorks,
     stats,
+    insights,
     translation,
     stream,
     pendingProgress,

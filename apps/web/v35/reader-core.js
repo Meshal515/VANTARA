@@ -243,3 +243,17 @@ export function saveSettings(settings, storage = globalThis.localStorage) {
     // التخزين ممتلئ أو ممنوع: الإعداد يبقى لهذه الجلسة
   }
 }
+/** Credit the previous interval before changing visibility/chapter. Periodic samples
+ * keep stationary reading accurate; the cap excludes long suspended processes. */
+export function createActiveClock(now = () => performance.now()) {
+  let last = now();
+  let previous = null;
+  return {
+    sample(next) {
+      const at = now();
+      if (previous) previous.activeMs += Math.max(0, Math.min(at - last, 30_000));
+      last = at;
+      previous = next;
+    },
+  };
+}

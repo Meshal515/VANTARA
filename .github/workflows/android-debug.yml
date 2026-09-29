@@ -59,6 +59,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Stamp the debug version in native and web assets
+        run: |
+          set -euo pipefail
+          version="debug-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+          echo "VANTARA_VERSION_NAME=$version" >> "$GITHUB_ENV"
+          echo "VANTARA_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          DEBUG_VERSION="$version" python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          path = Path('apps/web/lib/config.js')
+          path.write_text(path.read_text().replace('__VANTARA_VERSION__', os.environ['DEBUG_VERSION']))
+          PYCODE
+
       # بلا هذه الخطوة يبني Gradle أصولَ ويبٍ قديمة، فتُقرأ شاشةٌ لم تتغيّر
       # كأن التعديل لم يصل — والتشخيص يذهب إلى الكود وهو في النسخ.
       - name: Copy web assets into the Android project

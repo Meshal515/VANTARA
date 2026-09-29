@@ -72,7 +72,7 @@ describe('profile media', () => {
 });
 
 describe('profile stats and top 5', () => {
-  it('stats carry the followed works count, not the library itself', async () => {
+  it('stats stay private until both duration and progress are shared; only the count leaves the library', async () => {
     const { env, db } = testEnv();
     const insert = db.prepare(
       'INSERT INTO library (user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev) VALUES (?, ?, NULL, NULL, NULL, 1, ?, 1)',
@@ -80,6 +80,8 @@ describe('profile stats and top 5', () => {
     insert.run(FRIEND, 'ext:a', 0);
     insert.run(FRIEND, 'ext:b', 0);
     insert.run(FRIEND, 'ext:gone', 1);
+    expect((await call(env, `/v1/stats/${FRIEND}`)).status).toBe(403);
+    db.prepare('UPDATE settings SET data = ? WHERE user_id = ?').run(JSON.stringify({ shareInsights: true }), FRIEND);
     const res = await call(env, `/v1/stats/${FRIEND}`);
     const body = (await res.json()) as { followedWorks: number };
     expect(body.followedWorks).toBe(2);

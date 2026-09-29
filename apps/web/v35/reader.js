@@ -27,6 +27,7 @@ import {
   chapterSequence,
   chapterShort,
   createScheduler,
+  createActiveClock,
   loadSettings,
   neighbors,
   nextChapterPlan,
@@ -130,7 +131,7 @@ export function openSmartReader(deps, ctx) {
     <div class="rd-scroll" id="rdScroll"></div>
     <header class="rd-top" id="rdTop">
       ${iconButton('back', 'رجوع', { act: 'exit' })}
-      <div class="rd-titles"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></div>
+      <button class="rd-titles rd-titles--chapters" type="button" data-act="chapters" aria-label="الفصول" aria-haspopup="dialog"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></button>
       <button class="rd-tl-btn" type="button" data-act="translate" id="rdTlBtn" hidden aria-pressed="false">${glyph('translateAr', { size: 20 })}<span>ترجمة</span></button>
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
@@ -166,7 +167,6 @@ export function openSmartReader(deps, ctx) {
     chrome: false,
     frameMode: false,
     frame: new Map(),
-    lastTick: performance.now(),
     token: 0,
     progressTimer: null,
   };
@@ -238,6 +238,37 @@ export function openSmartReader(deps, ctx) {
   const keyOf = (row) => chapterKeyOf(ref, row);
   const nav = () => neighbors(sequence, state.row);
   const sameRow = (a, b) => a === b || (a && b && chapterId(a) === chapterId(b));
+
+  function openChapters() {
+    openSheet((body) => {
+      body.classList.add('rd-chapter-sheet');
+      const head = el('div', 'rd-chapter-sheet__head');
+      head.append(el('h3', null, 'الفصول'), el('span', null, String(sequence.length)));
+      const list = el('div', 'rd-chapter-sheet__list');
+      const currentId = chapterId(state.row);
+      let current = null;
+      for (const row of sequence) {
+        const b = el('button', 'rd-chapter-choice');
+        b.type = 'button';
+        const active = chapterId(row) === currentId;
+        if (active) {
+          b.classList.add('is-current');
+          b.setAttribute('aria-current', 'true');
+          current = b;
+        }
+        b.append(el('span', 'rd-chapter-choice__number', chapterLabel(row)));
+        if (row.label) b.append(el('span', 'rd-chapter-choice__title', row.label));
+        b.onclick = () => {
+          closeSheet();
+          if (!active) void openChapter(row, { startAt: 0 });
+        };
+        list.append(b);
+      }
+      body.append(head, list);
+      requestAnimationFrame(() => current?.scrollIntoView({ block: 'center', behavior: 'instant' }));
+      return () => body.classList.remove('rd-chapter-sheet');
+    });
+  }
 
   const pagesOf = (row) => sharedPages(engine, row);
 
@@ -320,6 +351,7 @@ export function openSmartReader(deps, ctx) {
 
   /** فتحٌ من الصفر: أول فصل، أو قفزة (الفصل السابق من الشريط، مصدر آخر، إعادة المحاولة). */
   async function openChapter(row, { startAt = null } = {}) {
+    tickActive();
     flushProgress();
     state.token += 1;
     const token = state.token;
@@ -329,6 +361,7 @@ export function openSmartReader(deps, ctx) {
     observer?.disconnect();
     segs.length = 0;
     state.seg = null;
+    tickActive();
     exitFrameMode();
     announce(row);
     scroll.replaceChildren(loadingBlock());
@@ -470,6 +503,7 @@ export function openSmartReader(deps, ctx) {
       flushProgress();
     }
     state.seg = seg;
+    tickActive();
     announce(seg.row);
     tl.focus(seg, seg.current, segs);
     syncTranslateButtons();
@@ -642,7 +676,9 @@ export function openSmartReader(deps, ctx) {
     }
     slot.frame.classList.remove('rd-page--error');
     slot.frame.replaceChildren(img);
+    tickActive();
     slot.loaded = true;
+    tickActive();
     slot.src = src;
   }
   function pageError(seg, index, error) {
@@ -780,10 +816,9 @@ export function openSmartReader(deps, ctx) {
     q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
     q('rdProgress').style.width = `${n ? ((state.current + 1) / n) * 100 : 0}%`;
   }
+  const activeClock = createActiveClock();
   function tickActive() {
-    const now = performance.now();
-    if (document.visibilityState === 'visible' && state.seg) state.seg.activeMs += Math.min(now - state.lastTick, 30_000);
-    state.lastTick = now;
+    activeClock.sample(!exited && document.visibilityState === 'visible' && state.slots[state.current]?.loaded ? state.seg : null);
   }
   function afterProgress() {
     tickActive();
@@ -834,6 +869,17 @@ export function openSmartReader(deps, ctx) {
   function flushProgress() {
     clearTimeout(state.progressTimer);
     state.progressTimer = null;
+    // زمن القراءة يُنسب إلى العمل نفسه ولا يُستنتج من وقت بقاء التطبيق مفتوحًا.
+    for (const part of segs) {
+      const credit = Math.floor(part.activeMs - (part.creditedMs ?? 0));
+      if (credit <= 0) continue;
+      part.creditedMs = (part.creditedMs ?? 0) + credit;
+      sync.enqueue('usage.work', {
+        seriesRef: ref, seriesTitle: ctx.title,
+        coverUrl: ctx.work?.coverImage?.large ?? part.row.manga?.thumbnailUrl ?? null,
+        section: 'manga', activeMs: credit,
+      });
+    }
     const seg = state.seg;
     if (!seg || !seg.pages.length) return;
     writePosition(seg);
@@ -1393,6 +1439,7 @@ export function openSmartReader(deps, ctx) {
 
   const actions = {
     exit: () => exit(),
+    chapters: () => openChapters(),
     frame: () => enterFrameMode(),
     frameCancel: () => exitFrameMode(),
     frameNext: () => openFrameSend(),
@@ -1429,6 +1476,10 @@ export function openSmartReader(deps, ctx) {
     if (document.visibilityState === 'hidden') flushProgress();
   };
   document.addEventListener('visibilitychange', onVisibility);
+  const activeTimer = setInterval(() => {
+    tickActive();
+    if (document.visibilityState === 'visible') flushProgress();
+  }, 10_000);
 
   /** رجوع أندرويد: الورقة، ثم التكبير، ثم وضع الفريم، ثم الخروج. */
   function handleBack() {
@@ -1446,6 +1497,8 @@ export function openSmartReader(deps, ctx) {
     deps.exit();
   }
   function destroy() {
+    clearInterval(activeTimer);
+    activeClock.sample(null);
     observer?.disconnect();
     document.removeEventListener('keydown', onKey);
     taps.reset();
@@ -1461,5 +1514,5 @@ export function openSmartReader(deps, ctx) {
   deps.immersive?.(true);
   void openChapter(ctx.row);
 
-  return { root, handleBack, destroy: () => !exited && (exited = true, flushProgress(), destroy()) };
+  return { root, handleBack, destroy: () => !exited && (exited = true, tickActive(), flushProgress(), destroy()) };
 }

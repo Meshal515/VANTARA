@@ -1513,21 +1513,22 @@
 }
 .v35 .an-hr-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
 }
 .v35 .an-hr {
   display: flex;
   align-items: stretch;
-  border-radius: 16px;
-  overflow: hidden;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
   cursor: pointer;
 }
 .v35 .an-hr-art {
   flex: none;
-  width: 88px;
+  width: 64px;
   aspect-ratio: 2 / 3;
+  border-radius: 9px;
+  overflow: hidden;
   background: var(--surface-2);
 }
 .v35 .an-hr-info {
@@ -1551,6 +1552,7 @@
   font-size: 13px;
   color: var(--text-2);
 }
+.v35 .an-hr-duration:not(:empty) { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 12px; }
 .v35 .an-when {
   display: inline-flex;
   align-items: center;

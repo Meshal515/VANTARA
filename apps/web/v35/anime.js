@@ -20,6 +20,8 @@ import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchA
 import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
+import { paintWorkInsights } from './work-insights.js';
+import { duration as insightDuration } from './insights.js';
 
 const HOME_KEY = 'anime.home.v2';
 // Legacy unowned keys remain on disk for recovery, but are never read into a new account.
@@ -621,7 +623,9 @@ export function createAnime(deps) {
     const sourcesStrip = el('div', 'an-sources');
     sourcesStrip.id = 'animeSources';
     sourcesStrip.dataset.reveal = '';
-    wrap.append(bar, hero, head, facts, stats, actions, sourcesStrip);
+    const insightHost = el('div', 'work-insights');
+    insightHost.dataset.ref = `anime:${m.id}`;
+    wrap.append(bar, hero, head, facts, stats, actions, insightHost, sourcesStrip);
     paintSources(m);
 
     if (m.next) {
@@ -660,6 +664,7 @@ export function createAnime(deps) {
     if (!partial && m.recommendations?.length) wrap.append(rail('قد يعجبك', { items: m.recommendations, card: (r) => posterCard(r) }));
 
     page.replaceChildren(wrap);
+    if (!partial) void paintWorkInsights(insightHost, { sync: deps.sync, ref: `anime:${m.id}`, openProfile: deps.openProfile });
     bindDetailScroll(page, bar);
     if (scoreNode) countUp(scoreNode, m.score);
     if (partial) pageIn(page);
@@ -977,10 +982,17 @@ export function createAnime(deps) {
   // تقدّم المشغّل الأصلي ← سجل المشاهدة (الاستئناف و«آخر المشاهدات»). الحلقة
   // من الحدث نفسه: التبديل لحلقة أخرى داخل المشغّل يُسجَّل لها لا للأولى.
   // وقت المشاهدة لقسم الأنمي في ملفك: تقدّم الموضع الفعلي فقط (قفزة أو توقف لا تُحسب)
-  const watchClock = { pos: null, acc: 0 };
+  const watchClock = { pos: null, at: null, acc: 0 };
   const flushWatch = () => {
     if (watchClock.acc < 1000 || !deps.sync) return;
-    deps.sync.enqueue('usage.watch', { section: 'anime', day: new Date().toISOString().slice(0, 10), activeMs: Math.round(watchClock.acc) });
+    const cur = state.playing;
+    if (!cur || cur.userId !== currentUser()) { watchClock.acc = 0; return; }
+    const ms = Math.round(watchClock.acc);
+    deps.sync.enqueue('usage.watch', { section: 'anime', day: new Date().toISOString().slice(0, 10), activeMs: ms });
+    deps.sync.enqueue('usage.work', {
+      section: 'anime', seriesRef: `anime:${cur.m.id}`, seriesTitle: cur.m.title,
+      coverUrl: cur.m.posterSmall ?? cur.m.poster ?? null, activeMs: ms,
+    });
     watchClock.acc = 0;
   };
   engine.on('playback', (p) => {
@@ -989,14 +1001,19 @@ export function createAnime(deps) {
     // An old native player must never credit playback to the account now signed in.
     if (cur.userId !== currentUser()) return;
     if (Number.isFinite(p.position)) {
+      const now = Date.now();
       const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
-      if (d > 0 && d <= 15_000) watchClock.acc += d;
+      const elapsed = watchClock.at === null ? 0 : Math.max(0, now - watchClock.at);
+      // قفزة المشغّل لا تُحتسب متابعة؛ السرعات >1× تُحسب بوقت الشخص الفعلي.
+      if (d > 0 && d <= 15_000) watchClock.acc += Math.min(d, elapsed + 1000);
       watchClock.pos = p.position;
+      watchClock.at = now;
       if (watchClock.acc >= 60_000) flushWatch();
     }
     if (p.final) {
       flushWatch();
       watchClock.pos = null;
+      watchClock.at = null;
     }
     const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
@@ -1295,15 +1312,15 @@ export function createAnime(deps) {
         let b = routeNodes.get(r.id);
         if (b) {
           b.className = `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`;
-          b.disabled = r.state !== 'READY';
+          b.disabled = r.state === 'RESOLVING';
           b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
-          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
-          b.onclick = () => void playRoute(r);
+          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
+          b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
           return b;
         }
         b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
         b.type = 'button';
-        b.disabled = r.state !== 'READY';
+        b.disabled = r.state === 'RESOLVING';
         const top = el('span', 'an-srv-top');
         const code = el('b', 'an-srv-code', r.code);
         code.dir = 'ltr';
@@ -1313,8 +1330,8 @@ export function createAnime(deps) {
         const line = el('span', 'an-srv-state');
         line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
         b.append(top, line);
-        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}`);
-        b.onclick = () => void playRoute(r);
+        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
+        b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
         routeNodes.set(r.id, b);
         return b;
       };
@@ -1413,6 +1430,9 @@ export function createAnime(deps) {
       const watch = localWatch()[m.id]?.episodes ?? {};
       const resume = {};
       for (const [ep, e] of Object.entries(watch)) if (!e.done && e.position > 5000) resume[ep] = e.position;
+      flushWatch();
+      watchClock.pos = null;
+      watchClock.at = null;
       state.playing = { session, m, n, userId: currentUser() };
       deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
       const presence = await deps.playerPresence?.();
@@ -1534,18 +1554,17 @@ export function createAnime(deps) {
   }
 
   function historyRow(w) {
-    const e = w.episodes?.[w.episode] ?? {};
-    const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
     const r = el('div', 'an-hr');
+    r.dataset.ref = `anime:${w.id}`;
     const info = el('div', 'an-hr-info');
     const t = el('b', 'an-hr-title', w.title);
     t.dir = 'auto';
     const when = el('span', 'an-when');
-    when.innerHTML = `${glyph('clock', { size: 15 })}<span>${dateAr(w.at)} (${relativeAr(w.at)})</span>`;
-    info.append(t, el('span', 'an-hr-ep', `الحلقة ${w.episode}`), progress(ratio), when);
+    when.innerHTML = `${glyph('clock', { size: 15 })}<span>${relativeAr(w.at)}</span>`;
+    info.append(t, el('span', 'an-hr-ep', `الحلقة ${w.episode}`), el('span', 'an-hr-duration'), when);
     const art = el('div', 'an-hr-art');
     art.append(image(w.poster));
-    const x = button('an-hr-x', glyph('close'), (ev) => {
+    const x = button('an-hr-x', glyph('trash'), (ev) => {
       ev.stopPropagation();
       const all = localWatch();
       delete all[w.id];
@@ -1605,7 +1624,7 @@ export function createAnime(deps) {
         );
         const list = el('div', 'an-hr-list');
         list.append(...items.map(historyRow));
-        nodes.push(list, el('div', 'an-foot', 'تم حفظ هذه المشاهدات على جهازك'));
+        nodes.push(list);
       }
     } else {
       // رفوف الحساب (تظهر في ملفك ولأصدقائك)، أو قائمة الجهاز لمن لم يسجّل
@@ -1631,6 +1650,18 @@ export function createAnime(deps) {
       }
     }
     host.replaceChildren(...nodes);
+    const historyOwner = currentUser();
+    if (state.libraryTab === 'history' && signedIn()) void deps.sync.insights(historyOwner).then((data) => {
+      if (!host.isConnected || state.libraryTab !== 'history' || currentUser() !== historyOwner || !data?.content) return;
+      const times = new Map(data.content.map((item) => [item.seriesRef, item.activeMs]));
+      for (const row of host.querySelectorAll('.an-hr[data-ref]')) {
+        const ms = times.get(row.dataset.ref);
+        if (ms < 60000) continue;
+        const span = row.querySelector('.an-hr-duration');
+        span.innerHTML = glyph('clock', { size: 15 });
+        span.append(document.createTextNode(insightDuration(ms)));
+      }
+    });
     stripIn([...host.querySelectorAll('.an-hr, .an-card')].slice(0, 10));
   }
   /** صحة كل مصدر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي، والكتالوج المحلوب. */

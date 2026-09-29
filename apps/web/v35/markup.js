@@ -127,6 +127,7 @@ export const SHELL_HTML = `<div class="app">
       <div class="progress-bar"><i id="progressFill"></i></div>
       <div class="progress-row"><span id="progressText"></span><div class="rate" id="rateStars" role="radiogroup" aria-label="تقييمك"></div></div>
     </div>
+    <div class="work-insights" id="detailInsights"></div>
 
     <div class="block" id="summaryBlock">
       <p class="summary clamped" id="description" dir="auto"></p>
@@ -204,6 +205,11 @@ export const SHELL_HTML = `<div class="app">
   <section class="page" id="settings">
     ${subTop('الإعدادات')}
     <div class="page-body" id="settingsBody"></div>
+  </section>
+
+  <section class="page" id="insights">
+    ${subTop('إحصائيات المتابعة')}
+    <div class="page-body insights-body" id="insightsBody"></div>
   </section>
 
   <section class="page" id="majlis">

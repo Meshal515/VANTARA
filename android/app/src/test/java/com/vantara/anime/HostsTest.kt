@@ -114,7 +114,7 @@ class HostsTest {
         assertTrue(streams.toString(), streams.isNotEmpty())
         val s = streams.first()
         assertTrue(s.url, s.url.contains("mp4upload.com:183"))
-        assertEquals("https://mp4upload.com/", s.headers["Referer"])
+        assertEquals("https://mp4upload.com/embed-khkthjiwfdch.html", s.headers["Referer"])
         assertEquals(720, s.quality)
         assertTrue(seen.any { it.header("X-Inertia-Version") == "a601a2d0d16b8ae7121ceb1fd46c1f5a" })
     }
