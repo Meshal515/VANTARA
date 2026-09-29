@@ -37,3 +37,23 @@ it('displays minutes, with a truthful subminute value', () => {
   expect(duration(65000)).toBe('1 د');
   expect(duration(58320000)).toBe('16 س 12 د');
 });
+
+it('does not discard foreground reading when a scheduled sample is delayed', () => {
+  let now = 0;
+  const clock = createActiveClock(() => now);
+  const work = { activeMs: 0 };
+  clock.sample(work);
+  now = 120000;
+  clock.sample(null);
+  expect(work.activeMs).toBe(120000);
+});
+
+it('tracks time on visited pages without treating a jump to the last page as full coverage', () => {
+  let now = 0;
+  const clock = createActiveClock(() => now);
+  const chapter = { activeMs: 0, pageMs: {} };
+  clock.sample(chapter, 0);
+  now = 2000; clock.sample(chapter, 19);
+  now = 5000; clock.sample(null);
+  expect(chapter.pageMs).toEqual({ 0: 2000, 19: 3000 });
+});

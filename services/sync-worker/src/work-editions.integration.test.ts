@@ -92,7 +92,7 @@ describe('work.describe', () => {
       seriesTitle: 'Slam Dunk',
       coverUrl: 'https://img.test/sd.jpg',
       chapterNumber: 1,
-      ratio: 0.25,
+      ratio: 0.95,
       activeMs: 9_000,
     });
     const [row] = await works(env, B);

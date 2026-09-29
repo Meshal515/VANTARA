@@ -117,8 +117,8 @@ describe('chapter.markMany', () => {
 
   it('a chapter read in the reader and then unmarked is not counted; a marked-only one is', async () => {
     const { env } = testEnv();
-    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:1', seriesRef: 'ext:y', chapterNumber: 1, ratio: 0.5, activeMs: 9000 });
-    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:2', seriesRef: 'ext:y', chapterNumber: 2, ratio: 0.5, activeMs: 9000 });
+    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:1', seriesRef: 'ext:y', chapterNumber: 1, ratio: 0.95, activeMs: 9000 });
+    await send(env, A, 'chapter.complete', { chapterKey: 'ext:y#n:2', seriesRef: 'ext:y', chapterNumber: 2, ratio: 0.95, activeMs: 9000 });
     await send(env, A, 'chapter.markMany', { seriesRef: 'ext:y', keys: ['ext:y#n:2'], read: false });
     await send(env, A, 'chapter.markMany', { seriesRef: 'ext:y', keys: ['ext:y#n:3'], read: true });
     const token = await mintToken(A, SECRET);

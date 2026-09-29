@@ -1,3 +1,4 @@
+import { nativeFollowTime, setReaderTime, flushFollowTime } from '../lib/follow-time.js';
 /**
  * القارئ الذكي.
  *
@@ -13,13 +14,12 @@
  *   - القارئ يسبقك: من أول الفصل يُلحق التالي تحته (قائمة صفحاته، ثم صوره حسب
  *     الشبكة وإعدادك) بأولوية لا تنافس ما تقرؤه الآن.
  *
- * القراءة تُحفظ في حسابك: الموضع، والفصل مقروء عند خُمسه — هذا الفصل وحده —
- * في العين والسجل والملف والإحصاء معًا.
+ * القراءة تُحفظ في حسابك: وقت فعلي وصفحات عُرضت، والسجل منفصل عن إكمال الفصل.
  */
 
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
-import { AUTO_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
+import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
 import { editionRows, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
@@ -123,6 +123,12 @@ export function openSmartReader(deps, ctx) {
   const sequence = chapterSequence(ctx.rows?.length ? ctx.rows : [ctx.row]);
   const ref = ctx.seriesRef;
   const me = () => sync.user?.userId;
+  const readingUser = me();
+  const nativeTime = nativeFollowTime();
+  let nativeForeground = true;
+  let nativeReaderActive = null;
+  const readingOwner = { userId: readingUser, seriesRef: ref, title: ctx.title,
+    coverUrl: ctx.work?.coverImage?.large ?? ctx.row?.manga?.thumbnailUrl ?? null };
 
   const root = el('div', 'v35 rd');
   root.setAttribute('role', 'application');
@@ -329,7 +335,7 @@ export function openSmartReader(deps, ctx) {
     if (!saved || (saved.ratio ?? 0) >= 0.98 || !(saved.ratio > 0)) return 0;
     return Math.min(pageCount - 1, Math.max(0, Math.floor(saved.ratio * pageCount) - 1));
   }
-  const POS_KEY = 'vantara.reader.positions';
+  const POS_KEY = `vantara.reader.positions.${encodeURIComponent(readingUser ?? '')}`;
   function readPositions() {
     try {
       return JSON.parse(localStorage.getItem(POS_KEY) ?? '{}') ?? {};
@@ -340,7 +346,7 @@ export function openSmartReader(deps, ctx) {
   function writePosition(seg) {
     try {
       const all = readPositions();
-      all[keyOf(seg.row)] = { sourceId: seg.row.sourceId, pages: seg.pages.length, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length), at: Date.now() };
+      all[keyOf(seg.row)] = { sourceId: seg.row.sourceId, pages: seg.pages.length, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length), pageMs: seg.pageMs, at: Date.now() };
       const keys = Object.keys(all);
       if (keys.length > 400) for (const k of keys.sort((a, b) => (all[a].at ?? 0) - (all[b].at ?? 0)).slice(0, keys.length - 400)) delete all[k];
       localStorage.setItem(POS_KEY, JSON.stringify(all));
@@ -410,6 +416,8 @@ export function openSmartReader(deps, ctx) {
   }
 
   function makeSegment(row, pages) {
+    const saved = readPositions()[keyOf(row)];
+    const pageMs = saved?.sourceId === row.sourceId && saved.pages === pages.length ? { ...saved.pageMs } : {};
     const seg = {
       id: ++segSeq,
       row,
@@ -422,6 +430,7 @@ export function openSmartReader(deps, ctx) {
       completed: false,
       preloaded: null,
       activeMs: 0,
+      pageMs,
       requested: false,
       next: null,
       nextError: null,
@@ -818,19 +827,26 @@ export function openSmartReader(deps, ctx) {
   }
   const activeClock = createActiveClock();
   function tickActive() {
-    activeClock.sample(!exited && document.visibilityState === 'visible' && state.slots[state.current]?.loaded ? state.seg : null);
+    const active = !exited && me() === readingUser && nativeForeground && document.visibilityState === 'visible' && Boolean(state.slots[state.current]?.loaded);
+    activeClock.sample(active ? state.seg : null, state.current);
+    if (nativeTime && nativeReaderActive !== active) {
+      nativeReaderActive = active;
+      void setReaderTime(readingOwner, active).catch(() => { nativeReaderActive = null; });
+    }
   }
   function afterProgress() {
     tickActive();
     const seg = state.seg;
     if (!seg) return;
-    const ratio = readRatio(seg.furthest, seg.pages.length);
-    // خُمس الفصل = قرأته. عندها فقط يدخل العمل «آخر المشاهدات».
-    if (shouldAutoMark({ ratio, alreadyRead: seg.marked })) {
+    const progressRatio = readRatio(seg.furthest, seg.pages.length);
+    const readMs = Object.values(seg.pageMs).reduce((sum, ms) => sum + ms, 0);
+    const ratio = seg.pages.length ? Object.entries(seg.pageMs).filter(([page, ms]) => Number(page) >= 0 && Number(page) < seg.pages.length && ms >= 500).length / seg.pages.length : 0;
+    // معظم الصفحات مع وقت قراءة فعلي؛ السجل له حد مستقل.
+    if (readMs >= 5_000 && shouldAutoMark({ ratio, alreadyRead: seg.marked })) {
       seg.marked = true;
       markChapter(sync, ref, seg.row, true);
     }
-    if (!seg.historyRecorded && ratio >= AUTO_READ_RATIO) {
+    if (!seg.historyRecorded && progressRatio >= HISTORY_READ_RATIO) {
       seg.historyRecorded = true;
       sync.enqueue('view.add', {
         seriesRef: ref,
@@ -841,7 +857,7 @@ export function openSmartReader(deps, ctx) {
         at: Date.now(),
       });
     }
-    if (!seg.completed && ratio >= AUTO_READ_RATIO && seg.activeMs >= 5_000) {
+    if (!seg.completed && ratio >= AUTO_READ_RATIO && readMs >= 5_000) {
       seg.completed = true;
       sync.enqueue('chapter.complete', {
         chapterKey: keyOf(seg.row),
@@ -851,7 +867,7 @@ export function openSmartReader(deps, ctx) {
         coverUrl: ctx.work?.coverImage?.large ?? seg.row.manga?.thumbnailUrl ?? null,
         chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
         ratio,
-        activeMs: Math.round(seg.activeMs),
+        activeMs: Math.round(readMs),
       });
       // آخر فصل في عمل انتهى نشره = أكملته: يظهر في «المكتمل» عندك وفي ملفك
       if (!neighbors(sequence, seg.row).next && ctx.work?.status === 'FINISHED') {
@@ -871,14 +887,21 @@ export function openSmartReader(deps, ctx) {
     state.progressTimer = null;
     // زمن القراءة يُنسب إلى العمل نفسه ولا يُستنتج من وقت بقاء التطبيق مفتوحًا.
     for (const part of segs) {
-      const credit = Math.floor(part.activeMs - (part.creditedMs ?? 0));
-      if (credit <= 0) continue;
-      part.creditedMs = (part.creditedMs ?? 0) + credit;
-      sync.enqueue('usage.work', {
-        seriesRef: ref, seriesTitle: ctx.title,
-        coverUrl: ctx.work?.coverImage?.large ?? part.row.manga?.thumbnailUrl ?? null,
-        section: 'manga', activeMs: credit,
-      });
+      writePosition(part);
+      if (nativeTime) continue;
+      let credit = Math.floor(part.activeMs - (part.creditedMs ?? 0));
+      while (credit > 0) {
+        part.pendingCredit ??= { amount: Math.min(credit, 15 * 60_000), id: crypto.randomUUID() };
+        const { amount, id } = part.pendingCredit;
+        sync.enqueue('usage.work', {
+          seriesRef: ref, seriesTitle: ctx.title,
+          coverUrl: ctx.work?.coverImage?.large ?? part.row.manga?.thumbnailUrl ?? null,
+          section: 'manga', activeMs: amount,
+        }, { opId: id, requireDurable: true });
+        part.pendingCredit = null;
+        part.creditedMs = (part.creditedMs ?? 0) + amount;
+        credit -= amount;
+      }
     }
     const seg = state.seg;
     if (!seg || !seg.pages.length) return;
@@ -1476,10 +1499,16 @@ export function openSmartReader(deps, ctx) {
     if (document.visibilityState === 'hidden') flushProgress();
   };
   document.addEventListener('visibilitychange', onVisibility);
-  const activeTimer = setInterval(() => {
+  let nativeLifecycle;
+  globalThis.Capacitor?.Plugins?.FollowTime?.addListener('foreground', (e) => {
+    nativeForeground = e.active;
     tickActive();
+    if (!e.active) flushProgress();
+  }).then((listener) => { if (exited) listener.remove(); else nativeLifecycle = listener; });
+  const activeTimer = setInterval(() => {
+    afterProgress();
     if (document.visibilityState === 'visible') flushProgress();
-  }, 10_000);
+  }, 5_000);
 
   /** رجوع أندرويد: الورقة، ثم التكبير، ثم وضع الفريم، ثم الخروج. */
   function handleBack() {
@@ -1498,6 +1527,8 @@ export function openSmartReader(deps, ctx) {
   }
   function destroy() {
     clearInterval(activeTimer);
+    nativeLifecycle?.remove();
+    if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     activeClock.sample(null);
     observer?.disconnect();
     document.removeEventListener('keydown', onKey);

@@ -244,16 +244,24 @@ export function saveSettings(settings, storage = globalThis.localStorage) {
   }
 }
 /** Credit the previous interval before changing visibility/chapter. Periodic samples
- * keep stationary reading accurate; the cap excludes long suspended processes. */
+ * keep stationary reading accurate; lifecycle transitions exclude hidden time. */
 export function createActiveClock(now = () => performance.now()) {
   let last = now();
   let previous = null;
+  let previousPage = null;
   return {
-    sample(next) {
+    sample(next, page = null) {
       const at = now();
-      if (previous) previous.activeMs += Math.max(0, Math.min(at - last, 30_000));
+      if (previous) {
+        const elapsed = Math.max(0, at - last);
+        previous.activeMs += elapsed;
+        if (previous.pageMs && Number.isInteger(previousPage)) {
+          previous.pageMs[previousPage] = (previous.pageMs[previousPage] ?? 0) + elapsed;
+        }
+      }
       last = at;
       previous = next;
+      previousPage = page;
     },
   };
 }
