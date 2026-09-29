@@ -85,6 +85,8 @@ object AnimeHostRouter : Interceptor {
     /** الدومين النشط الآن لمصدر (بعد أي تحويل مقبول). */
     fun activeBase(sourceId: String): String? = byId[sourceId]?.domains?.activeBase()
 
+    fun retryAt(sourceId: String): Long = gates[sourceId]?.retryAt() ?: 0L
+
     /** سبب مقروء: نوع الخطأ الأعمق ورسالته (UnknownHost = حجب DNS غالبًا). */
     fun describe(t: Throwable): String {
         // OkHttp يرمي فشل أول عنوان ويعلّق الباقي كـsuppressed (IPv6 ثم IPv4…)

@@ -28,6 +28,7 @@ class RateGate(
 
     private val windows = rules.map { ArrayDeque<Long>() }
     private var cooldownUntil = 0L
+    private var retryUntil = 0L
 
     /** كم ينتظر هذا الطلب الآن؛ صفر = احجز مكانه في النوافذ وانطلق. */
     private fun reserve(path: String): Long = synchronized(this) {
@@ -47,7 +48,10 @@ class RateGate(
         while (true) {
             val wait = reserve(path)
             if (wait == 0L) return
-            if (wait > maxWaitMs) throw RateLimitedException(path, wait)
+            if (wait > maxWaitMs) {
+                synchronized(this) { retryUntil = maxOf(retryUntil, clock() + wait) }
+                throw RateLimitedException(path, wait)
+            }
             if (canceled()) throw IOException("Canceled")
             sleep(minOf(wait, SLICE_MS))
         }
@@ -56,6 +60,9 @@ class RateGate(
     fun onRateLimited(retryAfterMs: Long) = synchronized(this) {
         cooldownUntil = maxOf(cooldownUntil, clock() + retryAfterMs)
     }
+
+    /** للواجهة فقط: يشمل انتظار النافذة المحلية وRetry-After دون تغيير سياسة الطلبات. */
+    fun retryAt(): Long = synchronized(this) { maxOf(cooldownUntil, retryUntil).takeIf { it > clock() } ?: 0L }
 
     fun cooldownLeft(): Long = synchronized(this) { (cooldownUntil - clock()).coerceAtLeast(0) }
 

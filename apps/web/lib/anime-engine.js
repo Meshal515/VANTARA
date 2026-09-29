@@ -105,6 +105,11 @@ export function matchingWorkingRoute(routes, working) {
       Math.abs((b.quality ?? 0) - (working.quality ?? b.quality ?? 0)))[0] ?? null;
 }
 
+/** مهلة أصلية مطلقة: إعادة رسم العداد لا تطلق أي طلب شبكة. */
+export function retrySeconds(retryAt, now = Date.now()) {
+  return Number.isFinite(retryAt) ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
+}
+
 export async function routes(session) {
   return (await call('routes', { session })) ?? null;
 }

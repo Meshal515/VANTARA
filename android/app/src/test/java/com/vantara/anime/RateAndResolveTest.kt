@@ -63,6 +63,21 @@ class RateAndResolveTest {
         assertEquals(3_000L, now)
     }
 
+    @Test fun `retry deadline includes local limits and expires without another request`() {
+        var now = 10_000L
+        val gate = RateGate(listOf(RateGate.Rule(Regex("^/api/"), 1)), clock = { now }, sleep = { fail("must not sleep") })
+        assertEquals(0L, gate.retryAt())
+        gate.acquire("/api/a", 20_000)
+        assertTrue(runCatching { gate.acquire("/api/b", 20_000) }.exceptionOrNull() is RateLimitedException)
+        assertEquals(70_000L, gate.retryAt())
+        now = 70_000L
+        assertEquals(0L, gate.retryAt())
+        gate.onRateLimited(46_000)
+        assertEquals(116_000L, gate.retryAt())
+        now = 116_000L
+        assertEquals(0L, gate.retryAt())
+    }
+
     @Test fun `Retry-After is read as seconds or a date, bounded`() {
         assertEquals(42_000L, RateGate.parseRetryAfter("42"))
         assertEquals(RateGate.DEFAULT_RETRY_AFTER_MS, RateGate.parseRetryAfter(null))
@@ -106,6 +121,7 @@ class RateAndResolveTest {
         } catch (e: RateLimitedException) {
             assertTrue(e.message!!, e.message!!.contains("/watch/stream-gate/a"))
         }
+        assertTrue(AnimeHostRouter.retryAt("rl-long") > System.currentTimeMillis() + 50_000)
         // الطلب التالي لا يصل الموقع أصلًا خلال فترة التهدئة
         runCatching { client.newCall(Request.Builder().url("https://rl-long.test/anime/x").build()).execute() }
         assertEquals(1, calls.size)

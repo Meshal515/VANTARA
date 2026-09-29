@@ -1,5 +1,6 @@
 package com.vantara.anime.adapters
 
+import com.vantara.anime.net.RateLimitedException
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.stream.Candidate
 import com.vantara.anime.stream.RouteReport
@@ -34,11 +35,11 @@ import eu.kanade.tachiyomi.network.await
  *   الكتالوج  /sitemap-anime.xml + movies  (1900+ عمل؛ صفحة «تصفّح» تحمّل بالتمرير)
  *   الحلقات   صفحة العمل: كل روابط /watch/<slug>/<n> (One Piece: 1200 في صفحة واحدة)
  *   السيرفرات POST /watch/…/sources (رمز CSRF من الصفحة) ← لكل سيرفر رمز ←
- *             GET /watch/stream-gate/<t> (بكوكيز الجلسة) ← 302 إلى صفحة المشغّل
+ *             POST /watch/stream-source/<t> ثم GET /watch/stream-gate/<t> (بكوكيز الجلسة) ← 302 إلى صفحة المشغّل
  *             (ok.ru، hgcloud، mega…) ← [EmbedResolver].
  *
  * حدود الموقع (`X-RateLimit-Limit: 20` في الدقيقة): سطل لـ`sources` و`stream-source`
- * معًا، وسطل لـ`stream-gate`. البوابة تعمل بلا `stream-source` فلا نطلبه؛ والحدود
+ * معًا، وسطل لـ`stream-gate`. نهيّئ كل بوابة قبل فتحها بنفس الجلسة؛ والحدود
  * نفسها في البيان يطبّقها [com.vantara.anime.net.RateGate] على كل طلبات المصدر.
  */
 class WitAnimeSiteAdapter(
@@ -53,6 +54,8 @@ class WitAnimeSiteAdapter(
 
     private val noRedirect by lazy { client.newBuilder().followRedirects(false).followSslRedirects(false).build() }
     private val catalogLock = Mutex()
+    // تهيئة البوابة وفتحها متتابعان؛ استخراج الفيديو يبقى خارج القفل.
+    private val gateLock = Mutex()
     @Volatile private var catalog: List<SourceAnime>? = null
 
     private fun abs(path: String) = if (path.startsWith("http")) path else base().trimEnd('/') + path
@@ -99,10 +102,8 @@ class WitAnimeSiteAdapter(
         return Parse.episodes(html(anime.url), slug, id)
     }
 
-    override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> {
-        val focused = candidatesFor(episode, now, trace, 1, server)
-        return if (focused.isNotEmpty()) focused else candidates(episode, now, trace, enough = 1)
-    }
+    override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> =
+        candidatesFor(episode, now, trace, 1, server)
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> =
         candidatesFor(episode, now, trace, enough, null)
@@ -114,7 +115,6 @@ class WitAnimeSiteAdapter(
         val sourcesPath = Parse.sourcesUrl(page) ?: "${episode.url.trimEnd('/')}/sources"
         val all = Parse.servers(post(sourcesPath, csrf, watch))
         val (skipped, supported) = all.partition { it.label.lowercase() in EmbedResolver.UNSUPPORTED }
-        val servers = if (preferredServer == null) supported else supported.filter { it.label.equals(preferredServer, ignoreCase = true) }
         if (all.isEmpty()) trace?.note("السيرفرات", "الموقع لم يُرجع أي سيرفر")
         fun report(s: Parse.Server, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
             trace?.route(
@@ -125,39 +125,47 @@ class WitAnimeSiteAdapter(
                 ),
             )
         skipped.forEach { report(it, RouteState.UNAVAILABLE, reason = "غير مدعوم بعد (فيديو مشفّر)") }
-        servers.forEach { report(it, RouteState.RESOLVING) }
-
-        return gatherUntil(
-            servers.map { s ->
-                suspend {
-                    val label = "${s.label} ${s.quality}"
-                    var failure: String? = null
-                    val got = withTimeoutOrNull(serverTimeoutMs) {
-                        try { streamsOf(s, watch, episode, now, trace) }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) {
-                            failure = e.brief()
-                            trace?.note(label, failure!!)
-                            emptyList()
+        suspend fun resolve(servers: List<Parse.Server>): List<Candidate> {
+            servers.forEach { report(it, RouteState.RESOLVING) }
+            return gatherUntil(
+                servers.map { s ->
+                    suspend {
+                        val label = "${s.label} ${s.quality}"
+                        var failure: String? = null
+                        val got = withTimeoutOrNull(serverTimeoutMs) {
+                            try { streamsOf(s, csrf, watch, episode, now, trace) }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) {
+                                failure = if (e is RateLimitedException) "المصدر يحدّ الطلبات (429) — حاول بعد ${(e.waitMs + 999) / 1000} ثانية" else e.brief()
+                                trace?.note(label, e.brief())
+                                emptyList()
+                            }
+                        }
+                        when {
+                            got == null -> emptyList<Candidate>().also {
+                                trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
+                                report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
+                            }
+                            got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = failure ?: "لم يُستخرج رابط فيديو من المشغّل") }
+                            else -> got.also { report(s, RouteState.READY, it) }
                         }
                     }
-                    when {
-                        got == null -> emptyList<Candidate>().also {
-                            trace?.note(label, "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
-                            report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية")
-                        }
-                        got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = failure ?: "لم يُستخرج رابط فيديو من المشغّل") }
-                        else -> got.also { report(s, RouteState.READY, it) }
-                    }
-                }
-            },
-            enough,
-        )
+                },
+                enough,
+            )
+        }
+        if (preferredServer == null) return resolve(supported)
+        val (preferred, remaining) = supported.partition { it.label.equals(preferredServer, ignoreCase = true) }
+        val focused = resolve(preferred)
+        return if (focused.isNotEmpty()) focused else resolve(remaining)
     }
 
-    private suspend fun streamsOf(s: Parse.Server, watch: String, episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
+    private suspend fun streamsOf(s: Parse.Server, csrf: String, watch: String, episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {
         val label = "${s.label} ${s.quality}"
-        val embed = gate(s.token, watch) ?: return emptyList<Candidate>().also { trace?.note(label, "البوابة لم تحوّل إلى مشغّل") }
+        val embed = gateLock.withLock {
+            post("/watch/stream-source/${s.token}", csrf, watch)
+            gate(s.token, watch)
+        } ?: return emptyList<Candidate>().also { trace?.note(label, "البوابة لم تحوّل إلى مشغّل") }
         // المشغّل يتحقق من الصفحة الأم نفسها: صفحة الحلقة، لا جذر الموقع
         val streams = embeds.resolve(embed, watch)
         if (streams.isEmpty()) trace?.note(label, "لم يُستخرج رابط فيديو من ${embed.substringAfter("://").substringBefore('/')}")
