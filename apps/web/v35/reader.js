@@ -1,4 +1,4 @@
-import { nativeFollowTime, setReaderTime, flushFollowTime } from '../lib/follow-time.js';
+import { nativeFollowTime, setReaderTime, flushFollowTime, listenFollowForeground } from '../lib/follow-time.js';
 /**
  * القارئ الذكي.
  *
@@ -1499,13 +1499,22 @@ export function openSmartReader(deps, ctx) {
     if (document.visibilityState === 'hidden') flushProgress();
   };
   document.addEventListener('visibilitychange', onVisibility);
-  let nativeLifecycle;
-  globalThis.Capacitor?.Plugins?.FollowTime?.addListener('foreground', (e) => {
-    nativeForeground = e.active;
+
+  // The chapter render is the critical path. Native usage accounting is not:
+  // start loading the chapter first, then attach optional lifecycle telemetry.
+  let exited = false;
+  let activeTimer = null;
+  let stopNativeLifecycle = () => {};
+  applySettings();
+  deps.immersive?.(true);
+  void openChapter(ctx.row);
+
+  stopNativeLifecycle = listenFollowForeground((e) => {
+    nativeForeground = e?.active !== false;
     tickActive();
-    if (!e.active) flushProgress();
-  }).then((listener) => { if (exited) listener.remove(); else nativeLifecycle = listener; });
-  const activeTimer = setInterval(() => {
+    if (e?.active === false) flushProgress();
+  });
+  activeTimer = setInterval(() => {
     afterProgress();
     if (document.visibilityState === 'visible') flushProgress();
   }, 5_000);
@@ -1516,7 +1525,6 @@ export function openSmartReader(deps, ctx) {
     exit();
     return true;
   }
-  let exited = false;
   function exit() {
     if (exited) return;
     exited = true;
@@ -1526,8 +1534,8 @@ export function openSmartReader(deps, ctx) {
     deps.exit();
   }
   function destroy() {
-    clearInterval(activeTimer);
-    nativeLifecycle?.remove();
+    if (activeTimer != null) clearInterval(activeTimer);
+    try { stopNativeLifecycle(); } catch {}
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     activeClock.sample(null);
     observer?.disconnect();
@@ -1540,10 +1548,6 @@ export function openSmartReader(deps, ctx) {
     deps.immersive?.(false);
     tl.destroy();
   }
-
-  applySettings();
-  deps.immersive?.(true);
-  void openChapter(ctx.row);
 
   return { root, handleBack, destroy: () => !exited && (exited = true, tickActive(), flushProgress(), destroy()) };
 }

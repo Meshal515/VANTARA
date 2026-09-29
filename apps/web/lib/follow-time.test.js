@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { collectFollowTime, flushFollowTime } from './follow-time.js';
+import { collectFollowTime, flushFollowTime, listenFollowForeground } from './follow-time.js';
 import { createSync } from './sync.js';
 
 let store;
@@ -106,5 +106,28 @@ it('accepts a direct listener handle as well as Capacitor promise handles', () =
   const sync = createSync({ baseUrl: 'https://sync.test' });
   const stop = collectFollowTime(sync);
   stop();
+  expect(handle.remove).toHaveBeenCalledTimes(1);
+});
+
+
+it('native foreground listener failures degrade to a no-op', () => {
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    addListener: () => { throw new Error('bridge not ready'); },
+  } } };
+  const seen = [];
+  let stop;
+  expect(() => { stop = listenFollowForeground((event) => seen.push(event)); }).not.toThrow();
+  expect(typeof stop).toBe('function');
+  expect(() => stop()).not.toThrow();
+  expect(seen).toEqual([]);
+});
+
+it('native foreground listener accepts a direct handle without requiring .then()', () => {
+  const handle = { remove: vi.fn() };
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    addListener: () => handle,
+  } } };
+  const stop = listenFollowForeground(() => {});
+  expect(() => stop()).not.toThrow();
   expect(handle.remove).toHaveBeenCalledTimes(1);
 });

@@ -1267,7 +1267,7 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
 });
 
 
-test('optional follow-time accounting can never precede the first application mount', () => {
+test('optional follow-time accounting can never precede critical rendering', () => {
   const shell = read('apps/web/v35/shell.js');
   const mount = shell.indexOf('deps.mount(root)');
   const collector = shell.indexOf('collectFollowTime(sync)');
@@ -1277,11 +1277,25 @@ test('optional follow-time accounting can never precede the first application mo
     'follow-time is non-critical accounting and must never run before the shell mounts',
   );
 
+  const reader = read('apps/web/v35/reader.js');
+  const chapterStart = reader.indexOf('void openChapter(ctx.row)');
+  const lifecycle = reader.indexOf('listenFollowForeground((e)');
+  assert.ok(chapterStart >= 0 && lifecycle >= 0, 'reader must start the chapter and register optional lifecycle accounting');
+  assert.ok(
+    chapterStart < lifecycle,
+    'the first chapter must start loading before optional native lifecycle accounting',
+  );
+  assert.doesNotMatch(
+    reader,
+    /Capacitor\?\.Plugins\?\.FollowTime\?\.addListener/,
+    'reader must not call the native FollowTime listener bridge directly',
+  );
+
   const follow = read('apps/web/lib/follow-time.js');
   assert.match(
     follow,
-    /try\s*\{[\s\S]*?native\.addListener\?\.\('foreground'/,
-    'native listener registration must stay behind a synchronous error boundary',
+    /export function listenFollowForeground[\s\S]*?try\s*\{[\s\S]*?native\.addListener\('foreground'/,
+    'native listener registration must stay behind the shared synchronous error boundary',
   );
 });
 

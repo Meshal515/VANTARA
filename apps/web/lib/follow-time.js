@@ -15,6 +15,44 @@ export function setReaderTime(owner, active) {
   return readerChain;
 }
 
+
+/**
+ * Register the optional native foreground listener without ever making it a
+ * render dependency. Capacitor normally returns a Promise handle, but in-place
+ * updates can briefly expose a stale/direct bridge shape. Both are accepted.
+ */
+export function listenFollowForeground(callback) {
+  const native = plugin();
+  if (!native?.addListener || typeof callback !== 'function') return () => {};
+
+  let closed = false;
+  let listener = null;
+  try {
+    const registration = native.addListener('foreground', callback);
+    if (registration?.then) {
+      Promise.resolve(registration).then(
+        (handle) => {
+          if (closed) {
+            try { void handle?.remove?.(); } catch {}
+          } else {
+            listener = handle ?? null;
+          }
+        },
+        () => {},
+      );
+    } else if (registration?.remove) {
+      listener = registration;
+    }
+  } catch {
+    // Optional accounting/lifecycle integration must never abort rendering.
+  }
+
+  return () => {
+    closed = true;
+    try { void listener?.remove?.(); } catch {}
+  };
+}
+
 const flights = new WeakMap();
 export function flushFollowTime(sync) {
   const native = plugin();
@@ -59,28 +97,8 @@ export function collectFollowTime(sync) {
   };
   const onForeground = (e) => { if (e?.active) flush(); };
 
-  let closed = false;
-  let listener = null;
   let timer = null;
-
-  // Native listener registration is optional. A bridge can be present while its
-  // plugin table is still stale during an in-place APK update; never let that
-  // become a synchronous startup exception.
-  try {
-    const registration = native.addListener?.('foreground', onForeground);
-    if (registration?.then) {
-      registration
-        .then((handle) => {
-          if (closed) void handle?.remove?.();
-          else listener = handle ?? null;
-        })
-        .catch(() => {});
-    } else if (registration?.remove) {
-      listener = registration;
-    }
-  } catch {
-    // Polling + foreground flush still work without the event listener.
-  }
+  const stopForeground = listenFollowForeground(onForeground);
 
   try {
     timer = setInterval(flush, 30_000);
@@ -91,11 +109,10 @@ export function collectFollowTime(sync) {
   }
 
   return () => {
-    closed = true;
     if (timer != null) clearInterval(timer);
     if (typeof document !== 'undefined') {
       try { document.removeEventListener('visibilitychange', flush); } catch {}
     }
-    try { void listener?.remove?.(); } catch {}
+    try { stopForeground(); } catch {}
   };
 }
