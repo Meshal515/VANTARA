@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -67,5 +67,20 @@ describe('anime-engine bridge', () => {
     expect(momentStart('الحلقة 12')).toBe(null);
     expect(clock(3_725_000)).toBe('1:02:05');
     expect(momentStart(momentLabel(3, 3_725_000, 3_730_000))).toBe(3_725_000);
+  });
+});
+
+
+describe('source retry cooldown', () => {
+  it('keeps retry disabled until the entire native cooldown has elapsed', () => {
+    const retryAt = 46_000;
+    expect(retrySeconds(retryAt, 0)).toBe(46);
+    expect(retrySeconds(retryAt, 45_001)).toBe(1);
+    expect(retrySeconds(retryAt, 46_000)).toBe(0);
+    expect(retrySeconds(retryAt, 70_000)).toBe(0);
+  });
+
+  it('accepts older bridge snapshots without a cooldown', () => {
+    for (const value of [undefined, null, NaN, Infinity, 0]) expect(retrySeconds(value, 100)).toBe(0);
   });
 });

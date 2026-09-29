@@ -185,6 +185,7 @@ class WitAnimeSiteTest {
                 r.url.encodedPath == "/watch/x/1" -> reply(200, """<meta name="csrf-token" content="t">""")
                 r.url.encodedPath == "/watch/x/1/sources" ->
                     reply(200, """{"players":{"FHD":[{"token":"$hg","label":"hgcloud"},{"token":"$mega","label":"mega"}]}}""")
+                r.url.encodedPath.startsWith("/watch/stream-source/") -> reply(200, "{}")
                 else -> reply(429, "")
             }
         }.build()
@@ -203,23 +204,30 @@ class WitAnimeSiteTest {
 
     @Test fun `failed preferred server is not fetched and attempted twice`() = runBlocking {
         val token = "9".repeat(64)
+        val fallback = "8".repeat(64)
         val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val r = chain.request()
             seen += r.url.encodedPath
             val (code, body) = when (r.url.encodedPath) {
                 "/watch/x/1" -> 200 to """<meta name="csrf-token" content="t">"""
-                "/watch/x/1/sources" -> 200 to """{"players":{"FHD":[{"token":"$token","label":"videa"}]}}"""
-                "/watch/stream-source/$token" -> 200 to """{"sandbox":false}"""
+                "/watch/x/1/sources" -> 200 to """{"players":{"FHD":[{"token":"$token","label":"videa"},{"token":"$fallback","label":"ok"}]}}"""
+                "/watch/stream-source/$token", "/watch/stream-source/$fallback" -> 200 to """{"sandbox":false}"""
+                "/watch/stream-gate/$fallback" -> 302 to ""
+                "/videoembed/fallback" -> 200 to okHtml
                 else -> 404 to ""
             }
             Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(code).message("x")
+                .apply { if (code == 302) header("Location", "https://ok.ru/videoembed/fallback") }
                 .body(body.toResponseBody("text/html".toMediaType())).build()
         }.build()
         val adapter = WitAnimeSiteAdapter("witanime", "WitAnime", client, { "https://witanime.site" }, EmbedResolver(client))
-        assertTrue(adapter.preferredCandidates(SourceEpisode("witanime", "/watch/x/1", "1", 1f), "videa", 0, null).isEmpty())
+        val result = adapter.preferredCandidates(SourceEpisode("witanime", "/watch/x/1", "1", 1f), "videa", 0, null)
+        assertEquals(3, result.size)
+        assertTrue(result.all { it.server == "ok" })
         assertEquals(1, seen.count { it == "/watch/x/1/sources" })
         assertEquals(1, seen.count { it == "/watch/stream-gate/$token" })
+        assertEquals(1, seen.count { it == "/watch/stream-gate/$fallback" })
     }
 
     @Test fun `a movie is one episode on its own watch path`() = runBlocking {

@@ -1131,7 +1131,7 @@ export function createAnime(deps) {
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const autoServer = workingServer(m.id);
-    const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, work: null };
+    const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null };
     let autoAttempted = false;
     let fallbackTimer = null;
     let paintQueued = false;
@@ -1197,9 +1197,10 @@ export function createAnime(deps) {
         const pool = filtered() ? shownGroups().flatMap(([, rs]) => rs) : sheet.routes;
         const ready = pool.some((r) => r.state === 'READY');
         if (exhausted()) {
-          bestBtn.disabled = false;
+          const wait = engine.retrySeconds(sheet.retryAt);
+          bestBtn.disabled = wait > 0;
           bestBtn.classList.remove('waiting');
-          bestBtn.innerHTML = `${glyph('refresh', { size: 20 })}<span>أعد المحاولة</span>`;
+          bestBtn.innerHTML = `${glyph('refresh', { size: 20 })}<span>${wait ? `أعد المحاولة بعد ${wait} ث` : 'أعد المحاولة'}</span>`;
           return;
         }
         bestBtn.disabled = sheet.busy || (!ready && (sheet.done || filtered()));
@@ -1338,6 +1339,7 @@ export function createAnime(deps) {
 
       bestBtn.onclick = async () => {
         if (exhausted()) {
+          if (engine.retrySeconds(sheet.retryAt)) return;
           deps.closeSheet();
           playEpisode(m, n, { position });
           return;
@@ -1369,6 +1371,9 @@ export function createAnime(deps) {
       };
 
       paint();
+      const cooldownTimer = setInterval(() => {
+        if (!sheet.closed && exhausted()) paintBest();
+      }, 1000);
       void (async () => {
         const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
         if (sheet.closed) return;
@@ -1382,12 +1387,14 @@ export function createAnime(deps) {
         off.push(
           engine.on('route', (e) => {
             if (e.session !== sheet.session || !e.route) return;
+            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
             sheet.routes = engine.upsertRoute(sheet.routes, e.route);
             queuePaint();
             maybeAutoPlay();
           }),
           engine.on('prepared', (e) => {
             if (e.session !== sheet.session) return;
+            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
             sheet.done = true;
             queuePaint();
           }),
@@ -1404,6 +1411,7 @@ export function createAnime(deps) {
           sheet.session = out.session;
           // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
           const snap = await engine.routes(out.session);
+          sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);
           sheet.routes = snap?.routes ?? out.routes ?? [];
           sheet.done = Boolean(snap?.done ?? out.done);
           queuePaint();
@@ -1415,6 +1423,7 @@ export function createAnime(deps) {
 
       return () => {
         sheet.closed = true;
+        clearInterval(cooldownTimer);
         clearTimeout(fallbackTimer);
         for (const f of off) f();
         off = [];

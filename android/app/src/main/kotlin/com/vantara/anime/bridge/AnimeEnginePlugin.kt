@@ -123,19 +123,23 @@ class AnimeEnginePlugin : Plugin() {
             preferredServer = call.getString("preferredServer"),
         )
         prep.listen { route ->
-            if (route == null) notifyListeners("prepared", JSObject().put("session", session))
-            else notifyListeners("route", JSObject().put("session", session).put("route", route, com.vantara.anime.stream.Route.serializer()))
+            val event = JSObject().put("session", session).put("retryAt", retryAt(prep))
+            if (route == null) notifyListeners("prepared", event)
+            else notifyListeners("route", event.put("route", route, com.vantara.anime.stream.Route.serializer()))
         }
         JSObject().put("session", session)
             .put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer()))
-            .put("done", prep.done)
+            .put("done", prep.done).put("retryAt", retryAt(prep))
     }
+
+    private fun retryAt(prep: com.vantara.anime.stream.PreparedEpisode): Long =
+        prep.copies.maxOfOrNull { com.vantara.anime.net.AnimeHostRouter.retryAt(it.sourceId) } ?: 0L
 
     @PluginMethod
     fun routes(call: PluginCall) {
         val prep = engine.prepared(call.getString("session") ?: "") ?: return call.resolve(JSObject().put("routes", JSArray()).put("done", true))
         call.resolve(
-            JSObject().put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer())).put("done", prep.done),
+            JSObject().put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer())).put("done", prep.done).put("retryAt", retryAt(prep)),
         )
     }
 
