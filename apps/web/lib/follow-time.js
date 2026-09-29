@@ -1,21 +1,29 @@
 /** Native time is journaled independently of the WebView, then handed off durably. */
-const plugin = () => globalThis.Capacitor?.Plugins?.FollowTime;
+const plugin = () => {
+  try {
+    return globalThis.Capacitor?.Plugins?.FollowTime ?? null;
+  } catch {
+    return null;
+  }
+};
 export const nativeFollowTime = () => Boolean(plugin());
 let readerChain = Promise.resolve();
 export function setReaderTime(owner, active) {
-  if (!plugin()) return Promise.resolve();
-  readerChain = readerChain.catch(() => {}).then(() => plugin().reader({ ...owner, active }));
+  const native = plugin();
+  if (!native?.reader) return Promise.resolve();
+  readerChain = readerChain.catch(() => {}).then(() => native.reader({ ...owner, active }));
   return readerChain;
 }
 
 const flights = new WeakMap();
 export function flushFollowTime(sync) {
-  if (!plugin() || !sync?.user?.userId) return Promise.resolve();
+  const native = plugin();
+  if (!native?.pending || !native?.acknowledge || !sync?.user?.userId) return Promise.resolve();
   if (flights.has(sync)) return flights.get(sync);
   const userId = sync.user.userId;
   const job = (async () => {
     for (let batch = 0; batch < 20; batch++) {
-      const { items = [] } = await plugin().pending({ userId });
+      const { items = [] } = await native.pending({ userId });
       if (!items.length || sync.user?.userId !== userId) break;
       const ids = [];
       for (const item of items) {
@@ -32,7 +40,7 @@ export function flushFollowTime(sync) {
         ids.push(item.id);
       }
       if (!ids.length) break;
-      await plugin().acknowledge({ userId, ids });
+      await native.acknowledge({ userId, ids });
       if (items.length < 100) break;
     }
   })().finally(() => flights.delete(sync));
@@ -42,18 +50,52 @@ export function flushFollowTime(sync) {
 
 /** One collector per mounted shell. A failed handoff remains in native storage. */
 export function collectFollowTime(sync) {
-  const flush = () => { if (document.visibilityState !== 'hidden') void flushFollowTime(sync).catch(() => {}); };
-  const onForeground = (e) => { if (e.active) flush(); };
+  const native = plugin();
+  if (!native) return () => {};
+
+  const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  const flush = () => {
+    if (visible()) void flushFollowTime(sync).catch(() => {});
+  };
+  const onForeground = (e) => { if (e?.active) flush(); };
+
   let closed = false;
-  let listener;
-  plugin()?.addListener('foreground', onForeground).then((l) => { if (closed) l.remove(); else listener = l; });
-  const timer = setInterval(flush, 30_000);
-  document.addEventListener('visibilitychange', flush);
-  flush();
+  let listener = null;
+  let timer = null;
+
+  // Native listener registration is optional. A bridge can be present while its
+  // plugin table is still stale during an in-place APK update; never let that
+  // become a synchronous startup exception.
+  try {
+    const registration = native.addListener?.('foreground', onForeground);
+    if (registration?.then) {
+      registration
+        .then((handle) => {
+          if (closed) void handle?.remove?.();
+          else listener = handle ?? null;
+        })
+        .catch(() => {});
+    } else if (registration?.remove) {
+      listener = registration;
+    }
+  } catch {
+    // Polling + foreground flush still work without the event listener.
+  }
+
+  try {
+    timer = setInterval(flush, 30_000);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', flush);
+    flush();
+  } catch {
+    // Accounting must degrade to a no-op, never block the application shell.
+  }
+
   return () => {
     closed = true;
-    clearInterval(timer);
-    document.removeEventListener('visibilitychange', flush);
-    listener?.remove();
+    if (timer != null) clearInterval(timer);
+    if (typeof document !== 'undefined') {
+      try { document.removeEventListener('visibilitychange', flush); } catch {}
+    }
+    try { void listener?.remove?.(); } catch {}
   };
 }

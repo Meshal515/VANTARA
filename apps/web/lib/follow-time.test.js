@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { flushFollowTime } from './follow-time.js';
+import { collectFollowTime, flushFollowTime } from './follow-time.js';
 import { createSync } from './sync.js';
 
 let store;
@@ -16,7 +16,10 @@ beforeEach(() => {
   };
   globalThis.fetch = async () => { throw new Error('offline'); };
 });
-afterEach(() => { delete globalThis.Capacitor; });
+afterEach(() => {
+  delete globalThis.Capacitor;
+  delete globalThis.document;
+});
 
 const item = { id: 'immutable-native-credit', owner: { userId: 'u1', section: 'anime', seriesRef: 'anime:1', title: 'One', coverUrl: null }, day: '2026-09-29', activeMs: 60000 };
 
@@ -62,4 +65,46 @@ it('drains a six-episode backlog instead of showing only the first hundred minut
   await flushFollowTime(sync);
   expect(pending).toEqual([]);
   expect(JSON.parse(store.get('vantara.queue')).filter(x => x.kind === 'usage.work').reduce((sum, x) => sum + x.payload.activeMs, 0)).toBe(9360000);
+});
+
+
+it('never lets a broken native listener registration abort startup', () => {
+  const add = vi.fn();
+  const remove = vi.fn();
+  globalThis.document = {
+    visibilityState: 'visible',
+    addEventListener: add,
+    removeEventListener: remove,
+  };
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    addListener: () => { throw new Error('native bridge not ready'); },
+    pending: async () => ({ items: [] }),
+    acknowledge: async () => {},
+  } } };
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+
+  let stop;
+  expect(() => { stop = collectFollowTime(sync); }).not.toThrow();
+  expect(typeof stop).toBe('function');
+  expect(() => stop()).not.toThrow();
+  expect(add).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+});
+
+it('accepts a direct listener handle as well as Capacitor promise handles', () => {
+  const handle = { remove: vi.fn() };
+  globalThis.document = {
+    visibilityState: 'visible',
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    addListener: () => handle,
+    pending: async () => ({ items: [] }),
+    acknowledge: async () => {},
+  } } };
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+  const stop = collectFollowTime(sync);
+  stop();
+  expect(handle.remove).toHaveBeenCalledTimes(1);
 });
