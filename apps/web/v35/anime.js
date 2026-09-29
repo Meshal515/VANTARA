@@ -1,3 +1,4 @@
+import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
  *
@@ -1000,7 +1001,7 @@ export function createAnime(deps) {
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
     // An old native player must never credit playback to the account now signed in.
     if (cur.userId !== currentUser()) return;
-    if (Number.isFinite(p.position)) {
+    if (!nativeFollowTime() && Number.isFinite(p.position)) {
       const now = Date.now();
       const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
       const elapsed = watchClock.at === null ? 0 : Math.max(0, now - watchClock.at);
@@ -1011,6 +1012,7 @@ export function createAnime(deps) {
       if (watchClock.acc >= 60_000) flushWatch();
     }
     if (p.final) {
+      void flushFollowTime(deps.sync).catch(() => {});
       flushWatch();
       watchClock.pos = null;
       watchClock.at = null;
@@ -1020,7 +1022,8 @@ export function createAnime(deps) {
       recordWatch(cur.m, n, p.position, p.duration, cur.userId);
       account?.recordView(cur.m, n);
       // 90% = شوهدت، في حسابك (مرة واحدة)
-      if (p.position / p.duration >= 0.9 && account) {
+      const watchedRatio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
+      if (watchedRatio >= 0.9 && account) {
         if (!account.isSeen(cur.m.id, n)) account.markEpisode(cur.m, n, true);
         // «أنهى الحلقة N» من المشغّل وحده: تعليم العين يدويًّا لا يعلن شيئًا
         account.completeEpisode(cur.m, n);
@@ -1451,6 +1454,7 @@ export function createAnime(deps) {
         prefer: code ?? prefer,
         title: m.title,
         animeId: String(m.id),
+        usageUserId: currentUser(),
         episode: n,
         total: m.aired || m.episodes || 0,
         position: startAt,

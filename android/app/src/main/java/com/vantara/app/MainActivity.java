@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(TranslationPlugin.class);
         registerPlugin(com.vantara.anime.bridge.AnimeEnginePlugin.class);
+        registerPlugin(com.vantara.usage.UsagePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

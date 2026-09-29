@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '13865ec21b48964de41d7078290941614b79bd41a88afb76a9d08786165b16b8';
+const SHELL_DIGEST = 'b1f6ad6d6f374d9585f1b81cf2fa5852820460557a8b863a9bbeacc4565a4c18';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -141,6 +141,7 @@ const SHELL = [
   '/vendor/gsap.esm.js',
   '/lib/anime-meta.js',
   '/lib/anime-engine.js',
+  '/lib/follow-time.js',
   '/anime/sources.json',
   '/manifest.webmanifest',
   '/fonts/NotoSansArabic.var.woff2',

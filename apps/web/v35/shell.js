@@ -1,3 +1,4 @@
+import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
  *
@@ -139,6 +140,7 @@ const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?
  */
 export function mountV35(deps, { page = 'home' } = {}) {
   const { sync } = deps;
+  const stopFollowTime = collectFollowTime(sync);
   setSharedLatest(createSourceLatest(sync));
   const root = el('div', 'v35');
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
@@ -4523,6 +4525,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      stopFollowTime();
       majlis.hide();
       clearInterval(state.heroTimer);
       clearInterval(chapterRefreshTimer);

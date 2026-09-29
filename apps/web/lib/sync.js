@@ -710,8 +710,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * الـop_id يُولَّد مرة واحدة هنا ويبقى ثابتًا عبر كل إعادة إرسال — هذا ما
    * يمنع احتساب الفصل مرتين بعد انقطاع.
    */
-  function enqueue(kind, payload = {}) {
-    const op = { opId: crypto.randomUUID(), kind, payload, at: Date.now() };
+  function enqueue(kind, payload = {}, { opId = crypto.randomUUID(), requireDurable = false } = {}) {
+    const existing = queue.find((op) => op.opId === opId);
+    if (existing) {
+      if (!persistQueue() && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
+      return opId;
+    }
+    const op = { opId, kind, payload, at: Date.now() };
     queue.push(op);
     if (queue.length > MAX_QUEUE) {
       const trimmed = trimQueue(queue, MAX_QUEUE);
@@ -719,7 +724,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       overflowing = trimmed.overflowing;
       pruneAttempts();
     }
-    persistQueue();
+    const saved = persistQueue();
+    if (!saved && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
     // الأثر يظهر الآن لا بعد الرحلة: القلب والنقطة والتفاعل يتغيرون تحت الإصبع
     const touched = new Set();
     try {

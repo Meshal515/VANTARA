@@ -7,6 +7,13 @@ import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.os.SystemClock
+import com.vantara.usage.ForegroundTime
+import com.vantara.usage.UsageOwner
+import com.vantara.usage.UsageStore
+import com.vantara.usage.WatchedRanges
+import com.vantara.usage.WatchedRange
+import kotlinx.serialization.encodeToString
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -96,6 +103,7 @@ class PlayerActivity : Activity() {
         val session: String,
         val title: String,
         val animeId: String = "",
+        val usageUserId: String? = null,
         val malId: Int? = null,
         val episode: Float = 1f,
         /** آخر حلقة متاحة (لقائمة الحلقات و«التالية»). */
@@ -236,6 +244,41 @@ class PlayerActivity : Activity() {
         if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${STALL_TIMEOUT_MS / 1000} ثانية")
     }
     private val hideControls = Runnable { setControls(false) }
+    private val usageClock = ForegroundTime(SystemClock::elapsedRealtime)
+    private var usageForeground = false
+    private var usageStarted = false
+    private var usageUnsaved = 0L
+    private var coverageEpisode: Float? = null
+    private var coverage = WatchedRanges()
+    private fun coverageKey() = "coverage:${launch.usageUserId.orEmpty()}:${launch.animeId}:$episode"
+    private fun loadCoverage() {
+        if (coverageEpisode == episode) return
+        coverageEpisode = episode
+        val saved = settings.getString(coverageKey(), null)
+        coverage = WatchedRanges(saved?.let { runCatching { Json.decodeFromString<List<WatchedRange>>(it) }.getOrNull() }.orEmpty())
+    }
+    private fun sampleUsage() {
+        if (!::player.isInitialized || !::launch.isInitialized) return
+        val active = usageForeground && !isInPictureInPictureMode && usageStarted &&
+            player.playbackState in listOf(Player.STATE_READY, Player.STATE_BUFFERING)
+        usageUnsaved += usageClock.sample(active)
+        val user = launch.usageUserId
+        if (!user.isNullOrBlank() && usageUnsaved > 0) {
+            try {
+                UsageStore.get(this).credit(UsageOwner(user, "anime", "anime:${launch.animeId}", launch.title, launch.poster), usageUnsaved, System.currentTimeMillis())
+                usageUnsaved = 0
+            } catch (_: Exception) { /* Keep the credit in memory and retry on the next tick. */ }
+        }
+        loadCoverage()
+        coverage.sample(position(), player.isPlaying && usageForeground)
+        if (!user.isNullOrBlank()) settings.edit().putString(coverageKey(), Json.encodeToString(coverage.snapshot())).apply()
+    }
+    private val usageTick = object : Runnable {
+        override fun run() {
+            sampleUsage()
+            main.postDelayed(this, 5_000)
+        }
+    }
     private val progressTick = object : Runnable {
         override fun run() {
             report(final = false)
@@ -307,6 +350,7 @@ class PlayerActivity : Activity() {
         } else {
             s.next()?.let { start(it, launch.positionMs) } ?: showError("لا توجد سيرفرات متاحة لهذه الحلقة")
         }
+        main.post(usageTick)
         main.postDelayed(progressTick, PROGRESS_EVERY_MS)
         main.post(clockTick)
     }
@@ -328,6 +372,7 @@ class PlayerActivity : Activity() {
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
+            sampleUsage()
             if (state == Player.STATE_BUFFERING) {
                 spinner.visibility = View.VISIBLE
                 if (reportedStart) {
@@ -363,7 +408,23 @@ class PlayerActivity : Activity() {
             bar.durationMs = player.duration.takeIf { it > 0 } ?: 0
         }
 
+        override fun onRenderedFirstFrame() {
+            usageStarted = true
+            sampleUsage()
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            loadCoverage()
+            if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+                coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
+            } else {
+                coverage.sample(oldPosition.positionMs, false)
+                coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
+            }
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            sampleUsage()
             if (isPlaying) scheduleHide() else main.removeCallbacks(hideControls)
         }
 
@@ -542,6 +603,8 @@ class PlayerActivity : Activity() {
         waiting?.cancel()
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
+        sampleUsage()
+        usageStarted = false
         player.stop()
         current = null
         val warmed = warmedSessionId?.takeIf { warmedEpisode == n && engine.prepared(it)?.best() != null }
@@ -1413,6 +1476,7 @@ class PlayerActivity : Activity() {
 
     /** التقدّم للواجهة (سجل المشاهدة) — كل ١٠ ثوانٍ وعند كل تبديل وخروج. */
     private fun report(final: Boolean) {
+        sampleUsage()
         val c = current
         if (c == null || !reportedStart) {
             // لم يبدأ شيء: لا تقدّم يُسجَّل، لكن الواجهة تعرف أن المشغّل أُغلق
@@ -1433,6 +1497,7 @@ class PlayerActivity : Activity() {
                 durationMs = d,
                 final = final,
                 code = codeOf(c),
+                watchedRatio = coverage.ratio(d),
             ),
         )
     }
@@ -1461,6 +1526,8 @@ class PlayerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        usageForeground = false
+        sampleUsage()
         presenceActive = false
         main.removeCallbacks(presenceTick)
         player.playWhenReady = false
@@ -1469,12 +1536,16 @@ class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        usageForeground = true
+        sampleUsage()
         presenceActive = true
         main.removeCallbacks(presenceTick)
         main.post(presenceTick)
     }
 
     override fun onDestroy() {
+        usageForeground = false
+        sampleUsage()
         presenceActive = false
         clip?.release()
         unlisten?.invoke()

@@ -64,10 +64,10 @@ describe('chapter read state', () => {
     expect(isChapterRead(sync, 'ext:w', key)).toBe(false);
   });
 
-  it('auto marks at 20 percent of the chapter, once', () => {
-    expect(AUTO_READ_RATIO).toBe(0.2);
+  it('auto marks only after most of the chapter was actually read, once', () => {
     expect(shouldAutoMark({ ratio: 0.19, alreadyRead: false })).toBe(false);
-    expect(shouldAutoMark({ ratio: 0.2, alreadyRead: false })).toBe(true);
+    expect(shouldAutoMark({ ratio: 0.2, alreadyRead: false })).toBe(false);
+    expect(shouldAutoMark({ ratio: 0.9, alreadyRead: false })).toBe(true);
     expect(shouldAutoMark({ ratio: 0.8, alreadyRead: true })).toBe(false);
   });
 });

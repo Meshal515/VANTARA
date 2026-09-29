@@ -51,7 +51,8 @@ class AnimeEnginePlugin : Plugin() {
                 JSObject()
                     .put("session", p.session).put("candidate", p.candidateId).put("sourceId", p.sourceId)
                     .put("position", p.positionMs).put("duration", p.durationMs).put("final", p.final)
-                    .put("animeId", p.animeId).put("episode", p.episode.toDouble()).put("code", p.code),
+                    .put("animeId", p.animeId).put("episode", p.episode.toDouble()).put("code", p.code)
+                    .put("watchedRatio", p.watchedRatio),
             )
         }
         // تفضيل السيرفر، تبديل الحلقة، وصندوق اللحظات الصادر
@@ -80,6 +81,7 @@ class AnimeEnginePlugin : Plugin() {
                 session = session,
                 title = call.getString("title").orEmpty(),
                 animeId = call.getString("animeId").orEmpty(),
+                usageUserId = call.getString("usageUserId"),
                 malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
                 total = call.getInt("total") ?: 0,

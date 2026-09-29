@@ -17,6 +17,7 @@ object PlaybackEvents {
         val final: Boolean,
         /** رمز السيرفر الذي يعمل (HGC…): الواجهة تتذكّره لهذا الأنمي. */
         val code: String?,
+        val watchedRatio: Double = 0.0,
     )
 
     @Volatile var listener: ((Progress) -> Unit)? = null
