@@ -103,7 +103,7 @@ class WitAnimeSiteAdapter(
     }
 
     override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> =
-        candidatesFor(episode, now, trace, 1, server)
+        candidatesFor(episode, now, trace, Int.MAX_VALUE, server)
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> =
         candidatesFor(episode, now, trace, enough, null)
@@ -155,9 +155,7 @@ class WitAnimeSiteAdapter(
             )
         }
         if (preferredServer == null) return resolve(supported)
-        val (preferred, remaining) = supported.partition { it.label.equals(preferredServer, ignoreCase = true) }
-        val focused = resolve(preferred)
-        return if (focused.isNotEmpty()) focused else resolve(remaining)
+        return resolve(supported.sortedByDescending { it.label.equals(preferredServer, ignoreCase = true) })
     }
 
     private suspend fun streamsOf(s: Parse.Server, csrf: String, watch: String, episode: SourceEpisode, now: Long, trace: ResolveTrace?): List<Candidate> {

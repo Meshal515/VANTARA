@@ -87,9 +87,9 @@ interface AnimeAdapter {
         enough: Int = Int.MAX_VALUE,
     ): List<Candidate>
 
-    /** مسار سريع لسيرفر اشتغل سابقًا؛ جلب رابط هذه الحلقة فقط، ثم الفحص المعتاد عند الفشل. */
+    /** يرجّح السيرفر السابق في ترتيب التجهيز، مع إبقاء جميع الخيارات متاحة. */
     suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long = System.currentTimeMillis(), trace: ResolveTrace? = null): List<Candidate> =
-        candidates(episode, now, trace, enough = 1)
+        candidates(episode, now, trace, enough = Int.MAX_VALUE)
 }
 
 /**
@@ -236,12 +236,12 @@ class ExtensionAdapter(
         val rule = pageEmbeds()
         val r = resolver
         if (rule != null && r != null) {
-            val fromPage = try { pageCandidates(episode, rule, r, now, trace, 1, server) }
+            val fromPage = try { pageCandidates(episode, rule, r, now, trace, Int.MAX_VALUE, server) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { trace?.note("صفحة الحلقة", e.brief()); emptyList() }
             if (fromPage.isNotEmpty()) return fromPage
         }
-        return candidates(episode, now, trace, enough = 1)
+        return emptyList()
     }
 
     private fun report(trace: ResolveTrace?, key: String, server: String, quality: Int?, variant: Variant, state: RouteState, list: List<Candidate> = emptyList(), reason: String? = null) =
@@ -253,7 +253,7 @@ class ExtensionAdapter(
         // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
         val referer = finalUrl
         val allEmbeds = rule.extract(html, finalUrl)
-        val embeds = if (preferredServer == null) allEmbeds else allEmbeds.filter { it.name.equals(preferredServer, ignoreCase = true) }
+        val embeds = if (preferredServer == null) allEmbeds else allEmbeds.sortedByDescending { it.name.equals(preferredServer, ignoreCase = true) }
         if (embeds.isEmpty()) trace?.note("صفحة الحلقة", "لا روابط سيرفرات بقاعدة البيان")
         val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
         val keyOf = { e: PageEmbeds.Embed -> "p" + Integer.toHexString(e.url.hashCode()) }
@@ -306,7 +306,7 @@ class ExtensionAdapter(
         }
         val allHosters = source.getHosterList(sEpisode)
         val nameOf = { h: Hoster -> h.hosterName.takeUnless { it == Hoster.NO_HOSTER_LIST || it.isBlank() } ?: name }
-        val hosters = if (preferredServer == null) allHosters else allHosters.filter { nameOf(it).equals(preferredServer, ignoreCase = true) }
+        val hosters = if (preferredServer == null) allHosters else allHosters.sortedByDescending { nameOf(it).equals(preferredServer, ignoreCase = true) }
         val variant = StreamClassifier.variant(episode.name).takeUnless { it == Variant.UNKNOWN } ?: Variant.SUB
         hosters.forEachIndexed { i, h -> report(trace, "h$i", nameOf(h), null, variant, RouteState.RESOLVING) }
         return coroutineScope {

@@ -249,4 +249,34 @@ class WitAnimeSiteTest {
         assertEquals(2, p.items.size)
         assertTrue(p.hasNext)
     }
+    @Test fun `successful preferred server still discovers the remaining servers`() = runBlocking {
+        val tokens = listOf("5".repeat(64), "6".repeat(64))
+        val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val reports = java.util.concurrent.CopyOnWriteArrayList<com.vantara.anime.stream.RouteReport>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val r = chain.request()
+            val path = r.url.encodedPath
+            seen += path
+            val (code, body) = when {
+                path == "/watch/x/1" -> 200 to """<meta name="csrf-token" content="t">"""
+                path.endsWith("/sources") -> 200 to """{"players":{"FHD":[{"token":"${tokens[0]}","label":"ok"},{"token":"${tokens[1]}","label":"videa"}]}}"""
+                path.startsWith("/watch/stream-source/") -> 200 to "{}"
+                path.startsWith("/watch/stream-gate/") -> 302 to ""
+                else -> 200 to "<html></html>"
+            }
+            Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(code).message("fixture")
+                .apply { if (code == 302) header("Location", if (path.endsWith(tokens[0])) "https://ok.ru/videoembed/test" else "https://videa.hu/player?v=test") }
+                .body(body.toResponseBody("text/html".toMediaType())).build()
+        }.build()
+        val extractor = EmbedResolver(client, com.vantara.anime.hosts.Sniffer { url, _ ->
+            com.vantara.anime.hosts.Stream("https://cdn.test/${if (url.contains("ok.ru")) "ok" else "videa"}.mp4")
+        })
+        val adapter = WitAnimeSiteAdapter("witanime", "WitAnime", client, { "https://witanime.site" }, extractor)
+        val result = adapter.preferredCandidates(SourceEpisode("witanime", "/watch/x/1", "1", 1f), "ok", 0,
+            com.vantara.anime.adapters.ResolveTrace { reports += it })
+        assertEquals(setOf("ok", "videa"), result.map { it.server }.toSet())
+        assertEquals(setOf("ok", "videa"), reports.filter { it.state == com.vantara.anime.stream.RouteState.READY }.map { it.server }.toSet())
+        assertEquals(1, seen.count { it == "/watch/x/1/sources" })
+        tokens.forEach { token -> assertEquals(1, seen.count { it == "/watch/stream-gate/$token" }) }
+    }
 }

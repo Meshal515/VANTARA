@@ -19,12 +19,15 @@ class PreparedEpisode(
     val prefs: Preferences,
     val session: PlaybackSession,
     private val health: HealthStore,
+    val limitedSourceId: String? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
     private val routeOfCandidate = HashMap<String, String>()
     private val listeners = CopyOnWriteArrayList<(Route?) -> Unit>()
+    private var pendingBatches = 1
+    private var fullPreparation = limitedSourceId == null
 
     @Volatile var job: Job? = null
     @Volatile var done = false
@@ -101,10 +104,27 @@ class PreparedEpisode(
         }
     }
 
+    /** Promote a warm session once; its existing candidates and player remain intact. */
+    fun beginFullPreparation(): Boolean = synchronized(this) {
+        if (fullPreparation) return@synchronized false
+        fullPreparation = true
+        pendingBatches++
+        done = false
+        true
+    }
+
     fun finish() {
-        done = true
-        session.changes.value = session.changes.value + 1
-        listeners.forEach { runCatching { it(null) } }
+        val completed = synchronized(this) {
+            if (pendingBatches <= 0) return@synchronized false
+            pendingBatches--
+            if (pendingBatches != 0) return@synchronized false
+            done = true
+            true
+        }
+        if (completed) {
+            session.changes.value = session.changes.value + 1
+            listeners.forEach { runCatching { it(null) } }
+        }
     }
 
     /** نفس السيرفر مرتين في نفس الجودة (من مصدرين): «MPU» ثم «MPU2». */

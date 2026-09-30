@@ -152,7 +152,7 @@ class PlayerActivity : Activity() {
     private lateinit var seekLeft: TextView
     private lateinit var seekRight: TextView
     private lateinit var unlockButton: ImageView
-    private lateinit var skipIntroButton: TextView
+    private lateinit var skipButton: TextView
     private var errorCard: View? = null
     private var countdownCard: View? = null
     private var clip: ClipEditor? = null
@@ -229,8 +229,11 @@ class PlayerActivity : Activity() {
     private var waiting: Job? = null
     private var warmedSessionId: String? = null
     private var warmedEpisode = -1
-    private var intro: IntroSkip.Interval? = null
-    private var introRequestedEpisode = -1
+    private var skipTimings = IntroSkip.Timings()
+    private var skipRequestKey: String? = null
+    private var skipRequestedDuration = 0L
+    private var skipGeneration = 0
+    private var skipRequest: Job? = null
     private var locked = false
     private var fill = false
     private var copies: List<SourceAnime> = emptyList()
@@ -289,9 +292,16 @@ class PlayerActivity : Activity() {
     private val clockTick = object : Runnable {
         override fun run() {
             updateTime()
-            maybeLoadIntro()
-            if (::skipIntroButton.isInitialized) {
-                skipIntroButton.visibility = if (IntroSkip.visible(intro, position()) && !locked && clip == null) View.VISIBLE else View.GONE
+            maybeLoadSkips()
+            if (::skipButton.isInitialized) {
+                val segment = IntroSkip.active(skipTimings, position())
+                val visible = segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
+                skipButton.visibility = if (visible) View.VISIBLE else View.GONE
+                if (visible) {
+                    val label = if (segment!!.opening) "تخطي المقدمة" else "تخطي النهاية"
+                    skipButton.text = "$label  »"
+                    skipButton.contentDescription = label
+                }
             }
             main.postDelayed(this, 500)
         }
@@ -441,6 +451,7 @@ class PlayerActivity : Activity() {
     private fun start(c: Candidate, positionMs: Long) {
         waiting?.cancel()
         hideError()
+        clearSkipTimings()
         current = c
         reportedStart = false
         startedAt = System.currentTimeMillis()
@@ -483,6 +494,8 @@ class PlayerActivity : Activity() {
 
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
+        clearSkipTimings()
+        reportedStart = false
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
         val c = current ?: return
@@ -500,6 +513,10 @@ class PlayerActivity : Activity() {
         val p = prep
         waiting = scope.launch {
             val again = when {
+                p != null && engine.completePreparation(sessionId) -> {
+                    message("نجهّز بقية السيرفرات…", long = true)
+                    p.awaitNext(WAIT_NEXT_MS)
+                }
                 p != null && !p.done -> {
                     message("نجهّز سيرفرًا آخر…", long = true)
                     p.awaitNext(WAIT_NEXT_MS)
@@ -619,10 +636,9 @@ class PlayerActivity : Activity() {
         if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
         episode = n.toFloat()
         if (presenceActive) sendPresence()
-        intro = null
-        introRequestedEpisode = -1
-        if (::skipIntroButton.isInitialized) skipIntroButton.visibility = View.GONE
+        clearSkipTimings()
         attach(id)
+        if (warmed != null) engine.completePreparation(id)
         hideError()
         spinner.visibility = View.VISIBLE
         if (warmed == null) message("نجهّز الحلقة $n…", long = true)
@@ -730,14 +746,14 @@ class PlayerActivity : Activity() {
         buildBottom()
         root.addView(controls, match())
 
-        skipIntroButton = pillButton("تخطي المقدمة  »", primary = true) {
-            intro?.let { player.seekTo(it.endMs) }
-            skipIntroButton.visibility = View.GONE
+        skipButton = pillButton("تخطي المقدمة  »", primary = true) {
+            IntroSkip.active(skipTimings, position())?.let { player.seekTo(it.interval.endMs) }
+            skipButton.visibility = View.GONE
         }.apply {
             contentDescription = "تخطي المقدمة"
             visibility = View.GONE
         }
-        root.addView(skipIntroButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.RIGHT or Gravity.BOTTOM).apply {
+        root.addView(skipButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.RIGHT or Gravity.BOTTOM).apply {
             rightMargin = dp(28)
             bottomMargin = dp(142)
         })
@@ -922,16 +938,33 @@ class PlayerActivity : Activity() {
 
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
 
-    /** جلب مستقل بعد بدء الفيديو: لا يؤخر التشغيل، ولا يظهر الزر إلا لتوقيت موثوق. */
-    private fun maybeLoadIntro() {
+    private fun clearSkipTimings() {
+        skipGeneration++
+        skipRequest?.cancel()
+        skipRequest = null
+        skipTimings = IntroSkip.Timings()
+        skipRequestKey = null
+        skipRequestedDuration = 0L
+        if (::skipButton.isInitialized) skipButton.visibility = View.GONE
+    }
+
+    /** Independent of playback startup; stale timings never follow a server/episode switch. */
+    private fun maybeLoadSkips() {
         val malId = launch.malId ?: return
         val duration = player.duration.takeIf { it > 0 } ?: return
-        if (!reportedStart || introRequestedEpisode == episodeInt()) return
+        if (!reportedStart || current == null) return
         val requested = episodeInt()
-        introRequestedEpisode = requested
-        scope.launch {
-            val found = withContext(Dispatchers.IO) { IntroSkip.fetch(network.client, malId, requested, duration) }
-            if (episodeInt() == requested) intro = found
+        // Specials such as 12.5 must never borrow episode 12's timings.
+        if (episode != requested.toFloat()) return
+        val key = "$sessionId|$requested|${current?.id}"
+        if (skipRequestKey == key && kotlin.math.abs(duration - skipRequestedDuration) <= duration * 0.01) return
+        clearSkipTimings()
+        val generation = skipGeneration
+        skipRequestKey = key
+        skipRequestedDuration = duration
+        skipRequest = scope.launch {
+            val found = withContext(Dispatchers.IO) { IntroSkip.fetchTimings(network.client, malId, requested, duration) }
+            if (generation == skipGeneration && skipRequestKey == key && episodeInt() == requested) skipTimings = found
         }
     }
 
@@ -1033,6 +1066,7 @@ class PlayerActivity : Activity() {
     /** نفس نموذج ورقة الواجهة: رموز لا أسماء، مجمّعة بالجودة، بحالتها الآن. */
     private fun showServers() {
         val p = prep ?: return message("السيرفرات غير متاحة لهذه الجلسة")
+        engine.completePreparation(sessionId)
         open(SheetKind.SERVERS, "السيرفرات", "الحلقة ${fmtEpisode(episode)}") { body ->
             val routes = p.routes()
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
