@@ -233,7 +233,7 @@ class PlayerActivity : Activity() {
     private val skipState = SkipLoadState { SystemClock.elapsedRealtime() }
     private val skipRepository by lazy {
         // Public timing APIs do not need source cookies or browser verification.
-        val client = OkHttpClient.Builder().dns(com.vantara.anime.net.AnimeDns { true }).build()
+        val client = OkHttpClient.Builder().dns(com.vantara.anime.net.AnimeDns(preferDoh = { true })).build()
         SkipRepository(client, File(cacheDir, "anime-skip-times"))
     }
     private var skipRequest: Job? = null
