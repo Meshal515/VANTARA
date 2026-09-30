@@ -98,4 +98,31 @@ class IntroSkipTest {
         assertEquals(IntroSkip.Timings(), IntroSkip.fetchTimings(client, 16498, 1, 1_440_000))
         assertEquals(1, calls)
     }
+
+    @Test fun `small video cut differences align the intervals instead of hiding both skips`() {
+        val timings = IntroSkip.parseTimings(body, 1_420_000)
+        assertEquals(IntroSkip.Interval(70_000, 160_000), timings.opening)
+        assertEquals(IntroSkip.Interval(1_280_000, 1_360_000), timings.ending)
+        assertNull(IntroSkip.parseTimings(body, 1_200_000).opening)
+    }
+
+    @Test fun `closest video cut wins even when an older response comes first`() {
+        val response = """{"found":true,"results":[
+            {"skipType":"op","episodeLength":1450,"interval":{"startTime":20,"endTime":100}},
+            {"skipType":"op","episodeLength":1440,"interval":{"startTime":90,"endTime":180}}]}"""
+        assertEquals(IntroSkip.Interval(90_000, 180_000), IntroSkip.parseTimings(response, 1_440_000).opening)
+    }
+
+    @Test fun `legacy provider field names are accepted without losing duration validation`() {
+        val legacy = """{"found":true,"results":[{"skip_type":"op","episode_length":1440,"interval":{"start_time":90,"end_time":180}}]}"""
+        assertEquals(IntroSkip.Interval(90_000, 180_000), IntroSkip.parseTimings(legacy, 1_440_000).opening)
+        assertNull(IntroSkip.parseTimings(legacy, 1_200_000).opening)
+    }
+
+    @Test fun `short opening duration differences never shift past surrounding footage`() {
+        val clipped = """{"found":true,"results":[{"skipType":"op","episodeLength":1450,"interval":{"startTime":1,"endTime":91}}]}"""
+        val op = IntroSkip.parseTimings(clipped, 1_440_000).opening
+        assertEquals(IntroSkip.Interval(0, 81_000), op)
+        assertNull(IntroSkip.parseTimings(clipped, 30_000).opening)
+    }
 }
