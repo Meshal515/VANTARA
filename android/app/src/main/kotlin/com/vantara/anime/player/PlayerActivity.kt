@@ -295,7 +295,7 @@ class PlayerActivity : Activity() {
             maybeLoadSkips()
             if (::skipButton.isInitialized) {
                 val segment = IntroSkip.active(skipTimings, position())
-                val visible = segment != null && reportedStart && !locked && clip == null && openSheet == null
+                val visible = segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
                 skipButton.visibility = if (visible) View.VISIBLE else View.GONE
                 if (visible) {
                     val label = if (segment!!.opening) "تخطي المقدمة" else "تخطي النهاية"
@@ -494,6 +494,8 @@ class PlayerActivity : Activity() {
 
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
+        clearSkipTimings()
+        reportedStart = false
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
         val c = current ?: return
@@ -950,14 +952,16 @@ class PlayerActivity : Activity() {
     private fun maybeLoadSkips() {
         val malId = launch.malId ?: return
         val duration = player.duration.takeIf { it > 0 } ?: return
-        if (!reportedStart) return
-        val key = "$sessionId|${episodeInt()}|${current?.id}"
+        if (!reportedStart || current == null) return
+        val requested = episodeInt()
+        // Specials such as 12.5 must never borrow episode 12's timings.
+        if (episode != requested.toFloat()) return
+        val key = "$sessionId|$requested|${current?.id}"
         if (skipRequestKey == key && kotlin.math.abs(duration - skipRequestedDuration) <= duration * 0.01) return
         clearSkipTimings()
         val generation = skipGeneration
         skipRequestKey = key
         skipRequestedDuration = duration
-        val requested = episodeInt()
         skipRequest = scope.launch {
             val found = withContext(Dispatchers.IO) { IntroSkip.fetchTimings(network.client, malId, requested, duration) }
             if (generation == skipGeneration && skipRequestKey == key && episodeInt() == requested) skipTimings = found
