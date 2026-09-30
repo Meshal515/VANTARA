@@ -187,11 +187,11 @@ export function openProfileEditor(ctx) {
           <span class="pe-cam pe-cam--face">${glyph('camera', { size: 16 })}</span>
         </button>
         <label class="pe-field">
-          <span class="pe-label">الاسم <em id="peNameCount"></em></span>
+          <span class="pe-label"><span>الاسم</span> <em id="peNameCount"></em></span>
           <input class="pe-name" id="peName" maxlength="${NAME_MAX}" autocomplete="nickname" dir="auto" enterkeyhint="next">
         </label>
         <label class="pe-field">
-          <span class="pe-label">النبذة <em id="peBioCount"></em></span>
+          <span class="pe-label"><span>النبذة</span> <em id="peBioCount"></em></span>
           <textarea class="pe-bio" id="peBio" maxlength="${BIO_MAX}" rows="3" dir="auto" placeholder="سطر أو سطرين عنك وعن اللي تقرأه"></textarea>
         </label>
         <div class="pe-appearance-host"></div>
@@ -199,13 +199,37 @@ export function openProfileEditor(ctx) {
       </div>
     </div>
     <input type="file" accept="image/*" id="peFile" hidden>`;
+  const previousFocus = document.activeElement;
+  const backgroundNodes = [...document.querySelectorAll('.page, .bottom-nav, #profile')].filter((node) => !node.closest('.pe') && !node.closest('#sheet'));
+  const inertBefore = backgroundNodes.map((node) => node.inert);
+  backgroundNodes.forEach((node) => { node.inert = true; });
   document.body.append(root);
+  const focusable = () => [...root.querySelectorAll('button,input,textarea,summary,[tabindex="0"]')].filter((node) => {
+    if (node.disabled || node.closest('[hidden],[inert]') || !node.getClientRects().length) return false;
+    for (let parent = node.parentElement; parent && parent !== root; parent = parent.parentElement) {
+      if (parent.tagName === 'DETAILS' && !parent.open && node !== parent.querySelector(':scope > summary')) return false;
+    }
+    return true;
+  });
+  const trapFocus = (event) => {
+    if (event.key !== 'Tab' || document.querySelector('.pe-crop') || document.querySelector('#sheet.show')) return;
+    const nodes = focusable(), first = nodes[0], last = nodes.at(-1);
+    if (!first) return;
+    if (event.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', trapFocus);
+  root.querySelector('[data-act="close"]').focus({ preventScroll: true });
+  const viewport = window.visualViewport;
+  const keyboardSpace = () => root.style.setProperty('--pe-keyboard-gap', `${Math.max(0, window.innerHeight - (viewport?.height || window.innerHeight) - (viewport?.offsetTop || 0))}px`);
+  viewport?.addEventListener('resize', keyboardSpace);
+  keyboardSpace();
   const q = (id) => root.querySelector(`#${id}`);
   const nameInput = q('peName');
   const bioInput = q('peBio');
   nameInput.value = draft.displayName ?? '';
   bioInput.value = draft.bio ?? '';
-  const appearance = createProfileAppearance(root.querySelector('.pe-appearance-host'), draft, refresh);
+  const appearance = createProfileAppearance(root.querySelector('.pe-appearance-host'), draft, refresh, { works: ctx.previewWorks || [] });
   let previewImages = {};
 
   const objectUrls = new Set();
@@ -444,6 +468,10 @@ export function openProfileEditor(ctx) {
     if (closed) return;
     closed = true;
     appearance.destroy();
+    document.removeEventListener('keydown', trapFocus);
+    viewport?.removeEventListener('resize', keyboardSpace);
+    backgroundNodes.forEach((node, i) => { node.inert = inertBefore[i]; });
+    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     for (const u of objectUrls) URL.revokeObjectURL(u);
     root.classList.add('pe--out');
     setTimeout(() => root.remove(), 180);

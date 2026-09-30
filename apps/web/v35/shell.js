@@ -2244,6 +2244,45 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
     });
   }
+  /** Pick a work directly for a profile place, using locally known works. */
+  function chooseProfileTop(position) {
+    openSheet((body) => {
+      body.classList.add('pf-top-picker');
+      body.append(el('h3', null, `اختر عملًا للمركز ${position}`));
+      const input = el('input', 'pf-top-search');
+      input.type = 'search';
+      input.placeholder = 'ابحث في أعمالك';
+      input.setAttribute('aria-label', 'ابحث عن عمل لأفضل 5');
+      const list = el('div', 'pf-top-choices');
+      const byRef = new Map();
+      for (const row of sync.rows('works')) byRef.set(row.series_ref, workFromRef(row.series_ref, row.title, row.cover_url));
+      for (const w of [...libraryWorks('all'), ...historyWorks()]) byRef.set(String(w.id), w);
+      const paint = () => {
+        list.replaceChildren();
+        const term = input.value.trim().toLocaleLowerCase();
+        const works = [...byRef.values()].filter((w) => titleOf(w).toLocaleLowerCase().includes(term)).slice(0, 60);
+        for (const work of works) {
+          const button = el('button', 'pf-top-choice');
+          button.type = 'button';
+          const cover = el('span', 'pf-top-choice-cover');
+          void mountImage(cover, work);
+          button.append(cover, el('bdi', null, titleOf(work)));
+          button.onclick = () => {
+            closeSheet();
+            placeInTop(descriptorOf(work), position);
+            toast(`صار رقم ${position} في أفضل 5`);
+            void profile.show(me());
+          };
+          list.append(button);
+        }
+        if (!works.length) list.append(el('p', null, 'ما لقينا عملًا. افتح صفحة العمل وأضفه إلى أفضل 5.'));
+      };
+      input.oninput = paint;
+      body.append(input, list);
+      paint();
+      return () => { input.oninput = null; };
+    });
+  }
   const toggleTopCurrent = () => openTopPicker(state.current);
   function afterLibraryChange() {
     refreshLibraryDetail();
@@ -2507,9 +2546,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   /**
    * @param {HTMLElement} target
-   * @param {{ userId?: string, own?: boolean, limit?: number }} [opts]
+   * @param {{ userId?: string, own?: boolean, limit?: number, profile?: boolean }} [opts]
    */
-  function renderHistoryList(target, { userId = me(), own = userId === me(), limit = Infinity } = {}) {
+  function renderHistoryList(target, { userId = me(), own = userId === me(), limit = Infinity, profile = false } = {}) {
     if (historyInsightsOwner !== me()) { historyInsights = null; historyInsightsOwner = me(); }
     const rows = viewRows(userId);
     if (!rows.length) {
@@ -2550,7 +2589,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       when.innerHTML = glyph('clock', { size: 14 });
       when.append(document.createTextNode(d));
       meta.append(when);
-      copy.append(meta);
+      if (profile) {
+        when.replaceChildren(document.createTextNode(d));
+        meta.removeChild(when);
+        copy.append(meta, when);
+      } else copy.append(meta);
       open.append(cover, copy);
       open.onclick = () => void openWork(work);
       item.append(open);
@@ -4343,6 +4386,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     edit: () => editProfile(),
     libraryWorks,
     historyList: (target, opts) => renderHistoryList(target, opts),
+    chooseTop: (position) => chooseProfileTop(position),
     topSlots: () => topSlots().map((r) => (r ? workFromRef(r.series_ref, topTitle(r)) : null)),
     toast: (text) => toast(text),
     removeFromTop: (ref) => removeFromTop(ref),
@@ -4357,6 +4401,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     editor = openProfileEditor({
       sync,
       profile: profile.editable(),
+      previewWorks: libraryWorks('all').slice(0, 2).map((w) => ({ title: titleOf(w), cover: w.coverImage?.large || null })),
       openSheet,
       closeSheet,
       toast,

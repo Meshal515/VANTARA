@@ -1,5 +1,6 @@
+import { contrastRatio } from './profile-color.js';
 import { describe, expect, it } from 'vitest';
-import { normalizeProfileTheme, profileThemeStyle, profileThemePatch, matchedProfileTheme, reverseProfileGradient } from './profile-theme.js';
+import { normalizeProfileTheme, profileThemeStyle, profileThemePatch, matchedProfileTheme, reverseProfileGradient, sampleProfileBackground } from './profile-theme.js';
 
 describe('profile themes', () => {
   it('reverses the two gradient colors without changing cards or angle', () => {
@@ -9,24 +10,20 @@ describe('profile themes', () => {
     expect(reverseProfileGradient(reversed)).toEqual(theme);
     expect(reverseProfileGradient({ backgroundColor: '#223344' }).backgroundGradient).toBeNull();
   });
-  it('keeps all profile and card text above 4.5 contrast, including midgray colors', () => {
-    const channels = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-    const light = (rgb) => rgb.map((n) => n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4)
-      .reduce((sum, n, i) => sum + n * [0.2126, 0.7152, 0.0722][i], 0);
-    const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-    for (const [first, second] of [['#767676', '#767676'], ['#ffffff', '#000000'], ['#b07070', '#7060a0'], ['#ffffff', '#eeeeee']]) {
-      const style = profileThemeStyle({ backgroundColor: first, backgroundGradient: second, cardColor: first });
-      const shade = style['--pf-background'].includes('rgba') ? 0.42 : 1;
-      for (let i = 0; i <= 20; i++) {
-        const background = channels(first).map((v, c) => (v + (channels(second)[c] - v) * i / 20) * shade);
-        for (const key of ['--text-1', '--text-2', '--text-3', '--text-4']) {
-          expect(contrast(light(channels(style[key])), light(background))).toBeGreaterThanOrEqual(4.5);
-        }
-      }
-      for (const key of ['--pf-card-text', '--pf-card-muted']) {
-        expect(contrast(light(channels(style[key])), light(channels(first)))).toBeGreaterThanOrEqual(4.5);
+  it('preserves selected endpoints and makes semantic colors readable on solids', () => {
+    for (const color of ['#ffffff', '#08070c', '#767676', '#5fd49a']) {
+      const style = profileThemeStyle({ backgroundColor: color, cardColor: color });
+      for (const key of ['--text-1', '--text-2', '--text-3', '--text-4', '--success', '--accent-text', '--pf-card-text', '--pf-card-muted']) {
+        expect(contrastRatio(style[key], color)).toBeGreaterThanOrEqual(4.5);
       }
     }
+  });
+  it('samples a gradient at its local position and settles to the ending color below it', () => {
+    const theme = { backgroundColor: '#ffffff', backgroundGradient: '#000000', backgroundAngle: 180 };
+    expect(sampleProfileBackground(theme, 100, 0, 200, 840)).toBe('#ffffff');
+    expect(sampleProfileBackground(theme, 100, 420, 200, 840)).toBe('#808080');
+    expect(sampleProfileBackground(theme, 100, 1200, 200, 840)).toBe('#000000');
+    expect(sampleProfileBackground(reverseProfileGradient(theme), 100, 0, 200, 840)).toBe('#000000');
   });
   it('uses only complete hex colors and bounded integer angles', () => {
     expect(normalizeProfileTheme({ backgroundColor: '#ABCDEF', cardColor: 'url(x)', backgroundAngle: 361 }))
@@ -47,7 +44,8 @@ describe('profile themes', () => {
   });
   it('keeps text legible across gradients with both bright and dark ends', () => {
     const style = profileThemeStyle({ backgroundColor: '#ffffff', backgroundGradient: '#000000' });
-    expect(style['--pf-background']).toContain('rgba(0, 0, 0, 0.58)');
+    expect(style['--pf-background']).toBe('linear-gradient(135deg, #ffffff, #000000)');
+    expect(style['--pf-background-end']).toBe('#000000');
     expect(style['--text-1']).toBe('#ffffff');
   });
   it('matches one image without a gradient, and uses the avatar as the second color when matching both', () => {
