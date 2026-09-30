@@ -292,7 +292,7 @@ const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
   ['accounts', 'user_id, username, created_at, rev, badge'],
-  ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, rev'],
+  ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, background_color, background_gradient, background_angle, card_color, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [
     'frames',
@@ -2315,7 +2315,22 @@ const PROFILE_COLUMNS: Record<string, string> = {
   bannerKey: 'banner_key',
   bio: 'bio',
   accent: 'accent',
+  backgroundColor: 'background_color',
+  backgroundGradient: 'background_gradient',
+  backgroundAngle: 'background_angle',
+  cardColor: 'card_color',
 };
+
+/** Theme values are data, never arbitrary CSS. Invalid fields leave the saved value intact. */
+function validProfileField(key: string, value: unknown): boolean {
+  if (['backgroundColor', 'backgroundGradient', 'cardColor'].includes(key)) {
+    return value === null || (typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value));
+  }
+  if (key === 'backgroundAngle') {
+    return value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 360);
+  }
+  return true;
+}
 
 async function applyFieldMerge(
   op: IncomingOp,
@@ -2375,7 +2390,7 @@ async function applyFieldMerge(
         );
         for (const [key, value] of safeFields) {
           const column = PROFILE_COLUMNS[key];
-          if (!column) continue;
+          if (!column || !validProfileField(key, value)) continue;
           const path = `$.${key}`;
           statements.push(
             env.DB.prepare(

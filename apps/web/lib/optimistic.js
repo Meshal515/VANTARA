@@ -278,7 +278,7 @@ export const PROJECTIONS = {
   },
   'profile.patch': (op, get, userId) => {
     const fields = op.payload?.fields ?? {};
-    const column = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key', accent: 'accent' };
+    const column = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key', accent: 'accent', backgroundColor: 'background_color', backgroundGradient: 'background_gradient', backgroundAngle: 'background_angle', cardColor: 'card_color' };
     const prev = get('profiles', userId) ?? { user_id: userId };
     const row = { ...prev };
     for (const [k, v] of Object.entries(fields)) if (column[k]) row[column[k]] = v;

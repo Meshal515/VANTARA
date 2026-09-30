@@ -25,6 +25,7 @@ import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
 import { DEFAULT_SILK, hexToRgb01, rgb01ToHex } from '../lib/silk-palette.js';
 import { withIdentity } from '../lib/identity.js';
 import { displayTitle, refForTitle } from './work-ref.js';
+import { applyProfileTheme } from './profile-theme.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -99,11 +100,12 @@ export function createProfile(ctx) {
   let shownSig = '';
   const signature = (userId) => {
     const p = profileOf(userId);
-    return JSON.stringify([p?.display_name, p?.bio, p?.avatar_key, p?.banner_key]);
+    return JSON.stringify([p?.display_name, p?.bio, p?.avatar_key, p?.banner_key, p?.background_color, p?.background_gradient, p?.background_angle, p?.card_color]);
   };
   /** ما حفظته للتوّ ولم تُرجعه المزامنة بعد: الملف يُظهره فورًا بدل القديم. */
   let local = null;
-  const COLUMN = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key' };
+  const COLUMN = { displayName: 'display_name', bio: 'bio', avatarKey: 'avatar_key', bannerKey: 'banner_key', backgroundColor: 'background_color', backgroundGradient: 'background_gradient', backgroundAngle: 'background_angle', cardColor: 'card_color' };
+  const themeOf = (p) => ({ backgroundColor: p?.background_color, backgroundGradient: p?.background_gradient, backgroundAngle: p?.background_angle, cardColor: p?.card_color });
   const serverProfileOf = (userId) => sync.rows('profiles', (p) => p.user_id === userId)[0] ?? null;
   const usernameOf = (userId) => sync.rows('accounts', (a) => a.user_id === userId)[0]?.username ?? '';
   const profileOf = (userId) => {
@@ -439,6 +441,8 @@ export function createProfile(ctx) {
     host.replaceChildren();
     host.style.removeProperty('--pf-tint');
     host.style.removeProperty('--pf-tint-deep');
+    applyProfileTheme(host, themeOf(profile));
+    host.closest('#profile')?.classList.toggle('pf-page-themed', host.classList.contains('pf-themed'));
 
     const top = el('div', 'pf-top');
     top.innerHTML = iconButton('back', 'رجوع', { act: 'profileBack', cls: 'icon-btn pf-glass' });
@@ -586,6 +590,7 @@ export function createProfile(ctx) {
         avatarKey: p?.default_avatar ? null : (p?.avatar_key ?? null),
         defaultAvatar: p?.default_avatar ? p.avatar_key : null,
         bannerKey: p?.banner_key ?? null,
+        ...themeOf(p),
       };
     },
     applyLocal(fields) {

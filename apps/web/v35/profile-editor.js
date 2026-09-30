@@ -13,6 +13,8 @@
 
 import { glyph, iconButton } from './icons.js';
 import { MediaError, TARGETS, drawCrop, encodeAnimated, encodeStatic, sniffAnimated } from './media-encode.js';
+import { createProfileAppearance } from './profile-appearance.js';
+import { normalizeProfileTheme, profileThemePatch } from './profile-theme.js';
 
 const NAME_MAX = 40;
 const BIO_MAX = 160;
@@ -153,13 +155,13 @@ function openCropper(file, kind, { animated = false } = {}) {
  *   openSheet: (build: (body: HTMLElement) => (void|(() => void))) => void,
  *   closeSheet: () => boolean,
  *   toast: (text: string) => void,
- *   onSaved: (fields: Record<string, string|null>) => void,
+ *   onSaved: (fields: Record<string, string|number|null>) => void,
  *   onClose: (saved: boolean) => void,
  * }} ctx
  */
 export function openProfileEditor(ctx) {
-  const start = { ...ctx.profile };
-  const draft = { ...ctx.profile, avatarBlob: null, bannerBlob: null };
+  const start = { ...ctx.profile, ...normalizeProfileTheme(ctx.profile) };
+  const draft = { ...start, avatarBlob: null, bannerBlob: null };
   let saving = false;
   let cropping = false;
   let preparing = false;
@@ -192,6 +194,7 @@ export function openProfileEditor(ctx) {
           <span class="pe-label">النبذة <em id="peBioCount"></em></span>
           <textarea class="pe-bio" id="peBio" maxlength="${BIO_MAX}" rows="3" dir="auto" placeholder="سطر أو سطرين عنك وعن اللي تقرأه"></textarea>
         </label>
+        <div class="pe-appearance-host"></div>
         <p class="pe-error" id="peError" role="alert" hidden></p>
       </div>
     </div>
@@ -202,11 +205,16 @@ export function openProfileEditor(ctx) {
   const bioInput = q('peBio');
   nameInput.value = draft.displayName ?? '';
   bioInput.value = draft.bio ?? '';
+  const appearance = createProfileAppearance(root.querySelector('.pe-appearance-host'), draft, refresh);
+  let previewImages = {};
 
   const objectUrls = new Set();
+  const blobUrls = new WeakMap();
   const preview = (blob) => {
+    if (blobUrls.has(blob)) return blobUrls.get(blob);
     const u = URL.createObjectURL(blob);
     objectUrls.add(u);
+    blobUrls.set(blob, u);
     return u;
   };
   function paintImages() {
@@ -225,22 +233,26 @@ export function openProfileEditor(ctx) {
     } else {
       face.append(el('span', 'pe-initial', [...(nameInput.value.trim() || '؟')][0]));
     }
+    previewImages = { avatar: faceSrc, banner: bannerSrc };
+    appearance.preview({ name: nameInput.value.trim(), bio: bioInput.value.trim(), ...previewImages });
   }
   const dirty = () =>
     Boolean(draft.avatarBlob || draft.bannerBlob) ||
     nameInput.value.trim() !== (start.displayName ?? '') ||
     (bioInput.value.trim() || null) !== (start.bio || null) ||
     draft.avatarKey !== start.avatarKey ||
-    draft.bannerKey !== start.bannerKey;
+    draft.bannerKey !== start.bannerKey ||
+    Object.keys(profileThemePatch(start, draft)).length > 0;
   function refresh() {
     const name = nameInput.value.trim();
     q('peNameCount').textContent = `${nameInput.value.length}/${NAME_MAX}`;
     q('peBioCount').textContent = `${bioInput.value.length}/${BIO_MAX}`;
     q('peNameCount').classList.toggle('pe-near', nameInput.value.length > NAME_MAX - 6);
     q('peBioCount').classList.toggle('pe-near', bioInput.value.length > BIO_MAX - 20);
-    root.querySelector('.pe-save').disabled = saving || preparing || !dirty() || !name;
+    root.querySelector('.pe-save').disabled = saving || preparing || !dirty() || !name || appearance.hasInvalid();
     nameInput.setAttribute('aria-invalid', String(!name));
     if (!draft.avatarKey && !draft.avatarBlob && !draft.defaultAvatar) paintImages();
+    appearance.preview({ name, bio: bioInput.value.trim(), ...previewImages });
   }
   function showError(text) {
     const e = q('peError');
@@ -363,13 +375,14 @@ export function openProfileEditor(ctx) {
   // ── الحفظ ──
   async function save() {
     const name = nameInput.value.trim();
-    if (!name || saving) return;
+    if (!name || saving || preparing || appearance.hasInvalid()) return;
     saving = true;
     const btn = root.querySelector('.pe-save');
     btn.disabled = true;
+    root.querySelector('.pe-scroll').inert = true;
     showError('');
     try {
-      const fields = {};
+      const fields = profileThemePatch(start, draft);
       if (draft.avatarBlob) {
         btn.textContent = 'رفع الصورة…';
         fields.avatarKey = (await ctx.sync.uploadMedia(draft.avatarBlob)).url;
@@ -400,6 +413,7 @@ export function openProfileEditor(ctx) {
       );
       btn.textContent = 'حفظ';
       saving = false;
+      root.querySelector('.pe-scroll').inert = false;
       refresh();
     }
   }
@@ -429,6 +443,7 @@ export function openProfileEditor(ctx) {
   function close(saved) {
     if (closed) return;
     closed = true;
+    appearance.destroy();
     for (const u of objectUrls) URL.revokeObjectURL(u);
     root.classList.add('pe--out');
     setTimeout(() => root.remove(), 180);

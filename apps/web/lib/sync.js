@@ -214,6 +214,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     overlay = projectQueue(landing.length ? [...landing.map((l) => l.op), ...queue] : queue, mirror, user?.userId ?? null);
     valuesCache = new Map();
   };
+  // Reopening offline must show durable queued edits before the first network pull.
+  refreshOverlay();
   let pulling = false;
   let pullAgain = false;
   let sessionGeneration = 0;
