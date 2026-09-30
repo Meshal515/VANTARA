@@ -1,7 +1,6 @@
 /*
  * الملف الشخصي. بانرٌ حريري بلون الصورة، والصورة على حافته بحلقة من نفس
- * اللون (--pf-tint). اللون الشخصي لا يتجاوز الحلقة ولمعة الرأس وشارة
- * «يقرأ الآن»: الصفحة تبقى على سطوح التطبيق الداكنة.
+ * اللون (--pf-tint). ألوان الخلفية والبطاقات اختيارية ومحصورة في الملف.
  */
 
 .v35 #profile {
@@ -11,6 +10,47 @@
 .v35 #profileBody {
   --pf-tint: var(--accent);
   --pf-tint-deep: #3d2c8d;
+}
+.v35 #profile.pf-page-themed { padding-bottom: 0; }
+.v35 #profileBody.pf-themed {
+  min-height: calc(100dvh - 64px);
+  padding-bottom: 40px;
+  background: var(--pf-background, var(--bg));
+  color: var(--text-1);
+}
+
+/* Cards get their own foreground: a light card on a dark profile stays readable. */
+.v35 .pf-themed :is(.pf-stats, .pf-now, .pf-first, .pf-log, .pf-empty, .rv-list, .pf-slot--empty .pf-card-frame, .pf-card, .pf-slot-open),
+.v35 .pf-themed .pe-preview-card {
+  --text-1: var(--pf-card-text);
+  --text-2: var(--pf-card-muted);
+  --text-3: var(--pf-card-muted);
+  --text-4: var(--pf-card-muted);
+  --line: var(--pf-card-line);
+  --line-strong: var(--pf-card-line);
+  --surface-1: var(--pf-card);
+  --surface-2: var(--pf-card-hover);
+  background: var(--pf-card);
+  color: var(--pf-card-text);
+}
+.v35 .pf-themed .pf-edit {
+  background: var(--pf-card);
+  color: var(--pf-card-text);
+}
+.v35 .pf-themed :is(.pf-card, .pf-slot-open) {
+  border-radius: var(--r-md);
+  overflow: hidden;
+  padding-bottom: 8px;
+  box-shadow: inset 0 0 0 1px var(--pf-card-line);
+}
+.v35 .pf-themed :is(.pf-card, .pf-slot-open) :is(.pf-card-title, .pf-card-meta) {
+  padding-inline: 4px;
+}
+.v35 .pf-themed .rv-list { padding: 10px; border-radius: var(--r-lg); }
+.v35 .pf-themed :is(.pf-initial, .pf-slot-remove, .pf-slot--empty .pf-slot-plus),
+.v35 .pf-themed .pe-face-img .pe-initial {
+  background: var(--pf-card);
+  color: var(--pf-card-text);
 }
 .v35 .pf-top {
   position: absolute;
@@ -655,11 +695,27 @@
   color: var(--text-4);
   box-shadow: none;
 }
+.v35.pe.pf-themed .pe-save:disabled {
+  background: var(--pf-card);
+  color: var(--pf-card-muted);
+}
+.v35.pe.pf-themed .pe-top .icon-btn:active {
+  background: var(--pf-card);
+  color: var(--pf-card-text);
+}
+@media (hover: hover) {
+  .v35.pe.pf-themed .pe-top .icon-btn:hover {
+    background: var(--pf-card);
+    color: var(--pf-card-text);
+  }
+}
 .v35 .pe-scroll {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-bottom: calc(var(--safe-bottom) + 40vh);
+  background: var(--pf-background, var(--bg));
+  color: var(--text-1);
 }
 
 .v35 .pe-banner {
@@ -1012,3 +1068,255 @@
   font-size: 12px;
   color: var(--text-4);
 }
+
+/* Profile appearance controls keep the app palette around the personal preview. */
+.v35 .pe-appearance {
+  --bg: #08070c;
+  --surface-1: #121019;
+  --surface-2: #18161f;
+  --text-1: #f3f4f8;
+  --text-2: #bab6c6;
+  --text-3: #a49eb3;
+  --text-4: #85809a;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  display: grid;
+  gap: 18px;
+  margin-top: 8px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  color: var(--text-1);
+}
+.v35 .pe-appearance-heading h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.v35 .pe-appearance-heading span,
+.v35 .pe-theme-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+.v35 .pe-preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--pf-background, var(--bg));
+  color: var(--text-1);
+}
+.v35 .pe-preview-banner {
+  height: 66px;
+  background: linear-gradient(125deg, #3d285f, #17294d);
+  background-size: cover;
+  background-position: center;
+}
+.v35 .pe-preview-content {
+  display: grid;
+  gap: 6px;
+  padding: 0 14px 14px;
+}
+.v35 .pe-preview-avatar {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  border: 3px solid var(--bg);
+  border-radius: 50%;
+  background: var(--surface-2) center / cover no-repeat;
+  color: #fff;
+  font-weight: 800;
+}
+.v35 .pe-preview-name {
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.v35 .pe-preview-bio {
+  margin: 0 0 4px;
+  max-height: 48px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-line;
+  color: var(--text-2);
+}
+.v35 .pe-preview-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  font-size: 13px;
+}
+.v35 .pe-preview-card span {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.v35 .pe-preview-label {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+}
+.v35 .pe-theme-section {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.v35 .pe-theme-section + .pe-theme-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.v35 .pe-theme-section legend {
+  margin-bottom: 10px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.v35 .pe-theme-hint {
+  margin: 0 0 12px;
+}
+.v35 .pe-theme-modes {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+.v35 .pe-theme-modes button {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+.v35 .pe-theme-modes button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+.v35 .pe-color-title {
+  display: block;
+  margin: 16px 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.v35 .pe-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+.v35 .pe-color-row input[type='color'] {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  cursor: pointer;
+}
+.v35 .pe-color-row input[type='color']::-webkit-color-swatch-wrapper { padding: 3px; }
+.v35 .pe-color-row input[type='color']::-webkit-color-swatch { border: 1px solid var(--line-strong); border-radius: 7px; }
+.v35 .pe-color-row input[type='color']::-moz-color-swatch { border: 1px solid var(--line-strong); border-radius: 7px; }
+.v35 .pe-hex-label {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.v35 .pe-hex {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  font-family: ui-monospace, monospace;
+  text-align: left;
+}
+.v35 .pe-hex[aria-invalid='true'] { box-shadow: inset 0 -2px var(--danger); }
+.v35 .pe-color-error { margin: 6px 0; color: var(--danger); font-size: 11px; }
+.v35 .pe-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+.v35 .pe-swatch {
+  width: 36px;
+  height: 36px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--swatch);
+  background-clip: content-box;
+}
+.v35 .pe-swatch[aria-pressed='true'] { border: 2px solid var(--accent); }
+.v35 .pe-angle {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.v35 .pe-angle span { display: flex; justify-content: space-between; }
+.v35 .pe-angle output { direction: ltr; font-variant-numeric: tabular-nums; }
+.v35 .pe-angle input { width: 100%; height: 32px; margin: 0; direction: ltr; accent-color: var(--accent); }
+.v35 .pe-appearance :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.v35 .pe-appearance [hidden] { display: none !important; }
+@media (max-width: 360px) {
+  .v35 .pe-appearance { padding: 12px; }
+  .v35 .pe-color-row { gap: 6px; }
+}
+.v35 .pe-match-heading { display: grid; grid-template-columns: 1fr auto; gap: 4px; align-items: center; }
+.v35 .pe-match-heading strong { font-size: 14px; }
+.v35 .pe-match-heading span { grid-column: 1 / -1; font-size: 12px; color: var(--text-3); }
+.v35 .pe-theme-reset { min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--accent-text); font: inherit; font-size: 11px; }
+.v35 .pe-gradient-reverse {
+  display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+  min-height: 44px; padding: 10px 16px; border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--surface-1); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 650;
+}
+.v35 .pe-gradient-reverse:active { background: var(--surface-2); }
+.v35 .pe-match-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.v35 .pe-match-options button {
+  display: grid; justify-items: center; align-content: center; gap: 10px;
+  min-width: 0; min-height: 112px; padding: 12px 4px;
+  border: 1px solid var(--line-strong); border-radius: 14px;
+  background: var(--surface-1); color: var(--text-2); font: inherit; font-size: 11px; font-weight: 650;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.v35 .pe-match-options button[aria-pressed='true'] {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface-1)); color: #fff;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.v35 .pe-match-options button:active { transform: scale(0.97); }
+.v35 .pe-match-art { width: 44px; height: 32px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: var(--surface-2) center / cover no-repeat; }
+.v35 .pe-match-art--avatar { width: 34px; height: 34px; border-radius: 50%; }
+.v35 .pe-match-art--both { background-size: 22px 32px, 22px 32px; background-position: left center, right center; }
+.v35 .pe-match-status { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.7; }
+.v35 .pe-manual { border-top: 1px solid var(--line); padding-top: 4px; }
+.v35 .pe-manual summary { min-height: 44px; padding: 12px 0; cursor: pointer; font-size: 13px; color: var(--text-2); }
+.v35 .pe-manual summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.v35 .pe-manual-body { display: grid; gap: 20px; padding-top: 10px; }

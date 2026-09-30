@@ -35,6 +35,44 @@ async function postPatches(
 }
 
 describe('field merge delivery guarantees', () => {
+  it('persists profile colors and delivers them to a friend through sync', async () => {
+    const { env, db } = fieldMergeEnv();
+    const fields = { backgroundColor: '#201234', backgroundGradient: '#0c1830', backgroundAngle: 135, cardColor: '#34204a' };
+    expect((await postPatches(env, 'profile.patch', [{ opId: 'colors', fields }])).status).toBe(200);
+    const expected = { background_color: '#201234', background_gradient: '#0c1830', background_angle: 135, card_color: '#34204a' };
+    expect(db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(USER)).toMatchObject(expected);
+    const friend = 'bedcf897-a6f0-4730-b757-402b14891ca5';
+    const token = await mintToken(friend, SECRET);
+    const response = await worker.fetch(new Request('https://worker.test/v1/sync?since=0', {
+      headers: { authorization: `Bearer ${token}` },
+    }), env, { waitUntil: () => {} });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { changes: { profiles: Array<Record<string, unknown>> } };
+    expect(body.changes.profiles.find((row) => row.user_id === USER)).toMatchObject(expected);
+  });
+
+  it('merges colors independently, ignores malformed theme values and allows reset', async () => {
+    const { env, db } = fieldMergeEnv();
+    await postPatches(env, 'profile.patch', [{ opId: 'theme-start', fields: {
+      backgroundColor: '#223344', backgroundGradient: '#334455', backgroundAngle: 90, cardColor: '#445566',
+    } }]);
+    await postPatches(env, 'profile.patch', [{ opId: 'card-only', fields: { cardColor: '#abcdef' } }]);
+    await postPatches(env, 'profile.patch', [{ opId: 'invalid-theme', fields: {
+      backgroundColor: 'url(https://example.com)', backgroundGradient: {}, backgroundAngle: 999, cardColor: '#12',
+    } }]);
+    expect(db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(USER)).toMatchObject({
+      background_color: '#223344', background_gradient: '#334455', background_angle: 90, card_color: '#abcdef',
+    });
+    await postPatches(env, 'profile.patch', [{ opId: 'theme-reset', fields: {
+      backgroundColor: null, backgroundGradient: null, backgroundAngle: null, cardColor: null,
+    } }]);
+    expect(db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(USER)).toMatchObject({
+      background_color: null, background_gradient: null, background_angle: null, card_color: null,
+    });
+    await postPatches(env, 'profile.patch', [{ opId: 'theme-start', fields: { backgroundColor: '#223344' } }]);
+    expect(db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(USER)).toMatchObject({ background_color: null });
+  });
+
   it('does not let a retried older profile op overwrite a newer value', async () => {
     const { env, db } = fieldMergeEnv();
     await postPatches(env, 'profile.patch', [{ opId: 'old-op', fields: { displayName: 'قديم' } }]);

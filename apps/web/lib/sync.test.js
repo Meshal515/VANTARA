@@ -94,6 +94,18 @@ describe('revoking a friend’s recent views', () => {
 });
 
 describe('queue durability', () => {
+  it('restores queued profile colors after an offline reload and preserves a later reset', async () => {
+    storage.setItem('vantara.mirror', JSON.stringify({ profiles: { u1: { user_id: 'u1', background_color: '#111111', bio: 'نبذة' } } }));
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'offline' }, 503));
+    const sync = await loadSync({ storage, fetchImpl });
+    sync.enqueue('profile.patch', { fields: { backgroundColor: '#223344', backgroundGradient: '#445566', backgroundAngle: 90, cardColor: '#ffffff' } });
+    const reloaded = await loadSync({ storage, fetchImpl });
+    expect(reloaded.rows('profiles')[0]).toMatchObject({ background_color: '#223344', background_gradient: '#445566', background_angle: 90, card_color: '#ffffff', bio: 'نبذة' });
+    reloaded.enqueue('profile.patch', { fields: { backgroundColor: null, backgroundGradient: null, backgroundAngle: null, cardColor: null } });
+    const reset = await loadSync({ storage, fetchImpl });
+    expect(reset.rows('profiles')[0]).toMatchObject({ background_color: null, background_gradient: null, background_angle: null, card_color: null, bio: 'نبذة' });
+  });
+
   it('keeps unsent writes when the server asks for a full resync', async () => {
     // D1 استُعيدت من نسخة احتياطية فرجع عدّادها. الكود القديم كان يمسح الطابور
     // مع المرآة: كتابات المستخدم غير المرسلة تضيع لسبب لا علاقة له بها.
