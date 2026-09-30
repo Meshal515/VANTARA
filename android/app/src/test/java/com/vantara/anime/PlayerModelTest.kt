@@ -209,4 +209,31 @@ class PlayerModelTest {
         assertEquals(listOf("1080p", "720p", "جودة غير محددة", "غير متاح"), groups.map { it.first })
         assertNotEquals("mega", groups.last().second.single().code.lowercase())
     }
+    @Test fun `warm preparation can be completed once without closing the live session`() {
+        val h = HealthStore(null) { now }
+        val p = PreparedEpisode("warm", emptyList(), 1f, Preferences(), PlaybackSession(emptyList(), h), h,
+            limitedSourceId = "s1", clock = { now })
+        p.report(report("a", "hgcloud", RouteState.READY, 720, cand("first", "a.cdn", 720)))
+        p.finish()
+        assertTrue(p.done)
+        assertTrue(p.beginFullPreparation())
+        assertFalse(p.done)
+        assertFalse(p.beginFullPreparation())
+        assertEquals("first", p.best()?.id)
+        p.report(report("b", "mp4upload", RouteState.READY, 720, cand("second", "b.cdn", 720), source = "s2"))
+        p.finish()
+        assertTrue(p.done)
+        assertEquals(2, p.routes().size)
+    }
+
+    @Test fun `full preparation waits for both warming and expansion batches`() {
+        val h = HealthStore(null) { now }
+        val p = PreparedEpisode("warm", emptyList(), 1f, Preferences(), PlaybackSession(emptyList(), h), h,
+            limitedSourceId = "s1", clock = { now })
+        assertTrue(p.beginFullPreparation())
+        p.finish()
+        assertFalse(p.done)
+        p.finish()
+        assertTrue(p.done)
+    }
 }

@@ -288,38 +288,55 @@ class AnimeEngine(context: Context) {
     ): com.vantara.anime.stream.PreparedEpisode {
         prepared.remove(sessionId)?.job?.cancel()
         val session = PlaybackSession(emptyList(), health)
-        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health)
+        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health, limitedSourceId = warmSourceId)
         sessions[sessionId] = session
         sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
         prepared[sessionId] = prep
-        prep.job = background.launch {
-            val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
-                .filter { warmSourceId == null || it.sourceId == warmSourceId }
-            kotlinx.coroutines.coroutineScope {
-                for (copy in ordered) {
-                    launch {
+        // Own both warm-up and later expansion so closing the session cancels both.
+        prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
+        launchPreparation(prep, copies.filter { warmSourceId == null || it.sourceId == warmSourceId }, preferredSourceId ?: warmSourceId, preferredServer)
+        return prep
+    }
+
+    /** Keep the warmed source's work; request the remaining copies without refetching it. */
+    fun completePreparation(id: String): Boolean {
+        val prep = prepared[id] ?: return false
+        val req = sessionRequests[id] ?: return false
+        if (prep.job?.isActive != true || !prep.beginFullPreparation()) return false
+        launchPreparation(prep, req.copies.filter { it.sourceId != prep.limitedSourceId })
+        return true
+    }
+
+    private fun launchPreparation(
+        prep: com.vantara.anime.stream.PreparedEpisode,
+        copies: List<SourceAnime>,
+        preferredSourceId: String? = null,
+        preferredServer: String? = null,
+    ) {
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            try {
+                val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
+                coroutineScope {
+                    for (copy in ordered) launch {
                         runCatching {
-                            // المهلة تشمل العثور على الحلقة وتحميل الإضافة أيضًا؛ وإلا قد
-                            // يظل التحضير مفتوحًا بلا نهاية قبل ظهور أي سيرفر.
                             withTimeout(PREPARE_TIMEOUT_MS) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                                val ep = resolver.pick(resolver.episodes(c), number) ?: return@withTimeout
+                                val ep = resolver.pick(resolver.episodes(c), prep.number) ?: return@withTimeout
                                 val a = adapter(copy.sourceId) ?: return@withTimeout
                                 val trace = com.vantara.anime.adapters.ResolveTrace(prep::report)
-                                val links = if (copy.sourceId == (preferredSourceId ?: warmSourceId) && preferredServer != null)
+                                val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
-                                else a.candidates(ep, trace = trace, enough = if (warmSourceId == null) Int.MAX_VALUE else 1)
-                                links
-                                    .also { prep.adopt(copy.sourceId, it) }
+                                else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
+                                prep.adopt(copy.sourceId, links)
                             }
                         }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
                     }
                 }
+            } finally {
+                prep.finish()
+                health.flush()
             }
-            prep.finish()
-            health.flush()
         }
-        return prep
     }
 
     fun prepared(id: String): com.vantara.anime.stream.PreparedEpisode? = prepared[id]

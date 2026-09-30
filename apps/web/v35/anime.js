@@ -971,7 +971,7 @@ export function createAnime(deps) {
   const preferredCode = (id) => readJson(SERVER_KEY, {})[id] ?? null;
   const workingServer = (id) => {
     const known = readJson(WORKING_SERVER_KEY, {});
-    return known.lastWorking ?? known[id] ?? null;
+    return known[id] ?? known.lastWorking ?? null;
   };
   const rememberCode = (id, code) => {
     if (!id || !code) return;
@@ -1133,10 +1133,8 @@ export function createAnime(deps) {
     const saved = localWatch()[m.id]?.episodes?.[n];
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
-    const autoServer = workingServer(m.id);
+    const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null };
-    let autoAttempted = false;
-    let fallbackTimer = null;
     let paintQueued = false;
     let off = [];
 
@@ -1289,29 +1287,6 @@ export function createAnime(deps) {
         }
       };
 
-      // جرّب المصدر والسيرفر اللذين بدآ الفيديو فعلًا، حتى في أنمي مختلف.
-      // الرابط نفسه لا يُعاد استخدامه: يجب استخراجه للحلقة الجديدة.
-      const maybeAutoPlay = () => {
-        if (!autoServer || autoAttempted || sheet.closed || sheet.busy || !sheet.session) return;
-        const preferred = engine.matchingWorkingRoute(sheet.routes, autoServer);
-        if (preferred) {
-          clearTimeout(fallbackTimer);
-          fallbackTimer = null;
-          autoAttempted = true;
-          void playRoute(preferred);
-          return;
-        }
-        const ready = sheet.routes.find((r) => r.state === 'READY');
-        if (!ready || fallbackTimer) return;
-        // المصدر القديم قد يكون غائبًا عن هذا العمل: لا نتركه ينتظر بلا نهاية.
-        fallbackTimer = setTimeout(() => {
-          fallbackTimer = null;
-          if (sheet.closed || sheet.busy || autoAttempted) return;
-          const pick = engine.matchingWorkingRoute(sheet.routes, autoServer) ?? sheet.routes.find((r) => r.state === 'READY');
-          if (pick) { autoAttempted = true; void playRoute(pick); }
-        }, sheet.done ? 0 : 1800);
-      };
-
       const tile = (r) => {
         let b = routeNodes.get(r.id);
         if (b) {
@@ -1393,7 +1368,6 @@ export function createAnime(deps) {
             sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
             sheet.routes = engine.upsertRoute(sheet.routes, e.route);
             queuePaint();
-            maybeAutoPlay();
           }),
           engine.on('prepared', (e) => {
             if (e.session !== sheet.session) return;
@@ -1403,10 +1377,10 @@ export function createAnime(deps) {
           }),
         );
         try {
-          const copies = autoServer?.sourceId
-            ? [...work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+          const copies = previousServer?.sourceId
+            ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
-          const out = await engine.prepare({ copies, episode: n, preferredSourceId: autoServer?.sourceId, preferredServer: autoServer?.server });
+          const out = await engine.prepare({ copies, episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;
@@ -1418,7 +1392,6 @@ export function createAnime(deps) {
           sheet.routes = snap?.routes ?? out.routes ?? [];
           sheet.done = Boolean(snap?.done ?? out.done);
           queuePaint();
-          maybeAutoPlay();
         } catch (e) {
           status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
         }
@@ -1427,7 +1400,6 @@ export function createAnime(deps) {
       return () => {
         sheet.closed = true;
         clearInterval(cooldownTimer);
-        clearTimeout(fallbackTimer);
         for (const f of off) f();
         off = [];
         // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
@@ -1460,8 +1432,8 @@ export function createAnime(deps) {
         position: startAt,
         poster: m.posterSmall ?? m.poster ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
-        copies: autoServer?.sourceId
-          ? [...sheet.work.copies].sort((a, b) => Number(b.sourceId === autoServer.sourceId) - Number(a.sourceId === autoServer.sourceId))
+        copies: previousServer?.sourceId
+          ? [...sheet.work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
           : sheet.work.copies,
         malId: m.idMal ?? null,
         resume,
