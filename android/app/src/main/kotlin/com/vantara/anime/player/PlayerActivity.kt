@@ -80,6 +80,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.TimeUnit
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -229,10 +230,12 @@ class PlayerActivity : Activity() {
     private var waiting: Job? = null
     private var warmedSessionId: String? = null
     private var warmedEpisode = -1
-    private var skipTimings = IntroSkip.Timings()
-    private var skipRequestKey: String? = null
-    private var skipRequestedDuration = 0L
-    private var skipGeneration = 0
+    private val skipState = SkipLoadState { SystemClock.elapsedRealtime() }
+    private val skipRepository by lazy {
+        // Public timing APIs do not need source cookies or browser verification.
+        val client = OkHttpClient.Builder().dns(com.vantara.anime.net.AnimeDns(preferDoh = { true })).build()
+        SkipRepository(client, File(cacheDir, "anime-skip-times"))
+    }
     private var skipRequest: Job? = null
     private var locked = false
     private var fill = false
@@ -294,7 +297,7 @@ class PlayerActivity : Activity() {
             updateTime()
             maybeLoadSkips()
             if (::skipButton.isInitialized) {
-                val segment = IntroSkip.active(skipTimings, position())
+                val segment = IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())
                 val visible = segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
                 skipButton.visibility = if (visible) View.VISIBLE else View.GONE
                 if (visible) {
@@ -696,7 +699,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS }
 
     private var openSheet: SheetKind? = null
 
@@ -747,7 +750,7 @@ class PlayerActivity : Activity() {
         root.addView(controls, match())
 
         skipButton = pillButton("تخطي المقدمة  »", primary = true) {
-            IntroSkip.active(skipTimings, position())?.let { player.seekTo(it.interval.endMs) }
+            IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())?.let { player.seekTo(it.interval.endMs) }
             skipButton.visibility = View.GONE
         }.apply {
             contentDescription = "تخطي المقدمة"
@@ -939,32 +942,51 @@ class PlayerActivity : Activity() {
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
 
     private fun clearSkipTimings() {
-        skipGeneration++
         skipRequest?.cancel()
         skipRequest = null
-        skipTimings = IntroSkip.Timings()
-        skipRequestKey = null
-        skipRequestedDuration = 0L
+        skipState.clear()
         if (::skipButton.isInitialized) skipButton.visibility = View.GONE
     }
 
     /** Independent of playback startup; stale timings never follow a server/episode switch. */
-    private fun maybeLoadSkips() {
-        val malId = launch.malId ?: return
+    private fun maybeLoadSkips(force: Boolean = false) {
         val duration = player.duration.takeIf { it > 0 } ?: return
-        if (!reportedStart || current == null) return
-        val requested = episodeInt()
-        // Specials such as 12.5 must never borrow episode 12's timings.
-        if (episode != requested.toFloat()) return
-        val key = "$sessionId|$requested|${current?.id}"
-        if (skipRequestKey == key && kotlin.math.abs(duration - skipRequestedDuration) <= duration * 0.01) return
-        clearSkipTimings()
-        val generation = skipGeneration
-        skipRequestKey = key
-        skipRequestedDuration = duration
+        val candidate = current ?: return
+        if (!reportedStart) return
+        val key = "$sessionId|${launch.animeId}|${launch.malId}|$episode|${candidate.id}"
+        val token = skipState.begin(key, duration, force) ?: return
+        skipRequest?.cancel()
         skipRequest = scope.launch {
-            val found = withContext(Dispatchers.IO) { IntroSkip.fetchTimings(network.client, malId, requested, duration) }
-            if (generation == skipGeneration && skipRequestKey == key && episodeInt() == requested) skipTimings = found
+            val found = skipRepository.load(launch.animeId.toIntOrNull(), launch.malId, episode, duration, force)
+            if (skipState.complete(token, found) && openSheet == SheetKind.SKIPS) sheet.refresh()
+        }
+    }
+
+    private fun skipStatusText(): String {
+        if (skipState.pending) return "جارٍ جلب توقيت الحلقة…"
+        if (skipState.cooldownLeftMs > 0) return "خدمة التوقيت تطلب الانتظار قليلًا قبل إعادة الجلب"
+        val result = skipState.result ?: return "يبدأ الجلب مع تشغيل الفيديو"
+        return when (result.status) {
+            SkipRepository.Status.READY -> listOfNotNull(
+                result.timings.opening?.let { "المقدمة ${ClipMath.clock(it.startMs)}–${ClipMath.clock(it.endMs)}" },
+                result.timings.ending?.let { "النهاية ${ClipMath.clock(it.startMs)}–${ClipMath.clock(it.endMs)}" },
+            ).joinToString(" · ")
+            SkipRepository.Status.NOT_FOUND -> "لم يُسجّل توقيت لهذه الحلقة بعد"
+            SkipRepository.Status.UNMATCHED -> "التوقيت الموجود لا يطابق نسخة الفيديو"
+            SkipRepository.Status.MISSING_ID -> "تعذّر مطابقة معرّف الأنمي"
+            SkipRepository.Status.FAILED -> "تعذّر الاتصال بخدمة التوقيت؛ تقدر تعيد الجلب"
+            SkipRepository.Status.SPECIAL -> "هذه الحلقة الخاصة تحتاج توقيتًا مستقلًا"
+        }
+    }
+
+    private fun showSkips() {
+        open(SheetKind.SKIPS, "تخطي المقدمة والنهاية") { body ->
+            body.addView(sheetRow("توقيت هذه الحلقة", skipStatusText(), selected = true))
+            body.addView(label("يظهر زر التخطي أثناء المقدمة أو النهاية. تخطي النهاية يُبقي المشاهد التي تأتي بعدها.", 12.5f, Tone.TEXT_3).apply { setPadding(0, dp(12), 0, dp(12)) })
+            body.addView(sheetRow("إعادة جلب التوقيت", if (skipState.pending) "جارٍ الجلب…" else "جرّب مجددًا بعد عودة الاتصال") {
+                maybeLoadSkips(force = true)
+                sheet.refresh()
+            }.apply { isEnabled = !skipState.pending })
         }
     }
 
@@ -1249,6 +1271,7 @@ class PlayerActivity : Activity() {
 
     private fun showMore() {
         open(SheetKind.MORE, "المزيد") { body ->
+            body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow("رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {

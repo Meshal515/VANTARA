@@ -9,6 +9,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
+import kotlin.math.min
 
 /** Opening and ending timings must match the MAL episode and this video cut. */
 internal object IntroSkip {
@@ -23,25 +25,31 @@ internal object IntroSkip {
         val result = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return Timings()
         if ((result["found"] as? JsonPrimitive)?.booleanOrNull != true) return Timings()
         val rows = result["results"] as? JsonArray ?: return Timings()
-        var opening: Interval? = null
-        var ending: Interval? = null
         val duration = durationMs / 1000.0
+        data class Match(val opening: Boolean, val mixed: Boolean, val difference: Double, val interval: Interval)
+        val matches = mutableListOf<Match>()
         for (element in rows) {
             val row = element as? JsonObject ?: continue
-            val type = (row["skipType"] as? JsonPrimitive)?.content ?: continue
+            val type = ((row["skipType"] ?: row["skip_type"]) as? JsonPrimitive)?.content ?: continue
             val isOpening = type in setOf("op", "mixed-op")
             if (!isOpening && type !in setOf("ed", "mixed-ed")) continue
-            val length = (row["episodeLength"] as? JsonPrimitive)?.doubleOrNull ?: continue
-            if (!length.isFinite() || length <= 0 || kotlin.math.abs(length - duration) > duration * 0.01) continue
+            val length = ((row["episodeLength"] ?: row["episode_length"]) as? JsonPrimitive)?.doubleOrNull ?: continue
+            // AniSkip filters by a 20-second cut difference. Bound shorter episodes too.
+            if (!length.isFinite() || length <= 0 || abs(length - duration) > min(20.0, duration * 0.025)) continue
             val interval = row["interval"] as? JsonObject ?: continue
-            val start = (interval["startTime"] as? JsonPrimitive)?.doubleOrNull ?: continue
-            val end = (interval["endTime"] as? JsonPrimitive)?.doubleOrNull ?: continue
-            if (!start.isFinite() || !end.isFinite() || start < 0 || end > duration || end - start !in 10.0..240.0) continue
-            if (isOpening && start > duration / 2 || !isOpening && start < duration / 2) continue
-            val timing = Interval((start * 1000).toLong(), (end * 1000).toLong().coerceAtMost(durationMs))
-            if (isOpening && opening == null) opening = timing
-            if (!isOpening && ending == null) ending = timing
+            val start = ((interval["startTime"] ?: interval["start_time"]) as? JsonPrimitive)?.doubleOrNull ?: continue
+            val end = ((interval["endTime"] ?: interval["end_time"]) as? JsonPrimitive)?.doubleOrNull ?: continue
+            if (!start.isFinite() || !end.isFinite() || start < 0 || end > length || end - start !in 10.0..240.0) continue
+            // Same correction used by AniSkip's player: align the reference cut to this cut.
+            val offset = duration - length
+            val timing = Interval(((start + offset) * 1000).toLong().coerceAtLeast(0), ((end + offset) * 1000).toLong().coerceAtMost(durationMs))
+            if (timing.endMs - timing.startMs < 10_000 || timing.startMs >= durationMs) continue
+            if (isOpening && timing.startMs > durationMs / 2 || !isOpening && timing.startMs < durationMs / 2) continue
+            matches += Match(isOpening, type.startsWith("mixed-"), abs(offset), timing)
         }
+        val sorted = matches.sortedWith(compareBy<Match> { it.difference }.thenBy { it.mixed })
+        val opening = sorted.firstOrNull { it.opening }?.interval
+        var ending = sorted.firstOrNull { !it.opening }?.interval
         if (opening != null && ending != null && opening.endMs > ending.startMs) ending = null
         return Timings(opening, ending)
     }
