@@ -26,6 +26,8 @@ import { DEFAULT_SILK, hexToRgb01, rgb01ToHex } from '../lib/silk-palette.js';
 import { withIdentity } from '../lib/identity.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { applyProfileTheme } from './profile-theme.js';
+import { profileTopSlots } from './profile-top.js';
+import { observeProfileContrast } from './profile-contrast.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -78,6 +80,7 @@ function readable(src) {
  */
 export function createProfile(ctx) {
   const { sync, host } = ctx;
+  const contrast = observeProfileContrast(host, {});
   const me = () => sync.user?.userId;
   let silk = null;
   let stopFollow = null;
@@ -314,68 +317,51 @@ export function createProfile(ctx) {
     void ctx.mountImage(c, work);
     return c;
   }
-  function topFive(items, name, own) {
+  function topFive(slots, name, own) {
     const wrap = el('div', 'pf-top5');
-    const [first, ...rest] = items;
-    const lead = el('button', 'pf-first');
-    lead.type = 'button';
-    const frame = el('span', 'pf-first-frame');
-    // نفس شارة الأربعة بعده، بالذهبي: الترتيب يُقرأ من الغلاف لا من دائرة بجانب العنوان
-    frame.append(poster(first, 'pf-first-poster'), el('span', 'pf-rank pf-rank--gold', '1'));
-    const copy = el('span', 'pf-first-copy');
-    copy.append(el('bdi', 'pf-first-title', titleOf(first)), el('span', 'pf-first-meta', own ? 'الأول عندك' : `الأول عند ${name}`));
-    lead.append(frame, copy);
-    lead.onclick = () => ctx.openWork(first);
-    wrap.append(lead);
-    if (rest.length) {
-      const grid = el('div', 'pf-rest');
-      rest.forEach((w, i) => {
-        const b = el('button', 'pf-card');
-        b.type = 'button';
-        const f = el('span', 'pf-card-frame');
-        f.append(poster(w, ''), el('span', 'pf-rank', String(i + 2)));
-        b.append(f, el('bdi', 'pf-card-title', titleOf(w)));
-        b.onclick = () => ctx.openWork(w);
-        grid.append(b);
-      });
-      wrap.append(grid);
+    wrap.dataset.arranging = 'false';
+    if (own) {
+      const arrange = el('button', 'pf-arrange', 'ترتيب أفضل 5');
+      arrange.type = 'button';
+      arrange.setAttribute('aria-pressed', 'false');
+      arrange.onclick = () => {
+        const active = wrap.dataset.arranging !== 'true';
+        wrap.dataset.arranging = String(active);
+        arrange.setAttribute('aria-pressed', String(active));
+        arrange.textContent = active ? 'تم الترتيب' : 'ترتيب أفضل 5';
+      };
+      wrap.append(arrange);
     }
-    return wrap;
-  }
-  /**
-   * أفضل 5 في ملفك أنت: الخانات الخمس كما هي (الفارغة تقول كيف تُملأ)، وعلى
-   * كل عمل زرّ إزالة ظاهر. التغيير يظهر حالًا ومن نفس الصفوف التي تقرؤها
-   * صفحة العمل.
-   */
-  function ownTopFive(slots) {
-    const wrap = el('div', 'pf-top5 pf-top5--own');
-    const grid = el('div', 'pf-slots');
-    slots.forEach((w, i) => {
-      const cell = el('div', `pf-slot${w ? '' : ' pf-slot--empty'}`);
-      const frame = el('span', 'pf-card-frame');
-      if (w) frame.append(poster(w, ''));
+    const grid = el('div', 'pf-rest');
+    slots.forEach((work, i) => {
+      const cell = el('div', `pf-slot${i === 0 ? ' pf-first-slot' : ''}${work ? '' : ' pf-slot--empty'}`);
+      const open = el('button', i === 0 ? 'pf-first' : 'pf-slot-open');
+      open.type = 'button';
+      const frame = el('span', i === 0 ? 'pf-first-frame' : 'pf-card-frame');
+      if (work) frame.append(poster(work, ''));
+      else frame.append(el('span', 'pf-slot-plus', '+'));
       frame.append(el('span', `pf-rank${i === 0 ? ' pf-rank--gold' : ''}`, String(i + 1)));
-      if (w) {
-        const open = el('button', 'pf-slot-open');
-        open.type = 'button';
-        open.append(frame, el('bdi', 'pf-card-title', titleOf(w)));
-        open.onclick = () => ctx.openWork(w);
-        const remove = el('button', 'pf-slot-remove');
-        remove.type = 'button';
-        remove.setAttribute('aria-label', `أزل ${titleOf(w)} من أفضل 5`);
-        remove.innerHTML = glyph('close', { size: 14 });
-        remove.onclick = (e) => {
-          e.stopPropagation();
-          ctx.removeFromTop(String(w.id));
-          cell.classList.add('pf-slot--gone');
-        };
-        cell.append(open, remove);
+      if (i === 0) {
+        const copy = el('span', 'pf-first-copy');
+        copy.append(el('bdi', 'pf-first-title', work ? titleOf(work) : own ? 'اختر عملك الأول' : 'المركز الأول فارغ'));
+        copy.append(el('span', 'pf-first-meta', work ? own ? 'الأول عندك' : `الأول عند ${name}` : own ? 'اضغط لاختيار عمل' : 'لم يُحدّد بعد'));
+        open.append(frame, copy);
       } else {
-        frame.append(el('span', 'pf-slot-plus', '+'));
-        cell.append(frame, el('span', 'pf-card-title pf-slot-hint', 'فارغة'));
-        cell.onclick = () => ctx.toast?.('من صفحة أي عمل: ⋮ ← «أضف إلى أفضل 5» واختر الرقم');
+        open.append(frame, el('bdi', `pf-card-title${work ? '' : ' pf-slot-hint'}`, work ? titleOf(work) : own ? 'اختر عملًا' : 'فارغة'));
       }
-      grid.append(cell);
+      if (work) open.onclick = () => wrap.dataset.arranging === 'true' ? ctx.chooseTop?.(i + 1) : ctx.openWork(work);
+      else if (own) open.onclick = () => ctx.chooseTop?.(i + 1);
+      else open.disabled = true;
+      open.setAttribute('aria-label', work ? `${i + 1} · ${titleOf(work)}` : own ? `اختر عملًا للمركز ${i + 1}` : `المركز ${i + 1} فارغ`);
+      cell.append(open);
+      if (work && own) {
+        const remove = el('button', 'pf-slot-remove', 'إزالة');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `أزل ${titleOf(work)} من أفضل 5`);
+        remove.onclick = () => { ctx.removeFromTop(String(work.id)); void show(me()); };
+        cell.append(remove);
+      }
+      (i === 0 ? wrap : grid).append(cell);
     });
     wrap.append(grid);
     return wrap;
@@ -442,6 +428,7 @@ export function createProfile(ctx) {
     host.style.removeProperty('--pf-tint');
     host.style.removeProperty('--pf-tint-deep');
     applyProfileTheme(host, themeOf(profile));
+    contrast.update(themeOf(profile));
     host.closest('#profile')?.classList.toggle('pf-page-themed', host.classList.contains('pf-themed'));
 
     const top = el('div', 'pf-top');
@@ -514,12 +501,12 @@ export function createProfile(ctx) {
     const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref));
     if (views.length) {
       const hist = el('div');
-      ctx.historyList(hist, { userId, own, limit: 5 });
+      ctx.historyList(hist, { userId, own, limit: 5, profile: true });
       const sec = section('آخر المشاهدات', hist, { meta: countLabel(views.length, 'work') });
       if (views.length > 5) {
         const more = el('button', 'pf-log-more', own ? 'كل آخر المشاهدات' : `كل مشاهدات ${name}`);
         more.type = 'button';
-        more.onclick = () => (own ? ctx.openHistory() : (more.remove(), ctx.historyList(hist, { userId, own, limit: 60 })));
+        more.onclick = () => (own ? ctx.openHistory() : (more.remove(), ctx.historyList(hist, { userId, own, limit: 60, profile: true })));
         sec.append(more);
       }
       body.append(sec);
@@ -558,13 +545,13 @@ export function createProfile(ctx) {
       stats.remove();
     }
 
-    const items = top5.slice(0, 5).map((t) => ctx.workFromRef(t.seriesRef, t.title, t.coverUrl));
+    const items = profileTopSlots(top5, (t) => ctx.workFromRef(t.seriesRef, t.title, t.coverUrl));
     if (own && ctx.topSlots) {
       // ملفك: من صفوفك أنت لا من الخادم، فالإزالة والتبديل يظهران حالًا
-      const next = ownTopFive(ctx.topSlots());
+      const next = topFive(ctx.topSlots(), name, true);
       topHost.replaceWith(next);
       topHost = next;
-    } else if (items.length) {
+    } else if (items.some(Boolean)) {
       const next = topFive(items, name, own);
       topHost.replaceWith(next);
       topHost = next;
