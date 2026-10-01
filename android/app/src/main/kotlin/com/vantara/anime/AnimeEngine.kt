@@ -76,7 +76,7 @@ class AnimeEngine(context: Context) {
     /** عمل خلفي لا يخص طلبًا (تحميل الإضافات مسبقًا). */
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    val dns = AnimeDns(AnimeHostRouter::prefersDoh)
+    val dns = AnimeDns(AnimeHostRouter::prefersDoh, preferIpv6 = AnimeHostRouter::prefersIpv6)
 
     init {
         AnimeHostRouter.health = health
@@ -84,6 +84,10 @@ class AnimeEngine(context: Context) {
         eu.kanade.tachiyomi.network.HostRouting.delegate = AnimeHostRouter
         eu.kanade.tachiyomi.network.HostRouting.hiddenOnly = AnimeHostRouter::isHiddenOnly
         eu.kanade.tachiyomi.network.HostRouting.dns = dns
+        eu.kanade.tachiyomi.network.HostRouting.redirectGuard = com.vantara.anime.net.DomainRedirectGuard
+        eu.kanade.tachiyomi.network.HostRouting.retryAllowed = AnimeHostRouter::canRetry
+        eu.kanade.tachiyomi.network.HostRouting.failVerificationFast = AnimeHostRouter::strictSource
+        eu.kanade.tachiyomi.network.HostRouting.verificationRequest = AnimeHostRouter::strictReferrer
         // نفس عميل الشبكة إلا مصنع المقبس؛ تُستخدم فقط عند مصافحة TLS تنقطع فجأة
         AnimeHostRouter.fragmentClient = network.client.newBuilder()
             .socketFactory(com.vantara.anime.net.SniFragmentingSocketFactory())
@@ -131,8 +135,10 @@ class AnimeEngine(context: Context) {
                 ExtensionAdapter(
                     id, source,
                     pageEmbeds = { entry(id)?.embeds },
-                    resolver = embeds,
+                    resolver = if (e.content == "cinema") embeds.forCinema() else embeds,
                     pageEpisodes = { entry(id)?.episodes },
+                    searchPage = { entry(id)?.search },
+                    detailsPage = { entry(id)?.details },
                 ).also { a ->
                     // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
                     AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
@@ -397,6 +403,7 @@ class AnimeEngine(context: Context) {
      */
     suspend fun diagnose(id: String, query: String = "naruto"): List<Step> {
         val e = entry(id) ?: error("مصدر غير معروف: $id")
+        if (e.content == "cinema") return CinemaDiagnostics(network.client, dns, ::adapter) { loadErrors[it] }.run(e, query)
         val steps = mutableListOf<Step>()
         fun add(label: String, state: String, detail: String) { steps += Step(label, state, detail) }
         val base = AnimeHostRouter.activeBase(id) ?: e.domains.current

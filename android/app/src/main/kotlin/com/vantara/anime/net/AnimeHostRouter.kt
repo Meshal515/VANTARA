@@ -24,7 +24,13 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object AnimeHostRouter : Interceptor {
 
-    private class Route(val sourceId: String, val domains: DomainInterceptor)
+    private class Route(val sourceId: String, val domains: DomainInterceptor, val plan: DomainPlan) {
+        val redirects = java.util.concurrent.ConcurrentLinkedDeque<DomainRedirect>()
+        fun report(event: DomainRedirect) {
+            redirects.add(event)
+            while (redirects.size > 20) redirects.pollFirst()
+        }
+    }
 
     private val routes = ConcurrentHashMap<String, Route>()
     private val byId = ConcurrentHashMap<String, Route>()
@@ -55,16 +61,17 @@ object AnimeHostRouter : Interceptor {
         lateinit var route: Route
         route = Route(
             sourceId,
-            DomainInterceptor(plan) { domain ->
+            DomainInterceptor(plan, onRedirect = { event -> route.report(event) }, onDomain = { domain ->
                 // الدومين الجديد المقبول يرث الحماية والقياس فورًا
                 val host = bareHost(domain)
                 routes[host] = route
                 hiddenOnly += host
                 dohFirst += host
                 health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
-            },
+            }),
+            plan,
         )
-        val hosts = plan.knownHosts()
+        val hosts = plan.knownHosts() + plan.migrationCandidates.map(::bareHost)
         byId.put(sourceId, route)?.let { old ->
             val stale = routes.filterValues { it === old }.keys - hosts
             routes.entries.removeIf { it.value === old }
@@ -84,6 +91,15 @@ object AnimeHostRouter : Interceptor {
 
     /** الدومين النشط الآن لمصدر (بعد أي تحويل مقبول). */
     fun activeBase(sourceId: String): String? = byId[sourceId]?.domains?.activeBase()
+
+    fun redirects(sourceId: String): List<DomainRedirect> = byId[sourceId]?.redirects?.toList().orEmpty()
+    fun prefersIpv6(host: String): Boolean = routes[host.lowercase()]?.plan?.preferIpv6 == true
+    fun strictSource(host: String): Boolean = routes[host.lowercase()]?.plan?.strictRedirects == true
+    fun strictReferrer(request: okhttp3.Request): Boolean = request.header("Referer")?.let { ref ->
+        runCatching { strictSource(java.net.URI(ref).host.orEmpty()) }.getOrDefault(false)
+    } ?: false
+    fun canRetry(error: IOException, request: okhttp3.Request): Boolean =
+        !(strictSource(request.url.host) && error is ForeignRedirectException)
 
     fun retryAt(sourceId: String): Long = gates[sourceId]?.retryAt() ?: 0L
 

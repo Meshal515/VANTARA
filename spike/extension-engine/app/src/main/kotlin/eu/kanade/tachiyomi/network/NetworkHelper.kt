@@ -69,6 +69,7 @@ class NetworkHelper(context: Context) {
         .dns(HostRouting)
         // الأول دائمًا: توجيه مضيفات مسجّلة (محرك الأنمي)؛ بلا تسجيل لا يفعل شيئًا
         .addInterceptor(HostRouting)
+        .addNetworkInterceptor(HostRouting.Redirects)
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net
         // for search/details then briefly returned EAI_NODATA for chapters.
         // Retry only idempotent methods; never replay POST/PUT blindly.
@@ -87,6 +88,7 @@ class NetworkHelper(context: Context) {
                         // إعادة الطلب بنفس البصمة لا تحل تحدي Cloudflare؛
                         // الاعتراض نفسه يعرض التحقق المرئي عند الحاجة.
                         if (io is CloudflareBypassException || io is BrowserVerificationException) throw io
+                        if (!HostRouting.retryAllowed(io, request)) throw io
                         last = io
                         if (attempt < 2) Thread.sleep(500L * (attempt + 1))
                     }

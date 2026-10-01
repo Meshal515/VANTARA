@@ -55,6 +55,9 @@ class BrowserVerificationInterceptor(
         val response = chain.proceed(request)
         if (!response.isVerificationShell(request)) return response
         response.close()
+        if (eu.kanade.tachiyomi.network.HostRouting.shouldFailVerification(request)) {
+            throw BrowserVerificationException("تحقق JavaScript لمصدر السينما؛ ننتقل إلى مصدر آخر دون فتح متصفح (${request.url.host})")
+        }
 
         synchronized(solveLock) {
             val now = System.currentTimeMillis()

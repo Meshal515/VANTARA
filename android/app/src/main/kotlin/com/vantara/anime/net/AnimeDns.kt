@@ -32,6 +32,8 @@ class AnimeDns(
     private val preferDoh: (String) -> Boolean,
     private val system: Dns = Dns.SYSTEM,
     private val hasIpv6: () -> Boolean = ::deviceHasIpv6,
+    private val preferIpv6: (String) -> Boolean = { false },
+    private val dohServers: List<Dns>? = null,
 ) : Dns {
 
     private val bootstrap: OkHttpClient by lazy {
@@ -43,7 +45,7 @@ class AnimeDns(
     }
 
     private val resolvers: List<Pair<String, Dns>> by lazy {
-        listOf(
+        dohServers?.mapIndexed { i, dns -> "resolver-$i" to dns } ?: listOf(
             "Cloudflare" to doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1"),
             "Google" to doh("https://dns.google/dns-query", "8.8.8.8", "8.8.4.4"),
         )
@@ -62,8 +64,11 @@ class AnimeDns(
     private val cache = ConcurrentHashMap<String, Cached>()
 
     override fun lookup(hostname: String): List<InetAddress> {
-        cache[hostname]?.takeIf { it.until > System.currentTimeMillis() }?.let { return it.addresses }
-        return if (preferDoh(hostname)) {
+        val v6First = preferIpv6(hostname)
+        cache[hostname]?.takeIf { it.until > System.currentTimeMillis() }?.let {
+            return if (v6First) usable(it.addresses, ipv6First = true) else it.addresses
+        }
+        val found = if (preferDoh(hostname)) {
             runCatching { viaDoh(hostname) }.getOrNull()?.also { remember(hostname, it) }
                 ?: system.lookup(hostname)
         } else {
@@ -72,6 +77,7 @@ class AnimeDns(
             good ?: runCatching { viaDoh(hostname) }.getOrNull()?.also { remember(hostname, it) }
                 ?: plain.getOrThrow()
         }
+        return if (v6First) usable(found, ipv6First = true) else found
     }
 
     /** للتشخيص: ما يعيده النظام وما يعيده DoH لنفس الاسم، كلٌّ على حدة. */
@@ -82,7 +88,9 @@ class AnimeDns(
         var last: Throwable? = null
         for ((_, resolver) in resolvers) {
             try {
-                val found = usable(resolver.lookup(hostname))
+                val raw = resolver.lookup(hostname)
+                // Preserve AAAA in the opted source's cache across Wi-Fi/mobile changes.
+                val found = if (preferIpv6(hostname)) raw else usable(raw)
                 if (found.isNotEmpty() && !isSinkhole(found)) return found
             } catch (e: Throwable) {
                 last = e
@@ -92,10 +100,10 @@ class AnimeDns(
     }
 
     /** IPv4 أولًا، وIPv6 فقط إن كان له مسار. */
-    internal fun usable(addresses: List<InetAddress>): List<InetAddress> {
+    internal fun usable(addresses: List<InetAddress>, ipv6First: Boolean = false): List<InetAddress> {
         val v4 = addresses.filterIsInstance<Inet4Address>()
         val v6 = addresses.filterIsInstance<Inet6Address>()
-        return if (hasIpv6()) v4 + v6 else v4.ifEmpty { v6 }
+        return if (hasIpv6()) { if (ipv6First) v6 + v4 else v4 + v6 } else v4.ifEmpty { v6 }
     }
 
     private fun remember(host: String, addresses: List<InetAddress>) {

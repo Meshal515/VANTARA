@@ -52,7 +52,17 @@ class EmbedResolver(
     private val client: OkHttpClient,
     private val sniffer: Sniffer? = null,
     private val userAgent: () -> String? = { null },
+    private val allowBrowser: Boolean = true,
 ) {
+    /** A request-scoped Cinema client; it cannot change Anime requests to the same host. */
+    fun forCinema(): EmbedResolver {
+        val builder = client.newBuilder()
+        builder.interceptors().add(0, okhttp3.Interceptor { chain ->
+            chain.proceed(chain.request().newBuilder().tag(eu.kanade.tachiyomi.network.HostRouting.NoBrowser::class.java, eu.kanade.tachiyomi.network.HostRouting.NoBrowser()).build())
+        })
+        return EmbedResolver(builder.build(), sniffer = null, userAgent = userAgent, allowBrowser = false)
+    }
+
     suspend fun resolve(embed: String, referer: String?): List<Stream> = resolve(embed, referer, depth = 0)
 
     private suspend fun resolve(embed: String, referer: String?, depth: Int): List<Stream> {
@@ -89,7 +99,7 @@ class EmbedResolver(
     }
 
     private suspend fun generic(url: String, referer: String?): List<Stream> {
-        val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (e: Exception) { if (!allowBrowser) throw e else null }
         if (page != null && page.ok) {
             val found = Generic.streams(page.body, page.url)
             if (found.isNotEmpty()) {

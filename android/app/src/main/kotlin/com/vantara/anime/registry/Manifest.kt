@@ -5,6 +5,7 @@ import com.vantara.anime.net.RateLimit
 import com.vantara.anime.net.UrlRewrite
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * بيان مصادر الأنمي — يصل من الواجهة (حزمة الويب تتحدّث بلا APK، وخادم
@@ -41,6 +42,8 @@ data class SourceEntry(
     val catalog: CatalogHint = CatalogHint(),
     /** سبب إيقاف معروف (دومين ميت…): يظهر في شاشة الصحة ولا يُحمَّل. */
     val disabledReason: String? = null,
+    val search: SearchPage? = null,
+    val details: PageDetails? = null,
 )
 
 @Serializable
@@ -62,6 +65,10 @@ data class Domains(
     val fingerprint: String? = null,
     val rewrites: List<UrlRewrite> = emptyList(),
     val limits: List<RateLimit> = emptyList(),
+    val strictRedirects: Boolean = false,
+    val followActive: Boolean = false,
+    val preferIpv6: Boolean = false,
+    val migrationCandidates: List<String> = emptyList(),
 ) {
     fun plan(extensionBaseUrl: String?): DomainPlan = DomainPlan(
         current = current,
@@ -71,6 +78,10 @@ data class Domains(
         fingerprint = fingerprint,
         rewrites = rewrites,
         limits = limits,
+        strictRedirects = strictRedirects,
+        followActive = followActive,
+        preferIpv6 = preferIpv6,
+        migrationCandidates = migrationCandidates.toSet(),
     )
 }
 
@@ -88,6 +99,9 @@ data class PageEmbeds(
     val pattern: String? = null,
     val nameAttr: String? = null,
     val qualityAttr: String? = null,
+    val resolveRelative: Boolean = false,
+    val watchSelector: String? = null,
+    val form: Map<String, String> = emptyMap(),
 ) {
     data class Embed(val url: String, val name: String, val quality: Int?)
 
@@ -95,8 +109,9 @@ data class PageEmbeds(
         val re = pattern?.let(::Regex)
         return org.jsoup.Jsoup.parse(html, pageUrl).select(selector).mapNotNull { el ->
             val raw = el.attr(attr).ifBlank { return@mapNotNull null }
-            val url = (if (re != null) re.find(raw)?.groupValues?.getOrNull(1) else raw)?.trim()
-                ?.takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            val value = (if (re != null) re.find(raw)?.groupValues?.getOrNull(1) else raw)?.trim() ?: return@mapNotNull null
+            val url = if (resolveRelative) el.absUrl(attr) else value.takeIf { it.startsWith("http") }
+            if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) return@mapNotNull null
             val name = nameAttr?.let { el.attr(it) }?.ifBlank { null } ?: el.text().trim()
             val quality = qualityAttr?.let { el.attr(it) }?.let { com.vantara.anime.stream.StreamClassifier.quality(it) }
             Embed(url, name, quality)
@@ -113,12 +128,15 @@ data class PageEpisodes(
     val selector: String,
     /** Regex مجموعته الأولى رقم الحلقة من الرابط؛ غيابه = أول رقم في نص العنصر. */
     val numberPattern: String? = null,
+    val singleSelector: String? = null,
+    val singleNumber: Float = 1f,
 ) {
     data class Item(val path: String, val number: Float)
 
     fun extract(html: String, pageUrl: String): List<Item> {
         val re = numberPattern?.let(::Regex)
-        return org.jsoup.Jsoup.parse(html, pageUrl).select(selector).mapNotNull { el ->
+        val doc = org.jsoup.Jsoup.parse(html, pageUrl)
+        val found = doc.select(selector).mapNotNull { el ->
             val href = el.absUrl("href").ifBlank { return@mapNotNull null }
             val url = runCatching { java.net.URI(href) }.getOrNull() ?: return@mapNotNull null
             val path = (url.rawPath ?: return@mapNotNull null) + (url.rawQuery?.let { "?$it" } ?: "")
@@ -126,6 +144,10 @@ data class PageEpisodes(
                 ?.toFloatOrNull() ?: return@mapNotNull null
             Item(path, number)
         }.distinctBy { it.path }.sortedBy { it.number }
+        if (found.isNotEmpty() || singleSelector == null) return found
+        val href = doc.selectFirst(singleSelector)?.absUrl("href")?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return found
+        val url = java.net.URI(href)
+        return listOf(Item(url.rawPath + (url.rawQuery?.let { "?$it" } ?: ""), singleNumber))
     }
 }
 
@@ -160,7 +182,17 @@ data class CardSelectors(
     val image: String? = "img",
     /** سمة الصورة (بعض المواقع تكسل التحميل في data-src). */
     val imageAttr: String = "src",
-)
+    val titleAttr: String? = null,
+) {
+    data class Item(val url: String, val title: String, val image: String?)
+    fun extract(html: String, pageUrl: String): List<Item> = org.jsoup.Jsoup.parse(html, pageUrl).select(card).mapNotNull { el ->
+        val a = el.selectFirst(link) ?: return@mapNotNull null
+        val href = a.absUrl("href").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return@mapNotNull null
+        val name = (titleAttr?.let { a.attr(it) } ?: title?.let { el.selectFirst(it)?.text() } ?: a.text()).trim().ifBlank { return@mapNotNull null }
+        val cover = image?.let { el.selectFirst(it)?.absUrl(imageAttr)?.ifBlank { null } }
+        Item(href, name, cover)
+    }.distinctBy { it.url }
+}
 
 object ManifestParser {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -182,6 +214,20 @@ object ManifestParser {
                 if (runCatching { Regex(l.path) }.isFailure || l.perMinute < 1) add("${s.id}: حد طلبات غير صالح «${l.path}»")
             }
             if (!s.domains.current.startsWith("https://") && !s.domains.current.startsWith("http://")) add("${s.id}: current ليس رابطًا")
+            if (s.domains.migrationCandidates.isNotEmpty()) {
+                if (!s.domains.strictRedirects || s.domains.fingerprint.isNullOrBlank()) add("${s.id}: مرشح الدومين يحتاج حماية التحويل وبصمة المصدر")
+                for (candidate in s.domains.migrationCandidates) {
+                    val url = candidate.toHttpUrlOrNull()
+                    if (url == null || url.scheme != "https" || url.host.contains('*') || url.encodedPath != "/" || url.query != null || url.fragment != null || url.username.isNotEmpty() || url.password.isNotEmpty()) {
+                        add("${s.id}: مرشح الدومين يجب أن يكون أصل HTTPS بمضيف محدد «$candidate»")
+                    }
+                }
+            }
+            s.search?.let { hint ->
+                if (!hint.urlTemplate.startsWith("/") || hint.urlTemplate.startsWith("//") || "{query}" !in hint.urlTemplate) add("${s.id}: البحث البديل يحتاج مسارًا داخل المصدر ومعامل query")
+                runCatching { org.jsoup.Jsoup.parse("").select(hint.cards.card); org.jsoup.Jsoup.parse("").select(hint.cards.link) }
+                    .onFailure { add("${s.id}: محددات البحث البديل غير صالحة") }
+            }
             s.extension?.let { e ->
                 if (!Regex("^[0-9a-fA-F]{64}$").matches(e.sha256)) add("${s.id}: sha256 غير صالح")
                 if (!e.apk.startsWith("https://")) add("${s.id}: رابط APK ليس https")

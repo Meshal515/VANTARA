@@ -95,6 +95,9 @@ class CloudflareInterceptor(
 
         Log.i(TAG, "Cloudflare challenge detected for ${request.url}")
         response.close()
+        // Strict Cinema requests cannot navigate through an unguarded WebView.
+        // Preserve the existing clearance/byte-fetch path for all other sources.
+        if (eu.kanade.tachiyomi.network.HostRouting.shouldFailVerification(request)) throw cloudflareError(request)
 
         synchronized(solveLock) {
             val host = request.url.host

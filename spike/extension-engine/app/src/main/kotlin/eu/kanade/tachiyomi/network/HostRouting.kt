@@ -26,6 +26,19 @@ object HostRouting : Interceptor, Dns {
     @Volatile
     var dns: Dns? = null
 
+    @Volatile var redirectGuard: Interceptor? = null
+    @Volatile var retryAllowed: (java.io.IOException, okhttp3.Request) -> Boolean = { _, _ -> true }
+    @Volatile var failVerificationFast: (String) -> Boolean = { false }
+    @Volatile var verificationRequest: (okhttp3.Request) -> Boolean = { false }
+    class NoBrowser
+    fun shouldFailVerification(request: okhttp3.Request): Boolean =
+        request.tag(NoBrowser::class.java) != null || failVerificationFast(request.url.host) || verificationRequest(request)
+
+    object Redirects : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response =
+            redirectGuard?.intercept(chain) ?: chain.proceed(chain.request())
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response =
         delegate?.intercept(chain) ?: chain.proceed(chain.request())
 

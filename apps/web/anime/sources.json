@@ -20,7 +20,13 @@
         ],
         "fingerprint": "OkAnime|اوك انمي",
         "rewrites": [
-          { "path": "/search/", "to": "/search", "params": { "s": "q" } }
+          {
+            "path": "/search/",
+            "to": "/search",
+            "params": {
+              "s": "q"
+            }
+          }
         ]
       },
       "episodes": {
@@ -61,8 +67,14 @@
         ],
         "fingerprint": "images\\.witanime\\.site",
         "limits": [
-          { "path": "^/watch/.+/sources$|^/watch/stream-source/", "perMinute": 18 },
-          { "path": "^/watch/stream-gate/", "perMinute": 18 }
+          {
+            "path": "^/watch/.+/sources$|^/watch/stream-source/",
+            "perMinute": 18
+          },
+          {
+            "path": "^/watch/stream-gate/",
+            "perMinute": 18
+          }
         ]
       },
       "catalog": {
@@ -190,7 +202,13 @@
         "current": "https://m.cimaleek.pw",
         "legacy": [
           "https://m.cimaleek.to"
-        ]
+        ],
+        "strictRedirects": true,
+        "followActive": true,
+        "migrationCandidates": [
+          "https://www433.b2cima.click"
+        ],
+        "fingerprint": "(?s)(?=.*wp-content/themes/cimalek)(?=.*(?:film_list-wrap|season-a|lalaplayer))(?=.*(?:سيما ليك|Cimaleek))"
       }
     },
     {
@@ -208,7 +226,21 @@
         "current": "https://tv10.egydead.live",
         "legacy": [
           "https://egydead.space"
-        ]
+        ],
+        "strictRedirects": true,
+        "followActive": true,
+        "mirrors": [
+          "https://m6o3p.sbs"
+        ],
+        "fingerprint": "(?s)(?=.*wp-content/themes/egydeadc-taq/)(?=.*(?:movieItem|infoBox))(?=.*(?:ايجي ديد|EgyDead))"
+      },
+      "embeds": {
+        "selector": "ul.serversList li[data-link], div.mob-servers li[data-link]",
+        "attr": "data-link",
+        "form": {
+          "View": "1"
+        },
+        "resolveRelative": true
       }
     },
     {
@@ -224,7 +256,11 @@
       },
       "domains": {
         "current": "https://www.faselhds.biz",
-        "legacy": []
+        "legacy": [],
+        "strictRedirects": true,
+        "followActive": true,
+        "preferIpv6": true,
+        "fingerprint": "(?s)(?=.*(?:faselhds|فاصل إعلاني|فاصل اعلاني))(?=.*(?:postList|seasonList|epAll))"
       }
     },
     {
@@ -239,8 +275,48 @@
         "version": "14.31"
       },
       "domains": {
-        "current": "https://m.asd.homes",
-        "legacy": []
+        "current": "https://m.myseed.pics",
+        "legacy": [
+          "https://m.asd.homes",
+          "https://m.myseed.tv"
+        ],
+        "strictRedirects": true,
+        "followActive": true,
+        "fingerprint": "(?s)(?=.*wp-content/themes/MySeed/)(?=.*(?:movie__block|post__name|servers__list))(?=.*(?:MySeed|ماي سيد))",
+        "rewrites": [
+          {
+            "path": "/find/",
+            "params": {
+              "find": "word"
+            }
+          }
+        ]
+      },
+      "search": {
+        "urlTemplate": "/find/?word={query}&offset={page}",
+        "cards": {
+          "card": "div.item__contents",
+          "link": "a.movie__block",
+          "titleAttr": "title",
+          "image": "img",
+          "imageAttr": "data-src"
+        }
+      },
+      "details": {
+        "title": "h1.post__name",
+        "description": "div.post__story",
+        "genres": "div.post__meta a[href*=genre]"
+      },
+      "episodes": {
+        "selector": "ul.episodes__list a[href]",
+        "singleSelector": "a.watch__btn",
+        "singleNumber": 0
+      },
+      "embeds": {
+        "selector": "div.servers__list li[data-link]",
+        "attr": "data-link",
+        "resolveRelative": true,
+        "watchSelector": "a.watch__btn"
       }
     },
     {

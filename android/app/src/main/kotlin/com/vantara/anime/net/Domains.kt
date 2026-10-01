@@ -32,6 +32,12 @@ data class DomainPlan(
     val rewrites: List<UrlRewrite> = emptyList(),
     /** حدود الطلبات لكل مسار (يطبّقها [RateGate] على كل طلبات المصدر). */
     val limits: List<RateLimit> = emptyList(),
+    /** Opt-in Cinema policy; legacy Anime plans retain their original behavior. */
+    val strictRedirects: Boolean = false,
+    val followActive: Boolean = false,
+    val preferIpv6: Boolean = false,
+    /** Exact hosts that may be fetched for identity verification, never pretrusted. */
+    val migrationCandidates: Set<String> = emptySet(),
 ) {
     val currentUrl: HttpUrl? get() = current.toHttpUrlOrNull()
     val currentHost: String? get() = currentUrl?.host
@@ -88,7 +94,7 @@ object DomainPolicy {
         val target = active ?: plan.currentUrl ?: return null
         if (url.host == target.host) return null
         val legacy = plan.legacy.map(::bareHost)
-        if (url.host !in legacy) return null
+        if (url.host !in legacy && !(plan.followActive && url.host == plan.currentHost)) return null
         return url.newBuilder().scheme(target.scheme).host(target.host).port(target.port).build()
     }
 
@@ -119,6 +125,7 @@ object DomainPolicy {
         if (from.host == to.host) return Verdict.SAME
         if (to.host in plan.knownHosts()) return Verdict.KNOWN
         if (siteOf(from.host) == siteOf(to.host)) return Verdict.SAME_SITE
+        if (plan.strictRedirects && to.host !in plan.migrationCandidates.map(::bareHost)) return Verdict.FOREIGN
         val fp = plan.fingerprint
         if (fp != null && html != null && Regex(fp, RegexOption.IGNORE_CASE).containsMatchIn(html)) return Verdict.FINGERPRINT_OK
         return Verdict.FOREIGN
@@ -127,6 +134,31 @@ object DomainPolicy {
 
 class ForeignRedirectException(val from: String, val to: String) :
     IOException("المصدر حوّل إلى موقع غريب: $from → $to")
+
+data class DomainRedirect(val from: String, val to: String, val accepted: Boolean, val reason: String)
+
+internal class SourceDomainRequest(val plan: DomainPlan, val report: (DomainRedirect) -> Unit)
+
+/** Checks each Location before OkHttp follows it; no unknown Cinema hop is contacted. */
+object DomainRedirectGuard : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        val source = chain.request().tag(SourceDomainRequest::class.java) ?: return response
+        if (response.code !in setOf(300, 301, 302, 303, 307, 308)) return response
+        val location = response.header("Location") ?: return response
+        val from = response.request.url
+        val to = from.resolve(location) ?: return response
+        val allowed = to.scheme == from.scheme && (to.host in source.plan.knownHosts() ||
+            source.plan.knownHosts().any { trusted -> siteOf(trusted) == siteOf(to.host) } || to.host in source.plan.migrationCandidates.map(::bareHost))
+        source.report(DomainRedirect(from.host, to.host, allowed,
+            if (!allowed) "دومين غير معتمد أو تغيير بروتوكول" else if (to.host in source.plan.migrationCandidates.map(::bareHost)) "مرشح: قبول نهائي بعد مطابقة البصمة" else "دومين المصدر أو مرآة موثقة"))
+        if (!allowed) {
+            response.close()
+            throw ForeignRedirectException(from.host, to.host)
+        }
+        return response
+    }
+}
 
 /**
  * اعتراض الدومين لعميل مصدر واحد:
@@ -137,8 +169,11 @@ class ForeignRedirectException(val from: String, val to: String) :
  */
 class DomainInterceptor(
     private val plan: DomainPlan,
-    private val onDomain: (String) -> Unit = {},
+    private val onDomain: (String) -> Unit,
+    private val onRedirect: (DomainRedirect) -> Unit,
 ) : Interceptor {
+
+    constructor(plan: DomainPlan, onDomain: (String) -> Unit = {}) : this(plan, onDomain, {})
 
     private val active = AtomicReference<HttpUrl?>(plan.currentUrl)
 
@@ -149,8 +184,9 @@ class DomainInterceptor(
         val rewritten = DomainPolicy.rewrite(original.url, plan, active.get())
         val hosted = rewritten ?: original.url
         val url = DomainPolicy.fixPath(hosted, plan) ?: hosted
-        val request = if (url != original.url) {
+        val request = if (url != original.url || plan.strictRedirects) {
             original.newBuilder().url(url).apply {
+                if (plan.strictRedirects) tag(SourceDomainRequest::class.java, SourceDomainRequest(plan, onRedirect))
                 if (rewritten != null) {
                     // Referer/Origin القديمان يكشفان الدومين الميت لبعض المواقع
                     original.header("Referer")?.let { ref -> header("Referer", swapHost(ref)) }
@@ -162,24 +198,32 @@ class DomainInterceptor(
         }
         val response = chain.proceed(request)
         val finalUrl = response.request.url
-        if (finalUrl.host == request.url.host) return response
+        val needsCandidateProof = plan.strictRedirects && finalUrl.host in plan.migrationCandidates.map(::bareHost) &&
+            finalUrl.host !in plan.knownHosts() && active.get()?.host != finalUrl.host
+        if (finalUrl.host == request.url.host && !needsCandidateProof) return response
         // سيرفرات الفيديو (dood → d000d…) تتحوّل كثيرًا ولا تخص دومين المصدر
         val siteHosts = plan.knownHosts() + listOfNotNull(active.get()?.host)
-        if (request.url.host !in siteHosts) return response
+        if (request.url.host !in siteHosts && !needsCandidateProof) return response
 
         // الطلب تحوّل لمضيف آخر: هل هو المصدر نفسه في بيت جديد؟
         val isHtml = response.header("Content-Type")?.contains("html", true) == true
         val html = if (isHtml) runCatching { response.peekBody(96_000).string() }.getOrNull() else null
-        return when (DomainPolicy.judge(request.url, finalUrl, plan, html)) {
+        val verdict = if (needsCandidateProof) {
+            if (plan.fingerprint != null && html != null && Regex(plan.fingerprint, RegexOption.IGNORE_CASE).containsMatchIn(html)) DomainPolicy.Verdict.FINGERPRINT_OK
+            else DomainPolicy.Verdict.FOREIGN
+        } else DomainPolicy.judge(request.url, finalUrl, plan, html)
+        return when (verdict) {
             DomainPolicy.Verdict.FOREIGN -> {
+                onRedirect(DomainRedirect(request.url.host, finalUrl.host, false, "لم يُعتمد الدومين أو لم تطابق الصفحة بصمة المصدر"))
                 response.close()
                 throw ForeignRedirectException(request.url.host, finalUrl.host)
             }
             DomainPolicy.Verdict.SAME -> response
             else -> {
+                onRedirect(DomainRedirect(request.url.host, finalUrl.host, true, "تحويل المصدر مقبول"))
                 // المضيف الجديد صار النشط فقط إن كان الطلب لصفحة الموقع لا لسيرفر فيديو
                 val base = active.get()
-                if (base == null || request.url.host == base.host) {
+                if (base == null || request.url.host == base.host || needsCandidateProof) {
                     active.set(finalUrl.newBuilder().encodedPath("/").query(null).fragment(null).build())
                     onDomain("${finalUrl.scheme}://${finalUrl.host}")
                 }
@@ -191,7 +235,7 @@ class DomainInterceptor(
     private fun swapHost(url: String): String {
         val parsed = url.toHttpUrlOrNull() ?: return url
         val target = active.get() ?: return url
-        if (parsed.host !in plan.legacy.map(::bareHost)) return url
+        if (parsed.host !in plan.legacy.map(::bareHost) && !(plan.followActive && parsed.host == plan.currentHost)) return url
         return parsed.newBuilder().host(target.host).scheme(target.scheme).build().toString()
     }
 }

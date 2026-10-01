@@ -760,7 +760,7 @@ export function createCinema(deps) {
           list.append(el('p', 'cn-note', 'لا مصادر سينما مفعّلة في المحرك — حدّث التطبيق.'));
           return;
         }
-        for (const src of mine) {
+        await Promise.all(mine.map(async (src) => {
           const box = el('section', 'cn-diag-src');
           box.append(el('h4', null, src.name ?? src.id));
           const steps = el('ol', 'cn-diag-steps');
@@ -775,7 +775,7 @@ export function createCinema(deps) {
               return li;
             }),
           );
-        }
+        }));
       })();
     }, { tone: 'cinema' });
   }

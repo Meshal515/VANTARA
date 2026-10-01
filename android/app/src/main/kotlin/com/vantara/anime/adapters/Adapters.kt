@@ -107,17 +107,25 @@ class ExtensionAdapter(
     private val resolver: EmbedResolver? = null,
     /** قاعدة البيان لحلقات صفحة العمل، حين لا تجد الإضافة أي حلقة. */
     private val pageEpisodes: () -> PageEpisodes? = { null },
+    private val searchPage: () -> com.vantara.anime.registry.SearchPage? = { null },
+    private val detailsPage: () -> com.vantara.anime.registry.PageDetails? = { null },
 ) : AnimeAdapter {
 
     override val name: String get() = source.name
     val extensionBaseUrl: String? get() = (source as? AnimeHttpSource)?.baseUrl
 
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage {
-        val result = when (listing) {
+        val fallback = if (listing == Listing.SEARCH) searchPage() else null
+        val result = try { when (listing) {
             Listing.POPULAR -> source.getPopularAnime(page)
             Listing.LATEST -> source.getLatestUpdates(page)
             Listing.SEARCH -> source.getSearchAnime(page, query, AnimeFilterList())
         }
+        } catch (e: Exception) {
+            if (e is CancellationException || e is java.io.IOException || fallback == null) throw e
+            return pageFromCards(fallback.url(requireNotNull(extensionBaseUrl), page, query), fallback.cards)
+        }
+        if (result.animes.isEmpty() && fallback != null) return pageFromCards(fallback.url(requireNotNull(extensionBaseUrl), page, query), fallback.cards)
         return SourcePage(result.animes.map { it.toVantara() }, result.hasNextPage)
     }
 
@@ -137,7 +145,7 @@ class ExtensionAdapter(
         val items = doc.select(sel.card).mapNotNull { card ->
             val link = card.selectFirst(sel.link) ?: return@mapNotNull null
             val href = link.absUrl("href").ifBlank { link.attr("href") }.ifBlank { return@mapNotNull null }
-            val title = (sel.title?.let { card.selectFirst(it)?.text() } ?: link.text()).trim().ifBlank { return@mapNotNull null }
+            val title = (sel.titleAttr?.let { link.attr(it) } ?: sel.title?.let { card.selectFirst(it)?.text() } ?: link.text()).trim().ifBlank { return@mapNotNull null }
             val image = sel.image?.let { card.selectFirst(it) }?.let { img -> img.absUrl(sel.imageAttr).ifBlank { img.attr(sel.imageAttr) } }
             SourceAnime(sourceId = id, url = pathOf(href), title = title, thumbnail = image?.ifBlank { null })
         }
@@ -169,8 +177,17 @@ class ExtensionAdapter(
         return SourcePage(result.animes.map { it.toVantara() }, result.hasNextPage)
     }
 
-    override suspend fun details(anime: SourceAnime): SourceAnime =
+    override suspend fun details(anime: SourceAnime): SourceAnime = try {
         source.getAnimeDetails(anime.toAniyomi()).toVantara(fallback = anime)
+    } catch (e: Exception) {
+        val rule = detailsPage()
+        if (e is CancellationException || e is java.io.IOException || rule == null) throw e
+        val (url, html) = fetchPage(anime.url)
+        val details = rule.extract(html, url)
+        if (details.title == null && details.description == null) throw e
+        anime.copy(title = details.title ?: anime.title, description = details.description ?: anime.description,
+            thumbnail = details.image ?: anime.thumbnail, genres = details.genres.ifEmpty { anime.genres })
+    }
 
     override suspend fun seasons(anime: SourceAnime): List<SourceAnime> =
         if (!anime.hasSeasons) emptyList() else source.getSeasonList(anime.toAniyomi()).map { it.toVantara() }
@@ -206,10 +223,12 @@ class ExtensionAdapter(
     }
 
     /** صفحة من الموقع عبر عميل الإضافة (ترويساتها وكوكيزها وموجّه الدومين). */
-    private suspend fun fetchPage(path: String): Pair<String, String> {
+    private suspend fun fetchPage(path: String, form: Map<String, String> = emptyMap()): Pair<String, String> {
         val http = source as? AnimeHttpSource ?: error("المصدر ليس HTTP")
         val url = if (path.startsWith("http")) path else http.baseUrl.trimEnd('/') + path
-        return http.client.newCall(GET(url, http.headers)).awaitOk().use { it.request.url.toString() to it.body.string() }
+        val request = if (form.isEmpty()) GET(url, http.headers) else okhttp3.Request.Builder().url(url).headers(http.headers)
+            .post(okhttp3.FormBody.Builder().apply { form.forEach { (key, value) -> add(key, value) } }.build()).build()
+        return http.client.newCall(request).awaitOk().use { it.request.url.toString() to it.body.string() }
     }
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
@@ -249,7 +268,14 @@ class ExtensionAdapter(
 
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
     private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int, preferredServer: String? = null): List<Candidate> {
-        val (finalUrl, html) = fetchPage(episode.url)
+        var (finalUrl, html) = fetchPage(episode.url, rule.form)
+        rule.watchSelector?.let { selector ->
+            val watch = org.jsoup.Jsoup.parse(html, finalUrl).selectFirst(selector)?.absUrl("href")?.ifBlank { null }
+            if (watch != null && watch != finalUrl) {
+                val page = fetchPage(watch, rule.form)
+                finalUrl = page.first; html = page.second
+            }
+        }
         // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
         val referer = finalUrl
         val allEmbeds = rule.extract(html, finalUrl)
