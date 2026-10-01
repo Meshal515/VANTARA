@@ -64,7 +64,7 @@ export function report(r) {
  */
 export function trustDates(units) {
   const dated = units.filter((u) => u.publishedAt);
-  if (dated.length < 3) return units;
+  if (dated.length < 10) return units;
   const times = dated.map((u) => u.publishedAt);
   return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }

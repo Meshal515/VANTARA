@@ -199,6 +199,12 @@
       "name": "EgyDead",
       "content": "cinema",
       "priority": 60,
+      "embeds": {
+        "selector": "ul.serversList li[data-link]",
+        "attr": "data-link",
+        "form": { "View": "1" },
+        "primary": true
+      },
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.egydead",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.egydead-v14.29.apk",

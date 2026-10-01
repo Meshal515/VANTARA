@@ -152,9 +152,11 @@ class PlaybackSession(
     /** يزيد مع كل إضافة: من ينتظر مرشّحًا جديدًا يراقبه. */
     val changes = kotlinx.coroutines.flow.MutableStateFlow(0)
 
-    val remaining: Int get() = synchronized(this) { queue.size }
+    @Volatile var acceptsCandidate: (Candidate) -> Boolean = { true }
 
-    fun next(): Candidate? = synchronized(this) { queue.removeFirstOrNull()?.also { tried += it } }
+    val remaining: Int get() = synchronized(this) { queue.count(acceptsCandidate) }
+
+    fun next(): Candidate? = synchronized(this) { queue.firstOrNull(acceptsCandidate)?.also { queue.remove(it); tried += it } }
 
     /** اختيار المستخدم من ورقة السيرفرات: هذا المرشّح الآن، والباقي احتياط. */
     fun take(id: String): Candidate? = synchronized(this) {

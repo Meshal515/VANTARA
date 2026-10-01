@@ -881,10 +881,29 @@ html,
 .v35 .nav.active {
   color: var(--text-1);
 }
+/* ───────────────────────── التنقّل ─────────────────────────
+ * علامة التحديد مشتركة: شرطة بلون القسم فوق الأيقونة، بلا خلفية حولها. */
+
 .v35 .nav.active .nav-pill {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: none;
+  color: var(--text-1);
 }
+.v35 .nav::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 22px;
+  height: 2px;
+  margin-left: -11px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform var(--dur) var(--ease-out);
+}
+.v35 .nav.active::before {
+  transform: scaleX(1);
+}
+
 .v35 .nav .notify-dot {
   top: 7px;
   inset-inline-end: calc(50% - 22px);
@@ -3194,3 +3213,6 @@ html,
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
+
+.v35 .up-art > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .feed-refresh { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: .75rem; cursor: pointer; }

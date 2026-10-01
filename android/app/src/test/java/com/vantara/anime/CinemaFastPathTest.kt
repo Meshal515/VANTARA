@@ -13,6 +13,10 @@ import com.vantara.anime.stream.RouteState
 import com.vantara.anime.stream.StreamProbe
 import com.vantara.anime.stream.Variant
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -51,6 +55,12 @@ class CinemaFastPathTest {
         assertFalse(StreamProbe.verdict(Container.MP4, "application/json", "{\"error\":\"expired\"}"))
     }
 
+    @Test fun `plain error responses cannot be mistaken for MP4`() {
+        assertFalse(StreamProbe.verdict(Container.MP4, "text/plain", "File expired"))
+        assertFalse(StreamProbe.verdict(Container.UNKNOWN, null, ""))
+        assertFalse(StreamProbe.verdict(Container.UNKNOWN, null, "{\"error\":\"expired\"}"))
+    }
+
     @Test fun `a movie asks for its only episode whatever the source numbers it`() {
         val r = EpisodeResolver({ null }, HealthStore(null) { now })
         val zero = listOf(SourceEpisode("s1", "/m", "فيلم", 0f))
@@ -85,6 +95,26 @@ class CinemaFastPathTest {
         p.markProbe("s1|bad", ok = false, ms = 30)
         p.report(ready("waiting", cand("waiting", "waiting.cdn", 720)))
         assertNull(p.best())
+    }
+
+    @Test fun `a successful probe wakes best immediately while other servers still resolve`() = runBlocking {
+        val p = prepared()
+        p.report(ready("a", cand("a", "a.cdn", 720)))
+        val waiting = async { p.awaitBest(null, 5_000) }
+        delay(20)
+        p.markProbe("s1|a", true, 20)
+        assertEquals("a", withTimeout(200) { waiting.await() }?.id)
+        assertFalse(p.done)
+    }
+
+    @Test fun `automatic fallback also waits for a probed candidate without discarding pending links`() {
+        val p = prepared()
+        p.report(ready("bad", cand("bad", "bad.cdn", 1080)))
+        p.report(ready("pending", cand("pending", "pending.cdn", 720)))
+        p.markProbe("s1|bad", false, 10)
+        assertNull(p.session.next())
+        p.markProbe("s1|pending", true, 10)
+        assertEquals("pending", p.session.next()?.id)
     }
 
     @Test fun `a late batch reopens a finished preparation`() {

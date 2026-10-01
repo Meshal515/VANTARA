@@ -88,6 +88,10 @@ data class PageEmbeds(
     val pattern: String? = null,
     val nameAttr: String? = null,
     val qualityAttr: String? = null,
+    /** Some sites expose the server list only after a form POST (EgyDead: View=1). */
+    val form: Map<String, String> = emptyMap(),
+    /** Prefer the maintained page resolver when the shipped extension no longer supports its hosts. */
+    val primary: Boolean = false,
 ) {
     data class Embed(val url: String, val name: String, val quality: Int?)
 

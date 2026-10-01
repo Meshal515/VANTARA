@@ -98,4 +98,14 @@ describe('work.describe', () => {
     const [row] = await works(env, B);
     expect(row).toMatchObject({ series_ref: 'ext:slam dunk', title: 'Slam Dunk', cover_url: 'https://img.test/sd.jpg' });
   });
+  it('repairs a failed canonical cover once without a stale device overwriting the repair', async () => {
+    const { env } = testEnv();
+    await send(env, A, 'work.describe', { seriesRef: 'ext:lookism', title: 'Lookism', coverUrl: 'https://img.test/dead.jpg' });
+    await send(env, A, 'work.cover.repair', { seriesRef: 'ext:lookism', expectedCover: 'https://img.test/dead.jpg', coverUrl: 'https://img.test/live.jpg', sourceId: 'teamx' });
+    expect((await works(env, B)).find(r => r['series_ref'] === 'ext:lookism')?.['cover_url']).toBe('https://img.test/live.jpg');
+    await send(env, B, 'work.cover.repair', { seriesRef: 'ext:lookism', expectedCover: 'https://img.test/dead.jpg', coverUrl: 'https://img.test/other.jpg' });
+    await send(env, B, 'work.describe', { seriesRef: 'ext:lookism', title: 'Lookism', coverUrl: 'https://img.test/old.jpg' });
+    expect((await works(env, A)).find(r => r['series_ref'] === 'ext:lookism')?.['cover_url']).toBe('https://img.test/live.jpg');
+  });
+
 });

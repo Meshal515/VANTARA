@@ -173,6 +173,7 @@ export type OpKind =
   | 'notification.seen'
   | 'settings.patch'
   | 'work.describe'
+  | 'work.cover.repair'
   | 'view.add'
   | 'view.remove';
 

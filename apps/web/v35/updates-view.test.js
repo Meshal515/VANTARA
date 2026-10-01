@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agoAr, groupEvents, unitLabel } from './updates-view.js';
+import { agoAr, groupEvents, mergeTimelineEvents, unitLabel } from './updates-view.js';
 import { trustDates } from '../lib/update-engine.js';
 
 /** الخط الزمني: وقت نسبي صادق، ودفعات الفصول بطاقة واحدة بلا خلط أعمال. */
@@ -8,6 +8,20 @@ const M = 60_000;
 const H = 60 * M;
 
 describe('آخر التحديثات', () => {
+  it('shows only real new publications live; discovery time never promotes historic backfill', () => {
+    const ev = (id, publishedAt) => ({ id, work: id, at: publishedAt ?? NOW, publishedAt, firstSeenAt: NOW });
+    const original = [ev('yesterday', NOW - 24 * H)];
+    const incoming = [ev('five-hours', NOW - 5 * H), ev('new', NOW + 20_000), ev('unknown', null), ...original];
+    const live = mergeTimelineEvents(original, incoming, { enteredAt: NOW, now: NOW + 30_000 });
+    expect(live.map((e) => e.id)).toEqual(['new', 'yesterday']);
+    expect(mergeTimelineEvents(live, incoming, { enteredAt: NOW, now: NOW + 30_000, refresh: true }).map((e) => e.id)).toEqual(['new', 'unknown', 'five-hours', 'yesterday']);
+  });
+  it('retains genuine dated batches, but rejects synthetic timestamps over an entire long backlog', () => {
+    const batch = [627, 626, 625, 624].map((number) => ({ number, publishedAt: NOW }));
+    expect(trustDates(batch)).toEqual(batch);
+    const backlog = Array.from({ length: 30 }, (_, i) => ({ number: i + 1, publishedAt: NOW }));
+    expect(trustDates(backlog).every((u) => !u.publishedAt)).toBe(true);
+  });
   it('relative time in natural Arabic', () => {
     expect(agoAr(NOW - 20_000, NOW)).toBe('الآن');
     expect(agoAr(NOW - 2 * M, NOW)).toBe('قبل دقيقتين');
@@ -33,7 +47,7 @@ describe('آخر التحديثات', () => {
   });
 
   it('drops upload dates a source stamps identically on every chapter', () => {
-    const same = [{ number: 3, publishedAt: NOW }, { number: 2, publishedAt: NOW + 5 }, { number: 1, publishedAt: NOW + 9 }];
+    const same = Array.from({ length: 30 }, (_, i) => ({ number: i + 1, publishedAt: NOW + i }));
     expect(trustDates(same).every((u) => !('publishedAt' in u))).toBe(true);
     const real = [{ number: 3, publishedAt: NOW }, { number: 2, publishedAt: NOW - 7 * 24 * H }, { number: 1, publishedAt: NOW - 14 * 24 * H }];
     expect(trustDates(real)).toEqual(real);

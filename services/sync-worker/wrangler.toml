@@ -2,8 +2,11 @@ name = "vantara-sync"
 main = "src/secure-index.ts"
 compatibility_date = "2025-01-01"
 
-# لا observability مدفوعة ولا cron: الخطة المجانية تكفي ثلاثة مستخدمين
+# Collect recent release history before a phone opens the app.
 workers_dev = true
+
+[triggers]
+crons = ["*/2 * * * *"]
 
 [[d1_databases]]
 binding = "DB"

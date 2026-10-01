@@ -4,7 +4,7 @@
  * كل مسار يرى فصولًا أو حلقات (Latest، البحث، صفحة العمل، جلب الفصول، الزحف،
  * التحديث اليدوي) يبلّغ «هذا العمل وما أراه من وحداته»، وهنا يتحوّل لأحداث ثابتة:
  * - أول مشاهدة للعمل خط أساس بلا أحداث: 400 فصل قديم لا تصير 400 تحديث.
- *   بعدها فقط ما يظهر فوق خط الأساس حدث جديد.
+ *   الوحدات المؤرّخة تُحفظ كاملة حتى تحت خط الأساس؛ القديم تاريخ، لا خبر حي.
  * - هوية الحدث = العمل الموحّد + نوع الوحدة + رقمها، لا رقم المصدر.
  *   نفس الفصل من ثلاثة مصادر = حدث واحد بثلاثة مصادر.
  * - وقتان منفصلان: `published_at` من المصدر إن كان موثوقًا، و`first_seen_at` أول
@@ -29,9 +29,9 @@ interface Source {
 
 const MAX_EVENTS = 100;
 const MAX_SOURCES = 12;
-const YEAR = 365 * 86_400_000;
+const EARLIEST_PUBLICATION = Date.UTC(1900, 0, 1);
 const WORK = {
-  manga: /^ext:[^\s|]{1,200}$/,
+  manga: /^ext:[^\x00-\x1f|]{1,200}$/,
   anime: /^anime:\d{1,9}$/,
   cinema: /^cinema:tt\d{1,10}$/,
 } as const;
@@ -70,7 +70,6 @@ interface Mark {
 }
 
 /** حدث جديد على خط أساس قديم: وقت نشر حديث موثوق لأول مشاهدة. */
-const RECENT_MS = 3 * 86_400_000;
 /** أكبر قفزة تُقبل فوق خط الأساس؛ ما بعدها ترقيم مصدر خاطئ لا فصول جديدة. */
 const JUMP = { chapter: 30, episode: 12 } as const;
 /** أكبر دفعة بلا تواريخ تُعدّ إصدارًا حقيقيًا؛ ما فوقها لحاق مصدر أكمل. */
@@ -78,7 +77,7 @@ const BURST = 3;
 
 const reliable = (p: unknown, now: number) => {
   const n = num(p);
-  return n != null && n > 0 && n <= now + 10 * 60_000 && n >= now - YEAR ? Math.min(n, now) : null;
+  return n != null && n >= EARLIEST_PUBLICATION && n <= now ? n : null;
 };
 const isAbove = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
 
@@ -107,6 +106,7 @@ export function parseReport(raw: unknown, now: number): Report | null {
   const units: Unit[] = [];
   for (const u of Array.isArray(r.units) ? r.units.slice(0, 60) : []) {
     const x = u as Record<string, unknown>;
+    if (Number(x?.publishedAt) > now) continue;
     const number = num(x?.number);
     const season = num(x?.season);
     if (kind === 'movie') {
@@ -133,24 +133,17 @@ function mergeSources(old: Source[], add: Source[]): Source[] {
 }
 
 /**
- * يقرّر من تقرير المجسّ: ما الأحداث الجديدة؟ وما خط الأساس بعدها؟
- *
- * - أول مشاهدة للعمل: كل الموجود خط أساس بلا أحداث، إلا ما نُشر فعلًا في آخر
- *   3 أيام بوقت موثوق.
- * - بعدها ما فوق الخط مرشّح، لكن «جديد على VANTARA» ليس «جديدًا في العالم»:
- *   · وحدة بتاريخ نشر موثوق أقدم من 3 أيام = محتوى قديم نراه أول مرة ← لا حدث.
- *   · أكثر من 3 وحدات بلا تاريخ فوق الخط دفعة واحدة = مصدر أكمل لحق بعمل نعرفه
- *     (النهايات: مصدر بفصلين ثم مصدر بـ21) ← نرفع الخط بصمت بلا 19 حدثًا قديمًا.
- *   · قفزات الترقيم الشاذة تُتجاهل.
- * - الفيلم: حدث «توفّر» واحد عند أول اكتشاف.
+ * Every dated unit is history, including delayed catch-up below the watermark.
+ * Undated first sightings stay a baseline; small later advances may use firstSeenAt.
+ * The UI accepts live insertions only with a trustworthy, genuinely recent publishedAt.
+ * An undated movie visit never manufactures a release event.
  */
-export function decide(report: Report, mark: Mark | null, now: number): { fresh: Unit[]; mark: Mark | null } {
-  if (report.kind === 'movie') return { fresh: mark ? [] : report.units.slice(0, 1), mark: mark ?? { season: null, number: 0 } };
+export function decide(report: Report, mark: Mark | null, _now: number): { fresh: Unit[]; mark: Mark | null } {
+  if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
-  const recent = (u: Unit) => u.publishedAt != null && now - u.publishedAt <= RECENT_MS;
   if (!mark) {
-    return { fresh: sorted.filter(recent).slice(-3), mark: { season: top.season, number: top.number } };
+    return { fresh: sorted.filter((u) => u.publishedAt != null), mark: { season: top.season, number: top.number } };
   }
   const limit = JUMP[report.kind];
   const above = sorted.filter((u) => {
@@ -161,7 +154,7 @@ export function decide(report: Report, mark: Mark | null, now: number): { fresh:
   });
   const undated = above.filter((u) => u.publishedAt == null);
   const catchUp = undated.length > BURST;
-  const fresh = above.filter((u) => (u.publishedAt != null ? recent(u) : !catchUp));
+  const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null && !catchUp)];
   const last = above[above.length - 1];
   return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
 }
@@ -219,12 +212,12 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
           old = [];
         }
         const merged = mergeSources(old, add);
-        // `at` و`first_seen_at` لا يُلمسان أبدًا: المصدر الثاني يُضاف تحت نفس الحدث في مكانه
+        // first_seen_at لا يتغير. أول تاريخ نشر موثوق يصحّح مكان الحدث مرة واحدة.
         if (JSON.stringify(merged) === row.sources && (row.cover || !r.cover) && (row.published_at != null || u.publishedAt == null)) continue;
         row.sources = JSON.stringify(merged);
         writes.push(
-          env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
-            .bind(row.sources, r.cover, u.publishedAt, now, id),
+          env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), at = CASE WHEN published_at IS NULL AND ? IS NOT NULL THEN ? ELSE at END, published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
+            .bind(row.sources, r.cover, u.publishedAt, u.publishedAt, u.publishedAt, now, id),
         );
         continue;
       }
@@ -257,7 +250,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
   // قديم رآه VANTARA أول مرة، أو دفعة بلا تواريخ أكبر من إصدار حقيقي في لحظة واحدة
   const where = [
     'section = ?',
-    `NOT (published_at IS NOT NULL AND published_at < first_seen_at - ${RECENT_MS})`,
+    `(kind <> 'movie' OR published_at IS NOT NULL)`,
     `(published_at IS NOT NULL OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
   ];
   const binds: unknown[] = [section];
@@ -304,6 +297,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
         sources,
       };
     }),
+    snapshotAt: Date.now(),
     next: rows.length > limit && last ? `${last.at}~${last.id}` : null,
   });
 }

@@ -53,9 +53,9 @@ class EmbedResolver(
     private val sniffer: Sniffer? = null,
     private val userAgent: () -> String? = { null },
 ) {
-    suspend fun resolve(embed: String, referer: String?): List<Stream> = resolve(embed, referer, depth = 0)
+    suspend fun resolve(embed: String, referer: String?, onStreams: ((List<Stream>) -> Unit)? = null): List<Stream> = resolve(embed, referer, depth = 0, onStreams = onStreams)
 
-    private suspend fun resolve(embed: String, referer: String?, depth: Int): List<Stream> {
+    private suspend fun resolve(embed: String, referer: String?, depth: Int, onStreams: ((List<Stream>) -> Unit)? = null): List<Stream> {
         val url = if (embed.startsWith("//")) "https:$embed" else embed
         val host = url.toHttpUrlOrNull()?.host?.lowercase() ?: return emptyList()
         // سيرفرات الفيديو قد يحجبها DNS المزوّد مثل مواقع المصادر؛ نفضّل لها
@@ -67,7 +67,7 @@ class EmbedResolver(
             host.endsWith("mega.nz") || host.endsWith("mega.co.nz") -> emptyList()
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
-            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> fallback(url, referer) { megamax(url, referer) }
+            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> fallback(url, referer) { megamax(url, referer, onStreams) }
             host.endsWith("videa.hu") -> fallback(url, referer) { videa(url, referer) }
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
@@ -155,7 +155,7 @@ class EmbedResolver(
         sniffer?.sniff(url, referer)?.let(::listOf).orEmpty()
 
     /** نُبقي محاولتين فقط قيد العمل، ونرجع عند أول مرآة صالحة بدل انتظار البطيئة. */
-    private suspend fun megamax(url: String, referer: String?): List<Stream> {
+    private suspend fun megamax(url: String, referer: String?, onStreams: ((List<Stream>) -> Unit)?): List<Stream> {
         val first = fetch(url, referer)
         val version = Megamax.version(first.body) ?: return emptyList()
         val headers = Headers.Builder().apply {
@@ -168,12 +168,13 @@ class EmbedResolver(
             add("Referer", first.url)
         }.build()
         val body = client.newCall(GET(first.url, headers)).await().use { it.body.string() }
-        val mirrors = Megamax.mirrors(body).take(MEGAMAX_TRIES)
+        val mirrors = Megamax.mirrors(body).take(if (onStreams == null) MEGAMAX_TRIES else 20)
         return coroutineScope {
             val results = Channel<List<Stream>>(Channel.UNLIMITED)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
             var next = 0
             var pending = 0
+            val gathered = mutableListOf<Stream>()
             fun CoroutineScope.startNext() {
                 if (next >= mirrors.size) return
                 val mirror = mirrors[next++]
@@ -195,12 +196,16 @@ class EmbedResolver(
                 val streams = results.receive()
                 pending--
                 if (streams.isNotEmpty()) {
-                    jobs.forEach { it.cancel() }
-                    return@coroutineScope streams
+                    if (onStreams == null) {
+                        jobs.forEach { it.cancel() }
+                        return@coroutineScope streams
+                    }
+                    gathered += streams
+                    onStreams(streams)
                 }
                 startNext()
             }
-            emptyList()
+            gathered.distinctBy { it.url }
         }
     }
 

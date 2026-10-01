@@ -36,7 +36,8 @@ object StreamProbe {
         if (container == Container.HLS) return false
         val type = contentType.orEmpty().lowercase()
         if (type.startsWith("text/html") || text.startsWith("<!doctype", ignoreCase = true) || text.startsWith("<html", ignoreCase = true)) return false
-        if (type.startsWith("application/json")) return false
-        return true
+        if (type.startsWith("application/json") || text.startsWith("{") || text.startsWith("[")) return false
+        if (type.startsWith("text/") || text.isEmpty()) return false
+        return type.startsWith("video/") || type.startsWith("application/octet-stream") || head.contains("ftyp")
     }
 }

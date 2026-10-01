@@ -408,8 +408,12 @@ class AnimeEngine(context: Context) {
             .build()
     }
 
+    private val probeSlots = Semaphore(4)
+
     private suspend fun probeRoute(prep: com.vantara.anime.stream.PreparedEpisode, r: com.vantara.anime.stream.RouteReport) {
-        val c = prep.rank(r.candidates).firstOrNull() ?: r.candidates.firstOrNull() ?: return
+        coroutineScope {
+            for (c in prep.rank(r.candidates)) if (prep.claimProbe(c.id)) launch {
+        probeSlots.withPermit {
         val t0 = System.nanoTime()
         val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
             kotlinx.coroutines.runInterruptible { runCatching { com.vantara.anime.stream.StreamProbe.check(probeClient, c) }.getOrDefault(false) }
@@ -417,7 +421,10 @@ class AnimeEngine(context: Context) {
         val ms = (System.nanoTime() - t0) / 1_000_000
         // النجاح وحده يُسجَّل للمضيف: فشل الفحص قد يكون ترويسة ينقصها، فلا يعاقَب المضيف في الأنمي بسببه
         if (ok) health.ok(HealthStore.hostKey(c.host), ms)
-        prep.markProbe("${r.sourceId}|${r.key}", ok, ms)
+        prep.markProbe("${r.sourceId}|${r.key}", ok, ms, c.id)
+        }
+            }
+        }
     }
 
     /** Keep the warmed source's work; request the remaining copies without refetching it. */

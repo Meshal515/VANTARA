@@ -908,7 +908,7 @@ function workStatements(
            -- غلاف العمل الموحّد ثابت: أول غلاف يُعرف يبقى، ولا يستبدله مصدر آخر
            -- ولا نسخة أخرى (كانت كل عملية تكتب غلاف نسختها فيتبدّل الغلاف بين الشاشات)
            cover_url = COALESCE(works.cover_url, excluded.cover_url),
-           source_id = COALESCE(excluded.source_id, works.source_id),
+           source_id = CASE WHEN works.cover_url IS NULL THEN COALESCE(excluded.source_id, works.source_id) ELSE COALESCE(works.source_id, excluded.source_id) END,
            updated_at = MAX(works.updated_at, excluded.updated_at),
            rev = excluded.rev`,
       )
@@ -2159,6 +2159,18 @@ export function statementsFor(
      * معًا قائمة واحدة، والمصدر نفسه يأخذ آخر ما وصل عنه. `json_each` يفكّ
      * القائمتين في SQL نفسه، فلا قراءة قبل الكتابة ولا سباق بين جهازين.
      */
+    case 'work.cover.repair': {
+      const seriesRef = asString(p['seriesRef'], 200);
+      const expected = asString(p['expectedCover'], 600);
+      const cover = asString(p['coverUrl'], 600);
+      const sourceId = asString(p['sourceId'], 120);
+      if (!seriesRef || !/^ext:[^\x00-\x1f|]+$/.test(seriesRef) || !expected || !cover || !/^https?:\/\//i.test(cover) || expected === cover) return null;
+      // Only a verified fallback may replace the exact broken canonical URL.
+      // A delayed repair from another device cannot undo a newer successful repair.
+      return [db.prepare('UPDATE works SET cover_url = ?, source_id = COALESCE(?, source_id), updated_at = MAX(updated_at, ?), rev = ? WHERE series_ref = ? AND cover_url = ?')
+        .bind(cover, sourceId, now, rev, seriesRef, expected)];
+    }
+
     case 'work.describe': {
       const seriesRef = asString(p['seriesRef'], 200);
       if (!seriesRef) return null;
@@ -3048,6 +3060,10 @@ export default {
     const now = Date.now();
 
     try {
+      if (path === '/health' && url.searchParams.get('collectors') === '1') {
+        const rows = await env.DB.prepare('SELECT source, last_attempt_at, last_success_at, last_error FROM collector_state ORDER BY source').all();
+        return json({ ok: true, collectors: rows.results }, { status: 200 }, cors);
+      }
       if (path === '/health') {
         return json({ ok: true, protocol: SYNC_PROTOCOL, rev: await currentRev(env) }, {}, cors);
       }
