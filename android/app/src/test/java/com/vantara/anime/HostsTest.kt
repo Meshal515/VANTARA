@@ -17,6 +17,9 @@ import com.vantara.anime.net.AnimeHostRouter
 import com.vantara.anime.stream.Candidate
 import com.vantara.anime.stream.Container
 import com.vantara.anime.stream.Preferences
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -144,6 +147,28 @@ class HostsTest {
         assertTrue(AnimeHostRouter.prefersDoh("fast.test"))
         assertFalse(AnimeHostRouter.isHiddenOnly("slow.test"))
         assertFalse(AnimeHostRouter.isHiddenOnly("fast.test"))
+    }
+
+    @Test fun `megamax publishes the first stream and continues remaining mirrors in background`() = runBlocking {
+        val mirrorJson = """{"props":{"streams":{"data":[{"label":"720p","mirrors":[
+            {"driver":"mp4upload","link":"https://slow.test/embed"},
+            {"driver":"earnvids","link":"https://fast.test/embed"}
+        ]}]}}}"""
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val r = chain.request()
+            val body = if (r.header("X-Inertia") == "true") mirrorJson else if (r.url.host == "share4max.com") fixture("megamax.html") else ""
+            Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody("text/html".toMediaType())).build()
+        }.build()
+        val resolver = EmbedResolver(client, sniffer = { url, _ ->
+            if (url.contains("slow.test")) delay(500) else delay(20)
+            com.vantara.anime.hosts.Stream("https://${java.net.URI(url).host}/video.mp4")
+        })
+        val first = CompletableDeferred<String>()
+        val all = async { resolver.resolve("https://share4max.com/iframe/nRcSlqx5tF9nn", null) { streams -> first.complete(streams.first().url) } }
+        assertEquals("https://fast.test/video.mp4", withTimeout(400) { first.await() })
+        assertTrue(all.isActive)
+        assertEquals(setOf("https://fast.test/video.mp4", "https://slow.test/video.mp4"), all.await().map { it.url }.toSet())
     }
 
     @Test fun `a page the extractor cannot read falls back to the sniffer`() = runBlocking {

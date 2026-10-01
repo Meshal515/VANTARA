@@ -32,7 +32,7 @@ describe('server collectors', () => {
     const { env } = setup();
     await collectTimelines(env, { now: NOW, fetchImpl: (async input => {
       const url = String(input);
-      if (url.includes('anilist')) return new Response('blocked', { status: 403 });
+      if (url.includes('graphql.anilist.co')) return new Response('blocked', { status: 403 });
       if (url.includes('kitsu')) return reply({ data: [{ id: '12', attributes: { canonicalTitle: 'One Piece' }, relationships: { mappings: { data: [{ id: 'mapping1' }] } } }],
         included: [{ id: 'mapping1', type: 'mappings', attributes: { externalSite: 'anilist/anime', externalId: '21' } }] });
       if (url.includes('ani.zip')) return reply({ mappings: { anilist_id: 21 }, episodes: { '1160': { episodeNumber: 5, absoluteEpisodeNumber: 1160, airDateUtc: new Date(NOW - H).toISOString() } } });

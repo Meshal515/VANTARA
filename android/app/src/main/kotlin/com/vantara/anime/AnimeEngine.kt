@@ -413,16 +413,17 @@ class AnimeEngine(context: Context) {
     private suspend fun probeRoute(prep: com.vantara.anime.stream.PreparedEpisode, r: com.vantara.anime.stream.RouteReport) {
         coroutineScope {
             for (c in prep.rank(r.candidates)) if (prep.claimProbe(c.id)) launch {
-        probeSlots.withPermit {
-        val t0 = System.nanoTime()
-        val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
-            kotlinx.coroutines.runInterruptible { runCatching { com.vantara.anime.stream.StreamProbe.check(probeClient, c) }.getOrDefault(false) }
-        } ?: false
-        val ms = (System.nanoTime() - t0) / 1_000_000
-        // النجاح وحده يُسجَّل للمضيف: فشل الفحص قد يكون ترويسة ينقصها، فلا يعاقَب المضيف في الأنمي بسببه
-        if (ok) health.ok(HealthStore.hostKey(c.host), ms)
-        prep.markProbe("${r.sourceId}|${r.key}", ok, ms, c.id)
-        }
+                probeSlots.withPermit {
+                    val t0 = System.nanoTime()
+                    val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
+                        kotlinx.coroutines.runInterruptible {
+                            runCatching { com.vantara.anime.stream.StreamProbe.check(probeClient, c) }.getOrDefault(false)
+                        }
+                    } ?: false
+                    val ms = (System.nanoTime() - t0) / 1_000_000
+                    if (ok) health.ok(HealthStore.hostKey(c.host), ms)
+                    prep.markProbe("${r.sourceId}|${r.key}", ok, ms, c.id)
+                }
             }
         }
     }
