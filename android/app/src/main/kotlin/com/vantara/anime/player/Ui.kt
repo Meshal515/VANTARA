@@ -31,22 +31,40 @@ import android.widget.TextView
  * خطّية مرسومة (لا صور)، وأوراق سفلية بتصميم VANTARA بدل نوافذ أندرويد.
  */
 object Tone {
-    const val BG = 0xFF05070D.toInt()
-    const val SURFACE = 0xFF0D111B.toInt()
-    const val SURFACE_2 = 0xFF131826.toInt()
-    const val SURFACE_3 = 0xFF1B2233.toInt()
-    const val LINE = 0x1FA0BEFF
-    const val TEXT = 0xFFF3F6FC.toInt()
-    const val TEXT_2 = 0xFFB4BDD0.toInt()
-    const val TEXT_3 = 0xFF7D879D.toInt()
-    const val TEXT_4 = 0xFF4E576B.toInt()
-    const val ACCENT = 0xFF3B82F6.toInt()
-    const val ACCENT_TEXT = 0xFF8FB8FF.toInt()
-    const val ACCENT_SOFT = 0x293B82F6
+    var BG = 0xFF05070D.toInt(); private set
+    var SURFACE = 0xFF0D111B.toInt(); private set
+    var SURFACE_2 = 0xFF131826.toInt(); private set
+    var SURFACE_3 = 0xFF1B2233.toInt(); private set
+    var LINE = 0x1FA0BEFF; private set
+    var TEXT = 0xFFF3F6FC.toInt(); private set
+    var TEXT_2 = 0xFFB4BDD0.toInt(); private set
+    var TEXT_3 = 0xFF7D879D.toInt(); private set
+    var TEXT_4 = 0xFF4E576B.toInt(); private set
+    var ACCENT = 0xFF3B82F6.toInt(); private set
+    var ACCENT_TEXT = 0xFF8FB8FF.toInt(); private set
+    var ACCENT_SOFT = 0x293B82F6; private set
+    /** حدّ العنصر المختار (الحلقة الحالية، السيرفر المختار). */
+    var ACCENT_LINE = 0x6B3B82F6; private set
     const val OK = 0xFF34D399.toInt()
     const val WARN = 0xFFFBBF24.toInt()
     const val BAD = 0xFFF87171.toInt()
     const val SCRIM = 0xB3000000.toInt()
+
+    /** لون القسم: نفس المشغّل بنفس تصميمه، والسينما بالأحمر الدموي (cinema.css). */
+    fun use(section: String) {
+        if (section == "cinema") {
+            BG = 0xFF0A0707.toInt(); SURFACE = 0xFF141010.toInt(); SURFACE_2 = 0xFF1B1515.toInt(); SURFACE_3 = 0xFF251C1C.toInt()
+            LINE = 0x1FFFC8C8; TEXT = 0xFFF7F2F2.toInt(); TEXT_2 = 0xFFCBBDBD.toInt(); TEXT_3 = 0xFF978787.toInt(); TEXT_4 = 0xFF5E5252.toInt()
+            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F
+        } else {
+            BG = 0xFF05070D.toInt(); SURFACE = 0xFF0D111B.toInt(); SURFACE_2 = 0xFF131826.toInt(); SURFACE_3 = 0xFF1B2233.toInt()
+            LINE = 0x1FA0BEFF; TEXT = 0xFFF3F6FC.toInt(); TEXT_2 = 0xFFB4BDD0.toInt(); TEXT_3 = 0xFF7D879D.toInt(); TEXT_4 = 0xFF4E576B.toInt()
+            ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6
+        }
+    }
+
+    /** اللون نفسه بشفافية أخرى (0..255). */
+    fun alpha(color: Int, a: Int) = (color and 0x00FFFFFF) or (a shl 24)
 }
 
 fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density + 0.5f).toInt()
@@ -368,7 +386,7 @@ fun Context.sheetRow(
     minimumHeight = dp(56)
     setPadding(dp(14), dp(10), dp(14), dp(10))
     background = if (onClick != null && enabled) {
-        pressable(if (selected) Tone.ACCENT_SOFT else Tone.SURFACE_2, dp(14).toFloat(), if (selected) dp(1) else 0, 0x6B3B82F6)
+        pressable(if (selected) Tone.ACCENT_SOFT else Tone.SURFACE_2, dp(14).toFloat(), if (selected) dp(1) else 0, Tone.ACCENT_LINE)
     } else {
         rounded(if (selected) Tone.ACCENT_SOFT else Tone.SURFACE_2, dp(14).toFloat())
     }

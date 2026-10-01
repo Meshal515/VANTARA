@@ -85,12 +85,12 @@ export const SHELL_HTML = `<div class="app">
     <main id="homeSections"></main>
     </div>
     <div class="home-view anime-home" id="animeHome" hidden></div>
-    <div class="home-view anime-home cinema-home" id="cinemaHome" hidden></div>
+    <div class="home-view cinema-home" id="cinemaHome" hidden></div>
   </section>
 
   <section class="page anime-page" id="anime"></section>
 
-  <section class="page anime-page cinema-page" id="cinema"></section>
+  <section class="page cinema-page" id="cinema"></section>
 
   <section class="page" id="detail">
     <div class="detail-glow" aria-hidden="true"><i id="detailGlow"></i></div>

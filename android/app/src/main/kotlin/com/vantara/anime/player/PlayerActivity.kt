@@ -188,7 +188,7 @@ class PlayerActivity : Activity() {
             .put("screen", "ANIME")
         if (watching) body.put("seriesId", launch.ref())
             .put("seriesTitle", launch.title)
-            .put("chapterLabel", if (launch.section == "cinema" && launch.total <= 1) "فيلم" else "الحلقة ${fmtEpisode(episode)}")
+            .put("chapterLabel", episodeLabel())
             .put("chapterNumber", episode.toDouble())
         presenceJob = scope.launch {
             withContext(Dispatchers.IO) {
@@ -327,6 +327,7 @@ class PlayerActivity : Activity() {
 
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
+        Tone.use(launch.section)
         sessionId = launch.session
         presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
@@ -382,9 +383,12 @@ class PlayerActivity : Activity() {
         unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refresh() } }
         expanded = false
         titleView.text = launch.title
-        episodeView.text = "الحلقة ${fmtEpisode(episode)}"
+        episodeView.text = episodeLabel()
         nextButton.visibility = if (hasNext()) View.VISIBLE else View.GONE
     }
+
+    /** «الحلقة 12»، والفيلم في السينما «فيلم». */
+    private fun episodeLabel() = if (launch.section == "cinema" && launch.total <= 1) "فيلم" else "الحلقة ${fmtEpisode(episode)}"
 
     // ───────────── التشغيل والتبديل ─────────────
 
@@ -667,7 +671,7 @@ class PlayerActivity : Activity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = rounded(0xE60D111B.toInt(), dp(18).toFloat(), dp(1), Tone.LINE)
+            background = rounded(Tone.alpha(Tone.SURFACE, 0xE6), dp(18).toFloat(), dp(1), Tone.LINE)
             setPadding(dp(16), dp(14), dp(16), dp(14))
             swallowTouches()
         }
@@ -768,14 +772,14 @@ class PlayerActivity : Activity() {
 
         pill = label("", 13.5f, Color.WHITE, bold = true).apply {
             setPadding(dp(16), dp(9), dp(16), dp(9))
-            background = rounded(0xD90D111B.toInt(), dp(20).toFloat(), dp(1), Tone.LINE)
+            background = rounded(Tone.alpha(Tone.SURFACE, 0xD9), dp(20).toFloat(), dp(1), Tone.LINE)
             textDirection = View.TEXT_DIRECTION_RTL
             alpha = 0f
             visibility = View.GONE
         }
         root.addView(pill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(84) })
 
-        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = 0x990D111B.toInt(), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE }
+        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE }
         root.addView(unlockButton, FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER_VERTICAL or Gravity.RIGHT).apply { rightMargin = dp(28) })
 
         sheet = VSheet(root)
@@ -885,7 +889,7 @@ class PlayerActivity : Activity() {
         gravity = Gravity.CENTER
         textAlignment = View.TEXT_ALIGNMENT_CENTER
         setPadding(dp(18), dp(12), dp(18), dp(12))
-        background = rounded(0x800D111B.toInt(), dp(30).toFloat())
+        background = rounded(Tone.alpha(Tone.SURFACE, 0x80), dp(30).toFloat())
         visibility = View.GONE
     }
 
@@ -1058,7 +1062,7 @@ class PlayerActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = rounded(0xF20D111B.toInt(), dp(22).toFloat(), dp(1), Tone.LINE)
+            background = rounded(Tone.alpha(Tone.SURFACE, 0xF2), dp(22).toFloat(), dp(1), Tone.LINE)
             setPadding(dp(24), dp(22), dp(24), dp(20))
             swallowTouches()
         }
@@ -1139,11 +1143,11 @@ class PlayerActivity : Activity() {
             setPadding(dp(14), dp(12), dp(14), dp(10))
             val bg = when {
                 isCurrent -> Tone.ACCENT_SOFT
-                dim -> 0x80131826.toInt()
+                dim -> Tone.alpha(Tone.SURFACE_2, 0x80)
                 else -> Tone.SURFACE_2
             }
             background = if (playable) pressable(bg, dp(16).toFloat(), dp(1), Tone.LINE)
-            else rounded(bg, dp(16).toFloat(), dp(1), if (isCurrent) 0x6B3B82F6 else Tone.LINE)
+            else rounded(bg, dp(16).toFloat(), dp(1), if (isCurrent) Tone.ACCENT_LINE else Tone.LINE)
             val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             top.addView(label(r.code, 17f, if (r.state == RouteState.UNAVAILABLE) Tone.TEXT_4 else if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { letterSpacing = 0.08f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
@@ -1176,7 +1180,7 @@ class PlayerActivity : Activity() {
                     gravity = Gravity.CENTER
                     textAlignment = View.TEXT_ALIGNMENT_CENTER
                     minHeight = dp(48)
-                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat(), if (watched && !on) dp(1) else 0, 0x6B3B82F6)
+                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat(), if (watched && !on) dp(1) else 0, Tone.ACCENT_LINE)
                     setOnClickListener { if (n != cur) switchEpisode(n) else sheet.close() }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
             }

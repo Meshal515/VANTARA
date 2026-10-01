@@ -30,7 +30,7 @@ class TimeBar(context: Context) : View(context) {
     private val buffered = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FFFFFF }
     private val played = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.ACCENT }
     private val thumb = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.ACCENT }
-    private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x403B82F6 }
+    private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.alpha(Tone.ACCENT, 0x40) }
 
     private val pad get() = dp(10).toFloat()
 

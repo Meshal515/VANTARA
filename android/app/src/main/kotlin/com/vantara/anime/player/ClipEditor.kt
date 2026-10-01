@@ -99,7 +99,7 @@ class ClipEditor(
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             background = GradientDrawable().apply {
-                setColor(0xF20D111B.toInt())
+                setColor(Tone.alpha(Tone.SURFACE, 0xF2))
                 val r = ctx.dp(24).toFloat()
                 cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(ctx.dp(1), Tone.LINE)
