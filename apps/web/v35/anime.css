@@ -171,10 +171,31 @@
   background: var(--accent);
 }
 
-/* ───────────── البانر: بطاقات تطلّ جاراتها ───────────── */
+/* ───────────── البانر: بطاقات تطلّ جاراتها ─────────────
+ * هوية «البثّ»: المسرح خلف البطاقات يلبس لون العمل الظاهر (`--stage` من
+ * AniList) ويتحوّل معه، ووسم الترتيب شريحة مائلة كرسوم الشاشات. */
 
+@property --stage {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #3b82f6;
+}
 .v35 .an-car {
+  --stage: var(--accent);
+  position: relative;
+  isolation: isolate;
   padding-top: 4px;
+  transition: --stage 0.9s ease;
+}
+.v35 .an-car::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -60px 0 0;
+  background:
+    radial-gradient(95% 60% at 50% 32%, color-mix(in srgb, var(--stage) 46%, transparent), transparent 74%),
+    linear-gradient(to bottom, transparent 55%, var(--bg));
+  pointer-events: none;
 }
 .v35 .an-car-track {
   display: flex;
@@ -233,18 +254,20 @@
   color: var(--text-3);
 }
 .v35 .an-car-rank {
-  padding: 2px 7px;
-  border-radius: 7px;
+  padding: 3px 12px 3px 10px;
   background: var(--accent);
   color: #fff;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
   direction: ltr;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
 }
 .v35 .an-car-title {
   margin: 0;
-  font-size: 21px;
-  font-weight: 850;
+  font-size: 25px;
+  font-weight: 900;
+  letter-spacing: -0.3px;
   line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -320,9 +343,53 @@
 }
 .v35 .an-rail-head h2 {
   margin: 0;
-  font-size: 19px;
-  font-weight: 820;
+  font-size: 20px;
+  font-weight: 850;
   line-height: 1.25;
+}
+/* وسم الشريط: كلمة لاتينية بلون القسم بعد شريحة مائلة، كعناوين البثّ */
+.v35 .an-kicker {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.8px;
+  line-height: 1;
+  color: var(--accent-text);
+}
+.v35 .an-kicker::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  clip-path: polygon(40% 0, 100% 0, 60% 100%, 0 100%);
+}
+.v35 .an-kicker--live::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  clip-path: none;
+  background: #ff4d5e;
+  box-shadow: 0 0 0 0 rgba(255, 77, 94, 0.6);
+  animation: an-live 1.8s ease-out infinite;
+}
+@keyframes an-live {
+  70% {
+    box-shadow: 0 0 0 7px rgba(255, 77, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 94, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .an-kicker--live::before {
+    animation: none;
+  }
+  .v35 .an-car {
+    transition: none;
+  }
 }
 .v35 .an-rail-sub {
   font-size: 12px;
@@ -463,7 +530,7 @@
 /* بطاقة الحلقة: عريضة */
 .v35 .an-ep-card {
   --art: var(--surface-2);
-  width: 248px;
+  width: 264px;
   display: grid;
   gap: 8px;
   padding: 0;
@@ -513,12 +580,36 @@
 }
 .v35 .an-ep-num {
   position: absolute;
-  bottom: 12px;
+  bottom: 10px;
   inset-inline-start: 12px;
-  font-size: 14px;
-  font-weight: 850;
+  display: grid;
+  justify-items: start;
+  line-height: 1;
   color: #fff;
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7);
+}
+.v35 .an-ep-num small {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.v35 .an-ep-num b {
+  margin-top: 2px;
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.v35 .an-new {
+  position: absolute;
+  top: 10px;
+  inset-inline-start: 10px;
+  padding: 3px 10px 3px 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
 }
 .v35 .an-ep-copy {
   display: grid;
@@ -853,11 +944,9 @@
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  margin: 16px var(--gutter) 0;
-  padding: 14px 4px;
-  border-radius: 18px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  margin: 18px var(--gutter) 0;
+  padding: 12px 0;
+  border-block: 1px solid var(--line);
 }
 .v35 .an-stat {
   display: grid;
@@ -868,9 +957,11 @@
   border-inline-start: 1px solid var(--line);
 }
 .v35 .an-stat b {
-  font-size: 18px;
-  font-weight: 850;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.5px;
   direction: ltr;
+  font-variant-numeric: tabular-nums;
 }
 .v35 .an-stat--score b {
   color: #ffd166;

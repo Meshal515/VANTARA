@@ -46,7 +46,7 @@ import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaRatings } from '../lib/manga-meta.js';
-import { menuIn, menuOut, swapViews } from './motion.js';
+import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
@@ -429,7 +429,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function removeView(ref) {
     sync.enqueue('view.remove', { seriesRef: ref });
   }
-  const historyWorks = () => viewRows().map((v) => workFromRef(v.series_ref, v.series_title, v.cover_url));
+  // البطاقة تقول أين وقفت: «الفصل 47» من سجلّك نفسه
+  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: v.chapter_label ?? null }));
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -702,7 +703,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** «الفصل 401 · قبل ساعتين»: الوقت من ذاكرة VANTARA حين يكون الحدث منها. */
   function latestLabel(work) {
     const recent = work._latestChapter;
-    if (!recent) return '';
+    if (!recent) return work._viewLabel ?? '';
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
     return work._updateAt ? `${label} · ${agoAr(work._updateAt)}` : label;
@@ -715,7 +716,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (meta && meta.textContent !== label) meta.textContent = label;
     });
   }
-  const renderStrip = (target, items) => reconcileCards(target, items.slice(0, 14));
+  const renderStrip = (target, items) => reconcileCards(target, items.slice(0, Number(target.dataset.limit) || 14));
   const renderGrid = (target, items) => reconcileCards(target, items);
   const skeletonCards = (n) =>
     Array.from({ length: n }, () => {
@@ -745,11 +746,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── الرئيسية ─────────────────────────
 
-  function sectionBlock(title, kind, items) {
-    const s = el('section', 'section');
-    s.dataset.kind = kind ?? 'friends';
+  /**
+   * أقسام الرئيسية بإيقاع مجلة لا شريطًا مكررًا: لكل نوع تركيبه.
+   *   - آخر المشاهدات: بطاقات عريضة تقول أين وقفت.
+   *   - الرائج: قائمة مرتّبة بأرقام، ثلاثة صفوف تُسحب أفقيًا.
+   *   - آخر التحديثات: شبكة 3×3 ثابتة.
+   *   - الباقي: أغلفة طولية.
+   */
+  const HOME_LAYOUT = {
+    history: { kicker: 'CONTINUE', layout: 'resume', limit: 12 },
+    libraryReading: { kicker: 'FOLLOWING', layout: 'covers', limit: 14 },
+    friends: { kicker: 'FRIENDS', layout: 'covers', limit: 14 },
+    trending: { kicker: 'CHARTS', layout: 'chart', limit: 12 },
+    recent: { kicker: 'LATEST', layout: 'grid', limit: 9 },
+    sourcesNow: { kicker: 'FRESH', layout: 'grid', limit: 9 },
+  };
+  function sectionBlock(title, kind, items, layoutKind = kind) {
+    const spec = HOME_LAYOUT[layoutKind] ?? { kicker: '', layout: 'covers', limit: 14 };
+    const s = el('section', `section section--${spec.layout}`);
+    s.dataset.kind = layoutKind ?? 'friends';
     const h = el('div', 'section-head');
-    h.append(el('h2', null, title));
+    const titles = el('div', 'section-titles');
+    if (spec.kicker) titles.append(el('span', 'section-eyebrow', spec.kicker));
+    titles.append(el('h2', null, title));
+    h.append(titles);
     if (kind) {
       const b = el('button', 'link');
       b.type = 'button';
@@ -758,7 +778,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.onclick = () => void openCollection(kind);
       h.append(b);
     }
-    const strip = el('div', 'card-strip');
+    const strip = el('div', `card-strip card-strip--${spec.layout}`);
+    strip.dataset.limit = String(spec.limit);
     renderStrip(strip, items);
     s.append(h, strip);
     return s;
@@ -846,7 +867,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
     const blocks = specs.map(([title, kind, items]) => {
-      const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, items);
+      const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, items, kind);
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), items);
       return section;
     });
@@ -872,6 +893,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function loadHome() {
     if (homeBusy) return;
     homeBusy = true;
+    // خارج `try`: الـ`finally` يحتاجه، ولو عُرّف داخله لرمى ReferenceError فبقي `homeBusy` عالقًا
+    let onLatest = null;
     try {
     if (!available()) {
       renderHeroFallback();
@@ -932,7 +955,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       paint();
     };
-    const onLatest = ({ items }) => live('recent')({ items });
+    onLatest = ({ items }) => live('recent')({ items });
     latestListeners.add(onLatest);
     try {
       const [tr, re] = await Promise.all([
@@ -971,7 +994,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       q('homeSections').replaceChildren(box.firstElementChild);
     }
     } finally {
-      latestListeners.delete(onLatest);
+      if (onLatest) latestListeners.delete(onLatest);
       homeCheckedAt = Date.now();
       homeBusy = false;
     }
@@ -979,28 +1002,36 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ── البانر الدائري: حركة v35 كما هي، وتركيبٌ يناسب الأغلفة الطولية ──
 
-  function heroSlide(w) {
+  /**
+   * «غلاف العدد»: صفحتان متقابلتان. الغلاف كاملًا واضحًا في صفحة، والكلام في
+   * المقابلة برقم الصفحة كمجلة. لا ضباب ولا توهّج: أغلفة المصادر صغيرة، فتُعرض
+   * بحجمها الصادق لا مكبّرة مشوّشة.
+   */
+  function heroSlide(w, i = 0, total = 1) {
     const s = el('div', 'hero-slide');
     s.setAttribute('role', 'group');
     s.setAttribute('aria-label', titleOf(w));
-    const back = el('div', 'hero-backdrop');
-    const cover = w.coverImage?.large;
-    if (cover) back.style.backgroundImage = `url("${cover.replace(/"/g, '%22')}")`;
     const poster = el('div', 'hero-poster');
     void mountImage(poster, w);
     const copy = el('div', 'hero-copy');
+    const folio = el('div', 'hero-folio');
+    folio.dir = 'ltr';
+    folio.append(el('b', null, String(i + 1).padStart(2, '0')), el('span', null, `/ ${String(total).padStart(2, '0')}`));
     const editions = w._work?.editions ?? [];
-    const kicker = [
-      (w.genres || []).slice(0, 2).map(genreAr).join(' · '),
-      editions.length > 1 ? countLabel(editions.length, 'source') : editions[0]?.label,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    copy.append(el('div', 'hero-kicker', kicker));
+    const kicker = (w.genres || []).slice(0, 2).map(genreAr).join(' · ');
     const name = el('h3', 'hero-name', titleOf(w));
     name.dir = 'auto';
+    const facts = [STATUS_AR[w.status], editions.length > 1 ? countLabel(editions.length, 'source') : editions[0]?.label].filter(Boolean).join(' · ');
+    const cue = el('span', 'hero-cue');
+    cue.innerHTML = `<span>اقرأ</span>${glyph('chevron', { size: 14 })}`;
+    copy.append(folio);
+    if (kicker) copy.append(el('div', 'hero-kicker', kicker));
     copy.append(name);
-    s.append(back, poster, copy);
+    if (facts) copy.append(el('div', 'hero-facts', facts));
+    copy.append(cue);
+    // السطور تصعد بهدوء مع كل صفحة (motion.heroSlideIn)
+    for (const line of copy.children) line.dataset.line = '';
+    s.append(poster, copy);
     s.onclick = () => {
       if (Math.abs(state.heroDeltaX) < 8) void openWork(w);
     };
@@ -1010,7 +1041,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const items = state.heroItems;
     if (!items.length) return renderHeroFallback();
     const physical = [items[items.length - 1], ...items, items[0]];
-    q('heroTrack').replaceChildren(...physical.map(heroSlide));
+    const logical = [items.length - 1, ...items.keys(), 0];
+    q('heroTrack').replaceChildren(...physical.map((w, k) => heroSlide(w, logical[k], items.length)));
     q('heroDots').replaceChildren(
       ...items.map((_, i) => {
         const d = el('button', `hero-dot${i === 0 ? ' active' : ''}`);
@@ -1034,9 +1066,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function renderHeroFallback() {
     state.heroItems = [];
-    const s = el('div', 'hero-slide');
+    const s = el('div', 'hero-slide hero-slide--empty');
     const copy = el('div', 'hero-copy');
-    copy.style.insetInlineStart = '20px';
     copy.append(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
     s.append(copy);
     q('heroTrack').replaceChildren(s);
@@ -1056,6 +1087,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
     const li = logicalIndex();
     root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
+    if (anim) heroSlideIn(tr.children[state.heroPhysicalIndex]);
     // الالتفاف لا يعتمد على transitionend وحده: صفحةٌ مخفية أو تطبيق في الخلفية
     // لا يطلقه، فكان العدّاد يتجاوز النسخ ويعرض بانرًا فارغًا
     clearTimeout(state.heroWrapTimer);
@@ -1163,6 +1195,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (work._work?.editions?.length) rememberWork(work);
     showPage('detail');
     renderDetail(work);
+    pageIn(q('detail'));
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
@@ -1988,14 +2021,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const row = el('div', `chapter-row${isRead ? ' is-read' : ''}${isNext ? ' is-next' : ''}`);
     const open = el('button', 'chapter-open');
     open.type = 'button';
-    const no = el('div', 'chapter-no', r.chapter.name || `الفصل ${r.number}`);
+    // رقم الفصل كبيرًا في البداية كترقيم صفحات كتاب، والاسم والتاريخ بجانبه
+    const num = el('span', 'chapter-num', Number.isFinite(r.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
+    num.dir = 'ltr';
+    // اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») يتكرر بجانب الرقم الكبير:
+    // يُكتفى بالتاريخ، ويبقى الاسم حين يحمل عنوانًا
+    const name = r.chapter.name || '';
+    const plain = !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
+    const when = dateLabel(r.chapter.dateUpload);
+    const no = el('div', 'chapter-no', plain ? when || `الفصل ${r.number}` : name);
     no.dir = 'auto';
     const note = el(
       'div',
       'chapter-note',
-      [dateLabel(r.chapter.dateUpload), r.chapter.scanlator].filter(Boolean).join(' · '),
+      (plain ? [r.chapter.scanlator] : [when, r.chapter.scanlator]).filter(Boolean).join(' · '),
     );
-    open.append(no, note);
+    const copy = el('span', 'chapter-copy');
+    copy.append(no, note);
+    open.append(num, copy);
     open.onclick = () => openChapter(w, r);
     const eye = el('button', 'chapter-eye');
     eye.type = 'button';
@@ -2323,16 +2366,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function refreshLibraryDetail() {
     if (!state.current) return;
     const e = libraryEntry(String(state.current.id));
-    const btn = q('libraryBtn');
-    const inLib = !!e?.row;
-    btn.setAttribute('aria-pressed', String(inLib));
-    btn.innerHTML = glyph('library', { filled: inLib });
-    const label = inLib ? 'في مكتبتي — المس للإزالة' : 'أضف إلى مكتبتي';
-    btn.setAttribute('aria-label', label);
-    btn.title = label;
-    const fav = root.querySelector('.icon-btn--fav');
-    fav.setAttribute('aria-pressed', String(!!e?.favorite));
-    fav.innerHTML = glyph('heart', { filled: !!e?.favorite });
+    // ثلاثة أفعال بأسمائها تحت «اقرأ»، كما في الأنمي: الحالة في الرمز الممتلئ ولون الزر
+    const paint = (id, icon, on, label, onLabel, offHint) => {
+      const btn = q(id);
+      btn.setAttribute('aria-pressed', String(on));
+      btn.innerHTML = `${glyph(icon, { filled: on })}<span>${on ? onLabel : label}</span>`;
+      btn.title = on ? `${onLabel} — المس للإزالة` : offHint;
+      btn.setAttribute('aria-label', btn.title);
+    };
+    paint('libraryBtn', 'library', !!e?.row, 'مكتبتي', 'في مكتبتي', 'أضف إلى مكتبتي');
+    paint('laterBtn', 'clock', !!e?.later, 'لاحقًا', 'لاحقًا', 'أقرأ لاحقًا');
+    paint('favBtn', 'heart', !!e?.favorite, 'المفضلة', 'المفضلة', 'أضف إلى المفضلة');
   }
   function userRating(ref) {
     const row = sync.rows('ratings', (r) => r.user_id === me() && r.series_ref === String(ref))[0];
@@ -2369,17 +2413,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openWorkMenu() {
     if (!state.current) return;
     const w = state.current;
-    const e = libraryEntry(String(w.id));
     openSheet((body) => {
       const title = el('h3', null, titleOf(w));
       title.dir = 'auto';
       title.style.marginBottom = '8px';
       body.append(title);
       body.append(
-        sheetItem('clock', 'أقرأ لاحقًا', () => {
-          closeSheet();
-          toggleLaterCurrent();
-        }, { pressed: !!e?.later }),
         sheetItem('star', inCollection('top', String(w.id)) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
           closeSheet();
           setTimeout(() => toggleTopCurrent(), 0);
@@ -3247,7 +3286,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const here = currentPage();
     // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
     const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    // الأقسام الثلاثة في رأس القائمة: التبديل من حيث تتنقّل، لا من الشعار وحده
+    const sections = el('div', 'drawer-sections');
+    sections.setAttribute('role', 'radiogroup');
+    sections.setAttribute('aria-label', 'أقسام VANTARA');
+    for (const id of ['manga', 'anime', 'cinema']) {
+      const b = el('button', `drawer-section drawer-section--${id}`);
+      b.type = 'button';
+      b.dataset.arg = id;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(root.dataset.section === id));
+      const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
+      word.dir = 'ltr';
+      b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
+      b.onclick = () => {
+        closeDrawer();
+        pickSection(null, b);
+      };
+      sections.append(b);
+    }
+    const laterLabel = (root.dataset.section ?? 'manga') === 'manga' ? 'أقرأ لاحقًا' : 'شاهد لاحقًا';
     q('drawerContent').replaceChildren(
+      sections,
       ...groups.map(([label, items]) => {
         const g = el('div', 'drawer-group');
         if (label) g.append(el('div', 'drawer-label', label));
@@ -3255,7 +3315,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           const b = el('button', 'drawer-item');
           b.type = 'button';
           b.innerHTML = glyph(ic);
-          b.append(el('span', null, text));
+          b.append(el('span', null, key === 'later' ? laterLabel : text));
           if (key === 'notifications' && unread) b.append(el('span', 'badge', unread > 99 ? '99+' : String(unread)));
           if (key === here) {
             b.classList.add('active');
@@ -4299,6 +4359,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     flipChapterOrder,
     toggleSummary,
     toggleFavoriteCurrent,
+    toggleLaterCurrent,
     toggleLibraryCurrent,
     readAllNotifications,
   };

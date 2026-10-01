@@ -161,11 +161,18 @@ export function createAnime(deps) {
   };
   const metaLine = (m) => [FORMAT_AR[m.format] ?? null, m.year ?? null].filter(Boolean).join(' · ');
 
-  function rail(title, { sub, cls = '', items = [], card, more } = {}) {
+  /**
+   * شريط برأس «بثّ»: وسم لاتيني بلون القسم فوق العنوان (NEW EPISODES، TOP 10…)،
+   * و`live` يضيف نقطة نابضة لما يُبثّ الآن. نفس السلوك، شكل الأنمي.
+   */
+  function rail(title, { sub, cls = '', items = [], card, more, kicker, live = false } = {}) {
     const s = el('section', `an-rail ${cls}`);
     s.dataset.reveal = '';
     const head = el('div', 'an-rail-head');
     const titles = el('div', 'an-rail-titles');
+    if (kicker) {
+      titles.append(el('span', `an-kicker${live ? ' an-kicker--live' : ''}`, kicker));
+    }
     titles.append(el('h2', null, title));
     if (sub) titles.append(el('span', 'an-rail-sub', sub));
     head.append(titles);
@@ -208,7 +215,11 @@ export function createAnime(deps) {
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }), el('span', 'an-ep-shade'));
     const play = el('span', 'an-play');
     play.innerHTML = glyph('play', { size: 18, filled: true });
-    art.append(play, el('span', 'an-ep-num', `الحلقة ${m.episode}`));
+    // رقم الحلقة كبيرًا كشاشة بثّ، و«جديدة» لما نزل خلال يومين
+    const num = el('span', 'an-ep-num');
+    num.append(el('small', null, 'الحلقة'), el('b', null, String(m.episode)));
+    art.append(play, num);
+    if (m.airedAt && Date.now() - m.airedAt < 48 * 3600e3) art.append(el('span', 'an-new', 'جديدة'));
     const copy = el('span', 'an-ep-copy');
     const t = el('span', 'an-ep-title', m.title);
     t.dir = 'auto';
@@ -239,7 +250,9 @@ export function createAnime(deps) {
     const s = el('section', 'an-rail an-genres');
     s.dataset.reveal = '';
     const head = el('div', 'an-rail-head');
-    head.append(el('h2', null, 'تصفّح حسب النوع'));
+    const titles = el('div', 'an-rail-titles');
+    titles.append(el('span', 'an-kicker', 'GENRES'), el('h2', null, 'تصفّح حسب النوع'));
+    head.append(titles);
     const strip = el('div', 'an-chips');
     for (const [g, hue] of ANIME_GENRES) {
       const b = button('an-chip', genreAr(g), () => openDiscover({ genre: g }));
@@ -293,6 +306,7 @@ export function createAnime(deps) {
     const box = el('div', 'an-car-info-in');
     const kicker = el('span', 'an-car-kicker');
     kicker.innerHTML = `<span class="an-car-rank">#${i + 1}</span><span>رائج الآن</span>`;
+    kicker.dir = 'rtl';
     const t = el('h2', 'an-car-title', m.title);
     t.dir = 'auto';
     const facts = el('span', 'an-car-sub');
@@ -340,6 +354,10 @@ export function createAnime(deps) {
     if (wrap._shown !== i) {
       wrap._shown = i;
       info.replaceChildren(carouselInfo(wrap._items[i], i));
+      // المسرح يلبس لون العمل الظاهر (من AniList) ويتحوّل معه
+      const color = wrap._items[i]?.color;
+      if (color) wrap.style.setProperty('--stage', color);
+      else wrap.style.removeProperty('--stage');
     }
     // في منتصف السحبة تكون المعلومات شفافة، وتكتمل حين تستقرّ البطاقة
     const fade = Math.max(0, 1 - nearest * 2.4);
@@ -384,16 +402,16 @@ export function createAnime(deps) {
     const blocks = el('div', 'an-home');
     if (data.hero?.length) blocks.append(carousel(data.hero));
     const cont = watching();
-    if (cont.length) blocks.append(rail('آخر المشاهدات', { items: cont.slice(0, 12), card: continueCard, more: () => openLibrary('history') }));
-    if (data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
+    if (cont.length) blocks.append(rail('آخر المشاهدات', { kicker: 'CONTINUE', items: cont.slice(0, 12), card: continueCard, more: () => openLibrary('history') }));
+    if (data.latest?.length) blocks.append(rail('حلقات جديدة', { kicker: 'NEW EPISODES', live: true, sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {
       const top = data.season.slice(0, 10);
-      blocks.append(rail('Top 10', { sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }) }));
+      blocks.append(rail('Top 10', { kicker: 'THIS SEASON', sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }) }));
     }
     blocks.append(genreChips());
-    if (data.trending?.length) blocks.append(rail('رائج هذا الأسبوع', { items: data.trending, card: (m) => posterCard(m), more: () => openDiscover({}) }));
-    if (data.popular?.length) blocks.append(rail('الأشهر على الإطلاق', { items: data.popular, card: (m) => posterCard(m) }));
-    if (data.top?.length) blocks.append(rail('الأعلى تقييمًا', { items: data.top, card: (m) => posterCard(m) }));
+    if (data.trending?.length) blocks.append(rail('رائج هذا الأسبوع', { kicker: 'TRENDING', items: data.trending, card: (m) => posterCard(m), more: () => openDiscover({}) }));
+    if (data.popular?.length) blocks.append(rail('الأشهر على الإطلاق', { kicker: 'ALL-TIME', items: data.popular, card: (m) => posterCard(m) }));
+    if (data.top?.length) blocks.append(rail('الأعلى تقييمًا', { kicker: 'TOP RATED', items: data.top, card: (m) => posterCard(m) }));
     blocks.append(el('p', 'an-credit', 'بيانات الأعمال من AniList · التشغيل من المصادر العربية'));
     q('animeHome').replaceChildren(blocks);
     return blocks;
