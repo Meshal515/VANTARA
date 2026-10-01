@@ -23,6 +23,12 @@ data class Route(
     val candidates: List<String> = emptyList(),
     /** سبب عدم الإتاحة، للتشخيص فقط. */
     val reason: String? = null,
+    /**
+     * فحص سريع للرابط بعد جاهزيته (السينما): `true` ردّ بفيديو أو قائمة HLS،
+     * `false` ردّ بصفحة أو خطأ، `null` لم يُفحص. يرتّب ولا يحجب.
+     */
+    val probed: Boolean? = null,
+    val probeMs: Long? = null,
 )
 
 /** ما يرسله المحوّل عن سيرفر: مفتاحه عنده، واسمه، وحالته. */

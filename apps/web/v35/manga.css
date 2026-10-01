@@ -1,0 +1,791 @@
+/*
+ * VANTARA MANGA — الهوية: «حبر وورق».
+ *
+ * المانجا تُقرأ لا تُشاهد، فهويتها هوية مطبوعة: مجلة هادئة لا واجهة إعلانات.
+ *   - الغلاف هو الصورة الوحيدة، بحجمه الصادق وحواف حادة (4px) كلوحة مطبوعة.
+ *     لا ضباب ولا توهّج ولا تدرّجات ملوّنة: أغلفة المصادر صغيرة وتُفضح بالتكبير.
+ *   - الطباعة تقود: عناوين ثقيلة، ووسم لاتيني صغير متباعد فوق كل قسم، وأرقام
+ *     كبيرة (الفصل، الترتيب، رقم الصفحة) كترقيم الكتب.
+ *   - خطوط شعرية تفصل بدل الصناديق.
+ *   - البنفسجي للفعل الأساسي والمختار وحدهما.
+ * السلوك (المكتبة، المفضلة، تابع، الأوراق) هو نفسه في الأقسام الثلاثة؛ هنا الشكل فقط.
+ */
+
+.v35 {
+  --paper: #f2ede4;
+  --m-r: 4px;
+}
+
+/* ───────────────────────── غلاف العدد (البانر) ───────────────────────── */
+
+.v35 .hero {
+  position: relative;
+  height: 292px;
+  margin: 6px 0 0;
+  overflow: hidden;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.v35 .hero-track {
+  height: 100%;
+  display: flex;
+  direction: ltr;
+  will-change: transform;
+}
+.v35 .hero.dragging .hero-track {
+  transition: none !important;
+}
+.v35 .hero-slide {
+  position: relative;
+  min-width: 100%;
+  height: 100%;
+  direction: rtl;
+  display: grid;
+  grid-template-columns: 54% minmax(0, 1fr);
+  padding: 0 var(--gutter) 22px;
+  cursor: pointer;
+}
+.v35 .hero-poster {
+  position: relative;
+  border-radius: var(--m-r);
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 26px 50px -18px rgba(0, 0, 0, 0.85);
+  transition: transform var(--dur) var(--ease);
+}
+.v35 .hero-poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.v35 .hero-slide:active .hero-poster {
+  transform: scale(0.985);
+}
+.v35 .hero-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* الصفحة المقابلة: رقم الصفحة فوق، والكلام يستقر في الأسفل */
+.v35 .hero-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-inline-start: 16px;
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 .hero-folio {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-bottom: auto;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.v35 .hero-folio b {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  color: var(--paper);
+}
+.v35 .hero-folio span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-3);
+}
+.v35 .hero-kicker {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 .hero-name {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--paper);
+  unicode-bidi: plaintext;
+  text-align: right;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .hero-facts {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+.v35 .hero-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--accent-line);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.v35 .hero-cue .icon {
+  width: 14px;
+  height: 14px;
+}
+.v35 .hero-slide--empty {
+  grid-template-columns: 1fr;
+  align-items: end;
+}
+.v35 .hero-slide--empty .hero-copy {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.v35 .hero-slide--empty .hero-name {
+  font-size: 34px;
+  letter-spacing: 6px;
+}
+.v35 .hero > .skeleton {
+  inset: 0 var(--gutter) 22px;
+  width: 54%;
+  border-radius: var(--m-r);
+}
+/* المؤشّر: شرطات قصيرة تحت الصفحة المقابلة، لا نقاط */
+.v35 .hero-dots {
+  position: absolute;
+  z-index: 3;
+  bottom: 4px;
+  left: var(--gutter);
+  display: flex;
+  gap: 4px;
+  direction: ltr;
+}
+.v35 .hero-dot {
+  width: 12px;
+  height: 2px;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  background: var(--line-strong);
+  transition: width var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.v35 .hero-dot.active {
+  width: 26px;
+  background: var(--paper);
+}
+
+/* ───────────────────────── الفهرس ─────────────────────────
+ * أربعة أبواب في شبكة 2×2 بخطوط شعرية لا صناديق: أغلفة صغيرة متراكبة لما خلف
+ * الباب، والرقم والاسم وسطر حيّ، وسهم. الضغط يُرى (تعتيم + دفع خفيف للسهم). */
+
+.v35 .shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 22px var(--gutter) 0;
+  border-top: 1px solid var(--line-strong);
+}
+.v35 .shortcut {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 74px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text-1);
+  text-align: start;
+  font: inherit;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.v35 .shortcut:nth-child(odd) {
+  padding-inline-end: 12px;
+  border-inline-end: 1px solid var(--line);
+}
+.v35 .shortcut:nth-child(even) {
+  padding-inline-start: 12px;
+}
+.v35 .shortcut:active {
+  opacity: 0.6;
+}
+.v35 .shortcut-art {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 46px;
+}
+.v35 .shortcut-cover {
+  position: absolute;
+  top: 0;
+  width: 29px;
+  aspect-ratio: 0.7;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+.v35 .shortcut-cover:nth-child(1) {
+  inset-inline-start: 0;
+  z-index: 3;
+}
+.v35 .shortcut-cover:nth-child(2) {
+  inset-inline-start: 8px;
+  top: 2px;
+  z-index: 2;
+  opacity: 0.8;
+}
+.v35 .shortcut-cover:nth-child(3) {
+  inset-inline-start: 14px;
+  top: 4px;
+  z-index: 1;
+  opacity: 0.55;
+}
+.v35 .shortcut-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.v35 .shortcut-cover .image-loading,
+.v35 .shortcut-cover .image-fallback {
+  position: absolute;
+  inset: 0;
+}
+.v35 .shortcut-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.v35 .shortcut-no {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  line-height: 1;
+  color: var(--accent-text);
+}
+.v35 .shortcut-label {
+  font-size: 13.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .shortcut-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .shortcut-sub:empty {
+  display: none;
+}
+.v35 .shortcut > .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-3);
+  transition: transform var(--dur) var(--ease-out);
+}
+.v35 .shortcut:active > .icon {
+  transform: translateX(-3px);
+}
+
+/* ───────────────────────── أقسام الرئيسية ───────────────────────── */
+
+.v35 #homeSections .section {
+  padding-top: 34px;
+}
+.v35 #homeSections .section-head {
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+.v35 .section-titles {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+/* وسم القسم: كلمة لاتينية صغيرة متباعدة بعد شرطة بلون القسم، كأقسام المجلات */
+.v35 .section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
+  line-height: 1;
+  color: var(--text-3);
+}
+.v35 .section-eyebrow::before {
+  content: '';
+  width: 14px;
+  height: 2px;
+  background: var(--accent);
+}
+.v35 #homeSections .section-head h2 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+}
+
+/* أغلفة طولية أكبر: الغلاف هو المحتوى */
+.v35 #homeSections .card-strip--covers {
+  grid-auto-columns: 128px;
+  gap: 12px;
+}
+
+/* آخر المشاهدات: بطاقة عريضة تقول أين وقفت */
+.v35 .card-strip--resume {
+  grid-auto-columns: min(78%, 300px);
+  gap: 10px;
+}
+.v35 .card-strip--resume .work-card {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  column-gap: 12px;
+  padding: 10px;
+  padding-inline-end: 14px;
+  border-radius: var(--m-r);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .card-strip--resume .work-card-frame {
+  grid-row: 1 / -1;
+}
+.v35 .card-strip--resume .work-title {
+  margin-top: 2px;
+  min-height: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.v35 .card-strip--resume .work-meta {
+  margin-top: 3px;
+}
+.v35 .card-strip--resume .work-facts {
+  display: none;
+}
+.v35 .card-strip--resume .work-card::after {
+  content: 'تابع القراءة';
+  grid-column: 2;
+  grid-row: 3;
+  align-self: end;
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+/* الرائج: جدول مرتّب كقوائم المبيعات — ثلاثة صفوف تُسحب أفقيًا */
+.v35 .card-strip--chart {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, auto);
+  grid-auto-columns: min(84%, 320px);
+  gap: 0 18px;
+  counter-reset: rank;
+}
+.v35 .card-strip--chart .work-card {
+  counter-increment: rank;
+  display: grid;
+  grid-template-columns: 34px 50px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  column-gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.v35 .card-strip--chart .work-card::before {
+  content: counter(rank, decimal-leading-zero);
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: center;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  direction: ltr;
+  text-align: right;
+}
+.v35 .card-strip--chart .work-card:nth-child(-n + 3)::before {
+  color: var(--paper);
+}
+.v35 .card-strip--chart .work-card-frame {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+}
+.v35 .card-strip--chart .work-title,
+.v35 .card-strip--chart .work-meta,
+.v35 .card-strip--chart .work-facts {
+  grid-column: 3;
+}
+.v35 .card-strip--chart .work-title {
+  margin-top: 0;
+  min-height: 0;
+  align-self: end;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+/* آخر التحديثات: شبكة 3×3 ثابتة، كما في صفحتها */
+.v35 .card-strip--grid {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-columns: auto;
+  gap: 18px 10px;
+  overflow: visible;
+}
+
+/* ───────────────────────── البطاقة ───────────────────────── */
+
+.v35 .poster {
+  border-radius: var(--m-r);
+}
+.v35 .work-title {
+  margin-top: 9px;
+  font-weight: 650;
+}
+.v35 .work-meta {
+  font-variant-numeric: tabular-nums;
+}
+.v35 .work-score {
+  color: var(--text-3);
+}
+.v35 .work-score .icon {
+  color: var(--text-3);
+}
+
+/* ───────────────────────── صفحة العمل ─────────────────────────
+ * صفحة عنوان كتاب: الغلاف في الوسط بحجم يُرى، والاسم تحته كبيرًا، ثم «اقرأ»
+ * عريضًا وتحته ثلاثة أفعال بأسمائها (نفس ترتيب الأنمي). الفصول كترقيم الصفحات. */
+
+/* صفحتان متقابلتان كبانر الرئيسية: الغلاف بحجم يُرى، وفي المقابلة عدد الفصول
+   رقمَ صفحة كبيرًا، والتصنيف بلون القسم، والاسم، والحالة. */
+.v35 #detail .detail-head {
+  grid-template-columns: 46% minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  padding: 6px var(--gutter) 0;
+}
+.v35 #detail .detail-cover {
+  width: auto;
+  border-radius: var(--m-r);
+  box-shadow: 0 30px 56px -22px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.v35 #detail .detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-inline-start: 16px;
+  padding: 2px 0 2px;
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 .detail-folio {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: auto;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.v35 .detail-folio b {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  color: var(--paper);
+}
+.v35 .detail-folio span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .detail-kicker {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 .detail-kicker:empty {
+  display: none;
+}
+.v35 #detail .detail-meta h1 {
+  font-size: 22px;
+  line-height: 1.22;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--paper);
+  text-align: right;
+  -webkit-line-clamp: 4;
+}
+.v35 #detail .detail-sub {
+  margin-top: 0;
+  color: var(--text-3);
+}
+.v35 #detail .detail-sub > span + span::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--text-4);
+  vertical-align: middle;
+}
+/* التصنيفات صارت سطرًا ملوّنًا فوق الاسم */
+.v35 #detail .detail-meta .chips {
+  display: none;
+}
+.v35 #detail #summaryBlock .section-eyebrow {
+  margin-bottom: 10px;
+}
+.v35 #detail .detail-cta {
+  grid-template-columns: 1fr;
+  padding-top: 22px;
+}
+.v35 #detail .read-cta {
+  min-height: 54px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+/* ثلاثة أفعال بأسمائها في سطر واحد بخطوط شعرية، لا ثلاثة صناديق */
+.v35 .detail-quick {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px var(--gutter) 0;
+  border-block: 1px solid var(--line);
+}
+.v35 .quick-btn {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.v35 .quick-btn .icon {
+  width: 19px;
+  height: 19px;
+  flex: none;
+}
+.v35 .quick-btn + .quick-btn {
+  border-inline-start: 1px solid var(--line);
+}
+.v35 .quick-btn:active {
+  background: var(--surface-1);
+}
+.v35 .quick-btn[aria-pressed='true'] {
+  color: var(--accent-text);
+}
+.v35 #detail .source-chip {
+  border-radius: var(--m-r);
+}
+.v35 #detail .progress-bar {
+  height: 2px;
+  border-radius: 0;
+}
+.v35 #detail .progress-bar > i {
+  border-radius: 0;
+}
+
+/* الكتل بخط شعري بينها بدل الفراغ وحده */
+.v35 #detail .block {
+  margin: 26px var(--gutter) 0;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--line);
+}
+.v35 #detail #summaryBlock {
+  margin-top: 18px;
+  border-top: 0;
+  padding-top: 0;
+}
+.v35 #detail .block-head h2 {
+  font-size: 20px;
+  font-weight: 800;
+}
+.v35 #detail .block-head .count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* الفصول: الرقم كبيرًا في البداية، والاسم والتاريخ بجانبه */
+.v35 #detail .chapter-row {
+  min-height: 62px;
+}
+.v35 #detail .chapter-open {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+}
+.v35 .chapter-num {
+  flex: none;
+  min-width: 50px;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper);
+  text-align: right;
+}
+.v35 .chapter-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.v35 #detail .chapter-no {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.v35 .chapter-row.is-read .chapter-num {
+  color: var(--text-4);
+}
+.v35 .chapter-row.is-next .chapter-num {
+  color: var(--accent-text);
+}
+.v35 #detail .chapter-row.is-next::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  background: var(--accent);
+}
+
+/* معلومات: قائمة تعريفات بخطوط شعرية، لا مربعات */
+.v35 #detail .info-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.v35 #detail .info-box {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  background: none;
+  border-bottom: 1px solid var(--line);
+}
+.v35 #detail .info-box:empty {
+  display: none;
+}
+.v35 #detail .info-value {
+  margin-top: 0;
+}
+
+/* ───────────────────────── البحث والاكتشاف ─────────────────────────
+ * التصنيفات كلمات في إطار شعري لا حبوب ملوّنة، والرائج جدول مرقّم بلا صندوق. */
+
+.v35[data-section='manga'] .search-head h2 {
+  font-size: 19px;
+  font-weight: 800;
+}
+.v35[data-section='manga'] .search-genre {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: var(--m-r);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-1);
+  font-weight: 650;
+}
+.v35[data-section='manga'] .search-genre:active {
+  background: var(--surface-2);
+}
+.v35[data-section='manga'] .search-chip {
+  border-radius: var(--m-r);
+}
+.v35[data-section='manga'] .search-trend {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  border-top: 1px solid var(--line-strong);
+}
+.v35[data-section='manga'] .search-trend-row {
+  padding-inline: 0;
+}
+.v35[data-section='manga'] .search-trend-row + .search-trend-row::before {
+  inset-inline: 0;
+}
+.v35[data-section='manga'] .search-trend-rank {
+  width: 30px;
+  font-size: 20px;
+  color: var(--text-3);
+}
+.v35[data-section='manga'] .search-trend-row:nth-child(-n + 3) .search-trend-rank {
+  color: var(--paper);
+}
+.v35[data-section='manga'] .search-trend-cover {
+  border-radius: 3px;
+}
+.v35[data-section='manga'] .search-input {
+  border-radius: 6px;
+}
+
+/* ───────────────────────── التنقّل ─────────────────────────
+ * نفس الأزرار في الأقسام الثلاثة؛ في المانجا «أنت هنا» شرطة فوق الأيقونة
+ * كعلامة كتاب، بدل الحبّة الملوّنة. */
+
+.v35[data-section='manga'] .nav.active .nav-pill {
+  background: none;
+  color: var(--text-1);
+}
+.v35[data-section='manga'] .nav::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 22px;
+  height: 2px;
+  margin-left: -11px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform var(--dur) var(--ease-out);
+}
+.v35[data-section='manga'] .nav.active::before {
+  transform: scaleX(1);
+}
+
+@media (max-width: 370px) {
+  .v35 .hero {
+    height: 258px;
+  }
+  .v35 .hero-name {
+    font-size: 18px;
+  }
+  .v35 .shortcut-label {
+    font-size: 13px;
+  }
+  .v35 .detail-folio b {
+    font-size: 32px;
+  }
+}

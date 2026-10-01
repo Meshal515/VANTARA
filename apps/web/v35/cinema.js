@@ -1,8 +1,9 @@
 /**
  * VANTARA CINEMA — أفلام ومسلسلات عالمية مترجمة.
  *
- * البيانات من Cinemeta (والعربية من Wikidata)، والتشغيل من أربعة مصادر عربية
- * (FaselHD، ArabSeed، EgyDead، Cimaleek) عبر محرك الأنمي نفسه بمحتوى `cinema`.
+ * البيانات من Cinemeta، والتشغيل من المصادر العربية في البيان (`content: cinema`)
+ * عبر محرك الأنمي نفسه، بالمسار السريع (lib/cinema-fast.js): بحث متدفق، وأول
+ * تشغيل صالح يفوز، والبقية تكمل في الخلفية.
  *
  * التصميم خاص بالسينما (`cn-` في cinema.css): الصورة تُعرض كاملة لا يغطيها
  * شيء، والكلام والأزرار تحتها؛ ملصقات بحواف حادة، وقائمة IMDb مرقّمة.
@@ -20,6 +21,7 @@ import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { pickCopies, queriesFor, readTitle, titleScore } from '../lib/cinema-match.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
+import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 
 const HOME_KEY = 'cinema.home.v3';
@@ -27,7 +29,7 @@ const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
 const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
 const STATE_AR = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
-const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek' };
+const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV' };
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
 
 const userKey = (base, userId) => `vantara.cinema.${base}.v1.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;
@@ -78,6 +80,7 @@ export function createCinema(deps) {
     season: 1,
     token: 0,
     works: new Map(),
+    warm: null,
     playing: null,
     libraryTab: 'continue',
     discover: { query: '', genre: '', type: 'movie', token: 0 },
@@ -678,42 +681,162 @@ export function createCinema(deps) {
 
   // ───────────── المصادر ─────────────
 
-  /** نسخ العمل (والموسم) في المصادر العربية، مع رقم حلقة الفيلم كما يرقّمه المصدر. */
-  async function locate(m, season) {
+  // المسار السريع (lib/cinema-fast.js): البحث متدفق مصدرًا مصدرًا، وأول نسخة
+  // مطابقة تكفي لبدء التجهيز؛ وما نجح لهذا العمل قبلًا يبدأ به التجهيز فورًا.
+  const memory = createMemory();
+  const metrics = createMetrics();
+  const nearCopies = (seen, { title, type }) =>
+    seen
+      .map((c) => ({ c, score: titleScore(title, c.title), kind: readTitle(c.title).kind }))
+      .filter((x) => x.score >= 0.5 && (!x.kind || x.kind === type))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map((x) => x.c);
+  const locator = createLocator({
+    searchStream: (query, content, onHit) => engine.searchStream(query, content, onHit),
+    queries: queriesFor,
+    match: (items, c) => pickCopies(items, c),
+    near: nearCopies,
+    memory,
+  });
+
+  /** بحث حيّ لهذا العمل/الموسم، مشترك بين صفحة العمل وورقة السيرفرات والتجهيز المسبق. */
+  function locateHandle(m, season) {
     const key = playKey(m, season);
-    if (state.works.has(key)) return state.works.get(key);
-    const pending = (async () => {
-      const seen = [];
-      for (let attempt = 0; attempt < 2; attempt++) {
-        for (const query of queriesFor(m.title)) {
-          const works = await engine.search(query, 'cinema');
-          if (!works) return null;
-          seen.push(...works.flatMap((w) => w.copies ?? []));
-          const copies = pickCopies(works, { title: m.title, year: m.year, type: m.type, season: m.type === 'series' ? season : null });
-          if (copies.length) {
-            senseMovie(m, copies);
-            return withNumber(m, copies);
-          }
-        }
-        // لا نتيجة إطلاقًا من أي مصدر: غالبًا الإضافات ما زالت تُنزَّل أول مرة. محاولة ثانية بعد لحظات
-        if (seen.length) break;
-        await new Promise((r) => setTimeout(r, 6000));
-      }
-      // ما لم يطابق بثقة يبقى «قريبًا» يختاره الشخص بنفسه
-      const near = [...new Map(seen.map((c) => [`${c.sourceId}|${c.url}`, c])).values()]
-        .map((c) => ({ c, score: titleScore(m.title, c.title), kind: readTitle(c.title).kind }))
-        .filter((x) => x.score >= 0.5 && (!x.kind || x.kind === m.type))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 6)
-        .map((x) => x.c);
-      if (!seen.length) state.works.delete(key); // لا نحفظ «لا شيء» ما دام لم يرد أحد
-      return { copies: [], number: null, near, total: seen.length };
-    })().catch(() => {
-      state.works.delete(key);
-      return null;
+    const old = state.works.get(key);
+    if (old) return old;
+    const h = locator({ key, title: m.title, year: m.year, type: m.type, season: m.type === 'series' ? season : null });
+    h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
+    if (h.found.fast) h.run.fastPath();
+    h.onHit((hit, info) => h.run.hit(hit, info));
+    state.works.set(key, h);
+    void h.first.then((found) => found.copies.length && senseMovie(m, found.copies));
+    // لم يرد أي مصدر: لا نحفظ «لا شيء»، فالفتحة القادمة تبحث من جديد
+    void h.done.then((found) => {
+      if (!found.answered && !found.copies.length && state.works.get(key) === h) state.works.delete(key);
     });
-    state.works.set(key, pending);
-    return pending;
+    return h;
+  }
+  /** نسخة اختارها الشخص من «نتائج قريبة»: تُحفظ للعمل وتُجهَّز مباشرة. */
+  function pinnedHandle(m, season, copy) {
+    const key = playKey(m, season);
+    state.works.get(key)?.cancel?.();
+    memory.remember(key, [copy]);
+    const found = { copies: [copy], near: [], total: 1, done: true, fast: true, answered: 1, sources: {} };
+    const h = { found, first: Promise.resolve(found), done: Promise.resolve(found), onCopies: () => () => {}, onHit: () => () => {}, cancel() {} };
+    h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
+    h.run.fastPath();
+    state.works.set(key, h);
+    return h;
+  }
+  /** النسخ عند أول مطابقة (والمتأخرة تصل للجلسة بعدها). */
+  const locate = (m, season) => locateHandle(m, season).first;
+
+  // ───────────── التجهيز المسبق: أول تشغيل صالح يفوز ─────────────
+  // فتح العمل يبدأ تجهيز ما ستشاهده (الفيلم، أو حلقة المتابعة) فورًا: حين تضغط
+  // «شاهد» يكون أول سيرفر جاهزًا غالبًا، والبقية تكمل بالخلفية. جلسة واحدة دافئة.
+
+  const WARM_TTL = 8 * 60_000; // روابط الفيديو تنتهي خلال دقائق
+  function dropWarm() {
+    const w = state.warm;
+    if (!w) return;
+    state.warm = null;
+    w.closed = true;
+    for (const f of w.off) f();
+    w.off = [];
+    w.run?.save();
+    if (w.session && !w.launched) void engine.closeSession(w.session);
+  }
+  function warmUp(m, season, n) {
+    const key = playKey(m, season);
+    const episode = m.type === 'movie' ? -1 : n;
+    const cur = state.warm;
+    if (cur && !cur.closed && cur.key === key && cur.episode === episode && Date.now() - cur.at < WARM_TTL) return cur;
+    dropWarm();
+    const h = locateHandle(m, season);
+    // فتحة ثانية لنفس العمل بعد انتهاء الأولى: قياس جديد يبدأ من الآن
+    if (h.run.saved) {
+      h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
+      h.run.fastPath();
+    }
+    const session = `cn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const w = { key, episode, at: Date.now(), session: null, routes: [], done: false, missing: false, closed: false, launched: false, remembered: false, handle: h, run: h.run, off: [], listeners: new Set() };
+    state.warm = w;
+    const notify = () => {
+      for (const fn of w.listeners) fn(w);
+    };
+    w.notify = notify;
+    void (async () => {
+      const found = await h.first;
+      if (w.closed) return;
+      if (!found.copies.length) {
+        w.missing = true;
+        w.done = true;
+        w.run.save();
+        notify();
+        return;
+      }
+      // المستمعان قبل الطلب: أول سيرفر قد يجهز قبل أن يعود النداء نفسه
+      w.off.push(
+        engine.on('route', (e) => {
+          if (e.session !== session || w.closed) return;
+          const i = w.routes.findIndex((r) => r.id === e.route.id);
+          if (i >= 0) w.routes[i] = e.route;
+          else w.routes.push(e.route);
+          w.run.route(e.route);
+          // أول سيرفر جاهز: نسخة مصدره تُحفظ للعمل، فالفتحة القادمة تبدأ منها مباشرة
+          if (e.route.state === 'READY' && e.route.probed !== false && !w.remembered) {
+            w.remembered = true;
+            memory.remember(key, h.found.copies, h.found.copies.find((c) => c.sourceId === e.route.sourceId));
+          }
+          notify();
+        }),
+        engine.on('prepared', (e) => {
+          if (e.session !== session || w.closed) return;
+          w.done = true;
+          noteServer(w.routes);
+          w.run.save();
+          notify();
+        }),
+      );
+      const pref = memory.server(key);
+      w.run.prepared();
+      // لقطة ثابتة: ما يصل أثناء النداء يُضاف بعده (`extend`) فلا يضيع ولا يتكرر
+      const initial = [...found.copies];
+      try {
+        const out = await engine.prepare({
+          session,
+          copies: initial,
+          episode,
+          preferredSourceId: pref?.sourceId ?? null,
+          preferredServer: pref?.server ?? null,
+          probe: true,
+        });
+        if (w.closed) return;
+        w.session = out?.session ?? session;
+        for (const r of out?.routes ?? []) if (!w.routes.some((x) => x.id === r.id)) w.routes.push(r);
+        if (out?.done) w.done = true;
+      } catch (e) {
+        w.error = String(e?.message ?? e);
+        w.done = true;
+      }
+      notify();
+      // مصدر ردّ بعد بدء التجهيز: نسخته تدخل الجلسة نفسها، وما يعمل لا يتوقف
+      w.off.push(
+        h.onCopies((fresh) => {
+          if (w.closed || !w.session) return;
+          void engine.extend(w.session, fresh).then((added) => {
+            if (added && !w.closed) {
+              w.done = false;
+              notify();
+            }
+          });
+        }),
+      );
+      const late = h.found.copies.filter((c) => !initial.includes(c));
+      if (late.length && w.session) void engine.extend(w.session, late);
+    })();
+    return w;
   }
 
   // ───────────── مجسّات Update Engine ─────────────
@@ -737,13 +860,165 @@ export function createCinema(deps) {
     }
   }
 
-  /** رقم «الحلقة» الوحيدة للفيلم يختلف بين المصادر (0 أو 1): نأخذ رقم الأقوى ونبقي من يوافقه. */
-  async function withNumber(m, copies) {
-    if (m.type !== 'movie') return { copies, number: null };
-    const lists = await Promise.all(copies.map((c) => engine.episodes(c).catch(() => null)));
-    const numbers = lists.map((l) => l?.[0]?.number ?? null);
-    const lead = numbers.find((n) => n != null) ?? 1;
-    return { copies: copies.filter((_, i) => numbers[i] == null || numbers[i] === lead), number: lead };
+  // ذاكرة السيرفرات على الجهاز: ما فشل مؤخرًا يُجرَّب أخيرًا (سبعة أيام)
+  const FAIL_KEY = 'vantara.cinema.serverFails.v1';
+  const STATE_RANK = { READY: 0, RESOLVING: 1 };
+  const probeRank = (r) => (r.probed === true ? 0 : r.probed === false ? 2 : 1);
+  const serverKey = (r) => `${r.sourceId}|${r.server ?? r.code}`;
+  const serverName = (r) => (/[\u0600-\u06FF]/.test(String(r.code ?? '')) && r.server ? r.server : r.code ?? r.server ?? 'سيرفر');
+  function failures(r) {
+    const f = readJson(FAIL_KEY, {})[serverKey(r)];
+    return f && Date.now() - f.at < 7 * 86_400_000 ? f.n : 0;
+  }
+  function noteServer(routes) {
+    const all = readJson(FAIL_KEY, {});
+    for (const r of routes) {
+      const k = serverKey(r);
+      if (r.state === 'READY') delete all[k];
+      else if (r.state === 'UNAVAILABLE' || r.state === 'FAILED') all[k] = { n: Math.min(9, (all[k]?.n ?? 0) + 1), at: Date.now() };
+    }
+    writeJson(FAIL_KEY, all);
+  }
+
+  // ───────────── أداء المصادر (تشخيص) ─────────────
+  // كل فتح عمل يُقاس: أول نتيجة، أول مطابقة، أول سيرفر، أول تشغيل صالح، لكل
+  // مصدر. هنا تُعرض الأرقام، ومقياس يفتح عدة أفلام ومسلسلات واحدًا واحدًا.
+
+  const ms = (v) => (v == null ? '—' : v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}s`);
+  const pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+
+  /** يفتح العمل كما يفتحه الشخص (بحث متدفق + تجهيز + فحص) وينتظر حتى يكتمل أو 45 ثانية. */
+  function measureOne(m, season) {
+    return new Promise((resolve) => {
+      const w = warmUp(m, season, m.type === 'movie' ? 1 : 1);
+      const t0 = Date.now();
+      const end = () => {
+        clearTimeout(timer);
+        w.listeners.delete(check);
+        const run = { ...w.run.run };
+        dropWarm();
+        resolve(run);
+      };
+      const check = () => {
+        if (w.done || w.missing || w.closed) end();
+      };
+      const timer = setTimeout(end, Math.max(0, 45_000 - (Date.now() - t0)));
+      w.listeners.add(check);
+      check();
+    });
+  }
+
+  async function benchmark(onProgress) {
+    const [movies, series] = await Promise.all([
+      catalog('movie', 'top').catch(() => []),
+      catalog('series', 'top').catch(() => []),
+    ]);
+    const picks = [...movies.slice(0, 4), ...series.slice(0, 3)];
+    for (let i = 0; i < picks.length; i++) {
+      const m = picks[i];
+      onProgress?.(i, picks.length, m);
+      // بلا ذاكرة سابقة: نقيس المسار الكامل لا المسار السريع
+      const key = playKey(m, m.type === 'series' ? 1 : null);
+      memory.forget(key);
+      state.works.get(key)?.cancel?.();
+      state.works.delete(key);
+      await measureOne(m, m.type === 'series' ? 1 : null);
+    }
+    onProgress?.(picks.length, picks.length, null);
+  }
+
+  function openSourcesDebug() {
+    deps.openSheet((body) => {
+      const head = el('div', 'an-sheet-head');
+      head.append(el('div', 'an-sheet-kicker', 'أداء المصادر'), text('div', 'an-sheet-title', 'السينما'));
+      const note = el('p', 'cn-note', 'كل فتح عمل يُقاس هنا: من فتح الصفحة حتى أول تشغيل صالح، ولكل مصدر.');
+      const actions = el('div', 'cn-perf-actions');
+      const status = el('p', 'cn-perf-status');
+      const host = el('div', 'cn-perf');
+      body.append(head, note, actions, status, host);
+      let closed = false;
+      const paint = () => {
+        if (closed) return;
+        const runs = metrics.runs();
+        const sources = metrics.sources();
+        const table = (cols, rows) => {
+          const t = el('table', 'cn-perf-table');
+          const tr = el('tr');
+          for (const c of cols) tr.append(el('th', null, c));
+          t.append(tr);
+          for (const r of rows) {
+            const row = el('tr');
+            for (const [i, v] of r.entries()) row.append(i === 0 ? text('td', null, v) : el('td', null, v));
+            t.append(row);
+          }
+          return t;
+        };
+        if (!runs.length) {
+          host.replaceChildren(el('p', 'cn-note', 'لا قياسات بعد — افتح أي فيلم أو مسلسل، أو اضغط «قِس الآن».'));
+          return;
+        }
+        const ttfp = runs.map((r) => r.ttfp ?? r.ttfr).filter((v) => v != null).sort((a, b) => a - b);
+        const mid = ttfp.length ? ttfp[Math.floor(ttfp.length / 2)] : null;
+        const summary = el('div', 'cn-perf-sum');
+        summary.append(
+          el('b', null, `أول تشغيل صالح (الوسيط): ${ms(mid)}`),
+          el('span', null, `${runs.length} فتحة · وجدنا تشغيلًا في ${runs.filter((r) => (r.ttfp ?? r.ttfr) != null).length}`),
+        );
+        host.replaceChildren(
+          summary,
+          el('h4', null, 'لكل مصدر'),
+          table(
+            ['المصدر', 'بحث', 'مطابقة', 'سيرفرات', 'أول صالح', 'نجاح', 'صالحة/ميتة'],
+            sources.map((x) => [
+              SOURCE_NAMES[x.id] ?? x.id,
+              ms(x.searchMs),
+              ms(x.matchMs),
+              ms(x.serversMs),
+              ms(x.firstPlayableMs),
+              x.skipped === x.runs ? 'متخطّى' : pct(x.successRate),
+              `${x.playableServers}/${x.deadServers}`,
+            ]),
+          ),
+          ...sources.filter((x) => x.topError).map((x) => text('p', 'cn-perf-err', `${SOURCE_NAMES[x.id] ?? x.id}: ${x.topError}`)),
+          el('h4', null, 'آخر الفتحات'),
+          table(
+            ['العمل', 'أول نتيجة', 'أول مطابقة', 'أول صالح', 'مصادر', 'سيرفرات', 'فشل'],
+            runs.slice(0, 20).map((r) => [
+              `${r.fast ? '⚡ ' : ''}${r.title ?? r.key}`,
+              ms(r.ttfs),
+              ms(r.ttfm),
+              ms(r.ttfp ?? r.ttfr),
+              `${r.sourcesOk}/${r.sourcesAsked}`,
+              String(r.playable),
+              pct(r.failRate),
+            ]),
+          ),
+        );
+      };
+      const run = button('cn-btn cn-btn--play', `${glyph('play', { size: 16, filled: true })}<span>قِس الآن (7 أعمال)</span>`, async () => {
+        if (!engine.available()) return toast('القياس داخل تطبيق أندرويد');
+        run.disabled = true;
+        try {
+          await benchmark((i, n, m) => {
+            if (closed) return;
+            status.textContent = m ? `نقيس ${i + 1}/${n}: ${displayTitle(m)}…` : 'انتهى القياس';
+            paint();
+          });
+        } finally {
+          run.disabled = false;
+          paint();
+        }
+      });
+      const clear = button('cn-btn cn-btn--ghost', 'امسح القياسات', () => {
+        metrics.clear();
+        paint();
+      });
+      actions.append(run, clear);
+      paint();
+      return () => {
+        closed = true;
+      };
+    }, { tone: 'cinema' });
   }
 
   /** فحص كل مصدر خطوة خطوة بعنوان هذا العمل: يقول أين يتعطّل بالضبط. */
@@ -794,8 +1069,11 @@ export function createCinema(deps) {
     if (q('cinemaSources') !== host || state.detail?.id !== m.id || (m.type === 'series' && state.season !== season)) return;
     const retry = () =>
       button('cn-link', 'ابحث مجددًا', () => {
+        state.works.get(playKey(m, season))?.cancel?.();
         state.works.delete(playKey(m, season));
+        dropWarm();
         void paintSources(m, season);
+        startWarm(m);
       });
     if (!found || !found.copies.length) {
       host.dataset.state = 'none';
@@ -813,8 +1091,11 @@ export function createCinema(deps) {
         for (const c of found.near) {
           const b = button('cn-near-item', '', async () => {
             b.disabled = true;
-            state.works.set(playKey(m, season), withNumber(m, [c]));
+            pinnedHandle(m, season, c);
+            dropWarm();
             await paintSources(m, season);
+            const p = resumePoint(m);
+            if (m.type === 'movie' || p.season === season) warmUp(m, season, m.type === 'movie' ? 1 : p.episode);
           });
           b.append(text('b', null, c.title), el('span', null, SOURCE_NAMES[c.sourceId] ?? c.sourceId));
           near.append(b);
@@ -826,14 +1107,41 @@ export function createCinema(deps) {
       return;
     }
     host.dataset.state = 'found';
-    const names = [...new Set(found.copies.map((c) => SOURCE_NAMES[c.sourceId] ?? c.sourceId))];
-    host.replaceChildren(el('i', 'cn-dot'), el('span', null, `مترجم · متاح عبر ${names.join('، ')}`));
+    // السطر نفسه يكبر مع كل مصدر يرد، ويقول «جاهز للتشغيل» لحظة يجهز أول سيرفر
+    const line = el('span');
+    host.replaceChildren(el('i', 'cn-dot'), line);
+    const h = state.works.get(playKey(m, season));
+    const paint = () => {
+      if (!line.isConnected) return false;
+      const names = [...new Set(found.copies.map((c) => SOURCE_NAMES[c.sourceId] ?? c.sourceId))];
+      const w = state.warm?.key === playKey(m, season) ? state.warm : null;
+      const ready = w ? w.routes.filter((r) => r.state === 'READY' && r.probed !== false).length : 0;
+      line.textContent = `مترجم · متاح عبر ${names.join('، ')}${ready ? ` · جاهز للتشغيل (${ready})` : ''}`;
+      return true;
+    };
+    paint();
+    const offCopies = h?.onCopies?.(() => paint() || offCopies?.());
+    const w = state.warm;
+    if (w?.key === playKey(m, season)) {
+      const listener = () => paint() || w.listeners.delete(listener);
+      w.listeners.add(listener);
+    }
+  }
+
+  /** تجهيز ما ستشاهده من هذه الصفحة: الفيلم، أو حلقة المتابعة في موسمها الظاهر. */
+  function startWarm(m) {
+    if (!engine.available() || !m?.id) return;
+    const p = resumePoint(m);
+    if (m.type === 'series' && p.season !== state.season) return;
+    warmUp(m, m.type === 'series' ? p.season : null, m.type === 'movie' ? 1 : p.episode);
   }
 
   // ───────────── صفحة العمل ─────────────
 
   async function openWork(m, { autoplay = false } = {}) {
     const token = ++state.token;
+    // عمل آخر: جلسة العمل السابق الدافئة تُغلق (روابطها لا تخصّ هذا)
+    if (state.warm && String(state.warm.key).split(':')[0] !== String(m.id)) dropWarm();
     state.detail = m;
     state.season = m.type === 'series' ? (watchAll()[m.id]?.season ?? null) : null;
     deps.showPage('cinema');
@@ -957,6 +1265,7 @@ export function createCinema(deps) {
     wrap.append(bar, art, body);
     page.replaceChildren(wrap);
     if (!partial) {
+      startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);
       void arabize(m, m.type === 'series' ? state.season : null);
       revealIn(wrap);
@@ -1105,7 +1414,7 @@ export function createCinema(deps) {
       const paint = () => {
         queued = false;
         if (sheet.closed) return;
-        const ready = sheet.routes.filter((r) => r.state === 'READY').length;
+        const ready = sheet.routes.filter((r) => r.state === 'READY' && r.probed !== false).length;
         if (sheet.missing) status.textContent = m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
         else if (!sheet.session) status.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
         else if (!sheet.done && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
@@ -1113,26 +1422,40 @@ export function createCinema(deps) {
         best.disabled = sheet.busy || sheet.missing || (!ready && sheet.done);
         best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
         best.classList.toggle('waiting', !ready && !sheet.done && !sheet.missing);
-        list.replaceChildren(
-          ...engine.groupRoutes(sheet.routes).map(([group, routes]) => {
-            const g = el('section', 'an-srv-group');
-            const grid = el('div', 'an-srv-grid');
-            for (const r of routes) {
-              const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}`);
-              b.type = 'button';
-              b.disabled = r.state === 'RESOLVING';
-              const top = el('span', 'an-srv-top');
-              top.append(text('b', 'an-srv-code', r.code, 'ltr'), el('span', 'an-srv-tag', SOURCE_NAMES[r.sourceId] ?? r.sourceId));
-              const line = el('span', 'an-srv-state');
-              line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
-              b.append(top, line);
-              b.onclick = () => (r.state === 'READY' ? void playRoute(r) : toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
-              grid.append(b);
-            }
-            g.append(el('h4', 'an-srv-q', group), grid);
-            return g;
-          }),
-        );
+        // الحيّ أولًا، والسيرفرات التي فشلت هنا مؤخرًا في آخر مجموعتها، والميت مطويّ
+        const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED');
+        const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED');
+        const tile = (r) => {
+          const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}`);
+          b.type = 'button';
+          b.disabled = r.state === 'RESOLVING';
+          const top = el('span', 'an-srv-top');
+          top.append(text('b', 'an-srv-code', serverName(r), /[\u0600-\u06FF]/.test(serverName(r)) ? 'rtl' : 'ltr'), el('span', 'an-srv-tag', SOURCE_NAMES[r.sourceId] ?? r.sourceId));
+          const line = el('span', 'an-srv-state');
+          line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
+          b.append(top, line);
+          b.onclick = () => (r.state === 'READY' ? void playRoute(r) : toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
+          return b;
+        };
+        const groups = engine.groupRoutes(live).map(([group, routes]) => {
+          const g = el('section', 'an-srv-group');
+          const grid = el('div', 'an-srv-grid');
+          // الجاهز أولًا، وداخله ما ردّ رابطه بفيديو فعلًا قبل ما لم يُفحص، ثم ما فشل هنا مؤخرًا
+          grid.append(...[...routes].sort((a, b) => (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3) || probeRank(a) - probeRank(b) || failures(a) - failures(b)).map(tile));
+          g.append(el('h4', 'an-srv-q', group), grid);
+          return g;
+        });
+        if (dead.length) {
+          const fold = el('details', 'cn-srv-dead');
+          fold.open = sheet.showDead === true;
+          fold.addEventListener('toggle', () => (sheet.showDead = fold.open));
+          const sum = el('summary', null, `غير متاح (${dead.length})`);
+          const grid = el('div', 'an-srv-grid');
+          grid.append(...dead.map(tile));
+          fold.append(sum, grid);
+          groups.push(fold);
+        }
+        list.replaceChildren(...groups);
       };
       const queuePaint = () => {
         if (queued) return;
@@ -1172,55 +1495,44 @@ export function createCinema(deps) {
       };
       paint();
 
-      void (async () => {
-        const found = await locate(m, season);
+      // الورقة تتبنّى الجلسة الدافئة (بدأت مع فتح العمل)، أو تبدأها الآن
+      const w = warmUp(m, season, n);
+      sheet.warm = w;
+      const sync = () => {
         if (sheet.closed) return;
-        if (!found?.copies.length) {
-          sheet.missing = true;
-          queuePaint();
-          return;
-        }
-        sheet.found = found;
-        off.push(
-          engine.on('route', (e) => {
-            if (e.session !== sheet.session) return;
-            const i = sheet.routes.findIndex((r) => r.id === e.route.id);
-            if (i >= 0) sheet.routes[i] = e.route;
-            else sheet.routes.push(e.route);
-            queuePaint();
-          }),
-          engine.on('prepared', (e) => {
-            if (e.session !== sheet.session) return;
-            sheet.done = true;
-            queuePaint();
-          }),
-        );
-        try {
-          const out = await engine.prepare({ copies: found.copies, episode: m.type === 'movie' ? found.number : n });
-          if (sheet.closed) {
-            if (out?.session) void engine.closeSession(out.session);
-            return;
-          }
-          sheet.session = out.session;
-          const snap = await engine.routes(out.session);
-          sheet.routes = snap?.routes ?? out.routes ?? [];
-          sheet.done = Boolean(snap?.done ?? out.done);
-          queuePaint();
-        } catch (e) {
-          status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
-        }
-      })();
+        sheet.session = w.session;
+        sheet.routes = w.routes;
+        sheet.done = w.done;
+        sheet.missing = w.missing;
+        sheet.found = w.handle.found;
+        if (w.error && !w.routes.length) status.textContent = `تعذّر تجهيز السيرفرات: ${w.error}`;
+        queuePaint();
+      };
+      w.listeners.add(sync);
+      off.push(() => w.listeners.delete(sync));
+      sync();
 
       return () => {
         sheet.closed = true;
         for (const f of off) f();
         off = [];
-        if (!sheet.launched && sheet.session) void engine.closeSession(sheet.session);
+        // الجلسة تبقى دافئة لصفحة العمل؛ تُغلق حين تغادر العمل أو تنتهي صلاحيتها
       };
     }, { tone: 'cinema', full: true });
 
     async function launch(candidate, code) {
       sheet.launched = true;
+      const w = sheet.warm;
+      // الجلسة صارت للمشغّل: لا تُغلق من هنا، والتجهيز القادم يبدأ جلسة جديدة
+      if (w) {
+        w.launched = true;
+        if (state.warm === w) state.warm = null;
+        for (const f of w.off) f();
+        w.off = [];
+        w.run?.save();
+        const route = w.routes.find((r) => r.code === code) ?? null;
+        if (route) memory.rememberServer(playKey(m, season), { sourceId: route.sourceId, server: route.server, code });
+      }
       deps.closeSheet();
       const key = playKey(m, season);
       const eps = m.type === 'series' ? (m.seasons?.find((s) => s.n === season)?.episodes ?? []) : [];
@@ -1246,7 +1558,7 @@ export function createCinema(deps) {
         animeId: key,
         section: 'cinema',
         usageUserId: currentUser(),
-        episode: m.type === 'movie' ? sheet.found.number : n,
+        episode: m.type === 'movie' ? 1 : n,
         total: m.type === 'series' ? eps.length : 1,
         position,
         poster: m.poster ?? null,
@@ -1434,5 +1746,5 @@ export function createCinema(deps) {
     host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty));
   }
 
-  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover };
+  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover, openSourcesDebug };
 }

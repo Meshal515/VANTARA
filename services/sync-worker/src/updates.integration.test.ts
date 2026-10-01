@@ -52,6 +52,39 @@ describe('Update Engine: خط الأساس', () => {
     expect(ev).toMatchObject({ id: 'ext:c|c:2', at: NOW + 2 * H - 600_000, publishedAt: NOW + 2 * H - 600_000, firstSeenAt: NOW + 2 * H });
   });
 
+  it('a fuller source catching up is not 19 new chapters (النهايات); old-dated chapters are not news', async () => {
+    const e = env();
+    await observe(e, [manga('ext:finals', [1, 2], 'small')], NOW);
+    const dates = { 19: Date.UTC(2025, 10, 15), 20: Date.UTC(2026, 0, 8), 21: Date.UTC(2026, 7, 7) };
+    expect(await observe(e, [manga('ext:finals', range(1, 21), 'full', dates)], NOW + H)).toMatchObject({ created: 0 });
+    expect((await list(e, 'section=manga')).events).toEqual([]);
+    // الفصل 22 الحقيقي بعدها: حدث واحد بوقته
+    expect(await observe(e, [manga('ext:finals', range(1, 22), 'full', dates)], NOW + 2 * H)).toMatchObject({ created: 1 });
+    expect((await list(e, 'section=manga')).events.map((x) => x.id)).toEqual(['ext:finals|c:22']);
+  });
+
+  it('one canonical cover: the timeline shows the work cover, not the reporting source thumbnail', async () => {
+    const e = env();
+    await e.DB.prepare('INSERT INTO works (series_ref, title, cover_url, source_id, updated_at, rev) VALUES (?, ?, ?, ?, 0, 0)').bind('ext:finals', 'النهايات', 'https://c/vol1.jpg', 'a').run();
+    await observe(e, [{ ...manga('ext:finals', [1], 's'), cover: 'https://c/vol3.jpg' }], NOW);
+    await observe(e, [{ ...manga('ext:finals', [2], 's'), cover: 'https://c/vol3.jpg' }], NOW + H);
+    expect((await list(e, 'section=manga')).events[0]).toMatchObject({ cover: 'https://c/vol1.jpg' });
+  });
+
+  it('legacy false events (written before the catch-up rule) are hidden from the timeline', async () => {
+    const e = env();
+    const put = (id: string, number: number, published: number | null, first: number) =>
+      e.DB.prepare('INSERT INTO update_events (id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?)')
+        .bind(id, 'ext:old', 'manga', 'chapter', number, 'old', published ?? first, published, first, '[]', first);
+    await e.DB.batch([
+      ...range(3, 9).map((n) => put(`ext:old|c:${n}`, n, null, NOW)),
+      put('ext:old|c:21', 21, Date.UTC(2026, 7, 7), NOW),
+      put('ext:ok|c:5', 5, null, NOW - H),
+    ]);
+    await e.DB.prepare("UPDATE update_events SET work = 'ext:ok' WHERE id = 'ext:ok|c:5'").run();
+    expect((await list(e, 'section=manga')).events.map((x) => x.id)).toEqual(['ext:ok|c:5']);
+  });
+
   it('ignores absurd jumps (bad numbering) and older backfill under the watermark', async () => {
     const e = env();
     await observe(e, [manga('ext:d', [50], 'x')], NOW);

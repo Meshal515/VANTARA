@@ -1000,6 +1000,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   // ───────────────────────── القراءة المحلية ─────────────────────────
 
+  /** صف لكيان داخلي (فحص/اختبار): مراجعه تبدأ بـ`__`. */
+  const INTERNAL = /^__/;
+  const isInternalRow = (r) =>
+    INTERNAL.test(String(r?.series_ref ?? '')) || INTERNAL.test(String(r?.chapter_key ?? '')) || INTERNAL.test(String(r?.username ?? '')) || INTERNAL.test(String(r?.user_id ?? ''));
+
   /** صفوف جدول من المرآة، مُرشَّحة اختياريًا. */
   /** الشاشات ترى الملفات بهويتها الأساسية مكان الفارغ؛ المرآة نفسها لا تتغير. */
   const view = (table, value) => {
@@ -1013,6 +1018,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       const bucket = overlay[table] ? { ...mirror[table], ...overlay[table] } : mirror[table];
       if (!bucket) return [];
       all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
+      // حارس مركزي: ما يكتبه فحص الخادم (`__verify__…`) وأي كيان داخلي لا يصل شاشة أبدًا
+      all = all.filter((r) => !isInternalRow(r));
       valuesCache.set(table, all);
     }
     return predicate ? all.filter(predicate) : [...all];

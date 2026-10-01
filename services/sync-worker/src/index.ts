@@ -578,7 +578,9 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       truncated = true;
     }
 
-    changes[table] = rows;
+    // كيانات فحص الخادم (`verify.mjs` يكتب `__verify__…` في جداول مشتركة كـworks)
+    // لا تصل أي جهاز. المؤشر يُحسب من الصفوف كلها فلا يتعطل السحب.
+    changes[table] = rows.filter((row) => !isInternalRef(row['series_ref']) && !isInternalRef(row['chapter_key']));
     let maxRev = cursor;
     for (const row of rows) {
       const rev = Number(row['rev'] ?? 0);
@@ -656,6 +658,9 @@ async function appliedOpIds(ops: readonly IncomingOp[], env: Env): Promise<Set<s
   }
   return out;
 }
+
+/** مرجع داخلي (فحص/اختبار) لا يُعرض لمستخدم أبدًا. */
+export const isInternalRef = (value: unknown): boolean => typeof value === 'string' && value.startsWith('__');
 
 function asString(value: unknown, max = 500): string | null {
   if (typeof value !== 'string') return null;
@@ -900,7 +905,9 @@ function workStatements(
           WHERE ${input.unlessHiddenBy ? `NOT (${SQL_HIDES_CURRENT})` : '1'}
          ON CONFLICT (series_ref) DO UPDATE SET
            title = COALESCE(excluded.title, works.title),
-           cover_url = COALESCE(excluded.cover_url, works.cover_url),
+           -- غلاف العمل الموحّد ثابت: أول غلاف يُعرف يبقى، ولا يستبدله مصدر آخر
+           -- ولا نسخة أخرى (كانت كل عملية تكتب غلاف نسختها فيتبدّل الغلاف بين الشاشات)
+           cover_url = COALESCE(works.cover_url, excluded.cover_url),
            source_id = COALESCE(excluded.source_id, works.source_id),
            updated_at = MAX(works.updated_at, excluded.updated_at),
            rev = excluded.rev`,

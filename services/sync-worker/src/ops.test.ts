@@ -245,7 +245,8 @@ describe('collections', () => {
     const out = translate('favorite.set', { seriesRef: 's1', seriesTitle: 'عنوان' });
     const work = out.find((entry) => entry.sql.includes('INSERT INTO works'));
     expect(work?.sql).toContain('COALESCE(excluded.title, works.title)');
-    expect(work?.sql).toContain('COALESCE(excluded.cover_url, works.cover_url)');
+    // الغلاف الموحّد: الموجود يبقى (لا يمحوه فارغ ولا يستبدله غلاف نسخة أخرى)
+    expect(work?.sql).toContain('COALESCE(works.cover_url, excluded.cover_url)');
   });
 
   it('keeps the chosen position when a work is re-added', () => {

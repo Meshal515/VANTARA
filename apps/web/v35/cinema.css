@@ -1198,3 +1198,87 @@
 .v35 .cn-diag-steps .cn-diag-fail {
   border-inline-start-color: #f87171;
 }
+
+/* السيرفرات الميتة مطويّة: لا تكون عشر بطاقات «غير متاح» هي التجربة */
+.v35 .cn-srv-dead {
+  margin-top: 14px;
+}
+.v35 .cn-srv-dead summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .cn-srv-dead summary::-webkit-details-marker {
+  display: none;
+}
+.v35 .cn-srv-dead summary::after {
+  content: ' ⌄';
+}
+.v35 .cn-srv-dead[open] summary::after {
+  content: ' ⌃';
+}
+
+/* ───────────── أداء المصادر (تشخيص) ───────────── */
+
+.v35 .cn-perf-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.v35 .cn-perf-status {
+  min-height: 18px;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.v35 .cn-perf h4 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+}
+.v35 .cn-perf-sum {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border-radius: var(--cn-r, 6px);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.v35 .cn-perf-sum b {
+  font-size: 15px;
+}
+.v35 .cn-perf-sum span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.v35 .cn-perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.v35 .cn-perf-table th,
+.v35 .cn-perf-table td {
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+  white-space: nowrap;
+}
+.v35 .cn-perf-table th {
+  color: var(--text-3);
+  font-weight: 600;
+}
+.v35 .cn-perf-table td:first-child,
+.v35 .cn-perf-table th:first-child {
+  text-align: start;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .cn-perf-err {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-3);
+}

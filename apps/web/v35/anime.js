@@ -17,8 +17,8 @@ import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
  * العربية، ويُربط في الخطوة التالية.
  */
 import { glyph, iconButton } from './icons.js';
-import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, relativeAr, searchAnime } from '../lib/anime-meta.js';
-import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
+import { FORMAT_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr, searchAnime } from '../lib/anime-meta.js';
+import { pageIn, pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
@@ -30,7 +30,6 @@ const HOME_KEY = 'anime.home.v2';
 const LIST_KEY = 'vantara.anime.list.v2.guest';
 const watchKey = (userId) => `vantara.anime.watch.v2.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;
 const STALE_MS = 30 * 60_000;
-const SLIDE_MS = 5500;
 
 const ANIME_GENRES = [
   ['Action', 8], ['Adventure', 28], ['Fantasy', 265], ['Romance', 335], ['Comedy', 45], ['Drama', 215],
@@ -107,7 +106,6 @@ export function createAnime(deps) {
   const state = {
     home: null,
     loading: null,
-    carouselTimer: null,
     detail: null,
     detailToken: 0,
     detailScroll: null,
@@ -208,11 +206,17 @@ export function createAnime(deps) {
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }), el('span', 'an-ep-shade'));
     const play = el('span', 'an-play');
     play.innerHTML = glyph('play', { size: 18, filled: true });
-    art.append(play, el('span', 'an-ep-num', `الحلقة ${m.episode}`));
+    // رقم الحلقة كبيرًا كشاشة بثّ، و«جديدة» لما نزل خلال يومين
+    const num = el('span', 'an-ep-num');
+    num.append(el('small', null, 'الحلقة'), el('b', null, String(m.episode)));
+    art.append(play, num);
     const copy = el('span', 'an-ep-copy');
     const t = el('span', 'an-ep-title', m.title);
     t.dir = 'auto';
-    copy.append(t, el('span', 'an-ep-when', relativeAr(m.airedAt)));
+    const fresh = m.airedAt && Date.now() - m.airedAt < 48 * 3600e3;
+    const when = el('span', 'an-ep-when', relativeAr(m.airedAt));
+    if (fresh) when.prepend(el('b', 'an-ep-fresh', 'جديدة · '));
+    copy.append(t, when);
     c.append(art, copy);
     c.onclick = () => void openAnime(m, { episode: m.episode });
     return c;
@@ -239,7 +243,9 @@ export function createAnime(deps) {
     const s = el('section', 'an-rail an-genres');
     s.dataset.reveal = '';
     const head = el('div', 'an-rail-head');
-    head.append(el('h2', null, 'تصفّح حسب النوع'));
+    const titles = el('div', 'an-rail-titles');
+    titles.append(el('h2', null, 'تصفّح حسب النوع'));
+    head.append(titles);
     const strip = el('div', 'an-chips');
     for (const [g, hue] of ANIME_GENRES) {
       const b = button('an-chip', genreAr(g), () => openDiscover({ genre: g }));
@@ -250,114 +256,86 @@ export function createAnime(deps) {
     return s;
   }
 
-  // ───────────── البانر: بطاقات تطلّ جاراتها ─────────────
+  // ───────────── جدول البث: توقيع الأنمي ─────────────
+  // الأنمي يُعرض أسبوعيًّا في مواعيد ثابتة؛ هذا ما لا يملكه غيره. فالرئيسية تبدأ
+  // بجدول الأسبوع لا ببانر: أيام بألسنة القسم، وأعمال اليوم بصورها ووقتها
+  // بتوقيت مكة تحتها (الكلام تحت الصورة لا فوقها). ما عُرض يُشغَّل، والقادم
+  // يقول متى. الشريط يبدأ عند «الآن».
 
-  function carousel(items) {
-    const wrap = el('section', 'an-car');
-    wrap.dataset.reveal = '';
-    wrap.setAttribute('aria-roledescription', 'carousel');
-    wrap.setAttribute('aria-label', 'رائج الآن');
-    const track = el('div', 'an-car-track');
-    const dots = el('div', 'an-car-dots');
-    items.forEach((m, i) => {
-      const s = el('button', 'an-car-slide');
-      s.type = 'button';
-      s.setAttribute('aria-label', m.title);
-      tint(s, m.color);
-      s.append(image(m.banner ?? m.poster, 'an-img', { eager: i < 2, position: m.banner ? 'center' : 'center 25%' }), el('span', 'an-car-shade'));
-      s.onclick = () => void openAnime(m);
-      track.append(s);
-      dots.append(button(`an-dot${i === 0 ? ' active' : ''}`, '', () => goSlide(track, i), `الشريحة ${i + 1}`));
-    });
-    // المعلومات تحت البطاقة لا فوقها: تذوب مع السحب وتظهر معلومات التالية
-    const info = el('div', 'an-car-info');
-    wrap.append(track, dots, info);
-    wrap._items = items;
-    wrap._shown = -1;
-    let raf = 0;
-    track.addEventListener(
-      'scroll',
-      () => {
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => paintCarousel(wrap));
-      },
-      { passive: true },
-    );
-    track.addEventListener('touchstart', () => clearInterval(state.carouselTimer), { passive: true });
-    track.addEventListener('touchend', () => autoplay(track));
-    requestAnimationFrame(() => paintCarousel(wrap));
-    autoplay(track);
-    return wrap;
+  const clock12 = (ts) => new Date(ts).toLocaleTimeString('ar', { timeZone: 'Asia/Riyadh', hour: 'numeric', minute: '2-digit', hour12: true, numberingSystem: 'latn' });
+  function dayLabel(key, today) {
+    const d = Math.round((Date.parse(key) - Date.parse(today)) / 86_400_000);
+    if (d === 0) return 'اليوم';
+    if (d === -1) return 'أمس';
+    if (d === 1) return 'غدًا';
+    return new Date(`${key}T12:00:00Z`).toLocaleDateString('ar', { weekday: 'long', timeZone: 'UTC' });
   }
-  function carouselInfo(m, i) {
-    const box = el('div', 'an-car-info-in');
-    const kicker = el('span', 'an-car-kicker');
-    kicker.innerHTML = `<span class="an-car-rank">#${i + 1}</span><span>رائج الآن</span>`;
-    const t = el('h2', 'an-car-title', m.title);
+
+  function slot(m) {
+    const now = Date.now();
+    const aired = m.airingAt <= now;
+    const c = el('button', `an-slot${aired ? ' aired' : ''}`);
+    c.type = 'button';
+    c.setAttribute('aria-label', `${m.title} — الحلقة ${m.episode}`);
+    tint(c, m.color);
+    const art = el('span', 'an-slot-art');
+    art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }));
+    const line = el('span', 'an-slot-line');
+    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, `الحلقة ${m.episode}`));
+    const t = el('span', 'an-slot-title', m.title);
     t.dir = 'auto';
-    const facts = el('span', 'an-car-sub');
-    if (m.score) facts.append(scoreBadge(m.score));
-    const ep = m.status === 'RELEASING' && m.aired ? `الحلقة ${m.aired}` : m.episodes ? `${m.episodes} حلقة` : null;
-    for (const f of [FORMAT_AR[m.format], ep, (m.genres ?? []).slice(0, 2).map(genreAr).join(' · ')].filter(Boolean)) facts.append(el('span', null, f));
-    const actions = el('div', 'an-car-actions');
-    actions.append(
-      button('an-btn an-btn--primary', `${glyph('play', { size: 18, filled: true })}<span>شاهد</span>`, () => void openAnime(m, { episode: 1 })),
-      listButton(m, 'an-btn an-btn--glass'),
-    );
-    box.append(kicker, t, facts, actions);
-    return box;
+    const when = el('span', 'an-slot-when', aired ? `نزلت ${relativeAr(m.airingAt)}` : relativeAr(m.airingAt));
+    c.append(art, line, t, when);
+    c.onclick = () => void openAnime(m, aired ? { episode: m.episode } : {});
+    return c;
   }
-  const slideIndex = (track) => {
-    const mid = track.getBoundingClientRect().left + track.clientWidth / 2;
-    let best = 0;
-    let bestD = Infinity;
-    [...track.children].forEach((s, i) => {
-      const r = s.getBoundingClientRect();
-      const d = Math.abs(r.left + r.width / 2 - mid);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
+
+  function airSchedule(week) {
+    const today = meccaDay(Date.now());
+    const days = new Map();
+    for (const m of week) {
+      const k = meccaDay(m.airingAt);
+      if (!days.has(k)) days.set(k, []);
+      days.get(k).push(m);
+    }
+    const keys = [...days.keys()].filter((k) => k >= meccaDay(Date.now() - 86_400_000)).sort();
+    if (!keys.length) return null;
+    const s = el('section', 'an-rail an-air');
+    s.dataset.reveal = '';
+    const head = el('div', 'an-rail-head');
+    const titles = el('div', 'an-rail-titles');
+    titles.append(el('h2', null, 'جدول البث'), el('span', 'an-rail-sub', 'بتوقيت مكة'));
+    head.append(titles);
+    // كل ما نزل بترتيبه في «آخر التحديثات» (نفس سلوك الأقسام الثلاثة)
+    if (deps.openUpdates) head.append(button('an-more', `<span>الكل</span>${glyph('chevron', { size: 16 })}`, () => deps.openUpdates('anime')));
+    const tabs = el('nav', 'an-days');
+    tabs.setAttribute('role', 'tablist');
+    const strip = el('div', 'an-strip an-air-strip');
+    let current = keys.includes(today) ? today : keys[0];
+    const show = (k, { scroll = true } = {}) => {
+      current = k;
+      for (const b of tabs.children) {
+        const on = b.dataset.day === k;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
       }
-    });
-    return best;
-  };
-  /** البطاقات الجانبية تصغر وتخفت، والوسطى بحجمها، والمعلومات تحتها تذوب مع البعد عن المنتصف. */
-  function paintCarousel(wrap) {
-    const track = wrap.querySelector('.an-car-track');
-    const dots = wrap.querySelector('.an-car-dots');
-    const info = wrap.querySelector('.an-car-info');
-    const mid = track.getBoundingClientRect().left + track.clientWidth / 2;
-    let nearest = 1;
-    for (const s of track.children) {
-      const r = s.getBoundingClientRect();
-      const t = Math.min(1, Math.abs(r.left + r.width / 2 - mid) / r.width);
-      nearest = Math.min(nearest, t);
-      s.style.transform = `scale(${(1 - t * 0.1).toFixed(3)})`;
-      s.style.opacity = (1 - t * 0.45).toFixed(3);
+      const list = days.get(k) ?? [];
+      strip.replaceChildren(...list.map(slot));
+      stripIn([...strip.children].slice(0, 4));
+      // اليوم يبدأ عند «الآن»: آخر ما نزل، وبعده القادم
+      const now = Date.now();
+      const at = Math.max(0, list.findIndex((m) => m.airingAt > now) - 1);
+      if (scroll) requestAnimationFrame(() => strip.children[k === today ? at : 0]?.scrollIntoView({ inline: 'start', block: 'nearest', behavior: 'instant' }));
+    };
+    for (const k of keys) {
+      const b = button(`an-day${k === current ? ' active' : ''}`, dayLabel(k, today), () => show(k));
+      b.dataset.day = k;
+      b.setAttribute('role', 'tab');
+      tabs.append(b);
     }
-    const i = slideIndex(track);
-    [...dots.children].forEach((d, k) => d.classList.toggle('active', k === i));
-    if (wrap._shown !== i) {
-      wrap._shown = i;
-      info.replaceChildren(carouselInfo(wrap._items[i], i));
-    }
-    // في منتصف السحبة تكون المعلومات شفافة، وتكتمل حين تستقرّ البطاقة
-    const fade = Math.max(0, 1 - nearest * 2.4);
-    info.style.opacity = fade.toFixed(3);
-    info.style.transform = `translateY(${((1 - fade) * 8).toFixed(1)}px)`;
-  }
-  function goSlide(track, i) {
-    const s = track.children[i];
-    if (!s) return;
-    track.scrollTo({ left: s.offsetLeft - (track.clientWidth - s.clientWidth) / 2, behavior: 'smooth' });
-  }
-  function autoplay(track) {
-    clearInterval(state.carouselTimer);
-    state.carouselTimer = setInterval(() => {
-      if (!track.isConnected) return clearInterval(state.carouselTimer);
-      if (deps.currentPage() !== 'home' || q('animeHome').hidden || document.hidden) return;
-      goSlide(track, (slideIndex(track) + 1) % track.children.length);
-    }, SLIDE_MS);
+    s.append(head, tabs, strip);
+    show(current, { scroll: true });
+    return s;
   }
 
   // ───────────── الرئيسية ─────────────
@@ -382,10 +360,13 @@ export function createAnime(deps) {
 
   function renderHome(data) {
     const blocks = el('div', 'an-home');
-    if (data.hero?.length) blocks.append(carousel(data.hero));
+    const air = data.week?.length ? airSchedule(data.week) : null;
+    if (air) blocks.append(air);
+    else if (data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m) }));
     const cont = watching();
     if (cont.length) blocks.append(rail('آخر المشاهدات', { items: cont.slice(0, 12), card: continueCard, more: () => openLibrary('history') }));
-    if (data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
+    // «حلقات جديدة» صارت داخل جدول البث (أمس واليوم)؛ تبقى شريطًا فقط لمحفوظ قديم بلا جدول
+    if (!air && data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {
       const top = data.season.slice(0, 10);
       blocks.append(rail('Top 10', { sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }) }));
@@ -401,11 +382,7 @@ export function createAnime(deps) {
 
   function renderSkeleton() {
     const box = el('div', 'an-home');
-    const car = el('div', 'an-car');
-    const track = el('div', 'an-car-track');
-    track.append(el('div', 'an-car-slide an-skel'), el('div', 'an-car-slide an-skel'));
-    car.append(track);
-    box.append(car);
+
     for (const wide of [true, false]) {
       const r = el('section', `an-rail${wide ? ' an-rail--wide' : ''}`);
       const head = el('div', 'an-rail-head');
@@ -559,6 +536,53 @@ export function createAnime(deps) {
     return { episode: Math.min(total, w.episode + 1), resume: true };
   }
 
+  /** موعد بتوقيت مكة بصيغة 12 ساعة: «السبت 6:30 م». */
+  const meccaTime = (ts) =>
+    new Date(ts).toLocaleString('ar', { timeZone: 'Asia/Riyadh', weekday: 'long', hour: 'numeric', minute: '2-digit', hour12: true, numberingSystem: 'latn' });
+
+  /**
+   * لوحة «على الهواء»: الحلقة القادمة وموعدها، آخر ما عُرض، وتقدّمك حلقةً حلقة.
+   * مكتمل: عدد حلقاته وموسمه. لم يبدأ: موعد أول حلقة. بلا ما يُقال: لا لوحة.
+   */
+  function onAirPanel(m) {
+    const total = m.episodes || m.aired || 0;
+    const aired = m.aired || (m.status === 'FINISHED' ? total : 0);
+    const seen = signedIn() ? account.seenCount(m.id) : Object.values(localWatch()[m.id]?.episodes ?? {}).filter((e) => e?.done).length;
+    const panel = el('section', 'an-onair');
+    panel.dataset.reveal = '';
+    const big = el('div', 'an-onair-big');
+    const side = el('div', 'an-onair-side');
+    if (m.status === 'RELEASING' && m.next) {
+      panel.classList.add('live');
+      big.append(el('small', null, 'الحلقة القادمة'), el('b', null, String(m.next.episode)));
+      side.append(el('span', 'an-onair-tag', 'يُعرض الآن'), el('strong', null, relativeAr(m.next.at)), el('span', null, meccaTime(m.next.at)));
+    } else if (m.status === 'NOT_YET_RELEASED') {
+      big.append(el('small', null, 'يبدأ'), el('b', null, m.next ? relativeAr(m.next.at).replace(/^بعد /, '') : 'قريبًا'));
+      side.append(el('span', 'an-onair-tag', 'قريبًا'), el('strong', null, m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : 'لم يُحدَّد'), m.next ? el('span', null, meccaTime(m.next.at)) : el('span'));
+    } else if (total) {
+      big.append(el('small', null, m.status === 'FINISHED' ? 'مكتمل' : 'حلقات'), el('b', null, String(total)));
+      side.append(el('span', 'an-onair-tag', STATUS_AR[m.status] ?? 'حلقات'), el('strong', null, m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : `${total} حلقة`), el('span', null, m.duration ? `${m.duration} دقيقة للحلقة` : ''));
+    } else {
+      return null;
+    }
+    panel.append(big, side);
+    // التقدّم: شريحة لكل حلقة عُرضت (حتى 52)، والمشاهَد ممتلئ
+    if (aired > 0) {
+      const ticks = el('div', 'an-onair-ticks');
+      if (aired <= 52) {
+        for (let n = 1; n <= aired; n++) ticks.append(el('i', n <= seen ? 'on' : ''));
+      } else {
+        const fill = el('i', 'an-onair-fill');
+        fill.style.setProperty('--p', String(Math.min(1, seen / aired)));
+        ticks.classList.add('long');
+        ticks.append(fill);
+      }
+      const label = el('span', 'an-onair-progress', seen ? `شاهدت ${seen} من ${aired}` : `${aired} حلقة متاحة${total > aired ? ` من ${total}` : ''}`);
+      panel.append(ticks, label);
+    }
+    return panel;
+  }
+
   function renderDetail(m, { partial = false } = {}) {
     const page = q('anime');
     page.style.removeProperty('--art');
@@ -593,22 +617,13 @@ export function createAnime(deps) {
 
     const facts = el('div', 'an-facts');
     facts.dataset.reveal = '';
-    if (m.status) facts.append(el('span', `an-status an-status--${String(m.status).toLowerCase()}`, STATUS_AR[m.status] ?? m.status));
-    for (const f of [FORMAT_AR[m.format], m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year, m.studio]) if (f) facts.append(el('span', 'an-fact', String(f)));
+    // الحالة والموسم في لوحة البث إن وُجدت؛ هنا ما لا تقوله هي
+    const onair = onAirPanel(m);
+    if (m.status && !onair) facts.append(el('span', `an-status an-status--${String(m.status).toLowerCase()}`, STATUS_AR[m.status] ?? m.status));
+    for (const f of [FORMAT_AR[m.format], !onair && m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : null, m.studio]) if (f) facts.append(el('span', 'an-fact', String(f)));
 
-    const stats = el('div', 'an-stats');
-    stats.dataset.reveal = '';
-    const stat = (value, label, cls = '') => {
-      const s = el('div', `an-stat ${cls}`);
-      const v = el('b', null, value);
-      s.append(v, el('span', null, label));
-      stats.append(s);
-      return v;
-    };
-    const scoreNode = m.score ? stat('0.0', 'التقييم', 'an-stat--score') : null;
-    stat(String(m.episodes ?? (m.aired || '—')), 'حلقة');
-    if (m.duration) stat(String(m.duration), 'دقيقة للحلقة');
-    if (m.popularity) stat(compactCount(m.popularity), 'متابع');
+    // لوحة البث مكان أرقام عامة (متابعين، مدة): ما يخص هذا الأنمي الآن
+    if (m.score) facts.append(scoreBadge(m.score));
 
     const actions = el('div', 'an-detail-actions');
     actions.dataset.reveal = '';
@@ -643,15 +658,9 @@ export function createAnime(deps) {
     sourcesStrip.dataset.reveal = '';
     const insightHost = el('div', 'work-insights');
     insightHost.dataset.ref = `anime:${m.id}`;
-    wrap.append(bar, hero, head, facts, stats, actions, insightHost, sourcesStrip);
+    wrap.append(bar, hero, head, facts, ...(onair ? [onair] : []), actions, insightHost, sourcesStrip);
     paintSources(m);
 
-    if (m.next) {
-      const next = el('div', 'an-next');
-      next.dataset.reveal = '';
-      next.innerHTML = `<span class="an-next-dot"></span><span>الحلقة ${m.next.episode} ${relativeAr(m.next.at)}</span>`;
-      wrap.append(next);
-    }
 
     if (m.description) {
       const about = el('section', 'an-block');
@@ -684,7 +693,6 @@ export function createAnime(deps) {
     page.replaceChildren(wrap);
     if (!partial) void paintWorkInsights(insightHost, { sync: deps.sync, ref: `anime:${m.id}`, openProfile: deps.openProfile });
     bindDetailScroll(page, bar);
-    if (scoreNode) countUp(scoreNode, m.score);
     if (partial) pageIn(page);
   }
 

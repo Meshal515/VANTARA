@@ -20,6 +20,8 @@ class PreparedEpisode(
     val session: PlaybackSession,
     private val health: HealthStore,
     val limitedSourceId: String? = null,
+    /** يُفحص كل سيرفر جاهز بطلب قصير (السينما). الأنمي بلا فحص كما كان. */
+    val probe: Boolean = false,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val byId = LinkedHashMap<String, Route>()
@@ -72,6 +74,8 @@ class PreparedEpisode(
                 state = if (old?.state == RouteState.READY && r.state == RouteState.RESOLVING) RouteState.READY else r.state,
                 candidates = (old?.candidates.orEmpty() + r.candidates.map { it.id }).distinct(),
                 reason = r.reason,
+                probed = old?.probed,
+                probeMs = old?.probeMs,
             )
             byId[rid] = route
         }
@@ -102,6 +106,28 @@ class PreparedEpisode(
                 ),
             )
         }
+    }
+
+    /** نتيجة فحص الرابط السريع: تُرسل للواجهة وتؤثر في ترتيب «شغّل الأفضل». */
+    fun markProbe(routeId: String, ok: Boolean, ms: Long) {
+        val route = synchronized(this) {
+            val old = byId[routeId] ?: return
+            old.copy(probed = ok, probeMs = ms).also { byId[routeId] = it }
+        }
+        session.reorder { rank(it) }
+        val shown = withPlaybackState(route)
+        listeners.forEach { runCatching { it(shown) } }
+    }
+
+    /**
+     * دفعة نسخ إضافية (مصدر رد متأخرًا بعد بدء التجهيز): الجلسة نفسها تكبر، ولا
+     * يتوقف ما يعمل. يرجع false إن أُغلقت الجلسة.
+     */
+    fun beginBatch(): Boolean = synchronized(this) {
+        if (job?.isActive != true) return@synchronized false
+        pendingBatches++
+        done = false
+        true
     }
 
     /** Promote a warm session once; its existing candidates and player remain intact. */
@@ -157,8 +183,11 @@ class PreparedEpisode(
         val base = StreamRanker.score(c, health, prefs)
         val latency = health.get(HealthStore.hostKey(c.host))?.latencyMs?.takeIf { it > 0 }
         val speed = latency?.let { 0.3 * (1 - it.coerceAtMost(8_000.0) / 8_000.0) } ?: 0.1
-        val preferred = if (preferCode != null && synchronized(this) { routeOfCandidate[c.id]?.let(byId::get)?.code } == preferCode) 0.35 else 0.0
-        return base + speed + preferred
+        val route = synchronized(this) { routeOfCandidate[c.id]?.let(byId::get) }
+        val preferred = if (preferCode != null && route?.code == preferCode) 0.35 else 0.0
+        // رابط ردّ فعلًا بفيديو يتقدّم؛ رابط ردّ بصفحة أو خطأ يتأخر (لا يُحذف: قد يعمل في المشغّل)
+        val probed = when (route?.probed) { true -> 0.4; false -> -0.5; null -> 0.0 }
+        return base + speed + preferred + probed
     }
 
     fun best(preferCode: String? = null): Candidate? = rank(synchronized(this) { candidates.values.toList() }, preferCode).firstOrNull()

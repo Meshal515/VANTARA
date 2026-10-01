@@ -37,6 +37,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -96,7 +98,13 @@ class AnimeEngine(context: Context) {
         val errors = ManifestParser.validate(parsed)
         if (errors.isNotEmpty()) return errors
         manifest = parsed
-        for (s in parsed.sources) AnimeHostRouter.register(s.id, s.domains.plan(null))
+        for (s in parsed.sources) {
+            AnimeHostRouter.register(s.id, s.domains.plan(null))
+            // حجب «تحويل غريب» حُكم بقواعد الدومين القديمة: البيان الجديد قد يقبله
+            // (بصمة أو مرآة)، فيُجرَّب المصدر من جديد بدل أن ينتظر تبريده
+            val key = HealthStore.sourceKey(s.id)
+            if (health.get(key)?.blocked?.startsWith("foreign_redirect") == true) health.unblock(key)
+        }
         // مصدر تغيّر ملفه أو دومينه يُعاد تحميله عند أول طلب
         adapters.keys.retainAll(parsed.sources.filter { it.enabled }.map { it.id }.toSet())
         preload()
@@ -202,6 +210,82 @@ class AnimeEngine(context: Context) {
         return merge(results)
     }
 
+    /** رد مصدر واحد في البحث المتدفق ([searchEach]). */
+    data class SourceHit(
+        val sourceId: String,
+        val items: List<SourceAnime>,
+        /** من بدء دوره حتى ردّه (يشمل تحميل الإضافة إن لم تكن محمّلة). */
+        val ms: Long,
+        val error: String? = null,
+        /** في التبريد: فشل متكرر أو تحقق يحتاج إنسانًا؛ لم يُسأل هذه المرة. */
+        val skipped: Boolean = false,
+    )
+
+    /**
+     * مصدر نتجاوزه في المسار السريع: قاطع الصحة مفتوح (فشل متتالٍ)، أو محجوب
+     * بسبب لا يحلّه الانتظار القصير (Cloudflare يطلب إنسانًا). المحجوب يُجرَّب
+     * من جديد كل [BLOCKED_RETRY_MS] فلا يُدفن للأبد.
+     */
+    fun coolingDown(id: String, now: Long = System.currentTimeMillis()): Boolean {
+        val r = health.get(HealthStore.sourceKey(id)) ?: return false
+        if (r.blocked != null) return now - r.lastFailAt < BLOCKED_RETRY_MS
+        return com.vantara.anime.health.HealthPolicy.open(r, now)
+    }
+
+    /**
+     * بحث متدفق: كل مصدر يُبلَّغ لحظة يرد ([onHit])، فأسرع مصدر يظهر فورًا ولا
+     * ينتظر أحدٌ أبطأهم. المصادر بالتوازي بحدّ [concurrency]، مرتّبة بالصحة
+     * (الأسرع والأنجح أولًا)، والمتجاوَز في التبريد يُبلَّغ «متخطّى» بلا طلب.
+     * [search] القديم يبقى كما هو للأنمي.
+     */
+    suspend fun searchEach(
+        query: String,
+        content: String,
+        concurrency: Int = 6,
+        timeoutMs: Long = STREAM_SEARCH_TIMEOUT_MS,
+        loadTimeoutMs: Long = STREAM_LOAD_TIMEOUT_MS,
+        onHit: (SourceHit) -> Unit,
+    ) {
+        val now = System.currentTimeMillis()
+        val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content }
+        val ordered = health.rank(all, { it.priority }) { HealthStore.sourceKey(it.id) }
+        val (cold, live) = ordered.partition { coolingDown(it.id, now) }
+        for (s in cold) {
+            onHit(SourceHit(s.id, emptyList(), 0, health.get(HealthStore.sourceKey(s.id))?.lastError ?: "في التبريد", skipped = true))
+        }
+        val gate = Semaphore(concurrency.coerceAtLeast(1))
+        coroutineScope {
+            for (s in live) launch {
+                gate.withPermit {
+                    val t0 = System.nanoTime()
+                    val elapsed = { (System.nanoTime() - t0) / 1_000_000 }
+                    val a = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) }
+                    if (a == null) {
+                        onHit(SourceHit(s.id, emptyList(), elapsed(), loadErrors[s.id] ?: "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية"))
+                        return@withPermit
+                    }
+                    val key = HealthStore.sourceKey(s.id)
+                    val hit = try {
+                        val page = withTimeout(timeoutMs) { a.page(Listing.SEARCH, 1, query) }
+                        SourceHit(s.id, page.items, elapsed())
+                    } catch (e: TimeoutCancellationException) {
+                        health.fail(key, "لم يرد خلال ${timeoutMs / 1000} ثانية")
+                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية")
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: IOException) {
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                    } catch (e: Throwable) {
+                        health.fail(key, "خطأ في قراءة الصفحة: ${AnimeHostRouter.describe(e)}")
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                    }
+                    onHit(hit)
+                }
+            }
+        }
+        health.flush()
+    }
+
     /**
      * ينفّذ طلبًا لمصدر بمهلة، ويسجّل ما لا يراه موجّه الشبكة: المهلة نفسها،
      * وأعطال القراءة (محلّل تغيّر موقعه). أعطال الشبكة سجّلها الموجّه أصلًا.
@@ -285,10 +369,12 @@ class AnimeEngine(context: Context) {
         /** سيرفر مؤكد من تشغيل سابق؛ نفك رابط هذه الحلقة له أولًا. */
         preferredSourceId: String? = null,
         preferredServer: String? = null,
+        /** افحص كل سيرفر جاهز بطلب قصير (السينما). */
+        probe: Boolean = false,
     ): com.vantara.anime.stream.PreparedEpisode {
         prepared.remove(sessionId)?.job?.cancel()
         val session = PlaybackSession(emptyList(), health)
-        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health, limitedSourceId = warmSourceId)
+        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health, limitedSourceId = warmSourceId, probe = probe)
         sessions[sessionId] = session
         sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
         prepared[sessionId] = prep
@@ -296,6 +382,42 @@ class AnimeEngine(context: Context) {
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
         launchPreparation(prep, copies.filter { warmSourceId == null || it.sourceId == warmSourceId }, preferredSourceId ?: warmSourceId, preferredServer)
         return prep
+    }
+
+    /**
+     * نسخ وصلت بعد بدء التجهيز (مصدر ردّ متأخرًا): تُضاف للجلسة نفسها وتُجهَّز
+     * سيرفراتها، وما يعمل لا يتوقف. يرجع عدد النسخ الجديدة فعلًا.
+     */
+    fun extendPreparation(id: String, more: List<SourceAnime>): Int {
+        val prep = prepared[id] ?: return 0
+        val req = sessionRequests[id] ?: return 0
+        val known = req.copies.map { it.sourceId to it.url }.toSet()
+        val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
+        if (fresh.isEmpty() || !prep.beginBatch()) return 0
+        sessionRequests[id] = req.copy(copies = req.copies + fresh)
+        launchPreparation(prep, fresh)
+        return fresh.size
+    }
+
+    /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
+    private val probeClient by lazy {
+        network.client.newBuilder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    private suspend fun probeRoute(prep: com.vantara.anime.stream.PreparedEpisode, r: com.vantara.anime.stream.RouteReport) {
+        val c = prep.rank(r.candidates).firstOrNull() ?: r.candidates.firstOrNull() ?: return
+        val t0 = System.nanoTime()
+        val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
+            kotlinx.coroutines.runInterruptible { runCatching { com.vantara.anime.stream.StreamProbe.check(probeClient, c) }.getOrDefault(false) }
+        } ?: false
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        // النجاح وحده يُسجَّل للمضيف: فشل الفحص قد يكون ترويسة ينقصها، فلا يعاقَب المضيف في الأنمي بسببه
+        if (ok) health.ok(HealthStore.hostKey(c.host), ms)
+        prep.markProbe("${r.sourceId}|${r.key}", ok, ms)
     }
 
     /** Keep the warmed source's work; request the remaining copies without refetching it. */
@@ -323,7 +445,14 @@ class AnimeEngine(context: Context) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
                                 val ep = resolver.pick(resolver.episodes(c), prep.number) ?: return@withTimeout
                                 val a = adapter(copy.sourceId) ?: return@withTimeout
-                                val trace = com.vantara.anime.adapters.ResolveTrace(prep::report)
+                                val scope = this
+                                val trace = com.vantara.anime.adapters.ResolveTrace { r ->
+                                    prep.report(r)
+                                    // أول رابط جاهز يُفحص فورًا بالتوازي، والسيرفرات الباقية تكمل
+                                    if (prep.probe && r.state == com.vantara.anime.stream.RouteState.READY && r.candidates.isNotEmpty()) {
+                                        scope.launch { probeRoute(prep, r) }
+                                    }
+                                }
                                 val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
                                 else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
@@ -552,6 +681,13 @@ class AnimeEngine(context: Context) {
         const val PLAY_PROBE_TIMEOUT_MS = 75_000L
         /** سقف تجهيز مصدر واحد (سيرفراته بالتوازي، والمتصفح المخفي آخرها). */
         const val PREPARE_TIMEOUT_MS = 90_000L
+        /** البحث المتدفق: لا ينتظر أحدٌ هذه المهل، فهي سقف للمصدر وحده لا للشاشة. */
+        const val STREAM_SEARCH_TIMEOUT_MS = 12_000L
+        const val STREAM_LOAD_TIMEOUT_MS = 25_000L
+        /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */
+        const val BLOCKED_RETRY_MS = 30 * 60_000L
+        /** فحص رابط فيديو جاهز: هل يرد فعلًا بفيديو أو قائمة HLS؟ */
+        const val PROBE_TIMEOUT_MS = 6_000L
 
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =

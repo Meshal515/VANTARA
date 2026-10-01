@@ -16,12 +16,13 @@ const CARD = `id idMal title { romaji english native } coverImage { extraLarge l
   genres averageScore popularity episodes duration format status season seasonYear isAdult
   nextAiringEpisode { episode airingAt } studios(isMain: true) { nodes { name } }`;
 
-const HOME_QUERY = `query ($season: MediaSeason, $year: Int, $from: Int, $to: Int) {
+const HOME_QUERY = `query ($season: MediaSeason, $year: Int, $from: Int, $to: Int, $until: Int) {
   trending: Page(perPage: 14) { media(type: ANIME, sort: TRENDING_DESC, isAdult: false) { ${CARD} description(asHtml: false) } }
   season: Page(perPage: 10) { media(type: ANIME, season: $season, seasonYear: $year, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   popular: Page(perPage: 18) { media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   top: Page(perPage: 18) { media(type: ANIME, sort: SCORE_DESC, isAdult: false, popularity_greater: 40000) { ${CARD} } }
   schedule: Page(perPage: 40) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { ${CARD} } } }
+  upcoming: Page(perPage: 50) { airingSchedules(airingAt_greater: $to, airingAt_lesser: $until, sort: TIME) { episode airingAt media { ${CARD} } } }
 }`;
 
 const DETAIL_QUERY = `query ($id: Int) {
@@ -119,6 +120,27 @@ export function latestEpisodes(schedules) {
   return out;
 }
 
+/**
+ * جدول البث: كل حلقة عُرضت أو ستُعرض في الأسبوع، بوقتها، مرتّبة زمنيًا.
+ * بلا تكرار لنفس الحلقة، وبلا أعمال لا يعرفها أحد (كما في «حلقات جديدة»).
+ */
+export function airingWeek(past, upcoming, { minPopularity = 3000 } = {}) {
+  const seen = new Set();
+  const out = [];
+  for (const s of [...(past ?? []), ...(upcoming ?? [])]) {
+    const m = normalize(s.media);
+    if (!m || m.popularity < minPopularity) continue;
+    const key = `${m.id}:${s.episode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...m, episode: s.episode, airingAt: s.airingAt * 1000 });
+  }
+  return out.sort((a, b) => a.airingAt - b.airingAt);
+}
+
+/** مفتاح اليوم بتوقيت مكة (YYYY-MM-DD): اليوم يبدأ وينتهي في السعودية لا في جهاز الخادم. */
+export const meccaDay = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+
 const list = (page) => (page?.media ?? []).map(normalize).filter(Boolean);
 
 /** يفكّ ردّ الرئيسية إلى قوائم جاهزة للعرض. */
@@ -132,6 +154,7 @@ export function parseHome(data) {
     popular: list(data?.popular),
     top: list(data?.top),
     latest: latestEpisodes(data?.schedule?.airingSchedules),
+    week: airingWeek(data?.schedule?.airingSchedules, data?.upcoming?.airingSchedules),
   };
 }
 
@@ -187,7 +210,7 @@ export async function fetchAnimeHome(opts = {}) {
   const now = opts.now ?? Date.now();
   const { season, year } = seasonOf(new Date(now));
   const to = Math.floor(now / 1000);
-  const data = await request(HOME_QUERY, { season, year, from: to - 7 * 86_400, to }, opts);
+  const data = await request(HOME_QUERY, { season, year, from: to - 7 * 86_400, to, until: to + 7 * 86_400 }, opts);
   return { ...parseHome(data), seasonName: `${SEASON_AR[season]} ${year}`, fetchedAt: now };
 }
 

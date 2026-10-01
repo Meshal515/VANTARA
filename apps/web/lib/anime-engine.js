@@ -45,6 +45,63 @@ export async function search(query, content = 'anime') {
   return (await call('search', { query, content }))?.works ?? null;
 }
 
+/**
+ * بحث متدفق: `onHit({sourceId, items, ms, error, skipped})` لكل مصدر لحظة يرد،
+ * فأسرع مصدر يظهر بلا انتظار أبطئهم. يرجع `{done, cancel}`؛ `done` يكتمل بـtrue
+ * حين يرد الجميع، أو null إن تعذّر البحث. محرك أقدم بلا البث يُغذّى من البحث
+ * المجمّع (نفس الشكل، بزمن واحد للكل).
+ */
+export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null } = {}) {
+  const plugin = bridge();
+  if (!plugin) return { done: Promise.resolve(null), cancel() {} };
+  const searchId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  let handles = [];
+  let settle;
+  let over = false;
+  const done = new Promise((r) => (settle = r));
+  const end = (value) => {
+    if (over) return;
+    over = true;
+    for (const h of handles) void Promise.resolve(h).then((x) => x?.remove?.());
+    handles = [];
+    settle(value);
+  };
+  void (async () => {
+    await configure();
+    if (typeof plugin.searchStream !== 'function') {
+      const t0 = Date.now();
+      const works = await search(query, content).catch(() => null);
+      if (!works) return end(null);
+      const by = new Map();
+      for (const c of works.flatMap((w) => w.copies ?? [])) by.set(c.sourceId, [...(by.get(c.sourceId) ?? []), c]);
+      for (const [sourceId, items] of by) if (!over) onHit({ sourceId, items, ms: Date.now() - t0, error: null, skipped: false });
+      return end(true);
+    }
+    // المستمعان قبل الطلب: أسرع مصدر قد يرد قبل أن يعود النداء نفسه
+    handles = [
+      await plugin.addListener('searchHit', (e) => !over && e.searchId === searchId && onHit(e)),
+      await plugin.addListener('searchDone', (e) => e.searchId === searchId && end(true)),
+    ];
+    if (over) return end(false);
+    await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}) });
+  })().catch(() => end(null));
+  return {
+    done,
+    cancel() {
+      if (over) return;
+      void plugin.cancelSearch?.({ searchId })?.catch?.(() => {});
+      end(false);
+    },
+  };
+}
+
+/** نسخ وصلت بعد بدء التجهيز تُضاف للجلسة نفسها. يرجع عدد الجديد فعلًا. */
+export async function extend(session, copies) {
+  const plugin = bridge();
+  if (!plugin?.extend || !session || !copies?.length) return 0;
+  return (await plugin.extend({ session, copies }).catch(() => null))?.added ?? 0;
+}
+
 /** أفضل عمل يطابق عناوين أنمي AniList (إنجليزي/روماجي/أصلي). */
 export async function findWork(titles) {
   const tried = new Set();
@@ -93,8 +150,8 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null }) {
-  return (await call('prepare', { copies, episode, quality, variant, preferredSourceId, preferredServer })) ?? null;
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined }) {
+  return (await call('prepare', { copies, episode, quality, variant, preferredSourceId, preferredServer, probe, ...(session ? { session } : {}) })) ?? null;
 }
 
 /** اسم السيرفر ومعرّف المصدر ثابتان بين الأعمال؛ رمز البطاقة ورابط الحلقة ليسا كذلك. */

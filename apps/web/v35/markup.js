@@ -35,8 +35,15 @@ const subTop = (title, { id, back = 'goBack', end = '' } = {}) =>
   `<div class="page-top-left">${end}</div>` +
   `</div>`;
 
-const shortcut = (icon, label, act, arg) =>
-  `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''}>${glyph(icon)}<span>${label}</span></button>`;
+/**
+ * فهرس المانجا: أغلفة صغيرة متراكبة (ما ستجده خلف الباب)، ثم الرقم والاسم وسطر
+ * يقول ما فيه، وسهم. يُضغط لأنه يُرى بابًا، لا لأنه داخل صندوق.
+ */
+const shortcut = (no, label, act, arg) =>
+  `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''} data-index="${arg ?? act}">` +
+  `<span class="shortcut-art" aria-hidden="true"></span>` +
+  `<span class="shortcut-text"><i class="shortcut-no">${no}</i><span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
+  `${glyph('chevron', { size: 16 })}</button>`;
 
 const navItem = (page, icon, label) =>
   `<button class="nav" type="button" data-page="${page}" data-act="navTo" data-arg="${page}" aria-label="${label}">` +
@@ -76,12 +83,12 @@ export const SHELL_HTML = `<div class="app">
       <div class="hero-dots" id="heroDots"></div>
     </section>
 
-    <div class="shortcuts">
-      ${shortcut('grid', 'التصنيفات', 'openCategories')}
-      ${shortcut('flame', 'رائج في المصادر', 'openCollection', 'trending')}
-      ${shortcut('book', 'كل الأعمال', 'openCollection', 'catalogue')}
-      ${shortcut('clock', 'آخر التحديثات', 'openCollection', 'recent')}
-    </div>
+    <nav class="shortcuts" aria-label="فهرس المانجا">
+      ${shortcut('01', 'آخر التحديثات', 'openCollection', 'recent')}
+      ${shortcut('02', 'الرائج', 'openCollection', 'trending')}
+      ${shortcut('03', 'التصنيفات', 'openCategories')}
+      ${shortcut('04', 'كل الأعمال', 'openCollection', 'catalogue')}
+    </nav>
     <main id="homeSections"></main>
     </div>
     <div class="home-view anime-home" id="animeHome" hidden></div>
@@ -101,25 +108,32 @@ export const SHELL_HTML = `<div class="app">
         ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
         <button class="icon-btn detail-tl" type="button" id="detailTlBtn" data-act="toggleTranslateCurrent" aria-pressed="false" aria-label="ترجمة تلقائية للفصول الإنجليزية" title="ترجمة تلقائية" hidden>${glyph('translateAr', { size: 22 })}</button>
         ${iconButton('eye', 'قراءتي السابقة', { act: 'markPreviousReading' })}
-        ${iconButton('heart', 'المفضلة', { act: 'toggleFavoriteCurrent', cls: 'icon-btn icon-btn--fav' })}
         ${iconButton('more', 'خيارات', { act: 'openWorkMenu' })}
       </div>
     </div>
 
-    <div class="detail-head">
+    <!-- صفحتان متقابلتان كبانر الرئيسية: الغلاف، وفي المقابلة عدد الفصول رقمَ صفحة ثم الاسم -->
+    <div class="detail-head" data-reveal>
       <div class="detail-cover" id="detailCover"></div>
       <div class="detail-meta">
+        <div class="detail-folio" id="detailFolio" dir="ltr"></div>
+        <div class="detail-kicker" id="detailKicker"></div>
         <h1 id="detailTitle">—</h1>
         <div class="detail-sub" id="detailSub"></div>
         <div class="chips" id="detailGenres"></div>
       </div>
     </div>
 
-    <div class="detail-cta">
+    <div class="detail-cta" data-reveal>
       <button class="btn btn-primary read-cta" type="button" id="readCta" data-act="readNow" disabled>
         ${glyph('book')}<span id="readCtaLabel">جارٍ جمع الفصول</span><small id="readCtaSub"></small>
       </button>
-      <button class="toggle-btn" type="button" id="libraryBtn" data-act="toggleLibraryCurrent" aria-pressed="false" aria-label="أضف إلى مكتبتي" title="أضف إلى مكتبتي">${glyph('library')}</button>
+    </div>
+    <!-- نفس ترتيب الأنمي: الفعل الأساسي عريضًا، وتحته ثلاثة بأسمائها -->
+    <div class="detail-quick" data-reveal>
+      <button class="quick-btn" type="button" id="libraryBtn" data-act="toggleLibraryCurrent" aria-pressed="false">${glyph('library')}<span>مكتبتي</span></button>
+      <button class="quick-btn" type="button" id="laterBtn" data-act="toggleLaterCurrent" aria-pressed="false">${glyph('clock')}<span>لاحقًا</span></button>
+      <button class="quick-btn" type="button" id="favBtn" data-act="toggleFavoriteCurrent" aria-pressed="false">${glyph('heart')}<span>المفضلة</span></button>
     </div>
 
     <div class="source-switch" id="sourcesBlock" hidden>
@@ -133,20 +147,21 @@ export const SHELL_HTML = `<div class="app">
     <div class="work-insights" id="detailInsights"></div>
 
     <div class="block" id="summaryBlock">
+      <span class="section-eyebrow">STORY</span>
       <p class="summary clamped" id="description" dir="auto"></p>
       <button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button>
     </div>
 
     <div class="block">
       <div class="block-head">
-        <h2>الفصول<span class="count" id="chapterCount"></span></h2>
+        <div class="section-titles"><span class="section-eyebrow">CHAPTERS</span><h2>الفصول<span class="count" id="chapterCount"></span></h2></div>
         ${iconButton('sort', 'عكس الترتيب', { act: 'flipChapterOrder', cls: 'icon-btn' })}
       </div>
       <div id="chapterPanel"></div>
     </div>
 
     <div class="block">
-      <div class="block-head"><h2>معلومات</h2></div>
+      <div class="block-head"><div class="section-titles"><span class="section-eyebrow">DETAILS</span><h2>معلومات</h2></div></div>
       <div class="info-grid" id="infoGrid"></div>
     </div>
   </section>
@@ -167,7 +182,7 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body anime-only" id="animeLibrary"></div>
     <div class="page-body cinema-only" id="cinemaLibrary"></div>
     <div class="page-body manga-only">
-      <div class="segmented" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
+      <div class="segmented library-tabs" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">
         <span class="work-meta" id="libraryCount"></span>
         <select class="select" id="librarySort" data-change="renderLibrary" aria-label="الترتيب">
