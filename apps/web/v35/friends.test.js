@@ -45,6 +45,18 @@ describe('آخر ما صار', () => {
     expect(ids(out)).toEqual(['msg:m1', 'activity:a3', 'rec:r2']);
   });
 
+  it('cinema: its own recs and completions, the shared chat, and no manga frames', () => {
+    const t = base();
+    t.recommendations.push({ id: 'r9', from_id: 'a', series_ref: 'cinema:tt1375666', created_at: 11 });
+    t.activity.push({ id: 'a9', actor_id: 'b', verb: 'EPISODE_DONE', series_ref: 'cinema:tt0944947', created_at: 12 });
+    const out = feedEvents(fakeSync(t), { section: 'cinema', filter: 'all', me: 'me' });
+    expect(ids(out)).toEqual(['activity:a9', 'rec:r9', 'msg:m1']);
+    // ولا تتسرّب للمانجا ولا للأنمي
+    expect(ids(feedEvents(fakeSync(t), { anime: false, filter: 'recs', me: 'me' }))).toEqual(['rec:r1']);
+    expect(ids(feedEvents(fakeSync(t), { anime: true, filter: 'recs', me: 'me' }))).toEqual(['rec:r2']);
+    expect(feedFilters('cinema', false).at(-1)).toEqual(['reading', 'المشاهدة']);
+  });
+
   it('filters: chat, recs, reading', () => {
     const sync = fakeSync(base());
     expect(ids(feedEvents(sync, { anime: false, filter: 'chat', me: 'me' }))).toEqual(['msg:m1', 'frame:f1']);

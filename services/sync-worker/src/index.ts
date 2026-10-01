@@ -1047,7 +1047,12 @@ export function statementsFor(
     case 'episode.complete': {
       const seriesRef = asString(p['seriesRef'], 200);
       const episode = asNumber(p['episode']);
-      if (!seriesRef || !seriesRef.startsWith('anime:') || episode === null || !Number.isInteger(episode) || episode < 1 || episode > 100_000) return null;
+      // أنمي `anime:<id>`، وسينما `cinema:<IMDb>` (المسلسل بموسمه، والفيلم «movie»)
+      const cinema = seriesRef?.startsWith('cinema:') ?? false;
+      if (!seriesRef || !(seriesRef.startsWith('anime:') || cinema) || episode === null || !Number.isInteger(episode) || episode < 1 || episode > 100_000) return null;
+      const seasonRaw = asNumber(p['season']);
+      const season = cinema && seasonRaw !== null && Number.isInteger(seasonRaw) && seasonRaw >= 1 && seasonRaw <= 200 ? seasonRaw : null;
+      const movie = cinema && p['movie'] === true;
       return [
         ...workStatements(db, {
           seriesRef,
@@ -1064,10 +1069,10 @@ export function statementsFor(
           accounts: ctx.accounts,
           seriesRef,
           link: socialLinkFor({ kind: 'work', seriesRef }),
-          payload: { episode },
+          payload: movie ? { movie: true } : season !== null ? { episode, season } : { episode },
           now,
           rev,
-          eventId: `done:${userId}:${seriesRef}#ep:${episode}`.slice(0, 250),
+          eventId: `done:${userId}:${seriesRef}#${movie ? 'movie' : season !== null ? `s${season}` : ''}ep:${episode}`.slice(0, 250),
           completion: true,
         }),
       ];

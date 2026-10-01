@@ -4365,7 +4365,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const friends = createFriends({
     sync,
     host: friendsHost,
-    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
+    section: () => root.dataset.section ?? 'manga',
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4420,6 +4420,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (const kind of ['library', 'read_later', 'favorite', 'completed']) {
       for (const m of animeAccount.shelf(kind)) add({ ref: `anime:${m.id}`, title: m.title, cover: m.poster, anime: true });
     }
+    // السينما: «قائمتي» و«المفضلة» من الحساب بمرجع `cinema:`
+    for (const r of [...sync.rows('library', (x) => x.user_id === me() && !x.removed), ...sync.rows('collections', (x) => x.user_id === me() && x.member)]) {
+      if (String(r.series_ref).startsWith('cinema:')) add({ ref: r.series_ref, title: r.series_title ?? sync.rows('works', (w) => w.series_ref === r.series_ref)[0]?.title ?? 'عمل', cover: r.cover_url ?? null, anime: true, section: 'cinema' });
+    }
     return out;
   }
   /** صورة المجلس: GIF يبقى متحركًا، والثابتة تُقص وتُضغط. */
@@ -4430,7 +4434,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync,
     host: q('majlisBody'),
     // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
-    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
+    section: () => root.dataset.section ?? 'manga',
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4551,6 +4555,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
+    share: (work) =>
+      openShareSheet({
+        sync,
+        friends: deps.friends?.() ?? [],
+        openSheet: (build) => openSheet(build, { tone: 'cinema' }),
+        closeSheet,
+        sheetBody: () => q('sheetBody'),
+        toast,
+        work,
+      }),
     openUpdates: (section) => openUpdates(section),
     setWatching: (info) => deps.setWatching?.(info),
     playerPresence: () => deps.playerPresence?.(),

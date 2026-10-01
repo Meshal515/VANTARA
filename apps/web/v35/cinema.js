@@ -1262,6 +1262,14 @@ export function createCinema(deps) {
     }
   }
 
+  const completed = new Set();
+  function completeOnce(m, season, n) {
+    const k = `${me()}:${m.id}:${season ?? 0}:${n}`;
+    if (!me() || completed.has(k)) return;
+    completed.add(k);
+    sync?.enqueue('episode.complete', { ...descriptor(m), episode: m.type === 'movie' ? 1 : n, ...(m.type === 'movie' ? { movie: true } : { season }) });
+  }
+
   // الوقت: المشغّل الأصلي الحديث يحتسبه بنفسه للسينما؛ وإلا نحتسبه هنا من التقدّم
   const clock = { pos: null, at: null, acc: 0 };
   function flushWatch() {
@@ -1289,7 +1297,12 @@ export function createCinema(deps) {
       if (clock.acc >= 60_000) flushWatch();
     }
     const n = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
-    if (p.duration > 0) recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+    if (p.duration > 0) {
+      recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+      // «أنهى S02E03» / «أنهى فيلم» للأصدقاء (حسب خصوصيتك في الخادم)، مرة لكل حلقة
+      const ratio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
+      if (ratio >= 0.9) completeOnce(cur.m, cur.m.type === 'series' ? cur.season : null, n);
+    }
     cur.n = n;
     if (p.final) {
       void flushFollowTime(deps.sync).catch(() => {});

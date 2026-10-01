@@ -962,7 +962,7 @@ export function createRoom(ctx) {
           const cover = el('span', 'mc-pick-cover');
           void ctx.mountImage(cover, ctx.workFromRef(w.ref, w.title, w.cover));
           const t = el('span', 'mc-pick-text');
-          t.append(el('bdi', null, w.title), el('small', null, w.anime ? 'أنمي' : 'مكتبتك'));
+          t.append(el('bdi', null, w.title), el('small', null, w.section === 'cinema' ? 'سينما' : w.anime ? 'أنمي' : 'مكتبتك'));
           row.append(cover, t);
           row.onclick = () => {
             sync.enqueue('recommendation.send', { seriesRef: w.ref, seriesTitle: w.title, coverUrl: w.cover, ...(note ? { message: note } : {}) });
