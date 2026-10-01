@@ -96,13 +96,7 @@ export function createAnime(deps) {
   const localWatch = () => readWatch(currentUser());
   const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
-  // رفوف المكتبة تُرسم من المرآة: متى وصل جديد من الخادم (جهاز ثانٍ مثلًا) تُعاد
-  let shelfPaint = 0;
-  deps.sync?.onChange?.(() => {
-    if (deps.root?.dataset.section !== 'anime' || deps.currentPage() !== 'library' || state.libraryTab === 'history' || state.libraryTab === 'sources') return;
-    cancelAnimationFrame(shelfPaint);
-    shelfPaint = requestAnimationFrame(() => renderLibrary());
-  });
+  // Shelf order is refreshed on entry or a user action, never by background sync.
   const state = {
     home: null,
     loading: null,

@@ -115,7 +115,7 @@ class PreparedEpisode(
     /** نتيجة فحص الرابط السريع: تُرسل للواجهة وتؤثر في ترتيب «شغّل الأفضل». */
     /** Each candidate is probed once, even if an adapter reports it twice. */
     fun claimProbe(candidateId: String): Boolean = synchronized(this) {
-        candidateId !in candidateProbes && probing.add(candidateId)
+        !candidateProbes.containsKey(candidateId) && probing.add(candidateId)
     }
 
     fun markProbe(routeId: String, ok: Boolean, ms: Long, candidateId: String? = null) {

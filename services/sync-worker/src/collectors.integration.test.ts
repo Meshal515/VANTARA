@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { collectTimelines } from './collectors.ts';
 import { sqliteEnv } from './test-d1.ts';
 import { handleUpdatesList } from './updates.ts';
@@ -28,8 +28,24 @@ describe('server collectors', () => {
     await collectTimelines(env, { now: NOW + H, fetchImpl: fetcher });
     expect((await list('manga')).events.every((r) => r.firstSeenAt === NOW)).toBe(true);
   });
+  it('falls back to exact AniList mappings and absolute episode numbers during an AniList outage', async () => {
+    const { env } = setup();
+    await collectTimelines(env, { now: NOW, fetchImpl: (async input => {
+      const url = String(input);
+      if (url.includes('anilist')) return new Response('blocked', { status: 403 });
+      if (url.includes('kitsu')) return reply({ data: [{ id: '12', attributes: { canonicalTitle: 'One Piece' }, relationships: { mappings: { data: [{ id: 'mapping1' }] } } }],
+        included: [{ id: 'mapping1', type: 'mappings', attributes: { externalSite: 'anilist/anime', externalId: '21' } }] });
+      if (url.includes('ani.zip')) return reply({ mappings: { anilist_id: 21 }, episodes: { '1160': { episodeNumber: 5, absoluteEpisodeNumber: 1160, airDateUtc: new Date(NOW - H).toISOString() } } });
+      if (url.includes('olympus')) return new Response('');
+      if (url.includes('mangadex')) return reply({ data: [] });
+      return reply({ metas: [] });
+    }) as typeof fetch });
+    const response = await handleUpdatesList(new URL('https://x/v1/updates?section=anime'), env);
+    expect((await response.json() as { events: unknown[] }).events).toEqual([expect.objectContaining({ work: 'anime:21', number: 1160, at: NOW - H })]);
+  });
   it('one source outage keeps other collectors running and persists a truthful failure status', async () => {
     const { env } = setup();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     await collectTimelines(env, { now: NOW, fetchImpl: (async (input) => {
       if (String(input).includes('anilist')) return reply({ data: { Page: { airingSchedules: [] } } });
       throw new Error('source unavailable');
@@ -37,5 +53,7 @@ describe('server collectors', () => {
     const rows = await env.DB.prepare('SELECT source, last_success_at, last_error FROM collector_state ORDER BY source').all<{ source: string; last_success_at: number; last_error: string | null }>();
     expect(rows.results.find((r) => r.source === 'anilist')?.last_success_at).toBe(NOW);
     expect(rows.results.find((r) => r.source === 'teamx')?.last_error).toContain('source unavailable');
+    expect(errors).toHaveBeenCalledTimes(3);
+    errors.mockRestore();
   });
 });
