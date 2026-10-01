@@ -39,3 +39,23 @@ describe('anime-meta', () => {
     expect(compactCount(950)).toBe('950');
   });
 });
+
+import { airingWeek, meccaDay } from './anime-meta.js';
+import { describe as describe2, expect as expect2, it as it2 } from 'vitest';
+
+describe2('airingWeek — جدول البث', () => {
+  const media = (id, popularity = 50000) => ({ id, title: { english: `A${id}` }, coverImage: {}, popularity, genres: [] });
+  it2('merges past and upcoming in time order without repeats or unknown shows', () => {
+    const week = airingWeek(
+      [{ episode: 3, airingAt: 200, media: media(1) }, { episode: 9, airingAt: 100, media: media(2, 10) }],
+      [{ episode: 4, airingAt: 900, media: media(1) }, { episode: 3, airingAt: 200, media: media(1) }],
+    );
+    expect2(week.map((m) => `${m.id}:${m.episode}`)).toEqual(['1:3', '1:4']);
+    expect2(week[0].airingAt).toBe(200_000);
+  });
+  it2('days are counted in Mecca time', () => {
+    // 22:30 UTC = 01:30 في مكة من اليوم التالي
+    expect2(meccaDay(Date.UTC(2026, 9, 1, 22, 30))).toBe('2026-10-02');
+    expect2(meccaDay(Date.UTC(2026, 9, 1, 20, 59))).toBe('2026-10-01');
+  });
+});

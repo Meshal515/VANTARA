@@ -71,6 +71,14 @@ export function heroSlideIn(slide) {
   if (lines.length) g.fromTo(lines, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.7, ease: EASE.out, stagger: 0.08, delay: 0.1, clearProps: 'opacity,transform' });
 }
 
+/** مسرح الأنمي: الفن يتقدّم ببطء ويظهر، والسطور تصعد واحدًا واحدًا. */
+export function stageIn(art, lines) {
+  const g = live();
+  if (!g) return;
+  if (art) g.fromTo(art, { scale: 1.1 }, { scale: 1, duration: 6, ease: 'power1.out' });
+  if (lines?.length) g.fromTo(lines, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55, ease: EASE.out, stagger: 0.06, clearProps: 'opacity,transform' });
+}
+
 /** شريط تقدّم البانر: يمتلئ خلال مدة الشريحة. يرجع أداة الإيقاف. */
 export function progressFill(bar, seconds, onDone) {
   const g = gsap();

@@ -109,15 +109,15 @@
 }
 .v35 .hero-name {
   margin: 0;
-  font-size: 21px;
-  line-height: 1.22;
+  font-size: 19px;
+  line-height: 1.25;
   font-weight: 800;
   letter-spacing: -0.2px;
   color: var(--paper);
   unicode-bidi: plaintext;
   text-align: right;
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -183,57 +183,124 @@
   background: var(--paper);
 }
 
-/* ───────────────────────── الفهرس ───────────────────────── */
+/* ───────────────────────── الفهرس ─────────────────────────
+ * أربعة أبواب في شبكة 2×2 بخطوط شعرية لا صناديق: أغلفة صغيرة متراكبة لما خلف
+ * الباب، والرقم والاسم وسطر حيّ، وسهم. الضغط يُرى (تعتيم + دفع خفيف للسهم). */
 
 .v35 .shortcuts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 22px var(--gutter) 0;
-  border-block: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
 }
 .v35 .shortcut {
   position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  min-height: 58px;
-  padding: 11px 10px 12px;
+  align-items: center;
+  gap: 8px;
+  min-height: 74px;
+  padding: 12px 0;
   border: 0;
+  border-bottom: 1px solid var(--line);
   background: none;
   color: var(--text-1);
   text-align: start;
-  transition: background var(--dur-fast) var(--ease);
+  font: inherit;
+  transition: opacity var(--dur-fast) var(--ease);
 }
-.v35 .shortcut:first-child {
-  padding-inline-start: 0;
+.v35 .shortcut:nth-child(odd) {
+  padding-inline-end: 12px;
+  border-inline-end: 1px solid var(--line);
 }
-.v35 .shortcut + .shortcut::before {
-  content: '';
-  position: absolute;
-  inset-block: 12px;
-  inset-inline-start: 0;
-  width: 1px;
-  background: var(--line);
+.v35 .shortcut:nth-child(even) {
+  padding-inline-start: 12px;
 }
 .v35 .shortcut:active {
-  background: var(--surface-1);
+  opacity: 0.6;
+}
+.v35 .shortcut-art {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 46px;
+}
+.v35 .shortcut-cover {
+  position: absolute;
+  top: 0;
+  width: 29px;
+  aspect-ratio: 0.7;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+.v35 .shortcut-cover:nth-child(1) {
+  inset-inline-start: 0;
+  z-index: 3;
+}
+.v35 .shortcut-cover:nth-child(2) {
+  inset-inline-start: 8px;
+  top: 2px;
+  z-index: 2;
+  opacity: 0.8;
+}
+.v35 .shortcut-cover:nth-child(3) {
+  inset-inline-start: 14px;
+  top: 4px;
+  z-index: 1;
+  opacity: 0.55;
+}
+.v35 .shortcut-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.v35 .shortcut-cover .image-loading,
+.v35 .shortcut-cover .image-fallback {
+  position: absolute;
+  inset: 0;
+}
+.v35 .shortcut-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 .v35 .shortcut-no {
   font-style: normal;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 1px;
   line-height: 1;
   color: var(--accent-text);
 }
-.v35 .shortcut span {
-  font-size: 12.5px;
-  font-weight: 700;
+.v35 .shortcut-label {
+  font-size: 13.5px;
+  font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+}
+.v35 .shortcut-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .shortcut-sub:empty {
+  display: none;
+}
+.v35 .shortcut > .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-3);
+  transition: transform var(--dur) var(--ease-out);
+}
+.v35 .shortcut:active > .icon {
+  transform: translateX(-3px);
 }
 
 /* ───────────────────────── أقسام الرئيسية ───────────────────────── */
@@ -407,33 +474,68 @@
  * صفحة عنوان كتاب: الغلاف في الوسط بحجم يُرى، والاسم تحته كبيرًا، ثم «اقرأ»
  * عريضًا وتحته ثلاثة أفعال بأسمائها (نفس ترتيب الأنمي). الفصول كترقيم الصفحات. */
 
+/* صفحتان متقابلتان كبانر الرئيسية: الغلاف بحجم يُرى، وفي المقابلة عدد الفصول
+   رقمَ صفحة كبيرًا، والتصنيف بلون القسم، والاسم، والحالة. */
 .v35 #detail .detail-head {
-  grid-template-columns: 1fr;
-  justify-items: center;
-  gap: 18px;
+  grid-template-columns: 46% minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
   padding: 6px var(--gutter) 0;
-  text-align: center;
 }
 .v35 #detail .detail-cover {
-  width: 172px;
+  width: auto;
   border-radius: var(--m-r);
-  box-shadow: 0 34px 60px -22px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 56px -22px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .v35 #detail .detail-meta {
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-inline-start: 16px;
+  padding: 2px 0 2px;
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 .detail-folio {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: auto;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.v35 .detail-folio b {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  color: var(--paper);
+}
+.v35 .detail-folio span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .detail-kicker {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 .detail-kicker:empty {
+  display: none;
 }
 .v35 #detail .detail-meta h1 {
-  font-size: 26px;
-  line-height: 1.2;
+  font-size: 22px;
+  line-height: 1.22;
   font-weight: 800;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
   color: var(--paper);
-  text-align: center;
-  -webkit-line-clamp: 3;
+  text-align: right;
+  -webkit-line-clamp: 4;
 }
 .v35 #detail .detail-sub {
-  justify-content: center;
-  margin-top: 8px;
+  margin-top: 0;
   color: var(--text-3);
 }
 .v35 #detail .detail-sub > span + span::before {
@@ -446,16 +548,12 @@
   background: var(--text-4);
   vertical-align: middle;
 }
-.v35 #detail .chips {
-  justify-content: center;
-  margin-top: 12px;
+/* التصنيفات صارت سطرًا ملوّنًا فوق الاسم */
+.v35 #detail .detail-meta .chips {
+  display: none;
 }
-.v35 #detail .chip {
-  padding: 3px 9px;
-  border-radius: 3px;
-  background: none;
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-  color: var(--text-2);
+.v35 #detail #summaryBlock .section-eyebrow {
+  margin-bottom: 10px;
 }
 .v35 #detail .detail-cta {
   grid-template-columns: 1fr;
@@ -466,22 +564,22 @@
   border-radius: 6px;
   font-size: 16px;
 }
+/* ثلاثة أفعال بأسمائها في سطر واحد بخطوط شعرية، لا ثلاثة صناديق */
 .v35 .detail-quick {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 10px var(--gutter) 0;
+  margin: 10px var(--gutter) 0;
+  border-block: 1px solid var(--line);
 }
 .v35 .quick-btn {
-  min-height: 46px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   border: 0;
-  border-radius: 6px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: 0;
+  background: none;
   color: var(--text-1);
   font: inherit;
   font-size: 13px;
@@ -494,13 +592,14 @@
   height: 19px;
   flex: none;
 }
+.v35 .quick-btn + .quick-btn {
+  border-inline-start: 1px solid var(--line);
+}
 .v35 .quick-btn:active {
-  background: var(--surface-3);
+  background: var(--surface-1);
 }
 .v35 .quick-btn[aria-pressed='true'] {
   color: var(--accent-text);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 .v35 #detail .source-chip {
   border-radius: var(--m-r);
@@ -683,10 +782,10 @@
   .v35 .hero-name {
     font-size: 18px;
   }
-  .v35 .shortcut span {
-    font-size: 11.5px;
+  .v35 .shortcut-label {
+    font-size: 13px;
   }
-  .v35 #detail .detail-cover {
-    width: 150px;
+  .v35 .detail-folio b {
+    font-size: 32px;
   }
 }

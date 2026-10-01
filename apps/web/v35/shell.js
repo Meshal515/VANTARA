@@ -852,7 +852,36 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }).finally(() => { latestJob = null; });
     return latestJob;
   }
+  /** الفهرس يُظهر ما خلفه: ثلاثة أغلفة من كل باب، وسطر يقول ما فيه الآن. */
+  function paintIndex() {
+    const pick = (list, from = 0) => uniqueById(list ?? []).filter((w) => w.coverImage?.large).slice(from, from + 3);
+    const updates = state.home.updates?.length ? state.home.updates : state.home.recent;
+    const doors = {
+      recent: { works: pick(updates), sub: state.home.updates?.length ? countLabel(state.home.updates.length, 'work') + ' تحدّثت' : 'فصول جديدة الآن' },
+      trending: { works: pick(state.home.trending), sub: 'الأكثر قراءة الآن' },
+      openCategories: { works: pick(state.home.trending, 3), sub: GENRES.slice(0, 3).map((g) => g.ar).join('، ') },
+      catalogue: { works: pick(state.home.recent, 3), sub: 'كل ما في المصادر' },
+    };
+    for (const b of root.querySelectorAll('#mangaHome .shortcut')) {
+      const door = doors[b.dataset.index];
+      if (!door) continue;
+      const sub = b.querySelector('.shortcut-sub');
+      if (sub.textContent !== door.sub) sub.textContent = door.sub;
+      const art = b.querySelector('.shortcut-art');
+      const key = door.works.map((w) => w.id).join('|');
+      if (art.dataset.key === key) continue;
+      art.dataset.key = key;
+      art.replaceChildren(
+        ...door.works.map((w) => {
+          const c = el('span', 'shortcut-cover');
+          void mountImage(c, w);
+          return c;
+        }),
+      );
+    }
+  }
   function renderHome() {
+    paintIndex();
     const specs = [];
     const history = historyWorks();
     if (history.length) specs.push(['آخر المشاهدات', 'history', history.slice(0, 20)]);
@@ -1277,8 +1306,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
     }
   }
+  /** رقم الصفحة في صفحة العمل: عدد الفصول الصحيحة (بلا الجانبية)، كبيرًا. */
+  function paintFolio(w) {
+    const host = q('detailFolio');
+    const n = w._chapters ? countMainChapters(w._chapters) : null;
+    if (!n) return void host.replaceChildren(el('b', null, '—'));
+    host.replaceChildren(el('b', null, String(n)), el('span', null, n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا'));
+  }
   /** العدد والتصنيف والنبذة تتحدّث مكانها، بلا إعادة الغلاف ولا قفزة. */
   function refreshDetailMeta(w) {
+    paintFolio(w);
     const sub = q('detailSub');
     sub.replaceChildren();
     if (w.status && STATUS_AR[w.status]) {
@@ -1286,7 +1323,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       st.dataset.status = w.status;
       sub.append(st);
     }
-    if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
+    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
     const editions = w._sources ?? [];
     if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
     renderInfo(w);
@@ -1306,11 +1343,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       s.dataset.status = w.status;
       sub.append(s);
     }
-    if (w._chapters) sub.append(el('span', null, countLabel(w._chapters.length, 'chapter')));
+    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
     const editions = w._sources ?? w._work?.editions ?? [];
     if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
 
     q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
+    q('detailKicker').textContent = (w.genres || []).slice(0, 3).map(genreAr).join(' · ');
+    paintFolio(w);
 
     const cover = q('detailCover');
     if (cover.dataset.for !== String(w.id)) {

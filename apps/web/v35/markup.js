@@ -35,9 +35,15 @@ const subTop = (title, { id, back = 'goBack', end = '' } = {}) =>
   `<div class="page-top-left">${end}</div>` +
   `</div>`;
 
-/** فهرس المانجا: رقمٌ ثم اسم، كفهرس مجلة — لا مربّع ولا أيقونة. */
+/**
+ * فهرس المانجا: أغلفة صغيرة متراكبة (ما ستجده خلف الباب)، ثم الرقم والاسم وسطر
+ * يقول ما فيه، وسهم. يُضغط لأنه يُرى بابًا، لا لأنه داخل صندوق.
+ */
 const shortcut = (no, label, act, arg) =>
-  `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''}><i class="shortcut-no">${no}</i><span>${label}</span></button>`;
+  `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''} data-index="${arg ?? act}">` +
+  `<span class="shortcut-art" aria-hidden="true"></span>` +
+  `<span class="shortcut-text"><i class="shortcut-no">${no}</i><span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
+  `${glyph('chevron', { size: 16 })}</button>`;
 
 const navItem = (page, icon, label) =>
   `<button class="nav" type="button" data-page="${page}" data-act="navTo" data-arg="${page}" aria-label="${label}">` +
@@ -106,10 +112,12 @@ export const SHELL_HTML = `<div class="app">
       </div>
     </div>
 
-    <!-- صفحة عنوان الكتاب: الغلاف في الوسط، ثم الاسم، ثم ما يُعرف عنه -->
+    <!-- صفحتان متقابلتان كبانر الرئيسية: الغلاف، وفي المقابلة عدد الفصول رقمَ صفحة ثم الاسم -->
     <div class="detail-head" data-reveal>
       <div class="detail-cover" id="detailCover"></div>
       <div class="detail-meta">
+        <div class="detail-folio" id="detailFolio" dir="ltr"></div>
+        <div class="detail-kicker" id="detailKicker"></div>
         <h1 id="detailTitle">—</h1>
         <div class="detail-sub" id="detailSub"></div>
         <div class="chips" id="detailGenres"></div>
@@ -139,20 +147,21 @@ export const SHELL_HTML = `<div class="app">
     <div class="work-insights" id="detailInsights"></div>
 
     <div class="block" id="summaryBlock">
+      <span class="section-eyebrow">STORY</span>
       <p class="summary clamped" id="description" dir="auto"></p>
       <button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button>
     </div>
 
     <div class="block">
       <div class="block-head">
-        <h2>الفصول<span class="count" id="chapterCount"></span></h2>
+        <div class="section-titles"><span class="section-eyebrow">CHAPTERS</span><h2>الفصول<span class="count" id="chapterCount"></span></h2></div>
         ${iconButton('sort', 'عكس الترتيب', { act: 'flipChapterOrder', cls: 'icon-btn' })}
       </div>
       <div id="chapterPanel"></div>
     </div>
 
     <div class="block">
-      <div class="block-head"><h2>معلومات</h2></div>
+      <div class="block-head"><div class="section-titles"><span class="section-eyebrow">DETAILS</span><h2>معلومات</h2></div></div>
       <div class="info-grid" id="infoGrid"></div>
     </div>
   </section>
@@ -173,7 +182,7 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body anime-only" id="animeLibrary"></div>
     <div class="page-body cinema-only" id="cinemaLibrary"></div>
     <div class="page-body manga-only">
-      <div class="segmented" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
+      <div class="segmented library-tabs" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">
         <span class="work-meta" id="libraryCount"></span>
         <select class="select" id="librarySort" data-change="renderLibrary" aria-label="الترتيب">
