@@ -124,6 +124,7 @@ class AnimeEnginePlugin : Plugin() {
             session, copies, number, prefs,
             preferredSourceId = call.getString("preferredSourceId"),
             preferredServer = call.getString("preferredServer"),
+            probe = call.getBoolean("probe") ?: false,
         )
         prep.listen { route ->
             val event = JSObject().put("session", session).put("retryAt", retryAt(prep))
@@ -137,6 +138,16 @@ class AnimeEnginePlugin : Plugin() {
 
     private fun retryAt(prep: com.vantara.anime.stream.PreparedEpisode): Long =
         prep.copies.maxOfOrNull { com.vantara.anime.net.AnimeHostRouter.retryAt(it.sourceId) } ?: 0L
+
+    /** نسخ وصلت بعد بدء التجهيز تُضاف للجلسة نفسها (`added`: الجديد فعلًا). */
+    @PluginMethod
+    fun extend(call: PluginCall) {
+        val session = call.getString("session") ?: return call.reject("session مطلوب")
+        val copiesJson = call.getArray("copies") ?: return call.reject("copies مطلوب")
+        val copies = runCatching { (0 until copiesJson.length()).map { animeFrom(copiesJson.getJSONObject(it)) } }
+            .getOrElse { return call.reject(it.message ?: "copies غير صالحة") }
+        call.resolve(JSObject().put("added", engine.extendPreparation(session, copies)))
+    }
 
     @PluginMethod
     fun routes(call: PluginCall) {
@@ -239,6 +250,47 @@ class AnimeEnginePlugin : Plugin() {
         val id = call.getString("sourceId") ?: error("sourceId مطلوب")
         val steps = engine.diagnose(id, call.getString("query") ?: "naruto")
         JSObject().put("steps", steps, ListSerializer(AnimeEngine.Step.serializer()))
+    }
+
+    private val searches = ConcurrentHashMap<String, Job>()
+
+    /**
+     * بحث متدفق: يرجع فورًا، وكل مصدر يصل بحدث `searchHit` لحظة يرد
+     * ({searchId, sourceId, ms, items, error, skipped})، والنهاية بـ`searchDone`.
+     * أسرع مصدر يظهر بلا انتظار أبطئهم.
+     */
+    @PluginMethod
+    fun searchStream(call: PluginCall) {
+        val id = call.getString("searchId") ?: "q-${System.nanoTime()}"
+        val query = call.getString("query").orEmpty()
+        val content = call.getString("content") ?: "anime"
+        val timeout = (call.getInt("timeoutMs") ?: AnimeEngine.STREAM_SEARCH_TIMEOUT_MS.toInt()).toLong()
+        val loadTimeout = (call.getInt("loadTimeoutMs") ?: AnimeEngine.STREAM_LOAD_TIMEOUT_MS.toInt()).toLong()
+        searches.remove(id)?.cancel()
+        searches[id] = scope.launch {
+            try {
+                engine.searchEach(query, content, timeoutMs = timeout, loadTimeoutMs = loadTimeout) { hit ->
+                    notifyListeners(
+                        "searchHit",
+                        JSObject().put("searchId", id).put("sourceId", hit.sourceId).put("ms", hit.ms)
+                            .put("error", hit.error).put("skipped", hit.skipped)
+                            .put("items", hit.items, ListSerializer(SourceAnime.serializer())),
+                    )
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+            } finally {
+                searches.remove(id)
+                notifyListeners("searchDone", JSObject().put("searchId", id))
+            }
+        }
+        call.resolve(JSObject().put("searchId", id))
+    }
+
+    @PluginMethod
+    fun cancelSearch(call: PluginCall) {
+        searches.remove(call.getString("searchId") ?: "")?.cancel()
+        call.resolve()
     }
 
     /** بحث موحّد في كل المصادر، والنتيجة أعمال مدموجة كل منها بنسخه. */

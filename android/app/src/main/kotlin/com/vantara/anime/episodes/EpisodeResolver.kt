@@ -48,7 +48,9 @@ class EpisodeResolver(
 
     /** نفس الحلقة في قائمة مصدر آخر: بالرقم، مع تسامح للترقيم العشري (12.5). */
     fun pick(episodes: List<SourceEpisode>, number: Float): SourceEpisode? =
-        episodes.firstOrNull { abs(it.number - number) < 0.01f }
+        // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم
+        if (number < 0f) episodes.firstOrNull()
+        else episodes.firstOrNull { abs(it.number - number) < 0.01f }
             ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
     /**

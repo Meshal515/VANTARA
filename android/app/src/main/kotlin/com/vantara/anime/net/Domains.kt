@@ -118,6 +118,8 @@ object DomainPolicy {
     fun judge(from: HttpUrl, to: HttpUrl, plan: DomainPlan, html: String?): Verdict {
         if (from.host == to.host) return Verdict.SAME
         if (to.host in plan.knownHosts()) return Verdict.KNOWN
+        // مرآة مكتوبة كموقع (`b2cima.click`) تقبل نطاقاتها الفرعية المتبدّلة (`wwr433.b2cima.click`)
+        if (plan.mirrors.any { m -> val h = bareHost(m); h.isNotEmpty() && to.host.endsWith(".$h") }) return Verdict.KNOWN
         if (siteOf(from.host) == siteOf(to.host)) return Verdict.SAME_SITE
         val fp = plan.fingerprint
         if (fp != null && html != null && Regex(fp, RegexOption.IGNORE_CASE).containsMatchIn(html)) return Verdict.FINGERPRINT_OK
@@ -125,8 +127,12 @@ object DomainPolicy {
     }
 }
 
-class ForeignRedirectException(val from: String, val to: String) :
-    IOException("المصدر حوّل إلى موقع غريب: $from → $to")
+class ForeignRedirectException(val from: String, val to: String, val title: String? = null) :
+    IOException("المصدر حوّل إلى موقع غريب: $from → $to" + (title?.let { " («$it»)" } ?: ""))
+
+/** عنوان الصفحة المحوَّل إليها: يكفي لنعرف من التشخيص هل هي الموقع نفسه أم صفحة إعلان. */
+internal fun pageTitle(html: String?): String? =
+    html?.let { Regex("<title[^>]*>([^<]{1,120})", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.trim() }?.takeIf { it.isNotEmpty() }
 
 /**
  * اعتراض الدومين لعميل مصدر واحد:
@@ -173,7 +179,7 @@ class DomainInterceptor(
         return when (DomainPolicy.judge(request.url, finalUrl, plan, html)) {
             DomainPolicy.Verdict.FOREIGN -> {
                 response.close()
-                throw ForeignRedirectException(request.url.host, finalUrl.host)
+                throw ForeignRedirectException(request.url.host, finalUrl.host, pageTitle(html))
             }
             DomainPolicy.Verdict.SAME -> response
             else -> {

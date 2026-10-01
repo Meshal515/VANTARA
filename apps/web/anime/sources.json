@@ -190,7 +190,8 @@
         "current": "https://m.cimaleek.pw",
         "legacy": [
           "https://m.cimaleek.to"
-        ]
+        ],
+        "fingerprint": "سيما ليك|cimaleek"
       }
     },
     {
@@ -208,7 +209,12 @@
         "current": "https://tv10.egydead.live",
         "legacy": [
           "https://egydead.space"
-        ]
+        ],
+        "mirrors": [
+          "https://m6o3p.sbs",
+          "https://egydead.fyi"
+        ],
+        "fingerprint": "ايجي ديد|egydead"
       }
     },
     {
@@ -224,7 +230,8 @@
       },
       "domains": {
         "current": "https://www.faselhds.biz",
-        "legacy": []
+        "legacy": [],
+        "fingerprint": "فاصل اعلاني|faselhd"
       }
     },
     {
@@ -239,16 +246,18 @@
         "version": "14.31"
       },
       "domains": {
-        "current": "https://m.asd.homes",
-        "legacy": []
+        "current": "https://m.myseed.pics",
+        "legacy": [
+          "https://m.asd.homes"
+        ],
+        "fingerprint": "عرب سيد|arabseed|ماي سيد|myseed"
       }
     },
     {
       "id": "tuktukcinema",
       "name": "TukTuk Cinema",
       "content": "cinema",
-      "enabled": false,
-      "disabledReason": "احتياط: خارج المصادر الأربعة المعتمدة للسينما",
+      "priority": 50,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.tuktukcinema",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.tuktukcinema-v14.8.apk",
@@ -257,24 +266,25 @@
       },
       "domains": {
         "current": "https://tuktukhd.com",
-        "legacy": []
+        "legacy": [],
+        "fingerprint": "توك توك|tuktuk"
       }
     },
     {
       "id": "asia2tv",
       "name": "Asia2TV",
-      "content": "drama",
-      "enabled": false,
-      "disabledReason": "احتياط: خارج المصادر الأربعة المعتمدة للسينما",
+      "content": "cinema",
+      "priority": 40,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.asia2tv",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.asia2tv-v14.37.apk",
-        "sha256": "91c1898eb923b9cb33ad2dae741d6a29b8e94ae28bdfb7436a2c2197efff391e",
-        "version": "14.37"
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.asia2tv-v14.38.apk",
+        "sha256": "5f59d7612e62b6a99d8d0c65bf2a5aef20840c17e5a34fe4a3ab45ca8021db65",
+        "version": "14.38"
       },
       "domains": {
         "current": "https://ww1.asia2tv.pw",
-        "legacy": []
+        "legacy": [],
+        "fingerprint": "asia2tv|آسيا"
       }
     }
   ]

@@ -3953,6 +3953,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : null,
     ]);
 
+    // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
+    if (globalThis.Capacitor?.Plugins?.AnimeEngine) {
+      group('', [row('activity', 'أداء مصادر السينما', 'زمن أول تشغيل صالح لكل مصدر وسيرفر، ومقياس على عدة أفلام ومسلسلات', { run: () => cinema.openSourcesDebug() })]);
+    }
+
     if (!api) return;
     // ── النظام: مطويّ. من يفتحه يعرف أنه دخل مكانًا تقنيًّا ──
     const toggleSystem = el('button', `system-toggle${systemOpen ? ' open' : ''}`);

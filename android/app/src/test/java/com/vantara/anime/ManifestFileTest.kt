@@ -1,6 +1,8 @@
 package com.vantara.anime
 
+import com.vantara.anime.net.DomainPolicy
 import com.vantara.anime.registry.ManifestParser
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +34,34 @@ class ManifestFileTest {
         assertEquals(listOf("mp4upload", "vk"), e.map { it.name })
         assertEquals("https://vkvideo.ru/video_ext.php?oid=-1&id=2&hash=3&hd=3", e[1].url)
         assertEquals(720, e[0].quality)
+    }
+
+    /**
+     * تحويلات رآها جوال حقيقي (السعودية): كانت كلها «موقع غريب» فتعذّرت ثلاثة
+     * مصادر من أربعة. الموقع نفسه في بيت جديد يُقبل؛ صفحة غريبة تبقى مرفوضة.
+     */
+    @Test fun `cinema sources follow their real domain moves and nothing else`() {
+        val m = ManifestParser.parse(file.readText())
+        fun plan(id: String) = m.sources.first { it.id == id }.domains.plan(null)
+        fun judge(id: String, from: String, to: String, html: String?) =
+            DomainPolicy.judge(from.toHttpUrl(), to.toHttpUrl(), plan(id), html)
+
+        val cima = "<title>سيما ليك الأصلي - مشاهدة افلام</title>"
+        assertEquals(DomainPolicy.Verdict.FINGERPRINT_OK, judge("cimaleek", "https://m.cimaleek.pw/?s=x", "https://wwr433.b2cima.click/?s=x", cima))
+        assertEquals(DomainPolicy.Verdict.FOREIGN, judge("cimaleek", "https://m.cimaleek.pw/?s=x", "https://wwr433.b2cima.click/?s=x", "<title>Parked domain</title>"))
+        assertEquals(DomainPolicy.Verdict.KNOWN, judge("egydead", "https://tv10.egydead.live/?s=x", "https://m6o3p.sbs/?s=x", null))
+        assertEquals(DomainPolicy.Verdict.FINGERPRINT_OK, judge("arabseed", "https://m.myseed.pics/", "https://m.myseed.tv/", "<title>ماي سيد - MySeed</title>"))
+        assertEquals(DomainPolicy.Verdict.FOREIGN, judge("egydead", "https://tv10.egydead.live/", "https://ads.example.com/", "<title>Win a prize</title>"))
+        // ArabSeed انتقل رسميًا: الدومين القديم يُعاد كتابته للجديد قبل الطلب، بلا تحويلين
+        val asd = plan("arabseed")
+        assertEquals("m.myseed.pics", DomainPolicy.rewrite("https://m.asd.homes/find/?word=x".toHttpUrl(), asd, null)?.host)
+    }
+
+    @Test fun `every enabled cinema source can recognise itself after a domain move`() {
+        val m = ManifestParser.parse(file.readText())
+        for (s in m.sources.filter { it.content == "cinema" && it.enabled && it.disabledReason == null }) {
+            assertTrue("${s.id} بلا بصمة: أي تغيير دومين سيُرفض", !s.domains.fingerprint.isNullOrBlank())
+        }
     }
 
     @Test fun `an adapter this app version does not know is rejected`() {
