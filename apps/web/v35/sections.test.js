@@ -13,10 +13,15 @@ describe('sections', () => {
     expect(writeSection('anime', s)).toBe(true);
     expect(readSection(s)).toBe('anime');
   });
-  it('never lands on a section that is not ready', () => {
+  it('cinema is a ready section now', () => {
     const s = memory();
-    expect(writeSection('cinema', s)).toBe(false);
-    s.setItem('vantara.section', 'cinema');
+    expect(writeSection('cinema', s)).toBe(true);
+    expect(readSection(s)).toBe('cinema');
+  });
+  it('never lands on an unknown section', () => {
+    const s = memory();
+    expect(writeSection('music', s)).toBe(false);
+    s.setItem('vantara.section', 'music');
     expect(readSection(s)).toBe('manga');
   });
   it('survives a storage that throws', () => {

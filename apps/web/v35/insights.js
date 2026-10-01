@@ -97,12 +97,10 @@ export function createInsights({ sync, host, mountImage, openWork, workFromRef, 
       people.append(chip);
     }
     const filters = el('div', 'insights-filters');
-    for (const [kind, label] of [['all', 'ALL'], ['manga', 'MANGA'], ['anime', 'ANIME'], ['cinema', 'CINMA']]) {
+    for (const [kind, label] of [['all', 'ALL'], ['manga', 'MANGA'], ['anime', 'ANIME'], ['cinema', 'CINEMA']]) {
       const button = el('button', kind === filter ? 'active' : '', label);
       button.type = 'button';
-      button.disabled = kind === 'cinema';
       button.setAttribute('aria-pressed', String(kind === filter));
-      if (kind === 'cinema') button.innerHTML += glyph('lock', { size: 14 });
       button.onclick = () => {
         filter = kind;
         host.dataset.kind = kind;

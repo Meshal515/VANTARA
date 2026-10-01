@@ -74,7 +74,7 @@ export function dayLabel(at, now = Date.now()) {
 /** حالة الحضور بكلمة: يقرأ/يشاهد/متصل/خامل/منذ. */
 export function presenceState(p) {
   const status = p?.status ?? 'OFFLINE';
-  const watching = p?.screen === 'ANIME' || String(p?.seriesRef ?? '').startsWith('anime:');
+  const watching = p?.screen === 'ANIME' || /^(anime|cinema):/.test(String(p?.seriesRef ?? ''));
   if (status === 'READING') return { tone: 'live', verb: watching ? 'يشاهد' : 'يقرأ', watching };
   if (status === 'ONLINE') return { tone: 'on', verb: 'متصل' };
   if (status === 'IDLE') return { tone: 'idle', verb: 'خامل' };

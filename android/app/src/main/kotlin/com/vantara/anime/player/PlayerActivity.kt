@@ -104,6 +104,8 @@ class PlayerActivity : Activity() {
         val session: String,
         val title: String,
         val animeId: String = "",
+        /** القسم الذي يُحتسب له الوقت ومرجع العمل: `anime` (الافتراضي) أو `cinema`. */
+        val section: String = "anime",
         val usageUserId: String? = null,
         val malId: Int? = null,
         val episode: Float = 1f,
@@ -128,7 +130,10 @@ class PlayerActivity : Activity() {
         val presenceUserId: String? = null,
         val presenceDeviceId: String? = null,
         val presenceDeviceCredential: String? = null,
-    )
+    ) {
+        /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
+        fun ref() = "$section:$animeId"
+    }
 
     private lateinit var launch: Launch
     private lateinit var player: ExoPlayer
@@ -181,9 +186,9 @@ class PlayerActivity : Activity() {
         val watching = ::player.isInitialized && current != null && player.playbackState != Player.STATE_ENDED
         val body = JSONObject().put("status", if (watching) "READING" else "ONLINE")
             .put("screen", "ANIME")
-        if (watching) body.put("seriesId", "anime:${launch.animeId}")
+        if (watching) body.put("seriesId", launch.ref())
             .put("seriesTitle", launch.title)
-            .put("chapterLabel", "الحلقة ${fmtEpisode(episode)}")
+            .put("chapterLabel", if (launch.section == "cinema" && launch.total <= 1) "فيلم" else "الحلقة ${fmtEpisode(episode)}")
             .put("chapterNumber", episode.toDouble())
         presenceJob = scope.launch {
             withContext(Dispatchers.IO) {
@@ -271,7 +276,7 @@ class PlayerActivity : Activity() {
         val user = launch.usageUserId
         if (!user.isNullOrBlank() && usageUnsaved > 0) {
             try {
-                UsageStore.get(this).credit(UsageOwner(user, "anime", "anime:${launch.animeId}", launch.title, launch.poster), usageUnsaved, System.currentTimeMillis())
+                UsageStore.get(this).credit(UsageOwner(user, launch.section, launch.ref(), launch.title, launch.poster), usageUnsaved, System.currentTimeMillis())
                 usageUnsaved = 0
             } catch (_: Exception) { /* Keep the credit in memory and retry on the next tick. */ }
         }

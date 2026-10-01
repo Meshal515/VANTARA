@@ -1437,7 +1437,7 @@ function screenV35(page) {
         setWatching: (info) => {
           if (!info && !state.reading?.watching) return;
           const next = info
-            ? { seriesId: info.ref, seriesTitle: info.title, chapterId: null, chapterLabel: `الحلقة ${info.episode}`, chapterNumber: info.episode, watching: true }
+            ? { seriesId: info.ref, seriesTitle: info.title, chapterId: null, chapterLabel: info.episode == null ? 'فيلم' : `الحلقة ${info.episode}`, chapterNumber: info.episode ?? null, watching: true }
             : null;
           const same = next && state.reading?.watching && state.reading.seriesId === next.seriesId && state.reading.chapterNumber === next.chapterNumber;
           state.reading = next;
