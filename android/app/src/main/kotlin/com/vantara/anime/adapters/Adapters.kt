@@ -47,6 +47,8 @@ data class SourceAnime(
     /** المصدر يقسّم العمل مواسم بدل حلقات مباشرة. */
     val hasSeasons: Boolean = false,
     val seasonNumber: Double = -1.0,
+    /** Cinema asks for a season independently of the episode number. */
+    val requestedSeason: Int? = null,
 )
 
 @Serializable

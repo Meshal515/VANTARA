@@ -3476,7 +3476,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (id === 'rafiq') void rafiq.show();
     if (id === 'home' && root.dataset.section === 'manga') {
-      if (from !== 'home') refreshFriendsHero();
+      if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
     }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
@@ -4376,7 +4376,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const enter = () => {
       if (id === 'anime') anime.show();
       else if (id === 'cinema') cinema.show();
-      else { refreshFriendsHero(); restartHero(); }
+      else { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); restartHero(); }
     };
     if (currentPage() !== 'home') {
       applySection(id);

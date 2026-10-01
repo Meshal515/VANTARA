@@ -8,6 +8,10 @@ const CINEMETA = 'https://v3-cinemeta.strem.io';
 const DAY = 86_400_000;
 type Observation = { work: string; section: string; kind: string; title: string; cover?: string | null; source: { s: string; u?: string }; units: Array<{ number?: number; season?: number; publishedAt?: number }> };
 type Fetcher = typeof fetch;
+class PartialScan extends Error {
+  readonly cursor: number;
+  constructor(message: string, cursor: number) { super(message); this.cursor = cursor; }
+}
 const text = (value: string) => value.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const attr = (tag: string, name: string) => new RegExp(`\\b${name}=["']([^"']+)["']`, 'i').exec(tag)?.[1] ?? '';
 
@@ -43,7 +47,16 @@ export function teamxChapters(html: string, now: number) {
 
 async function observe(env: Env, works: Observation[], now: number) {
   if (!works.length) return;
-  const response = await handleUpdatesObserve(new Request('https://internal/v1/updates/observe', { method: 'POST', body: JSON.stringify({ works }) }), env, now);
+  // Keep one invocation below D1 Free's query budget. Recent history wins;
+  // retain a fair share of every work instead of one long history consuming it.
+  let remaining = 80;
+  const bounded = works.map(w => ({ ...w, units: [] as Observation['units'] }));
+  for (let i = 0; remaining > 0 && works.some(w => i < w.units.length); i++) {
+    for (let j = 0; j < works.length && remaining > 0; j++) {
+      const u = works[j]!.units[i]; if (u) { bounded[j]!.units.push(u); remaining--; }
+    }
+  }
+  const response = await handleUpdatesObserve(new Request('https://internal/v1/updates/observe', { method: 'POST', body: JSON.stringify({ works: bounded.filter(w => w.units.length) }) }), env, now);
   if (!response.ok) throw new Error(`ingestion_${response.status}`);
 }
 
@@ -61,7 +74,7 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
     } catch { failures++; }
   }));
   await observe(env, reports, now);
-  if (failures) throw new Error(`${failures} chapter pages failed`);
+  if (failures) throw new PartialScan(`${failures} chapter pages failed`, rotated.length ? (cursor + 4) % rotated.length : 0);
   return rotated.length ? (cursor + 4) % rotated.length : 0;
 }
 
@@ -98,9 +111,11 @@ async function animeFallback(env: Env, now: number, fetchImpl: Fetcher, cursor: 
   const rest = all.slice(2);
   const selected = [...all.slice(0, 2), ...Array.from({ length: Math.min(2, rest.length) }, (_, i) => rest[(cursor + i) % rest.length]!)];
   const reports: Observation[] = [];
+  let failures = 0;
   for (const m of selected) {
     const mapping = m.relationships?.mappings?.data?.map(x => mappings.get(x.id)).find(x => x?.externalSite === 'anilist/anime');
     if (!mapping?.externalId || !/^\d+$/.test(mapping.externalId)) continue;
+    try {
     const data = await (await request(`https://api.ani.zip/mappings?anilist_id=${mapping.externalId}`, fetchImpl)).json() as {
       mappings?: { anilist_id?: number }; episodes?: Record<string, { episodeNumber?: number; absoluteEpisodeNumber?: number; episode?: string; airDateUtc?: string; aired?: string }>;
     };
@@ -109,8 +124,10 @@ async function animeFallback(env: Env, now: number, fetchImpl: Fetcher, cursor: 
       .filter((e): e is { number: number; publishedAt: number } => Number.isFinite(e.number) && e.number! > 0 && e.publishedAt <= now && e.publishedAt >= now - 7 * DAY);
     if (units.length) reports.push({ work: `anime:${mapping.externalId}`, section: 'anime', kind: 'episode', title: m.attributes.canonicalTitle,
       cover: m.attributes.posterImage?.original ?? null, source: { s: 'anizip' }, units });
+    } catch { failures++; }
   }
   await observe(env, reports, now);
+  if (failures) throw new PartialScan(`${failures} anime episode pages failed`, rest.length ? (cursor + 2) % rest.length : 0);
   return rest.length ? (cursor + 2) % rest.length : 0;
 }
 
@@ -144,18 +161,33 @@ async function cinema(env: Env, now: number, fetchImpl: Fetcher, cursor: number)
       const data = await (await request(`${CINEMETA}/meta/series/${id}.json`, fetchImpl)).json() as { meta?: { name?: string; poster?: string; videos?: Array<{ season: number; episode: number; released?: string }> } };
       if (!data.meta?.videos) throw new Error('invalid series');
       const units = data.meta.videos.map((v) => ({ season: v.season, number: v.episode, publishedAt: Date.parse(v.released ?? '') }))
-        .filter((v) => v.season > 0 && v.number > 0 && v.publishedAt <= now && v.publishedAt >= now - 7 * DAY).slice(-40);
+        .filter((v) => v.season > 0 && v.number > 0 && v.publishedAt <= now && v.publishedAt >= now - 7 * DAY).sort((a,b) => b.publishedAt - a.publishedAt).slice(0, 40);
       if (units.length) reports.push({ work: `cinema:${id}`, section: 'cinema', kind: 'episode', title: data.meta.name ?? id, cover: data.meta.poster ?? null, source: { s: 'cinemeta' }, units });
     } catch { failures++; }
   }));
   await observe(env, reports, now);
-  if (failures) throw new Error(`${failures} series failed`);
+  if (failures) throw new PartialScan(`${failures} series failed`, rotated.length ? (cursor + 4) % rotated.length : 0);
   return rotated.length ? (cursor + 4) % rotated.length : 0;
 }
 
-export async function collectTimelines(env: Env, { now = Date.now(), fetchImpl = fetch }: { now?: number; fetchImpl?: Fetcher } = {}) {
-  const jobs = [['teamx', teamx], ['mangadex-ar', mangaDex], ['anilist', anime], ['cinemeta-series', cinema]] as const;
-  await Promise.all(jobs.map(async ([source, run]) => {
+async function movies(env: Env, now: number, fetchImpl: Fetcher) {
+  const body = await (await request(`${CINEMETA}/catalog/movie/lastVideos.json`, fetchImpl)).json() as {
+    metas?: Array<{ id?: string; name?: string; poster?: string; released?: string }>;
+  };
+  if (!Array.isArray(body.metas)) throw new Error('invalid movie release catalog');
+  const reports = body.metas.filter(m => /^tt\d+$/.test(m.id ?? '') && m.name && m.released && Date.parse(m.released) <= now)
+    .sort((a,b) => Date.parse(b.released!) - Date.parse(a.released!)).slice(0, 40)
+    .map(m => ({ work: `cinema:${m.id}`, section: 'cinema', kind: 'movie', title: m.name!, cover: m.poster ?? null,
+      source: { s: 'cinemeta' }, units: [{ publishedAt: Date.parse(m.released!) }] }));
+  await observe(env, reports, now);
+  return 0;
+}
+
+export async function collectTimelines(env: Env, { now = Date.now(), fetchImpl = fetch, scheduled = false }: { now?: number; fetchImpl?: Fetcher; scheduled?: boolean } = {}) {
+  const jobs = [['teamx', teamx], ['mangadex-ar', mangaDex], ['anilist', anime], ['cinemeta-series', cinema], ['cinemeta-movies', movies]] as const;
+  const slots = [['teamx', 'mangadex-ar'], ['anilist', 'cinemeta-series', 'cinemeta-movies']];
+  const selected = scheduled ? jobs.filter(([source]) => slots[Math.floor(now / 60_000) % slots.length]!.includes(source)) : jobs;
+  await Promise.all(selected.map(async ([source, run]) => {
     const claim = await env.DB.prepare(`INSERT INTO collector_state (source, lease_until, last_attempt_at) VALUES (?, ?, ?)
       ON CONFLICT(source) DO UPDATE SET lease_until = excluded.lease_until, last_attempt_at = excluded.last_attempt_at
       WHERE collector_state.lease_until < ?`).bind(source, now + 90_000, now, now).run();
@@ -166,7 +198,7 @@ export async function collectTimelines(env: Env, { now = Date.now(), fetchImpl =
       await env.DB.prepare('UPDATE collector_state SET lease_until = 0, last_success_at = ?, last_error = NULL, cursor = ? WHERE source = ?').bind(now, cursor, source).run();
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error).slice(0, 200);
-      await env.DB.prepare('UPDATE collector_state SET lease_until = 0, last_error = ? WHERE source = ?').bind(message, source).run();
+      await env.DB.prepare('UPDATE collector_state SET lease_until = 0, last_error = ?, cursor = ? WHERE source = ?').bind(message, error instanceof PartialScan ? error.cursor : row?.cursor ?? 0, source).run();
       console.error('timeline collector', source, message);
     }
   }));

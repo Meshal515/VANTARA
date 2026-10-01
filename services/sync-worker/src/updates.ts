@@ -183,6 +183,9 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
   }
 
   const writes = [];
+  const markValues: unknown[][] = [];
+  const insertValues: unknown[][] = [];
+  const updateValues = new Map<string, { sources: string; cover: string | null; publishedAt: number | null }>();
   let created = 0;
   let baselined = 0;
   const createdIds = new Set<string>();
@@ -192,12 +195,7 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
     if (!before) baselined++;
     if (mark && (!before || mark.season !== before.season || mark.number !== before.number)) {
       marks.set(r.work, mark);
-      writes.push(
-        env.DB.prepare(
-          `INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (work) DO UPDATE SET max_season = excluded.max_season, max_number = excluded.max_number, updated_at = excluded.updated_at`,
-        ).bind(r.work, r.section, mark.season, mark.number, now, now),
-      );
+      markValues.push([r.work, r.section, mark.season, mark.number, now, now]);
     }
     const freshIds = new Set(fresh.map((u) => eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number)));
     for (const u of r.units) {
@@ -215,23 +213,41 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
         // first_seen_at لا يتغير. أول تاريخ نشر موثوق يصحّح مكان الحدث مرة واحدة.
         if (JSON.stringify(merged) === row.sources && (row.cover || !r.cover) && (row.published_at != null || u.publishedAt == null)) continue;
         row.sources = JSON.stringify(merged);
-        writes.push(
-          env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), at = CASE WHEN published_at IS NULL AND ? IS NOT NULL THEN ? ELSE at END, published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
-            .bind(row.sources, r.cover, u.publishedAt, u.publishedAt, u.publishedAt, now, id),
-        );
+        const prior = updateValues.get(id);
+        updateValues.set(id, { sources: row.sources, cover: prior?.cover ?? r.cover, publishedAt: prior?.publishedAt ?? u.publishedAt });
+        row.cover ??= r.cover;
+        row.published_at ??= u.publishedAt;
         continue;
       }
       if (!freshIds.has(id) || createdIds.has(id)) continue;
       createdIds.add(id);
       created++;
       known.set(id, { sources: JSON.stringify(add), cover: r.cover, published_at: u.publishedAt });
-      writes.push(
-        env.DB.prepare(
-          `INSERT INTO update_events (id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
-        ).bind(id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now),
-      );
+      insertValues.push([id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now]);
     }
+  }
+  // D1 counts SQL statements, including statements inside a batch. Pack rows
+  // below its 100 bound-parameter limit instead of issuing one query per event.
+  for (let i = 0; i < markValues.length; i += 16) {
+    const rows = markValues.slice(i, i + 16);
+    writes.push(env.DB.prepare(`INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at)
+      VALUES ${rows.map(() => '(?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(work) DO UPDATE SET max_season=excluded.max_season, max_number=excluded.max_number, updated_at=excluded.updated_at`).bind(...rows.flat()));
+  }
+  for (let i = 0; i < insertValues.length; i += 7) {
+    const rows = insertValues.slice(i, i + 7);
+    writes.push(env.DB.prepare(`INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at)
+      VALUES ${rows.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')} ON CONFLICT(id) DO NOTHING`).bind(...rows.flat()));
+  }
+  const updates = [...updateValues];
+  for (let i = 0; i < updates.length; i += 8) {
+    const rows = updates.slice(i, i + 8);
+    const choose = `CASE id ${rows.map(() => 'WHEN ? THEN ?').join(' ')} END`;
+    writes.push(env.DB.prepare(`UPDATE update_events SET sources=${choose}, cover=COALESCE(cover,${choose}),
+      at=CASE WHEN published_at IS NULL THEN COALESCE(${choose},at) ELSE at END,
+      published_at=COALESCE(published_at,${choose}),updated_at=? WHERE id IN (${rows.map(() => '?').join(',')})`)
+      .bind(...rows.flatMap(([id,u]) => [id,u.sources]), ...rows.flatMap(([id,u]) => [id,u.cover]),
+        ...rows.flatMap(([id,u]) => [id,u.publishedAt]), ...rows.flatMap(([id,u]) => [id,u.publishedAt]), now, ...rows.map(([id]) => id)));
   }
   if (writes.length) await env.DB.batch(writes);
   return reply({ accepted: reports.length, created, baselined });

@@ -43,7 +43,7 @@ describe('آخر التحديثات', () => {
     ]);
     expect(unitLabel({ kind: 'episode', season: 2, high: 5, low: 5, events: [{}] })).toBe('S02E05');
     expect(unitLabel({ kind: 'episode', season: null, high: 8, low: 8, events: [{}] })).toBe('الحلقة 8');
-    expect(unitLabel({ kind: 'movie', events: [{}] })).toBe('متاح الآن');
+    expect(unitLabel({ kind: 'movie', events: [{}] })).toBe('فيلم');
   });
 
   it('drops upload dates a source stamps identically on every chapter', () => {

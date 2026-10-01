@@ -72,7 +72,7 @@ const fmt = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) 
 /** «الفصل 401»، «الفصول 399–401»، «الحلقة 8»، «S02E05»، «متاح الآن». */
 export function unitLabel(g) {
   const many = g.events?.length > 1 && g.low !== g.high;
-  if (g.kind === 'movie') return 'متاح الآن';
+  if (g.kind === 'movie') return 'فيلم';
   if (g.kind === 'chapter') return many ? `الفصول ${fmt(g.low)}–${fmt(g.high)}` : `الفصل ${fmt(g.high)}`;
   if (g.season != null) {
     const s = String(g.season).padStart(2, '0');

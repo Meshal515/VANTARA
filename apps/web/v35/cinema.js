@@ -751,6 +751,7 @@ export function createCinema(deps) {
   function warmUp(m, season, n) {
     const key = playKey(m, season);
     const episode = m.type === 'movie' ? -1 : n;
+    const forPreparation = copies => m.type === 'series' ? copies.map(c => ({ ...c, requestedSeason: season })) : copies;
     const cur = state.warm;
     if (cur && !cur.closed && cur.key === key && cur.episode === episode && Date.now() - cur.at < WARM_TTL) return cur;
     dropWarm();
@@ -807,7 +808,7 @@ export function createCinema(deps) {
       try {
         const out = await engine.prepare({
           session,
-          copies: initial,
+          copies: forPreparation(initial),
           episode,
           preferredSourceId: pref?.sourceId ?? null,
           preferredServer: pref?.server ?? null,
@@ -825,7 +826,7 @@ export function createCinema(deps) {
       // مصدر ردّ بعد بدء التجهيز: نسخته تدخل الجلسة نفسها، وما يعمل لا يتوقف
       w.copyOff = h.onCopies((fresh) => {
           if (w.closed || !w.session) return;
-          void engine.extend(w.session, fresh).then((added) => {
+          void engine.extend(w.session, forPreparation(fresh)).then((added) => {
             if (added && !w.closed) {
               w.done = false;
               notify();
@@ -834,7 +835,7 @@ export function createCinema(deps) {
         });
       h.done.finally(() => w.copyOff?.());
       const late = h.found.copies.filter((c) => !initial.includes(c));
-      if (late.length && w.session) void engine.extend(w.session, late);
+      if (late.length && w.session) void engine.extend(w.session, forPreparation(late));
     })();
     return w;
   }

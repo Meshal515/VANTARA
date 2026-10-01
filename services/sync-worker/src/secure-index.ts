@@ -418,7 +418,7 @@ async function logoutAll(request: Request, env: Env, now: number): Promise<Respo
 
 export default {
   async scheduled(event: { scheduledTime: number }, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(collectTimelines(env, { now: event.scheduledTime }));
+    ctx.waitUntil(collectTimelines(env, { now: event.scheduledTime, scheduled: true }));
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);

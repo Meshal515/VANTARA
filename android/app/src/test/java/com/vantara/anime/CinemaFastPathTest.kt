@@ -1,5 +1,10 @@
 package com.vantara.anime
 
+import com.vantara.anime.adapters.AnimeAdapter
+import com.vantara.anime.adapters.SourceAnime
+import com.vantara.anime.adapters.SourcePage
+import com.vantara.anime.adapters.Listing
+import com.vantara.anime.adapters.ResolveTrace
 import com.vantara.anime.adapters.SourceEpisode
 import com.vantara.anime.episodes.EpisodeResolver
 import com.vantara.anime.health.HealthStore
@@ -70,6 +75,33 @@ class CinemaFastPathTest {
         assertNull(r.pick(emptyList(), -1f))
         // الأنمي لا يتأثر: الرقم الموجب يطابق كما كان
         assertNull(r.pick(zero, 1f))
+    }
+
+    @Test fun `a parent series resolves the requested season and caches each season independently`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val adapter = object : AnimeAdapter {
+            override val id = "egydead"
+            override val name = "EgyDead"
+            override suspend fun page(listing: Listing, page: Int, query: String) = SourcePage(emptyList(), false)
+            override suspend fun details(anime: SourceAnime) = anime
+            override suspend fun seasons(anime: SourceAnime) = listOf(
+                SourceAnime(id, "/season/s02", "The Gentlemen الموسم الثاني", seasonNumber = 2.0),
+                SourceAnime(id, "/season/s01", "The Gentlemen الموسم الاول", seasonNumber = 1.0),
+            )
+            override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
+                seen += anime.url
+                return listOf(SourceEpisode(id, "${anime.url}/episode1", "1", 1f))
+            }
+            override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int) = emptyList<Candidate>()
+        }
+        val r = EpisodeResolver({ adapter }, HealthStore(null))
+        val parent = SourceAnime("egydead", "/serie/gentlemen", "The Gentlemen", hasSeasons = true)
+        val first = r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 1)))
+        val second = r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 2)))
+        assertEquals("/season/s01/episode1", first.single().url)
+        assertEquals("/season/s02/episode1", second.single().url)
+        assertEquals(listOf("/season/s01", "/season/s02"), seen)
+        assertTrue(r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 3))).isEmpty())
     }
 
     @Test fun `a probed route outranks an unprobed one and a failed probe sinks`() {
