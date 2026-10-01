@@ -2,8 +2,11 @@ package com.vantara.anime
 
 import com.vantara.anime.net.CinemaMediaProbe
 import eu.kanade.tachiyomi.network.HostRouting
-import com.sun.net.httpserver.HttpServer
-import java.net.InetSocketAddress
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.Dispatcher
+import okio.Buffer
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.Assert.*
@@ -29,10 +32,11 @@ class CinemaMediaProbeTest {
         }
     }
     private suspend fun withServer(block: suspend (String) -> Unit) {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            val path = exchange.requestURI.path
-            val authorized = exchange.requestHeaders.getFirst("Referer") == "https://source.test/"
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+          override fun dispatch(request: RecordedRequest): MockResponse {
+            val path = request.path
+            val authorized = request.getHeader("Referer") == "https://source.test/"
             val bytes = when (path) {
                 "/master.m3u8" -> "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nmedia.m3u8\n".toByteArray()
                 "/media.m3u8" -> "#EXTM3U\n#EXTINF:5,\nsegment.ts\n".toByteArray()
@@ -40,11 +44,11 @@ class CinemaMediaProbeTest {
                 else -> "<html>captcha</html>".toByteArray()
             }
             val code = if (path == "/segment.ts" && !authorized) 403 else 200
-            exchange.responseHeaders.add("Content-Type", if (path == "/html") "text/html" else "application/octet-stream")
-            exchange.sendResponseHeaders(code, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+            return MockResponse().setResponseCode(code).setHeader("Content-Type", if (path == "/html") "text/html" else "application/octet-stream")
+                .setBody(Buffer().write(bytes))
+          }
         }
         server.start()
-        try { block("http://127.0.0.1:${server.address.port}") } finally { server.stop(0) }
+        try { block(server.url("/").toString().trimEnd('/')) } finally { server.shutdown() }
     }
 }
