@@ -71,6 +71,14 @@ export function dayLabel(at, now = Date.now()) {
   return new Date(at).toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', numberingSystem: 'latn' });
 }
 
+/** قسم ما يتابعه الشخص الآن: من مرجع عمله، وإلا من شاشته. */
+export function presenceSection(p) {
+  const ref = String(p?.seriesRef ?? '');
+  if (ref.startsWith('cinema:')) return 'cinema';
+  if (ref.startsWith('anime:') || p?.screen === 'ANIME') return 'anime';
+  return 'manga';
+}
+
 /** حالة الحضور بكلمة: يقرأ/يشاهد/متصل/خامل/منذ. */
 export function presenceState(p) {
   const status = p?.status ?? 'OFFLINE';

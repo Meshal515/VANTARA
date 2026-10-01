@@ -18,7 +18,7 @@
  * لا يزيد شيئًا.
  */
 
-import { isAnimeRef } from './anime-account.js';
+import { isAnimeRef, isMediaRef, sectionOfRef } from './anime-account.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
@@ -271,8 +271,9 @@ export function createProfile(ctx) {
     void ctx.mountImage(cover, work);
     const copy = el('span', 'pf-now-copy');
     const label = el('span', 'pf-now-label');
-    const watching = p.screen === 'ANIME' || String(p.seriesRef ?? '').startsWith('anime:');
-    if (watching) card.dataset.tone = 'anime';
+    const nowSection = String(p.seriesRef ?? '').startsWith('cinema:') ? 'cinema' : p.screen === 'ANIME' || String(p.seriesRef ?? '').startsWith('anime:') ? 'anime' : null;
+    const watching = Boolean(nowSection);
+    if (nowSection) card.dataset.tone = nowSection;
     label.append(el('i', 'pf-pulse'), document.createTextNode(watching ? (own ? 'تشاهد الآن' : 'يشاهد الآن') : own ? 'تقرأ الآن' : 'يقرأ الآن'));
     copy.append(label, el('bdi', 'pf-now-title', p.seriesTitle));
     if (p.chapterLabel) copy.append(el('span', 'pf-now-chapter', p.chapterLabel));
@@ -298,6 +299,11 @@ export function createProfile(ctx) {
         statCell(v(numbers?.anime?.followed), 'أنمي متابَع'),
         statCell(v(numbers?.anime?.watchedEpisodes), 'حلقات'),
         statCell(numbers ? shortDuration(numbers.time?.anime?.totalMs) : '—', 'مشاهدة'),
+      );
+    } else if (ctx.section?.() === 'cinema') {
+      card.append(
+        statCell(v(numbers?.cinema?.followed), 'في قائمته'),
+        statCell(numbers ? shortDuration(numbers.time?.cinema?.totalMs) : '—', 'مشاهدة'),
       );
     } else {
       card.append(
@@ -383,7 +389,7 @@ export function createProfile(ctx) {
    * أولًا، ومع كل عمل آخر فصل فتحه.
    */
   function shelfOf(userId, kind, media = 'all') {
-    const keep = (ref) => media === 'all' || (media === 'anime') === isAnimeRef(ref);
+    const keep = (ref) => media === 'all' || sectionOfRef(ref) === media;
     const refs =
       kind === 'reading'
         ? sync.rows('library', (r) => r.user_id === userId && !r.removed).map((r) => r.series_ref)
@@ -491,6 +497,8 @@ export function createProfile(ctx) {
     if (reading.length) body.append(section('في مكتبة المانجا', strip(reading), { meta: countLabel(reading.length, 'work') }));
     const watchingNow = shelf('reading', 'anime');
     if (watchingNow.length) body.append(section('أنمي في قائمته', strip(watchingNow), { meta: `${fmt(watchingNow.length)} أنمي` }));
+    const cinemaList = shelf('reading', 'cinema');
+    if (cinemaList.length) body.append(section('سينما في قائمته', strip(cinemaList), { meta: `${fmt(cinemaList.length)} عمل` }));
     const animeViews = sync
       .rows('work_views', (r) => r.user_id === userId && !r.removed && isAnimeRef(r.series_ref))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
@@ -498,7 +506,14 @@ export function createProfile(ctx) {
       const items = animeViews.map((v) => ({ work: workOf(v.series_ref, v.series_title, v.cover_url), view: v }));
       body.append(section('آخر ما شاهد', strip(items, { chapters: true }), { meta: `${fmt(animeViews.length)} أنمي` }));
     }
-    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref));
+    const cinemaViews = sync
+      .rows('work_views', (r) => r.user_id === userId && !r.removed && sectionOfRef(r.series_ref) === 'cinema')
+      .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
+    if (cinemaViews.length) {
+      const items = cinemaViews.map((v) => ({ work: workOf(v.series_ref, v.series_title, v.cover_url), view: v }));
+      body.append(section('آخر ما شاهد في السينما', strip(items, { chapters: true }), { meta: `${fmt(cinemaViews.length)} عمل` }));
+    }
+    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isMediaRef(r.series_ref));
     if (views.length) {
       const hist = el('div');
       ctx.historyList(hist, { userId, own, limit: 5, profile: true });

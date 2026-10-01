@@ -310,6 +310,37 @@
 .v35 .cn-bill-img {
   position: absolute;
   inset: 0;
+  --from: 0;
+  --to: 0;
+  --drag: 0px;
+  transform: translateX(var(--drag)) scale(1.001);
+  transition: opacity 0.9s ease, transform 1.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+/* الداخلة: من جهة التقليب، أكبر قليلًا، ثم تستقر */
+.v35 .cn-bill-img.cn-bill-enter {
+  transform: translateX(calc(var(--from) * 7%)) scale(1.05);
+}
+/* الخارجة: تبقى ظاهرة تحتها وتنزاح للجهة الأخرى حتى تغطيها الجديدة */
+.v35 .cn-bill-img.cn-bill-leave {
+  transform: translateX(calc(var(--to) * 4%)) scale(1.02);
+}
+.v35 .cn-bill.dragging .cn-bill-img,
+.v35 .cn-bill.dragging .cn-bill-info {
+  transition: none;
+}
+.v35 .cn-bill-info {
+  --shift: 0px;
+  --drag: 0px;
+  transform: translateX(var(--drag));
+  transition: opacity 0.32s ease, transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.v35 .cn-bill-info.is-out {
+  opacity: 0;
+  transform: translateX(var(--shift));
+}
+.v35 .cn-bill-info.no-anim {
+  transition: none;
 }
 /* ذوبان رفيع في أسفل الصورة فقط ليتصل بالخلفية، لا ظلّ فوق المشهد */
 .v35 .cn-bill-stage::after {
@@ -1048,6 +1079,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .v35 .cn-bill-img,
+  .v35 .cn-bill-info,
   .v35 .cn-img,
   .v35 .cn-kind::after {
     transition: none;
@@ -1068,4 +1101,100 @@
 .v35 .cn-ep-over.cn-pending {
   height: 2.7em;
   width: 92%;
+}
+
+/* لم يُعثر عليه: سبب واضح، نتائج قريبة يختارها الشخص، وفحص المصادر */
+.v35 .cn-sources[data-state='none'] {
+  display: grid;
+  gap: 10px;
+}
+.v35 .cn-sources-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.v35 .cn-sources-row .cn-link {
+  margin-inline-start: auto;
+}
+.v35 .cn-near {
+  display: grid;
+  gap: 6px;
+}
+.v35 .cn-near-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.v35 .cn-near-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: inherit;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .cn-near-item b {
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v35 .cn-near-item span {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.v35 .cn-diag-open {
+  justify-self: start;
+}
+.v35 .cn-diag {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 12px;
+}
+.v35 .cn-diag-src h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.v35 .cn-diag-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.v35 .cn-diag-steps li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-2);
+  border-inline-start: 3px solid var(--text-4);
+}
+.v35 .cn-diag-steps li b {
+  font-size: 12.5px;
+  color: var(--text);
+}
+.v35 .cn-diag-steps li span {
+  word-break: break-word;
+}
+.v35 .cn-diag-steps .cn-diag-ok {
+  border-inline-start-color: #34d399;
+}
+.v35 .cn-diag-steps .cn-diag-warn {
+  border-inline-start-color: #fbbf24;
+}
+.v35 .cn-diag-steps .cn-diag-fail {
+  border-inline-start-color: #f87171;
 }

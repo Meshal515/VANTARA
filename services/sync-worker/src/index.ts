@@ -11,6 +11,7 @@
  */
 
 import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
+import { handleUpdatesList, handleUpdatesObserve, type UpdatesEnv } from './updates.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
@@ -1046,7 +1047,12 @@ export function statementsFor(
     case 'episode.complete': {
       const seriesRef = asString(p['seriesRef'], 200);
       const episode = asNumber(p['episode']);
-      if (!seriesRef || !seriesRef.startsWith('anime:') || episode === null || !Number.isInteger(episode) || episode < 1 || episode > 100_000) return null;
+      // أنمي `anime:<id>`، وسينما `cinema:<IMDb>` (المسلسل بموسمه، والفيلم «movie»)
+      const cinema = seriesRef?.startsWith('cinema:') ?? false;
+      if (!seriesRef || !(seriesRef.startsWith('anime:') || cinema) || episode === null || !Number.isInteger(episode) || episode < 1 || episode > 100_000) return null;
+      const seasonRaw = asNumber(p['season']);
+      const season = cinema && seasonRaw !== null && Number.isInteger(seasonRaw) && seasonRaw >= 1 && seasonRaw <= 200 ? seasonRaw : null;
+      const movie = cinema && p['movie'] === true;
       return [
         ...workStatements(db, {
           seriesRef,
@@ -1063,10 +1069,10 @@ export function statementsFor(
           accounts: ctx.accounts,
           seriesRef,
           link: socialLinkFor({ kind: 'work', seriesRef }),
-          payload: { episode },
+          payload: movie ? { movie: true } : season !== null ? { episode, season } : { episode },
           now,
           rev,
-          eventId: `done:${userId}:${seriesRef}#ep:${episode}`.slice(0, 250),
+          eventId: `done:${userId}:${seriesRef}#${movie ? 'movie' : season !== null ? `s${season}` : ''}ep:${episode}`.slice(0, 250),
           completion: true,
         }),
       ];
@@ -2852,7 +2858,7 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   ]);
   const items = new Map<string, { seriesRef: string; section: string; title: string | null; coverUrl: string | null; activeMs: number; completed: number }>();
   const ensure = (ref: string) => {
-    if (!items.has(ref)) items.set(ref, { seriesRef: ref, section: ref.startsWith('anime:') ? 'anime' : 'manga', title: null, coverUrl: null, activeMs: 0, completed: 0 });
+    if (!items.has(ref)) items.set(ref, { seriesRef: ref, section: ref.startsWith('anime:') ? 'anime' : ref.startsWith('cinema:') ? 'cinema' : 'manga', title: null, coverUrl: null, activeMs: 0, completed: 0 });
     return items.get(ref)!;
   };
   for (const r of times?.results ?? []) {
@@ -2886,7 +2892,7 @@ async function handleStats(env: Env, viewerId: string, targetId: string, now: nu
     env.DB.prepare('SELECT day, active_ms FROM usage_daily WHERE user_id = ?').bind(targetId),
     // المكتبة نفسها خاصة ولا تُزامَن للأصدقاء؛ عددها وحده إحصاء في الملف
     env.DB.prepare(
-      "SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN series_ref LIKE 'anime:%' THEN 1 ELSE 0 END), 0) AS anime FROM library WHERE user_id = ? AND removed = 0",
+      "SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN series_ref LIKE 'anime:%' THEN 1 ELSE 0 END), 0) AS anime, COALESCE(SUM(CASE WHEN series_ref LIKE 'cinema:%' THEN 1 ELSE 0 END), 0) AS cinema FROM library WHERE user_id = ? AND removed = 0",
     ).bind(targetId),
     env.DB.prepare('SELECT chapter_key, series_ref, read FROM chapter_marks WHERE user_id = ?').bind(targetId),
     env.DB.prepare('SELECT day, section, active_ms FROM usage_sections WHERE user_id = ?').bind(targetId),
@@ -2942,8 +2948,10 @@ async function handleStats(env: Env, viewerId: string, targetId: string, now: nu
     all: windowOf([...mangaDays, ...sectionDays('anime'), ...sectionDays('cinema')]),
   };
   const followedAnime = Number(followed?.results?.[0]?.['anime'] ?? 0);
-  const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0) - followedAnime;
-  return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, usage: { todayMs, weekMs, totalMs }, time });
+  const followedCinema = Number(followed?.results?.[0]?.['cinema'] ?? 0);
+  // المانجا وحدها: الأنمي والسينما لهما عدّاداتهما
+  const followedWorks = Number(followed?.results?.[0]?.['n'] ?? 0) - followedAnime - followedCinema;
+  return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, cinema: { followed: followedCinema }, usage: { todayMs, weekMs, totalMs }, time });
 }
 
 // ───────────────────────────── الصور ─────────────────────────────
@@ -3053,6 +3061,9 @@ export default {
       let response: Response | null = null;
       if (path === '/v1/privacy/capabilities' && request.method === 'GET') response = json({ recentViewsRevocable: true });
       else if (path.startsWith('/v1/source-latest') && (request.method === 'GET' || request.method === 'POST')) response = await handleSourceLatest(request, env, path, now);
+      // Update Engine: الأجهزة مجسّات تبلّغ ما تراه، والخط الزمني ذاكرة VANTARA الثابتة
+      else if (path === '/v1/updates/observe' && request.method === 'POST') response = await handleUpdatesObserve(request, env as UpdatesEnv, now);
+      else if (path === '/v1/updates' && request.method === 'GET') response = await handleUpdatesList(url, env as UpdatesEnv);
       else if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);

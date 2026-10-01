@@ -21,6 +21,7 @@ import { FORMAT_AR, SEASON_AR, STATUS_AR, compactCount, fetchAnimeDetail, fetchA
 import { countUp, pageIn, pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
+import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { duration as insightDuration } from './insights.js';
 
@@ -384,7 +385,7 @@ export function createAnime(deps) {
     if (data.hero?.length) blocks.append(carousel(data.hero));
     const cont = watching();
     if (cont.length) blocks.append(rail('آخر المشاهدات', { items: cont.slice(0, 12), card: continueCard, more: () => openLibrary('history') }));
-    if (data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard }));
+    if (data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {
       const top = data.season.slice(0, 10);
       blocks.append(rail('Top 10', { sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }) }));
@@ -437,6 +438,7 @@ export function createAnime(deps) {
       if (!force && state.home && Date.now() - (state.home.fetchedAt ?? 0) < STALE_MS) return;
       try {
         const fresh = await fetchAnimeHome();
+        senseAnime(fresh.latest ?? []);
         const first = !state.home;
         state.home = fresh;
         void deps.writeKv(HOME_KEY, fresh);
@@ -451,6 +453,22 @@ export function createAnime(deps) {
     };
     state.loading = run().finally(() => (state.loading = null));
     return state.loading;
+  }
+
+  /** مجسّ Update Engine: حلقات AniList (بوقت بثها الحقيقي إن وُجد). */
+  function senseAnime(list) {
+    for (const m of list) {
+      if (!m?.id || !(m.episode > 0)) continue;
+      reportUpdate({
+        work: `anime:${m.id}`,
+        section: 'anime',
+        kind: 'episode',
+        title: m.title,
+        cover: m.posterSmall ?? m.poster ?? null,
+        source: { s: 'anilist' },
+        units: [{ number: m.episode, ...(m.airedAt ? { publishedAt: m.airedAt } : {}) }],
+      });
+    }
   }
 
   function show() {
@@ -508,6 +526,7 @@ export function createAnime(deps) {
       const full = await fetchAnimeDetail(m.id);
       if (token !== state.detailToken || !full) return;
       state.detail = full;
+      if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
       if (episode) state.episodeRange = Math.floor((episode - 1) / 50);
       state.malTitles = {};
       renderDetail(full);
@@ -595,8 +614,6 @@ export function createAnime(deps) {
     actions.dataset.reveal = '';
     const { episode: startEp, resume } = resumePoint(m);
     const watch = button('an-btn an-btn--primary an-btn--wide', `${glyph('play', { size: 20, filled: true })}<span>${resume ? 'تابع' : 'شاهد'} الحلقة ${startEp}</span>`, () => playEpisode(m, startEp));
-    // ترشيح لصديق أو للمجلس (بدل زر «مشاهدة جماعية» لم يكن يعمل)
-    const recommend = button('an-btn an-btn--icon', glyph('send', { size: 20 }), () => shareCurrent(), 'رشّح لصديق');
     const toggleBtn = (kind, icon, onLabel, offLabel) => {
       const b = el('button', 'an-btn an-btn--icon');
       b.type = 'button';
@@ -605,7 +622,7 @@ export function createAnime(deps) {
         b.setAttribute('aria-pressed', String(Boolean(on)));
         b.setAttribute('aria-label', on ? onLabel : offLabel);
         b.title = on ? onLabel : offLabel;
-        b.innerHTML = glyph(icon, { size: 20, filled: Boolean(on) });
+        b.innerHTML = `${glyph(icon, { size: 20, filled: Boolean(on) })}<span>${kind === 'favorite' ? 'المفضلة' : 'لاحقًا'}</span>`;
       };
       paint();
       b.onclick = () => {
@@ -619,7 +636,7 @@ export function createAnime(deps) {
     };
     actions.append(watch, listButton(m, 'an-btn an-btn--glass'));
     if (signedIn()) actions.append(toggleBtn('read_later', 'clock', 'في «شاهد لاحقًا»', 'شاهد لاحقًا'), toggleBtn('favorite', 'heart', 'في المفضلة', 'المفضلة'));
-    actions.append(recommend);
+    // الترشيح للمجلس من زر المشاركة في الأعلى وحده (كان مكررًا هنا)
 
     const sourcesStrip = el('div', 'an-sources');
     sourcesStrip.id = 'animeSources';
@@ -1566,25 +1583,37 @@ export function createAnime(deps) {
   function renderLibrary() {
     const host = q('animeLibrary');
     if (!host) return;
-    const tabs = el('div', 'an-seg');
+    // نفس شرائح «مكتبتي» في المانجا والسينما: الاسم وعدده، وبنفس الترتيب (قانون التوحيد)
+    const tabs = el('div', 'segmented library-tabs');
+    tabs.setAttribute('role', 'tablist');
+    const countOf = (k) =>
+      k === 'history' ? watching().length
+        : k === 'list' ? (signedIn() ? account.shelf('library').length : Object.keys(readJson(LIST_KEY, {})).length)
+          : k === 'sources' ? 0
+            : signedIn() ? account.shelf(k).length : 0;
     for (const [k, label] of [
-      ['history', 'آخر المشاهدات'],
       ['list', signedIn() ? 'أتابعها' : 'قائمتي'],
+      ['history', 'آخر المشاهدات'],
       ...(signedIn()
         ? [
-            ['read_later', 'شاهد لاحقًا'],
+            ['read_later', 'لاحقًا'],
             ['favorite', 'المفضلة'],
             ['completed', 'المكتمل'],
           ]
         : []),
       ...(engine.available() ? [['sources', 'المصادر']] : []),
     ]) {
-      tabs.append(
-        button(`an-seg-btn${state.libraryTab === k ? ' active' : ''}`, label, () => {
-          state.libraryTab = k;
-          renderLibrary();
-        }),
-      );
+      const b = el('button', `library-tab${state.libraryTab === k ? ' active' : ''}`, label);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(state.libraryTab === k));
+      const n = countOf(k);
+      if (n) b.append(el('b', null, String(n)));
+      b.onclick = () => {
+        state.libraryTab = k;
+        renderLibrary();
+      };
+      tabs.append(b);
     }
     const nodes = [tabs];
     if (state.libraryTab === 'sources') {

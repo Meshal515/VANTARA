@@ -16,6 +16,8 @@ describe('قراءة عنوان المصدر', () => {
     expect(readTitle('Breaking Bad S05')).toMatchObject({ season: 5 });
     expect(readTitle('مسلسل Lost الموسم الحادي عشر')).toMatchObject({ season: 11 });
     expect(readTitle('فيلم Inception 2010 مترجم اون لاين')).toEqual({ season: null, year: 2010, kind: 'movie' });
+    expect(readTitle('سلسلة افلام حكاية لعبة Toy Story كاملة').kind).toBe('collection');
+    expect(readTitle('The Matrix Collection').kind).toBe('collection');
   });
   it('title score ignores Arabic padding, year and quality words', () => {
     expect(titleScore('Inception', 'فيلم Inception 2010 مترجم اون لاين HD')).toBe(1);
@@ -30,6 +32,10 @@ describe('اختيار النسخ', () => {
   it('movie: right year only, series pages excluded', () => {
     const works = [{ copies: [c('faselhd', 'فيلم Dune 2021 مترجم'), c('arabseed', 'فيلم Dune 1984 مترجم'), c('egydead', 'مسلسل Dune الموسم الاول')] }];
     expect(pickCopies(works, { title: 'Dune', year: 2021, type: 'movie' }).map((x) => x.sourceId)).toEqual(['faselhd']);
+  });
+  it('movie: an extra word is a different film unless the year matches exactly', () => {
+    const works = [{ copies: [c('cimaleek', 'فيلم Toy Story 5 Part Two مترجم'), c('egydead', 'مشاهدة فيلم Toy Story 5 2026 مترجم'), c('arabseed', 'فيلم Toy Story 5 مدبلج مصري')] }];
+    expect(pickCopies(works, { title: 'Toy Story 5', year: 2026, type: 'movie' }).map((x) => x.sourceId)).toEqual(['egydead', 'arabseed']);
   });
   it('series: matching season; season-less copy only for season 1', () => {
     const works = [

@@ -14,7 +14,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
 
 import { SHELL_HTML } from './markup.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, seriesRefOf, setSharedLatest } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -41,7 +41,7 @@ import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
-import { createAnimeAccount, isAnimeRef } from './anime-account.js';
+import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
@@ -52,6 +52,9 @@ import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
+import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
+import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
+import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
 import { paintWorkInsights } from './work-insights.js';
 
@@ -142,6 +145,9 @@ const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?
 export function mountV35(deps, { page = 'home' } = {}) {
   const { sync } = deps;
   setSharedLatest(createSourceLatest(sync));
+  // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
+  connectUpdates((path, opts) => sync.translation(path, opts));
+  onChapters(observeMangaChapters);
   const root = el('div', 'v35');
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
@@ -343,7 +349,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   })();
 
   // الأنمي يشارك هذه الجداول بمرجع `anime:<id>`: شاشات المانجا لا تعرضه (له مكتبته)
-  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isAnimeRef(r.series_ref));
+  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isMediaRef(r.series_ref));
   const inCollection = (kind, ref) =>
     kind === 'completed'
       ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
@@ -359,8 +365,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function libraryWorks(filter = 'all') {
     const refs = new Set([
       ...libraryRows().map((r) => r.series_ref),
-      ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
-      ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
+      ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
+      ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
     ]);
     return [...refs]
       .map((ref) => {
@@ -404,7 +410,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const viewRows = (userId = me()) =>
     sync
-      .rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref))
+      .rows('work_views', (r) => r.user_id === userId && !r.removed && !isMediaRef(r.series_ref))
       .filter((r) => userId !== me() || qualifiesOwnView(r))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
   function recordChapterView(w, row) {
@@ -661,11 +667,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     frame.append(p);
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
-    const chapter = work._latestChapter;
-    const recentLabel = chapter
-      ? (Number.isFinite(Number(chapter.chapterNumber)) && Number(chapter.chapterNumber) >= 0
-        ? `الفصل ${chapter.chapterNumber}` : String(chapter.name ?? '').slice(0, 44))
-      : null;
+    const recentLabel = latestLabel(work) || null;
     const m = el('div', 'work-meta', meta ?? recentLabel ?? '');
     const facts = el('div', 'work-facts');
     facts.append(score);
@@ -692,12 +694,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     return a;
   }
+  /** «الفصل 401 · قبل ساعتين»: الوقت من ذاكرة VANTARA حين يكون الحدث منها. */
+  function latestLabel(work) {
+    const recent = work._latestChapter;
+    if (!recent) return '';
+    const n = Number(recent.chapterNumber);
+    const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
+    return work._updateAt ? `${label} · ${agoAr(work._updateAt)}` : label;
+  }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
       node._work = work;
-      const recent = work._latestChapter;
-      const label = recent ? (Number.isFinite(Number(recent.chapterNumber)) && Number(recent.chapterNumber) >= 0
-        ? `الفصل ${recent.chapterNumber}` : String(recent.name ?? '').slice(0, 44)) : '';
+      const label = latestLabel(work);
       const meta = node.querySelector('.work-meta');
       if (meta && meta.textContent !== label) meta.textContent = label;
     });
@@ -757,7 +765,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function friendsReading() {
     const since = Date.now() - 14 * 86_400_000;
     const byRef = new Map();
-    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isAnimeRef(r.series_ref))) {
+    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isMediaRef(r.series_ref))) {
       const e = byRef.get(v.series_ref) ?? { ref: v.series_ref, users: new Set(), at: 0, title: v.series_title, cover: v.cover_url };
       e.users.add(v.user_id);
       e.at = Math.max(e.at, v.viewed_at ?? 0);
@@ -827,7 +835,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
     if (state.home.trending.length) specs.push(['رائج في المصادر', 'trending', state.home.trending]);
-    if (state.home.recent.length) specs.push(['آخر التحديثات في المصادر', 'recent', state.home.recent]);
+    if (state.home.updates?.length) specs.push(['آخر التحديثات', 'recent', state.home.updates]);
+    else if (state.home.recent.length) specs.push(['في المصادر الآن', 'sourcesNow', state.home.recent]);
     if (!specs.length) return;
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
@@ -2702,7 +2711,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const COLLECTIONS = {
     trending: { title: 'رائج في المصادر', kind: 'popular' },
-    recent: { title: 'آخر التحديثات في المصادر', kind: 'latestListing' },
+    // «آخر التحديثات» صار ذاكرة VANTARA (openUpdates)، و«في المصادر الآن» قائمة المصادر اللحظية
+    sourcesNow: { title: 'في المصادر الآن', kind: 'latestListing' },
     catalogue: { title: 'كل الأعمال', kind: 'catalogue' },
   };
   async function openCollection(kind) {
@@ -2716,8 +2726,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       navTo('library');
       return;
     }
+    if (kind === 'recent') return openUpdates('manga');
+    q('collectionGrid').classList.remove('up-feed');
     const c = COLLECTIONS[kind] || COLLECTIONS.trending;
-    const initial = kind === 'recent'
+    const initial = kind === 'sourcesNow'
       ? recentFromLatest(latestPartial?.items ?? [], state.home.recent)
       : kind === 'trending' ? state.home.trending : [];
     state.collection = { kind: c.kind, page: 0, hasNext: true, items: [...initial], genre: null };
@@ -2729,6 +2741,66 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (c.kind === 'latestListing') void latestFirstPage();
     await loadMoreCollection();
   }
+  // ───────────────────────── آخر التحديثات (Update Engine) ─────────────────────────
+  // خط زمني ثابت من ذاكرة VANTARA لكل قسم: نفس الشاشة ونفس السلوك، بلون القسم.
+
+  const UPDATE_TITLES = { manga: 'آخر التحديثات', anime: 'حلقات جديدة', cinema: 'آخر التحديثات' };
+  function openUpdates(section) {
+    state.collection = { kind: 'updates', page: 0, hasNext: false, items: [], genre: null };
+    q('collectionTitle').textContent = UPDATE_TITLES[section] ?? 'آخر التحديثات';
+    q('collectionMore').hidden = true;
+    showPage('collection');
+    mountTimeline(q('collectionGrid'), {
+      section,
+      el,
+      image: (src) => {
+        const img = new Image();
+        img.alt = '';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.className = 'up-img';
+        img.onload = () => img.classList.add('loaded');
+        img.src = src;
+        return img;
+      },
+      open: (g) => openUpdate(g),
+      empty: () => {
+        const box = el('div');
+        emptyState(box, {
+          icon: 'clock',
+          title: 'VANTARA يراقب المصادر',
+          text: 'أول ما يظهر جديد في أي مصدر — من قائمته أو صفحة العمل أو البحث — يُسجَّل هنا بوقته الحقيقي ويبقى.',
+          action: section === 'manga' ? { label: 'في المصادر الآن', icon: 'flame', run: () => void openCollection('sourcesNow') } : null,
+        });
+        return box;
+      },
+    });
+  }
+  /** عمل مانجا من حدث: من الحساب إن عُرف، وإلا من مصادر الحدث نفسها. */
+  function workOfEvent(g) {
+    const base = workFromRef(g.work, g.title, g.cover);
+    if (!base._work?.editions?.length) {
+      const editions = (g.sources ?? []).filter((x) => x.u).map((x) => ({ sourceId: x.s, label: x.s, manga: { url: x.u, title: x.t ?? g.title, thumbnailUrl: g.cover ?? null, memo: x.m ?? '' } }));
+      base._work = { ...base._work, editions };
+    }
+    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at };
+  }
+  function openUpdate(g) {
+    if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });
+    if (g.section === 'cinema') return openCinemaRef(g.kind === 'movie' ? g.work : `${g.work}:${g.season ?? 1}`, { title: g.title, cover: g.cover });
+    void openWork(workOfEvent(g));
+  }
+  /** شريط الرئيسية: آخر التحديثات من الذاكرة (يُسأل كل دقيقتين ما دامت الرئيسية ظاهرة). */
+  let updatesAskedAt = 0;
+  async function refreshHomeUpdates() {
+    if (Date.now() - updatesAskedAt < 120_000) return;
+    updatesAskedAt = Date.now();
+    const groups = await latestGroups('manga').catch(() => null);
+    if (!groups?.length) return;
+    state.home.updates = groups.map(workOfEvent);
+    if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
+  }
+
   async function loadMoreCollection() {
     if (!state.collection.hasNext) return;
     const requested = state.collection;
@@ -3268,6 +3340,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq') void rafiq.show();
+    if (id === 'home' && root.dataset.section === 'manga') void refreshHomeUpdates();
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
     if (id === 'settings') {
@@ -4292,7 +4365,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const friends = createFriends({
     sync,
     host: friendsHost,
-    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
+    section: () => root.dataset.section ?? 'manga',
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4347,6 +4420,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (const kind of ['library', 'read_later', 'favorite', 'completed']) {
       for (const m of animeAccount.shelf(kind)) add({ ref: `anime:${m.id}`, title: m.title, cover: m.poster, anime: true });
     }
+    // السينما: «قائمتي» و«المفضلة» من الحساب بمرجع `cinema:`
+    for (const r of [...sync.rows('library', (x) => x.user_id === me() && !x.removed), ...sync.rows('collections', (x) => x.user_id === me() && x.member)]) {
+      if (String(r.series_ref).startsWith('cinema:')) add({ ref: r.series_ref, title: r.series_title ?? sync.rows('works', (w) => w.series_ref === r.series_ref)[0]?.title ?? 'عمل', cover: r.cover_url ?? null, anime: true, section: 'cinema' });
+    }
     return out;
   }
   /** صورة المجلس: GIF يبقى متحركًا، والثابتة تُقص وتُضغط. */
@@ -4357,7 +4434,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync,
     host: q('majlisBody'),
     // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
-    section: () => (root.dataset.section === 'anime' ? 'anime' : 'manga'),
+    section: () => root.dataset.section ?? 'manga',
     presence: () => deps.presence?.() ?? Promise.resolve([]),
     avatarNode,
     mountImage,
@@ -4394,8 +4471,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!available() || !idle()) return;
     const seen = new Set();
     const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
-    void prewarm(works, { onDone: (full) => rememberWork(full), shouldContinue: idle });
+    void prewarm(works, { onDone: (full) => rememberWork(full), shouldContinue: idle }).then(() => sweepLatest(idle));
   }, 30_000);
+  // مجسّ Latest: فصول أعمال قوائم المصادر، واحدًا واحدًا في سكون الرئيسية، كل 20 دقيقة.
+  // ما يُرى يذهب لـUpdate Engine (عبر محرك الإضافات)، والخادم يقرّر ما الجديد.
+  let sweptAt = 0;
+  async function sweepLatest(idle) {
+    if (!available() || Date.now() - sweptAt < 20 * 60_000 || !idle()) return;
+    sweptAt = Date.now();
+    await scanLatestChapterUpdates({ shouldContinue: idle }).catch(() => {});
+    updatesAskedAt = 0;
+    setTimeout(() => void refreshHomeUpdates(), 6000);
+  }
+  setInterval(() => void sweepLatest(() => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga'), 5 * 60_000);
 
   const profile = createProfile({
     sync,
@@ -4445,6 +4533,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    openUpdates: (section) => openUpdates(section),
     sync,
     openProfile,
     friends: () => deps.friends?.() ?? [],
@@ -4466,6 +4555,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
+    share: (work) =>
+      openShareSheet({
+        sync,
+        friends: deps.friends?.() ?? [],
+        openSheet: (build) => openSheet(build, { tone: 'cinema' }),
+        closeSheet,
+        sheetBody: () => q('sheetBody'),
+        toast,
+        work,
+      }),
+    openUpdates: (section) => openUpdates(section),
     setWatching: (info) => deps.setWatching?.(info),
     playerPresence: () => deps.playerPresence?.(),
   });
@@ -4572,6 +4673,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   paintNotifyDots();
   renderHome();
+  void refreshHomeUpdates();
   // ابدأ Latest عند دخول التطبيق مباشرة؛ loadHome وصفحته يتشاركان نفس الطلب.
   if (available()) void latestFirstPage();
   void loadHome();

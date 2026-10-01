@@ -3164,3 +3164,121 @@ html,
 /* داخل صف إعداد: بلا هوامش الصفحة، فلا يُقصّ الزر الأخير عند الحافة */
 .v35 .setting .segmented { flex: none; margin: 0; padding: 0; gap: 6px; overflow: visible; }
 .v35 .setting .segmented > button[aria-pressed] { padding: 0 12px; }
+
+/* ───────────── آخر التحديثات: خط VANTARA الزمني (مشترك بين الأقسام) ─────────────
+ * نفس البنية في المانجا والأنمي والسينما: ثلاث بطاقات في الصف بوقتها،
+ * واللون من رموز القسم وحدها. */
+.v35 .grid.up-feed,
+.v35 .up-feed {
+  display: block;
+}
+.v35 .up-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 10px;
+}
+.v35 .up-day {
+  grid-column: 1 / -1;
+  margin: 10px 0 -4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .up-day:first-child {
+  margin-top: 0;
+}
+.v35 .up-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .up-art {
+  display: block;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-2);
+  transition: transform 0.15s ease;
+}
+.v35 .up-card:active .up-art {
+  transform: scale(0.97);
+}
+.v35 .up-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.v35 .up-img.loaded {
+  opacity: 1;
+}
+.v35 .up-title {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .up-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.v35 .up-plus {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+.v35 .up-unit,
+.v35 .up-when {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .up-unit {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .up-when {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.v35 .up-sources {
+  color: var(--text-4);
+}
+.v35 .up-skel {
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+.v35 .up-more {
+  min-height: 24px;
+  padding: 12px 0 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+@media (min-width: 700px) {
+  .v35 .up-list {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}

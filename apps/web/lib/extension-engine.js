@@ -91,14 +91,32 @@ export async function search(sourceId, query, page = 1) {
  * بالمصدر (`memo`) يحتاجها حين يُسأل عنه، وإرسال الرابط وحده يعني أن
  * المصدر يستقبل عملًا لا يعرفه. فمرّر ما جاءك كما جاءك.
  */
+/**
+ * مجسّ الفصول: كل فصول يجلبها أي مسار (Latest، البحث، صفحة العمل، الزحف،
+ * التحديث) تمرّ على `Update Engine`. لا يغيّر ما يرجع للمستدعي ولا يؤخّره.
+ */
+let chapterSink = null;
+export function onChapters(fn) {
+	chapterSink = fn;
+}
+function sense(sourceId, manga, list) {
+	try {
+		chapterSink?.(sourceId, manga, list);
+	} catch {
+		// المجسّ لا يكسر القراءة أبدًا
+	}
+}
+
 export async function series(sourceId, manga) {
 	const out = await required().series({ sourceId, manga });
+	sense(sourceId, out.manga ?? manga, out.chapters ?? []);
 	return { manga: out.manga, chapters: out.chapters ?? [] };
 }
 
 /** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
 export async function chapters(sourceId, manga) {
 	const { chapters: list } = await required().chapters({ sourceId, manga });
+	sense(sourceId, manga, list ?? []);
 	return list ?? [];
 }
 

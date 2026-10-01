@@ -9,8 +9,8 @@
  * المشترك مع بقية VANTARA: الهيكل، والتنقّل، وورقة السيرفرات والمشغّل بلون
  * القسم.
  *
- * المتابعة («أكمل»، «لاحقًا»، «المفضلة») محفوظة على هذا الجهاز لكل حساب؛
- * والوقت يُحتسب لقسم السينما في الإحصاءات.
+ * «قائمتي» و«المفضلة» و«أكمل المشاهدة» في حسابك (نفس جداول المانجا والأنمي بمرجع
+ * `cinema:<IMDb>`)، والوقت يُحتسب لقسم السينما في الإحصاءات.
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
@@ -18,7 +18,9 @@ import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
-import { pickCopies, queriesFor } from '../lib/cinema-match.js';
+import { pickCopies, queriesFor, readTitle, titleScore } from '../lib/cinema-match.js';
+import { report as reportUpdate } from '../lib/update-engine.js';
+import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -84,7 +86,6 @@ export function createCinema(deps) {
   // ───────────── التخزين المحلي ─────────────
 
   const watchAll = () => readJson(userKey('watch', currentUser()), {});
-  const listAll = () => readJson(userKey('list', currentUser()), {});
   function recordWatch(m, season, n, position, duration) {
     const all = watchAll();
     const w = all[m.id] ?? { ...slim(m), episodes: {} };
@@ -98,15 +99,58 @@ export function createCinema(deps) {
     all[m.id] = w;
     writeJson(userKey('watch', currentUser()), all);
   }
-  const inList = (kind, id) => Boolean(listAll()[id]?.[kind]);
+  // ───────────── الحساب ─────────────
+  // نفس جداول المانجا والأنمي بمرجع `cinema:<IMDb>`: «قائمتي» = library، «المفضلة» =
+  // favorite، و«أكمل المشاهدة» = work_views. فتصل لكل أجهزتك وتظهر في ملفك.
+  // موضع التوقف داخل الحلقة وحده على الجهاز (مثل الأنمي).
+  const sync = deps.sync;
+  const me = () => sync?.user?.userId ?? null;
+  const refOf = (id) => `cinema:${id}`;
+  const isCinemaRef = (ref) => typeof ref === 'string' && ref.startsWith('cinema:');
+  const descriptor = (m) => ({ seriesRef: refOf(m.id), seriesTitle: m.title ?? null, coverUrl: m.poster ?? null });
+  const TYPES_KEY = 'vantara.cinema.types.v1';
+  const types = readJson(TYPES_KEY, {});
+  const rememberType = (m) => {
+    if (!m?.id || !m.type || types[m.id] === m.type) return;
+    types[m.id] = m.type;
+    writeJson(TYPES_KEY, types);
+  };
+  const rows = (table, pick) => sync?.rows?.(table, (r) => r.user_id === me() && isCinemaRef(r.series_ref) && pick(r)) ?? [];
+  const inList = (kind, id) =>
+    kind === 'later'
+      ? rows('library', (r) => r.series_ref === refOf(id) && !r.removed).length > 0
+      : rows('collections', (r) => r.kind === 'favorite' && r.series_ref === refOf(id) && r.member).length > 0;
   function toggleList(kind, m) {
-    const all = listAll();
-    const row = all[m.id] ?? { ...slim(m) };
-    row[kind] = row[kind] ? 0 : Date.now();
-    if (!row.later && !row.fav) delete all[m.id];
-    else all[m.id] = { ...row, ...slim(m) };
-    writeJson(userKey('list', currentUser()), all);
-    return Boolean(row[kind]);
+    const on = !inList(kind, m.id);
+    rememberType(m);
+    if (kind === 'later') sync?.enqueue(on ? 'library.add' : 'library.remove', on ? descriptor(m) : { seriesRef: refOf(m.id) });
+    else sync?.enqueue('favorite.set', { ...descriptor(m), member: on });
+    return on;
+  }
+  /** عمل من صفوف الحساب: العنوان والغلاف منها، والنوع والخلفية مما عرفه الجهاز. */
+  function fromRef(ref, title, cover) {
+    const id = ref.slice('cinema:'.length).split(':')[0];
+    const local = watchAll()[id] ?? {};
+    const work = sync?.rows?.('works', (w) => w.series_ref === refOf(id))[0];
+    return { ...local, id, type: types[id] ?? local.type ?? null, title: title ?? work?.title ?? local.title ?? id, poster: cover ?? work?.cover_url ?? local.poster ?? null };
+  }
+  /** رف من الحساب: «قائمتي» أو «المفضلة»، الأحدث أولًا. */
+  function shelf(kind) {
+    const list =
+      kind === 'later'
+        ? rows('library', (r) => !r.removed).sort((a, b) => (b.added_at ?? 0) - (a.added_at ?? 0))
+        : rows('collections', (r) => r.kind === 'favorite' && r.member).sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
+    return [...new Map(list.map((r) => [r.series_ref, r])).values()].map((r) => fromRef(r.series_ref, r.series_title, r.cover_url));
+  }
+  /** «آخر المشاهدات» في الحساب: مرة لكل حلقة في الجلسة. */
+  const viewed = new Set();
+  function recordView(m, season, n) {
+    if (!me()) return;
+    const k = `${me()}:${m.id}:${season ?? 0}:${n}`;
+    if (viewed.has(k)) return;
+    viewed.add(k);
+    rememberType(m);
+    sync?.enqueue('view.add', { ...descriptor(m), chapterLabel: m.type === 'series' ? `الموسم ${season} · الحلقة ${n}` : 'فيلم', chapterNumber: m.type === 'series' ? n : null });
   }
   /** من أين يكمل: آخر حلقة غير مكتملة، أو التالية لآخر مكتملة. */
   function resumePoint(m) {
@@ -128,7 +172,23 @@ export function createCinema(deps) {
       ? { season: nextSeason.n, episode: nextSeason.episodes[0]?.n ?? 1, position: 0, resume: true, record: null }
       : { season: w.season, episode: w.episode, position: 0, resume: true, record: null };
   }
-  const continuing = () => Object.values(watchAll()).filter((w) => w.at).sort((a, b) => b.at - a.at);
+  /** «أكمل المشاهدة»: من الحساب (كل أجهزتك)، وموضع التوقف من الجهاز إن وُجد. */
+  function continuing() {
+    const local = watchAll();
+    const views = rows('work_views', (r) => !r.removed).sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
+    const out = new Map();
+    for (const v of views) {
+      const w = fromRef(v.series_ref, v.series_title, v.cover_url);
+      if (out.has(w.id)) continue;
+      const m = /الموسم\s+(\d+)\s+·\s+الحلقة\s+(\d+(?:\.\d+)?)/.exec(v.chapter_label ?? '');
+      if (m && !local[w.id]) Object.assign(w, { type: w.type ?? 'series', season: Number(m[1]), episode: Number(m[2]), episodes: {} });
+      if (!m && !local[w.id]) Object.assign(w, { type: w.type ?? 'movie', season: 0, episode: 1, episodes: {} });
+      out.set(w.id, { ...w, at: v.viewed_at ?? w.at });
+    }
+    // ما شوهد هنا قبل أن يصل الحساب (أو بلا حساب) لا يضيع
+    for (const w of Object.values(local)) if (w.at && !out.has(w.id)) out.set(w.id, w);
+    return [...out.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  }
 
   // ───────────── القصة بالعربية ─────────────
   // Cinemeta يعطيها بالإنجليزية؛ الخادم يعرّبها مرة لكل نص ويحفظها للجميع،
@@ -241,11 +301,13 @@ export function createCinema(deps) {
   /** يبدأ جلب التفاصيل مع أول لمسة، فتفتح الصفحة جاهزة غالبًا. */
   function prefetch(m) {
     if (!m?.id || state.details.has(m.id)) return state.details.get(m.id);
-    const p = fetchDetail(m.type, m.id)
-      .catch(() => {
-        state.details.delete(m.id);
-        return null;
-      });
+    // عمل من الحساب قد لا يُعرف نوعه على هذا الجهاز: فيلم أولًا ثم مسلسل
+    const tryType = (type) => fetchDetail(type, m.id).catch(() => null);
+    const p = (async () => (await tryType(m.type ?? types[m.id] ?? 'movie')) ?? (m.type ? null : await tryType('series')))().then((full) => {
+      if (full) rememberType(full);
+      else state.details.delete(m.id);
+      return full;
+    });
     state.details.set(m.id, p);
     return p;
   }
@@ -362,18 +424,36 @@ export function createCinema(deps) {
     box.append(stage, info, ticks);
     state.hero = { index: 0, tween: null, items };
 
-    const paint = (i, first = false) => {
+    // الانتقال: الصورة الجديدة تدخل من جهة التقليب وتذوب فوق السابقة (التي تنزاح قليلًا
+    // للجهة الأخرى)، والكلام تحتها يخرج ويدخل بنفس الاتجاه. CSS لا GSAP: لا شيء يبدأ
+    // مخفيًا ويعلق إن تعطّل محرك الحركة.
+    const frame = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+    let swapTimer = null;
+    const paint = (i, first = false, from = -1) => {
       const m = items[i];
       state.hero.index = i;
+      const calm = first || reduced();
       const img = image(m.background ?? m.poster, 'cn-img cn-bill-img', { eager: first || i < 2 });
+      img.classList.add('cn-bill-enter');
+      if (!calm) img.style.setProperty('--from', String(from));
+      const previous = [...stage.querySelectorAll('.cn-bill-img')];
       stage.append(img);
-      const settle = () => {
-        img.classList.add('loaded');
-        // الصورة السابقة تبقى تحت حتى تكتمل الجديدة: لا وميض أسود بينهما
-        setTimeout(() => [...stage.children].slice(0, -1).forEach((n) => n.remove()), 700);
-      };
+      const settle = () =>
+        frame(() => {
+          img.classList.add('loaded');
+          img.classList.remove('cn-bill-enter');
+          for (const old of previous) {
+            if (!calm) old.style.setProperty('--to', String(-from));
+            old.classList.add('cn-bill-leave');
+          }
+          // الصورة السابقة تبقى تحت حتى تكتمل الجديدة: لا وميض أسود بينهما
+          setTimeout(() => previous.forEach((n) => n.remove()), 1300);
+        });
       if (img.complete && img.naturalWidth) settle();
-      else img.addEventListener('load', settle, { once: true });
+      else {
+        img.addEventListener('load', settle, { once: true });
+        img.addEventListener('error', settle, { once: true });
+      }
 
       const top = el('div', 'cn-bill-top');
       top.append(titleMark(m, 'cn-bill-mark'), facts(m));
@@ -394,7 +474,23 @@ export function createCinema(deps) {
       paintLater();
       const more = opener(button('cn-btn cn-btn--icon', glyph('info', { size: 20 }), null, 'التفاصيل'), m);
       actions.append(play, later, more);
-      info.replaceChildren(top, ...(genres ? [el('p', 'cn-bill-genres', genres)] : []), actions);
+      const content = [top, ...(genres ? [el('p', 'cn-bill-genres', genres)] : []), actions];
+      clearTimeout(swapTimer);
+      if (calm) {
+        info.classList.remove('is-out', 'no-anim');
+        info.replaceChildren(...content);
+      } else {
+        info.style.setProperty('--shift', `${-from * 14}px`);
+        info.classList.add('is-out');
+        swapTimer = setTimeout(() => {
+          info.classList.add('no-anim');
+          info.style.setProperty('--shift', `${from * 14}px`);
+          info.replaceChildren(...content);
+          void info.offsetWidth; // يثبت نقطة البداية قبل الرجوع للمكان
+          info.classList.remove('no-anim');
+          frame(() => info.classList.remove('is-out'));
+        }, 200);
+      }
 
       bars.forEach((b, k) => {
         b.parentElement.classList.toggle('done', k < i);
@@ -410,19 +506,41 @@ export function createCinema(deps) {
         state.hero.tween = progressFill(bars[state.hero.index], HERO_SECONDS, () => next(step));
         return;
       }
-      paint((state.hero.index + step + items.length) % items.length);
+      // التالي يدخل من اليسار (اتجاه القراءة العربي)، والسابق من اليمين
+      paint((state.hero.index + step + items.length) % items.length, false, step > 0 ? -1 : 1);
     };
 
-    // سحب أفقي على الصورة يقلّب (اليمين في العربية = السابق)
+    // سحب أفقي على الصورة: تتبع الإصبع قليلًا (تعرف أنك تقلّب)، ثم تقلّب أو ترجع بهدوء
     let x0 = null;
-    stage.addEventListener('pointerdown', (e) => (x0 = e.clientX), { passive: true });
-    stage.addEventListener('pointerup', (e) => {
+    let dragged = 0;
+    const current = () => stage.querySelector('.cn-bill-img:last-child');
+    const follow = (dx) => {
+      const top = current();
+      if (top) top.style.setProperty('--drag', `${dx * 0.18}px`);
+      info.style.setProperty('--drag', `${dx * 0.12}px`);
+    };
+    stage.addEventListener('pointerdown', (e) => {
+      x0 = e.clientX;
+      dragged = 0;
+      box.classList.add('dragging');
+    }, { passive: true });
+    stage.addEventListener('pointermove', (e) => {
+      if (x0 === null || reduced()) return;
+      dragged = e.clientX - x0;
+      follow(dragged);
+    }, { passive: true });
+    const release = (e) => {
       if (x0 === null) return;
-      const dx = e.clientX - x0;
+      const dx = (e?.clientX ?? x0) - x0;
       x0 = null;
+      box.classList.remove('dragging');
+      follow(0);
       if (Math.abs(dx) > 40) next(dx > 0 ? 1 : -1);
-      else void openWork(items[state.hero.index]);
-    });
+      else if (e?.type === 'pointerup' && Math.abs(dragged) < 8) void openWork(items[state.hero.index]);
+    };
+    stage.addEventListener('pointerup', release);
+    stage.addEventListener('pointercancel', release);
+    stage.addEventListener('pointerleave', (e) => x0 !== null && release(e));
     paint(0, true);
     return box;
   }
@@ -456,8 +574,10 @@ export function createCinema(deps) {
     if (heroItems.length) page.append(billboard(heroItems));
     const cont = continuing().filter((w) => wants(w.type));
     if (cont.length) page.append(rail('أكمل المشاهدة', cont.slice(0, 12), continueCard, { more: () => openLibrary('continue') }));
-    const later = Object.values(listAll()).filter((x) => x.later && wants(x.type)).sort((a, b) => b.later - a.later);
+    const later = shelf('later').filter((x) => !x.type || wants(x.type));
     if (later.length) page.append(rail('قائمتي', later.slice(0, 16), posterCard, { more: () => openLibrary('later') }));
+    const fresh = (state.updates ?? []).filter((g) => wants(g.kind === 'movie' ? 'movie' : 'series'));
+    if (fresh.length) page.append(rail('آخر التحديثات', fresh, updateCard, { more: deps.openUpdates ? () => deps.openUpdates('cinema') : undefined }));
     const skip = new Set(heroItems.map((m) => m.id));
     const rest = (list) => (list ?? []).filter((m) => !skip.has(m.id));
     if (wants('movie') && data.movies?.length) page.append(rail('أفلام رائجة الآن', rest(data.movies)));
@@ -533,6 +653,27 @@ export function createCinema(deps) {
   function show() {
     if (state.home && !state.loading) renderHome(state.home);
     void loadHome();
+    void loadUpdates();
+  }
+
+  // «آخر التحديثات» من ذاكرة VANTARA: حلقات المسلسلات الجديدة والأفلام التي توفّرت
+  let updatesAt = 0;
+  async function loadUpdates() {
+    if (Date.now() - updatesAt < 120_000) return;
+    updatesAt = Date.now();
+    const groups = await latestGroups('cinema').catch(() => null);
+    if (!groups?.length) return;
+    state.updates = groups;
+    if (state.home && deps.currentPage() === 'home' && !q('cinemaHome').hidden) renderHome(state.home);
+  }
+  /** بطاقة حدث: الملصق، الاسم، و«S02E05 · قبل ساعتين». */
+  function updateCard(g) {
+    const m = { id: g.work.slice('cinema:'.length), type: g.kind === 'movie' ? 'movie' : 'series', title: g.title, poster: g.cover };
+    const c = posterCard(m);
+    const meta = c.querySelector('.cn-poster-meta');
+    meta.replaceChildren(el('span', 'cn-poster-unit', `${unitLabel(g)} · ${agoAr(g.at)}`));
+    meta.dir = 'auto';
+    return c;
   }
 
   // ───────────── المصادر ─────────────
@@ -542,27 +683,101 @@ export function createCinema(deps) {
     const key = playKey(m, season);
     if (state.works.has(key)) return state.works.get(key);
     const pending = (async () => {
-      for (const query of queriesFor(m.title)) {
-        const works = await engine.search(query, 'cinema');
-        if (!works) return null;
-        const copies = pickCopies(works, { title: m.title, year: m.year, type: m.type, season: m.type === 'series' ? season : null });
-        if (!copies.length) continue;
-        if (m.type === 'movie') {
-          // رقم «الحلقة» الوحيدة للفيلم يختلف بين المصادر (0 أو 1): نأخذ رقم الأقوى ونبقي من يوافقه
-          const lists = await Promise.all(copies.map((c) => engine.episodes(c).catch(() => null)));
-          const numbers = lists.map((l) => l?.[0]?.number ?? null);
-          const lead = numbers.find((n) => n != null) ?? 1;
-          return { copies: copies.filter((_, i) => numbers[i] == null || numbers[i] === lead), number: lead };
+      const seen = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const query of queriesFor(m.title)) {
+          const works = await engine.search(query, 'cinema');
+          if (!works) return null;
+          seen.push(...works.flatMap((w) => w.copies ?? []));
+          const copies = pickCopies(works, { title: m.title, year: m.year, type: m.type, season: m.type === 'series' ? season : null });
+          if (copies.length) {
+            senseMovie(m, copies);
+            return withNumber(m, copies);
+          }
         }
-        return { copies, number: null };
+        // لا نتيجة إطلاقًا من أي مصدر: غالبًا الإضافات ما زالت تُنزَّل أول مرة. محاولة ثانية بعد لحظات
+        if (seen.length) break;
+        await new Promise((r) => setTimeout(r, 6000));
       }
-      return { copies: [], number: null };
+      // ما لم يطابق بثقة يبقى «قريبًا» يختاره الشخص بنفسه
+      const near = [...new Map(seen.map((c) => [`${c.sourceId}|${c.url}`, c])).values()]
+        .map((c) => ({ c, score: titleScore(m.title, c.title), kind: readTitle(c.title).kind }))
+        .filter((x) => x.score >= 0.5 && (!x.kind || x.kind === m.type))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
+        .map((x) => x.c);
+      if (!seen.length) state.works.delete(key); // لا نحفظ «لا شيء» ما دام لم يرد أحد
+      return { copies: [], number: null, near, total: seen.length };
     })().catch(() => {
       state.works.delete(key);
       return null;
     });
     state.works.set(key, pending);
     return pending;
+  }
+
+  // ───────────── مجسّات Update Engine ─────────────
+  // المسلسل: حلقاته التي عُرضت (بتاريخ عرضها). الفيلم: «توفّر» حين نجده في
+  // المصادر العربية وهو حديث. والخادم يقرّر: أول مرة خط أساس بلا أحداث.
+
+  function senseSeries(m) {
+    if (m.type !== 'series' || !m.seasons) return;
+    const now = Date.now();
+    const units = m.seasons
+      .filter((s) => s.n > 0)
+      .flatMap((s) => s.episodes.filter((e) => e.released && e.released <= now).map((e) => ({ season: s.n, number: e.n, publishedAt: e.released })))
+      .sort((a, b) => b.season - a.season || b.number - a.number)
+      .slice(0, 40);
+    if (units.length) reportUpdate({ work: `cinema:${m.id}`, section: 'cinema', kind: 'episode', title: m.title, cover: m.poster ?? null, source: { s: 'cinemeta' }, units });
+  }
+  function senseMovie(m, copies) {
+    if (m.type !== 'movie' || !copies?.length || !(m.year >= new Date().getFullYear() - 1)) return;
+    for (const c of copies.slice(0, 4)) {
+      reportUpdate({ work: `cinema:${m.id}`, section: 'cinema', kind: 'movie', title: m.title, cover: m.poster ?? null, source: { s: c.sourceId, u: c.url }, units: [{}] });
+    }
+  }
+
+  /** رقم «الحلقة» الوحيدة للفيلم يختلف بين المصادر (0 أو 1): نأخذ رقم الأقوى ونبقي من يوافقه. */
+  async function withNumber(m, copies) {
+    if (m.type !== 'movie') return { copies, number: null };
+    const lists = await Promise.all(copies.map((c) => engine.episodes(c).catch(() => null)));
+    const numbers = lists.map((l) => l?.[0]?.number ?? null);
+    const lead = numbers.find((n) => n != null) ?? 1;
+    return { copies: copies.filter((_, i) => numbers[i] == null || numbers[i] === lead), number: lead };
+  }
+
+  /** فحص كل مصدر خطوة خطوة بعنوان هذا العمل: يقول أين يتعطّل بالضبط. */
+  function diagnoseSheet(m) {
+    deps.openSheet((body) => {
+      const head = el('div', 'an-sheet-head');
+      head.append(el('div', 'an-sheet-kicker', 'فحص المصادر'), text('div', 'an-sheet-title', m.title));
+      const list = el('div', 'cn-diag');
+      body.append(head, list);
+      void (async () => {
+        const all = (await engine.sources().catch(() => null)) ?? [];
+        const mine = all.filter((x) => x.content === 'cinema' && x.enabled);
+        if (!mine.length) {
+          list.append(el('p', 'cn-note', 'لا مصادر سينما مفعّلة في المحرك — حدّث التطبيق.'));
+          return;
+        }
+        for (const src of mine) {
+          const box = el('section', 'cn-diag-src');
+          box.append(el('h4', null, src.name ?? src.id));
+          const steps = el('ol', 'cn-diag-steps');
+          steps.append(el('li', 'cn-diag-wait', 'نفحص…'));
+          box.append(steps);
+          list.append(box);
+          const out = await engine.diagnose(src.id, m.title).catch((e) => [{ label: 'الفحص', state: 'fail', detail: String(e?.message ?? e) }]);
+          steps.replaceChildren(
+            ...(out ?? []).map((st) => {
+              const li = el('li', `cn-diag-${st.state}`);
+              li.append(el('b', null, st.label), text('span', null, st.detail ?? ''));
+              return li;
+            }),
+          );
+        }
+      })();
+    }, { tone: 'cinema' });
   }
 
   async function paintSources(m, season) {
@@ -584,8 +799,30 @@ export function createCinema(deps) {
       });
     if (!found || !found.copies.length) {
       host.dataset.state = 'none';
-      const msg = !found ? 'تعذّر البحث في المصادر — تحقّق من الاتصال' : m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
-      host.replaceChildren(el('i', 'cn-dot'), el('span', null, msg), retry());
+      const msg = !found
+        ? 'تعذّر البحث في المصادر — تحقّق من الاتصال'
+        : !found.total
+          ? 'المصادر لم ترد بأي نتيجة'
+          : m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'لم نجده بنفس الاسم في المصادر';
+      const row = el('div', 'cn-sources-row');
+      row.append(el('i', 'cn-dot'), el('span', null, msg), retry());
+      const nodes = [row];
+      if (found?.near?.length) {
+        const near = el('div', 'cn-near');
+        near.append(el('span', 'cn-near-label', 'نتائج قريبة — اختر الصحيح:'));
+        for (const c of found.near) {
+          const b = button('cn-near-item', '', async () => {
+            b.disabled = true;
+            state.works.set(playKey(m, season), withNumber(m, [c]));
+            await paintSources(m, season);
+          });
+          b.append(text('b', null, c.title), el('span', null, SOURCE_NAMES[c.sourceId] ?? c.sourceId));
+          near.append(b);
+        }
+        nodes.push(near);
+      }
+      nodes.push(button('cn-link cn-diag-open', 'افحص المصادر', () => diagnoseSheet(m)));
+      host.replaceChildren(...nodes);
       return;
     }
     host.dataset.state = 'found';
@@ -610,6 +847,7 @@ export function createCinema(deps) {
     }
     if (full.type === 'series' && !full.seasons?.some((s) => s.n === state.season)) state.season = full.seasons?.find((s) => s.n !== 0)?.n ?? full.seasons?.[0]?.n ?? 1;
     state.detail = full;
+    senseSeries(full);
     renderDetail(full);
     if (autoplay) {
       const r = resumePoint(full);
@@ -996,6 +1234,7 @@ export function createCinema(deps) {
       clock.pos = null;
       clock.at = null;
       state.playing = { key, m, season, n: m.type === 'movie' ? 1 : n, userId: currentUser() };
+      recordView(m, season, m.type === 'movie' ? 1 : n);
       const title = m.type === 'series' ? `${displayTitle(m)} · الموسم ${season}` : displayTitle(m);
       deps.setWatching?.({ ref: `cinema:${key}`, title, episode: m.type === 'series' ? n : null });
       const presence = await deps.playerPresence?.();
@@ -1021,6 +1260,14 @@ export function createCinema(deps) {
         presenceDeviceCredential: presence?.deviceCredential ?? null,
       });
     }
+  }
+
+  const completed = new Set();
+  function completeOnce(m, season, n) {
+    const k = `${me()}:${m.id}:${season ?? 0}:${n}`;
+    if (!me() || completed.has(k)) return;
+    completed.add(k);
+    sync?.enqueue('episode.complete', { ...descriptor(m), episode: m.type === 'movie' ? 1 : n, ...(m.type === 'movie' ? { movie: true } : { season }) });
   }
 
   // الوقت: المشغّل الأصلي الحديث يحتسبه بنفسه للسينما؛ وإلا نحتسبه هنا من التقدّم
@@ -1050,7 +1297,12 @@ export function createCinema(deps) {
       if (clock.acc >= 60_000) flushWatch();
     }
     const n = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
-    if (p.duration > 0) recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+    if (p.duration > 0) {
+      recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+      // «أنهى S02E03» / «أنهى فيلم» للأصدقاء (حسب خصوصيتك في الخادم)، مرة لكل حلقة
+      const ratio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
+      if (ratio >= 0.9) completeOnce(cur.m, cur.m.type === 'series' ? cur.season : null, n);
+    }
     cur.n = n;
     if (p.final) {
       void flushFollowTime(deps.sync).catch(() => {});
@@ -1153,15 +1405,25 @@ export function createCinema(deps) {
   function renderLibrary() {
     const host = q('cinemaLibrary');
     if (!host) return;
-    const tabs = el('div', 'cn-kinds cn-kinds--inline');
-    for (const [k, label] of [['continue', 'أكمل المشاهدة'], ['later', 'قائمتي'], ['fav', 'المفضلة']]) {
-      tabs.append(button(`cn-kind${state.libraryTab === k ? ' active' : ''}`, label, () => {
+    // نفس شرائح «مكتبتي» في المانجا والأنمي: الاسم وعدده (قانون التوحيد)
+    const tabs = el('div', 'segmented library-tabs');
+    tabs.setAttribute('role', 'tablist');
+    const countOf = (k) => (k === 'continue' ? continuing().length : shelf(k).length);
+    for (const [k, label] of [['later', 'قائمتي'], ['continue', 'آخر المشاهدات'], ['fav', 'المفضلة']]) {
+      const b = el('button', `library-tab${state.libraryTab === k ? ' active' : ''}`, label);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(state.libraryTab === k));
+      const n = countOf(k);
+      if (n) b.append(el('b', null, String(n)));
+      b.onclick = () => {
         state.libraryTab = k;
         renderLibrary();
-      }));
+      };
+      tabs.append(b);
     }
     const tab = state.libraryTab;
-    const items = tab === 'continue' ? continuing() : Object.values(listAll()).filter((x) => x[tab]).sort((a, b) => b[tab] - a[tab]);
+    const items = tab === 'continue' ? continuing() : shelf(tab);
     const grid = el('div', tab === 'continue' ? 'cn-wide-grid' : 'cn-grid');
     grid.append(...items.map((m) => (tab === 'continue' ? continueCard(m) : posterCard(m))));
     const empty = {
@@ -1169,7 +1431,7 @@ export function createCinema(deps) {
       later: ['plus', 'قائمتك فاضية', 'أضف أي فيلم أو مسلسل بزر «قائمتي».'],
       fav: ['heart', 'لا مفضلات بعد', 'علّم ما تحب بزر القلب.'],
     }[tab];
-    host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty), el('p', 'cn-note', 'قائمة السينما محفوظة على هذا الجهاز.'));
+    host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty));
   }
 
   return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover };

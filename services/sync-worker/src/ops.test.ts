@@ -780,3 +780,18 @@ describe('chapter.mark', () => {
     expect(translate('chapter.mark', { seriesRef: 's', chapterKey: 'k', read: 'yes' })).toEqual([]);
   });
 });
+
+describe('episode.complete (anime + cinema)', () => {
+  const activity = (out: Recorded[]) => out.find((entry) => entry.sql.includes('INSERT INTO activity'));
+  it('cinema: a series episode carries its season, a movie says movie', () => {
+    const ep = activity(translate('episode.complete', { seriesRef: 'cinema:tt0944947', seriesTitle: 'GoT', episode: 3, season: 2 }));
+    expect(ep).toBeDefined();
+    expect(ep?.values).toContain('{"episode":3,"season":2}');
+    const movie = activity(translate('episode.complete', { seriesRef: 'cinema:tt1375666', seriesTitle: 'Inception', episode: 1, movie: true }));
+    expect(movie?.values).toContain('{"movie":true}');
+  });
+  it('anime keeps its old shape, and other refs are refused', () => {
+    expect(activity(translate('episode.complete', { seriesRef: 'anime:21', episode: 1150 }))?.values).toContain('{"episode":1150}');
+    expect(translate('episode.complete', { seriesRef: 'ext:solo', episode: 1 })).toEqual([]);
+  });
+});

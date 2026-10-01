@@ -17,6 +17,7 @@ import { glyph } from './icons.js';
 import { countLabel } from './plural.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { EMOJI_GROUPS } from './emoji.js';
+import { sectionOfRef } from './anime-account.js';
 
 /** نفس القائمة المغلقة في الخادم (`MAJLIS_REACTIONS`). */
 export const REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
@@ -90,10 +91,12 @@ export function createMajlis(ctx) {
       .map((a) => a.user_id)
       .sort((a, b) => (a === me() ? -1 : b === me() ? 1 : nameOf(a).localeCompare(nameOf(b), 'ar')));
   const presenceOf = (userId) => presence.find((p) => p.userId === userId) ?? null;
-  // الأنمي يعيش في نفس المجلس بمرجع `anime:<id>`: «يشاهد» بدل «يقرأ»، ولونه أزرق
+  // الأنمي والسينما في نفس المجلس بمرجعيهما (`anime:`/`cinema:`): «يشاهد» بدل «يقرأ»،
+  // وكل بطاقة بلون قسمها
   const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
-  const watching = (p) => p?.screen === 'ANIME' || isAnime(p?.seriesRef);
-  const toneOf = (ref) => (isAnime(ref) ? 'anime' : 'manga');
+  const sectionOfPresence = (p) => (String(p?.seriesRef ?? '').startsWith('cinema:') ? 'cinema' : p?.screen === 'ANIME' || isAnime(p?.seriesRef) ? 'anime' : 'manga');
+  const watching = (p) => sectionOfPresence(p) !== 'manga';
+  const toneOf = (ref) => sectionOfRef(ref);
   const workOf = (ref, title, cover) => {
     const row = ref ? sync.rows('works', (w) => w.series_ref === ref)[0] : null;
     // فريمٌ بلا مرجع يُربط بعنوانه بنفس قاعدة المكتبة، فلا يصير العمل عملين
@@ -400,12 +403,14 @@ export function createMajlis(ctx) {
   // ── يقرأون الآن ──
 
   // مجلسان: قسم الأنمي يرى الأنمي وحده، والمانجا ترى المانجا وحدها — نفس الأصدقاء
-  const animeSide = () => ctx.section?.() === 'anime';
-  const onThisSide = (ref) => isAnime(ref) === animeSide();
+  // ثلاثة مجالس بنفس الأصدقاء: كل قسم يرى ترشيحاته ومن يتابع فيه الآن
+  const side = () => ctx.section?.() ?? 'manga';
+  const animeSide = () => side() !== 'manga';
+  const onThisSide = (ref) => sectionOfRef(ref) === side();
   const filters = () => (animeSide() ? ANIME_FILTERS : FILTERS);
 
   function readingNow() {
-    return presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me() && watching(p) === animeSide());
+    return presence.filter((p) => p.status === 'READING' && p.seriesTitle && p.userId !== me() && sectionOfPresence(p) === side());
   }
   function readingCard(p) {
     const work = workOf(p.seriesRef, p.seriesTitle);
@@ -547,13 +552,14 @@ export function createMajlis(ctx) {
   function recCard(e) {
     const r = e.row;
     const card = el('article', 'mj-card mj-card--rec');
-    const anime = isAnime(r.series_ref);
+    const anime = sectionOfRef(r.series_ref) !== 'manga';
+    const cinema = sectionOfRef(r.series_ref) === 'cinema';
     card.dataset.tone = toneOf(r.series_ref);
     const chapter = r.chapter_label ? { label: r.chapter_label, number: r.chapter_number ?? null } : null;
     // لحظة من المشغّل: «الحلقة 12 · 12:10–12:20»
     const moment = anime && chapter?.label.includes('·');
     const verb = moment ? 'شارك لحظة من' : 'رشّح';
-    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
+    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : cinema ? 'رشّح فيلمًا أو مسلسلًا' : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
     const b = el('button', 'mj-work');
     b.type = 'button';
@@ -686,11 +692,12 @@ export function createMajlis(ctx) {
       const inner = el('div');
       inner.innerHTML = `<div class="empty-art">${glyph('users')}</div>`;
       const anime = animeSide();
-      inner.append(el('h3', null, filter === 'all' ? (anime ? 'مجلس الأنمي هادي' : 'المجلس هادي') : 'ما فيه شي هنا بعد'));
-      inner.append(el('p', null, anime ? 'رشّح أنمي لأصدقائك، أو شارك لحظة من المشغّل بزرّ الكاميرا.' : 'رشّح عملًا لأصدقائك، أو أرسل فريمًا من القارئ بزرّ الكاميرا.'));
+      const cinema = side() === 'cinema';
+      inner.append(el('h3', null, filter === 'all' ? (cinema ? 'مجلس السينما هادي' : anime ? 'مجلس الأنمي هادي' : 'المجلس هادي') : 'ما فيه شي هنا بعد'));
+      inner.append(el('p', null, cinema ? 'رشّح فيلمًا أو مسلسلًا لأصدقائك من صفحته.' : anime ? 'رشّح أنمي لأصدقائك، أو شارك لحظة من المشغّل بزرّ الكاميرا.' : 'رشّح عملًا لأصدقائك، أو أرسل فريمًا من القارئ بزرّ الكاميرا.'));
       const cta = el('button', 'btn btn-secondary');
       cta.type = 'button';
-      cta.innerHTML = `${glyph('compass')}<span>${anime ? 'اكتشف أنمي ترشّحه' : 'اكتشف عملًا ترشّحه'}</span>`;
+      cta.innerHTML = `${glyph('compass')}<span>${cinema ? 'اكتشف فيلمًا ترشّحه' : anime ? 'اكتشف أنمي ترشّحه' : 'اكتشف عملًا ترشّحه'}</span>`;
       cta.onclick = ctx.openShare;
       inner.append(cta);
       empty.append(inner);

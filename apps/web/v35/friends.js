@@ -16,21 +16,27 @@
 
 import { glyph } from './icons.js';
 import { displayTitle, refForTitle } from './work-ref.js';
-import { actionList, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceState, pressable, roomInitial, shortAgo } from './social-kit.js';
+import { actionList, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceSection, presenceState, pressable, roomInitial, shortAgo } from './social-kit.js';
+import { sectionOfRef } from './anime-account.js';
 
 const VERB_COPY = {
   CHAPTER_DONE: (p) => (p?.chapter != null ? `خلّص الفصل ${p.chapter} من` : 'خلّص فصلًا من'),
-  EPISODE_DONE: (p) => (p?.episode != null ? `أنهى الحلقة ${p.episode} من` : 'أنهى حلقة من'),
+  EPISODE_DONE: (p) =>
+    p?.movie ? 'أنهى فيلم'
+      : p?.season != null && p?.episode != null ? `أنهى S${String(p.season).padStart(2, '0')}E${String(p.episode).padStart(2, '0')} من`
+        : p?.episode != null ? `أنهى الحلقة ${p.episode} من` : 'أنهى حلقة من',
   LIBRARY_ADD: () => 'أضاف لمكتبته',
   FAVORITED: () => 'أضاف للمفضلة',
   RATED_WORK: (p) => (p?.score ? `قيّم ${Math.round(p.score / 2)} من 5` : 'قيّم'),
   COMMENTED: () => 'علّق على',
 };
 const COMPLETION = new Set(['CHAPTER_DONE', 'EPISODE_DONE']);
-const isAnime = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
+/** القسم من خيار قديم (`anime: true/false`) أو اسمه. */
+const sectionOf = (s) => (s === true ? 'anime' : s === false || !s ? 'manga' : s);
 
 /** المصافي لكل قسم: المحادثة في الكل، والقراءة/المشاهدة لقسمها. */
-export function feedFilters(anime, readingHidden = false) {
+export function feedFilters(section, readingHidden = false) {
+  const anime = sectionOf(section) !== 'manga';
   return [
     ['all', 'الكل'],
     ['chat', 'الشات'],
@@ -43,13 +49,16 @@ export function feedFilters(anime, readingHidden = false) {
  * أحداث «آخر ما صار» لقسم واحد: بلا المحذوف للجميع، وبلا ما أخفيته لديك،
  * وبلا إنهاءات غيرك إن أخفيت «نشاط القراءة» لديك.
  */
-export function feedEvents(sync, { anime, filter, me, readingHidden = false, limit = 80 }) {
+export function feedEvents(sync, { anime, section: sectionName, filter, me, readingHidden = false, limit = 80 }) {
+  // لكل قسم ترشيحاته ونشاطه (المانجا، الأنمي، السينما)، والمحادثة للكل
+  const section = sectionOf(sectionName ?? anime);
+  const mine = (ref) => sectionOfRef(ref) === section;
   const hidden = new Set(sync.rows('majlis_hidden', (h) => h.user_id === me).map((h) => h.target));
   const out = [];
   for (const m of sync.rows('majlis_messages', (x) => !x.deleted && (x.kind === 'text' || x.kind === 'voice'))) out.push({ kind: 'msg', id: m.id, at: m.created_at, actor: m.sender_id, row: m });
-  if (!anime) for (const f of sync.rows('frames', (x) => !x.removed)) out.push({ kind: 'frame', id: f.id, at: f.created_at, actor: f.from_id, row: f });
-  for (const r of sync.rows('recommendations', (x) => !x.removed && isAnime(x.series_ref) === anime)) out.push({ kind: 'rec', id: r.id, at: r.created_at, actor: r.from_id, row: r });
-  for (const a of sync.rows('activity', (x) => !x.removed && x.verb in VERB_COPY && isAnime(x.series_ref) === anime)) {
+  if (section === 'manga') for (const f of sync.rows('frames', (x) => !x.removed)) out.push({ kind: 'frame', id: f.id, at: f.created_at, actor: f.from_id, row: f });
+  for (const r of sync.rows('recommendations', (x) => !x.removed && mine(x.series_ref))) out.push({ kind: 'rec', id: r.id, at: r.created_at, actor: r.from_id, row: r });
+  for (const a of sync.rows('activity', (x) => !x.removed && x.verb in VERB_COPY && mine(x.series_ref))) {
     if (readingHidden && COMPLETION.has(a.verb) && a.actor_id !== me) continue;
     out.push({ kind: 'activity', id: a.id, at: a.created_at, actor: a.actor_id, row: a });
   }
@@ -87,7 +96,7 @@ export function createFriends(ctx) {
   let entered = false;
   const seenRows = new Set();
 
-  const anime = () => ctx.section() === 'anime';
+  const section = () => ctx.section() ?? 'manga';
   const settings = () => parse(sync.row?.('settings', me())?.data, {});
   const readingHidden = () => settings().feedReading === 'hide';
   const presenceOf = (id) => presence.find((p) => p.userId === id) ?? null;
@@ -118,7 +127,7 @@ export function createFriends(ctx) {
 
   /** من يقرأ/يشاهد الآن في قسمك: سطر بالعمل، أو «العمل مخفي». */
   function nowRows() {
-    const rows = presence.filter((p) => p.status === 'READING' && p.userId !== me() && presenceState(p).watching === anime());
+    const rows = presence.filter((p) => p.status === 'READING' && p.userId !== me() && presenceSection(p) === section());
     if (!rows.length) return null;
     const box = el('div', 'sx-now');
     for (const p of rows) {
@@ -334,7 +343,7 @@ export function createFriends(ctx) {
     const bar = el('div', 'sx-tabs');
     bar.setAttribute('role', 'tablist');
     const line = el('span', 'sx-tabs-line');
-    for (const [k, label] of feedFilters(anime(), readingHidden())) {
+    for (const [k, label] of feedFilters(section(), readingHidden())) {
       const t = el('button', `sx-tab${k === filter ? ' is-on' : ''}`, label);
       t.type = 'button';
       t.setAttribute('role', 'tab');
@@ -368,7 +377,7 @@ export function createFriends(ctx) {
 
   function feedList() {
     const list = el('div', 'sx-feed');
-    const events = feedEvents(sync, { anime: anime(), filter, me: me(), readingHidden: readingHidden() });
+    const events = feedEvents(sync, { section: section(), filter, me: me(), readingHidden: readingHidden() });
     if (!events.length) {
       const empty = el('p', 'sx-empty', filter === 'recs' ? 'أول ترشيح بيظهر هنا' : filter === 'chat' ? 'المجلس هادي. قل شي' : 'لسه ما صار شي هنا');
       list.append(empty);
@@ -451,7 +460,7 @@ export function createFriends(ctx) {
     parts.push(room);
 
     const feed = el('section', 'sx-section sx-feed-section');
-    if (!feedFilters(anime(), readingHidden()).some(([k]) => k === filter)) filter = 'all';
+    if (!feedFilters(section(), readingHidden()).some(([k]) => k === filter)) filter = 'all';
     let list = feedList();
     const bar = tabs(() => {
       const next = feedList();
