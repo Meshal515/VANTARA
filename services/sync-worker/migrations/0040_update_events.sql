@@ -18,3 +18,14 @@ CREATE TABLE IF NOT EXISTS update_events (
 );
 CREATE INDEX IF NOT EXISTS update_events_timeline ON update_events (section, at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS update_events_work ON update_events (work, at DESC);
+
+-- خط الأساس لكل عمل: أول ما يراه VANTARA يُحفظ «موجودًا» بلا أحداث، وما بعده فقط
+-- يصير تحديثًا. `max_season/max_number` أعلى وحدة معروفة (الموسم للمسلسلات فقط).
+CREATE TABLE IF NOT EXISTS update_watermarks (
+  work TEXT PRIMARY KEY,
+  section TEXT NOT NULL CHECK (section IN ('manga', 'anime', 'cinema')),
+  max_season INTEGER,
+  max_number REAL,
+  baseline_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);

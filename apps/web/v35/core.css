@@ -3164,3 +3164,101 @@ html,
 /* داخل صف إعداد: بلا هوامش الصفحة، فلا يُقصّ الزر الأخير عند الحافة */
 .v35 .setting .segmented { flex: none; margin: 0; padding: 0; gap: 6px; overflow: visible; }
 .v35 .setting .segmented > button[aria-pressed] { padding: 0 12px; }
+
+/* ───────────── آخر التحديثات: خط VANTARA الزمني (مشترك بين الأقسام) ─────────────
+ * نفس البنية في المانجا والأنمي والسينما، واللون من رموز القسم وحدها. */
+.v35 .grid.up-feed,
+.v35 .up-feed {
+  display: block;
+}
+.v35 .up-list {
+  display: grid;
+}
+.v35 .up-day {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .up-day:first-child {
+  margin-top: 4px;
+}
+.v35 .up-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .up-row:active {
+  background: var(--surface-1);
+}
+.v35 .up-art {
+  display: block;
+  width: 48px;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .up-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.v35 .up-img.loaded {
+  opacity: 1;
+}
+.v35 .up-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.v35 .up-title {
+  font-size: 14.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .up-unit {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .up-side {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.v35 .up-sources {
+  color: var(--text-4);
+}
+.v35 .up-skel {
+  height: 72px;
+  margin: 8px 0;
+  border-radius: 6px;
+  background: var(--surface-1);
+}
+.v35 .up-more {
+  min-height: 24px;
+  padding: 12px 0 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}

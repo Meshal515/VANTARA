@@ -881,17 +881,26 @@
 }
 .v35 .an-detail-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 16px var(--gutter) 0;
 }
-.v35 .an-detail-actions .an-btn--glass {
-  flex: none;
-  width: 50px;
-  height: 50px;
-  padding: 0;
+/* قانون التوحيد: الفعل الأساسي بعرض الصفحة، والأفعال الثانوية صفٌّ تحته بأسمائها */
+.v35 .an-detail-actions .an-btn--wide {
+  flex: 1 1 100%;
 }
-.v35 .an-detail-actions .an-btn--glass span {
-  display: none;
+.v35 .an-detail-actions .an-btn--glass,
+.v35 .an-detail-actions .an-btn--icon {
+  flex: 1 1 0;
+  width: auto;
+  height: 46px;
+  padding: 0 8px;
+  gap: 6px;
+  font-size: 13px;
+}
+.v35 .an-detail-actions .an-btn--glass span,
+.v35 .an-detail-actions .an-btn--icon span {
+  display: inline;
 }
 .v35 .an-detail-actions .an-btn--glass .icon {
   width: 21px;

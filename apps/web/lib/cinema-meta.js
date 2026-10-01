@@ -67,6 +67,7 @@ export function normalize(m) {
     cast: (m.cast ?? []).slice(0, 8),
     status: m.status || null,
     seasons: m.videos ? seasonsOf(m.videos) : null,
+    released: m.released ? Date.parse(m.released) || null : null,
   };
 }
 

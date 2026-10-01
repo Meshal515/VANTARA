@@ -310,6 +310,37 @@
 .v35 .cn-bill-img {
   position: absolute;
   inset: 0;
+  --from: 0;
+  --to: 0;
+  --drag: 0px;
+  transform: translateX(var(--drag)) scale(1.001);
+  transition: opacity 0.9s ease, transform 1.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+/* الداخلة: من جهة التقليب، أكبر قليلًا، ثم تستقر */
+.v35 .cn-bill-img.cn-bill-enter {
+  transform: translateX(calc(var(--from) * 7%)) scale(1.05);
+}
+/* الخارجة: تبقى ظاهرة تحتها وتنزاح للجهة الأخرى حتى تغطيها الجديدة */
+.v35 .cn-bill-img.cn-bill-leave {
+  transform: translateX(calc(var(--to) * 4%)) scale(1.02);
+}
+.v35 .cn-bill.dragging .cn-bill-img,
+.v35 .cn-bill.dragging .cn-bill-info {
+  transition: none;
+}
+.v35 .cn-bill-info {
+  --shift: 0px;
+  --drag: 0px;
+  transform: translateX(var(--drag));
+  transition: opacity 0.32s ease, transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.v35 .cn-bill-info.is-out {
+  opacity: 0;
+  transform: translateX(var(--shift));
+}
+.v35 .cn-bill-info.no-anim {
+  transition: none;
 }
 /* ذوبان رفيع في أسفل الصورة فقط ليتصل بالخلفية، لا ظلّ فوق المشهد */
 .v35 .cn-bill-stage::after {
@@ -1048,6 +1079,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .v35 .cn-bill-img,
+  .v35 .cn-bill-info,
   .v35 .cn-img,
   .v35 .cn-kind::after {
     transition: none;

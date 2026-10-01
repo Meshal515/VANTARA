@@ -1,13 +1,15 @@
 /**
- * Update Engine — VANTARA هي المصدر الأب للتحديثات.
+ * Update Engine — المصادر تكتشف، وVANTARA يقرّر ويحفظ الحقيقة.
  *
- * الأجهزة تبلّغ ما تراه (مسح Latest للمانجا، حلقات AniList، حلقات المسلسل
- * وتوفّر الفيلم في السينما)، وهنا يتحوّل كل ذلك لأحداث ثابتة:
+ * كل مسار يرى فصولًا أو حلقات (Latest، البحث، صفحة العمل، جلب الفصول، الزحف،
+ * التحديث اليدوي) يبلّغ «هذا العمل وما أراه من وحداته»، وهنا يتحوّل لأحداث ثابتة:
+ * - أول مشاهدة للعمل خط أساس بلا أحداث: 400 فصل قديم لا تصير 400 تحديث.
+ *   بعدها فقط ما يظهر فوق خط الأساس حدث جديد.
  * - هوية الحدث = العمل الموحّد + نوع الوحدة + رقمها، لا رقم المصدر.
  *   نفس الفصل من ثلاثة مصادر = حدث واحد بثلاثة مصادر.
- * - الوقت `at` يُثبَّت عند الإنشاء: وقت النشر إن أعطاه المصدر وكان معقولًا،
- *   وإلا أول وقت اكتشفه فيه VANTARA. لا يُعاد ضبطه بأي تحديث لاحق،
- *   فالخط الزمني لا يتبدّل بترتيب ردود المصادر.
+ * - وقتان منفصلان: `published_at` من المصدر إن كان موثوقًا، و`first_seen_at` أول
+ *   اكتشاف لـVANTARA. والترتيب `at` يُثبَّت عند الإنشاء ولا يُعاد ضبطه أبدًا،
+ *   فالخط الزمني لا يتبدّل بترتيب ردود المصادر، ويبقى الحدث وإن اختفى المصدر.
  */
 
 import type { D1Database } from './types.ts';
@@ -22,18 +24,7 @@ interface Source {
   s: string;
   u?: string;
   t?: string;
-}
-interface Incoming {
-  id: string;
-  work: string;
-  section: Section;
-  kind: Kind;
-  season: number | null;
-  number: number | null;
-  title: string;
-  cover: string | null;
-  publishedAt: number | null;
-  source: Source | null;
+  m?: string;
 }
 
 const MAX_EVENTS = 100;
@@ -57,8 +48,40 @@ export function eventId(work: string, kind: Kind, season: number | null, number:
   return season == null ? `${work}|e:${n}` : `${work}|s${season}e:${n}`;
 }
 
-/** يتحقق من حدث مُبلَّغ ويعيده بشكله المعتمد، أو null. */
-export function parseEvent(raw: unknown, now: number): Incoming | null {
+interface Unit {
+  season: number | null;
+  number: number;
+  publishedAt: number | null;
+}
+interface Report {
+  work: string;
+  section: Section;
+  kind: Kind;
+  title: string;
+  cover: string | null;
+  source: Source | null;
+  units: Unit[];
+}
+
+/** خط أساس العمل: أعلى وحدة معروفة. */
+interface Mark {
+  season: number | null;
+  number: number;
+}
+
+/** حدث جديد على خط أساس قديم: وقت نشر حديث موثوق لأول مشاهدة. */
+const RECENT_MS = 3 * 86_400_000;
+/** أكبر قفزة تُقبل فوق خط الأساس؛ ما بعدها ترقيم مصدر خاطئ لا فصول جديدة. */
+const JUMP = { chapter: 30, episode: 12 } as const;
+
+const reliable = (p: unknown, now: number) => {
+  const n = num(p);
+  return n != null && n > 0 && n <= now + 10 * 60_000 && n >= now - YEAR ? Math.min(n, now) : null;
+};
+const above = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
+
+/** يتحقق من تقرير مجسّ (عمل + ما يراه من وحداته) ويعيده بشكله المعتمد، أو null. */
+export function parseReport(raw: unknown, now: number): Report | null {
   const r = raw as Record<string, unknown>;
   const section = r?.section;
   const kind = r?.kind;
@@ -69,21 +92,32 @@ export function parseEvent(raw: unknown, now: number): Incoming | null {
   if (section === 'cinema' && kind === 'chapter') return null;
   const work = str(r.work, 220);
   if (!work || !WORK[section].test(work)) return null;
-  const number = kind === 'movie' ? null : num(r.number);
-  if (kind !== 'movie' && (number == null || number < 0 || number > 100_000)) return null;
-  const seasonRaw = num(r.season);
-  const season = kind === 'episode' && section === 'cinema' ? (seasonRaw != null && seasonRaw >= 0 && seasonRaw <= 200 ? Math.floor(seasonRaw) : null) : null;
-  if (section === 'cinema' && kind === 'episode' && season == null) return null;
   const title = str(r.title, 200);
   if (!title) return null;
   const cover = str(r.cover, 600);
-  // وقت نشر «موثوق»: خلال السنة الماضية ولا في المستقبل (جداول البث القادمة ليست تحديثًا)
-  const p = num(r.publishedAt);
-  const publishedAt = p != null && p <= now + 10 * 60_000 && p >= now - YEAR ? Math.min(p, now) : null;
   const s = r.source as Record<string, unknown> | undefined;
   const sid = str(s?.s, 120);
-  const source = sid && /^[\w.:@-]+$/.test(sid) ? { s: sid, ...(str(s?.u, 500) ? { u: str(s?.u, 500)! } : {}), ...(str(s?.t, 200) ? { t: str(s?.t, 200)! } : {}) } : null;
-  return { id: eventId(work, kind, season, number), work, section, kind, season, number, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, publishedAt, source };
+  // u = رابط العمل في المصدر، t = اسمه هناك، m = حالة الإضافة (memo): ما يلزم لفتحه منه
+  const source = sid && /^[\w.:@-]+$/.test(sid)
+    ? { s: sid, ...(str(s?.u, 500) ? { u: str(s?.u, 500)! } : {}), ...(str(s?.t, 200) ? { t: str(s?.t, 200)! } : {}), ...(str(s?.m, 500) ? { m: str(s?.m, 500)! } : {}) }
+    : null;
+  const seasoned = section === 'cinema' && kind === 'episode';
+  const units: Unit[] = [];
+  for (const u of Array.isArray(r.units) ? r.units.slice(0, 60) : []) {
+    const x = u as Record<string, unknown>;
+    const number = num(x?.number);
+    const season = num(x?.season);
+    if (kind === 'movie') {
+      units.push({ season: null, number: 0, publishedAt: reliable(x?.publishedAt, now) });
+      break;
+    }
+    if (number == null || number < 0 || number > 100_000) continue;
+    if (seasoned && (season == null || season < 1 || season > 200)) continue;
+    units.push({ season: seasoned ? Math.floor(season!) : null, number, publishedAt: reliable(x?.publishedAt, now) });
+  }
+  if (kind === 'movie' && !units.length) units.push({ season: null, number: 0, publishedAt: null });
+  if (!units.length) return null;
+  return { work, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units };
 }
 
 function mergeSources(old: Source[], add: Source[]): Source[] {
@@ -96,58 +130,108 @@ function mergeSources(old: Source[], add: Source[]): Source[] {
   return out.slice(0, MAX_SOURCES);
 }
 
-export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, now: number): Promise<Response> {
-  const body = (await request.json().catch(() => null)) as { events?: unknown } | null;
-  const list = Array.isArray(body?.events) ? body!.events.slice(0, MAX_EVENTS) : [];
-  // نفس الحدث مرتين في الطلب نفسه (مصدران): يُدمج قبل الكتابة
-  const byId = new Map<string, Incoming & { sources: Source[] }>();
-  for (const raw of list) {
-    const e = parseEvent(raw, now);
-    if (!e) continue;
-    const prev = byId.get(e.id);
-    if (prev) {
-      prev.sources = mergeSources(prev.sources, e.source ? [e.source] : []);
-      prev.publishedAt = prev.publishedAt ?? e.publishedAt;
-      prev.cover = prev.cover ?? e.cover;
-    } else byId.set(e.id, { ...e, sources: e.source ? [e.source] : [] });
+/**
+ * يقرّر من تقرير المجسّ: ما الأحداث الجديدة؟ وما خط الأساس بعدها؟
+ * - أول مشاهدة للعمل: كل الموجود خط أساس بلا أحداث، إلا ما نُشر فعلًا في آخر 3 أيام
+ *   بوقت موثوق (تحديث حقيقي حديث، لا تاريخ قديم).
+ * - بعدها: ما فوق خط الأساس (بقفزة معقولة) حدث جديد، وما تحته قديم لا يُعلن.
+ * - الفيلم: حدث «توفّر» واحد عند أول اكتشاف.
+ */
+export function decide(report: Report, mark: Mark | null, now: number): { fresh: Unit[]; mark: Mark | null } {
+  if (report.kind === 'movie') return { fresh: mark ? [] : report.units.slice(0, 1), mark: mark ?? { season: null, number: 0 } };
+  const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
+  const top = sorted[sorted.length - 1]!;
+  if (!mark) {
+    const fresh = sorted.filter((u) => u.publishedAt != null && now - u.publishedAt <= RECENT_MS).slice(-3);
+    return { fresh, mark: { season: top.season, number: top.number } };
   }
-  if (!byId.size) return reply({ accepted: 0, created: 0 });
+  const limit = JUMP[report.kind];
+  const fresh = sorted.filter((u) => {
+    if (!above(u, mark)) return false;
+    // موسم جديد يبدأ من أوله؛ وفي نفس الموسم قفزة معقولة فقط
+    if ((u.season ?? 0) > (mark.season ?? 0)) return (u.season ?? 0) === (mark.season ?? 0) + 1 && u.number <= limit;
+    return u.number - mark.number <= limit;
+  });
+  const last = fresh[fresh.length - 1];
+  return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
+}
 
-  const ids = [...byId.keys()];
-  const { results } = await env.DB.prepare(`SELECT id, sources, cover, published_at FROM update_events WHERE id IN (${ids.map(() => '?').join(',')})`)
-    .bind(...ids)
-    .all<{ id: string; sources: string; cover: string | null; published_at: number | null }>();
-  const known = new Map((results ?? []).map((r) => [r.id, r]));
+export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, now: number): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as { works?: unknown } | null;
+  const reports = (Array.isArray(body?.works) ? body!.works.slice(0, MAX_EVENTS) : []).map((r) => parseReport(r, now)).filter((r): r is Report => r !== null);
+  if (!reports.length) return reply({ accepted: 0, created: 0, baselined: 0 });
+
+  const works = [...new Set(reports.map((r) => r.work))];
+  const marks = new Map<string, Mark>();
+  const { results: markRows } = await env.DB.prepare(`SELECT work, max_season, max_number FROM update_watermarks WHERE work IN (${works.map(() => '?').join(',')})`)
+    .bind(...works)
+    .all<{ work: string; max_season: number | null; max_number: number | null }>();
+  for (const m of markRows ?? []) marks.set(m.work, { season: m.max_season, number: m.max_number ?? 0 });
+
+  // كل وحدة يراها المجسّ قد تكون حدثًا موجودًا: مصدر جديد يُدمج تحته
+  const allIds = reports.flatMap((r) => r.units.map((u) => eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number)));
+  const known = new Map<string, { sources: string; cover: string | null; published_at: number | null }>();
+  for (let i = 0; i < allIds.length; i += 90) {
+    const ids = allIds.slice(i, i + 90);
+    const { results } = await env.DB.prepare(`SELECT id, sources, cover, published_at FROM update_events WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .bind(...ids)
+      .all<{ id: string; sources: string; cover: string | null; published_at: number | null }>();
+    for (const r of results ?? []) known.set(r.id, r);
+  }
+
   const writes = [];
   let created = 0;
-  for (const e of byId.values()) {
-    const row = known.get(e.id);
-    if (!row) {
+  let baselined = 0;
+  const createdIds = new Set<string>();
+  for (const r of reports) {
+    const before = marks.get(r.work) ?? null;
+    const { fresh, mark } = decide(r, before, now);
+    if (!before) baselined++;
+    if (mark && (!before || mark.season !== before.season || mark.number !== before.number)) {
+      marks.set(r.work, mark);
+      writes.push(
+        env.DB.prepare(
+          `INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (work) DO UPDATE SET max_season = excluded.max_season, max_number = excluded.max_number, updated_at = excluded.updated_at`,
+        ).bind(r.work, r.section, mark.season, mark.number, now, now),
+      );
+    }
+    const freshIds = new Set(fresh.map((u) => eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number)));
+    for (const u of r.units) {
+      const id = eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number);
+      const row = known.get(id);
+      const add = r.source ? [r.source] : [];
+      if (row) {
+        let old: Source[] = [];
+        try {
+          old = JSON.parse(row.sources) as Source[];
+        } catch {
+          old = [];
+        }
+        const merged = mergeSources(old, add);
+        // `at` و`first_seen_at` لا يُلمسان أبدًا: المصدر الثاني يُضاف تحت نفس الحدث في مكانه
+        if (JSON.stringify(merged) === row.sources && (row.cover || !r.cover) && (row.published_at != null || u.publishedAt == null)) continue;
+        row.sources = JSON.stringify(merged);
+        writes.push(
+          env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
+            .bind(row.sources, r.cover, u.publishedAt, now, id),
+        );
+        continue;
+      }
+      if (!freshIds.has(id) || createdIds.has(id)) continue;
+      createdIds.add(id);
       created++;
+      known.set(id, { sources: JSON.stringify(add), cover: r.cover, published_at: u.publishedAt });
       writes.push(
         env.DB.prepare(
           `INSERT INTO update_events (id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
-        ).bind(e.id, e.work, e.section, e.kind, e.season, e.number, e.title, e.cover, e.publishedAt ?? now, e.publishedAt, now, JSON.stringify(e.sources), now),
+        ).bind(id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now),
       );
-      continue;
     }
-    let old: Source[] = [];
-    try {
-      old = JSON.parse(row.sources) as Source[];
-    } catch {
-      old = [];
-    }
-    const merged = mergeSources(old, e.sources);
-    // `at` لا يُلمس أبدًا: المصدر الثاني يُضاف تحت نفس الحدث في مكانه
-    if (JSON.stringify(merged) === row.sources && (row.cover || !e.cover) && (row.published_at != null || e.publishedAt == null)) continue;
-    writes.push(
-      env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
-        .bind(JSON.stringify(merged), e.cover, e.publishedAt, now, e.id),
-    );
   }
   if (writes.length) await env.DB.batch(writes);
-  return reply({ accepted: byId.size, created });
+  return reply({ accepted: reports.length, created, baselined });
 }
 
 export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Response> {
