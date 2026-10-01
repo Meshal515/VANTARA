@@ -173,7 +173,7 @@ class AnimeEnginePlugin : Plugin() {
     @PluginMethod
     fun pick(call: PluginCall) {
         val prep = engine.prepared(call.getString("session") ?: "") ?: return call.reject("الجلسة انتهت")
-        val list = prep.rank(prep.candidatesOf(call.getString("route") ?: ""))
+        val list = prep.rank(prep.playable(prep.candidatesOf(call.getString("route") ?: "")))
         call.resolve(JSObject().put("candidate", list.firstOrNull()?.id))
     }
 

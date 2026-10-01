@@ -4,7 +4,7 @@
  * كل مسار يرى فصولًا أو حلقات (Latest، البحث، صفحة العمل، جلب الفصول، الزحف،
  * التحديث اليدوي) يبلّغ «هذا العمل وما أراه من وحداته»، وهنا يتحوّل لأحداث ثابتة:
  * - أول مشاهدة للعمل خط أساس بلا أحداث: 400 فصل قديم لا تصير 400 تحديث.
- *   بعدها فقط ما يظهر فوق خط الأساس حدث جديد.
+ *   الوحدات المؤرّخة تُحفظ كاملة حتى تحت خط الأساس؛ القديم تاريخ، لا خبر حي.
  * - هوية الحدث = العمل الموحّد + نوع الوحدة + رقمها، لا رقم المصدر.
  *   نفس الفصل من ثلاثة مصادر = حدث واحد بثلاثة مصادر.
  * - وقتان منفصلان: `published_at` من المصدر إن كان موثوقًا، و`first_seen_at` أول
@@ -29,9 +29,9 @@ interface Source {
 
 const MAX_EVENTS = 100;
 const MAX_SOURCES = 12;
-const YEAR = 365 * 86_400_000;
+const EARLIEST_PUBLICATION = Date.UTC(1900, 0, 1);
 const WORK = {
-  manga: /^ext:[^\s|]{1,200}$/,
+  manga: /^ext:[^\x00-\x1f|]{1,200}$/,
   anime: /^anime:\d{1,9}$/,
   cinema: /^cinema:tt\d{1,10}$/,
 } as const;
@@ -70,7 +70,6 @@ interface Mark {
 }
 
 /** حدث جديد على خط أساس قديم: وقت نشر حديث موثوق لأول مشاهدة. */
-const RECENT_MS = 3 * 86_400_000;
 /** أكبر قفزة تُقبل فوق خط الأساس؛ ما بعدها ترقيم مصدر خاطئ لا فصول جديدة. */
 const JUMP = { chapter: 30, episode: 12 } as const;
 /** أكبر دفعة بلا تواريخ تُعدّ إصدارًا حقيقيًا؛ ما فوقها لحاق مصدر أكمل. */
@@ -78,7 +77,7 @@ const BURST = 3;
 
 const reliable = (p: unknown, now: number) => {
   const n = num(p);
-  return n != null && n > 0 && n <= now + 10 * 60_000 && n >= now - YEAR ? Math.min(n, now) : null;
+  return n != null && n >= EARLIEST_PUBLICATION && n <= now ? n : null;
 };
 const isAbove = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
 
@@ -107,6 +106,7 @@ export function parseReport(raw: unknown, now: number): Report | null {
   const units: Unit[] = [];
   for (const u of Array.isArray(r.units) ? r.units.slice(0, 60) : []) {
     const x = u as Record<string, unknown>;
+    if (Number(x?.publishedAt) > now) continue;
     const number = num(x?.number);
     const season = num(x?.season);
     if (kind === 'movie') {
@@ -133,24 +133,17 @@ function mergeSources(old: Source[], add: Source[]): Source[] {
 }
 
 /**
- * يقرّر من تقرير المجسّ: ما الأحداث الجديدة؟ وما خط الأساس بعدها؟
- *
- * - أول مشاهدة للعمل: كل الموجود خط أساس بلا أحداث، إلا ما نُشر فعلًا في آخر
- *   3 أيام بوقت موثوق.
- * - بعدها ما فوق الخط مرشّح، لكن «جديد على VANTARA» ليس «جديدًا في العالم»:
- *   · وحدة بتاريخ نشر موثوق أقدم من 3 أيام = محتوى قديم نراه أول مرة ← لا حدث.
- *   · أكثر من 3 وحدات بلا تاريخ فوق الخط دفعة واحدة = مصدر أكمل لحق بعمل نعرفه
- *     (النهايات: مصدر بفصلين ثم مصدر بـ21) ← نرفع الخط بصمت بلا 19 حدثًا قديمًا.
- *   · قفزات الترقيم الشاذة تُتجاهل.
- * - الفيلم: حدث «توفّر» واحد عند أول اكتشاف.
+ * Every dated unit is history, including delayed catch-up below the watermark.
+ * Undated first sightings stay a baseline; small later advances may use firstSeenAt.
+ * The UI accepts live insertions only with a trustworthy, genuinely recent publishedAt.
+ * An undated movie visit never manufactures a release event.
  */
-export function decide(report: Report, mark: Mark | null, now: number): { fresh: Unit[]; mark: Mark | null } {
-  if (report.kind === 'movie') return { fresh: mark ? [] : report.units.slice(0, 1), mark: mark ?? { season: null, number: 0 } };
+export function decide(report: Report, mark: Mark | null, _now: number): { fresh: Unit[]; mark: Mark | null } {
+  if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
-  const recent = (u: Unit) => u.publishedAt != null && now - u.publishedAt <= RECENT_MS;
   if (!mark) {
-    return { fresh: sorted.filter(recent).slice(-3), mark: { season: top.season, number: top.number } };
+    return { fresh: sorted.filter((u) => u.publishedAt != null), mark: { season: top.season, number: top.number } };
   }
   const limit = JUMP[report.kind];
   const above = sorted.filter((u) => {
@@ -161,7 +154,7 @@ export function decide(report: Report, mark: Mark | null, now: number): { fresh:
   });
   const undated = above.filter((u) => u.publishedAt == null);
   const catchUp = undated.length > BURST;
-  const fresh = above.filter((u) => (u.publishedAt != null ? recent(u) : !catchUp));
+  const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null && !catchUp)];
   const last = above[above.length - 1];
   return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
 }
@@ -190,6 +183,9 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
   }
 
   const writes = [];
+  const markValues: unknown[][] = [];
+  const insertValues: unknown[][] = [];
+  const updateValues = new Map<string, { sources: string; cover: string | null; publishedAt: number | null }>();
   let created = 0;
   let baselined = 0;
   const createdIds = new Set<string>();
@@ -199,12 +195,7 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
     if (!before) baselined++;
     if (mark && (!before || mark.season !== before.season || mark.number !== before.number)) {
       marks.set(r.work, mark);
-      writes.push(
-        env.DB.prepare(
-          `INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (work) DO UPDATE SET max_season = excluded.max_season, max_number = excluded.max_number, updated_at = excluded.updated_at`,
-        ).bind(r.work, r.section, mark.season, mark.number, now, now),
-      );
+      markValues.push([r.work, r.section, mark.season, mark.number, now, now]);
     }
     const freshIds = new Set(fresh.map((u) => eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number)));
     for (const u of r.units) {
@@ -219,26 +210,44 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
           old = [];
         }
         const merged = mergeSources(old, add);
-        // `at` و`first_seen_at` لا يُلمسان أبدًا: المصدر الثاني يُضاف تحت نفس الحدث في مكانه
+        // first_seen_at لا يتغير. أول تاريخ نشر موثوق يصحّح مكان الحدث مرة واحدة.
         if (JSON.stringify(merged) === row.sources && (row.cover || !r.cover) && (row.published_at != null || u.publishedAt == null)) continue;
         row.sources = JSON.stringify(merged);
-        writes.push(
-          env.DB.prepare('UPDATE update_events SET sources = ?, cover = COALESCE(cover, ?), published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?')
-            .bind(row.sources, r.cover, u.publishedAt, now, id),
-        );
+        const prior = updateValues.get(id);
+        updateValues.set(id, { sources: row.sources, cover: prior?.cover ?? r.cover, publishedAt: prior?.publishedAt ?? u.publishedAt });
+        row.cover ??= r.cover;
+        row.published_at ??= u.publishedAt;
         continue;
       }
       if (!freshIds.has(id) || createdIds.has(id)) continue;
       createdIds.add(id);
       created++;
       known.set(id, { sources: JSON.stringify(add), cover: r.cover, published_at: u.publishedAt });
-      writes.push(
-        env.DB.prepare(
-          `INSERT INTO update_events (id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
-        ).bind(id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now),
-      );
+      insertValues.push([id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now]);
     }
+  }
+  // D1 counts SQL statements, including statements inside a batch. Pack rows
+  // below its 100 bound-parameter limit instead of issuing one query per event.
+  for (let i = 0; i < markValues.length; i += 16) {
+    const rows = markValues.slice(i, i + 16);
+    writes.push(env.DB.prepare(`INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at)
+      VALUES ${rows.map(() => '(?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(work) DO UPDATE SET max_season=excluded.max_season, max_number=excluded.max_number, updated_at=excluded.updated_at`).bind(...rows.flat()));
+  }
+  for (let i = 0; i < insertValues.length; i += 7) {
+    const rows = insertValues.slice(i, i + 7);
+    writes.push(env.DB.prepare(`INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at)
+      VALUES ${rows.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')} ON CONFLICT(id) DO NOTHING`).bind(...rows.flat()));
+  }
+  const updates = [...updateValues];
+  for (let i = 0; i < updates.length; i += 8) {
+    const rows = updates.slice(i, i + 8);
+    const choose = `CASE id ${rows.map(() => 'WHEN ? THEN ?').join(' ')} END`;
+    writes.push(env.DB.prepare(`UPDATE update_events SET sources=${choose}, cover=COALESCE(cover,${choose}),
+      at=CASE WHEN published_at IS NULL THEN COALESCE(${choose},at) ELSE at END,
+      published_at=COALESCE(published_at,${choose}),updated_at=? WHERE id IN (${rows.map(() => '?').join(',')})`)
+      .bind(...rows.flatMap(([id,u]) => [id,u.sources]), ...rows.flatMap(([id,u]) => [id,u.cover]),
+        ...rows.flatMap(([id,u]) => [id,u.publishedAt]), ...rows.flatMap(([id,u]) => [id,u.publishedAt]), now, ...rows.map(([id]) => id)));
   }
   if (writes.length) await env.DB.batch(writes);
   return reply({ accepted: reports.length, created, baselined });
@@ -257,7 +266,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
   // قديم رآه VANTARA أول مرة، أو دفعة بلا تواريخ أكبر من إصدار حقيقي في لحظة واحدة
   const where = [
     'section = ?',
-    `NOT (published_at IS NOT NULL AND published_at < first_seen_at - ${RECENT_MS})`,
+    `(kind <> 'movie' OR published_at IS NOT NULL)`,
     `(published_at IS NOT NULL OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
   ];
   const binds: unknown[] = [section];
@@ -304,6 +313,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
         sources,
       };
     }),
+    snapshotAt: Date.now(),
     next: rows.length > limit && last ? `${last.at}~${last.id}` : null,
   });
 }

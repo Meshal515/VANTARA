@@ -47,6 +47,8 @@ data class SourceAnime(
     /** المصدر يقسّم العمل مواسم بدل حلقات مباشرة. */
     val hasSeasons: Boolean = false,
     val seasonNumber: Double = -1.0,
+    /** Cinema asks for a season independently of the episode number. */
+    val requestedSeason: Int? = null,
 )
 
 @Serializable
@@ -206,13 +208,21 @@ class ExtensionAdapter(
     }
 
     /** صفحة من الموقع عبر عميل الإضافة (ترويساتها وكوكيزها وموجّه الدومين). */
-    private suspend fun fetchPage(path: String): Pair<String, String> {
+    private suspend fun fetchPage(path: String, form: Map<String, String> = emptyMap()): Pair<String, String> {
         val http = source as? AnimeHttpSource ?: error("المصدر ليس HTTP")
         val url = if (path.startsWith("http")) path else http.baseUrl.trimEnd('/') + path
-        return http.client.newCall(GET(url, http.headers)).awaitOk().use { it.request.url.toString() to it.body.string() }
+        val request = if (form.isEmpty()) GET(url, http.headers) else okhttp3.Request.Builder().url(url)
+            .headers(http.headers).header("Referer", url)
+            .post(okhttp3.FormBody.Builder().apply { form.forEach { (k, v) -> add(k, v) } }.build()).build()
+        return http.client.newCall(request).awaitOk().use { it.request.url.toString() to it.body.string() }
     }
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
+        val primary = pageEmbeds()?.takeIf { it.primary }
+        if (primary != null && resolver != null) {
+            val fromPage = pageCandidates(episode, primary, resolver, now, trace, enough)
+            if (fromPage.isNotEmpty()) return fromPage
+        }
         val fromExtension = try {
             extensionCandidates(episode, now, trace)
         } catch (e: CancellationException) {
@@ -229,6 +239,11 @@ class ExtensionAdapter(
     }
 
     override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> {
+        val primary = pageEmbeds()?.takeIf { it.primary }
+        if (primary != null && resolver != null) {
+            val fromPage = pageCandidates(episode, primary, resolver, now, trace, Int.MAX_VALUE, server)
+            if (fromPage.isNotEmpty()) return fromPage
+        }
         val fromExtension = try { extensionCandidates(episode, now, trace, server) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { trace?.note("الإضافة", e.brief()); emptyList() }
@@ -249,7 +264,7 @@ class ExtensionAdapter(
 
     /** صفحة الحلقة ← روابط صفحات المشغّل بقاعدة البيان ← [EmbedResolver] بالتوازي. */
     private suspend fun pageCandidates(episode: SourceEpisode, rule: PageEmbeds, r: EmbedResolver, now: Long, trace: ResolveTrace?, enough: Int, preferredServer: String? = null): List<Candidate> {
-        val (finalUrl, html) = fetchPage(episode.url)
+        val (finalUrl, html) = fetchPage(episode.url, rule.form)
         // المشغّلات تتحقق من الصفحة الأم نفسها لا من جذر الموقع
         val referer = finalUrl
         val allEmbeds = rule.extract(html, finalUrl)
@@ -261,30 +276,30 @@ class ExtensionAdapter(
         return gatherUntil(
             embeds.map { embed ->
                 suspend {
-                    val got = withTimeoutOrNull(pageEmbedTimeoutMs) {
-                        runCatching { r.resolve(embed.url, referer) }
-                            .fold(
-                                { it },
-                                { report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = it.brief()); null },
-                            )
-                            ?.map { st ->
-                                Candidate(
-                                    id = "$id|${episode.url}|${st.url.hashCode()}",
-                                    sourceId = id,
-                                    sourceName = name,
-                                    server = embed.name,
-                                    host = StreamClassifier.host(st.url),
-                                    url = st.url,
-                                    headers = st.headers,
-                                    quality = st.quality ?: embed.quality,
-                                    label = embed.name,
-                                    variant = variant,
-                                    container = st.container ?: StreamClassifier.container(st.url),
-                                    resolvedAt = now,
-                                    expiresAt = StreamClassifier.expiresAt(st.url, now),
-                                )
-                            }
+                    fun convert(streams: List<com.vantara.anime.hosts.Stream>) = streams.map { st ->
+                        Candidate(
+                            id = "$id|${episode.url}|${st.url.hashCode()}", sourceId = id, sourceName = name,
+                            server = embed.name, host = StreamClassifier.host(st.url), url = st.url, headers = st.headers,
+                            quality = st.quality ?: embed.quality, label = st.label.ifBlank { embed.name }, variant = variant,
+                            container = st.container ?: StreamClassifier.container(st.url), resolvedAt = now,
+                            expiresAt = StreamClassifier.expiresAt(st.url, now),
+                        )
                     }
+                    val earlyFound = mutableListOf<Candidate>()
+                    val got = withTimeoutOrNull(pageEmbedTimeoutMs) {
+                        try {
+                            convert(r.resolve(embed.url, referer) { streams ->
+                                val early = convert(streams)
+                                earlyFound += early
+                                if (early.isNotEmpty()) report(trace, keyOf(embed), embed.name, early.maxOfOrNull { it.quality ?: 0 }?.takeIf { it > 0 } ?: embed.quality, variant, RouteState.READY, early)
+                            })
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            if (earlyFound.isEmpty()) report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = e.brief())
+                            earlyFound.toList()
+                        }
+                    } ?: earlyFound.toList().takeIf { it.isNotEmpty() }
                     when {
                         got == null -> emptyList<Candidate>().also {
                             report(trace, keyOf(embed), embed.name, embed.quality, variant, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${pageEmbedTimeoutMs / 1000} ثانية")

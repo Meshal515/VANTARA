@@ -1,5 +1,10 @@
 package com.vantara.anime
 
+import com.vantara.anime.adapters.AnimeAdapter
+import com.vantara.anime.adapters.SourceAnime
+import com.vantara.anime.adapters.SourcePage
+import com.vantara.anime.adapters.Listing
+import com.vantara.anime.adapters.ResolveTrace
 import com.vantara.anime.adapters.SourceEpisode
 import com.vantara.anime.episodes.EpisodeResolver
 import com.vantara.anime.health.HealthStore
@@ -13,6 +18,10 @@ import com.vantara.anime.stream.RouteState
 import com.vantara.anime.stream.StreamProbe
 import com.vantara.anime.stream.Variant
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -51,6 +60,12 @@ class CinemaFastPathTest {
         assertFalse(StreamProbe.verdict(Container.MP4, "application/json", "{\"error\":\"expired\"}"))
     }
 
+    @Test fun `plain error responses cannot be mistaken for MP4`() {
+        assertFalse(StreamProbe.verdict(Container.MP4, "text/plain", "File expired"))
+        assertFalse(StreamProbe.verdict(Container.UNKNOWN, null, ""))
+        assertFalse(StreamProbe.verdict(Container.UNKNOWN, null, "{\"error\":\"expired\"}"))
+    }
+
     @Test fun `a movie asks for its only episode whatever the source numbers it`() {
         val r = EpisodeResolver({ null }, HealthStore(null) { now })
         val zero = listOf(SourceEpisode("s1", "/m", "فيلم", 0f))
@@ -62,11 +77,38 @@ class CinemaFastPathTest {
         assertNull(r.pick(zero, 1f))
     }
 
+    @Test fun `a parent series resolves the requested season and caches each season independently`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val adapter = object : AnimeAdapter {
+            override val id = "egydead"
+            override val name = "EgyDead"
+            override suspend fun page(listing: Listing, page: Int, query: String) = SourcePage(emptyList(), false)
+            override suspend fun details(anime: SourceAnime) = anime
+            override suspend fun seasons(anime: SourceAnime) = listOf(
+                SourceAnime(id, "/season/s02", "The Gentlemen الموسم الثاني", seasonNumber = 2.0),
+                SourceAnime(id, "/season/s01", "The Gentlemen الموسم الاول", seasonNumber = 1.0),
+            )
+            override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
+                seen += anime.url
+                return listOf(SourceEpisode(id, "${anime.url}/episode1", "1", 1f))
+            }
+            override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int) = emptyList<Candidate>()
+        }
+        val r = EpisodeResolver({ adapter }, HealthStore(null))
+        val parent = SourceAnime("egydead", "/serie/gentlemen", "The Gentlemen", hasSeasons = true)
+        val first = r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 1)))
+        val second = r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 2)))
+        assertEquals("/season/s01/episode1", first.single().url)
+        assertEquals("/season/s02/episode1", second.single().url)
+        assertEquals(listOf("/season/s01", "/season/s02"), seen)
+        assertTrue(r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 3))).isEmpty())
+    }
+
     @Test fun `a probed route outranks an unprobed one and a failed probe sinks`() {
         val p = prepared()
         p.report(ready("a", cand("a1", "a.cdn", 1080)))
         p.report(ready("b", cand("b1", "b.cdn", 720)))
-        assertEquals("a1", p.best()?.id)
+        assertNull(p.best()) // Extracted links are not yet playable streams.
         p.markProbe("s1|a", ok = false, ms = 900)
         p.markProbe("s1|b", ok = true, ms = 300)
         assertEquals("b1", p.best()?.id)
@@ -77,6 +119,34 @@ class CinemaFastPathTest {
         // تقرير لاحق للسيرفر نفسه لا يمحو نتيجة فحصه
         p.report(ready("b", cand("b2", "b.cdn", 720)))
         assertEquals(true, p.routes().first { it.id == "s1|b" }.probed)
+    }
+
+    @Test fun `failed probes are never offered as best and an unprobed link cannot win`() {
+        val p = prepared()
+        p.report(ready("bad", cand("bad", "bad.cdn", 1080)))
+        p.markProbe("s1|bad", ok = false, ms = 30)
+        p.report(ready("waiting", cand("waiting", "waiting.cdn", 720)))
+        assertNull(p.best())
+    }
+
+    @Test fun `a successful probe wakes best immediately while other servers still resolve`() = runBlocking {
+        val p = prepared()
+        p.report(ready("a", cand("a", "a.cdn", 720)))
+        val waiting = async { p.awaitBest(null, 5_000) }
+        delay(20)
+        p.markProbe("s1|a", true, 20)
+        assertEquals("a", withTimeout(200) { waiting.await() }?.id)
+        assertFalse(p.done)
+    }
+
+    @Test fun `automatic fallback also waits for a probed candidate without discarding pending links`() {
+        val p = prepared()
+        p.report(ready("bad", cand("bad", "bad.cdn", 1080)))
+        p.report(ready("pending", cand("pending", "pending.cdn", 720)))
+        p.markProbe("s1|bad", false, 10)
+        assertNull(p.session.next())
+        p.markProbe("s1|pending", true, 10)
+        assertEquals("pending", p.session.next()?.id)
     }
 
     @Test fun `a late batch reopens a finished preparation`() {

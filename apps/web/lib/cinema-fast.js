@@ -317,7 +317,7 @@ export function createMetrics(storage = globalThis.localStorage, { clock = Date.
           }
           if (s.searchMs != null && !s.skipped) a.search.push(s.searchMs);
           if (s.serversMs != null) a.servers.push(s.serversMs);
-          if (s.playableMs != null || s.readyMs != null) a.first.push(s.playableMs ?? s.readyMs);
+          if (s.playableMs != null) a.first.push(s.playableMs);
           if (s.playable > 0) a.playable++;
           a.ready += s.ready;
           a.good += s.playable;
@@ -350,7 +350,7 @@ export function createMetrics(storage = globalThis.localStorage, { clock = Date.
 /** خلاصة الفتح للتخزين: أرقام لا قوائم سيرفرات. */
 export function summarize(run) {
   const routes = Object.values(run.routes);
-  const playable = routes.filter((r) => r.state === 'READY' && r.probed !== false).length;
+  const playable = routes.filter((r) => r.state === 'READY' && r.probed === true).length;
   const dead = routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false).length;
   const sources = Object.fromEntries(Object.entries(run.sources).map(([id, s]) => [id, { ...s }]));
   return {
@@ -363,7 +363,7 @@ export function summarize(run) {
     ttfm: run.ttfm,
     ttfr: run.ttfr,
     ttfp: run.ttfp ?? null,
-    sourcesOk: Object.values(run.sources).filter((s) => s.ready > 0).length,
+    sourcesOk: Object.values(run.sources).filter((s) => s.playable > 0).length,
     sourcesAsked: Object.values(run.sources).filter((s) => !s.skipped).length,
     servers: routes.length,
     playable,

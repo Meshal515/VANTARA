@@ -27,6 +27,8 @@ class PreparedEpisode(
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
     private val routeOfCandidate = HashMap<String, String>()
+    private val candidateProbes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val probing = HashSet<String>()
     private val listeners = CopyOnWriteArrayList<(Route?) -> Unit>()
     private var pendingBatches = 1
     private var fullPreparation = limitedSourceId == null
@@ -34,6 +36,8 @@ class PreparedEpisode(
     @Volatile var job: Job? = null
     @Volatile var done = false
         private set
+
+    init { if (probe) session.acceptsCandidate = { candidateProbes[it.id] == true } }
 
     fun routes(): List<Route> = synchronized(this) { byId.values.map(::withPlaybackState) }
 
@@ -109,12 +113,25 @@ class PreparedEpisode(
     }
 
     /** نتيجة فحص الرابط السريع: تُرسل للواجهة وتؤثر في ترتيب «شغّل الأفضل». */
-    fun markProbe(routeId: String, ok: Boolean, ms: Long) {
+    /** Each candidate is probed once, even if an adapter reports it twice. */
+    fun claimProbe(candidateId: String): Boolean = synchronized(this) {
+        !candidateProbes.containsKey(candidateId) && probing.add(candidateId)
+    }
+
+    fun markProbe(routeId: String, ok: Boolean, ms: Long, candidateId: String? = null) {
         val route = synchronized(this) {
             val old = byId[routeId] ?: return
-            old.copy(probed = ok, probeMs = ms).also { byId[routeId] = it }
+            val ids = candidateId?.let(::listOf) ?: old.candidates
+            for (id in ids) { candidateProbes[id] = ok; probing.remove(id) }
+            val verdict = when {
+                old.candidates.any { candidateProbes[it] == true } -> true
+                old.candidates.all { candidateProbes[it] == false } -> false
+                else -> null
+            }
+            old.copy(probed = verdict, probeMs = ms).also { byId[routeId] = it }
         }
         session.reorder { rank(it) }
+        session.changes.value = session.changes.value + 1
         val shown = withPlaybackState(route)
         listeners.forEach { runCatching { it(shown) } }
     }
@@ -190,7 +207,12 @@ class PreparedEpisode(
         return base + speed + preferred + probed
     }
 
-    fun best(preferCode: String? = null): Candidate? = rank(synchronized(this) { candidates.values.toList() }, preferCode).firstOrNull()
+    /** Cinema's search/extraction result is not a playable stream until its probe succeeds. */
+    fun playable(list: List<Candidate>): List<Candidate> = if (!probe) list else synchronized(this) {
+        list.filter { candidateProbes[it.id] == true }
+    }
+
+    fun best(preferCode: String? = null): Candidate? = rank(playable(synchronized(this) { candidates.values.toList() }), preferCode).firstOrNull()
 
     /** أفضل مرشّح، منتظرًا أول سيرفر يجهز إن لم يجهز شيء بعد. */
     suspend fun awaitBest(preferCode: String?, timeoutMs: Long): Candidate? =

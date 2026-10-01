@@ -82,7 +82,7 @@ export function pickCopies(works, { title, year = null, type = 'movie', season =
     if (type === 'movie' && score < 1 && !(info.year && year && info.year === year)) continue;
     if (type === 'series' && season != null) {
       const s = info.season ?? (c.seasonNumber > 0 ? c.seasonNumber : null);
-      if (s != null ? s !== season : season !== 1) continue;
+      if (s != null ? s !== season : !c.hasSeasons && season !== 1) continue;
     }
     out.push({ copy: c, score: score + (info.year && year && info.year === year ? 0.05 : 0) });
   }

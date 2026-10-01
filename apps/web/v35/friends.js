@@ -14,6 +14,7 @@
  * «نشاط القراءة ← إخفاء لدي» (الإعدادات) يُطبَّق هنا: مصفاتك أنت، لا تمسّ غيرك.
  */
 
+import { createFeedSnapshot } from './feed-snapshot.js';
 import { glyph } from './icons.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { actionList, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceSection, presenceState, pressable, roomInitial, shortAgo } from './social-kit.js';
@@ -95,6 +96,8 @@ export function createFriends(ctx) {
   let filter = 'all';
   let entered = false;
   const seenRows = new Set();
+  const feedSnapshots = new Map();
+  let friendOrder = null;
 
   const section = () => ctx.section() ?? 'manga';
   const settings = () => parse(sync.row?.('settings', me())?.data, {});
@@ -377,7 +380,10 @@ export function createFriends(ctx) {
 
   function feedList() {
     const list = el('div', 'sx-feed');
-    const events = feedEvents(sync, { section: section(), filter, me: me(), readingHidden: readingHidden() });
+    const key = `${section()}|${filter}|${readingHidden()}`;
+    if (!feedSnapshots.has(key)) feedSnapshots.set(key, createFeedSnapshot({ key: e => `${e.kind}:${e.id}` }));
+    const snapshot = feedSnapshots.get(key);
+    const events = snapshot.accept(feedEvents(sync, { section: section(), filter, me: me(), readingHidden: readingHidden() }), { prune: true });
     if (!events.length) {
       const empty = el('p', 'sx-empty', filter === 'recs' ? 'أول ترشيح بيظهر هنا' : filter === 'chat' ? 'المجلس هادي. قل شي' : 'لسه ما صار شي هنا');
       list.append(empty);
@@ -399,6 +405,11 @@ export function createFriends(ctx) {
         continue;
       }
       list.append(feedRow(e));
+    }
+    if (snapshot.pending) {
+      const refresh = el('button', 'feed-refresh', `${snapshot.pending} أنشطة جديدة`);
+      refresh.type = 'button'; refresh.onclick = () => { snapshot.refresh(); render(); };
+      list.append(refresh);
     }
     return list;
   }
@@ -441,7 +452,9 @@ export function createFriends(ctx) {
   function render() {
     const keepScroll = host.querySelector('.sx-strip')?.scrollLeft ?? 0;
     const parts = [];
-    const ids = kit.friendIds().sort((a, b) => rank(a) - rank(b) || kit.nameOf(a).localeCompare(kit.nameOf(b), 'ar'));
+    const currentIds = kit.friendIds();
+    friendOrder ??= currentIds.sort((a, b) => rank(a) - rank(b) || kit.nameOf(a).localeCompare(kit.nameOf(b), 'ar'));
+    const ids = friendOrder.filter(id => currentIds.includes(id));
 
     const friends = el('section', 'sx-section sx-friends');
     const live = ids.filter((id) => rank(id) < 3).length;
@@ -538,6 +551,8 @@ export function createFriends(ctx) {
 
   return {
     show() {
+      feedSnapshots.clear();
+      friendOrder = null;
       entered = false;
       render();
       void refreshPresence();

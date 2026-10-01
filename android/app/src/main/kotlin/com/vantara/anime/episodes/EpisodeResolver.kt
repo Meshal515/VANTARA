@@ -36,10 +36,17 @@ class EpisodeResolver(
     private val episodeCache = ConcurrentHashMap<String, Cached>()
 
     suspend fun episodes(copy: Copy): List<SourceEpisode> {
-        val key = "${copy.sourceId}|${copy.anime.url}"
+        val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}"
         episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS }?.let { return it.episodes }
         val adapter = adapterOf(copy.sourceId) ?: return emptyList()
-        val list = adapter.episodes(copy.anime)
+        val season = copy.anime.requestedSeason
+        val selected = if (season != null && season > 0 && copy.anime.hasSeasons) {
+            adapter.seasons(copy.anime).firstOrNull {
+                if (it.seasonNumber > 0) it.seasonNumber.toInt() == season
+                else com.vantara.anime.matching.TitleNormalizer.key(it.title).season == season
+            } ?: return emptyList()
+        } else copy.anime
+        val list = adapter.episodes(selected)
         // قائمة فارغة قد تكون محلّلًا تغيّر موقعه أو تحديًا عابرًا، لا «عمل بلا حلقات»:
         // لا تُخبّأ فتحجب المحاولة التالية عشر دقائق
         if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list)

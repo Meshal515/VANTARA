@@ -158,6 +158,14 @@ describe('createMetrics', () => {
     expect(per[1]).toMatchObject({ id: 'b', successRate: 0, topError: 'لم يرد خلال 12 ثانية' });
   });
 
+  it('does not report extracted but unprobed links as a successful source or a first playable time', () => {
+    const metrics = createMetrics(store());
+    const run = metrics.start({ key: 'k', title: 'Dune', kind: 'movie' });
+    run.route({ id: 'a|1', sourceId: 'a', state: 'READY' });
+    run.save();
+    expect(metrics.runs()[0]).toMatchObject({ sourcesOk: 0, playable: 0, ttfp: null });
+    expect(metrics.sources()[0]).toMatchObject({ firstPlayableMs: null, successRate: 0 });
+  });
   it('saves a run once and keeps only the latest runs', () => {
     const metrics = createMetrics(store(), { keep: 3 });
     for (let i = 0; i < 5; i++) {
@@ -171,7 +179,7 @@ describe('createMetrics', () => {
 
   it('a link that failed its probe does not count as playable', () => {
     const s = summarize({ key: 'k', sources: {}, routes: { a: { state: 'READY', probed: false }, b: { state: 'READY', probed: null } } });
-    expect(s.playable).toBe(1);
+    expect(s.playable).toBe(0);
     expect(s.failRate).toBe(0.5);
   });
 });

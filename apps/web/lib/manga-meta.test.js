@@ -1,7 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { fetchMangaRatings, matchMangaRating } from './manga-meta.js';
+import { fetchMangaPopular, fetchMangaRatings, matchMangaRating } from './manga-meta.js';
 
 describe('AniList manga rating', () => {
+  it('uses global popularity rather than source feed rank, retaining canonical refs and a trustworthy cover', async () => {
+    let query;
+    const items = await fetchMangaPopular({ fetchImpl: async (_url, init) => {
+      query = JSON.parse(init.body).query;
+      return { ok: true, json: async () => ({ data: { Page: { pageInfo: { hasNextPage: true }, media: [
+        { id: 1, title: { english: 'One Piece' }, coverImage: { large: 'https://c/one.jpg' }, popularity: 999, genres: ['Action'] },
+        { id: 2, title: { english: 'Adult' }, isAdult: true },
+      ] } } }) };
+    } });
+    expect(query).toContain('POPULARITY_DESC');
+    expect(items.items.map((m) => m.id)).toEqual(['ext:one piece']);
+    expect(items.items[0].coverImage.large).toBe('https://c/one.jpg');
+    expect(items.hasNextPage).toBe(true);
+  });
+  it('falls back to worldwide readership on Kitsu if AniList is unavailable', async () => {
+    const result = await fetchMangaPopular({ fetchImpl: async (url) => url.includes('anilist') ? { ok: false, status: 403 } : {
+      ok: true, json: async () => ({ data: [{ id: '38', attributes: { canonicalTitle: 'One Piece', userCount: 100000, posterImage: { original: 'https://c/op.jpg' } } }], links: {} }),
+    } });
+    expect(result.items[0]).toMatchObject({ id: 'ext:one piece', popularity: 100000, coverImage: { large: 'https://c/op.jpg' } });
+  });
   it('accepts only an exact normalized title, never the first search result by guess', () => {
     const results = [
       { id: 1, title: { romaji: 'Nano Machine: Ragnarok' }, averageScore: 99 },

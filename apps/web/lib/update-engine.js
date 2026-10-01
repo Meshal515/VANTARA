@@ -13,7 +13,8 @@ import { chapterNumberOf, normalizeTitle } from './catalog.js';
 
 const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
-const MAX_BATCH = 100;
+const MAX_BATCH = 20;
+const MAX_BATCH_UNITS = 200;
 
 let transport = null;
 const queue = new Map();
@@ -33,7 +34,13 @@ export async function flush() {
   clearTimeout(timer);
   timer = null;
   if (!transport || !queue.size) return;
-  const works = [...queue.values()].slice(0, MAX_BATCH);
+  const works = [];
+  let units = 0;
+  for (const work of queue.values()) {
+    const count = work.units?.length || 1;
+    if (works.length >= MAX_BATCH || (works.length && units + count > MAX_BATCH_UNITS)) break;
+    works.push(work); units += count;
+  }
   for (const w of works) queue.delete(keyOf(w));
   try {
     await transport('/v1/updates/observe', { method: 'POST', body: { works } });
@@ -64,7 +71,7 @@ export function report(r) {
  */
 export function trustDates(units) {
   const dated = units.filter((u) => u.publishedAt);
-  if (dated.length < 3) return units;
+  if (dated.length < 10) return units;
   const times = dated.map((u) => u.publishedAt);
   return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }

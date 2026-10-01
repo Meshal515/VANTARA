@@ -31,6 +31,8 @@ import { countLabel } from './plural.js';
 import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
 import { createFriends } from './friends.js';
+import { rankFriendsReading } from './friends-reading.js';
+import { createFeedSnapshot } from './feed-snapshot.js';
 import { createRoom } from './majlis-chat.js';
 import { prepareRoomAvatar } from './media-encode.js';
 import { endpoints } from '../lib/config.js';
@@ -45,7 +47,7 @@ import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
-import { fetchMangaRatings } from '../lib/manga-meta.js';
+import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
@@ -473,6 +475,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * ويرجع. الآن يوضع المعروف في نفس اللحظة، والذاكرة تعطيه بلا انتظار.
    */
   const shownCovers = new Map();
+  const failedCanonical = new Map();
+  const idOf = (work) => String(work?.id ?? '');
   const animePosters = new Map();
   /** ملصق أنمي بمعرّف AniList، مرة لكل أنمي في الجلسة. */
   function animePoster(id) {
@@ -489,7 +493,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // ذاكرة هذا الجهاز، فلا تختلف نسخة Debug عن Release ولا شاشة عن شاشة
     const canonical = work?.id ? sync.rows('works', (x) => x.series_ref === String(work.id))[0]?.cover_url ?? null : null;
     const known0 = shownCovers.get(String(work?.id ?? ''));
-    const known = known0 && (!canonical || known0 === canonical || known0 === cachedCover(canonical)) ? known0 : null;
+    const known = known0 && (!canonical || known0 === canonical || known0 === cachedCover(canonical) || failedCanonical.get(idOf(work)) === canonical) ? known0 : null;
     if (known) {
       const current = container.querySelector(':scope > img');
       if (current?.getAttribute('src') === known) return known;
@@ -518,7 +522,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onerror = () => done(false);
         img.src = url;
       });
-    const show = (img, url) => {
+    const show = (img, url, remote = url, sourceId = null) => {
+      if (id.startsWith('ext:') && canonical && remote !== canonical && failedCanonical.get(id) === canonical) {
+        sync.enqueue('work.cover.repair', { seriesRef: id, expectedCover: canonical, coverUrl: remote, sourceId });
+      }
       if (opts.position) img.style.objectPosition = opts.position;
       container.replaceChildren(img);
       if (id) shownCovers.set(id, img.getAttribute('src') ?? url);
@@ -529,7 +536,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const serverCover = id ? sync.rows('works', (x) => x.series_ref === id)[0]?.cover_url : null;
     const seen = new Set();
     const candidates = [
-      ...[serverCover, knownCover(id)].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? work?._work?.editions?.[0]?.sourceId ?? null })),
+      ...[serverCover, knownCover(id)].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? sync.rows('works', (x) => x.series_ref === id)[0]?.source_id ?? work?._work?.editions?.[0]?.sourceId ?? null })),
       ...coverCandidates(work),
     ].filter((c) => !seen.has(c.url) && seen.add(c.url));
     // أنمي من المجلس أو الحضور بلا غلاف محفوظ: ملصقه من AniList
@@ -539,14 +546,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (poster) candidates.push({ url: poster, sourceId: null });
     }
     // المحفوظ أولًا وبلا هيكل لامع: الغلاف الذي رأيته أمس يظهر كما هو
-    for (const { url } of candidates) {
+    for (const { url, sourceId } of candidates) {
       const local = cachedCover(url);
       if (!local) continue;
       const img = await tryUrl(local, 2500);
       if (container.dataset.imageToken !== token) return null;
       if (img) {
         rememberCover(id, url);
-        return show(img, local);
+        return show(img, local, url, sourceId);
       }
       forgetCover(url);
     }
@@ -562,8 +569,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (container.dataset.imageToken !== token) return null;
       if (img) {
         rememberCover(id, url);
-        return show(img, img.src);
+        return show(img, img.src, url, sourceId);
       }
+      if (url === canonical) failedCanonical.set(id, canonical);
     }
     if (container.dataset.imageToken !== token) return null;
     fallbackArt(container, titleOf(work));
@@ -590,7 +598,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** تفاصيل العمل من أوثق نسخة تحمل غلافه غالبًا. مرتين في آنٍ، ومرة لكل عمل كل عشر دقائق. */
   function resolveCoverLater(work) {
     const id = String(work?.id ?? '');
-    if (!id || !available() || !work?._work?.editions?.length) return;
+    if (!id || !id.startsWith('ext:') || !available()) return;
     if (Date.now() - (coverTried.get(id) ?? 0) < 10 * 60_000) return;
     coverTried.set(id, Date.now());
     const run = async () => {
@@ -598,9 +606,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       try {
         const full = await describe(work);
         const url = full?._work?.thumbnailUrl || full?.coverImage?.large || null;
-        if (url && url !== work.coverImage?.large) {
+        if (url) {
           rememberWork({ ...full, _work: { ...full._work, thumbnailUrl: url } });
           announceCover(id, url);
+          for (const [container, waiting] of waitingCovers) {
+            if (String(waiting.id) === id && container.isConnected) { waitingCovers.delete(container); void mountImage(container, { ...full, id }); }
+          }
         }
       } catch {
         // المصدر ما ردّ: يُعاد بعد عشر دقائق عند أول ظهور للبطاقة
@@ -789,20 +800,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * الأكثر أصدقاءً أولًا ثم الأحدث. من سجلّهم نفسه، لا تقدير.
    */
   function friendsReading() {
-    const since = Date.now() - 14 * 86_400_000;
-    const byRef = new Map();
-    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isMediaRef(r.series_ref))) {
-      const e = byRef.get(v.series_ref) ?? { ref: v.series_ref, users: new Set(), at: 0, title: v.series_title, cover: v.cover_url };
-      e.users.add(v.user_id);
-      e.at = Math.max(e.at, v.viewed_at ?? 0);
-      e.title ??= v.series_title;
-      e.cover ??= v.cover_url;
-      byRef.set(v.series_ref, e);
-    }
-    return [...byRef.values()]
-      .sort((a, b) => b.users.size - a.users.size || b.at - a.at)
+    const friendIds = (deps.friends?.() ?? sync.rows('accounts').map((r) => ({ userId: r.user_id }))).map((p) => p.userId);
+    return rankFriendsReading(sync.rows('work_views'), { me: me(), friendIds })
       .map((e) => workFromRef(e.ref, e.title, e.cover));
   }
+  function refreshFriendsHero() {
+    const next = friendsReading().filter((w) => w.coverImage?.large).slice(0, 6);
+    if (next.length === state.heroItems.length && next.every((w, i) => w.id === state.heroItems[i]?.id)) return;
+    state.heroItems = next;
+    renderHero();
+  }
+
   /**
    * الرئيسية من بيانات حقيقية فقط، كل قسم بمصدره وترتيبه:
    *   - آخر المشاهدات: سجلّك (20% من فصل أو تعليم).
@@ -813,6 +821,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *     لا يصل في SManga، لذلك لا ندّعيه حتى يقدمه المصدر بصراحة.
    * لا «مقترحة» ولا «مميزة» بلا معنى: ما لا نعرفه لا نخترعه.
    */
+  const homeSnapshots = new Map();
+  function homeSnapshot(kind, incoming) {
+    if (!homeSnapshots.has(kind)) homeSnapshots.set(kind, createFeedSnapshot());
+    return homeSnapshots.get(kind).accept(incoming);
+  }
+  async function globalPopular(page) {
+    const key = `manga.global-popular.${page}`;
+    const cached = (await readKv(key))?.value;
+    if (cached?.items?.length && Date.now() - cached.at < 6 * 60 * 60_000) return cached;
+    try {
+      const result = await fetchMangaPopular({ page });
+      const ranked = { ...result, at: Date.now() };
+      void writeKv(key, ranked);
+      return ranked;
+    } catch (error) {
+      if (cached?.items?.length) return cached;
+      throw error;
+    }
+  }
   let homeBusy = false;
   let homeCheckedAt = 0;
   const keepChapterFacts = (items, before) => {
@@ -841,11 +868,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.home.recent = recentFromLatest(items, state.home.recent);
       for (const listener of latestListeners) listener(latestPartial);
       if (state.collection?.kind === 'latestListing' && state.collection.page === 0) {
-        state.collection.items = recentFromLatest(items, state.collection.items);
+        if (!state.collection.items.length) state.collection.items = recentFromLatest(items, []);
         renderGrid(q('collectionGrid'), state.collection.items);
       }
       if (currentPage() === 'home') renderHome();
-      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+      void writeKv('home.v4', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
     }, { concurrency: 3 }).then((result) => {
       latestResult = { ...result, at: Date.now() };
       return latestResult;
@@ -889,25 +916,37 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (reading.length) specs.push(['أعمال تتابعها', 'libraryReading', reading]);
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
-    if (state.home.trending.length) specs.push(['رائج في المصادر', 'trending', state.home.trending]);
+    if (state.home.trending.length) specs.push(['الأكثر شهرة عالميًا', 'trending', state.home.trending]);
     if (state.home.updates?.length) specs.push(['آخر التحديثات', 'recent', state.home.updates]);
     else if (state.home.recent.length) specs.push(['في المصادر الآن', 'sourcesNow', state.home.recent]);
     if (!specs.length) return;
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
     const blocks = specs.map(([title, kind, items]) => {
-      const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, items, kind);
-      if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), items);
+      const snapshot = homeSnapshot(kind, items);
+      const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, snapshot, kind);
+      if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), snapshot);
+      const pending = homeSnapshots.get(kind).pending;
+      let refresh = section.querySelector('.feed-refresh');
+      if (pending && !refresh) {
+        refresh = el('button', 'feed-refresh');
+        refresh.type = 'button';
+        refresh.onclick = () => { homeSnapshots.get(kind).refresh(); renderHome(); };
+        section.querySelector('.section-head').append(refresh);
+      }
+      if (refresh) { refresh.hidden = !pending; refresh.textContent = `${pending} أعمال جديدة`; }
       return section;
     });
-    blocks.forEach((block, i) => {
+    const previousOrder = [...old.values()].filter(s => blocks.includes(s));
+    const stableBlocks = [...previousOrder, ...blocks.filter(s => !previousOrder.includes(s))];
+    stableBlocks.forEach((block, i) => {
       if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
     });
     for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
-      ...['رائج في المصادر', 'آخر التحديثات في المصادر'].map((title) => {
+      ...['الأكثر شهرة عالميًا', 'آخر التحديثات في المصادر'].map((title) => {
         const s = el('section', 'section');
         s.setAttribute('aria-busy', 'true');
         const h = el('div', 'section-head');
@@ -926,7 +965,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     let onLatest = null;
     try {
     if (!available()) {
-      renderHeroFallback();
+      if (!state.heroItems.length) renderHeroFallback();
       const box = el('div');
       emptyState(box, { icon: 'layers', title: 'المصادر داخل تطبيق أندرويد', text: 'الكتالوج يُقرأ من مصادرنا العربية بمحرّك التطبيق — افتح VANTARA على الجوال.' });
       renderHome();
@@ -935,42 +974,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     // آخر رئيسية رأيتها تظهر فورًا، والمصادر تحدّثها وهي تردّ واحدًا واحدًا —
     // لا شاشة تنتظر أبطأ مصدر من ستة عشر. قائمتان حقيقيتان: الرائج والأحدث.
-    const cached = (await readKv('home.v3'))?.value;
+    const cached = (await readKv('home.v4'))?.value;
     const hasCache = Boolean(cached?.trending?.length || cached?.recent?.length || state.home.trending.length || state.home.recent.length);
-    const heroFrom = (list) => list.filter((w) => !!w.coverImage?.large).slice(0, 6);
     if (hasCache) {
       if (cached?.trending?.length) state.home.trending = cached.trending;
       if (cached?.recent?.length) state.home.recent = recentFromLatest(state.home.recent, cached.recent.map(({ _latestChapter, ...w }) => w));
-      const previousHero = heroFrom(state.home.trending);
-      if (previousHero.length && (previousHero.length !== state.heroItems.length || previousHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
-        state.heroItems = previousHero;
-        renderHero();
-      }
       renderHome();
     } else {
       if (!q('homeSections').childElementCount) renderHomeSkeleton();
-      renderHeroSkeleton();
+      if (!state.heroItems.length) renderHeroFallback();
     }
-    let heroDone = hasCache;
     let paintTimer = null;
     let saveTimer = null;
     const paint = () => {
       clearTimeout(paintTimer);
       paintTimer = setTimeout(() => {
-        // البانر من أول عمل له غلاف، ويكتمل مع وصول الباقي. كان ينتظر ثلاثة ثم
-        // الستة عشر كلها، فمصدرٌ بطيء يُبقي مكانه مربعًا أسود
-        const next = heroFrom(state.home.trending);
-        if (!heroDone && next.length > state.heroItems.length && !state.heroDragging) {
-          state.heroItems = next;
-          renderHero();
-          if (next.length >= 6) heroDone = true;
-        }
         if (currentPage() === 'home') renderHome();
         // يُحفظ ما وصل فورًا: الفتحة القادمة تبدأ منه ولو علق مصدر للنهاية
         if (!hasCache && !saveTimer) {
           saveTimer = setTimeout(() => {
             saveTimer = null;
-            void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+            void writeKv('home.v4', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
           }, 1500);
         }
       }, 120);
@@ -988,30 +1012,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     latestListeners.add(onLatest);
     try {
       const [tr, re] = await Promise.all([
-        browseLive({ kind: 'popular', page: 1 }, live('trending'), {
-          concurrency: 3, shouldContinue: () => currentPage() === 'home' && root.dataset.section === 'manga',
-        }),
+        globalPopular(1),
         latestFirstPage(),
       ]);
       // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
       if (tr.items.length) state.home.trending = tr.items;
       if (re.items.length) state.home.recent = recentFromLatest(re.items, state.home.recent);
       clearTimeout(saveTimer);
-      const finalHero = heroFrom(tr.items);
-      // لا يُعاد بناء بانرٍ يلفّ أمام المستخدم بنفس الأعمال
-      if (finalHero.length && (finalHero.length !== state.heroItems.length || finalHero.some((w, i) => w.id !== state.heroItems[i]?.id))) {
-        state.heroItems = finalHero;
-        renderHero();
-      } else if (!state.heroItems.length) {
-        renderHeroFallback();
-      }
       renderHome();
       if (!tr.items.length && !re.items.length && !hasCache) throw new Error('empty');
-      void writeKv('home.v3', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
+      void writeKv('home.v4', { trending: state.home.trending.slice(0, 40), recent: state.home.recent.slice(0, 40) });
     } catch {
       // عندنا نسخة محفوظة: تبقى كما هي، بلا شاشة خطأ فوقها
       if (hasCache) return;
-      renderHeroFallback();
+      if (!state.heroItems.length) renderHeroFallback();
       const box = el('div');
       emptyState(box, {
         icon: 'offline',
@@ -2795,7 +2809,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── المجموعات والاستكشاف والبحث ─────────────────────────
 
   const COLLECTIONS = {
-    trending: { title: 'رائج في المصادر', kind: 'popular' },
+    trending: { title: 'الأكثر شهرة عالميًا', kind: 'globalPopular' },
     // «آخر التحديثات» صار ذاكرة VANTARA (openUpdates)، و«في المصادر الآن» قائمة المصادر اللحظية
     sourcesNow: { title: 'في المصادر الآن', kind: 'latestListing' },
     catalogue: { title: 'كل الأعمال', kind: 'catalogue' },
@@ -2838,6 +2852,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountTimeline(q('collectionGrid'), {
       section,
       el,
+      mountCover: (art, g) => void mountImage(art, g.section === 'manga' ? workOfEvent(g) : workFromRef(g.work, g.title, g.cover)),
+      visible: () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section,
       image: (src) => {
         const img = new Image();
         img.alt = '';
@@ -2896,14 +2912,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const page = state.collection.page + 1;
       const r = state.collection.genre
         ? await browse({ genre: state.collection.genre.names, page })
+        : state.collection.kind === 'globalPopular' ? await globalPopular(page)
         : state.collection.kind === 'latestListing' && page === 1
           ? await latestFirstPage()
           : await browse({ kind: state.collection.kind, page });
       if (requested !== state.collection) return;
       state.collection.page = r.page;
       state.collection.hasNext = r.hasNextPage;
-      state.collection.items = uniqueById(state.collection.page === 1 && requested.items.length
-        ? [...r.items, ...requested.items] : [...requested.items, ...r.items]);
+      state.collection.items = uniqueById([...requested.items, ...r.items]);
       if (!state.collection.items.length) {
         emptyState(q('collectionGrid'), {
           icon: 'search',
@@ -3028,12 +3044,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   async function runSearch(term, grid, stillWanted) {
     grid.replaceChildren(...skeletonCards(6));
+    grid.parentNode?.querySelector('.search-refresh')?.remove();
+    const snapshot = createFeedSnapshot();
+    const paintSnapshot = (items) => {
+      renderGrid(grid, snapshot.accept(items));
+      let refresh = grid.parentNode?.querySelector('.search-refresh');
+      if (snapshot.pending && !refresh) {
+        refresh = el('button', 'feed-refresh search-refresh');
+        refresh.type = 'button';
+        refresh.onclick = () => { if (stillWanted() !== term) return; renderGrid(grid, snapshot.refresh()); refresh.remove(); };
+        grid.after(refresh);
+      }
+      if (refresh) refresh.textContent = `${snapshot.pending} نتائج جديدة`;
+    };
     try {
       const { items } = await browseLive({ query: term }, ({ items: partial }) => {
-        if (stillWanted() === term && partial.length) renderGrid(grid, partial);
+        if (stillWanted() === term && partial.length) paintSnapshot(partial);
       });
       if (stillWanted() !== term) return 0;
-      if (items.length) renderGrid(grid, items);
+      if (items.length) paintSnapshot(items);
       else emptyState(grid, { icon: 'search', title: 'لا نتائج', text: 'جرّب اسمًا آخر، أو الاسم بالإنجليزي.' });
       return items.length;
     } catch {
@@ -3446,7 +3475,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq') void rafiq.show();
-    if (id === 'home' && root.dataset.section === 'manga') void refreshHomeUpdates();
+    if (id === 'home' && root.dataset.section === 'manga') {
+      if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
+      void refreshHomeUpdates();
+    }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
     if (id === 'settings') {
@@ -4344,7 +4376,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const enter = () => {
       if (id === 'anime') anime.show();
       else if (id === 'cinema') cinema.show();
-      else restartHero();
+      else { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); restartHero(); }
     };
     if (currentPage() !== 'home') {
       applySection(id);
@@ -4440,13 +4472,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {
     if (tables.includes('work_views') || tables.includes('progress')) {
-      if (currentPage() === 'library' && state.libraryFilter === 'history') renderLibrary();
-      else if (currentPage() === 'home' && tables.includes('work_views')) renderHome();
+      if (currentPage() === 'home' && tables.includes('work_views')) {
+        if (!state.heroItems.length) refreshFriendsHero();
+        renderHome();
+      }
     }
     if (tables.some((t) => ['library', 'collections', 'completions'].includes(t))) {
       refreshLibraryDetail();
       if (currentPage() === 'home') renderHome();
-      if (currentPage() === 'library') renderLibrary();
     }
     if (tables.includes('ratings')) {
       pendingRating = null;
@@ -4784,6 +4817,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   if (startSection === 'cinema') cinema.show();
 
   paintNotifyDots();
+  refreshFriendsHero();
+  if (!state.heroItems.length) renderHeroFallback();
   renderHome();
   void refreshHomeUpdates();
   // ابدأ Latest عند دخول التطبيق مباشرة؛ loadHome وصفحته يتشاركان نفس الطلب.

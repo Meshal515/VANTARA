@@ -667,7 +667,7 @@ export function createCinema(deps) {
     const groups = await latestGroups('cinema').catch(() => null);
     if (!groups?.length) return;
     state.updates = groups;
-    if (state.home && deps.currentPage() === 'home' && !q('cinemaHome').hidden) renderHome(state.home);
+    if (state.home && (deps.currentPage() !== 'home' || q('cinemaHome').hidden)) renderHome(state.home);
   }
   /** بطاقة حدث: الملصق، الاسم، و«S02E05 · قبل ساعتين». */
   function updateCard(g) {
@@ -744,12 +744,14 @@ export function createCinema(deps) {
     w.closed = true;
     for (const f of w.off) f();
     w.off = [];
+    w.copyOff?.();
     w.run?.save();
     if (w.session && !w.launched) void engine.closeSession(w.session);
   }
   function warmUp(m, season, n) {
     const key = playKey(m, season);
     const episode = m.type === 'movie' ? -1 : n;
+    const forPreparation = copies => m.type === 'series' ? copies.map(c => ({ ...c, requestedSeason: season })) : copies;
     const cur = state.warm;
     if (cur && !cur.closed && cur.key === key && cur.episode === episode && Date.now() - cur.at < WARM_TTL) return cur;
     dropWarm();
@@ -785,7 +787,7 @@ export function createCinema(deps) {
           else w.routes.push(e.route);
           w.run.route(e.route);
           // أول سيرفر جاهز: نسخة مصدره تُحفظ للعمل، فالفتحة القادمة تبدأ منها مباشرة
-          if (e.route.state === 'READY' && e.route.probed !== false && !w.remembered) {
+          if (e.route.state === 'READY' && e.route.probed === true && !w.remembered) {
             w.remembered = true;
             memory.remember(key, h.found.copies, h.found.copies.find((c) => c.sourceId === e.route.sourceId));
           }
@@ -806,7 +808,7 @@ export function createCinema(deps) {
       try {
         const out = await engine.prepare({
           session,
-          copies: initial,
+          copies: forPreparation(initial),
           episode,
           preferredSourceId: pref?.sourceId ?? null,
           preferredServer: pref?.server ?? null,
@@ -822,19 +824,18 @@ export function createCinema(deps) {
       }
       notify();
       // مصدر ردّ بعد بدء التجهيز: نسخته تدخل الجلسة نفسها، وما يعمل لا يتوقف
-      w.off.push(
-        h.onCopies((fresh) => {
+      w.copyOff = h.onCopies((fresh) => {
           if (w.closed || !w.session) return;
-          void engine.extend(w.session, fresh).then((added) => {
+          void engine.extend(w.session, forPreparation(fresh)).then((added) => {
             if (added && !w.closed) {
               w.done = false;
               notify();
             }
           });
-        }),
-      );
+        });
+      h.done.finally(() => w.copyOff?.());
       const late = h.found.copies.filter((c) => !initial.includes(c));
-      if (late.length && w.session) void engine.extend(w.session, late);
+      if (late.length && w.session) void engine.extend(w.session, forPreparation(late));
     })();
     return w;
   }
@@ -854,9 +855,9 @@ export function createCinema(deps) {
     if (units.length) reportUpdate({ work: `cinema:${m.id}`, section: 'cinema', kind: 'episode', title: m.title, cover: m.poster ?? null, source: { s: 'cinemeta' }, units });
   }
   function senseMovie(m, copies) {
-    if (m.type !== 'movie' || !copies?.length || !(m.year >= new Date().getFullYear() - 1)) return;
+    if (m.type !== 'movie' || !copies?.length || !m.released || m.released > Date.now()) return;
     for (const c of copies.slice(0, 4)) {
-      reportUpdate({ work: `cinema:${m.id}`, section: 'cinema', kind: 'movie', title: m.title, cover: m.poster ?? null, source: { s: c.sourceId, u: c.url }, units: [{}] });
+      reportUpdate({ work: `cinema:${m.id}`, section: 'cinema', kind: 'movie', title: m.title, cover: m.poster ?? null, source: { s: c.sourceId, u: c.url }, units: [{ publishedAt: m.released }] });
     }
   }
 
@@ -874,8 +875,8 @@ export function createCinema(deps) {
     const all = readJson(FAIL_KEY, {});
     for (const r of routes) {
       const k = serverKey(r);
-      if (r.state === 'READY') delete all[k];
-      else if (r.state === 'UNAVAILABLE' || r.state === 'FAILED') all[k] = { n: Math.min(9, (all[k]?.n ?? 0) + 1), at: Date.now() };
+      if (r.state === 'READY' && r.probed === true) delete all[k];
+      else if (r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false) all[k] = { n: Math.min(9, (all[k]?.n ?? 0) + 1), at: Date.now() };
     }
     writeJson(FAIL_KEY, all);
   }
@@ -1115,7 +1116,7 @@ export function createCinema(deps) {
       if (!line.isConnected) return false;
       const names = [...new Set(found.copies.map((c) => SOURCE_NAMES[c.sourceId] ?? c.sourceId))];
       const w = state.warm?.key === playKey(m, season) ? state.warm : null;
-      const ready = w ? w.routes.filter((r) => r.state === 'READY' && r.probed !== false).length : 0;
+      const ready = w ? w.routes.filter((r) => r.state === 'READY' && r.probed === true).length : 0;
       line.textContent = `مترجم · متاح عبر ${names.join('، ')}${ready ? ` · جاهز للتشغيل (${ready})` : ''}`;
       return true;
     };
@@ -1411,10 +1412,17 @@ export function createCinema(deps) {
       foot.append(best);
       body.append(bar, scroll, foot);
 
+      const tileNodes = new Map();
+      const groupNodes = new Map();
+      const routeGroups = new Map();
+      const deadFold = el('details', 'cn-srv-dead');
+      const deadSummary = el('summary');
+      const deadGrid = el('div', 'an-srv-grid');
+      deadFold.append(deadSummary, deadGrid);
       const paint = () => {
         queued = false;
         if (sheet.closed) return;
-        const ready = sheet.routes.filter((r) => r.state === 'READY' && r.probed !== false).length;
+        const ready = sheet.routes.filter((r) => r.state === 'READY' && r.probed === true).length;
         if (sheet.missing) status.textContent = m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
         else if (!sheet.session) status.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
         else if (!sheet.done && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
@@ -1423,39 +1431,43 @@ export function createCinema(deps) {
         best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
         best.classList.toggle('waiting', !ready && !sheet.done && !sheet.missing);
         // الحيّ أولًا، والسيرفرات التي فشلت هنا مؤخرًا في آخر مجموعتها، والميت مطويّ
-        const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED');
-        const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED');
+        const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED' && r.probed !== false);
+        const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false);
         const tile = (r) => {
-          const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}`);
-          b.type = 'button';
-          b.disabled = r.state === 'RESOLVING';
-          const top = el('span', 'an-srv-top');
-          top.append(text('b', 'an-srv-code', serverName(r), /[\u0600-\u06FF]/.test(serverName(r)) ? 'rtl' : 'ltr'), el('span', 'an-srv-tag', SOURCE_NAMES[r.sourceId] ?? r.sourceId));
-          const line = el('span', 'an-srv-state');
-          line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
-          b.append(top, line);
-          b.onclick = () => (r.state === 'READY' ? void playRoute(r) : toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
+          let b = tileNodes.get(r.id);
+          if (!b) {
+            b = el('button'); b.type = 'button';
+            b.innerHTML = '<span class="an-srv-top"><b class="an-srv-code"></b><span class="an-srv-tag"></span></span><span class="an-srv-state"><i class="an-srv-dot"></i><span></span></span>';
+            tileNodes.set(r.id, b);
+          }
+          const verified = r.state === 'READY' && r.probed === true;
+          const pending = r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null);
+          b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}`;
+          b.disabled = pending;
+          b.querySelector('.an-srv-code').textContent = serverName(r);
+          b.querySelector('.an-srv-tag').textContent = SOURCE_NAMES[r.sourceId] ?? r.sourceId;
+          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.probed === false ? 'غير متاح' : STATE_AR[r.state] ?? '';
+          b.onclick = () => verified ? void playRoute(r) : toast(r.reason || 'لم ينجح فحص رابط الفيديو', 5000);
           return b;
         };
-        const groups = engine.groupRoutes(live).map(([group, routes]) => {
-          const g = el('section', 'an-srv-group');
-          const grid = el('div', 'an-srv-grid');
-          // الجاهز أولًا، وداخله ما ردّ رابطه بفيديو فعلًا قبل ما لم يُفحص، ثم ما فشل هنا مؤخرًا
-          grid.append(...[...routes].sort((a, b) => (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3) || probeRank(a) - probeRank(b) || failures(a) - failures(b)).map(tile));
-          g.append(el('h4', 'an-srv-q', group), grid);
-          return g;
-        });
-        if (dead.length) {
-          const fold = el('details', 'cn-srv-dead');
-          fold.open = sheet.showDead === true;
-          fold.addEventListener('toggle', () => (sheet.showDead = fold.open));
-          const sum = el('summary', null, `غير متاح (${dead.length})`);
-          const grid = el('div', 'an-srv-grid');
-          grid.append(...dead.map(tile));
-          fold.append(sum, grid);
-          groups.push(fold);
+        for (const r of live) {
+          let group = routeGroups.get(r.id);
+          if (!group) { group = engine.groupRoutes([r])[0]?.[0] ?? 'السيرفرات'; routeGroups.set(r.id, group); }
+          if (!groupNodes.has(group)) {
+            const g = el('section', 'an-srv-group');
+            const grid = el('div', 'an-srv-grid');
+            g.append(el('h4', 'an-srv-q', group), grid);
+            groupNodes.set(group, grid);
+            list.insertBefore(g, deadFold.parentNode === list ? deadFold : null);
+          }
+          const grid = groupNodes.get(group), b = tile(r);
+          if (b.parentNode !== grid) grid.append(b);
         }
-        list.replaceChildren(...groups);
+        if (dead.length) {
+          deadSummary.textContent = `غير متاح (${dead.length})`;
+          for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }
+          if (deadFold.parentNode !== list) list.append(deadFold);
+        }
       };
       const queuePaint = () => {
         if (queued) return;

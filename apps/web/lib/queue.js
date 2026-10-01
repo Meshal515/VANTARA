@@ -74,6 +74,7 @@ const OPS = {
   // آخر فتحة لكل عمل تكفي؛ والحذف بعدها يلغيها (نفس المفتاح)
   'view.add': { class: STATE, key: (p) => `view/${p.seriesRef}` },
   'view.remove': { class: STATE, key: (p) => `view/${p.seriesRef}` },
+  'work.cover.repair': { class: STATE, key: (p) => `cover-repair/${p.seriesRef}` },
   'work.describe': { class: STATE, key: (p) => `work/${p.seriesRef}` },
   'majlis.receipt': { class: STATE, key: (p) => `receipt/${p.targetKind}/${p.targetId}/${p.seen ? 's' : 'd'}` },
   'notification.seen': { class: STATE, key: (p) => `notification-seen/${p.id}` },

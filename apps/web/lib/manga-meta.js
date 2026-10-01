@@ -1,6 +1,50 @@
 /** تقييم المانجا من AniList فقط عند مطابقة عنوان العمل نفسه بثقة. */
 import { normalizeTitle } from './catalog.js';
 
+/** Global readership, cached by the caller as a stable ranking snapshot. */
+export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl('https://graphql.anilist.co', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ query: `query ($page: Int) { Page(page: $page, perPage: 24) { pageInfo { hasNextPage }
+        media(type: MANGA, sort: POPULARITY_DESC, isAdult: false) { id title { english romaji native } synonyms
+          coverImage { extraLarge large } genres popularity averageScore status chapters isAdult } } }`, variables: { page } }),
+    });
+    if (!response.ok) throw new Error(`anilist_${response.status}`);
+    const data = (await response.json())?.data?.Page;
+    if (!data?.media) throw new Error('anilist_no_popularity');
+    const items = data.media.filter((m) => !m.isAdult).map((m) => {
+      const title = m.title?.english || m.title?.romaji || m.title?.native;
+      const key = normalizeTitle(title);
+      return {
+        id: `ext:${key}`, title: { english: title, romaji: m.title?.romaji, native: m.title?.native }, synonyms: m.synonyms ?? [],
+        coverImage: m.coverImage, bannerImage: m.coverImage?.large, genres: m.genres ?? [], status: m.status,
+        popularity: m.popularity, averageScore: m.averageScore, chapters: m.chapters, staff: { edges: [] },
+        _metaId: m.id, _work: { key, title, thumbnailUrl: m.coverImage?.large ?? null, editions: [] },
+      };
+    }).filter((w) => w.title.english && w._work.key);
+    return { items, hasNextPage: Boolean(data.pageInfo?.hasNextPage), page };
+  } catch (primaryError) {
+    // A provider outage must not turn global popularity back into source ranking.
+    const url = `https://kitsu.io/api/edge/manga?sort=-userCount&page[limit]=24&page[offset]=${(page - 1) * 24}`;
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/vnd.api+json' } });
+    if (!response.ok) throw primaryError;
+    const data = await response.json();
+    if (!Array.isArray(data.data)) throw primaryError;
+    const items = data.data.filter((m) => m.attributes && !['R18', 'R18+'].includes(m.attributes.ageRating)).map((m) => {
+      const a = m.attributes, title = a.titles?.en || a.canonicalTitle, key = normalizeTitle(title);
+      const cover = a.posterImage?.original || a.posterImage?.large || a.posterImage?.medium || null;
+      return { id: `ext:${key}`, title: { english: title, romaji: a.titles?.en_jp }, coverImage: { large: cover, extraLarge: cover },
+        genres: [], status: a.status, popularity: a.userCount, chapters: a.chapterCount, staff: { edges: [] },
+        _work: { key, title, thumbnailUrl: cover, editions: [] } };
+    }).filter((w) => w.title.english && w._work.key);
+    return { items, page, hasNextPage: Boolean(data.links?.next) };
+  } finally { clearTimeout(timer); }
+}
+
 export function matchMangaRating(title, candidates) {
   const key = normalizeTitle(title);
   if (!key) return null;

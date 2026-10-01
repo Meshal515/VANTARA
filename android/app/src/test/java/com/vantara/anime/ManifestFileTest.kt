@@ -22,6 +22,14 @@ class ManifestFileTest {
         assertTrue(m.sources.any { it.id == "witanime" && it.enabled && it.adapter == "witanime-site" })
     }
 
+    @Test fun `EgyDead has a native MegaMax server extraction path`() {
+        val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "egydead" }.embeds
+        assertTrue("Old extension ignores MegaMax, so it needs the page server path", rule != null)
+        val embeds = rule!!.extract("""<ul class="serversList"><li data-link="https://megamax.me/iframe/x"><span><p>MegaMax</p></span></li></ul>""", "https://tv10.egydead.live/unabomber-2026/")
+        assertEquals("https://megamax.me/iframe/x", embeds.single().url)
+        assertEquals("MegaMax", embeds.single().name)
+    }
+
     @Test fun `OkAnime's server rule reads the redesigned episode page`() {
         val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "okanime" }.embeds!!
         val html = """

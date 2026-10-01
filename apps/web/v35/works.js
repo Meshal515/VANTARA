@@ -792,7 +792,7 @@ export function describe(v35work) {
       const title = work.title?.english ?? '';
       if (!title || title.startsWith('ext:')) return work;
       const { items } = await browse({ query: title, keepWestern: true });
-      work = items.find((x) => x.id === work.id) ?? items[0] ?? work;
+      work = items.find((x) => x.id === work.id) ?? items.find((x) => titlesMatch(x.title?.english, title)) ?? work;
     }
     const primary = work._work?.editions?.[0];
     if (!primary) return work;

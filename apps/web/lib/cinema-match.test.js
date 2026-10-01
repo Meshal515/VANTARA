@@ -45,6 +45,11 @@ describe('اختيار النسخ', () => {
     expect(pickCopies(works, { title: 'Dark', type: 'series', season: 2 }).map((x) => x.sourceId)).toEqual(['arabseed']);
     expect(pickCopies(works, { title: 'Dark', type: 'series', season: 1 }).map((x) => x.sourceId).sort()).toEqual(['cimaleek', 'faselhd']);
   });
+  it('allows a parent series for later seasons only when the source explicitly has seasons', () => {
+    const parent = { ...c('egydead', 'مسلسل The Gentlemen 2024 مترجم كامل'), hasSeasons: true };
+    const unknown = c('other', 'مسلسل The Gentlemen 2024 مترجم كامل');
+    expect(pickCopies([{ copies: [parent, unknown] }], { title: 'The Gentlemen', type: 'series', season: 2 })).toEqual([parent]);
+  });
   it('queries: as is, then without subtitle punctuation', () => {
     expect(queriesFor('Dune: Part Two')).toEqual(['Dune: Part Two', 'Dune']);
   });

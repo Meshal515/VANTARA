@@ -14,6 +14,7 @@ import {
   verifyIdentityToken,
 } from '@vantara/domain';
 import legacyWorker from './index.ts';
+import { collectTimelines } from './collectors.ts';
 import { bearerFrom, mintToken } from './session.ts';
 import type { Env, ExecutionContext } from './types.ts';
 
@@ -416,6 +417,9 @@ async function logoutAll(request: Request, env: Env, now: number): Promise<Respo
 }
 
 export default {
+  async scheduled(event: { scheduledTime: number }, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(collectTimelines(env, { now: event.scheduledTime, scheduled: true }));
+  },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';

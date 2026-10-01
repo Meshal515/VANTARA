@@ -751,30 +751,6 @@
   border-radius: 6px;
 }
 
-/* ───────────────────────── التنقّل ─────────────────────────
- * نفس الأزرار في الأقسام الثلاثة؛ في المانجا «أنت هنا» شرطة فوق الأيقونة
- * كعلامة كتاب، بدل الحبّة الملوّنة. */
-
-.v35[data-section='manga'] .nav.active .nav-pill {
-  background: none;
-  color: var(--text-1);
-}
-.v35[data-section='manga'] .nav::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 22px;
-  height: 2px;
-  margin-left: -11px;
-  background: var(--accent);
-  transform: scaleX(0);
-  transition: transform var(--dur) var(--ease-out);
-}
-.v35[data-section='manga'] .nav.active::before {
-  transform: scaleX(1);
-}
-
 @media (max-width: 370px) {
   .v35 .hero {
     height: 258px;
