@@ -40,6 +40,7 @@ import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
+import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
@@ -1132,6 +1133,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function openWork(work, { readNumber = null } = {}) {
     // أنمي (ترشيح، إشعار، حضور…): صفحته في قسم الأنمي، لا صفحة مانجا بنفس العنوان
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
+    if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
     if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
       work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
@@ -2043,12 +2045,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (root.dataset.section !== 'anime') {
       writeSection('anime');
       applySection('anime');
-      q('mangaHome').hidden = true;
-      q('animeHome').hidden = false;
+      showHome('anime');
     }
     const episode = chapter && Number.isFinite(chapter.number) ? chapter.number : null;
     const position = chapter ? momentStart(chapter.label) : null;
     void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position });
+  }
+
+  // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
+  function openCinemaRef(ref, { title = null, cover = null } = {}) {
+    const [, id, season] = ref.split(':');
+    if (!/^tt\d+$/.test(id ?? '')) return toast('ما قدرنا نفتح هذا العمل');
+    closeSheet();
+    if (root.dataset.section !== 'cinema') {
+      writeSection('cinema');
+      applySection('cinema');
+      showHome('cinema');
+    }
+    void cinema.openWork({ id, type: season ? 'series' : 'movie', title: title ?? '', poster: cover });
   }
 
   // ── ورقة المعاينة ──
@@ -2057,6 +2071,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function previewWork(work, { chapter = null } = {}) {
     if (isAnimeRef(work?.id)) return openAnimeRef(work.id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter });
+    if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     let alive = true;
     openSheet((body) => {
       const box = el('div', 'pv');
@@ -2957,9 +2972,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openSearch() {
-    if (root.dataset.section === 'anime') {
+    if (root.dataset.section === 'anime' || root.dataset.section === 'cinema') {
+      const host = root.dataset.section === 'anime' ? 'animeDiscover' : 'cinemaDiscover';
       showPage('discover');
-      setTimeout(() => q('animeDiscover')?.querySelector('input')?.focus(), 60);
+      setTimeout(() => q(host)?.querySelector('input')?.focus(), 60);
       return;
     }
     showPage('search');
@@ -3244,9 +3260,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('detailTop').classList.remove('scrolled');
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
-    if (id === 'library') inAnime ? anime.renderLibrary() : renderLibrary();
+    const inCinema = root.dataset.section === 'cinema';
+    if (id === 'library') inAnime ? anime.renderLibrary() : inCinema ? cinema.renderLibrary() : renderLibrary();
     if (id === 'discover') {
       if (inAnime) anime.showDiscover();
+      else if (inCinema) cinema.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq') void rafiq.show();
@@ -4137,23 +4155,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
     setSectionsOpen(false);
     if (root.dataset.section === id) return;
     writeSection(id);
-    const from = id === 'anime' ? q('mangaHome') : q('animeHome');
-    const to = id === 'anime' ? q('animeHome') : q('mangaHome');
+    const from = q(HOMES[root.dataset.section] ?? 'mangaHome');
+    const to = q(HOMES[id]);
+    const enter = () => {
+      if (id === 'anime') anime.show();
+      else if (id === 'cinema') cinema.show();
+      else restartHero();
+    };
     if (currentPage() !== 'home') {
       applySection(id);
-      from.hidden = true;
-      to.hidden = false;
+      showHome(id);
       showPage('home');
-      if (id === 'anime') anime.show();
+      enter();
       return;
     }
     swapViews(from, to, {
       onSwap: () => {
         applySection(id);
-        if (id === 'anime') anime.show();
-        else restartHero();
+        enter();
       },
     });
+  }
+  const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
+  /** رئيسية القسم وحدها ظاهرة. */
+  function showHome(id) {
+    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = section !== id;
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
@@ -4437,6 +4463,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
         work,
       }),
   });
+  // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
+  const cinema = createCinema({
+    root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    setWatching: (info) => deps.setWatching?.(info),
+    playerPresence: () => deps.playerPresence?.(),
+  });
   // «رفيق»: مساعد التوصيات. البطاقة تفتح العمل الحقيقي: الأنمي بمعرّفه، والمانجا
   // بعنوانها في مصادرنا العربية (وإلا صفحة البحث بالعنوان)
   const rafiq = createRafiq({
@@ -4516,8 +4548,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (root.dataset.section !== 'manga') {
       writeSection('manga');
       applySection('manga');
-      q('mangaHome').hidden = false;
-      q('animeHome').hidden = true;
+      showHome('manga');
     }
     const titles = [card.title, ...(card.titles ?? [])].filter(Boolean);
     for (const t of [...new Set(titles)].slice(0, 3)) {
@@ -4535,9 +4566,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const startSection = readSection();
   applySection(startSection);
-  q('mangaHome').hidden = startSection !== 'manga';
-  q('animeHome').hidden = startSection !== 'anime';
+  showHome(startSection);
   if (startSection === 'anime') anime.show();
+  if (startSection === 'cinema') cinema.show();
 
   paintNotifyDots();
   renderHome();

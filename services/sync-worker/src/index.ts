@@ -10,6 +10,7 @@
  * تُستدعى دالة المجال للتحقق من المدخل، وتعليق يربط الاثنين.
  */
 
+import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
@@ -3109,6 +3110,8 @@ export default {
       else if (path === '/v1/rafiq/new' && request.method === 'POST') response = await handleRafiqNew(env as RafiqEnv, userId, now);
       else if (path === '/v1/rafiq/external' && (request.method === 'POST' || request.method === 'DELETE')) response = await handleRafiqExternal(request, url, env as RafiqEnv, userId, now);
       else if (path === '/v1/rafiq/usage' && request.method === 'GET') response = await handleRafiqUsage(env as RafiqEnv, userId, now);
+      // قصص السينما بالعربية: محفوظة للجميع، والجديد يُترجم هنا بمفتاح الخادم
+      else if (path === '/v1/cinema/overviews' && request.method === 'POST') response = await handleCinemaOverviews(request, env as CinemaEnv, userId, now);
       else if (path === '/v1/rafiq/conversations' && (request.method === 'GET' || request.method === 'DELETE')) response = await handleRafiqConversations(request, url, env as RafiqEnv, userId);
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, userId, decodeURIComponent(path.slice('/v1/stats/'.length)), now);

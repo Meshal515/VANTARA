@@ -62,9 +62,9 @@ export const SHELL_HTML = `<div class="app">
           <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">ANIME</span></span>
           <span class="section-sub">مسلسلات · أفلام</span>
         </button>
-        <button class="section-item section-item--cinema" type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" data-act="pickSection" data-arg="cinema">
+        <button class="section-item section-item--cinema" type="button" role="menuitemradio" aria-checked="false" data-act="pickSection" data-arg="cinema">
           <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">CINEMA</span></span>
-          <span class="section-sub">قريبًا</span>
+          <span class="section-sub">أفلام · مسلسلات</span>
         </button>
       </div>
       <div class="header-end">${iconButton('search', 'بحث', { act: 'openSearch' })}${bell()}</div>
@@ -85,9 +85,12 @@ export const SHELL_HTML = `<div class="app">
     <main id="homeSections"></main>
     </div>
     <div class="home-view anime-home" id="animeHome" hidden></div>
+    <div class="home-view cinema-home" id="cinemaHome" hidden></div>
   </section>
 
   <section class="page anime-page" id="anime"></section>
+
+  <section class="page cinema-page" id="cinema"></section>
 
   <section class="page" id="detail">
     <div class="detail-glow" aria-hidden="true"><i id="detailGlow"></i></div>
@@ -162,6 +165,7 @@ export const SHELL_HTML = `<div class="app">
   <section class="page" id="library">
     ${mainTop('مكتبتي')}
     <div class="page-body anime-only" id="animeLibrary"></div>
+    <div class="page-body cinema-only" id="cinemaLibrary"></div>
     <div class="page-body manga-only">
       <div class="segmented" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">
@@ -177,6 +181,7 @@ export const SHELL_HTML = `<div class="app">
   <section class="page" id="discover">
     ${mainTop('اكتشف')}
     <div class="page-body anime-only" id="animeDiscover"></div>
+    <div class="page-body cinema-only" id="cinemaDiscover"></div>
     <div class="page-body manga-only">
       <form class="search-bar" data-submit="discoverSearch" role="search">
         ${glyph('search')}

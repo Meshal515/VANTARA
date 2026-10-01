@@ -8,7 +8,7 @@
  *
  * المانجا: أسود بنفسجي، أغلفة طولية، ورق.
  * الأنمي: أسود أزرق عميق، إطارات عريضة، ضوء شاشة.
- * السينما: أسود دافئ، برتقالي.
+ * السينما: أسود محمرّ، أحمر دموي، وواجهة عريضة بلا ما يغطي الصورة.
  */
 
 /* ───────────── متغيّرات الأقسام ───────────── */
@@ -34,24 +34,24 @@
   caret-color: #8fb8ff;
 }
 .v35[data-section='cinema'] {
-  --bg: #0b0806;
-  --bg-raised: #110d0a;
-  --surface-1: #17120e;
-  --surface-2: #1e1813;
-  --surface-3: #29211a;
-  --line: rgba(255, 210, 170, 0.07);
-  --line-strong: rgba(255, 210, 170, 0.14);
-  --text-2: #cdbfb3;
-  --text-3: #9a8a7c;
-  --text-4: #62564c;
-  --accent: #f97316;
-  --accent-press: #ea580c;
-  --accent-text: #ffb27a;
-  --accent-soft: rgba(249, 115, 22, 0.15);
-  --accent-line: rgba(249, 115, 22, 0.42);
+  --bg: #0a0707;
+  --bg-raised: #0f0b0b;
+  --surface-1: #141010;
+  --surface-2: #1b1515;
+  --surface-3: #251c1c;
+  --line: rgba(255, 200, 200, 0.07);
+  --line-strong: rgba(255, 200, 200, 0.13);
+  --text-2: #cbbdbd;
+  --text-3: #978787;
+  --text-4: #5e5252;
+  --accent: #c1121f;
+  --accent-press: #9a0e18;
+  --accent-text: #f26b6b;
+  --accent-soft: rgba(193, 18, 31, 0.16);
+  --accent-line: rgba(193, 18, 31, 0.45);
   --accent-glow: transparent; /* لا توهّج ملوّن تحت الأزرار */
-  accent-color: #f97316;
-  caret-color: #ffb27a;
+  accent-color: #c1121f;
+  caret-color: #f26b6b;
 }
 .v35,
 .v35 .app,
@@ -61,7 +61,9 @@
 
 /* ما يخصّ قسمًا يختفي في غيره */
 .v35:not([data-section='anime']) .anime-only,
-.v35[data-section='anime'] .manga-only {
+.v35:not([data-section='cinema']) .cinema-only,
+.v35[data-section='anime'] .manga-only,
+.v35[data-section='cinema'] .manga-only {
   display: none !important;
 }
 

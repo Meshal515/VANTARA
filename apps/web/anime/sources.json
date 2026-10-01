@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-09-25",
+  "updatedAt": "2026-10-01",
   "sources": [
     {
       "id": "okanime",
@@ -179,8 +179,7 @@
       "id": "cimaleek",
       "name": "Cimaleek",
       "content": "cinema",
-      "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "priority": 55,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.cimaleek",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.cimaleek-v14.11.apk",
@@ -198,8 +197,7 @@
       "id": "egydead",
       "name": "EgyDead",
       "content": "cinema",
-      "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "priority": 60,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.egydead",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.egydead-v14.29.apk",
@@ -217,8 +215,7 @@
       "id": "faselhd",
       "name": "FaselHD",
       "content": "cinema",
-      "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "priority": 70,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.faselhd",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.faselhd-v14.28.apk",
@@ -234,8 +231,7 @@
       "id": "arabseed",
       "name": "ArabSeed",
       "content": "cinema",
-      "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "priority": 65,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.arabseed",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.arabseed-v14.31.apk",
@@ -252,7 +248,7 @@
       "name": "TukTuk Cinema",
       "content": "cinema",
       "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "disabledReason": "احتياط: خارج المصادر الأربعة المعتمدة للسينما",
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.tuktukcinema",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.tuktukcinema-v14.8.apk",
@@ -269,7 +265,7 @@
       "name": "Asia2TV",
       "content": "drama",
       "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "disabledReason": "احتياط: خارج المصادر الأربعة المعتمدة للسينما",
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.asia2tv",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.asia2tv-v14.37.apk",

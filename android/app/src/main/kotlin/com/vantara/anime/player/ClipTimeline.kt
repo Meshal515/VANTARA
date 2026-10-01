@@ -30,7 +30,7 @@ class ClipTimeline(context: Context) : View(context) {
     private var dragging: Boolean? = null // true = البداية، false = النهاية
     private val rail = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.SURFACE_3 }
     private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF; strokeWidth = 2f }
-    private val sel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x333B82F6 }
+    private val sel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.alpha(Tone.ACCENT, 0x33) }
     private val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.ACCENT; style = Paint.Style.STROKE }
     private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tone.ACCENT }
     private val grip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCCFFFFFF.toInt(); strokeWidth = 3f; strokeCap = Paint.Cap.ROUND }
