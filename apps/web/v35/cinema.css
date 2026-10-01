@@ -1053,3 +1053,19 @@
     transition: none;
   }
 }
+
+/* القصة وهي تُعرَّب: سطور هيكلية بدل نص إنجليزي يومض ثم يتبدّل */
+.v35 .cn-pending {
+  display: block;
+  color: transparent;
+  border-radius: 4px;
+  background: repeating-linear-gradient(to bottom, var(--surface-2) 0 0.95em, transparent 0.95em 1.75em);
+  animation: cn-blink 1.4s ease-in-out infinite;
+}
+.v35 .cn-synopsis.cn-pending {
+  height: 5.1em;
+}
+.v35 .cn-ep-over.cn-pending {
+  height: 2.7em;
+  width: 92%;
+}

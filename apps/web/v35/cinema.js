@@ -17,10 +17,11 @@ import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
-import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta, withArabic } from '../lib/cinema-meta.js';
+import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { pickCopies, queriesFor } from '../lib/cinema-match.js';
 
-const HOME_KEY = 'cinema.home.v2';
+const HOME_KEY = 'cinema.home.v3';
+const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
 const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
 const STATE_AR = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
@@ -44,7 +45,7 @@ const writeJson = (key, value) => {
 };
 /** مفتاح المشاهدة: الفيلم برقمه، والمسلسل برقمه وموسمه (حلقات كل موسم تبدأ من 1). */
 export const playKey = (m, season = null) => (m.type === 'series' ? `${m.id}:${season ?? 1}` : m.id);
-const slim = (m) => ({ id: m.id, type: m.type, title: m.title, titleAr: m.titleAr ?? null, poster: m.poster, background: m.background, logo: m.logo ?? null, year: m.year, rating: m.rating, genres: (m.genres ?? []).slice(0, 3) });
+const slim = (m) => ({ id: m.id, type: m.type, title: m.title, poster: m.poster, background: m.background, logo: m.logo ?? null, year: m.year, rating: m.rating, genres: (m.genres ?? []).slice(0, 3) });
 
 /** «112 min» ← «1 س 52 د». */
 export function runtimeAr(runtime) {
@@ -129,6 +130,49 @@ export function createCinema(deps) {
   }
   const continuing = () => Object.values(watchAll()).filter((w) => w.at).sort((a, b) => b.at - a.at);
 
+  // ───────────── القصة بالعربية ─────────────
+  // Cinemeta يعطيها بالإنجليزية؛ الخادم يعرّبها مرة لكل نص ويحفظها للجميع،
+  // وهنا نسخة على الجهاز فلا تُطلب مرتين. البصمة تكشف تغيّر النص في المصدر.
+
+  const overviews = readJson(OVERVIEW_KEY, {});
+  const fingerprint = (str) => {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (Math.imul(h, 31) + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  };
+  function cachedOverview(key, english) {
+    const hit = overviews[key];
+    return hit && hit.h === fingerprint(english) ? hit.t : null;
+  }
+  function rememberOverviews(found, texts) {
+    for (const [key, t] of Object.entries(found)) if (texts.has(key)) overviews[key] = { h: fingerprint(texts.get(key)), t };
+    const keys = Object.keys(overviews);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 1500))) delete overviews[k];
+    writeJson(OVERVIEW_KEY, overviews);
+  }
+  /** قصة العمل (أو حلقات الموسم المعروض) بالعربية في أماكنها، والإنجليزي إن تعذّر. */
+  async function arabize(m, season) {
+    await null; // بعد أن تُركّب الصفحة نفسها
+    const texts = new Map();
+    if (m.description) texts.set(m.id, m.description);
+    for (const e of m.seasons?.find((s) => s.n === season)?.episodes ?? []) if (e.overview) texts.set(`${m.id}:${season}:${e.n}`, e.overview);
+    const need = [...texts].filter(([key, english]) => !cachedOverview(key, english)).map(([key, english]) => ({ key, text: english }));
+    const found = {};
+    for (let i = 0; i < need.length && deps.sync?.translation; i += 24) {
+      const res = await deps.sync.translation('/v1/cinema/overviews', { method: 'POST', body: { items: need.slice(i, i + 24) } }).catch(() => null);
+      Object.assign(found, res?.status === 200 ? (res.body?.overviews ?? {}) : {});
+    }
+    if (Object.keys(found).length) rememberOverviews(found, texts);
+    if (state.detail?.id !== m.id) return;
+    for (const node of q('cinema')?.querySelectorAll('[data-overview].cn-pending') ?? []) {
+      const key = node.dataset.overview;
+      const ar = found[key] ?? cachedOverview(key, texts.get(key) ?? '');
+      node.classList.remove('cn-pending');
+      node.textContent = ar ?? texts.get(key) ?? '';
+      if (!ar) node.dir = 'ltr';
+    }
+  }
+
   // ───────────── قطع صغيرة ─────────────
 
   function image(src, cls = 'cn-img', { eager = false, fallback = null } = {}) {
@@ -155,8 +199,6 @@ export function createCinema(deps) {
     return b;
   };
   const genreAr = (g) => GENRES_AR[g] ?? g;
-  /** وصف Wikidata العام («مسلسل تلفزيوني») لا يضيف شيئًا: يُعرض الوصف المفيد فقط. */
-  const meaningful = (d) => Boolean(d) && d.length >= 24;
   const text = (tag, cls, value, dir = 'auto') => {
     const n = el(tag, cls, value);
     n.dir = dir;
@@ -167,7 +209,7 @@ export function createCinema(deps) {
     const box = el('div', `cn-mark ${cls}`);
     const name = text('h2', 'cn-mark-text', displayTitle(m));
     box.append(name);
-    if (m.logo && !m.titleAr) {
+    if (m.logo) {
       const logo = image(m.logo, 'cn-mark-logo', { eager: true });
       logo.alt = displayTitle(m);
       logo.onload = () => {
@@ -200,7 +242,6 @@ export function createCinema(deps) {
   function prefetch(m) {
     if (!m?.id || state.details.has(m.id)) return state.details.get(m.id);
     const p = fetchDetail(m.type, m.id)
-      .then(async (full) => (full ? (await withArabic([full]))[0] : null))
       .catch(() => {
         state.details.delete(m.id);
         return null;
@@ -425,7 +466,7 @@ export function createCinema(deps) {
     if (wants('movie') && data.fresh?.length) page.append(rail(`جديد ${new Date().getFullYear()}`, data.fresh, posterCard, { sub: 'صدرت هذه السنة' }));
     if (wants('series') && data.topSeries?.length) page.append(chart('أعلى المسلسلات تقييمًا', data.topSeries));
     page.append(genreGrid((g) => openDiscover({ genre: g, type: k === 'series' ? 'series' : 'movie' })));
-    page.append(el('p', 'cn-credit', 'بيانات الأعمال من Cinemeta وWikidata · التشغيل من المصادر العربية'));
+    page.append(el('p', 'cn-credit', 'بيانات الأعمال من Cinemeta · القصص معرّبة · التشغيل من المصادر العربية'));
     q('cinemaHome').replaceChildren(page);
     return page;
   }
@@ -454,7 +495,6 @@ export function createCinema(deps) {
     ]);
     const cut = (list) => list.slice(0, 20).map(slim);
     const data = { movies: cut(movies), series: cut(series), fresh: cut(fresh), topMovies: cut(topMovies), topSeries: cut(topSeries), fetchedAt: Date.now() };
-    await withArabic([...data.movies, ...data.series, ...data.fresh, ...data.topMovies, ...data.topSeries]);
     return data;
   }
 
@@ -591,7 +631,6 @@ export function createCinema(deps) {
     const body = el('div', 'cn-detail-body');
     body.id = 'cinemaBody';
     body.append(titleMark(m, 'cn-detail-mark'));
-    if (m.titleAr && m.title !== m.titleAr) body.append(text('p', 'cn-original', m.title, 'ltr'));
     const line = facts(m, { runtime: true });
     if (m.type === 'series' && m.seasons) line.append(el('span', null, seasonsAr(m.seasons.filter((s) => s.n !== 0).length)));
     body.append(line);
@@ -642,17 +681,18 @@ export function createCinema(deps) {
       sources.id = 'cinemaSources';
       body.append(sources);
 
-      if (meaningful(m.descriptionAr) || m.description) {
+      if (m.description) {
+        // القصة بالعربية: المحفوظ فورًا، وإلا هيكل خفيف حتى تصل من الخادم (والإنجليزي إن تعذّرت)
         const about = el('section', 'cn-about');
-        if (meaningful(m.descriptionAr)) about.append(el('p', 'cn-tagline', m.descriptionAr));
-        if (m.description) {
-          const p = text('p', 'cn-synopsis clamped', m.description);
-          const more = button('cn-link', 'المزيد', () => {
-            const closed = p.classList.toggle('clamped');
-            more.textContent = closed ? 'المزيد' : 'أقل';
-          });
-          about.append(p, more);
-        }
+        const ar = cachedOverview(m.id, m.description);
+        const p = el('p', `cn-synopsis clamped${ar ? '' : ' cn-pending'}`, ar ?? '');
+        p.dataset.overview = m.id;
+        p.dir = 'rtl';
+        const more = button('cn-link', 'المزيد', () => {
+          const closed = p.classList.toggle('clamped');
+          more.textContent = closed ? 'المزيد' : 'أقل';
+        });
+        about.append(p, more);
         body.append(about);
       }
 
@@ -680,6 +720,7 @@ export function createCinema(deps) {
     page.replaceChildren(wrap);
     if (!partial) {
       void paintSources(m, m.type === 'series' ? state.season : null);
+      void arabize(m, m.type === 'series' ? state.season : null);
       revealIn(wrap);
     }
   }
@@ -690,7 +731,6 @@ export function createCinema(deps) {
     if (!genre) return;
     try {
       const list = (await catalog(m.type, 'top', { genre })).filter((x) => x.id !== m.id).slice(0, 14);
-      await withArabic(list);
       if (token !== state.token) return;
       const host = q('cinemaSimilar');
       if (host && list.length) host.replaceChildren(rail('قد يعجبك', list.map(slim)));
@@ -709,6 +749,7 @@ export function createCinema(deps) {
           deps.closeSheet();
           state.season = s.n;
           renderEpisodes(host, m);
+          void arabize(m, s.n);
           void paintSources(m, s.n);
         });
         b.append(el('b', null, s.n === 0 ? 'إضافات' : `الموسم ${s.n}`), el('span', null, `${s.episodes.length} حلقة`));
@@ -763,7 +804,14 @@ export function createCinema(deps) {
       const when = e.released ? new Date(e.released).toLocaleDateString('ar', { day: 'numeric', month: 'short', year: 'numeric', numberingSystem: 'latn' }) : null;
       const sub = upcoming ? `تُعرض ${when}` : rec?.done ? 'شوهدت' : remainingAr(rec?.position, rec?.duration) ?? when;
       if (sub) copy.append(el('span', 'cn-ep-sub', sub));
-      if (e.overview) copy.append(text('span', 'cn-ep-over', e.overview));
+      if (e.overview) {
+        const key = `${m.id}:${season.n}:${e.n}`;
+        const ar = cachedOverview(key, e.overview);
+        const over = el('span', `cn-ep-over${ar ? '' : ' cn-pending'}`, ar ?? '');
+        over.dataset.overview = key;
+        over.dir = 'rtl';
+        copy.append(over);
+      }
       row.append(art, copy);
       row.onclick = () => play(m, season.n, e.n, rec && !rec.done ? rec.position : 0);
       li.append(row);
@@ -1089,7 +1137,6 @@ export function createCinema(deps) {
     try {
       let items = query ? await searchMeta(query) : await catalog(type, 'top', { genre });
       items = items.slice(0, 42);
-      await withArabic(items);
       if (token !== state.discover.token) return;
       grid.replaceChildren(...(items.length ? items.map((m) => posterCard(m)) : [emptyBox('search', 'لا نتائج', 'جرّب الاسم الإنجليزي للعمل.')]));
       stripIn([...grid.children].slice(0, 9));

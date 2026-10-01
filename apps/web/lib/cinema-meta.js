@@ -1,14 +1,11 @@
 /**
  * بيانات أعمال VANTARA CINEMA: Cinemeta (قاعدة ستريمو المفتوحة) للبحث والقوائم
- * والمواسم والحلقات، وWikidata للعنوان والوصف العربيين بنفس رقم IMDb.
- *
- * كلاهما بلا مفتاح ولا حساب. التشغيل نفسه ليس من هنا: من المصادر العربية في
+ * والمواسم والحلقات، بلا مفتاح ولا حساب. القصة تُعرَّب في الخادم
+ * (`/v1/cinema/overviews`) وتُحفظ للجميع. التشغيل نفسه ليس من هنا: من المصادر العربية في
  * محرك التطبيق (`anime-engine.js` بمحتوى `cinema`).
  */
 
 const CINEMETA = 'https://v3-cinemeta.strem.io';
-const SPARQL = 'https://query.wikidata.org/sparql';
-const AR_KEY = 'vantara.cinema.ar.v1';
 
 export const GENRES_AR = {
   Action: 'أكشن', Adventure: 'مغامرة', Animation: 'رسوم متحركة', Biography: 'سيرة', Comedy: 'كوميديا', Crime: 'جريمة',
@@ -58,7 +55,6 @@ export function normalize(m) {
     id: String(m.imdb_id ?? m.id),
     type: m.type === 'series' ? 'series' : 'movie',
     title: m.name,
-    titleAr: null,
     poster: m.poster || null,
     background: m.background || null,
     logo: m.logo || null,
@@ -66,7 +62,6 @@ export function normalize(m) {
     rating: Number.isFinite(rating) && rating > 0 ? rating : null,
     genres: m.genres ?? m.genre ?? [],
     description: m.description || null,
-    descriptionAr: null,
     runtime: m.runtime || null,
     director: m.director ?? [],
     cast: (m.cast ?? []).slice(0, 8),
@@ -99,75 +94,5 @@ export async function detail(type, id, { fetchImpl } = {}) {
   return normalize(data.meta);
 }
 
-// ───────────── العربية من Wikidata ─────────────
-
-const memory = new Map();
-function stored() {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(AR_KEY) ?? '{}') ?? {};
-  } catch {
-    return {};
-  }
-}
-function store(all) {
-  try {
-    const keys = Object.keys(all);
-    // آخر 1500 عمل يكفي؛ الأقدم يُعاد جلبه إن احتيج
-    for (const k of keys.slice(0, Math.max(0, keys.length - 1500))) delete all[k];
-    globalThis.localStorage?.setItem(AR_KEY, JSON.stringify(all));
-  } catch {
-    // تخزين ممتلئ أو ممنوع: الذاكرة تكفي لهذه الجلسة
-  }
-}
-
-/** {tt…: {t, d}} للأرقام المطلوبة. ما لا عربي له يُحفظ فارغًا فلا يُسأل عنه كل مرة. */
-export async function arabic(ids, { fetchImpl = globalThis.fetch } = {}) {
-  const disk = stored();
-  const out = {};
-  const missing = [];
-  for (const id of new Set(ids)) {
-    const hit = memory.get(id) ?? disk[id];
-    if (hit) out[id] = hit;
-    else if (/^tt\d+$/.test(id)) missing.push(id);
-  }
-  for (let i = 0; i < missing.length; i += 60) {
-    const chunk = missing.slice(i, i + 60);
-    const query = `SELECT ?imdb ?l ?d WHERE { VALUES ?imdb { ${chunk.map((id) => `"${id}"`).join(' ')} } ?i wdt:P345 ?imdb .
-      OPTIONAL { ?i rdfs:label ?l FILTER(LANG(?l) = "ar") } OPTIONAL { ?i schema:description ?d FILTER(LANG(?d) = "ar") } }`;
-    try {
-      const res = await fetchImpl(`${SPARQL}?format=json&query=${encodeURIComponent(query)}`, { headers: { Accept: 'application/sparql-results+json' } });
-      if (!res.ok) continue;
-      const rows = (await res.json())?.results?.bindings ?? [];
-      for (const id of chunk) out[id] = { t: null, d: null };
-      for (const r of rows) {
-        const id = r.imdb?.value;
-        if (!id) continue;
-        out[id] = { t: out[id]?.t ?? r.l?.value ?? null, d: out[id]?.d ?? r.d?.value ?? null };
-      }
-      for (const id of chunk) {
-        memory.set(id, out[id]);
-        disk[id] = out[id];
-      }
-    } catch {
-      // Wikidata غير متاح: العناوين تبقى كما هي
-    }
-  }
-  if (missing.length) store(disk);
-  return out;
-}
-
-/** يضيف `titleAr`/`descriptionAr` للأعمال في مكانها، ويرجعها. */
-export async function withArabic(items, opts) {
-  const list = items.filter(Boolean);
-  const ar = await arabic(list.map((m) => m.id), opts).catch(() => ({}));
-  for (const m of list) {
-    const t = ar[m.id]?.t;
-    // اسم عربي فعلي فقط، لا نقل حرفي للاسم اللاتيني نفسه
-    if (t && /[؀-ۿ]/.test(t)) m.titleAr = t;
-    if (ar[m.id]?.d) m.descriptionAr = ar[m.id].d;
-  }
-  return list;
-}
-
-/** العنوان الظاهر: العربي إن وُجد. */
-export const displayTitle = (m) => m?.titleAr || m?.title || '';
+/** أسماء الأعمال تبقى كما هي (الإنجليزية)؛ القصة وحدها تُعرَّب. */
+export const displayTitle = (m) => m?.title || '';
