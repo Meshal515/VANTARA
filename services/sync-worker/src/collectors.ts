@@ -80,7 +80,9 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
 
 async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
   const query = 'limit=50&translatedLanguage%5B%5D=ar&includes%5B%5D=manga&order%5BpublishAt%5D=desc';
-  const body = await (await request(`https://api.mangadex.org/chapter?${query}`, fetchImpl)).json() as { data?: Array<{ attributes?: { chapter?: string; publishAt?: string }; relationships?: Array<{ id: string; type: string; attributes?: { title?: Record<string, string> } }> }> };
+  const body = await (await request(`https://api.mangadex.org/chapter?${query}`, fetchImpl, {
+    headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
+  })).json() as { data?: Array<{ attributes?: { chapter?: string; publishAt?: string }; relationships?: Array<{ id: string; type: string; attributes?: { title?: Record<string, string> } }> }> };
   if (!Array.isArray(body.data)) throw new Error('invalid MangaDex feed');
   const works = new Map<string, Observation>();
   for (const chapter of body.data) {
