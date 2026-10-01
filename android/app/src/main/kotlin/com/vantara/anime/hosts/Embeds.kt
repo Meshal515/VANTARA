@@ -56,11 +56,7 @@ class EmbedResolver(
 ) {
     /** A request-scoped Cinema client; it cannot change Anime requests to the same host. */
     fun forCinema(): EmbedResolver {
-        val builder = client.newBuilder()
-        builder.interceptors().add(0, okhttp3.Interceptor { chain ->
-            chain.proceed(chain.request().newBuilder().tag(eu.kanade.tachiyomi.network.HostRouting.NoBrowser::class.java, eu.kanade.tachiyomi.network.HostRouting.NoBrowser()).build())
-        })
-        return EmbedResolver(builder.build(), sniffer = null, userAgent = userAgent, allowBrowser = false)
+        return EmbedResolver(com.vantara.anime.net.CinemaNetwork.client(client), sniffer = null, userAgent = userAgent, allowBrowser = false)
     }
 
     suspend fun resolve(embed: String, referer: String?): List<Stream> = resolve(embed, referer, depth = 0)

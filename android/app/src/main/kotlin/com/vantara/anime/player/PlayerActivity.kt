@@ -165,6 +165,9 @@ class PlayerActivity : Activity() {
 
     private val engine by lazy { AnimeEngine.get(this) }
     private val network: NetworkHelper by lazy { Injekt.get<NetworkHelper>() }
+    private val playbackClient by lazy {
+        if (launch.section == "cinema") com.vantara.anime.net.CinemaNetwork.client(network.client) else network.client
+    }
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -468,7 +471,7 @@ class PlayerActivity : Activity() {
         reportedStart = false
         startedAt = System.currentTimeMillis()
         spinner.visibility = View.VISIBLE
-        val http = MediaCache.factory(this, network.client, c.headers)
+        val http = MediaCache.factory(this, playbackClient, c.headers)
         val item = MediaItem.Builder()
             .setUri(c.url)
             .apply {
@@ -1375,7 +1378,7 @@ class PlayerActivity : Activity() {
         controls.visibility = View.GONE
         // لا إيقاف: المحرّر يُبقي المشغّل يعمل ويدوّره داخل المدى
         clip = ClipEditor(
-            this, root, player, c, ClipMath.initial(moment, d), d, network.client,
+            this, root, player, c, ClipMath.initial(moment, d), d, playbackClient,
             episodeLabel = "الحلقة ${fmtEpisode(episode)}", title = launch.title,
             keyframeAt = ::segmentStartAt,
         ) {
