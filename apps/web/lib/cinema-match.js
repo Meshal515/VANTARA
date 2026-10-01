@@ -41,6 +41,8 @@ export function readTitle(title) {
     if (after) season = ORDINALS[after[1]] ?? null;
   }
   const y = t.match(/(?:^|\D)((?:19|20)\d{2})(?!\d)/);
+  // «سلسلة أفلام X كاملة» صفحة تجميع لا عمل واحد
+  if (/سلسلة\s+افلام|\bcollection\b/i.test(t)) return { season: null, year: y ? Number(y[1]) : null, kind: 'collection' };
   const kind = /(^|\s)فيلم(\s|$)/.test(t) ? 'movie' : /(^|\s)(مسلسل|الموسم|الحلقة)(\s|$)/.test(t) || season ? 'series' : null;
   return { season, year: y ? Number(y[1]) : null, kind };
 }
@@ -76,6 +78,8 @@ export function pickCopies(works, { title, year = null, type = 'movie', season =
     const score = titleScore(title, c.title);
     if (score < minScore) continue;
     if (type === 'movie' && year && info.year && Math.abs(info.year - year) > 1) continue;
+    // فيلم بكلمة زائدة («Dune» مقابل «Dune Part Two») غالبًا جزء آخر: لا يُقبل إلا بنفس السنة تمامًا
+    if (type === 'movie' && score < 1 && !(info.year && year && info.year === year)) continue;
     if (type === 'series' && season != null) {
       const s = info.season ?? (c.seasonNumber > 0 ? c.seasonNumber : null);
       if (s != null ? s !== season : season !== 1) continue;

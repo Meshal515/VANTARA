@@ -18,7 +18,7 @@
  * لا يزيد شيئًا.
  */
 
-import { isAnimeRef } from './anime-account.js';
+import { isAnimeRef, isMediaRef, sectionOfRef } from './anime-account.js';
 import { glyph, iconButton } from './icons.js';
 import { countLabel } from './plural.js';
 import { createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
@@ -383,7 +383,7 @@ export function createProfile(ctx) {
    * أولًا، ومع كل عمل آخر فصل فتحه.
    */
   function shelfOf(userId, kind, media = 'all') {
-    const keep = (ref) => media === 'all' || (media === 'anime') === isAnimeRef(ref);
+    const keep = (ref) => media === 'all' || sectionOfRef(ref) === media;
     const refs =
       kind === 'reading'
         ? sync.rows('library', (r) => r.user_id === userId && !r.removed).map((r) => r.series_ref)
@@ -491,6 +491,8 @@ export function createProfile(ctx) {
     if (reading.length) body.append(section('في مكتبة المانجا', strip(reading), { meta: countLabel(reading.length, 'work') }));
     const watchingNow = shelf('reading', 'anime');
     if (watchingNow.length) body.append(section('أنمي في قائمته', strip(watchingNow), { meta: `${fmt(watchingNow.length)} أنمي` }));
+    const cinemaList = shelf('reading', 'cinema');
+    if (cinemaList.length) body.append(section('سينما في قائمته', strip(cinemaList), { meta: `${fmt(cinemaList.length)} عمل` }));
     const animeViews = sync
       .rows('work_views', (r) => r.user_id === userId && !r.removed && isAnimeRef(r.series_ref))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
@@ -498,7 +500,7 @@ export function createProfile(ctx) {
       const items = animeViews.map((v) => ({ work: workOf(v.series_ref, v.series_title, v.cover_url), view: v }));
       body.append(section('آخر ما شاهد', strip(items, { chapters: true }), { meta: `${fmt(animeViews.length)} أنمي` }));
     }
-    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref));
+    const views = sync.rows('work_views', (r) => r.user_id === userId && !r.removed && !isMediaRef(r.series_ref));
     if (views.length) {
       const hist = el('div');
       ctx.historyList(hist, { userId, own, limit: 5, profile: true });

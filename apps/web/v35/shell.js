@@ -41,7 +41,7 @@ import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
-import { createAnimeAccount, isAnimeRef } from './anime-account.js';
+import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
@@ -343,7 +343,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   })();
 
   // الأنمي يشارك هذه الجداول بمرجع `anime:<id>`: شاشات المانجا لا تعرضه (له مكتبته)
-  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isAnimeRef(r.series_ref));
+  const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isMediaRef(r.series_ref));
   const inCollection = (kind, ref) =>
     kind === 'completed'
       ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
@@ -359,8 +359,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function libraryWorks(filter = 'all') {
     const refs = new Set([
       ...libraryRows().map((r) => r.series_ref),
-      ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
-      ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isAnimeRef(r.series_ref)).map((r) => r.series_ref),
+      ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
+      ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
     ]);
     return [...refs]
       .map((ref) => {
@@ -404,7 +404,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const viewRows = (userId = me()) =>
     sync
-      .rows('work_views', (r) => r.user_id === userId && !r.removed && !isAnimeRef(r.series_ref))
+      .rows('work_views', (r) => r.user_id === userId && !r.removed && !isMediaRef(r.series_ref))
       .filter((r) => userId !== me() || qualifiesOwnView(r))
       .sort((a, b) => (b.viewed_at ?? 0) - (a.viewed_at ?? 0));
   function recordChapterView(w, row) {
@@ -757,7 +757,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function friendsReading() {
     const since = Date.now() - 14 * 86_400_000;
     const byRef = new Map();
-    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isAnimeRef(r.series_ref))) {
+    for (const v of sync.rows('work_views', (r) => r.user_id !== me() && !r.removed && (r.viewed_at ?? 0) >= since && r.chapter_label && !isMediaRef(r.series_ref))) {
       const e = byRef.get(v.series_ref) ?? { ref: v.series_ref, users: new Set(), at: 0, title: v.series_title, cover: v.cover_url };
       e.users.add(v.user_id);
       e.at = Math.max(e.at, v.viewed_at ?? 0);

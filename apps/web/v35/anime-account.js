@@ -14,6 +14,9 @@
 export const animeRef = (id) => `anime:${id}`;
 export const episodeKey = (id, n) => `anime:${id}#ep:${n}`;
 export const isAnimeRef = (ref) => typeof ref === 'string' && ref.startsWith('anime:');
+/** مرجع لقسم غير المانجا (أنمي أو سينما): شاشات المانجا لا تعرضه، فلكل قسم مكتبته. */
+export const isMediaRef = (ref) => typeof ref === 'string' && (ref.startsWith('anime:') || ref.startsWith('cinema:'));
+export const sectionOfRef = (ref) => (String(ref ?? '').startsWith('anime:') ? 'anime' : String(ref ?? '').startsWith('cinema:') ? 'cinema' : 'manga');
 
 export function createAnimeAccount(sync) {
   const me = () => sync.user?.userId;
