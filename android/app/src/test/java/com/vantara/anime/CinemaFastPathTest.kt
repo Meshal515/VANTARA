@@ -66,7 +66,7 @@ class CinemaFastPathTest {
         val p = prepared()
         p.report(ready("a", cand("a1", "a.cdn", 1080)))
         p.report(ready("b", cand("b1", "b.cdn", 720)))
-        assertEquals("a1", p.best()?.id)
+        assertNull(p.best()) // Extracted links are not yet playable streams.
         p.markProbe("s1|a", ok = false, ms = 900)
         p.markProbe("s1|b", ok = true, ms = 300)
         assertEquals("b1", p.best()?.id)
@@ -77,6 +77,14 @@ class CinemaFastPathTest {
         // تقرير لاحق للسيرفر نفسه لا يمحو نتيجة فحصه
         p.report(ready("b", cand("b2", "b.cdn", 720)))
         assertEquals(true, p.routes().first { it.id == "s1|b" }.probed)
+    }
+
+    @Test fun `failed probes are never offered as best and an unprobed link cannot win`() {
+        val p = prepared()
+        p.report(ready("bad", cand("bad", "bad.cdn", 1080)))
+        p.markProbe("s1|bad", ok = false, ms = 30)
+        p.report(ready("waiting", cand("waiting", "waiting.cdn", 720)))
+        assertNull(p.best())
     }
 
     @Test fun `a late batch reopens a finished preparation`() {
