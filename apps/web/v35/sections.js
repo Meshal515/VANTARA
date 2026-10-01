@@ -10,7 +10,7 @@
 export const SECTIONS = {
   manga: { id: 'manga', word: 'MANGA', sub: 'مانجا · مانهوا', ready: true, unit: 'فصل', verb: 'اقرأ', theme: '#08070c' },
   anime: { id: 'anime', word: 'ANIME', sub: 'مسلسلات · أفلام', ready: true, unit: 'حلقة', verb: 'شاهد', theme: '#05070d' },
-  cinema: { id: 'cinema', word: 'CINEMA', sub: 'قريبًا', ready: false, unit: 'فيلم', verb: 'شاهد', theme: '#0b0806' },
+  cinema: { id: 'cinema', word: 'CINEMA', sub: 'أفلام · مسلسلات', ready: true, unit: 'فيلم', verb: 'شاهد', theme: '#101010' },
 };
 
 const KEY = 'vantara.section';

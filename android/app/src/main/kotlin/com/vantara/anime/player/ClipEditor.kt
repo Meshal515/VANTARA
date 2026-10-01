@@ -143,8 +143,10 @@ class ClipEditor(
         shareButton = action(Glyph.Kind.SHARE, "مشاركة") { share() }
         actions.addView(saveButton, weight())
         actions.addView(shareButton, weight())
-        actions.addView(action(Glyph.Kind.SEND, "أرسل لصديق") { sendToFriend() }, weight())
-        actions.addView(action(Glyph.Kind.SPARK, "في المجلس") { activity.queueMoment(null, "الجميع", range) }, weight())
+        if (!activity.isCinema) {
+            actions.addView(action(Glyph.Kind.SEND, "أرسل لصديق") { sendToFriend() }, weight())
+            actions.addView(action(Glyph.Kind.SPARK, "في المجلس") { activity.queueMoment(null, "الجميع", range) }, weight())
+        }
         panel.addView(actions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = ctx.dp(6) })
 
         busyBar = ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {

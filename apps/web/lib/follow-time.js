@@ -72,8 +72,8 @@ export function flushFollowTime(sync) {
           section: owner.section, seriesRef: owner.seriesRef, seriesTitle: owner.title,
           coverUrl: owner.coverUrl, activeMs: item.activeMs,
         }, { opId: `${item.id}:work`, requireDurable: true });
-        if (owner.section === 'anime') sync.enqueue('usage.watch', {
-          section: 'anime', day: item.day, activeMs: item.activeMs,
+        if (['anime', 'cinema'].includes(owner.section)) sync.enqueue('usage.watch', {
+          section: owner.section, day: item.day, activeMs: item.activeMs,
         }, { opId: `${item.id}:watch`, requireDurable: true });
         ids.push(item.id);
       }

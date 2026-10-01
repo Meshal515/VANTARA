@@ -47,6 +47,8 @@ data class SourceAnime(
     /** المصدر يقسّم العمل مواسم بدل حلقات مباشرة. */
     val hasSeasons: Boolean = false,
     val seasonNumber: Double = -1.0,
+    val mediaType: String? = null,
+    val year: Int? = null,
 )
 
 @Serializable
@@ -64,7 +66,7 @@ data class SourceEpisode(
 @Serializable
 data class SourcePage(val items: List<SourceAnime>, val hasNext: Boolean)
 
-enum class Listing { POPULAR, LATEST, SEARCH }
+enum class Listing { POPULAR, LATEST, SEARCH, SERIES }
 
 interface AnimeAdapter {
     val id: String
@@ -114,7 +116,7 @@ class ExtensionAdapter(
 
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage {
         val result = when (listing) {
-            Listing.POPULAR -> source.getPopularAnime(page)
+            Listing.POPULAR, Listing.SERIES -> source.getPopularAnime(page)
             Listing.LATEST -> source.getLatestUpdates(page)
             Listing.SEARCH -> source.getSearchAnime(page, query, AnimeFilterList())
         }

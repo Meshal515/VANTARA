@@ -15,9 +15,12 @@ describe('sections', () => {
   });
   it('never lands on a section that is not ready', () => {
     const s = memory();
-    expect(writeSection('cinema', s)).toBe(false);
-    s.setItem('vantara.section', 'cinema');
+    expect(writeSection('unknown', s)).toBe(false);
+    s.setItem('vantara.section', 'unknown');
     expect(readSection(s)).toBe('manga');
+  });
+  it('remembers Cinema without affecting the default', () => {
+    const s = memory(); expect(writeSection('cinema', s)).toBe(true); expect(readSection(s)).toBe('cinema');
   });
   it('survives a storage that throws', () => {
     const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };

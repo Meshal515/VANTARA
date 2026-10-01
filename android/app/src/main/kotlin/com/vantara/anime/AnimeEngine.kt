@@ -7,6 +7,10 @@ import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.adapters.SourcePage
 import com.vantara.anime.adapters.WitAnimeSiteAdapter
+import com.vantara.anime.adapters.TuktukSiteAdapter
+import com.vantara.anime.adapters.EgyDeadSiteAdapter
+import com.vantara.anime.adapters.CinemaTitles
+import com.vantara.anime.registry.ManifestNamespaces
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.hosts.WebViewSniffer
 import com.vantara.anime.catalog.CatalogCrawler
@@ -91,14 +95,23 @@ class AnimeEngine(context: Context) {
     }
 
     /** يُنادى من الواجهة عند الإقلاع وكلما وصل بيان أحدث. */
-    fun configure(text: String): List<String> {
+    @Synchronized
+    fun configure(text: String, content: String = "anime"): List<String> {
         val parsed = ManifestParser.parse(text)
-        val errors = ManifestParser.validate(parsed)
+        val errors = ManifestNamespaces.validate(parsed, content, manifest)
         if (errors.isNotEmpty()) return errors
-        manifest = parsed
-        for (s in parsed.sources) AnimeHostRouter.register(s.id, s.domains.plan(null))
-        // مصدر تغيّر ملفه أو دومينه يُعاد تحميله عند أول طلب
-        adapters.keys.retainAll(parsed.sources.filter { it.enabled }.map { it.id }.toSet())
+        val selected = ManifestNamespaces.incoming(parsed, content)
+        val old = manifest.sources.filter { it.content == content }.associateBy { it.id }
+        manifest = ManifestNamespaces.merge(manifest, parsed, content)
+        for (source in selected.sources) {
+            AnimeHostRouter.register(source.id, source.domains.plan(null))
+            if (old[source.id] != source) {
+                adapters.remove(source.id)
+                loadErrors.remove(source.id)
+            }
+        }
+        val retained = manifest.sources.filter { it.enabled }.map { it.id }.toSet()
+        adapters.keys.retainAll(retained)
         preload()
         return emptyList()
     }
@@ -164,6 +177,8 @@ class AnimeEngine(context: Context) {
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
+        TuktukSiteAdapter.KIND -> TuktukSiteAdapter(e.id, e.name, network.client, { AnimeHostRouter.activeBase(e.id) ?: e.domains.current }, embeds)
+        EgyDeadSiteAdapter.KIND -> EgyDeadSiteAdapter(e.id, e.name, network.client, { AnimeHostRouter.activeBase(e.id) ?: e.domains.current }, embeds)
         else -> error("محوّل غير معروف: $kind")
     }
 
@@ -177,6 +192,8 @@ class AnimeEngine(context: Context) {
         val title: String,
         val thumbnail: String?,
         val copies: List<SourceAnime>,
+        val mediaType: String? = null,
+        val year: Int? = null,
     )
 
     /**
@@ -231,17 +248,25 @@ class AnimeEngine(context: Context) {
         val works = mutableListOf<MutableList<SourceAnime>>()
         for (item in items) {
             val signals = WorkSignals(listOf(item.title))
-            val home = works.firstOrNull { group -> WorkMatcher.compare(WorkSignals(listOf(group.first().title)), signals) == WorkMatcher.Match.SAME }
+            val cinema = item.mediaType != null || entry(item.sourceId)?.content == "cinema"
+            val home = works.firstOrNull { group ->
+                val first = group.first()
+                val otherCinema = first.mediaType != null || entry(first.sourceId)?.content == "cinema"
+                if (cinema || otherCinema) cinema && otherCinema && (CinemaTitles.same(first, item) || (first.sourceId == item.sourceId && first.url == item.url))
+                else WorkMatcher.compare(WorkSignals(listOf(first.title)), signals) == WorkMatcher.Match.SAME
+            }
             if (home != null) home += item else works += mutableListOf(item)
         }
         return works.map { group ->
             val ranked = health.rank(group, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
             val lead = ranked.first()
             Work(
-                key = WorkMatcher.bucket(lead.title),
+                key = if (lead.mediaType != null || entry(lead.sourceId)?.content == "cinema") CinemaTitles.key(lead) else WorkMatcher.bucket(lead.title),
                 title = lead.title,
                 thumbnail = ranked.firstNotNullOfOrNull { it.thumbnail },
                 copies = ranked,
+                mediaType = lead.mediaType,
+                year = lead.year,
             )
         }
     }
@@ -321,7 +346,7 @@ class AnimeEngine(context: Context) {
                         runCatching {
                             withTimeout(PREPARE_TIMEOUT_MS) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                                val ep = resolver.pick(resolver.episodes(c), prep.number) ?: return@withTimeout
+                                val ep = resolver.pick(resolver.episodes(c), prep.number, strict = entry(copy.sourceId)?.content == "cinema") ?: return@withTimeout
                                 val a = adapter(copy.sourceId) ?: return@withTimeout
                                 val trace = com.vantara.anime.adapters.ResolveTrace(prep::report)
                                 val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
@@ -381,7 +406,8 @@ class AnimeEngine(context: Context) {
         adapter(id)?.page(listingOf(listing), page, query)
 
     private fun listingOf(s: String) = when (s) {
-        "latest" -> Listing.LATEST
+        "latest", "recent" -> Listing.LATEST
+        "series" -> Listing.SERIES
         "search" -> Listing.SEARCH
         else -> Listing.POPULAR
     }

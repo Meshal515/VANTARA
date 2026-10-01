@@ -997,6 +997,7 @@ export function createAnime(deps) {
     watchClock.acc = 0;
   };
   engine.on('playback', (p) => {
+    if ((p.content ?? 'anime') !== 'anime') return;
     const cur = state.playing;
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
     // An old native player must never credit playback to the account now signed in.
@@ -1042,12 +1043,14 @@ export function createAnime(deps) {
     }
   });
   engine.on('episode', (e) => {
+    if ((e.content ?? 'anime') !== 'anime') return;
     const cur = state.playing;
     if (!cur || String(e.animeId) !== String(cur.m.id)) return;
     cur.session = e.session;
     cur.n = e.episode;
   });
   engine.on('server', (e) => {
+    if ((e.content ?? 'anime') !== 'anime') return;
     if (e?.animeId && e.code) {
       rememberCode(e.animeId, e.code);
       if (e.sourceId && e.server) {

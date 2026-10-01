@@ -67,7 +67,7 @@ class EmbedResolver(
             host.endsWith("mega.nz") || host.endsWith("mega.co.nz") -> emptyList()
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
-            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> fallback(url, referer) { megamax(url, referer) }
+            (host.endsWith("share4max.com") || host.contains("megamax") || host == "megatuktuk.store" || host.endsWith(".megatuktuk.store")) && depth == 0 -> fallback(url, referer) { megamax(url, referer) }
             host.endsWith("videa.hu") -> fallback(url, referer) { videa(url, referer) }
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
@@ -154,10 +154,26 @@ class EmbedResolver(
     private suspend fun sniff(url: String, referer: String?): List<Stream> =
         sniffer?.sniff(url, referer)?.let(::listOf).orEmpty()
 
-    /** نُبقي محاولتين فقط قيد العمل، ونرجع عند أول مرآة صالحة بدل انتظار البطيئة. */
-    private suspend fun megamax(url: String, referer: String?): List<Stream> {
+    data class CinemaEmbed(val url: String, val server: String, val quality: Int? = null, val referer: String? = null)
+
+    /** Cinema exposes each mirror as a route; Anime retains its first-success wrapper policy. */
+    suspend fun expandCinema(embed: String, referer: String?): List<CinemaEmbed> {
+        val url = if (embed.startsWith("//")) "https:$embed" else embed
+        val host = url.toHttpUrlOrNull()?.host ?: return emptyList()
+        if (host != "megatuktuk.store" && !host.endsWith(".megatuktuk.store")) {
+            return listOf(CinemaEmbed(url, host, referer = referer))
+        }
+        val (pageUrl, mirrors) = megamaxPage(url, referer)
+        return mirrors.filter { mirror ->
+            val driver = mirror.driver.lowercase()
+            driver !in UNSUPPORTED && !driver.contains("torrent") && !driver.contains("p2p") &&
+                (mirror.link.startsWith("https://") || mirror.link.startsWith("http://") || mirror.link.startsWith("//"))
+        }.distinctBy { it.link }.take(16).map { CinemaEmbed(it.link, it.driver, it.quality, pageUrl) }
+    }
+
+    private suspend fun megamaxPage(url: String, referer: String?): Pair<String, List<Megamax.Mirror>> {
         val first = fetch(url, referer)
-        val version = Megamax.version(first.body) ?: return emptyList()
+        val version = Megamax.version(first.body) ?: return first.url to emptyList()
         val headers = Headers.Builder().apply {
             add("X-Inertia", "true")
             add("X-Inertia-Version", version)
@@ -168,7 +184,13 @@ class EmbedResolver(
             add("Referer", first.url)
         }.build()
         val body = client.newCall(GET(first.url, headers)).await().use { it.body.string() }
-        val mirrors = Megamax.mirrors(body).take(MEGAMAX_TRIES)
+        return first.url to Megamax.mirrors(body)
+    }
+
+    /** Keep the original Anime behavior: two parallel attempts, stop at the first valid mirror. */
+    private suspend fun megamax(url: String, referer: String?): List<Stream> {
+        val (pageUrl, allMirrors) = megamaxPage(url, referer)
+        val mirrors = allMirrors.take(MEGAMAX_TRIES)
         return coroutineScope {
             val results = Channel<List<Stream>>(Channel.UNLIMITED)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
@@ -180,7 +202,7 @@ class EmbedResolver(
                 pending++
                 jobs += launch {
                     val streams = try {
-                        resolve(mirror.link, first.url, depth = 1)
+                        resolve(mirror.link, pageUrl, depth = 1)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {

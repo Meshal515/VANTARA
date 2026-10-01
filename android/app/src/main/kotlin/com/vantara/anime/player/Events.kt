@@ -18,6 +18,10 @@ object PlaybackEvents {
         /** رمز السيرفر الذي يعمل (HGC…): الواجهة تتذكّره لهذا الأنمي. */
         val code: String?,
         val watchedRatio: Double = 0.0,
+        val content: String = "anime",
+        val mediaType: String? = null,
+        val contentId: String? = null,
+        val season: Int = 1,
     )
 
     @Volatile var listener: ((Progress) -> Unit)? = null

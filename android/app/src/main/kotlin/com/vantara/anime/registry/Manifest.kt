@@ -166,7 +166,7 @@ object ManifestParser {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** المحوّلات الأصلية التي يعرفها هذا الإصدار من التطبيق. */
-    val NATIVE_ADAPTERS = setOf(com.vantara.anime.adapters.WitAnimeSiteAdapter.KIND)
+    val NATIVE_ADAPTERS = setOf(com.vantara.anime.adapters.WitAnimeSiteAdapter.KIND, com.vantara.anime.adapters.TuktukSiteAdapter.KIND, com.vantara.anime.adapters.EgyDeadSiteAdapter.KIND)
 
     fun parse(text: String): Manifest = json.decodeFromString(Manifest.serializer(), text)
 
@@ -192,4 +192,22 @@ object ManifestParser {
             }
         }
     }
+}
+
+/** Independent namespace updates retain every other configured content section. */
+object ManifestNamespaces {
+    fun incoming(parsed: Manifest, content: String): Manifest =
+        if (content == "anime") parsed.copy(sources = parsed.sources.filter { it.content == "anime" }) else parsed
+
+    fun validate(parsed: Manifest, content: String, existing: Manifest = Manifest()): List<String> = buildList {
+        if (content !in setOf("anime", "cinema")) add("قسم مصادر غير معروف: $content")
+        val selected = incoming(parsed, content)
+        selected.sources.filter { it.content != content }.forEach { add("${it.id}: المصدر خارج قسم $content") }
+        val foreignIds = existing.sources.filter { it.content != content }.map { it.id }.toSet()
+        selected.sources.filter { it.id in foreignIds }.forEach { add("${it.id}: المعرّف مستخدم بقسم آخر") }
+        addAll(ManifestParser.validate(selected))
+    }
+    fun merge(existing: Manifest, parsed: Manifest, content: String): Manifest = parsed.copy(
+        sources = existing.sources.filter { it.content != content } + incoming(parsed, content).sources,
+    )
 }

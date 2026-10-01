@@ -128,9 +128,24 @@ class PlayerActivity : Activity() {
         val presenceUserId: String? = null,
         val presenceDeviceId: String? = null,
         val presenceDeviceCredential: String? = null,
+        val content: String = "anime",
+        val mediaType: String? = null,
+        val contentId: String? = null,
+        val season: Int = 1,
     )
 
     private lateinit var launch: Launch
+    internal val isCinema: Boolean get() = ::launch.isInitialized && launch.content == "cinema"
+    private val isMovie: Boolean get() = isCinema && launch.mediaType == "movie"
+    private val identity: PlaybackIdentity get() = PlaybackIdentity(launch.content, launch.contentId ?: launch.animeId, launch.mediaType, launch.season)
+    private fun episodeLabel(): String = when {
+        isMovie -> "فيلم"
+        isCinema -> "الموسم ${launch.season} · الحلقة ${fmtEpisode(episode)}"
+        else -> "الحلقة ${fmtEpisode(episode)}"
+    }
+    private fun identityEvent(): JSONObject = JSONObject().put("animeId", launch.animeId)
+        .put("content", launch.content).put("contentId", launch.contentId ?: launch.animeId)
+        .put("mediaType", launch.mediaType ?: JSONObject.NULL).put("season", launch.season)
     private lateinit var player: ExoPlayer
     private lateinit var video: PlayerView
     private lateinit var root: FrameLayout
@@ -175,6 +190,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun sendPresence() {
+        if (isCinema) return
         val endpoint = launch.presenceEndpoint?.trimEnd('/')?.takeIf { it.startsWith("https://") } ?: return
         val authorization = presenceAuthorization?.takeIf { it.startsWith("Bearer ") } ?: return
         if (presenceJob?.isActive == true) return
@@ -256,7 +272,7 @@ class PlayerActivity : Activity() {
     private var usageUnsaved = 0L
     private var coverageEpisode: Float? = null
     private var coverage = WatchedRanges()
-    private fun coverageKey() = "coverage:${launch.usageUserId.orEmpty()}:${launch.animeId}:$episode"
+    private fun coverageKey() = identity.coverageKey(launch.usageUserId, episode)
     private fun loadCoverage() {
         if (coverageEpisode == episode) return
         coverageEpisode = episode
@@ -271,7 +287,7 @@ class PlayerActivity : Activity() {
         val user = launch.usageUserId
         if (!user.isNullOrBlank() && usageUnsaved > 0) {
             try {
-                UsageStore.get(this).credit(UsageOwner(user, "anime", "anime:${launch.animeId}", launch.title, launch.poster), usageUnsaved, System.currentTimeMillis())
+                UsageStore.get(this).credit(UsageOwner(user, identity.section, identity.seriesRef, launch.title, launch.poster), usageUnsaved, System.currentTimeMillis())
                 usageUnsaved = 0
             } catch (_: Exception) { /* Keep the credit in memory and retry on the next tick. */ }
         }
@@ -377,7 +393,7 @@ class PlayerActivity : Activity() {
         unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refresh() } }
         expanded = false
         titleView.text = launch.title
-        episodeView.text = "الحلقة ${fmtEpisode(episode)}"
+        episodeView.text = episodeLabel()
         nextButton.visibility = if (hasNext()) View.VISIBLE else View.GONE
     }
 
@@ -406,7 +422,7 @@ class PlayerActivity : Activity() {
                         codeOf(c)?.let { code ->
                             preferCode = code
                             PlaybackEvents.emit(
-                                "server", JSONObject().put("animeId", launch.animeId).put("code", code)
+                                "server", identityEvent().put("code", code)
                                     .put("sourceId", c.sourceId).put("server", c.server).put("quality", c.quality),
                             )
                         }
@@ -554,7 +570,7 @@ class PlayerActivity : Activity() {
             return
         }
         preferCode = route.code
-        PlaybackEvents.emit("server", JSONObject().put("animeId", launch.animeId).put("code", route.code).put("picked", true))
+        PlaybackEvents.emit("server", identityEvent().put("code", route.code).put("picked", true))
         val at = position()
         report(final = false)
         sheet.close()
@@ -588,7 +604,7 @@ class PlayerActivity : Activity() {
 
     private fun episodeInt() = floor(episode).toInt()
 
-    private fun hasNext() = copies.isNotEmpty() && launch.total > 0 && episodeInt() + 1 <= launch.total
+    private fun hasNext() = !isMovie && copies.isNotEmpty() && launch.total > 0 && episodeInt() + 1 <= launch.total
 
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
@@ -645,7 +661,7 @@ class PlayerActivity : Activity() {
         hideError()
         spinner.visibility = View.VISIBLE
         if (warmed == null) message("نجهّز الحلقة $n…", long = true)
-        PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
+        PlaybackEvents.emit("episode", identityEvent().put("episode", n).put("session", id))
         val p = prep ?: return
         val s = session ?: return
         val from = resume[n] ?: 0L
@@ -837,7 +853,7 @@ class PlayerActivity : Activity() {
         val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         nextButton = iconButton(Glyph.Kind.NEXT, desc = "الحلقة التالية") { switchEpisode(episodeInt() + 1) }
         left.addView(nextButton)
-        left.addView(iconButton(Glyph.Kind.EPISODES, desc = "الحلقات") { showEpisodes() })
+        if (!isMovie) left.addView(iconButton(Glyph.Kind.EPISODES, desc = "الحلقات") { showEpisodes() })
         left.addView(iconButton(Glyph.Kind.SERVERS, desc = "السيرفرات") { showServers() })
         row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
@@ -950,6 +966,7 @@ class PlayerActivity : Activity() {
 
     /** Independent of playback startup; stale timings never follow a server/episode switch. */
     private fun maybeLoadSkips(force: Boolean = false) {
+        if (isCinema) return
         val duration = player.duration.takeIf { it > 0 } ?: return
         val candidate = current ?: return
         if (!reportedStart) return
@@ -1089,7 +1106,7 @@ class PlayerActivity : Activity() {
     private fun showServers() {
         val p = prep ?: return message("السيرفرات غير متاحة لهذه الجلسة")
         engine.completePreparation(sessionId)
-        open(SheetKind.SERVERS, "السيرفرات", "الحلقة ${fmtEpisode(episode)}") { body ->
+        open(SheetKind.SERVERS, "السيرفرات", episodeLabel()) { body ->
             val routes = p.routes()
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
             val ready = routes.count { it.state == RouteState.READY }
@@ -1271,30 +1288,32 @@ class PlayerActivity : Activity() {
 
     private fun showMore() {
         open(SheetKind.MORE, "المزيد") { body ->
-            body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
+            if (!isCinema) body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
-            if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
+            if (!isCinema && (friends().isNotEmpty() || launch.animeId.isNotEmpty())) {
                 body.addView(sheetRow("رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
                     pickFriend("رشّح الحلقة ${fmtEpisode(episode)}") { to, name -> queueMoment(to, name, null) }
                 })
             }
-            body.addView(sectionLabel("الحلقة التالية تلقائيًا"))
-            val cur = settings.getInt("autoNext", 10)
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for ((v, name) in listOf(0 to "إيقاف", 5 to "5 ث", 10 to "10 ث", 15 to "15 ث")) {
-                val on = v == cur
-                row.addView(label(name, 13.5f, if (on) Color.WHITE else Tone.TEXT_2, bold = true).apply {
-                    gravity = Gravity.CENTER
-                    textAlignment = View.TEXT_ALIGNMENT_CENTER
-                    minHeight = dp(44)
-                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat())
-                    setOnClickListener {
-                        settings.edit().putInt("autoNext", v).apply()
-                        sheet.refresh()
-                    }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+            if (!isMovie) {
+                body.addView(sectionLabel("الحلقة التالية تلقائيًا"))
+                val cur = settings.getInt("autoNext", 10)
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for ((v, name) in listOf(0 to "إيقاف", 5 to "5 ث", 10 to "10 ث", 15 to "15 ث")) {
+                    val on = v == cur
+                    row.addView(label(name, 13.5f, if (on) Color.WHITE else Tone.TEXT_2, bold = true).apply {
+                        gravity = Gravity.CENTER
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                        minHeight = dp(44)
+                        background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat())
+                        setOnClickListener {
+                            settings.edit().putInt("autoNext", v).apply()
+                            sheet.refresh()
+                        }
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                }
+                body.addView(row)
             }
-            body.addView(row)
         }
     }
 
@@ -1319,6 +1338,7 @@ class PlayerActivity : Activity() {
 
     /** «الجميع» (المجلس) أولًا، ثم الأصدقاء. [onPick] يستلم (المعرّف أو null للجميع، الاسم). */
     fun pickFriend(title: String, onPick: (String?, String) -> Unit) {
+        if (isCinema) return
         open(SheetKind.FRIENDS, title, "يظهر لهم في المجلس") { body ->
             body.addView(sheetRow("الجميع", "كل أصدقائك في المجلس", leading = avatar("✦")) { sheet.close(); onPick(null, "الجميع") })
             val list = friends()
@@ -1340,6 +1360,7 @@ class PlayerActivity : Activity() {
      * و«مشاركة» تعطيك الملف لأي تطبيق.
      */
     fun queueMoment(to: String?, name: String, range: ClipRange?) {
+        if (isCinema) return
         val item = JSONObject()
             .put("type", if (range != null) "moment" else "episode")
             .put("animeId", launch.animeId)
@@ -1367,7 +1388,7 @@ class PlayerActivity : Activity() {
         // لا إيقاف: المحرّر يُبقي المشغّل يعمل ويدوّره داخل المدى
         clip = ClipEditor(
             this, root, player, c, ClipMath.initial(moment, d), d, network.client,
-            episodeLabel = "الحلقة ${fmtEpisode(episode)}", title = launch.title,
+            episodeLabel = episodeLabel(), title = launch.title,
             keyframeAt = ::segmentStartAt,
         ) {
             clip = null
@@ -1390,13 +1411,13 @@ class PlayerActivity : Activity() {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "${launch.title} — الحلقة ${fmtEpisode(episode)} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})")
+            putExtra(Intent.EXTRA_TEXT, "${launch.title} — ${episodeLabel()} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(send, "شارك المقطع"))
     }
 
-    fun clipName(range: ClipRange) = "${launch.title} - الحلقة ${fmtEpisode(episode)} - ${ClipMath.clock(range.momentMs).replace(':', '.')}"
+    fun clipName(range: ClipRange) = "${launch.title} - ${episodeLabel()} - ${ClipMath.clock(range.momentMs).replace(':', '.')}"
 
     // ───────────── الإيماءات ─────────────
 
@@ -1537,7 +1558,8 @@ class PlayerActivity : Activity() {
         val c = current
         if (c == null || !reportedStart) {
             // لم يبدأ شيء: لا تقدّم يُسجَّل، لكن الواجهة تعرف أن المشغّل أُغلق
-            if (final) PlaybackEvents.emit(PlaybackEvents.Progress(sessionId, "", "", launch.animeId, episode, 0, 0, true, null))
+            if (final) PlaybackEvents.emit(PlaybackEvents.Progress(sessionId, "", "", launch.animeId, episode, 0, 0, true, null,
+                content = launch.content, contentId = launch.contentId ?: launch.animeId, mediaType = launch.mediaType, season = launch.season))
             return
         }
         val d = player.duration.takeIf { it > 0 } ?: 0
@@ -1555,6 +1577,10 @@ class PlayerActivity : Activity() {
                 final = final,
                 code = codeOf(c),
                 watchedRatio = coverage.ratio(d),
+                content = launch.content,
+                contentId = launch.contentId ?: launch.animeId,
+                mediaType = launch.mediaType,
+                season = launch.season,
             ),
         )
     }
@@ -1595,9 +1621,9 @@ class PlayerActivity : Activity() {
         super.onResume()
         usageForeground = true
         sampleUsage()
-        presenceActive = true
+        presenceActive = !isCinema
         main.removeCallbacks(presenceTick)
-        main.post(presenceTick)
+        if (presenceActive) main.post(presenceTick)
     }
 
     override fun onDestroy() {

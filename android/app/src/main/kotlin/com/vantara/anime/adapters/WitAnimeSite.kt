@@ -75,7 +75,7 @@ class WitAnimeSiteAdapter(
             SourcePage(Parse.cards(body, id), hasNext = Parse.hasPage(body, page + 1))
         }
         Listing.LATEST -> SourcePage(if (page == 1) Parse.cards(html("/"), id) else emptyList(), hasNext = false)
-        Listing.POPULAR -> {
+        Listing.POPULAR, Listing.SERIES -> {
             val all = catalog()
             val from = (page - 1) * PAGE_SIZE
             SourcePage(all.drop(from).take(PAGE_SIZE), hasNext = from + PAGE_SIZE < all.size)

@@ -131,3 +131,16 @@ it('native foreground listener accepts a direct handle without requiring .then()
   expect(() => stop()).not.toThrow();
   expect(handle.remove).toHaveBeenCalledTimes(1);
 });
+
+it('hands off Cinema time with its own section and reference', async () => {
+  let pending = [{ ...item, id: 'cinema-credit', owner: { ...item.owner, section: 'cinema', seriesRef: 'cinema:movie:tt123', title: 'Film' } }];
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    pending: async () => ({ items: pending }), acknowledge: async () => { pending = []; },
+  } } };
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+  await flushFollowTime(sync);
+  const queued = JSON.parse(store.get('vantara.queue'));
+  expect(queued.find(x => x.kind === 'usage.watch').payload.section).toBe('cinema');
+  expect(queued.find(x => x.kind === 'usage.work').payload.seriesRef).toBe('cinema:movie:tt123');
+  expect(pending).toEqual([]);
+});

@@ -47,9 +47,9 @@ class EpisodeResolver(
     }
 
     /** نفس الحلقة في قائمة مصدر آخر: بالرقم، مع تسامح للترقيم العشري (12.5). */
-    fun pick(episodes: List<SourceEpisode>, number: Float): SourceEpisode? =
+    fun pick(episodes: List<SourceEpisode>, number: Float, strict: Boolean = false): SourceEpisode? =
         episodes.firstOrNull { abs(it.number - number) < 0.01f }
-            ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
+            ?: if (strict) null else episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
     /**
      * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة
@@ -74,7 +74,7 @@ class EpisodeResolver(
                     async {
                         withTimeoutOrNull(perSourceTimeoutMs) {
                             runCatching {
-                                val ep = pick(episodes(copy), number) ?: return@runCatching emptyList()
+                                val ep = pick(episodes(copy), number, strict = copy.anime.mediaType != null) ?: return@runCatching emptyList()
                                 adapterOf(copy.sourceId)?.candidates(ep, enough = enough).orEmpty()
                             }.onFailure { health.fail(HealthStore.sourceKey(copy.sourceId), it.message ?: it.javaClass.simpleName) }
                                 .getOrDefault(emptyList())

@@ -52,7 +52,8 @@ class AnimeEnginePlugin : Plugin() {
                     .put("session", p.session).put("candidate", p.candidateId).put("sourceId", p.sourceId)
                     .put("position", p.positionMs).put("duration", p.durationMs).put("final", p.final)
                     .put("animeId", p.animeId).put("episode", p.episode.toDouble()).put("code", p.code)
-                    .put("watchedRatio", p.watchedRatio),
+                    .put("watchedRatio", p.watchedRatio)
+                    .put("content", p.content).put("mediaType", p.mediaType).put("contentId", p.contentId).put("season", p.season),
             )
         }
         // تفضيل السيرفر، تبديل الحلقة، وصندوق اللحظات الصادر
@@ -81,6 +82,10 @@ class AnimeEnginePlugin : Plugin() {
                 session = session,
                 title = call.getString("title").orEmpty(),
                 animeId = call.getString("animeId").orEmpty(),
+                content = call.getString("content") ?: "anime",
+                mediaType = call.getString("mediaType"),
+                contentId = call.getString("contentId"),
+                season = call.getInt("season") ?: 1,
                 usageUserId = call.getString("usageUserId"),
                 malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
@@ -197,7 +202,7 @@ class AnimeEnginePlugin : Plugin() {
     @PluginMethod
     fun configure(call: PluginCall) {
         val manifest = call.getObject("manifest") ?: return call.reject("manifest مطلوب")
-        val errors = engine.configure(manifest.toString())
+        val errors = engine.configure(manifest.toString(), call.getString("content") ?: "anime")
         call.resolve(JSObject().put("ok", errors.isEmpty()).put("errors", JSArray(errors)))
     }
 
@@ -260,6 +265,13 @@ class AnimeEnginePlugin : Plugin() {
         val anime = animeFrom(call.getObject("anime"))
         val a = engine.adapter(anime.sourceId) ?: error(engine.loadError(anime.sourceId) ?: "المصدر غير متاح")
         JSObject().put("anime", a.details(anime), SourceAnime.serializer())
+    }
+
+    @PluginMethod
+    fun seasons(call: PluginCall) = run(call) {
+        val anime = animeFrom(call.getObject("anime"))
+        val adapter = engine.adapter(anime.sourceId) ?: error(engine.loadError(anime.sourceId) ?: "المصدر غير متاح")
+        JSObject().put("seasons", adapter.seasons(anime), ListSerializer(SourceAnime.serializer()))
     }
 
     @PluginMethod

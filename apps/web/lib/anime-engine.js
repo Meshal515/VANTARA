@@ -190,7 +190,7 @@ export function momentStart(label) {
 }
 
 export async function sources() {
-  return (await call('sources'))?.sources ?? null;
+  return (await call('sources'))?.sources?.filter((source) => (source.content ?? 'anime') === 'anime') ?? null;
 }
 
 export async function health() {

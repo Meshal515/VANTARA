@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, sources, upsertRoute } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -26,6 +26,15 @@ describe('anime-engine bridge', () => {
   it('rejects a manifest the engine refuses', async () => {
     globalThis.Capacitor = { Plugins: { AnimeEngine: { configure: async () => ({ ok: false, errors: ['x: sha256'] }) } } };
     await expect(configure({ force: true, fetchImpl: async () => ({ json: async () => ({}) }) })).rejects.toThrow('sha256');
+  });
+
+  it('keeps Cinema sources out of Anime after both manifests are configured', async () => {
+    const anime = { id: 'wit', content: 'anime' };
+    globalThis.Capacitor = { Plugins: { AnimeEngine: {
+      configure: async () => ({ ok: true }), sources: async () => ({ sources: [anime, { id: 'cinema-tuktuk', content: 'cinema' }, { id: 'legacy' }] }),
+    } } };
+    await configure({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+    expect(await sources()).toEqual([anime, { id: 'legacy' }]);
   });
 
   it('picks the work whose copy title matches exactly', () => {

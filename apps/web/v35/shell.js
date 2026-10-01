@@ -40,6 +40,7 @@ import { openShareSheet } from './share.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
+import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentStart } from '../lib/anime-engine.js';
@@ -857,6 +858,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function loadHome() {
     if (homeBusy) return;
     homeBusy = true;
+    let onLatest = null;
     try {
     if (!available()) {
       renderHeroFallback();
@@ -917,7 +919,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       paint();
     };
-    const onLatest = ({ items }) => live('recent')({ items });
+    onLatest = ({ items }) => live('recent')({ items });
     latestListeners.add(onLatest);
     try {
       const [tr, re] = await Promise.all([
@@ -2044,6 +2046,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       writeSection('anime');
       applySection('anime');
       q('mangaHome').hidden = true;
+      q('cinemaHome').hidden = true;
       q('animeHome').hidden = false;
     }
     const episode = chapter && Number.isFinite(chapter.number) ? chapter.number : null;
@@ -2957,6 +2960,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openSearch() {
+    if (root.dataset.section === 'cinema') return cinema.openSearch();
     if (root.dataset.section === 'anime') {
       showPage('discover');
       setTimeout(() => q('animeDiscover')?.querySelector('input')?.focus(), 60);
@@ -3243,10 +3247,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
     q('detailTop').classList.remove('scrolled');
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
+    if (from === 'cinema' && id !== 'cinema') cinema.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
-    if (id === 'library') inAnime ? anime.renderLibrary() : renderLibrary();
+    const inCinema = root.dataset.section === 'cinema';
+    if (id === 'library') inCinema ? cinema.renderLibrary() : inAnime ? anime.renderLibrary() : renderLibrary();
     if (id === 'discover') {
-      if (inAnime) anime.showDiscover();
+      if (inCinema) cinema.showDiscover();
+      else if (inAnime) anime.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq') void rafiq.show();
@@ -4137,23 +4144,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     setSectionsOpen(false);
     if (root.dataset.section === id) return;
     writeSection(id);
-    const from = id === 'anime' ? q('mangaHome') : q('animeHome');
-    const to = id === 'anime' ? q('animeHome') : q('mangaHome');
-    if (currentPage() !== 'home') {
+    const homes = { manga: q('mangaHome'), anime: q('animeHome'), cinema: q('cinemaHome') };
+    const from = homes[root.dataset.section] ?? homes.manga;
+    const to = homes[id];
+    const enter = () => {
       applySection(id);
-      from.hidden = true;
-      to.hidden = false;
-      showPage('home');
+      for (const [name, host] of Object.entries(homes)) host.hidden = name !== id;
       if (id === 'anime') anime.show();
+      else if (id === 'cinema') cinema.show();
+      else restartHero();
+    };
+    if (currentPage() !== 'home') {
+      enter();
+      showPage('home');
       return;
     }
-    swapViews(from, to, {
-      onSwap: () => {
-        applySection(id);
-        if (id === 'anime') anime.show();
-        else restartHero();
-      },
-    });
+    swapViews(from, to, { onSwap: enter });
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
@@ -4437,6 +4443,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         work,
       }),
   });
+  const cinema = createCinema({ root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, sync });
   // «رفيق»: مساعد التوصيات. البطاقة تفتح العمل الحقيقي: الأنمي بمعرّفه، والمانجا
   // بعنوانها في مصادرنا العربية (وإلا صفحة البحث بالعنوان)
   const rafiq = createRafiq({
@@ -4518,6 +4525,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       applySection('manga');
       q('mangaHome').hidden = false;
       q('animeHome').hidden = true;
+      q('cinemaHome').hidden = true;
     }
     const titles = [card.title, ...(card.titles ?? [])].filter(Boolean);
     for (const t of [...new Set(titles)].slice(0, 3)) {
@@ -4537,7 +4545,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   applySection(startSection);
   q('mangaHome').hidden = startSection !== 'manga';
   q('animeHome').hidden = startSection !== 'anime';
+  q('cinemaHome').hidden = startSection !== 'cinema';
   if (startSection === 'anime') anime.show();
+  if (startSection === 'cinema') cinema.show();
 
   paintNotifyDots();
   renderHome();
@@ -4583,6 +4593,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      cinema.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
       majlis.hide();

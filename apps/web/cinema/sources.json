@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-30",
+  "sources": [
+    { "id": "cinema-tuktuk", "name": "TukTuk", "content": "cinema", "priority": 90, "adapter": "tuktuk-site", "domains": { "current": "https://tuktukhd.com", "legacy": [] }, "catalog": { "listing": "popular", "ratePerSecond": 1.0, "maxPages": 1000 } },
+    { "id": "cinema-egydead", "name": "EgyDead", "content": "cinema", "priority": 70, "adapter": "egydead-site", "domains": { "current": "https://tv10.egydead.live", "legacy": ["https://egydead.space"] }, "catalog": { "listing": "popular", "ratePerSecond": 1.0, "maxPages": 1000 } }
+  ]
+}
