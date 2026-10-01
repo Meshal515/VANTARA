@@ -2,7 +2,7 @@
  * «آخر التحديثات» — الخط الزمني من ذاكرة VANTARA (`Update Engine`).
  *
  * نفس السلوك في الأقسام الثلاثة (قانون التوحيد): الجديد فوق، القديم تحته ولا
- * يختفي، أيام بعناوين، ووقت نسبي حقيقي. الألوان من رموز القسم وحدها.
+ * يختفي، ثلاث بطاقات في الصف، ووقت نسبي حقيقي على كل بطاقة. الألوان من رموز القسم وحدها.
  * لا يُعاد ترتيب شيء بسبب ردود المصادر: الترتيب وقت ثابت من الخادم.
  */
 
@@ -78,38 +78,33 @@ export function mountTimeline(host, { section, el, open, empty, image }) {
   const more = el('div', 'up-more');
   host.append(list, more);
 
+  // بطاقة: الغلاف كاملًا بلا ما يغطيه، وتحته الاسم ثم «الفصل 401» ثم الوقت والمصادر
   const row = (g) => {
-    const b = el('button', 'up-row');
+    const b = el('button', 'up-card');
     b.type = 'button';
     const art = el('span', 'up-art');
     if (g.cover) art.append(image(g.cover));
-    const copy = el('span', 'up-copy');
     const t = el('b', 'up-title', g.title);
     t.dir = 'auto';
-    const unit = el('span', 'up-unit', unitLabel(g));
+    // دفعة فصول: الأحدث وبجانبه كم معه («الفصل 201 +2») بدل مدى طويل لا يتسع
+    const unit = el('span', 'up-unit', unitLabel({ ...g, low: g.high, events: [g] }));
     unit.dir = g.season != null && g.kind !== 'movie' ? 'ltr' : 'auto';
-    copy.append(t, unit);
-    const side = el('span', 'up-side');
-    side.append(el('time', 'up-time', agoAr(g.at)));
-    if (g.sources.length > 1) side.append(el('span', 'up-sources', `${g.sources.length} مصادر`));
-    b.append(art, copy, side);
+    const extra = g.events.length - 1;
+    const line = el('span', 'up-line');
+    line.append(unit);
+    if (extra > 0) {
+      const plus = el('span', 'up-plus', `+${extra}`);
+      plus.dir = 'ltr';
+      line.append(plus);
+    }
+    b.append(art, t, line, el('span', 'up-when', agoAr(g.at)));
     b.onclick = () => open(g);
     return b;
   };
 
+  // شبكة متصلة بلا عناوين أيام (كانت تترك فراغات): الوقت على كل بطاقة يكفي
   const paint = () => {
-    const groups = groupEvents(state.events);
-    const nodes = [];
-    let day = null;
-    for (const g of groups) {
-      const d = dayOf(g.at);
-      if (d !== day) {
-        day = d;
-        nodes.push(el('h3', 'up-day', d));
-      }
-      nodes.push(row(g));
-    }
-    list.replaceChildren(...nodes);
+    list.replaceChildren(...groupEvents(state.events).map(row));
     if (!state.events.length && state.done) list.replaceChildren(empty());
   };
 
