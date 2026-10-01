@@ -149,6 +149,12 @@ function rowsOf(payload, table) {
   return payload?.changes?.[table] ?? [];
 }
 
+function noInternalRows(payload) {
+  return Object.keys(payload?.changes ?? {}).flatMap((table) => rowsOf(payload, table)).every((row) =>
+    !String(row.series_ref ?? '').startsWith('__') && !String(row.chapter_key ?? '').startsWith('__'),
+  );
+}
+
 async function main() {
   // ─── B2: جهاز موثوق حقيقي على D1 ───
   await seedVerifierAccount();
@@ -211,8 +217,13 @@ async function main() {
   check('التكرار داخل الدفعة يُقبل', doubled.status === 200);
 
   const afterReads = await call(`/v1/sync?since=${startCursor}`, {}, token);
-  const readRow = rowsOf(afterReads.json, 'chapter_reads').find((row) => row.chapter_key === CHAPTER);
-  check('الفصل وصل في الفروقات', Boolean(readRow));
+  check('كيانات التحقق الداخلية لا تصل في الفروقات', afterReads.status === 200 && noInternalRows(afterReads.json));
+  // المراجع الداخلية محجوبة عن المزامنة عمدًا؛ نفحص الكتابة في D1 نفسها.
+  const readRow = (await d1Query(
+    'SELECT read_count FROM chapter_reads WHERE user_id = ? AND chapter_key = ?',
+    [USER_ID, CHAPTER],
+  )).result?.[0]?.results?.[0];
+  check('الفصل الداخلي كُتب في D1', Boolean(readRow));
   // القلب: أربع تسليمات لنفس العملية ⇒ قراءة واحدة
   check(
     'الفصل لم يُحتسب مرتين بعد إعادة التسليم',
@@ -264,7 +275,11 @@ async function main() {
   );
 
   const afterProgress = await call(`/v1/sync?since=${startCursor}`, {}, token);
-  const progressRow = rowsOf(afterProgress.json, 'progress').find((row) => row.chapter_key === CHAPTER);
+  check('التقدم الداخلي لا يصل في الفروقات', afterProgress.status === 200 && noInternalRows(afterProgress.json));
+  const progressRow = (await d1Query(
+    'SELECT page, owner_synced FROM progress WHERE user_id = ? AND chapter_key = ?',
+    [USER_ID, CHAPTER],
+  )).result?.[0]?.results?.[0];
   check(
     'التقدم لم يرجع للخلف بعد مزامنة جهاز قديم',
     progressRow?.page === 30,
@@ -273,7 +288,7 @@ async function main() {
 
   // ─── ملكية التقدم: المرآة صندوق صادر يُقرّ، لا حقيقة ثانية ───
   check(
-    'صف المرآة يصل معلَّمًا بأن المالك لم يستلمه',
+    'صف المرآة في D1 معلَّم بأن المالك لم يستلمه',
     progressRow?.owner_synced === 0,
     `owner_synced=${progressRow?.owner_synced}`,
   );
@@ -381,9 +396,13 @@ async function main() {
   );
   check('تُقبل بلا خطأ فلا يتوقف الطابور', tooShort.status === 200);
   const afterShort = await call(`/v1/sync?since=${startCursor}`, {}, token);
+  const shortReads = (await d1Query(
+    'SELECT read_count FROM chapter_reads WHERE user_id = ? AND chapter_key = ?',
+    [USER_ID, '__verify__/ch-2'],
+  )).result?.[0]?.results ?? [];
   check(
     'فتح الفصل لثانية لم يُحتسب قراءة',
-    !rowsOf(afterShort.json, 'chapter_reads').some((row) => row.chapter_key === '__verify__/ch-2'),
+    shortReads.length === 0,
   );
 
   // ─── الـcursor يتقدّم ولا يرجع ───
