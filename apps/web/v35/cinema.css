@@ -1198,3 +1198,25 @@
 .v35 .cn-diag-steps .cn-diag-fail {
   border-inline-start-color: #f87171;
 }
+
+/* السيرفرات الميتة مطويّة: لا تكون عشر بطاقات «غير متاح» هي التجربة */
+.v35 .cn-srv-dead {
+  margin-top: 14px;
+}
+.v35 .cn-srv-dead summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .cn-srv-dead summary::-webkit-details-marker {
+  display: none;
+}
+.v35 .cn-srv-dead summary::after {
+  content: ' ⌄';
+}
+.v35 .cn-srv-dead[open] summary::after {
+  content: ' ⌃';
+}

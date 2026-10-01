@@ -307,7 +307,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const saved = readJson(WORKS_KEY, {})[ref];
     const row = serverWork(ref);
     const title = displayTitle(ref, row?.title, saved?.title, fallbackTitle);
-    const thumbnailUrl = saved?.thumbnailUrl ?? row?.cover_url ?? cover ?? null;
+    // الغلاف الموحّد (الخادم) أولًا، ثم ما عرفه هذا الجهاز: نفس الغلاف في كل الشاشات
+    const thumbnailUrl = row?.cover_url ?? saved?.thumbnailUrl ?? cover ?? null;
     // نسخ الجهاز أولًا (تحمل تفاصيل آخر فتح)، ثم ما عرفه غيره عبر الخادم
     const editions = mergeEditions(saved?.editions, serverEditions(row));
     const base = { key: saved?.key ?? ref.replace(/^ext:/, ''), title, thumbnailUrl, editions };
@@ -483,7 +484,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
-    const known = shownCovers.get(String(work?.id ?? ''));
+    // غلاف العمل الموحّد واحد في كل الشاشات: غلاف الخادم (يثبّته أول من عرفه) يسبق
+    // ذاكرة هذا الجهاز، فلا تختلف نسخة Debug عن Release ولا شاشة عن شاشة
+    const canonical = work?.id ? sync.rows('works', (x) => x.series_ref === String(work.id))[0]?.cover_url ?? null : null;
+    const known0 = shownCovers.get(String(work?.id ?? ''));
+    const known = known0 && (!canonical || known0 === canonical || known0 === cachedCover(canonical)) ? known0 : null;
     if (known) {
       const current = container.querySelector(':scope > img');
       if (current?.getAttribute('src') === known) return known;
@@ -523,7 +528,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const serverCover = id ? sync.rows('works', (x) => x.series_ref === id)[0]?.cover_url : null;
     const seen = new Set();
     const candidates = [
-      ...[knownCover(id), serverCover].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? work?._work?.editions?.[0]?.sourceId ?? null })),
+      ...[serverCover, knownCover(id)].filter(Boolean).map((url) => ({ url, sourceId: work?._work?.editions?.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? work?._work?.editions?.[0]?.sourceId ?? null })),
       ...coverCandidates(work),
     ].filter((c) => !seen.has(c.url) && seen.add(c.url));
     // أنمي من المجلس أو الحضور بلا غلاف محفوظ: ملصقه من AniList
@@ -1140,6 +1145,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── صفحة العمل ─────────────────────────
 
   async function openWork(work, { readNumber = null } = {}) {
+    // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
+    if (/^__/.test(String(work?.id ?? ''))) return;
     // أنمي (ترشيح، إشعار، حضور…): صفحته في قسم الأنمي، لا صفحة مانجا بنفس العنوان
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });

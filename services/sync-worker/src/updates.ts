@@ -73,12 +73,14 @@ interface Mark {
 const RECENT_MS = 3 * 86_400_000;
 /** أكبر قفزة تُقبل فوق خط الأساس؛ ما بعدها ترقيم مصدر خاطئ لا فصول جديدة. */
 const JUMP = { chapter: 30, episode: 12 } as const;
+/** أكبر دفعة بلا تواريخ تُعدّ إصدارًا حقيقيًا؛ ما فوقها لحاق مصدر أكمل. */
+const BURST = 3;
 
 const reliable = (p: unknown, now: number) => {
   const n = num(p);
   return n != null && n > 0 && n <= now + 10 * 60_000 && n >= now - YEAR ? Math.min(n, now) : null;
 };
-const above = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
+const isAbove = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
 
 /** يتحقق من تقرير مجسّ (عمل + ما يراه من وحداته) ويعيده بشكله المعتمد، أو null. */
 export function parseReport(raw: unknown, now: number): Report | null {
@@ -132,27 +134,35 @@ function mergeSources(old: Source[], add: Source[]): Source[] {
 
 /**
  * يقرّر من تقرير المجسّ: ما الأحداث الجديدة؟ وما خط الأساس بعدها؟
- * - أول مشاهدة للعمل: كل الموجود خط أساس بلا أحداث، إلا ما نُشر فعلًا في آخر 3 أيام
- *   بوقت موثوق (تحديث حقيقي حديث، لا تاريخ قديم).
- * - بعدها: ما فوق خط الأساس (بقفزة معقولة) حدث جديد، وما تحته قديم لا يُعلن.
+ *
+ * - أول مشاهدة للعمل: كل الموجود خط أساس بلا أحداث، إلا ما نُشر فعلًا في آخر
+ *   3 أيام بوقت موثوق.
+ * - بعدها ما فوق الخط مرشّح، لكن «جديد على VANTARA» ليس «جديدًا في العالم»:
+ *   · وحدة بتاريخ نشر موثوق أقدم من 3 أيام = محتوى قديم نراه أول مرة ← لا حدث.
+ *   · أكثر من 3 وحدات بلا تاريخ فوق الخط دفعة واحدة = مصدر أكمل لحق بعمل نعرفه
+ *     (النهايات: مصدر بفصلين ثم مصدر بـ21) ← نرفع الخط بصمت بلا 19 حدثًا قديمًا.
+ *   · قفزات الترقيم الشاذة تُتجاهل.
  * - الفيلم: حدث «توفّر» واحد عند أول اكتشاف.
  */
 export function decide(report: Report, mark: Mark | null, now: number): { fresh: Unit[]; mark: Mark | null } {
   if (report.kind === 'movie') return { fresh: mark ? [] : report.units.slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
+  const recent = (u: Unit) => u.publishedAt != null && now - u.publishedAt <= RECENT_MS;
   if (!mark) {
-    const fresh = sorted.filter((u) => u.publishedAt != null && now - u.publishedAt <= RECENT_MS).slice(-3);
-    return { fresh, mark: { season: top.season, number: top.number } };
+    return { fresh: sorted.filter(recent).slice(-3), mark: { season: top.season, number: top.number } };
   }
   const limit = JUMP[report.kind];
-  const fresh = sorted.filter((u) => {
-    if (!above(u, mark)) return false;
+  const above = sorted.filter((u) => {
+    if (!isAbove(u, mark)) return false;
     // موسم جديد يبدأ من أوله؛ وفي نفس الموسم قفزة معقولة فقط
     if ((u.season ?? 0) > (mark.season ?? 0)) return (u.season ?? 0) === (mark.season ?? 0) + 1 && u.number <= limit;
     return u.number - mark.number <= limit;
   });
-  const last = fresh[fresh.length - 1];
+  const undated = above.filter((u) => u.publishedAt == null);
+  const catchUp = undated.length > BURST;
+  const fresh = above.filter((u) => (u.publishedAt != null ? recent(u) : !catchUp));
+  const last = above[above.length - 1];
   return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
 }
 
@@ -243,7 +253,13 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
   const beforeAt = Number(atRaw);
   const cursor = before && Number.isFinite(beforeAt) && idRaw ? { at: beforeAt, id: idRaw } : null;
   const work = url.searchParams.get('work');
-  const where = ['section = ?'];
+  // أحداث كُتبت قبل قاعدة اللحاق (مصدر أكمل لحق بعمل نعرفه) لا تُعرض: محتوى بتاريخ
+  // قديم رآه VANTARA أول مرة، أو دفعة بلا تواريخ أكبر من إصدار حقيقي في لحظة واحدة
+  const where = [
+    'section = ?',
+    `NOT (published_at IS NOT NULL AND published_at < first_seen_at - ${RECENT_MS})`,
+    `(published_at IS NOT NULL OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
+  ];
   const binds: unknown[] = [section];
   if (work) {
     where.push('work = ?');
@@ -254,7 +270,10 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
     binds.push(cursor.at, cursor.at, cursor.id);
   }
   const { results } = await env.DB.prepare(
-    `SELECT id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources
+    // الغلاف غلاف العمل الموحّد (works) إن عُرف، لا غلاف أول مصدر بلّغ الفصل
+    `SELECT id, work, section, kind, season, number, title,
+            COALESCE((SELECT cover_url FROM works WHERE works.series_ref = update_events.work), cover) AS cover,
+            at, published_at, first_seen_at, sources
      FROM update_events WHERE ${where.join(' AND ')} ORDER BY at DESC, id DESC LIMIT ?`,
   )
     .bind(...binds, limit + 1)

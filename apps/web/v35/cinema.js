@@ -737,6 +737,25 @@ export function createCinema(deps) {
     }
   }
 
+  // ذاكرة السيرفرات على الجهاز: ما فشل مؤخرًا يُجرَّب أخيرًا (سبعة أيام)
+  const FAIL_KEY = 'vantara.cinema.serverFails.v1';
+  const STATE_RANK = { READY: 0, RESOLVING: 1 };
+  const serverKey = (r) => `${r.sourceId}|${r.server ?? r.code}`;
+  const serverName = (r) => (/[\u0600-\u06FF]/.test(String(r.code ?? '')) && r.server ? r.server : r.code ?? r.server ?? 'سيرفر');
+  function failures(r) {
+    const f = readJson(FAIL_KEY, {})[serverKey(r)];
+    return f && Date.now() - f.at < 7 * 86_400_000 ? f.n : 0;
+  }
+  function noteServer(routes) {
+    const all = readJson(FAIL_KEY, {});
+    for (const r of routes) {
+      const k = serverKey(r);
+      if (r.state === 'READY') delete all[k];
+      else if (r.state === 'UNAVAILABLE' || r.state === 'FAILED') all[k] = { n: Math.min(9, (all[k]?.n ?? 0) + 1), at: Date.now() };
+    }
+    writeJson(FAIL_KEY, all);
+  }
+
   /** رقم «الحلقة» الوحيدة للفيلم يختلف بين المصادر (0 أو 1): نأخذ رقم الأقوى ونبقي من يوافقه. */
   async function withNumber(m, copies) {
     if (m.type !== 'movie') return { copies, number: null };
@@ -1113,26 +1132,39 @@ export function createCinema(deps) {
         best.disabled = sheet.busy || sheet.missing || (!ready && sheet.done);
         best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
         best.classList.toggle('waiting', !ready && !sheet.done && !sheet.missing);
-        list.replaceChildren(
-          ...engine.groupRoutes(sheet.routes).map(([group, routes]) => {
-            const g = el('section', 'an-srv-group');
-            const grid = el('div', 'an-srv-grid');
-            for (const r of routes) {
-              const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}`);
-              b.type = 'button';
-              b.disabled = r.state === 'RESOLVING';
-              const top = el('span', 'an-srv-top');
-              top.append(text('b', 'an-srv-code', r.code, 'ltr'), el('span', 'an-srv-tag', SOURCE_NAMES[r.sourceId] ?? r.sourceId));
-              const line = el('span', 'an-srv-state');
-              line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
-              b.append(top, line);
-              b.onclick = () => (r.state === 'READY' ? void playRoute(r) : toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
-              grid.append(b);
-            }
-            g.append(el('h4', 'an-srv-q', group), grid);
-            return g;
-          }),
-        );
+        // الحيّ أولًا، والسيرفرات التي فشلت هنا مؤخرًا في آخر مجموعتها، والميت مطويّ
+        const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED');
+        const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED');
+        const tile = (r) => {
+          const b = el('button', `an-srv an-srv--${r.state.toLowerCase()}`);
+          b.type = 'button';
+          b.disabled = r.state === 'RESOLVING';
+          const top = el('span', 'an-srv-top');
+          top.append(text('b', 'an-srv-code', serverName(r), /[\u0600-\u06FF]/.test(serverName(r)) ? 'rtl' : 'ltr'), el('span', 'an-srv-tag', SOURCE_NAMES[r.sourceId] ?? r.sourceId));
+          const line = el('span', 'an-srv-state');
+          line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
+          b.append(top, line);
+          b.onclick = () => (r.state === 'READY' ? void playRoute(r) : toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
+          return b;
+        };
+        const groups = engine.groupRoutes(live).map(([group, routes]) => {
+          const g = el('section', 'an-srv-group');
+          const grid = el('div', 'an-srv-grid');
+          grid.append(...[...routes].sort((a, b) => (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3) || failures(a) - failures(b)).map(tile));
+          g.append(el('h4', 'an-srv-q', group), grid);
+          return g;
+        });
+        if (dead.length) {
+          const fold = el('details', 'cn-srv-dead');
+          fold.open = sheet.showDead === true;
+          fold.addEventListener('toggle', () => (sheet.showDead = fold.open));
+          const sum = el('summary', null, `غير متاح (${dead.length})`);
+          const grid = el('div', 'an-srv-grid');
+          grid.append(...dead.map(tile));
+          fold.append(sum, grid);
+          groups.push(fold);
+        }
+        list.replaceChildren(...groups);
       };
       const queuePaint = () => {
         if (queued) return;
@@ -1192,6 +1224,7 @@ export function createCinema(deps) {
           engine.on('prepared', (e) => {
             if (e.session !== sheet.session) return;
             sheet.done = true;
+            noteServer(sheet.routes);
             queuePaint();
           }),
         );
