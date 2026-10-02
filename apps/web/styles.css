@@ -56,7 +56,13 @@ html, body, * { -webkit-tap-highlight-color: transparent; }
 
 * { box-sizing: border-box; }
 html { background: var(--bg); color: var(--text); -webkit-text-size-adjust: 100%; }
-body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); overflow-x: hidden; }
+/*
+ * `overflow-x: clip` لا `hidden`: سفاري الآيفون يجعل body بـ`hidden` حاويةَ تمرير،
+ * فيصير كل `position: fixed` (الشريط السفلي، المشغّل) نسبيًا لها ويتحرك مع
+ * المحتوى — الشريط يطلع في منتصف الشاشة بعد التمرير. `clip` يقصّ بلا تمرير.
+ */
+body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); overflow-x: clip; }
+@supports not (overflow: clip) { body { overflow-x: hidden; } }
 button:not(.v35 *), input:not(.v35 *) { font: inherit; color: inherit; }
 button:not(.v35 *) { background: none; border: none; cursor: pointer; }
 button:disabled:not(.v35 *) { opacity: .5; cursor: default; }
