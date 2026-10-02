@@ -58,6 +58,7 @@ import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
+import { hiddenOnThisPlatform } from '../pwa/platform.js';
 import { paintWorkInsights } from './work-insights.js';
 
 const AR_GENRE = {
@@ -347,6 +348,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
   (function resumeJobsWhenSignedIn(tries = 0) {
+    if (hiddenOnThisPlatform('translation')) return;
     if (sync.user) return void translationJobs.resumeAll();
     if (tries < 60) setTimeout(() => resumeJobsWhenSignedIn(tries + 1), 5000);
   })();
@@ -1437,7 +1439,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = q('detailTlBtn');
     if (!b) return;
     const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish || !readTranslateSettings().enabled;
+    b.hidden = !hasEnglish || !readTranslateSettings().enabled || hiddenOnThisPlatform('translation');
     const on = translationOn(String(w?.id ?? ''));
     b.setAttribute('aria-pressed', String(on));
     b.classList.toggle('detail-tl--on', on);
@@ -3384,7 +3386,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     const here = currentPage();
     // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
-    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    const groups = rafiq.enabled && !hiddenOnThisPlatform('rafiq') ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     // الأقسام الثلاثة في رأس القائمة: التبديل من حيث تتنقّل، لا من الشعار وحده
     const sections = el('div', 'drawer-sections');
     sections.setAttribute('role', 'radiogroup');
@@ -3443,7 +3445,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function openDrawer() {
     // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
-    if (rafiq.enabled !== true) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
+    if (rafiq.enabled !== true && !hiddenOnThisPlatform('rafiq')) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
@@ -3459,7 +3461,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
-    if (key === 'rafiq') return showPage('rafiq');
+    if (key === 'rafiq') return hiddenOnThisPlatform('rafiq') ? undefined : showPage('rafiq');
     if (key === 'insights') return showPage('insights');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
@@ -3520,7 +3522,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (inCinema) cinema.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
-    if (id === 'rafiq') void rafiq.show();
+    if (id === 'rafiq' && !hiddenOnThisPlatform('rafiq')) void rafiq.show();
     if (id === 'home' && root.dataset.section === 'manga') {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
@@ -4077,7 +4079,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ],
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
-      renderTranslationSettings(group, row, toggle);
+      // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
+      if (!hiddenOnThisPlatform('translation')) renderTranslationSettings(group, row, toggle);
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
@@ -4879,7 +4882,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     return null;
   }
-  setTimeout(() => void rafiq.check(), 2500);
+  // الـPWA بلا رفيق (قرار المالك): لا سؤال للخادم ولا أثر في القائمة
+  if (!hiddenOnThisPlatform('rafiq')) setTimeout(() => void rafiq.check(), 2500);
 
   const startSection = readSection();
   applySection(startSection);

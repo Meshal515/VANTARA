@@ -19,6 +19,8 @@
   "devDependencies": {
     "@capacitor/cli": "^6.2.2",
     "@types/node": "^22.13.0",
+    "fake-indexeddb": "6.2.5",
+    "linkedom": "^0.18.13",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   },

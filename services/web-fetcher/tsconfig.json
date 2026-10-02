@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // منصة الويب لا Node: fetch وcrypto.subtle وResponse globals من lib DOM.
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "rootDir": "../..",
+  },
+  "include": ["src/**/*.ts", "../../apps/web/pwa/sources/allow.json"]
+}

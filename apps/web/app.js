@@ -12,6 +12,8 @@
  * التمرير للأعلى، وذلك وحده يجعل التطبيق يبدو معطوبًا حتى لو كان كل رقم صحيحًا.
  */
 
+// الـPWA: جسور الويب قبل أي وحدة تسأل عن الإضافات الأصلية. داخل الـAPK لا يفعل شيئًا.
+import './pwa/boot.js';
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
@@ -59,6 +61,8 @@ const el = (tag, className, text) => {
 const root = $('#root');
 const config = endpoints();
 const sync = createSync({ baseUrl: config.sync });
+// الـPWA تطلب المصادر عبر جالب الويب بتوكن الجلسة نفسها (داخل الـAPK: VantaraWeb غير موجود)
+globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, refresh: () => sync.refreshSession() });
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
 const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);

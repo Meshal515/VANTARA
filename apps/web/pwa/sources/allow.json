@@ -1,0 +1,42 @@
+{
+  "$comment": "المواقع التي يحق لجالب الويب طلبها (services/web-fetcher). سطر يطابق الموقع ونطاقاته الفرعية. كل مضيف في تعريفات المصادر يجب أن يكون هنا (يحرسه repository-safety).",
+  "hosts": [
+    "3asq.online",
+    "starzmanga.com",
+    "sparkmanga.net",
+    "hizomanga.net",
+    "mangalik.net",
+    "lekmanga.online",
+    "mangatime.org",
+    "hijala.com",
+    "meshmanga.com",
+    "olympustaff.com",
+    "azorafly.com",
+    "mangadex.org",
+    "mangadex.network",
+
+    "witanime.site",
+    "witanime.net",
+    "shahiid-anime.net",
+    "anime4up.rest",
+    "myseed.pics",
+    "myseed.tv",
+    "tuktukhd.com",
+    "egydead.live",
+    "egydead.space",
+    "egydead.fyi",
+    "m6o3p.sbs",
+
+    "ok.ru",
+    "okcdn.ru",
+    "mycdn.me",
+    "megamax.me",
+    "share4max.com",
+    "megatuktuk.com",
+    "sendvid.com",
+    "vidara.to",
+    "hgcloud.to",
+    "vibuxer.com",
+    "mp4upload.com"
+  ]
+}

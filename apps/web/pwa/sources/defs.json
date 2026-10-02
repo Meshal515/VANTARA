@@ -1,0 +1,72 @@
+{
+  "$comment": "تعريفات مصادر الـPWA: بيانات لا كود. كل مصدر = محرك عائلته + دومينه + إعداده. المعرّف نفس معرّف الـAPK للمصدر نفسه، فمكتبتك ونسخ أعمالك تفتح في الاثنين. رفع version يجعل التعريف «مرشّحًا» يُختبر قبل اعتماده (pwa/sources/registry.js).",
+  "sources": [
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.manga3asq",
+      "label": "3asq",
+      "names": ["مانجا العاشق"],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "3asq.online",
+      "config": {
+        "listing": "archive",
+        "chapterMode": "mangaAjax",
+        "archiveUrlSelector": "div.post-title a:not([target])",
+        "chapterDateSelector": "span.chapter-release-date .timediff"
+      },
+      "probe": { "query": "one piece" }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangastarz",
+      "label": "Manga Starz",
+      "names": ["Manga Starz"],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "starzmanga.com",
+      "config": {},
+      "probe": { "query": "solo" }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangaspark",
+      "label": "MangaSpark",
+      "names": ["MangaSpark"],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "sparkmanga.net",
+      "config": {
+        "chapterMode": "adminAjax",
+        "pageSelector": "div.wp-manga-chapter-img img, div.reading-content img"
+      },
+      "probe": { "query": "solo" }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangalek",
+      "label": "Mangalek",
+      "names": ["مانجا ليك"],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "mangalik.net",
+      "config": {},
+      "probe": { "query": "solo" }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.hizomanga",
+      "label": "HizoManga",
+      "names": ["Hizo Manga"],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "hizomanga.net",
+      "config": {
+        "mangaSubString": "serie",
+        "descriptionSelector": ".manga-excerpt",
+        "statusSelector": ".manga-status"
+      },
+      "probe": { "query": "a" }
+    }
+  ]
+}

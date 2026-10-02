@@ -1,0 +1,95 @@
+name: Deploy web fetcher
+
+# جالب الويب للـPWA (services/web-fetcher). لا ينشر من push مباشرة: بعد نجاح
+# VANTARA CI على main فقط، مثل خادم المزامنة. الـAPK لا يستعمله (docs/PWA.md).
+on:
+  workflow_run:
+    workflows: ['VANTARA CI']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-fetcher-production
+  cancel-in-progress: false
+
+env:
+  WORKER_DIR: services/web-fetcher
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"    || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID"   || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$VANTARA_IDENTITY_SECRET" || { echo 'Missing VANTARA_IDENTITY_SECRET'; exit 1; }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vantara/domain build
+      - run: pnpm --filter @vantara/web-fetcher typecheck
+
+      - name: Deploy code and the identity secret as one version
+        working-directory: ${{ env.WORKER_DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
+        run: |
+          set -euo pipefail
+          secrets_file="$(mktemp)"
+          trap 'rm -f "$secrets_file"' EXIT
+          chmod 600 "$secrets_file"
+          jq -n --arg identity "$VANTARA_IDENTITY_SECRET" '{ VANTARA_IDENTITY_SECRET: $identity }' > "$secrets_file"
+          npx --yes wrangler@4 deploy --secrets-file "$secrets_file"
+
+      - name: Smoke test and reach our sources from Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | jq -r '.result.subdomain')
+          url="https://vantara-fetch.$sub.workers.dev"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS "$url/health" -o /tmp/health.json; then break; fi
+            echo "health not ready yet (attempt $attempt)"; sleep 5
+          done
+          jq -e '.ok == true' /tmp/health.json > /dev/null
+          # بلا توكن: الجلب مرفوض (الجالب ليس مفتوحًا)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/v1/fetch" -H 'content-type: application/json' --data '{"url":"https://3asq.online/"}')
+          test "$code" = '401' || { echo "unauthenticated fetch returned $code"; exit 1; }
+          # من شبكة Cloudflare: هل تصل مواقعنا؟ وأيها يطلب تحققًا؟ (معلومة لا شرط نجاح)
+          curl -fsS "$url/health/hosts?h=w1.anime4up.rest,witanime.site,shahiid-anime.net,m.myseed.pics,tuktukhd.com,tv10.egydead.live,3asq.online,mangalik.net,starzmanga.com,olympustaff.com,meshmanga.com,api.mangadex.org" | tee /tmp/hosts.json | jq .
+          {
+            echo "VANTARA_FETCH_URL=$url"
+            echo ''
+            echo '| host | status | challenge | ms |'
+            echo '|---|---|---|---|'
+            jq -r '.results[] | "| \(.host) | \(.status // .error) | \(.challenge // .detail // "-") | \(.ms) |"' /tmp/hosts.json
+          } >> "$GITHUB_STEP_SUMMARY"

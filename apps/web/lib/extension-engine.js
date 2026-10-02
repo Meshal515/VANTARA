@@ -6,14 +6,17 @@
  * بصمات ولا أسماء مضيفات. بيان المصادر يسكن في `Sources.kt` وحده، ويُقرأ
  * بـ`sources()`.
  *
- * ومقصودٌ ألّا يكون هنا بديلٌ يعمل على الويب. القارئ على المتصفح لا يستطيع
- * تحميل DEX، وبديلٌ يرجع بيانات تشبه الحقيقية يجعل شاشةً مكسورة تبدو سليمة
- * — وهذا أسوأ من شاشة تقول «غير متاح». فـ`isAvailable()` تُسأل أولًا.
+ * المتصفح لا يستطيع تحميل DEX. فنسخة الويب (PWA) لها جسرها الحقيقي بنفس
+ * الواجهة: محركات مصادر ويب عبر جالب الويب (pwa/bridges/manga.js)، لا بيانات
+ * تشبه الحقيقية. داخل الـAPK الجسر الأصلي وحده، و`webPlugin()` يرجع null هناك.
+ * و`isAvailable()` تُسأل أولًا كما كانت.
  */
 
-/** الجسر، أو `null` على الويب. يُقرأ عند كل نداء: Capacitor يحقنه قبل JS. */
+import { webPlugin } from '../pwa/platform.js';
+
+/** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
 function bridge() {
-	return globalThis.Capacitor?.Plugins?.ExtensionEngine ?? null;
+	return globalThis.Capacitor?.Plugins?.ExtensionEngine ?? webPlugin('ExtensionEngine');
 }
 
 /** هل المحرّك موجود أصلًا؟ تُسأل قبل عرض أي واجهة مصادر. */

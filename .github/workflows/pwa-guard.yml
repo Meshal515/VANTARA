@@ -1,0 +1,41 @@
+name: PWA guard
+
+# قاعدة الـPWA: إضافية فقط ولا تلمس الـAPK. أي تغيير يمسّ ملفات الـPWA يجب أن
+# يترك بصمة الكود الأصلي (tools/native-fingerprint.mjs) كما هي على الفرع الأساسي:
+# لا Kotlin ولا Manifest ولا Gradle ولا capacitor.config ولا إصدارات Capacitor.
+on:
+  pull_request:
+    paths:
+      - 'apps/web/pwa/**'
+      - 'services/web-fetcher/**'
+      - 'docs/PWA.md'
+      - '.github/workflows/web-fetcher.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apk-untouched:
+    name: APK untouched
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Native fingerprint is identical to the base branch
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          head_fp=$(node tools/native-fingerprint.mjs)
+          git worktree add -q /tmp/base "$BASE"
+          base_fp=$(cd /tmp/base && node tools/native-fingerprint.mjs)
+          echo "base $base_fp · head $head_fp"
+          if [ "$base_fp" != "$head_fp" ]; then
+            echo 'This PR touches PWA files and also changes native APK inputs:'
+            git diff --name-only "$BASE"...HEAD -- android capacitor.config.ts
+            echo 'Split native changes into their own PR. The PWA must never change the APK.'
+            exit 1
+          fi
