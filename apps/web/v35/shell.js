@@ -58,7 +58,8 @@ import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
-import { hiddenOnThisPlatform } from '../pwa/platform.js';
+import { currentPlatform, supports } from '../lib/capabilities.js';
+import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 
 const AR_GENRE = {
@@ -348,7 +349,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
   (function resumeJobsWhenSignedIn(tries = 0) {
-    if (hiddenOnThisPlatform('translation')) return;
+    if (!supports('translation')) return;
     if (sync.user) return void translationJobs.resumeAll();
     if (tries < 60) setTimeout(() => resumeJobsWhenSignedIn(tries + 1), 5000);
   })();
@@ -1439,7 +1440,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = q('detailTlBtn');
     if (!b) return;
     const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish || !readTranslateSettings().enabled || hiddenOnThisPlatform('translation');
+    b.hidden = !hasEnglish || !readTranslateSettings().enabled || !supports('translation');
     const on = translationOn(String(w?.id ?? ''));
     b.setAttribute('aria-pressed', String(on));
     b.classList.toggle('detail-tl--on', on);
@@ -3386,7 +3387,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     const here = currentPage();
     // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
-    const groups = rafiq.enabled && !hiddenOnThisPlatform('rafiq') ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    const groups = rafiq.enabled && supports('rafiq') ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     // الأقسام الثلاثة في رأس القائمة: التبديل من حيث تتنقّل، لا من الشعار وحده
     const sections = el('div', 'drawer-sections');
     sections.setAttribute('role', 'radiogroup');
@@ -3445,7 +3446,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function openDrawer() {
     // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
-    if (rafiq.enabled !== true && !hiddenOnThisPlatform('rafiq')) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
+    if (rafiq.enabled !== true && supports('rafiq')) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
@@ -3461,7 +3462,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
-    if (key === 'rafiq') return hiddenOnThisPlatform('rafiq') ? undefined : showPage('rafiq');
+    if (key === 'rafiq') return supports('rafiq') ? showPage('rafiq') : undefined;
     if (key === 'insights') return showPage('insights');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
@@ -3522,7 +3523,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (inCinema) cinema.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
-    if (id === 'rafiq' && !hiddenOnThisPlatform('rafiq')) void rafiq.show();
+    if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
     if (id === 'home' && root.dataset.section === 'manga') {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
@@ -3886,6 +3887,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync.enqueue('settings.patch', { fields });
   }
 
+  /** سجل التحديثات: المشترك + ما يخص هذه المنصة (lib/release.js). */
+  function openWhatsNew() {
+    const KIND = { new: 'جديد', fix: 'إصلاح', improve: 'تحسين' };
+    openSheet((body) => {
+      body.append(el('h3', null, 'ما الجديد'));
+      for (const release of releaseNotesFor(currentPlatform())) {
+        body.append(el('div', 'settings-group-label settings-sublabel', `${RELEASE.product} ${release.version}`));
+        const list = el('ul', 'whats-new');
+        for (const item of release.items) {
+          const li = el('li');
+          li.append(el('span', `whats-new__kind whats-new__kind--${item.kind}`, KIND[item.kind] ?? ''), el('span', null, item.text));
+          list.append(li);
+        }
+        body.append(list);
+      }
+    });
+  }
+
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -4080,7 +4099,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
-      if (!hiddenOnThisPlatform('translation')) renderTranslationSettings(group, row, toggle);
+      if (supports('translation')) renderTranslationSettings(group, row, toggle);
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
@@ -4090,7 +4109,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
-      row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || '—' }),
+      row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
+      row('spark', 'ما الجديد', `${RELEASE.product} ${RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {
@@ -4883,7 +4903,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return null;
   }
   // الـPWA بلا رفيق (قرار المالك): لا سؤال للخادم ولا أثر في القائمة
-  if (!hiddenOnThisPlatform('rafiq')) setTimeout(() => void rafiq.check(), 2500);
+  if (supports('rafiq')) setTimeout(() => void rafiq.check(), 2500);
 
   const startSection = readSection();
   applySection(startSection);

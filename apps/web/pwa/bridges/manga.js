@@ -10,6 +10,7 @@
 import { getRuntime } from '../runtime.js';
 import { imageSrc } from '../cache/images.js';
 import { checkListing, checkPages, checkSeries } from '../sources/contract.js';
+import { supports } from '../../lib/capabilities.js';
 
 const MIN = 60 * 1000;
 const TTL = { search: 30 * MIN, popular: 20 * MIN, latest: 10 * MIN, catalogue: 20 * MIN, genre: 30 * MIN, series: 30 * MIN, pages: 7 * 24 * 60 * MIN };
@@ -50,7 +51,7 @@ export const MangaEngine = {
   async sources() {
     const { registry } = await rt();
     return {
-      sources: registry.list('manga').map((d) => ({
+      sources: (supports('mangaWebSources') ? registry.list('manga') : []).map((d) => ({
         id: d.id,
         label: d.label,
         lib: 1.6,

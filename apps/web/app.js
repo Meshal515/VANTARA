@@ -14,6 +14,9 @@
 
 // الـPWA: جسور الويب قبل أي وحدة تسأل عن الإضافات الأصلية. داخل الـAPK لا يفعل شيئًا.
 import './pwa/boot.js';
+import { runMigrations } from './lib/migrations.js';
+import { supports } from './lib/capabilities.js';
+import { RELEASE, releaseNotesFor } from './lib/release.js';
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
@@ -60,6 +63,8 @@ const el = (tag, className, text) => {
 
 const root = $('#root');
 const config = endpoints();
+// البيانات المحلية تُرحَّل لنسخة هذا الإصدار قبل أن يقرأها أي شيء
+runMigrations();
 const sync = createSync({ baseUrl: config.sync });
 // الـPWA تطلب المصادر عبر جالب الويب بتوكن الجلسة نفسها (داخل الـAPK: VantaraWeb غير موجود)
 globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, refresh: () => sync.refreshSession() });
@@ -2053,8 +2058,70 @@ globalThis.__vantaraCheckUpdate = (opts) => checkUpdates(opts);
 // ───────────────────────────── الإقلاع ─────────────────────────────
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  // الويب: أول تثبيت للعامل لا يعيد التحميل؛ التحديث يُطبَّق حين يطلبه الشخص فقط
+  // (pwa/update.js). الـAPK كما كان.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker
+    .register('/sw.js')
+    .then((registration) => {
+      if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.watchForUpdates(registration, { onReady: showWebUpdate }));
+    })
+    .catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (supports('webUpdate') && !hadController) return;
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(showWhatsNew, 1500));
+}
+
+/** الويب: نسخة جديدة نزلت بالكامل في الخلفية. لا تُطبَّق إلا بضغطة. */
+function showWebUpdate(apply) {
+  if (document.querySelector('.vupdate')) return;
+  const bar = el('div', 'vupdate');
+  bar.setAttribute('role', 'status');
+  const card = el('div', 'vupdate__card');
+  const copy = el('div', 'vupdate__copy');
+  copy.append(el('strong', null, 'تحديث جديد متاح'));
+  copy.append(el('span', null, 'نزل في الخلفية. يتطبّق بإعادة تحميل سريعة'));
+  const go = el('button', 'vupdate__go', 'تحديث');
+  go.type = 'button';
+  go.addEventListener('click', () => {
+    go.disabled = true;
+    go.textContent = '…';
+    apply();
+  });
+  const later = el('button', 'vupdate__later', '×');
+  later.type = 'button';
+  later.setAttribute('aria-label', 'لاحقًا');
+  later.addEventListener('click', () => bar.remove());
+  card.append(copy, go, later);
+  bar.append(card);
+  document.body.append(bar);
+}
+
+/** «ما الجديد» مرة بعد تحديث طبّقه الشخص: المشترك + ما يخص منصته. */
+function showWhatsNew() {
+  const platform = supports('webUpdate') ? 'pwa' : 'apk';
+  const [latest] = releaseNotesFor(platform);
+  if (!latest || document.querySelector('.vupdate')) return;
+  const bar = el('div', 'vupdate');
+  bar.setAttribute('role', 'status');
+  const card = el('div', 'vupdate__card');
+  const copy = el('div', 'vupdate__copy');
+  copy.append(el('strong', null, `${RELEASE.product} ${latest.version}`));
+  const list = el('ul', 'vupdate__notes');
+  for (const item of latest.items.slice(0, 4)) list.append(el('li', null, item.text));
+  copy.append(list);
+  const done = el('button', 'vupdate__later', '×');
+  done.type = 'button';
+  done.setAttribute('aria-label', 'إغلاق');
+  done.addEventListener('click', () => bar.remove());
+  card.append(copy, done);
+  bar.append(card);
+  document.body.append(bar);
 }
 
 /**

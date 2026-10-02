@@ -17,7 +17,7 @@
 import { isFiller } from './works.js';
 import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings, setTranslationLocked } from '../lib/translate-settings.js';
-import { hiddenOnThisPlatform } from '../pwa/platform.js';
+import { supports } from '../lib/capabilities.js';
 import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, focusPage, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
@@ -69,7 +69,7 @@ export function endWorkSession(ref) {
 /** هل الترجمة شغّالة لهذا العمل الآن؟ تلقائي = نعم؛ عند الطلب = إن فعّلتها في هذه الجلسة. */
 export function translationOn(ref) {
   const s = readTranslateSettings();
-  if (!s.enabled || !ref || hiddenOnThisPlatform('translation')) return false;
+  if (!s.enabled || !ref || !supports('translation')) return false;
   // تلقائي: شغّالة ما لم توقفها مؤقتًا لهذا العمل؛ عند الطلب: إن فعّلتها في هذه الجلسة
   // فصول جهّزتها مقدمًا تُعرض عربية دائمًا، ولو بعد إعادة فتح التطبيق
   return s.mode === 'auto' ? !sessionWorks.has(`off:${ref}`) : sessionWorks.has(ref) || readJobs().some((j) => j.ref === ref);
@@ -143,7 +143,7 @@ export function createReaderTranslation(deps) {
   let currentSeg = null;
 
   // الـPWA بلا ترجمة مانجا: لا زرّ ولا ترجمة تلقائية مهما قال تخزين المتصفح
-  const enabled = () => readTranslateSettings().enabled && !hiddenOnThisPlatform('translation');
+  const enabled = () => readTranslateSettings().enabled && supports('translation');
   const isOn = () => translationOn(ref);
   root.classList.toggle('rd-tl-off', !isOn());
 

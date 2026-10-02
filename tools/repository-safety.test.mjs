@@ -1359,7 +1359,8 @@ test('the native app never references the web fetcher or the PWA engines', () =>
 });
 
 test('PWA modules are reached only through the platform gate', () => {
-  const allowed = new Set(['pwa/platform.js', 'pwa/boot.js']);
+  // update.js: تحديث الويب، يُستورد خلف supports('webUpdate') فلا يُحمَّل في الـAPK
+  const allowed = new Set(['pwa/platform.js', 'pwa/boot.js', 'pwa/update.js']);
   const outside = webFiles().filter((f) => f.endsWith('.js') && !f.includes('.test.') && !f.includes('/apps/web/pwa/'));
   const leaks = [];
   for (const file of outside) {

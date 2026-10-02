@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '288ad6c45477028a8c83166a89a04baa2c83c413ffa29e66916456c3b1a04c62';
+const SHELL_DIGEST = 'b9d6549c78d62ad250cad7ea169e07c24fad4feca3d95436356ffdd9b5ff60b8';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -166,6 +166,9 @@ const SHELL = [
   '/lib/cinema-fast.js',
   '/lib/update-engine.js',
   '/lib/follow-time.js',
+  '/lib/release.js',
+  '/lib/capabilities.js',
+  '/lib/migrations.js',
   '/anime/sources.json',
   '/manifest.webmanifest',
   '/fonts/NotoSansArabic.var.woff2',
@@ -201,6 +204,7 @@ const SHELL = [
   '/pwa/sources/engines/witanime.js',
   '/pwa/sources/hosts.js',
   '/pwa/sources/registry.js',
+  '/pwa/update.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -212,7 +216,9 @@ self.addEventListener('install', (event) => {
         // قشرة نصف مخزّنة تُخدم لاحقًا
         await cache.addAll(SHELL);
       }
-      await self.skipWaiting();
+      // الـAPK: يتفعّل فورًا كما كان. الويب: ينتظر حتى يضغط الشخص «تحديث»
+      // (رسالة skip-waiting) أو يُغلق التطبيق — لا تحديث يكسر جلسة مفتوحة.
+      if (BUNDLED) await self.skipWaiting();
     })(),
   );
 });

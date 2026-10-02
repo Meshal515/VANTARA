@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hiddenOnThisPlatform, isNative, isWeb, webPlugin } from './platform.js';
+import { isNative, isWeb, webPlugin } from './platform.js';
 import { installWebBridges } from './boot.js';
 
 const native = { Capacitor: { isNativePlatform: () => true, Plugins: {} } };
@@ -13,14 +13,6 @@ describe('platform gate', () => {
     // جسر يرمي: يُعامل كأصلي فلا يُحقن فيه شيء من الويب
     expect(isNative({ Capacitor: { isNativePlatform: () => { throw new Error('x'); } } })).toBe(true);
     expect(isWeb({})).toBe(true);
-  });
-
-  it('hides Rafiq and manga translation in the browser only', () => {
-    expect(hiddenOnThisPlatform('rafiq', {})).toBe(true);
-    expect(hiddenOnThisPlatform('translation', {})).toBe(true);
-    expect(hiddenOnThisPlatform('rafiq', native)).toBe(false);
-    expect(hiddenOnThisPlatform('translation', native)).toBe(false);
-    expect(hiddenOnThisPlatform('majlis', {})).toBe(false);
   });
 
   it('boot installs web bridges in the browser and nothing inside the APK', () => {

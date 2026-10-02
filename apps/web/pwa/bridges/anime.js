@@ -9,6 +9,11 @@
  */
 
 import { getRuntime } from '../runtime.js';
+import { supports } from '../../lib/capabilities.js';
+
+/** القسم مفعّل في الويب؟ (مفاتيح الميزات في lib/release.js) */
+const sectionOn = (content) => (content === 'cinema' ? supports('pwaCinema') : supports('animeWebSources'));
+const videoDefs = (r, content = null) => r.registry.list(content).filter((d) => d.content !== 'manga' && sectionOn(d.content));
 
 const listeners = new Map();
 function emit(event, data) {
@@ -196,7 +201,7 @@ export const AnimeEngine = {
   async sources() {
     const r = await rt();
     return {
-      sources: r.registry.list().filter((d) => d.content !== 'manga').map((d) => ({
+      sources: videoDefs(r).map((d) => ({
         id: d.id, name: d.label, content: d.content, enabled: true, disabledReason: null, loadError: null, domain: d.domain, catalog: null, web: true,
       })),
     };
@@ -249,7 +254,7 @@ export const AnimeEngine = {
 
   async search({ query, content = 'anime' }) {
     const r = await rt();
-    const defs = r.registry.list(content);
+    const defs = videoDefs(r, content);
     const lists = await Promise.all(defs.map((d) => searchSource(r, d, query).catch(() => [])));
     const works = new Map();
     for (const it of lists.flat()) {
@@ -268,7 +273,7 @@ export const AnimeEngine = {
     searches.set(searchId, job);
     void (async () => {
       await Promise.all(
-        r.registry.list(content).map(async (def) => {
+        videoDefs(r, content).map(async (def) => {
           const t0 = Date.now();
           if (r.registry.cooling(def.id)) {
             if (!job.cancelled) emit('searchHit', { searchId, sourceId: def.id, ms: 0, items: [], error: 'يرتاح بعد أعطال', skipped: true, needsHuman: false });

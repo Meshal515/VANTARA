@@ -29,18 +29,6 @@ export function isNative(g = globalThis) {
 export const isWeb = (g = globalThis) => !isNative(g);
 
 /**
- * ميزات مخفية من الـPWA بقرار المالك (لا لأنها معطّلة):
- *   - rafiq: مساعد التوصيات.
- *   - translation: ترجمة المانجا (كل أزرارها وإعداداتها).
- * داخل الـAPK كلها ظاهرة كما هي.
- */
-export const WEB_HIDDEN = Object.freeze(['rafiq', 'translation']);
-
-export function hiddenOnThisPlatform(feature, g = globalThis) {
-  return isWeb(g) && WEB_HIDDEN.includes(feature);
-}
-
-/**
  * إضافة الويب البديلة لإضافة Capacitor بالاسم (`ExtensionEngine`، `AnimeEngine`)،
  * أو `null`. داخل الـAPK دائمًا `null`: الإضافة الأصلية وحدها.
  */
