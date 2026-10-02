@@ -921,7 +921,23 @@ export function createAnime(deps) {
 
   // ───────────── المصادر العربية والتشغيل ─────────────
 
-  /** يبحث عن الأنمي في كل المصادر العربية (محرك التطبيق) ويدمج نسخه. */
+  // نسخ كل أنمي في المصادر تُحفظ على الجهاز: الفتحة التالية تبدأ منها فورًا،
+  // والبحث يتحدّث بصمت في الخلفية (كان يُعاد من الصفر مع كل دخول وخروج)
+  const FOUND_KEY = 'vantara.anime.found.v1';
+  const FOUND_TTL = 7 * 24 * 3600e3;
+  const knownWork = (id) => {
+    const hit = readJson(FOUND_KEY, {})[id];
+    return hit?.work?.copies?.length && Date.now() - (hit.at ?? 0) < FOUND_TTL ? hit.work : null;
+  };
+  const keepWork = (id, work) => {
+    const all = readJson(FOUND_KEY, {});
+    all[id] = { work, at: Date.now() };
+    const ids = Object.keys(all);
+    if (ids.length > 300) for (const old of ids.sort((a, b) => all[a].at - all[b].at).slice(0, ids.length - 300)) delete all[old];
+    writeJson(FOUND_KEY, all);
+  };
+
+  /** يبحث عن الأنمي في كل المصادر العربية (محرك التطبيق): أول مصدر يطابق يكفي، والبقية تُضاف حين تصل. */
   async function locateWork(m, token = state.detailToken) {
     if (!engine.available()) return null;
     if (state.workFor === m.id && state.work) return state.work;
@@ -929,16 +945,32 @@ export function createAnime(deps) {
     if (state.workFor === m.id && state.workPending) return state.workPending;
     state.work = null;
     state.workFor = m.id;
+    const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
+    const current = () => token === state.detailToken && state.workFor === m.id;
+    const adopt = (work) => {
+      keepWork(m.id, work);
+      if (!current()) return;
+      state.work = work;
+      paintSources(m, 'found');
+    };
+    const remembered = knownWork(m.id);
+    if (remembered) {
+      state.work = remembered;
+      paintSources(m, 'found');
+      // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
+      void engine.findWorkStream(titles, adopt).then((fresh) => fresh && adopt(fresh)).catch(() => {});
+      return remembered;
+    }
     paintSources(m, 'loading');
     const pending = (async () => {
       try {
-        const work = await engine.findWork([m.title, m.romaji, m.native, ...(m.synonyms ?? [])]);
-        if (token !== state.detailToken || state.workFor !== m.id) return null;
-        state.work = work;
-        paintSources(m, work ? 'found' : 'none');
+        const work = await engine.findWorkStream(titles, adopt);
+        if (!current()) return null;
+        if (work) adopt(work);
+        else paintSources(m, 'none');
         return work;
       } catch {
-        if (token === state.detailToken && state.workFor === m.id) paintSources(m, 'error');
+        if (current()) paintSources(m, 'error');
         return null;
       } finally {
         if (state.workPending === pending) state.workPending = null;

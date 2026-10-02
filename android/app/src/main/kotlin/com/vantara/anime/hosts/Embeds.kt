@@ -67,7 +67,7 @@ class EmbedResolver(
             host.endsWith("mega.nz") || host.endsWith("mega.co.nz") -> emptyList()
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
-            (host.endsWith("share4max.com") || host.contains("megamax")) && depth == 0 -> fallback(url, referer) { megamax(url, referer, onStreams) }
+            (host.endsWith("share4max.com") || host.contains("megamax") || host.contains("megatuktuk")) && depth == 0 -> fallback(url, referer) { megamax(url, referer, onStreams) }
             host.endsWith("videa.hu") -> fallback(url, referer) { videa(url, referer) }
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->

@@ -200,7 +200,7 @@
       "content": "cinema",
       "priority": 60,
       "embeds": {
-        "selector": "ul.serversList li[data-link]",
+        "selector": "ul.serversList li[data-link], .mob-servers li[data-link]",
         "attr": "data-link",
         "form": { "View": "1" },
         "primary": true
@@ -259,12 +259,7 @@
       "name": "TukTuk Cinema",
       "content": "cinema",
       "priority": 50,
-      "extension": {
-        "pkg": "eu.kanade.tachiyomi.animeextension.ar.tuktukcinema",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.tuktukcinema-v14.8.apk",
-        "sha256": "c8b027204b6b49beb13681b0fb3380758c7e6ef98c418dc8054b10b8a7bdb52a",
-        "version": "14.8"
-      },
+      "adapter": "tuktuk-site",
       "domains": {
         "current": "https://tuktukhd.com",
         "legacy": [],

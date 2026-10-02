@@ -30,6 +30,19 @@ class ManifestFileTest {
         assertEquals("MegaMax", embeds.single().name)
     }
 
+    /** للجوال يرسل الموقع قائمته داخل `.mob-servers` لا `ul.serversList`: كانت الأفلام كلها «GYD غير متاح». */
+    @Test fun `EgyDead servers are read from the mobile page the phone actually gets`() {
+        val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "egydead" }.embeds!!
+        val mobile = """
+            <div class="mob-servers"><span><em>قائمه السيرفرات</em></span><ul>
+              <li data-link="https://hgcloud.to/e/wfw0buonw2r9"><span><p>StreamHG</p></span></li>
+              <li data-link="https://mxdrop.top/e/wln840w7f0zm6oz"><span><p>Mixdrop</p></span></li>
+            </ul></div>"""
+        val e = rule.extract(mobile, "https://tv10.egydead.live/toy-story-5-2026-1080p-web-dl/")
+        assertEquals(listOf("StreamHG", "Mixdrop"), e.map { it.name })
+        assertEquals("https://mxdrop.top/e/wln840w7f0zm6oz", e[1].url)
+    }
+
     @Test fun `OkAnime's server rule reads the redesigned episode page`() {
         val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "okanime" }.embeds!!
         val html = """
