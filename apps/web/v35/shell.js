@@ -15,7 +15,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
 import { SHELL_HTML } from './markup.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -2026,7 +2026,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const b = el('div', 'sheet-item');
         b.innerHTML = glyph('alert');
         b.querySelector('.icon').style.color = 'var(--warning)';
-        b.append(el('span', null, f.label));
+        b.append(el('span', null, displayName(f.label, f.sourceId)));
         const c = el('span', null, 'ما ردّ الآن');
         c.style.cssText = 'margin-inline-start:auto;color:var(--text-3);font-size:var(--fs-meta)';
         b.append(c);

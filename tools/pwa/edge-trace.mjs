@@ -38,16 +38,29 @@ const t = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(n
 const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 
 async function check(url, init) {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
-    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000), redirect: 'follow' });
+    // الترويسات وحدها تكفي للحكم (كفحص الواجهة): خوادم كثيرة تتجاهل Range وتبدأ ملفًا بالجيجات
+    const res = await fetch(url, { ...init, signal: ctrl.signal, redirect: 'follow' });
     const type = res.headers.get('content-type') ?? '';
     const size = res.headers.get('content-range')?.split('/')[1] ?? res.headers.get('content-length') ?? '';
-    const head = new Uint8Array(await res.arrayBuffer()).slice(0, 16);
-    const isHls = new TextDecoder().decode(head).startsWith('#EXTM3U');
+    let isHls = false;
+    if (/mpegurl|text\/plain|octet/i.test(type) && Number(size || 0) < 2_000_000) {
+      const reader = res.body?.getReader();
+      const first = reader ? await reader.read() : null;
+      isHls = Boolean(first?.value && new TextDecoder().decode(first.value.slice(0, 16)).startsWith('#EXTM3U'));
+      reader?.cancel().catch(() => {});
+    } else {
+      res.body?.cancel().catch(() => {});
+    }
     const ok = res.ok && (isHls || /video|mpegurl|octet-stream|mp2t/i.test(type));
-    return `${ok ? '✓' : '✗'} ${res.status} ${type.split(';')[0]}${size ? ` ${(Number(size) / 1e6).toFixed(0)}MB` : ''}`;
+    return `${ok ? '✓' : '✗'} ${res.status} ${type.split(';')[0]}${size ? ` ${(Number(size) / 1e6).toFixed(0)}MB` : ''} ${Date.now() - started}ms`;
   } catch (e) {
-    return `✗ ${String(e?.cause?.code ?? e?.message ?? e).slice(0, 40)}`;
+    return `✗ ${String(e?.cause?.code ?? e?.name ?? e?.message ?? e).slice(0, 30)} ${Date.now() - started}ms`;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -83,7 +96,7 @@ for (const c of cases) {
         const direct = await check(s.url, { headers: { range: 'bytes=0-1', 'user-agent': UA, ...(s.referer ? { referer: s.referer } : {}) } });
         log(`| ${sv.name} | ${s.quality ?? sv.quality ?? ''} | ${s.type} ${new URL(s.url).hostname} ${Date.now() - started}ms | ${edge} | ${direct} |`);
       } catch (e) {
-        log(`| ${sv.name} | ${sv.quality ?? ''} | ✗ ${String(e?.code ?? '')} ${String(e?.message ?? e).slice(0, 70).replace(/\|/g, '/')} | | |`);
+        log(`| ${sv.name} | ${sv.quality ?? ''} | ✗ ${String(e?.code ?? '')} ${e?.host ? `[${e.host}] ` : ''}${String(e?.message ?? e).slice(0, 70).replace(/\|/g, '/')} | | |`);
       }
     }
   } catch (e) {

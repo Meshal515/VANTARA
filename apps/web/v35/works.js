@@ -215,8 +215,29 @@ export async function cachedWorkChapterCount(v35work) {
  * العربي بنفس الرقم يغلبه متى نزل. ويظهر في المصادر بعد العربي، بوسم «إنجليزي».
  */
 export const isFiller = (sourceId) => String(sourceId ?? '').includes('@');
+/** أسماء المصادر المعروفة حين لا يحمل المصدر اسمًا (حزمة بلا name، أو نسخة من الخادم بلا label). */
+const KNOWN_NAMES = {
+  teamx: 'Team X', mangaswat: 'MangaSwat', manga3asq: '3asq', mangastarz: 'Manga Starz', mangaspark: 'MangaSpark',
+  mangalek: 'Mangalek', hizomanga: 'HizoManga', mangalink: 'Manga Link', mangalionz: 'MangaLionz', azora: 'Azora',
+  lavascans: 'Lava Scans', mangadex: 'MangaDex', mangadar: 'MangaDar', olympustaff: 'Olympus Staff',
+};
+/**
+ * اسم بشري دائمًا: معرّف حزمة (`eu.kanade.tachiyomi.extension.ar.teamx`) لا يظهر
+ * للقارئ أبدًا. الاسم المعطى يُحترم إن لم يكن هو المعرّف نفسه.
+ */
+export function displayName(label, sourceId) {
+  const id = String(sourceId ?? '').split('@')[0];
+  const raw = String(label ?? '').trim();
+  if (raw && raw !== id && !/^[a-z]+(\.[a-z0-9_]+){2,}$/i.test(raw)) return raw;
+  const slug = (raw || id).split('.').pop()?.toLowerCase() ?? '';
+  if (KNOWN_NAMES[slug]) return KNOWN_NAMES[slug];
+  return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : 'مصدر';
+}
 /** اسم المصدر كما يُعرض: الإنجليزي موسوم، فلا يلتبس MangaDex العربي بالإنجليزي. */
-export const sourceLabel = (s) => (isFiller(s?.sourceId) ? `${s.label} · إنجليزي` : s?.label);
+export const sourceLabel = (s) => {
+  const name = displayName(s?.label, s?.sourceId);
+  return isFiller(s?.sourceId) ? `${name} · إنجليزي` : name;
+};
 /** شرائح المصادر: العربي أولًا ثم الإنجليزي، وداخل كلٍّ بالأوثق. */
 const sourceList = (editions) =>
   [...editions]
