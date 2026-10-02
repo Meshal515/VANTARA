@@ -744,7 +744,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!recent) return work._viewLabel ?? '';
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
-    return work._updateAt ? `${label} · ${agoAr(work._updateAt)}` : label;
+    // عدة فصول نزلت للعمل: بطاقة واحدة ورقم خفيف بعددها
+    const more = work._newCount > 1 ? ` +${work._newCount}` : '';
+    return work._updateAt ? `${label}${more} · ${agoAr(work._updateAt)}` : label + more;
   }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
@@ -2913,7 +2915,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     // غلاف الحدث مرشّحٌ دائمًا بعد غلاف العمل: غلافٌ محفوظ قديم لا يُسقط البطاقة إلى حرف
     if (g.cover && base.bannerImage !== g.cover && !coverCandidates(base).some((c) => c.url === g.cover)) base.bannerImage = g.cover;
-    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at };
+    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _newCount: g.events?.length ?? 1 };
   }
   function openUpdate(g) {
     if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });

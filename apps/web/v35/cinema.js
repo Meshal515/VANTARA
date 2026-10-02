@@ -674,7 +674,9 @@ export function createCinema(deps) {
     const m = { id: g.work.slice('cinema:'.length), type: g.kind === 'movie' ? 'movie' : 'series', title: g.title, poster: g.cover };
     const c = posterCard(m);
     const meta = c.querySelector('.cn-poster-meta');
-    meta.replaceChildren(el('span', 'cn-poster-unit', `${unitLabel(g)} · ${agoAr(g.at)}`));
+    // الأحدث ورقم خفيف بعدد ما نزل، كالمانجا: «S02E05 +3 · قبل ساعتين»
+    const more = g.events?.length > 1 ? ` +${g.events.length}` : '';
+    meta.replaceChildren(el('span', 'cn-poster-unit', `${unitLabel({ ...g, low: g.high, events: [g] })}${more} · ${agoAr(g.at)}`));
     meta.dir = 'auto';
     return c;
   }

@@ -135,14 +135,14 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     else if (g.cover) art.append(image(g.cover));
     const t = el('b', 'up-title', g.title);
     t.dir = 'auto';
-    // دفعة فصول: الأحدث وبجانبه كم معه («الفصل 201 +2») بدل مدى طويل لا يتسع
+    // بطاقة واحدة للعمل: الأحدث وبجانبه رقم خفيف بعدد ما نزل («الفصل 203 +3»)
     const unit = el('span', 'up-unit', unitLabel({ ...g, low: g.high, events: [g] }));
     unit.dir = g.season != null && g.kind !== 'movie' ? 'ltr' : 'auto';
-    const extra = g.events.length - 1;
+    const count = g.events.length;
     const line = el('span', 'up-line');
     line.append(unit);
-    if (extra > 0) {
-      const plus = el('span', 'up-plus', `+${extra}`);
+    if (count > 1) {
+      const plus = el('span', 'up-plus', `+${count}`);
       plus.dir = 'ltr';
       line.append(plus);
     }
