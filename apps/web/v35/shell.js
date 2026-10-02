@@ -13,6 +13,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -50,6 +51,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
+import { pinPad } from '../screens/pin-pad.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
@@ -58,6 +60,8 @@ import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
+import { currentPlatform, supports } from '../lib/capabilities.js';
+import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 
 const AR_GENRE = {
@@ -169,6 +173,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   });
   const q = (id) => root.querySelector(`#${id}`);
+  // الشريط الجانبي للشاشات العريضة يُرسم بعد اكتمال الإقلاع (يقرأ رفيق والحساب)
+  const wideScreen = globalThis.matchMedia?.('(min-width: 1024px)');
+  let railReady = false;
+  // صفحة العمل على الكمبيوتر: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب الفصول
+  const detailDock = sideDock(
+    () => [q('detailCover'), root.querySelector('#detail .detail-cta'), root.querySelector('#detail .detail-quick'), q('detailProgress')],
+    { query: wideScreen, className: 'detail-side' },
+  );
 
   const state = {
     home: { trending: [], featured: [], recent: [], popular: [] },
@@ -347,6 +359,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
   (function resumeJobsWhenSignedIn(tries = 0) {
+    if (!supports('translation')) return;
     if (sync.user) return void translationJobs.resumeAll();
     if (tries < 60) setTimeout(() => resumeJobsWhenSignedIn(tries + 1), 5000);
   })();
@@ -819,7 +832,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       h.append(b);
     }
     const strip = el('div', `card-strip card-strip--${spec.layout}`);
-    strip.dataset.limit = String(spec.limit);
+    // الشبكة على الشاشة العريضة 12 (صفوف كاملة من 4 أو 6 أعمدة)، وعلى الجوال 3×3
+    strip.dataset.limit = String(spec.layout === 'grid' && globalThis.matchMedia?.('(min-width: 700px)').matches ? 12 : spec.limit);
     renderStrip(strip, items);
     s.append(h, strip);
     return s;
@@ -1437,7 +1451,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = q('detailTlBtn');
     if (!b) return;
     const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish || !readTranslateSettings().enabled;
+    b.hidden = !hasEnglish || !readTranslateSettings().enabled || !supports('translation');
     const on = translationOn(String(w?.id ?? ''));
     b.setAttribute('aria-pressed', String(on));
     b.classList.toggle('detail-tl--on', on);
@@ -3384,7 +3398,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     const here = currentPage();
     // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
-    const groups = rafiq.enabled ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    const groups = rafiq.enabled && supports('rafiq') ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
     // الأقسام الثلاثة في رأس القائمة: التبديل من حيث تتنقّل، لا من الشعار وحده
     const sections = el('div', 'drawer-sections');
     sections.setAttribute('role', 'radiogroup');
@@ -3393,6 +3407,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const b = el('button', `drawer-section drawer-section--${id}`);
       b.type = 'button';
       b.dataset.arg = id;
+      b.dataset.short = id[0].toUpperCase();
+      b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
       const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
@@ -3429,6 +3445,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
             b.innerHTML = glyph(ic);
             b.append(el('span', null, key === 'later' ? laterLabel : text));
           }
+          b.title = b.textContent;
           if (key === 'notifications' && unread) b.append(el('span', 'badge', unread > 99 ? '99+' : String(unread)));
           if (key === here) {
             b.classList.add('active');
@@ -3443,10 +3460,48 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function openDrawer() {
     // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
-    if (rafiq.enabled !== true) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
+    if (rafiq.enabled !== true && supports('rafiq')) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
+  // الشاشة العريضة (كمبيوتر، آيباد بالعرض): القائمة نفسها شريط ثابت بجانب
+  // المحتوى بدل الشريط السفلي، فتُرسم مع كل تنقّل ليبقى «أنت هنا» صحيحًا
+  function paintRail() {
+    if (railReady && wideScreen?.matches) buildDrawer();
+  }
+  // مطويّ: أيقونات وشعار فقط. يُحفظ على الجهاز كاختيار شخصي
+  const RAIL_KEY = 'vantara.rail.collapsed';
+  root.classList.toggle('rail-collapsed', (() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })());
+  function toggleRail() {
+    const collapsed = !root.classList.contains('rail-collapsed');
+    // انتقال عرض واحد: الشريط يضيق والمحتوى (والفصول بعمودين) يتمدد معه بنعومة
+    const swap = () => root.classList.toggle('rail-collapsed', collapsed);
+    const reduce = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !reduce) {
+      root.classList.add('rail-moving');
+      document.startViewTransition(swap).finished.finally(() => root.classList.remove('rail-moving'));
+    } else swap();
+    try {
+      localStorage.setItem(RAIL_KEY, collapsed ? '1' : '0');
+    } catch {
+      // تفضيل عرض فقط
+    }
+  }
+  /** الشعار: في الشريط المطويّ يفتحه، وفي المفتوح يرجع للرئيسية. */
+  function railLogo() {
+    if (root.classList.contains('rail-collapsed')) return toggleRail();
+    navTo('home');
+  }
+  wideScreen?.addEventListener?.('change', () => {
+    closeDrawer();
+    paintRail();
+  });
   function closeDrawer() {
     if (!q('drawerBackdrop').classList.contains('open')) return false;
     q('drawerBackdrop').classList.remove('open');
@@ -3459,7 +3514,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
-    if (key === 'rafiq') return showPage('rafiq');
+    if (key === 'rafiq') return supports('rafiq') ? showPage('rafiq') : undefined;
     if (key === 'insights') return showPage('insights');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
@@ -3470,6 +3525,196 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'friends') return openSocial('friends');
     if (key === 'activity') return openSocial('friends');
   }
+  // ───────────────────────── PIN وحذف الحساب ─────────────────────────
+
+  /** ردّ الخادم بلغة لوحة PIN. */
+  const padResult = (out) => {
+    if (out.ok) return { ok: true };
+    const error = out.data?.error ?? 'other';
+    const message = error === 'bad_pin' ? 'الرمز أرقام فقط: 4 أو 6' : error === 'pin_wrong' ? 'رمز غير صحيح' : error === 'pin_locked' ? undefined : 'تعذّر الحفظ. حاول مرة ثانية';
+    return { error, retryAt: out.data?.retryAt ?? null, message };
+  };
+  const pinFace = () => {
+    const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
+    const name = profile?.display_name || sync.user?.displayName || '';
+    return { avatar: profile?.avatar_key ?? null, initial: [...name][0] || '؟' };
+  };
+
+  function createPin() {
+    pinPad({
+      mode: 'create',
+      title: 'رمز PIN لحسابك',
+      ...pinFace(),
+      submit: async (pin) => padResult(await sync.setPin(pin)),
+      onDone: () => {
+        toast('حسابك صار محمي برمز');
+        renderSettings();
+      },
+    });
+  }
+
+  /** الرمز الحالي أولًا (يُحسب من محاولات القفل كأي إدخال)، ثم الجديد. */
+  function askCurrentPin(title, then) {
+    pinPad({
+      mode: 'enter',
+      digits: sync.user?.pinDigits,
+      title,
+      subtitle: 'اكتب رمزك الحالي',
+      ...pinFace(),
+      submit: async (pin) => {
+        try {
+          await sync.unlock(pin);
+          setTimeout(() => then(pin), 200);
+          return { ok: true };
+        } catch (error) {
+          if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
+          return { error: error?.status ? 'other' : 'network', message: 'تعذّر التحقق. حاول مرة ثانية' };
+        }
+      },
+    });
+  }
+
+  function managePin() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'رمز PIN'));
+      body.append(el('p', null, `حسابك محمي برمز من ${sync.user?.pinDigits} أرقام. يُطلب كل ما فُتح التطبيق على حسابك.`));
+      const actions = el('div', 'sheet-actions');
+      const remove = el('button', 'btn btn-secondary', 'إزالة الرمز');
+      remove.type = 'button';
+      remove.onclick = () => {
+        closeSheet();
+        pinPad({
+          mode: 'enter',
+          digits: sync.user?.pinDigits,
+          title: 'إزالة الرمز',
+          subtitle: 'اكتب رمزك الحالي',
+          ...pinFace(),
+          submit: async (pin) => padResult(await sync.removePin(pin)),
+          onDone: () => {
+            toast('أُزيل الرمز');
+            renderSettings();
+          },
+        });
+      };
+      const change = el('button', 'btn btn-primary', 'تغيير الرمز');
+      change.type = 'button';
+      change.onclick = () => {
+        closeSheet();
+        askCurrentPin('تغيير الرمز', (current) =>
+          pinPad({
+            mode: 'create',
+            title: 'الرمز الجديد',
+            ...pinFace(),
+            submit: async (pin) => padResult(await sync.setPin(pin, current)),
+            onDone: () => {
+              toast('تغيّر الرمز');
+              renderSettings();
+            },
+          }),
+        );
+      };
+      actions.append(remove, change);
+      body.append(actions);
+    });
+  }
+
+  function confirmDeleteAccount() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'حذف الحساب؟'));
+      body.append(el('p', null, 'يُحذف حسابك من السيرفر بكل ما فيه: مكتبتك، تقدّمك، تقييماتك، رسائلك وصورك. بعد الحذف ما يرجع.'));
+      const actions = el('div', 'sheet-actions');
+      const cancel = el('button', 'btn btn-secondary', 'إلغاء');
+      cancel.type = 'button';
+      cancel.onclick = () => closeSheet();
+      const ok = el('button', 'btn btn-danger', 'نعم أوافق');
+      ok.type = 'button';
+      let graceMs = 10_000;
+      ok.onclick = async () => {
+        closeSheet();
+        if (sync.user?.pinDigits) {
+          pinPad({
+            mode: 'enter',
+            digits: sync.user.pinDigits,
+            title: 'تأكيد الحذف',
+            subtitle: 'اكتب رمزك لحذف الحساب',
+            ...pinFace(),
+            submit: async (pin) => {
+              const out = await sync.deleteAccount(pin);
+              if (out.ok) graceMs = Number(out.data?.graceMs) || 10_000;
+              return padResult(out);
+            },
+            onDone: () => showDeleting(graceMs),
+          });
+          return;
+        }
+        const out = await sync.deleteAccount().catch(() => ({ ok: false }));
+        if (out.ok) showDeleting(Number(out.data?.graceMs) || 10_000);
+        else toast('تعذّر الحذف. تأكد من النت وحاول مرة ثانية');
+      };
+      actions.append(cancel, ok);
+      body.append(actions);
+    });
+  }
+
+  /**
+   * «جارٍ حذف الحساب من السيرفر»: الحساب على الخادم PENDING_DELETE — لا شيء
+   * مُسح بعد ولا اسمه تحرر. عشر ثوانٍ وزر تراجع يعيده ACTIVE فورًا؛ بعدها فقط
+   * يبدأ المسح النهائي. ولو أُغلق التطبيق في المنتصف يكمله الخادم وحده.
+   */
+  function showDeleting(graceMs = 10_000) {
+    const SECONDS = Math.max(1, Math.round(graceMs / 1000));
+    const wrap = el('div', 'vdel');
+    wrap.setAttribute('role', 'alertdialog');
+    wrap.setAttribute('aria-modal', 'true');
+    const box = el('div');
+    const ring = el('div', 'vdel__ring');
+    const count = el('div', 'vdel__count', String(SECONDS));
+    const title = el('h2', 'vdel__title', 'جارٍ حذف الحساب من السيرفر');
+    const text = el('p', 'vdel__text', 'تقدر تتراجع قبل ما يخلص العدّ.');
+    const undo = el('button', 'vdel__undo', 'تراجع');
+    undo.type = 'button';
+    box.append(ring, count, title, text, undo);
+    wrap.append(box);
+    document.body.append(wrap);
+    const start = performance.now();
+    let raf = 0;
+    let done = false;
+    const tick = () => {
+      const left = Math.max(0, SECONDS * 1000 - (performance.now() - start));
+      ring.style.setProperty('--p', String(left / (SECONDS * 1000)));
+      count.textContent = String(Math.ceil(left / 1000));
+      if (left <= 0) return void finish();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    async function finish() {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      undo.hidden = true;
+      title.textContent = 'نحذف حسابك…';
+      text.textContent = '';
+      await sync.commitDeletion().catch(() => {});
+      wrap.remove();
+      deps.switchAccount();
+    }
+    undo.onclick = async () => {
+      if (done) return;
+      cancelAnimationFrame(raf);
+      undo.disabled = true;
+      undo.textContent = 'نرجّع حسابك…';
+      const out = await sync.restoreAccount().catch(() => ({ ok: false }));
+      if (out.ok && out.data?.restored) {
+        done = true;
+        wrap.remove();
+        toast('رجع حسابك كما كان');
+        return;
+      }
+      text.textContent = 'ما قدرنا نتراجع: فات الوقت أو انقطع النت.';
+      void finish();
+    };
+  }
+
   function confirmSwitchAccount() {
     openSheet((body) => {
       body.append(el('h3', null, 'تبديل الحساب؟'));
@@ -3520,7 +3765,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (inCinema) cinema.showDiscover();
       else if (!state.catalog.length) void loadMoreDiscover();
     }
-    if (id === 'rafiq') void rafiq.show();
+    if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
     if (id === 'home' && root.dataset.section === 'manga') {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
@@ -3555,6 +3800,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       room.close();
     }
     if (id !== 'profile') profile?.hide();
+    paintRail();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
@@ -3884,12 +4130,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync.enqueue('settings.patch', { fields });
   }
 
+  /** سجل التحديثات: المشترك + ما يخص هذه المنصة (lib/release.js). */
+  function openWhatsNew() {
+    const KIND = { new: 'جديد', fix: 'إصلاح', improve: 'تحسين' };
+    openSheet((body) => {
+      body.append(el('h3', null, 'ما الجديد'));
+      for (const release of releaseNotesFor(currentPlatform())) {
+        body.append(el('div', 'settings-group-label settings-sublabel', `${RELEASE.product} ${release.version}`));
+        const list = el('ul', 'whats-new');
+        for (const item of release.items) {
+          const li = el('li');
+          li.append(el('span', `whats-new__kind whats-new__kind--${item.kind}`, KIND[item.kind] ?? ''), el('span', null, item.text));
+          list.append(li);
+        }
+        body.append(list);
+      }
+    });
+  }
+
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
     const api = deps.settings;
     // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
-    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'ما يراه أصدقاؤك': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
+    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
     const group = (label, rows, { note, cls } = {}) => {
       if (label) {
         const head = el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}${EYEBROWS[label] ? '' : ' settings-sublabel'}`);
@@ -3971,6 +4235,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     group('الحساب', [
       row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
+      sync.deleteAccount ? row('trash', 'حذف الحساب', null, { danger: true, run: confirmDeleteAccount }) : null,
       sync.approveDevice
         ? row('shield', 'اعتماد جوال جديد', 'برمز الجوال الجديد', {
             value: pendingPhones ? `${pendingPhones} ينتظر` : null,
@@ -3979,7 +4244,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
-    // الخصوصية: اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    // الخصوصية: قفل الحساب أولًا، ثم اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    if (sync.setPin) {
+      const digits = sync.user?.pinDigits;
+      group('الخصوصية', [
+        row('lock', 'رمز PIN', digits ? `${digits} أرقام — يُطلب كل ما فُتح حسابك` : 'رمز من أرقام يُطلب كل ما فُتح حسابك', {
+          value: digits ? 'مفعّل' : 'مغلق',
+          tone: digits ? 'ok' : undefined,
+          run: digits ? managePin : createPin,
+        }),
+      ]);
+    }
     const privacy = mySettings();
     group(
       'ما يراه أصدقاؤك',
@@ -4077,7 +4352,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ],
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
-      renderTranslationSettings(group, row, toggle);
+      // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
+      if (supports('translation')) renderTranslationSettings(group, row, toggle);
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
@@ -4087,7 +4363,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
-      row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || '—' }),
+      row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
+      row('spark', 'ما الجديد', `${RELEASE.product} ${RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {
@@ -4391,6 +4668,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     root.querySelectorAll('.notify-dot, .social-tab-dot').forEach((d) => (d.hidden = unread === 0));
     root.querySelectorAll('.has-dot').forEach((b) => b.setAttribute('aria-label', unread ? `الإشعارات، ${countLabel(unread, 'new')}` : 'الإشعارات'));
+    paintRail();
   }
 
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
@@ -4432,6 +4710,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', s.theme);
     document.documentElement.style.background = s.theme;
+    paintRail();
   }
   function pickSection(_e, t) {
     const id = t.dataset.arg;
@@ -4473,6 +4752,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const actions = {
     toggleSections: () => setSectionsOpen(!sectionsOpen()),
+    toggleRail,
+    railLogo,
     pickSection,
     shareAnime: () => anime.shareCurrent(),
     backFromDetail: () => goBack(),
@@ -4879,7 +5160,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     return null;
   }
-  setTimeout(() => void rafiq.check(), 2500);
+  // الـPWA بلا رفيق (قرار المالك): لا سؤال للخادم ولا أثر في القائمة
+  if (supports('rafiq')) setTimeout(() => void rafiq.check(), 2500);
 
   const startSection = readSection();
   applySection(startSection);
@@ -4900,6 +5182,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   const chapterRefreshTimer = setInterval(refreshChapters, 60_000);
   document.addEventListener('visibilitychange', refreshChapters);
+  railReady = true;
   showPage(page);
 
   // الرجوع من القارئ أو الأصدقاء يعيد الصفحة كما تُركت، بتمريرها
@@ -4934,6 +5217,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      detailDock.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
       majlis.hide();

@@ -12,11 +12,17 @@
  * التمرير للأعلى، وذلك وحده يجعل التطبيق يبدو معطوبًا حتى لو كان كل رقم صحيحًا.
  */
 
+// الـPWA: جسور الويب قبل أي وحدة تسأل عن الإضافات الأصلية. داخل الـAPK لا يفعل شيئًا.
+import './pwa/boot.js';
+import { runMigrations } from './lib/migrations.js';
+import { supports } from './lib/capabilities.js';
+import { RELEASE, releaseNotesFor } from './lib/release.js';
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
+import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
@@ -58,7 +64,11 @@ const el = (tag, className, text) => {
 
 const root = $('#root');
 const config = endpoints();
+// البيانات المحلية تُرحَّل لنسخة هذا الإصدار قبل أن يقرأها أي شيء
+runMigrations();
 const sync = createSync({ baseUrl: config.sync });
+// الـPWA تطلب المصادر عبر جالب الويب بتوكن الجلسة نفسها (داخل الـAPK: VantaraWeb غير موجود)
+globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, refresh: () => sync.refreshSession() });
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
 const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
@@ -2049,8 +2059,70 @@ globalThis.__vantaraCheckUpdate = (opts) => checkUpdates(opts);
 // ───────────────────────────── الإقلاع ─────────────────────────────
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  // الويب: أول تثبيت للعامل لا يعيد التحميل؛ التحديث يُطبَّق حين يطلبه الشخص فقط
+  // (pwa/update.js). الـAPK كما كان.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker
+    .register('/sw.js')
+    .then((registration) => {
+      if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.watchForUpdates(registration, { onReady: showWebUpdate }));
+    })
+    .catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (supports('webUpdate') && !hadController) return;
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(showWhatsNew, 1500));
+}
+
+/** الويب: نسخة جديدة نزلت بالكامل في الخلفية. لا تُطبَّق إلا بضغطة. */
+function showWebUpdate(apply) {
+  if (document.querySelector('.vupdate')) return;
+  const bar = el('div', 'vupdate');
+  bar.setAttribute('role', 'status');
+  const card = el('div', 'vupdate__card');
+  const copy = el('div', 'vupdate__copy');
+  copy.append(el('strong', null, 'تحديث جديد متاح'));
+  copy.append(el('span', null, 'نزل في الخلفية. يتطبّق بإعادة تحميل سريعة'));
+  const go = el('button', 'vupdate__go', 'تحديث');
+  go.type = 'button';
+  go.addEventListener('click', () => {
+    go.disabled = true;
+    go.textContent = '…';
+    apply();
+  });
+  const later = el('button', 'vupdate__later', '×');
+  later.type = 'button';
+  later.setAttribute('aria-label', 'لاحقًا');
+  later.addEventListener('click', () => bar.remove());
+  card.append(copy, go, later);
+  bar.append(card);
+  document.body.append(bar);
+}
+
+/** «ما الجديد» مرة بعد تحديث طبّقه الشخص: المشترك + ما يخص منصته. */
+function showWhatsNew() {
+  const platform = supports('webUpdate') ? 'pwa' : 'apk';
+  const [latest] = releaseNotesFor(platform);
+  if (!latest || document.querySelector('.vupdate')) return;
+  const bar = el('div', 'vupdate');
+  bar.setAttribute('role', 'status');
+  const card = el('div', 'vupdate__card');
+  const copy = el('div', 'vupdate__copy');
+  copy.append(el('strong', null, `${RELEASE.product} ${latest.version}`));
+  const list = el('ul', 'vupdate__notes');
+  for (const item of latest.items.slice(0, 4)) list.append(el('li', null, item.text));
+  copy.append(list);
+  const done = el('button', 'vupdate__later', '×');
+  done.type = 'button';
+  done.setAttribute('aria-label', 'إغلاق');
+  done.addEventListener('click', () => bar.remove());
+  card.append(copy, done);
+  bar.append(card);
+  document.body.append(bar);
 }
 
 /**
@@ -2113,6 +2185,9 @@ function toastNewNotifications() {
 
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
+  if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
+  if (tables.includes('accounts')) followAccountState();
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
 });
@@ -2121,6 +2196,90 @@ setInterval(() => void sync.pull(), 60_000);
 // صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
 setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4_000);
 setInterval(() => void sync.push(), 15_000);
+
+/**
+ * حُذف حسابك من جهاز آخر (الحالة تصل بالمزامنة): في المهلة شاشة تقول ذلك
+ * وتختفي وحدها إن تراجع، وبعد المسح النهائي خروج إلى «من يتابع؟».
+ */
+let pendingNotice = null;
+function followAccountState() {
+  if (!sync.user || sync.deletingHere || state.screen === 'GATE') return;
+  const accountState = sync.accountState;
+  if (accountState !== 'PENDING_DELETE') {
+    pendingNotice?.remove();
+    pendingNotice = null;
+  }
+  if (accountState === 'DELETED') {
+    dropV35();
+    sync.signOut();
+    void go({ name: 'gate' });
+    showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    return;
+  }
+  if (accountState === 'PENDING_DELETE' && !pendingNotice) {
+    pendingNotice = el('div', 'vdel');
+    pendingNotice.setAttribute('role', 'alertdialog');
+    const box = el('div');
+    box.append(el('h2', 'vdel__title', 'هذا الحساب يُحذف الآن'));
+    box.append(el('p', 'vdel__text', 'بدأ حذفه من جهاز آخر. لو تراجع صاحبه يرجع كل شيء كما كان.'));
+    const out = el('button', 'vdel__undo', 'تبديل الحساب');
+    out.type = 'button';
+    out.onclick = () => {
+      pendingNotice?.remove();
+      pendingNotice = null;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+    };
+    box.append(out);
+    pendingNotice.append(box);
+    document.body.append(pendingNotice);
+  }
+}
+
+/**
+ * قفل الحساب: عليه PIN وما أُدخل منذ فُتح التطبيق. الرمز قبل أي شاشة، وإذن
+ * الجلسة يعيش ما دام التطبيق مفتوحًا فقط (sessionStorage). «تبديل الحساب»
+ * مخرج دائم: لا أحد يُحبس خلف رمز لا يعرفه.
+ */
+let lockOpen = false;
+function showLock(onUnlocked = () => {}) {
+  if (lockOpen || !sync.user) return;
+  lockOpen = true;
+  const me = sync.user;
+  const profile = sync.rows('profiles', (p) => p.user_id === me.userId)[0];
+  const name = profile?.display_name || me.displayName || me.username || '';
+  pinPad({
+    mode: 'enter',
+    digits: me.pinDigits,
+    solid: true,
+    title: name,
+    subtitle: 'اكتب رمز الحساب',
+    avatar: profile?.avatar_key ?? null,
+    initial: [...name][0] || '؟',
+    cancelLabel: 'تبديل الحساب',
+    submit: async (pin) => {
+      try {
+        await sync.unlock(pin);
+        return { ok: true };
+      } catch (error) {
+        if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
+        if (!error?.status) return { error: 'network' };
+        return { error: 'other', message: 'تعذّر فتح الحساب. اختر «تبديل الحساب»' };
+      }
+    },
+    onDone: () => {
+      lockOpen = false;
+      onUnlocked();
+    },
+    onCancel: () => {
+      lockOpen = false;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+    },
+  });
+}
 
 async function boot() {
   // شاشة الدخول أو الرئيسية قد تنتظر الشبكة؛ واجهةٌ رسمت شيئًا وما زالت حيّة
@@ -2169,6 +2328,18 @@ async function boot() {
     return;
   }
 
+  if (sync.signedIn && sync.locked) {
+    // حساب محمي: لا رئيسية ولا نبض قبل الرمز
+    showLock(() => {
+      startHeartbeat();
+      void go({ name: 'home' });
+      void sync.pull();
+      void refreshPresence();
+      void drainProgressOutbox();
+    });
+    void startUpdates();
+    return;
+  }
   if (sync.signedIn) {
     // جلسة قائمة: نفتح على الرئيسية فورًا من المرآة، والشبكة تُصحّح بعدها
     startHeartbeat();

@@ -52,6 +52,9 @@ class FakeStatement implements D1PreparedStatement {
       return (row ? ({ ok: 1 } as T) : null);
     }
 
+    // لا PIN في هذه الحسابات: إصدار الجلسة كما كان
+    if (this.#sql.includes('FROM account_pins')) return null;
+
     if (this.#sql.includes('FROM accounts a LEFT JOIN profiles p')) {
       const [userId] = this.#values as [string];
       const row = this.#db.accounts.find((account) => account.userId === userId);

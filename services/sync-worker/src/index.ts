@@ -119,7 +119,7 @@ class DuplicateOpConflict extends Error {
  * revision قبل الصفوف التابعة له، ولا يمكن لطلبين متزامنين بنفس op_id أن
  * يطبقا الأثر مرتين.
  */
-async function commitAtNextRevision(
+export async function commitAtNextRevision(
   env: Env,
   now: number,
   opIds: readonly string[],
@@ -215,6 +215,7 @@ interface AccountRow {
   status: string;
   beat_at: number;
   settings_data: string | null;
+  pin_digits: number | null;
 }
 
 /**
@@ -227,11 +228,13 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT a.user_id, a.username,
             p.display_name, p.avatar_key, p.banner_key, p.accent,
-            pr.status, pr.beat_at, s.data AS settings_data
+            pr.status, pr.beat_at, s.data AS settings_data, pin.digits AS pin_digits
        FROM accounts a
        LEFT JOIN profiles p USING (user_id)
        LEFT JOIN presence pr USING (user_id)
        LEFT JOIN settings s USING (user_id)
+       LEFT JOIN account_pins pin USING (user_id)
+      WHERE a.lifecycle = 'ACTIVE'
       ORDER BY a.created_at, a.username`,
   ).all<AccountRow>();
 
@@ -260,8 +263,12 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
         // القفل: أحد جالس في هذا الحساب الآن
         active: status !== 'OFFLINE',
         lastSeenAt: row.beat_at || null,
+        // الـPIN نفسه لا يخرج أبدًا: فقط «عليه PIN» وطوله، لرسم لوحة الأرقام
+        pinDigits: row.pin_digits ?? null,
       };
     }),
+    // سقف المجموعة: الشاشة تخفي «+» عند الامتلاء، والخادم يرفض الحادي عشر وحده
+    limit: 10,
   });
 }
 
@@ -293,7 +300,7 @@ const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) 
 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
-  ['accounts', 'user_id, username, created_at, rev, badge'],
+  ['accounts', 'user_id, username, created_at, rev, badge, lifecycle, purge_after'],
   ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, background_color, background_gradient, background_angle, card_color, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [
@@ -400,7 +407,7 @@ async function ensurePublicViewBackfill(env: Env): Promise<void> {
  * صلاحية (حذف رسالة غيرك، اسم المجلس) تُقرأ منها في SQL — العميل لا يقرّر.
  */
 export async function ensureOwnerBadge(env: Env, now: number): Promise<void> {
-  const accounts = await env.DB.prepare('SELECT user_id, username, badge FROM accounts').all<{ user_id: string; username: string; badge: string | null }>();
+  const accounts = await env.DB.prepare("SELECT user_id, username, badge FROM accounts WHERE lifecycle != 'DELETED'").all<{ user_id: string; username: string; badge: string | null }>();
   const list = (env.VANTARA_OWNERS || 'bedcf897-a6f0-4730-b757-402b14891ca5').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
   const owners = new Set(accounts.results.filter((a) => list.includes(a.user_id.toLowerCase()) || list.includes(a.username.toLowerCase())).map((a) => a.user_id));
   const wrong = accounts.results.filter((a) => (a.badge === 'owner') !== owners.has(a.user_id));
@@ -2238,7 +2245,7 @@ const ACCOUNT_AWARE_KINDS = new Set([
 ]);
 
 async function allAccountIds(env: Env): Promise<string[]> {
-  const { results } = await env.DB.prepare('SELECT user_id FROM accounts').all<{ user_id: string }>();
+  const { results } = await env.DB.prepare("SELECT user_id FROM accounts WHERE lifecycle = 'ACTIVE'").all<{ user_id: string }>();
   return results.map((row) => row.user_id);
 }
 
@@ -2625,7 +2632,8 @@ async function handlePresenceList(env: Env, now: number): Promise<Response> {
        FROM presence pr
        JOIN accounts a USING (user_id)
        LEFT JOIN profiles p USING (user_id)
-       LEFT JOIN settings s USING (user_id)`,
+       LEFT JOIN settings s USING (user_id)
+      WHERE a.lifecycle = 'ACTIVE'`,
   ).all<Record<string, unknown>>();
 
   return json({
@@ -2689,7 +2697,8 @@ async function handleWeek(env: Env, viewerId: string, now: number): Promise<Resp
   const [accounts, days, reads, ratings, settings] = await Promise.all([
     env.DB.prepare(
       `SELECT a.user_id, a.username, p.display_name
-         FROM accounts a LEFT JOIN profiles p USING (user_id)`,
+         FROM accounts a LEFT JOIN profiles p USING (user_id)
+        WHERE a.lifecycle = 'ACTIVE'`,
     ).all<Record<string, unknown>>(),
     env.DB.prepare(`SELECT user_id, day, active_ms FROM usage_daily`).all<Record<string, unknown>>(),
     env.DB.prepare(

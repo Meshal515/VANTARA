@@ -3406,3 +3406,10 @@ html,
 .v35 .drawer-item.active .drawer-room-pic {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+/* «ما الجديد»: سطر لكل بند، ونوعه كلمة صغيرة قبله (بلا صناديق) */
+.whats-new { list-style: none; margin: 4px 0 14px; padding: 0; display: grid; gap: 10px; }
+.whats-new li { display: flex; gap: 10px; align-items: baseline; line-height: 1.6; font-size: 14px; }
+.whats-new__kind { flex: none; font-size: 11px; font-weight: 700; color: var(--accent, #c9a6ff); min-width: 34px; }
+.whats-new__kind--fix { color: #7fd1a7; }
+.whats-new__kind--improve { color: #8fb8ff; }

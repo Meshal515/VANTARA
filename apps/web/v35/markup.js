@@ -271,6 +271,14 @@ export const SHELL_HTML = `<div class="app">
 
 <div class="drawer-backdrop" id="drawerBackdrop" data-act="drawerBackdropClick">
   <aside class="drawer" aria-label="القائمة">
+    <div class="drawer-brand">
+      <button class="rail-logo" type="button" data-act="railLogo" aria-label="VANTARA" title="VANTARA">
+        <span class="rail-mark" aria-hidden="true"></span>
+        <span class="rail-panel" aria-hidden="true">${glyph('sidebar')}</span>
+      </button>
+      <div class="drawer-wordmark" aria-hidden="true"><b>VANTARA</b><span class="drawer-brand-word"></span></div>
+      ${iconButton('sidebar', 'اطوِ الشريط الجانبي', { act: 'toggleRail', cls: 'icon-btn rail-toggle' })}
+    </div>
     <div class="drawer-head">
       <button class="drawer-me" type="button" id="drawerMe" data-act="drawerNavigate" data-arg="profile"></button>
       ${iconButton('close', 'إغلاق', { act: 'closeDrawer' })}

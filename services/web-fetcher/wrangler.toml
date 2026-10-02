@@ -1,0 +1,18 @@
+# جالب الويب (PWA): يجلب صفحات المصادر وصورها للمتصفح، لأن المتصفح لا يقدر
+# يطلب مواقع لا تسمح له (CORS) ولا يضبط Referer. للـPWA وحدها: الـAPK لا
+# يعرف هذا العنوان ولا يناديه أبدًا (docs/PWA.md).
+name = "vantara-fetch"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[observability]
+enabled = true
+
+# VANTARA_IDENTITY_SECRET: نفس سر توقيع جلسات المزامنة. الجالب يتحقق من
+# توكن الدخول بلا قاعدة بيانات ولا نداء للمزامنة. يُضبط من CI ولا يدخل المستودع.
+[secrets]
+required = ["VANTARA_IDENTITY_SECRET"]
+
+[vars]
+ALLOWED_ORIGINS = "https://vantara.pages.dev"

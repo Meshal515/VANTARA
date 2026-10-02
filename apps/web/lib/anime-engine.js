@@ -7,9 +7,14 @@
  * البيان (`/anime/sources.json`) يُقرأ من حزمة الويب نفسها، فيتحدّث مع كل
  * تحديث للواجهة بلا APK. وعلى الويب (بلا المحرك) تُرجع الدوال `null` بدل
  * بيانات تشبه الحقيقية: شاشة تقول «داخل التطبيق فقط» أصدق من شاشة مكسورة.
+ * والـPWA لها جسر حقيقي بنفس الواجهة: محركات ويب عبر جالب الويب.
  */
 
-const bridge = () => globalThis.Capacitor?.Plugins?.AnimeEngine ?? null;
+import { webPlugin } from '../pwa/platform.js';
+
+// الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
+// داخل الـAPK `webPlugin()` يرجع null دائمًا.
+const bridge = () => globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('AnimeEngine');
 
 export const available = () => bridge() !== null;
 

@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'f12b5390fedaa55941d2e43d6584af88b2ea8c07b3d1ce1a00b704e90f613710';
+const SHELL_DIGEST = 'c21a35bd16142123142cc2030ffc77a2bfb2c1ec91506e5a46028235cabedf10';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -54,6 +54,14 @@ const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
  * المخزَّنة هي الفرق بين إقلاعٍ فوري وشاشةٍ بيضاء.
  */
 const BUNDLED = self.location.hostname === 'localhost';
+
+/**
+ * كاشات الـPWA الدائمة: صور المصادر (أغلفة وصفحات) وإعداد الجالب. لا تُمسح مع
+ * تغيّر القشرة، ولا تُنشأ داخل الـAPK أصلًا (`BUNDLED` يرجع قبلها).
+ */
+const IMAGE_CACHE = 'vantara-img-v1';
+const PWA_CONFIG_CACHE = 'vantara-pwa-config';
+const KEEP = [IMAGE_CACHE, PWA_CONFIG_CACHE];
 
 // كل ملف هنا يجب أن يكون مخزَّنًا **قبل** أول رسم. وحارس في
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
@@ -87,6 +95,8 @@ const SHELL = [
   '/lib/toast.js',
   '/lib/report.js',
   '/screens/accounts.js',
+  '/screens/pin-pad.js',
+  '/screens/add-account.js',
   '/screens/sources.js',
   '/lib/extension-engine.js',
   '/lib/catalog.js',
@@ -147,6 +157,9 @@ const SHELL = [
   '/v35/anime-account.js',
   '/v35/rafiq.js',
   '/v35/rafiq.css',
+  '/v35/wide.css',
+  '/account.css',
+  '/v35/side-dock.js',
   '/v35/sections.js',
   '/v35/updates-view.js',
   '/v35/motion.js',
@@ -158,6 +171,9 @@ const SHELL = [
   '/lib/cinema-fast.js',
   '/lib/update-engine.js',
   '/lib/follow-time.js',
+  '/lib/release.js',
+  '/lib/capabilities.js',
+  '/lib/migrations.js',
   '/anime/sources.json',
   '/manifest.webmanifest',
   '/fonts/NotoSansArabic.var.woff2',
@@ -166,6 +182,40 @@ const SHELL = [
   '/icons/icon-512.png',
   // قناع شعار «من يتابع؟»: بدونه يظهر مربّعٌ ملوّن مكان الشعار دون اتصال
   '/icons/logo-mark.png',
+  // الـPWA (pwa/): جسور الويب ومحركات المصادر والكاش. تُستورد في المتصفح وحده،
+  // وتُخزَّن هنا ليفتح التطبيق دون اتصال على آخر ما رآه.
+  '/pwa/boot.js',
+  '/pwa/bridges/anime.js',
+  '/pwa/bridges/manga.js',
+  '/pwa/cache/images.js',
+  '/pwa/cache/store.js',
+  '/pwa/net/endpoint.js',
+  '/pwa/net/fetcher.js',
+  '/pwa/platform.js',
+  '/pwa/player/player.css',
+  '/pwa/player/player.js',
+  '/pwa/runtime.js',
+  '/pwa/sources/contract.js',
+  '/pwa/sources/crypto.js',
+  '/pwa/sources/dates.js',
+  '/pwa/sources/defs.json',
+  '/pwa/sources/dom.js',
+  '/pwa/sources/engines/arabseed.js',
+  '/pwa/sources/engines/index.js',
+  '/pwa/sources/engines/madara.js',
+  '/pwa/sources/engines/iken.js',
+  '/pwa/sources/engines/mangadex.js',
+  '/pwa/sources/engines/mangaswat.js',
+  '/pwa/sources/engines/mangathemesia.js',
+  '/pwa/sources/engines/teamx.js',
+  '/pwa/sources/engines/zeistmanga.js',
+  '/pwa/sources/engines/shahiid.js',
+  '/pwa/sources/engines/tuktuk.js',
+  '/pwa/sources/engines/video-common.js',
+  '/pwa/sources/engines/witanime.js',
+  '/pwa/sources/hosts.js',
+  '/pwa/sources/registry.js',
+  '/pwa/update.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -177,7 +227,9 @@ self.addEventListener('install', (event) => {
         // قشرة نصف مخزّنة تُخدم لاحقًا
         await cache.addAll(SHELL);
       }
-      await self.skipWaiting();
+      // الـAPK: يتفعّل فورًا كما كان. الويب: ينتظر حتى يضغط الشخص «تحديث»
+      // (رسالة skip-waiting) أو يُغلق التطبيق — لا تحديث يكسر جلسة مفتوحة.
+      if (BUNDLED) await self.skipWaiting();
     })(),
   );
 });
@@ -188,7 +240,7 @@ self.addEventListener('activate', (event) => {
       const names = await caches.keys();
       // داخل الـAPK يُمسح كل شيء، ومنه ما خزّنته نسخة أقدم من هذا الملف —
       // وهذا ما يفكّ جهازًا عالقًا على واجهة قديمة بلا مسح بيانات التطبيق.
-      const doomed = BUNDLED ? names : names.filter((name) => name !== VERSION);
+      const doomed = BUNDLED ? names : names.filter((name) => name !== VERSION && !KEEP.includes(name));
       await Promise.all(doomed.map((name) => caches.delete(name)));
       await self.clients.claim();
     })(),
@@ -205,6 +257,7 @@ const isShellRequest = (url) =>
   url.pathname.startsWith('/icons/') ||
   url.pathname.startsWith('/fonts/') ||
   url.pathname.startsWith('/lib/') ||
+  url.pathname.startsWith('/pwa/') ||
   url.pathname.startsWith('/screens/');
 
 self.addEventListener('fetch', (event) => {
@@ -221,6 +274,12 @@ self.addEventListener('fetch', (event) => {
 
   // كل ما هو مصادَق عليه يمر إلى الشبكة ولا يُلمس
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/health')) return;
+
+  // صور المصادر في الـPWA: من الكاش أولًا، وإلا عبر جالب الويب ثم تُحفظ
+  if (url.pathname === '/__img') {
+    event.respondWith(sourceImage(url));
+    return;
+  }
 
   // التنقّل: **الكاش أولًا**.
   //
@@ -279,3 +338,81 @@ self.addEventListener('fetch', (event) => {
     })(),
   );
 });
+
+// ───────────────────── صور المصادر (PWA فقط) ─────────────────────
+//
+// الواجهة تضع `<img src="/__img?u=…&r=…">` (pwa/cache/images.js). هنا:
+//   - موجودة في كاش الصور ⇒ تُرد فورًا، بلا شبكة (وتعمل دون اتصال).
+//   - غير موجودة ⇒ تُجلب من جالب الويب بالإذن المحفوظ، وتُحفظ إن كانت صورة.
+//   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقدم.
+// المفتاح رابط الصورة الأصلي وحده (بلا الإذن ولا المرجع)، فتجديد الإذن لا يفرغه.
+
+const MAX_IMAGES = 2500;
+let lastTrim = 0;
+
+async function pwaConfig() {
+  const cache = await caches.open(PWA_CONFIG_CACHE);
+  const hit = await cache.match('/__pwa/config');
+  if (!hit) return null;
+  try {
+    return await hit.json();
+  } catch {
+    return null;
+  }
+}
+
+async function sourceImage(url) {
+  const source = url.searchParams.get('u') ?? '';
+  const key = new Request(`/__img?u=${encodeURIComponent(source)}`);
+  const cache = await caches.open(IMAGE_CACHE);
+  const hit = await cache.match(key);
+  if (hit) return hit;
+
+  const config = await pwaConfig();
+  if (!config?.fetchBase || !config?.grant || !/^https?:\/\//.test(source)) return new Response(null, { status: 503 });
+  const remote = new URL('/v1/media', config.fetchBase);
+  remote.searchParams.set('u', source);
+  const referer = url.searchParams.get('r');
+  if (referer) remote.searchParams.set('r', referer);
+  remote.searchParams.set('g', config.grant);
+
+  let response;
+  try {
+    response = await fetch(remote.toString(), { mode: 'cors', credentials: 'omit' });
+  } catch {
+    return new Response(null, { status: 504 });
+  }
+  const type = response.headers.get('content-type') ?? '';
+  if (response.ok && type.startsWith('image/')) {
+    const body = await response.blob();
+    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000' } });
+    try {
+      await cache.put(key, stored.clone());
+    } catch {
+      // القرص ممتلئ: نكنس بقوة، والصورة تُعرض على كل حال
+      lastTrim = 0;
+    }
+    void trimImages();
+    return stored;
+  }
+  return response;
+}
+
+/** يحذف الأقدم دخولًا حتى يرجع الكاش تحت الحد (مرة كل دقيقة على الأكثر). */
+async function trimImages() {
+  const now = Date.now();
+  if (now - lastTrim < 60_000) return;
+  lastTrim = now;
+  const cache = await caches.open(IMAGE_CACHE);
+  const keys = await cache.keys();
+  let excess = keys.length - MAX_IMAGES;
+  try {
+    const { usage = 0, quota = 0 } = (await self.navigator.storage?.estimate?.()) ?? {};
+    // فوق نصف الحصة: نحرر خُمس الصور أيضًا
+    if (quota && usage > quota / 2) excess = Math.max(excess, Math.ceil(keys.length / 5));
+  } catch {
+    // بلا تقدير: العدد وحده يحكم
+  }
+  // keys() بترتيب الإدخال: الأول هو الأقدم
+  for (const request of keys.slice(0, Math.max(0, excess))) await cache.delete(request);
+}

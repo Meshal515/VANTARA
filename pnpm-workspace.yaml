@@ -2,3 +2,4 @@ packages:
   - apps/*
   - packages/*
   - services/sync-worker
+  - services/web-fetcher

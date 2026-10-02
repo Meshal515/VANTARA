@@ -1,11 +1,14 @@
 /**
  * «من يتابع؟» — شاشة اختيار الحساب، بتصميم v35.
  *
- * اختيار الحساب **هو** تسجيل الدخول. لا كلمة مرور، ولا PIN، ولا معرّف يُكتب.
- * VANTARA تطبيق خاص بين أصدقاء، والاحتكاك هنا لا يشتري أمانًا يُذكر — يشتري
- * تأخيرًا في كل فتح.
+ * اختيار الحساب **هو** تسجيل الدخول. لا كلمة مرور ولا معرّف يُكتب. الـPIN
+ * اختياري لكل حساب (الإعدادات ← الخصوصية): من وضعه يُسأل عنه هنا، والبقية
+ * يدخلون بلمسة كما كانوا.
  *
- *   فتح التطبيق → صور الحسابات → سحب → «متابعة» → داخل.
+ *   فتح التطبيق → صور الحسابات → سحب → «متابعة» → (PIN إن وُجد) → داخل.
+ *
+ * «+» الزجاجي يضيف حسابًا (صورة، اسم، اسم مستخدم). يختفي عند عشرة حسابات،
+ * والخادم هو من يفرض العشرة فعلًا.
  *
  * الخلفية حريرٌ يأخذ لونه من صورة الحساب الذي في المنتصف، والشعار يتلوّن
  * معه. والحساب المستخدم الآن على جهاز آخر مقفل (انظر `gate-policy.js`) —
@@ -15,6 +18,8 @@
 import { gateEntry, rememberGateAccount, rememberedGateAccount } from '../lib/gate-policy.js';
 import { cachedSilkPalette, createSilk, followImage, silkPaletteForSrc } from '../lib/silk.js';
 import { logoColorFromPalette, rgb01ToHex, silkPaletteFor } from '../lib/silk-palette.js';
+import { openAddAccount } from './add-account.js';
+import { pinPad } from './pin-pad.js';
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -40,6 +45,10 @@ function statusLine(account) {
   if (account.status === 'IDLE') return 'خامل';
   return agoLabel(account.lastSeenAt);
 }
+
+const PLUS_SVG =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>';
 
 const LOCK_SVG =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.85" ' +
@@ -112,6 +121,25 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     return () => {};
   }
 
+  // «+» زجاجي: حساب جديد بثلاث خانات، ثم دخول مباشر إليه
+  if (accounts.length < sync.accountsLimit) {
+    const add = el('button', 'gate__add');
+    add.type = 'button';
+    add.setAttribute('aria-label', 'إضافة حساب');
+    add.innerHTML = PLUS_SVG;
+    add.onclick = () => {
+      if (busy) return;
+      openAddAccount({
+        sync,
+        onCreated: async (user) => {
+          rememberGateAccount(user.userId);
+          await onSignedIn(user);
+        },
+      });
+    };
+    gate.append(add);
+  }
+
   const remembered = rememberedGateAccount();
   // يبدأ من حساب هذا الجهاز: الفتح التالي لمسة واحدة لا سحبًا
   const startAt = Math.max(0, accounts.findIndex((a) => a.userId === remembered));
@@ -161,6 +189,12 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     }
     card.append(face);
     if (account.active) card.append(el('span', 'gate-card__live'));
+    if (account.pinDigits) {
+      const pin = el('span', 'gate-card__pin');
+      pin.innerHTML = LOCK_SVG;
+      pin.setAttribute('aria-label', 'محمي برمز');
+      card.append(pin);
+    }
     stage.append(card);
     return card;
   });
@@ -304,17 +338,66 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     enter.disabled = true;
     message.classList.remove('gate__message--error');
     message.textContent = '';
+    if (account.pinDigits) return askPin(account);
     try {
       const user = await sync.signIn(account.userId);
       rememberGateAccount(account.userId);
       await onSignedIn(user);
     } catch (error) {
-      busy = false;
-      enter.disabled = false;
-      if (error?.code === 'device_untrusted' && sync.requestDevice) return void showApproval(account);
-      message.classList.add('gate__message--error');
-      message.textContent = error?.status ? 'تعذّر الدخول. حاول مرة أخرى.' : 'ما فيه اتصال بالخادم. تأكد من النت وحاول مرة ثانية.';
+      failed(account, error);
     }
+  }
+
+  function failed(account, error) {
+    busy = false;
+    enter.disabled = false;
+    if (error?.code === 'device_untrusted' && sync.requestDevice) return void showApproval(account);
+    if (error?.code === 'pin_required') {
+      // PIN أُضيف للتو من جهاز آخر: القائمة قديمة، نسأل عنه الآن
+      account.pinDigits = error.digits ?? 4;
+      return askPin(account);
+    }
+    message.classList.add('gate__message--error');
+    message.textContent = error?.status ? 'تعذّر الدخول. حاول مرة أخرى.' : 'ما فيه اتصال بالخادم. تأكد من النت وحاول مرة ثانية.';
+  }
+
+  /** حساب محمي: لوحة PIN فوق الحرير نفسه، والدخول بعد الرمز الصحيح. */
+  function askPin(account) {
+    let signed = null;
+    let deferred = null;
+    pinPad({
+      mode: 'enter',
+      digits: account.pinDigits,
+      title: account.displayName,
+      subtitle: 'اكتب رمز الحساب',
+      avatar: account.avatarKey || null,
+      initial: [...String(account.displayName || '؟')][0],
+      submit: async (pin) => {
+        try {
+          signed = await sync.signIn(account.userId, { pin });
+          return { ok: true };
+        } catch (error) {
+          if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
+          if (!error?.status) return { error: 'network' };
+          // جهاز غير معتمد أو حساب حُذف: اللوحة تُغلق والبوابة تشرح
+          deferred = error;
+          return { ok: true };
+        }
+      },
+      onDone: async () => {
+        if (deferred) return failed(account, deferred);
+        rememberGateAccount(account.userId);
+        try {
+          await onSignedIn(signed);
+        } catch (error) {
+          failed(account, error);
+        }
+      },
+      onCancel: () => {
+        busy = false;
+        enter.disabled = false;
+      },
+    });
   }
 
   // ─────────────── جوال جديد: رمز يُعتمد مرة، ثم الدخول وحده ───────────────

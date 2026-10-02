@@ -588,7 +588,8 @@ export function createAnime(deps) {
     bar.querySelector('.an-detail-top-title').textContent = m.title;
 
     const hero = el('div', 'an-detail-hero');
-    const art = el('div', 'an-detail-art');
+    // بلا لافتة عريضة: الغلاف (460px) خلفيةٌ — على الشاشة الكبيرة تُضبَّب عمدًا بدل أن تُمطّ
+    const art = el('div', m.banner ? 'an-detail-art' : 'an-detail-art an-detail-art--poster');
     art.dataset.art = '';
     art.append(image(m.banner ?? m.poster, 'an-img', { eager: true, position: m.banner ? 'center' : 'center 20%' }), el('div', 'an-detail-shade'));
     hero.append(art);

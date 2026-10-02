@@ -1336,3 +1336,75 @@ test('every named import in apps/web resolves to an export', () => {
   }
   assert.deepEqual(missing, []);
 });
+
+// ───────────────────────── PWA: لا تلمس الـAPK ─────────────────────────
+//
+// نسخة الويب (apps/web/pwa + services/web-fetcher) إضافية فقط. القاعدة:
+// الـAPK لا يعرف جالب الويب ولا يحمّل محركات الويب، وكل وحدة pwa/ تمرّ من
+// بوابة واحدة جوابها داخل الـAPK «لا». docs/PWA.md يشرح لماذا.
+
+function webFiles(dir = resolve(ROOT, 'apps/web')) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? (['node_modules', 'vendor'].includes(e.name) ? [] : webFiles(resolve(dir, e.name))) : [resolve(dir, e.name)],
+  );
+}
+
+test('the native app never references the web fetcher or the PWA engines', () => {
+  const native = execFileSync('git', ['ls-files', '-z', '--', 'android', 'capacitor.config.ts'], { cwd: ROOT })
+    .toString()
+    .split('\0')
+    .filter((p) => p && !p.startsWith('android/app/src/main/assets/public/') && /\.(kt|java|xml|gradle|kts|ts|json|pro)$/.test(p));
+  const offenders = native.filter((p) => /web-fetcher|vantara-fetch|\/pwa\//.test(readFileSync(resolve(ROOT, p), 'utf8')));
+  assert.deepEqual(offenders, []);
+});
+
+test('PWA modules are reached only through the platform gate', () => {
+  // update.js: تحديث الويب، يُستورد خلف supports('webUpdate') فلا يُحمَّل في الـAPK
+  const allowed = new Set(['pwa/platform.js', 'pwa/boot.js', 'pwa/update.js']);
+  const outside = webFiles().filter((f) => f.endsWith('.js') && !f.includes('.test.') && !f.includes('/apps/web/pwa/'));
+  const leaks = [];
+  for (const file of outside) {
+    for (const [, spec] of readFileSync(file, 'utf8').matchAll(/(?:import|from)\s*\(?\s*['"]([^'"]*pwa\/[^'"]+)['"]/g)) {
+      const target = resolve(dirname(file), spec).split('/apps/web/')[1];
+      if (!allowed.has(target)) leaks.push(`${file.split('/apps/web/')[1]} → ${target}`);
+    }
+  }
+  assert.deepEqual(leaks, [], 'only pwa/platform.js (gate) and pwa/boot.js (inert in the APK) may be imported outside pwa/');
+});
+
+test('every web bridge yields to the native plugin first', () => {
+  const ext = read('apps/web/lib/extension-engine.js');
+  assert.match(ext, /globalThis\.Capacitor\?\.Plugins\?\.ExtensionEngine \?\? webPlugin\('ExtensionEngine'\)/);
+  const anime = read('apps/web/lib/anime-engine.js');
+  assert.match(anime, /globalThis\.Capacitor\?\.Plugins\?\.AnimeEngine(?: \?\? webPlugin\('AnimeEngine'\))?/);
+  const platform = read('apps/web/pwa/platform.js');
+  assert.match(platform, /export function webPlugin\(name, g = globalThis\) \{\n  if \(isNative\(g\)\) return null;/, 'webPlugin must return null inside the native app');
+  assert.match(read('apps/web/pwa/boot.js'), /if \(isNative\(g\) \|\| g\.VantaraWeb\) return/, 'boot must do nothing inside the native app');
+});
+
+test('every PWA module is precached by the service worker', () => {
+  const worker = read('apps/web/sw.js');
+  const shell = new Set([...worker.matchAll(/^\s*'(\/[^']+)',$/gm)].map((m) => m[1]));
+  const missing = webFiles(resolve(ROOT, 'apps/web/pwa'))
+    .filter((f) => !f.includes('.test.') && !f.endsWith('/allow.json'))
+    .map((f) => `/${f.split('/apps/web/')[1]}`)
+    .filter((p) => !shell.has(p));
+  assert.deepEqual(missing, [], 'a PWA module missing from SHELL breaks the app offline');
+});
+
+test('the web fetcher may reach every host the web sources use, and nothing it does not need', () => {
+  const allow = JSON.parse(read('apps/web/pwa/sources/allow.json')).hosts;
+  const defs = JSON.parse(read('apps/web/pwa/sources/defs.json')).sources;
+  const covered = (host) => allow.some((e) => host === e || host.endsWith(`.${e}`));
+  const uncovered = defs.flatMap((d) => [d.domain, ...(d.hosts ?? [])]).filter((h) => !covered(h));
+  assert.deepEqual(uncovered, [], 'add these hosts to apps/web/pwa/sources/allow.json');
+  for (const host of allow) assert.match(host, /^(?!-)[a-z0-9.-]+\.[a-z]{2,}$/, `bad allowlist entry: ${host}`);
+});
+
+test('the web fetcher deploy is CI-gated, main-only and never ships the APK secrets', () => {
+  const workflow = read('.github/workflows/web-fetcher.yml');
+  assert.match(workflow, /workflows: \['VANTARA CI'\]/);
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /conclusion == 'success' && github\.event\.workflow_run\.head_branch == 'main'/);
+  assert.doesNotMatch(workflow, /VANTARA_DEVICE_PEPPER|VANTARA_SESSION_SECRET|OPENAI|DEEPSEEK/);
+});
