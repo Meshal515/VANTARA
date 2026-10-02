@@ -108,6 +108,26 @@ jobs:
             exit 1
           fi
 
+      # اسم المشروع «vantara» محجوز عالميًا لغيرنا، فعنوان Pages الفعلي فيه لاحقة
+      # (vantara-bcf.pages.dev). الـWorkers لا تقبل إلا الأصل المكتوب في
+      # ALLOWED_ORIGINS؛ فإن لم يطابق العنوانَ الفعلي يُنشر موقع لا يكلّم خادمه.
+      - name: Verify the live Pages origin is allowed by the Workers
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PAGES_PROJECT" \
+            | jq -r '.result.subdomain')
+          origin="https://$sub"
+          echo "Pages origin: $origin"
+          for file in services/sync-worker/wrangler.toml services/web-fetcher/wrangler.toml; do
+            grep -E '^ALLOWED_ORIGINS' "$file" | grep -qF "$origin" \
+              || { echo "::error::$file ALLOWED_ORIGINS lacks $origin"; exit 1; }
+          done
+
       # الواجهة في المتصفح تحتاج عنوان الـWorker أيضًا: بلا هذا تُظهر
       # «عنوان المزامنة غير مضبوط». يُستنتج من الحساب لا من سرّ إضافي.
       - name: Bake the sync endpoint into the web bundle

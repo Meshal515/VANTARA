@@ -15,4 +15,4 @@ enabled = true
 required = ["VANTARA_IDENTITY_SECRET"]
 
 [vars]
-ALLOWED_ORIGINS = "https://vantara.pages.dev"
+ALLOWED_ORIGINS = "https://vantara-bcf.pages.dev"

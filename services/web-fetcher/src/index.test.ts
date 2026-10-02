@@ -6,8 +6,8 @@ import { rewritePlaylist } from './hls.ts';
 import { challengeOf, createHandler, overLimit, type Env } from './index.ts';
 
 const SECRET = 'fetcher-test-identity-secret-32-chars!!';
-const env: Env = { VANTARA_IDENTITY_SECRET: SECRET, ALLOWED_ORIGINS: 'https://vantara.pages.dev' };
-const ORIGIN = 'https://vantara.pages.dev';
+const env: Env = { VANTARA_IDENTITY_SECRET: SECRET, ALLOWED_ORIGINS: 'https://vantara-bcf.pages.dev' };
+const ORIGIN = 'https://vantara-bcf.pages.dev';
 
 async function bearer(userId = 'u1') {
   return `Bearer ${await mintIdentityToken({ userId, deviceId: 'd1' }, SECRET)}`;
