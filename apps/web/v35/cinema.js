@@ -835,7 +835,10 @@ export function createCinema(deps) {
             }
           });
         });
-      h.done.finally(() => w.copyOff?.());
+      h.done.finally(() => {
+        w.copyOff?.();
+        notify();
+      });
       const late = h.found.copies.filter((c) => !initial.includes(c));
       if (late.length && w.session) void engine.extend(w.session, forPreparation(late));
     })();
@@ -1425,13 +1428,17 @@ export function createCinema(deps) {
         queued = false;
         if (sheet.closed) return;
         const ready = sheet.routes.filter((r) => r.state === 'READY' && r.probed === true).length;
+        // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
+        // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
+        const pendingRoute = sheet.routes.some((r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null));
+        const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
         if (sheet.missing) status.textContent = m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
         else if (!sheet.session) status.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
-        else if (!sheet.done && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
-        else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${sheet.done ? '' : ' · البقية تصل بالخلفية'}` : 'لم يجهز أي سيرفر الآن';
-        best.disabled = sheet.busy || sheet.missing || (!ready && sheet.done);
+        else if (!settled && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
+        else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${settled ? '' : ' · البقية تصل بالخلفية'}` : 'لم يجهز أي سيرفر الآن';
+        best.disabled = sheet.busy || sheet.missing || (!ready && settled);
         best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
-        best.classList.toggle('waiting', !ready && !sheet.done && !sheet.missing);
+        best.classList.toggle('waiting', !ready && !settled && !sheet.missing);
         // الحيّ أولًا، والسيرفرات التي فشلت هنا مؤخرًا في آخر مجموعتها، والميت مطويّ
         const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED' && r.probed !== false);
         const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false);

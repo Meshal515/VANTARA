@@ -7,6 +7,7 @@ import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.adapters.SourcePage
 import com.vantara.anime.adapters.ArabSeedSiteAdapter
+import com.vantara.anime.adapters.TukTukSiteAdapter
 import com.vantara.anime.adapters.WitAnimeSiteAdapter
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.hosts.WebViewSniffer
@@ -174,6 +175,13 @@ class AnimeEngine(context: Context) {
             embeds = embeds,
         )
         ArabSeedSiteAdapter.KIND -> ArabSeedSiteAdapter(
+            id = e.id,
+            name = e.name,
+            client = network.client,
+            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
+            embeds = embeds,
+        )
+        TukTukSiteAdapter.KIND -> TukTukSiteAdapter(
             id = e.id,
             name = e.name,
             client = network.client,

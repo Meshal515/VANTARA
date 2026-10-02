@@ -117,6 +117,68 @@ export async function findWork(titles) {
   return null;
 }
 
+/**
+ * نسخ العمل من نتائج وصلت حتى الآن (من أي عدد من المصادر): المطابقة التامة
+ * لأحد العناوين أولًا، وإلا الأقرب (≥ 0.75) ومعه كل نسخة بنفس عنوانه. `null`
+ * إن لم يطابق شيء بعد.
+ */
+export function pickCopies(items, titles) {
+  const wanted = titles.filter(Boolean).map(fold);
+  const seen = new Set();
+  const all = items.filter((c) => c && !seen.has(`${c.sourceId}|${c.url}`) && seen.add(`${c.sourceId}|${c.url}`));
+  let copies = all.filter((c) => wanted.includes(fold(c.title)));
+  if (!copies.length) {
+    const score = (c) => {
+      const words = new Set(fold(c.title).split(' '));
+      return Math.max(0, ...wanted.map((t) => {
+        const tw = t.split(' ').filter(Boolean);
+        return tw.length ? tw.filter((x) => words.has(x)).length / Math.max(tw.length, words.size) : 0;
+      }));
+    };
+    const best = all.map((c) => [c, score(c)]).sort((a, b) => b[1] - a[1])[0];
+    if (!best || best[1] < 0.75) return null;
+    copies = all.filter((c) => fold(c.title) === fold(best[0].title));
+  }
+  // نسخة واحدة لكل مصدر: الأولى (أسرع رد) هي المرجّحة
+  const one = [...new Map(copies.map((c) => [c.sourceId, c])).values()];
+  return { key: fold(one[0].title), title: one[0].title, thumbnail: one.find((c) => c.thumbnail)?.thumbnail ?? null, copies: one };
+}
+
+/**
+ * مثل [findWork] لكن متدفقًا: يرجع العمل لحظة يطابق أول مصدر، ولا ينتظر أبطأ
+ * المصادر (مصدر معطّل قد يأخذ 20 ثانية ليفشل). ما يصل بعدها من نسخ يُبلَّغ
+ * عبر `onWork(work)` بالعمل نفسه وقد كبر. عنوان بديل يُسأل فقط إن لم يطابق الأول.
+ */
+export function findWorkStream(titles, onWork = () => {}) {
+  return new Promise((resolve) => {
+    let first = null;
+    const tried = new Set();
+    const queries = titles.filter(Boolean).map((t) => String(t).replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter((q) => q && !tried.has(q.toLowerCase()) && tried.add(q.toLowerCase()));
+    const run = async (i) => {
+      if (i >= queries.length) return resolve(first);
+      const items = [];
+      const { done } = searchStream(queries[i], 'anime', (hit) => {
+        items.push(...(hit.items ?? []));
+        const work = pickCopies(items, titles);
+        if (!work) return;
+        if (!first) {
+          first = work;
+          resolve(work);
+        } else if (work.copies.length > first.copies.length) {
+          first = work;
+          onWork(work);
+        }
+      });
+      const ok = await done;
+      if (!first) {
+        if (ok === null) return resolve(null);
+        return run(i + 1);
+      }
+    };
+    void run(0);
+  });
+}
+
 const fold = (s) =>
   String(s ?? '')
     .toLowerCase()

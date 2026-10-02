@@ -181,33 +181,22 @@ class ArabSeedSiteAdapter(
         data class Server(val index: Int, val quality: Int, val label: String, val link: String?, val direct: Boolean)
         data class Watch(val csrf: String, val postId: String, val qualities: List<Int>, val activeQuality: Int?, val servers: List<Server>)
 
-        private val EPISODE = Regex("""\s*(?:الحلقة|حلقة)\s*(\d+(?:\.\d+)?).*$""")
+        fun kindOf(title: String): String = SiteCards.kindOf(title)
 
-        fun kindOf(title: String): String =
-            if (Regex("""(^|\s)(مسلسل|برنامج|انمي|أنمي|الموسم|الحلقة)(\s|$)""").containsMatchIn(title)) "series" else "movie"
+        fun episodeNumber(title: String): Float? = SiteCards.episodeNumber(title)
 
-        fun episodeNumber(title: String): Float? = EPISODE.find(title)?.groupValues?.get(1)?.toFloatOrNull()
-
-        /**
-         * بطاقات البحث. حلقات المسلسل تُجمع: «مسلسل X الموسم الثاني الحلقة 8 …» و«… الحلقة 7 …»
-         * عملٌ واحد «مسلسل X الموسم الثاني» رابطه أحدث حلقة (صفحتها تسرد حلقات الموسم كلها).
-         */
+        /** بطاقات البحث، وحلقات الموسم الواحد عملٌ واحد ([SiteCards.fold]). */
         fun search(html: String, sourceId: String): List<SourceAnime> {
             val doc = Jsoup.parse(html, "https://m.myseed.pics/")
-            val seen = LinkedHashMap<String, SourceAnime>()
-            for (a in doc.select(".item__contents a.movie__block[href], .item__contents > a[href]")) {
-                val href = a.absUrl("href")
-                val raw = a.attr("title").ifBlank { a.selectFirst("h3")?.text().orEmpty() }.trim()
-                if (href.isBlank() || raw.isBlank()) continue
+            val cards = doc.select(".item__contents a.movie__block[href], .item__contents > a[href]").map { a ->
                 val img = a.selectFirst("img")
-                val thumb = img?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } }?.ifBlank { null }
-                val path = runCatching { href.toHttpUrl().let { u -> u.encodedPath + (u.encodedQuery?.let { "?$it" } ?: "") } }.getOrNull() ?: continue
-                val series = kindOf(raw) == "series"
-                val title = if (series) raw.replace(EPISODE, "").trim().ifBlank { raw } else raw
-                val key = if (series) title else path
-                if (key !in seen) seen[key] = SourceAnime(sourceId, path, title, thumb)
+                SiteCards.Card(
+                    href = a.absUrl("href"),
+                    title = a.attr("title").ifBlank { a.selectFirst("h3")?.text().orEmpty() },
+                    thumb = img?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } }?.ifBlank { null },
+                )
             }
-            return seen.values.toList()
+            return SiteCards.fold(cards, sourceId)
         }
 
         fun episodes(html: String, pageUrl: String, sourceId: String): List<SourceEpisode> {
