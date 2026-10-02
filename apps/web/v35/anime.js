@@ -1008,6 +1008,47 @@ export function createAnime(deps) {
     for (const c of state.work.copies) host.append(el('span', 'an-source-chip', c.sourceId === state.work.copies[0].sourceId ? `${sourceName(c.sourceId)} ★` : sourceName(c.sourceId)));
   }
 
+  // مصدر يطلب تحقق إنسان من Cloudflare: شريحة صغيرة «تحقّق» لعشر ثوانٍ ثم تختفي،
+  // مرة لكل مصدر في الجلسة. لا شيء يظهر من تلقاء نفسه بعدها: التحقق متاح أيضًا
+  // من «المصادر» في الإعدادات متى شئت.
+  const askedVerify = new Set();
+  engine.onNeedsHuman((id) => {
+    if (askedVerify.has(id)) return;
+    askedVerify.add(id);
+    showVerifyPill(id);
+  });
+  function showVerifyPill(id) {
+    const pill = el('div', 'an-verify');
+    pill.setAttribute('role', 'status');
+    pill.append(el('span', 'an-verify-text', `${sourceName(id)} يطلب تحقق`));
+    let timer = 0;
+    const close = () => {
+      clearTimeout(timer);
+      pill.classList.remove('in');
+      setTimeout(() => pill.remove(), 250);
+    };
+    pill.append(button('an-verify-go', 'تحقّق', () => {
+      close();
+      void verifySource(id);
+    }));
+    (deps.root ?? document.body).append(pill);
+    requestAnimationFrame(() => pill.classList.add('in'));
+    timer = setTimeout(close, 10_000);
+  }
+  /** يفتح صفحة التحقق، وبعد نجاحه يعيد البحث عن الأنمي المفتوح ليضم المصدر. */
+  async function verifySource(id) {
+    toast(`نفتح تحقق ${sourceName(id)}…`);
+    const out = await engine.verify(id);
+    if (!out?.ok) return toast(`لم يكتمل التحقق: ${out?.error ?? 'تعذّر'}`);
+    toast(`تم التحقق من ${sourceName(id)}`);
+    const m = state.detail;
+    if (m && state.workFor === m.id) {
+      state.workFor = null;
+      state.work = null;
+      void locateWork(m);
+    }
+  }
+
   const SOURCE_NAMES = {};
   const sourceName = (id) => SOURCE_NAMES[id] ?? id;
   void engine.sources().then((list) => {
@@ -1751,7 +1792,12 @@ export function createAnime(deps) {
           await engine.crawl(s.id);
           toast(`بدأ حلب كتالوج ${s.name}`);
         }));
-        if (r?.blocked) line.append(button('an-src-btn', 'أعد المحاولة', async () => {
+        // تحقق إنسان من Cloudflare: يُحلّ هنا بضغطة، لا بالانتظار
+        if (r?.blocked === 'cloudflare_interactive') line.append(button('an-src-btn an-src-btn--verify', 'تحقّق', async () => {
+          await verifySource(s.id);
+          void renderSourcesHealth(box);
+        }));
+        else if (r?.blocked) line.append(button('an-src-btn', 'أعد المحاولة', async () => {
           await engine.unblock(`source:${s.id}`);
           void renderSourcesHealth(box);
         }));

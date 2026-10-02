@@ -34,7 +34,29 @@ data class Stream(
     val label: String = "",
     /** صيغة معروفة سلفًا حين لا يدل عليها الرابط (Google Drive: `/download?id=…`). */
     val container: Container? = null,
+    /** الصفحة التي وُجد فيها الفيديو (المتصفح المخفي): تكشف مرآة يحوّل إليها مشغّلٌ بسكربت. */
+    val page: String? = null,
 )
+
+/**
+ * مشغّلات تحوّل بسكربت مبهم إلى مرآة بنفس المسار (StreamHG: `hgcloud.to/e/x` ←
+ * `vibuxer.com/e/x`). صفحة المرآة فيها الرابط مباشرة، فبعد أن يعرفها المتصفح
+ * المخفي مرة يصير السيرفر طلبًا عاديًا واحدًا مثل Mixdrop. المرآة المعروفة الآن
+ * مزروعة؛ ومرآة لا تعطي فيديو تُنسى ويتعلّم المتصفح غيرها.
+ */
+object Mirrors {
+    private val learned = java.util.concurrent.ConcurrentHashMap(mapOf("hgcloud.to" to "vibuxer.com"))
+
+    fun of(host: String): String? = learned[host.removePrefix("www.")]
+
+    fun learn(from: String, to: String) {
+        val a = from.removePrefix("www.")
+        val b = to.removePrefix("www.")
+        if (a != b) learned[a] = b
+    }
+
+    fun forget(host: String) { learned.remove(host.removePrefix("www.")) }
+}
 
 /** يفتح صفحة المشغّل كمتصفح مخفي ويلتقط أول طلب فيديو (m3u8/mp4/mpd). */
 fun interface Sniffer {
@@ -72,8 +94,23 @@ class EmbedResolver(
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
                 fallback(url, referer) { fetch(url, referer).let { Vk.parse(it.body, headersFor(it.url)) } }
-            else -> generic(url, referer, depth)
+            else -> mirrored(url, referer) ?: generic(url, referer, depth)
         }
+    }
+
+    /** المرآة المعروفة لمشغّل يحوّل بسكربت: طلب عادي بنفس المسار، بلا متصفح. */
+    private suspend fun mirrored(url: String, referer: String?): List<Stream>? {
+        val u = url.toHttpUrlOrNull() ?: return null
+        val mirror = Mirrors.of(u.host) ?: return null
+        val target = u.newBuilder().host(mirror).build().toString()
+        val page = try { fetch(target, url) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        val found = page?.takeIf { it.ok }?.let { Generic.streams(it.body, it.url) }.orEmpty()
+        if (found.isEmpty()) {
+            Mirrors.forget(u.host)
+            return null
+        }
+        val headers = headersFor(page!!.url)
+        return found.take(3).map { Stream(it, headers, null, host(page.url)) }
     }
 
     /** An extractor exception must still allow the browser path, but never after cancellation. */
@@ -159,8 +196,14 @@ class EmbedResolver(
 
     private fun quote(s: String) = kotlinx.serialization.json.JsonPrimitive(s).toString()
 
-    private suspend fun sniff(url: String, referer: String?): List<Stream> =
-        sniffer?.sniff(url, referer)?.let(::listOf).orEmpty()
+    private suspend fun sniff(url: String, referer: String?): List<Stream> {
+        val got = sniffer?.sniff(url, referer) ?: return emptyList()
+        // المشغّل حوّل إلى مرآة بنفس المسار: المرة القادمة طلب عادي إليها
+        val from = url.toHttpUrlOrNull()
+        val to = got.page?.toHttpUrlOrNull()
+        if (from != null && to != null && from.host != to.host && from.encodedPath == to.encodedPath) Mirrors.learn(from.host, to.host)
+        return listOf(got)
+    }
 
     /** نُبقي محاولتين فقط قيد العمل، ونرجع عند أول مرآة صالحة بدل انتظار البطيئة. */
     private suspend fun megamax(url: String, referer: String?, onStreams: ((List<Stream>) -> Unit)?): List<Stream> {

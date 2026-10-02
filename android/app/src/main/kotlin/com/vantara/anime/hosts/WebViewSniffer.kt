@@ -73,6 +73,8 @@ class WebViewSniffer(
             mediaPlaybackRequiresUserGesture = false
             userAgentString = ua
         }
+        // آخر صفحة رئيسية فتحها المشغّل (يُحدَّث على خيط الواجهة؛ `view.url` لا يُقرأ من خيط الشبكة)
+        var mainUrl: String? = url
         fun take(u: String, pageUrl: String?) {
             if (found.isCompleted || !isMedia(u)) return
             val origin = pageUrl?.let { runCatching { java.net.URI(it) }.getOrNull() }?.let { "${it.scheme}://${it.host}" }
@@ -80,7 +82,7 @@ class WebViewSniffer(
                 put("User-Agent", ua)
                 origin?.let { put("Referer", pageUrl!!); put("Origin", it) }
             }
-            found.complete(Stream(u, headers, null, "sniffed"))
+            found.complete(Stream(u, headers, null, "sniffed", page = mainUrl ?: pageUrl))
         }
         view.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -92,7 +94,12 @@ class WebViewSniffer(
                 return null
             }
 
+            override fun onPageStarted(v: WebView, u: String, favicon: android.graphics.Bitmap?) {
+                mainUrl = u
+            }
+
             override fun onPageFinished(v: WebView, u: String) {
+                mainUrl = u
                 if (found.isCompleted) return
                 v.evaluateJavascript(PLAY_JS, null)
                 v.evaluateJavascript("document.documentElement.outerHTML") { raw ->

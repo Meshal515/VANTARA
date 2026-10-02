@@ -72,11 +72,22 @@
       }
     },
     {
+      "id": "shahiid",
+      "name": "Shahiid Anime",
+      "content": "anime",
+      "priority": 60,
+      "adapter": "shahiid-site",
+      "domains": {
+        "current": "https://shahiid-anime.net",
+        "legacy": [],
+        "fingerprint": "Shahiid Anime|شاهد انمي"
+      }
+    },
+    {
       "id": "anime4up",
       "name": "Anime4Up",
       "content": "anime",
-      "enabled": false,
-      "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
+      "priority": 50,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.anime4up",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.anime4up-v14.79.apk",

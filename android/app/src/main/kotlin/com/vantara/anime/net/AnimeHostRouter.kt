@@ -106,8 +106,27 @@ object AnimeHostRouter : Interceptor {
         return listOfNotNull(kind, root.message?.take(120)).joinToString(": ")
     }
 
+    /** مضيفات طلب الشخص التحقق منها بنفسه («تحقّق»): يظهر تحدّيها حتى هذا الوقت فقط. */
+    private val visibleUntil = ConcurrentHashMap<String, Long>()
+
+    /** يسمح بإظهار تحدّي Cloudflare لمضيفات مصدر واحد لمدة قصيرة، بطلب صريح من الشخص. */
+    fun allowVisible(sourceId: String, ms: Long) {
+        val route = byId[sourceId] ?: return
+        val until = System.currentTimeMillis() + ms
+        for ((host, r) in routes) if (r === route) visibleUntil[host] = until
+    }
+
+    fun endVisible(sourceId: String) {
+        val route = byId[sourceId] ?: return
+        for ((host, r) in routes) if (r === route) visibleUntil.remove(host)
+    }
+
     /** Cloudflare يسأل: هل يُمنع إظهار التحدي لهذا المضيف؟ */
-    fun isHiddenOnly(host: String): Boolean = host.lowercase() in hiddenOnly
+    fun isHiddenOnly(host: String): Boolean {
+        val h = host.lowercase()
+        if ((visibleUntil[h] ?: 0L) > System.currentTimeMillis()) return false
+        return h in hiddenOnly
+    }
 
     /** DNS يسأل: هل نفضّل DoH لهذا المضيف قبل DNS مزوّد الإنترنت؟ */
     fun prefersDoh(host: String): Boolean = host.lowercase() in dohFirst

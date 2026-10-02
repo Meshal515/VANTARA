@@ -3214,3 +3214,195 @@ html,
 
 .v35 .up-art > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .v35 .feed-refresh { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: .75rem; cursor: pointer; }
+
+/* ───────────────────────── الإعدادات: بلا صناديق ─────────────────────────
+   خطوط شعرية كالسينما والرئيسية: رأس هو أنت، وعناوين بكلمة لاتينية صغيرة،
+   وصفوف خفيفة. لا خلفيات ولا إطارات حول المجموعات. */
+
+.v35 #settingsBody {
+  padding-top: 8px;
+}
+.v35 #settingsBody .settings-me {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 6px 0 22px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text-1);
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+.v35 #settingsBody .settings-me-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.v35 #settingsBody .settings-me-text strong {
+  font-size: 20px;
+  font-weight: 750;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 #settingsBody .settings-me-text small {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  text-align: end;
+  justify-self: start;
+}
+.v35 #settingsBody .settings-me-cta {
+  color: var(--accent-text);
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+.v35 #settingsBody .settings-me .chev {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-text);
+}
+
+.v35 #settingsBody .settings-group-label {
+  display: grid;
+  gap: 2px;
+  margin: 30px 0 4px;
+  color: var(--text-1);
+}
+.v35 #settingsBody .settings-group-label:first-child {
+  margin-top: 4px;
+}
+.v35 #settingsBody .settings-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+}
+.v35 #settingsBody .settings-eyebrow::after {
+  content: '';
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.v35 #settingsBody .settings-title {
+  font-size: 19px;
+  font-weight: 750;
+}
+/* عنوان فرعي داخل المجموعة («ما تراه أنت»): أصغر وبلا كلمة لاتينية */
+.v35 #settingsBody .settings-sublabel {
+  margin-top: 18px;
+}
+.v35 #settingsBody .settings-sublabel .settings-title {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.v35 #settingsBody .settings-list {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  overflow: visible;
+}
+.v35 #settingsBody .setting {
+  min-height: 58px;
+  padding: 13px 0;
+  gap: 14px;
+}
+.v35 #settingsBody .setting + .setting::before {
+  inset-inline: 36px 0;
+}
+.v35 #settingsBody .setting > .icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+}
+.v35 #settingsBody .setting strong {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.v35 #settingsBody .setting small {
+  margin-top: 1px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 #settingsBody .setting .value {
+  flex: none;
+  max-width: 40%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 #settingsBody button.setting:active {
+  background: none;
+  opacity: 0.7;
+}
+.v35 #settingsBody .switch-input {
+  width: 40px;
+  height: 24px;
+}
+.v35 #settingsBody .switch-input::after {
+  width: 18px;
+  height: 18px;
+}
+.v35 #settingsBody .switch-input:checked::after {
+  transform: translateX(-16px);
+}
+.v35 #settingsBody .settings-note {
+  margin: 4px 0 0;
+  padding-inline-start: 34px;
+  font-size: 12px;
+  color: var(--text-4, var(--text-3));
+}
+
+/* النظام: صف شعري يُطوى، لا صندوق */
+.v35 #settingsBody .system-toggle {
+  min-height: 58px;
+  margin-top: 30px;
+  padding: 13px 0;
+  border-radius: 0;
+  box-shadow: none;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.v35 #settingsBody .settings-list.danger-zone {
+  background: none;
+  box-shadow: none;
+}
+
+/* المجلس في الدرج بصورته كخادم ديسكورد: مربّع مستدير بدل الأيقونة */
+.v35 .drawer-room-pic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 750;
+}
+.v35 .drawer-room-pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .drawer-item.active .drawer-room-pic {
+  box-shadow: 0 0 0 2px var(--accent);
+}
