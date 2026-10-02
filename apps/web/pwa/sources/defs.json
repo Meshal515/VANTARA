@@ -89,6 +89,241 @@
       }
     },
     {
+      "id": "eu.kanade.tachiyomi.extension.ar.comicverse",
+      "label": "Comic Verse",
+      "names": [
+        "Comic Verse"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "arcomixverse.blogspot.com",
+      "config": {
+        "feedLabelSelector": "[data-label]"
+      },
+      "probe": {
+        "query": "batman"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.lonertranslations",
+      "label": "Loner Translations",
+      "names": [
+        "Loner Translations"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "loner-tl.blogspot.com",
+      "config": {},
+      "probe": {
+        "query": "stage"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangaailand",
+      "label": "Manga Ai Land",
+      "names": [
+        "Manga Ai Land"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "manga-ai-land.blogspot.com",
+      "config": {
+        "chapterCategory": "فصل"
+      },
+      "probe": {
+        "query": "usogui"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.manhatok",
+      "label": "Manhatok",
+      "names": [
+        "Manhatok"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "manhatok.blogspot.com",
+      "config": {},
+      "probe": {
+        "query": "blue lock"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.orcamanga",
+      "label": "Orca Manga",
+      "names": [
+        "Orca Manga"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "infinity896.blogspot.com",
+      "config": {},
+      "probe": {
+        "query": "omniscient"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.xsanomanga",
+      "label": "XSano Manga",
+      "names": [
+        "XSano Manga"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "www.xsano-manga.com",
+      "config": {
+        "popular": false,
+        "detailsSelector": "main",
+        "genreSelector": "dl a[rel=tag]",
+        "pageSelector": "#reader div.separator"
+      },
+      "probe": {
+        "query": "frieren"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.yokai",
+      "label": "Yokai",
+      "names": [
+        "Yokai"
+      ],
+      "content": "manga",
+      "engine": "zeistmanga",
+      "version": 1,
+      "domain": "yokai-team.blogspot.com",
+      "config": {},
+      "probe": {
+        "query": "hunter"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.azora",
+      "label": "Azora",
+      "names": [
+        "Azora"
+      ],
+      "content": "manga",
+      "engine": "iken",
+      "version": 1,
+      "domain": "azorafly.com",
+      "config": {},
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.all.mangadex",
+      "label": "MangaDex",
+      "names": [
+        "MangaDex"
+      ],
+      "content": "manga",
+      "engine": "mangadex",
+      "version": 1,
+      "domain": "mangadex.org",
+      "config": {
+        "lang": "ar"
+      },
+      "probe": {
+        "query": "one piece"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.lavascans",
+      "label": "Lava Scans",
+      "names": [
+        "Lava Scans"
+      ],
+      "content": "manga",
+      "engine": "mangathemesia",
+      "version": 1,
+      "domain": "lavascans.com",
+      "config": {
+        "searchSelector": ".listupd .manga-card-v",
+        "searchTitleSelector": ".bigor .tt, h3 a",
+        "detailsSelector": "div.lh-container",
+        "titleSelector": ".lh-title",
+        "descriptionSelector": "#manga-story",
+        "genreSelector": ".lh-genres a",
+        "statusSelector": ".status-badge-lux",
+        "thumbnailSelector": ".lh-poster img",
+        "chapterSelector": "#chapters-list-container .ch-item:not(.locked)",
+        "chapterNameSelector": ".ch-num",
+        "chapterDateSelector": ".ch-date"
+      },
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangalink",
+      "label": "Manga Link",
+      "names": [
+        "مانجا لينك"
+      ],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "link-manga.net",
+      "config": {},
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangalionz",
+      "label": "MangaLionz",
+      "names": [
+        "MangaLionz"
+      ],
+      "content": "manga",
+      "engine": "madara",
+      "version": 1,
+      "domain": "manga-lionz.org",
+      "config": {},
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.teamx",
+      "label": "Team X",
+      "names": [
+        "Team X",
+        "تيم إكس"
+      ],
+      "content": "manga",
+      "engine": "teamx",
+      "version": 1,
+      "domain": "olympustaff.com",
+      "config": {},
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
+      "id": "eu.kanade.tachiyomi.extension.ar.mangaswat",
+      "label": "MangaSwat",
+      "names": [
+        "MangaSwat",
+        "مانجا سوات"
+      ],
+      "content": "manga",
+      "engine": "mangaswat",
+      "version": 1,
+      "domain": "meshmanga.com",
+      "config": {},
+      "probe": {
+        "query": "solo"
+      }
+    },
+    {
       "id": "witanime",
       "label": "WitAnime",
       "names": [

@@ -336,10 +336,14 @@ export const madara = {
         const list = JSON.parse(JSON.parse(raw));
         return list.map((imageUrl, index) => ({ index, url: chapterUrl, imageUrl }));
       }
-      return qa(doc, cfg.pageSelector)
-        .map((img) => imageOf(img, chapterUrl))
-        .filter(Boolean)
-        .map((imageUrl, index) => ({ index, url: chapterUrl, imageUrl }));
+      // محدد المصدر أولًا، ثم أشكال Madara المعروفة: قالب تحدّث لا يترك الفصل فارغًا
+      for (const selector of [cfg.pageSelector, 'img.wp-manga-chapter-img', '.reading-content img']) {
+        const list = qa(doc, selector)
+          .map((img) => imageOf(img, chapterUrl))
+          .filter((u) => /^https?:\/\//.test(u));
+        if (list.length) return list.map((imageUrl, index) => ({ index, url: chapterUrl, imageUrl }));
+      }
+      return [];
     }
 
     return {
