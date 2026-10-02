@@ -43,7 +43,7 @@ const P = {
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   history: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.7"/><path d="M4 4.5v4.2h4.2"/><path d="M12 8v4l2.8 1.8"/>',
   // أعمدة متصاعدة: إحصائيات المتابعة (غير «activity» نبض المجلس)
-  chart: '<path d="M4 20h16"/><path d="M7 16v-4M12 16V8M17 16V5"/>',
+  chart: '<path d="M4 4v16"/><path d="M8 7h4M8 12h8M8 17h11"/>',
 
   // ── الأفعال ──
   share: '<circle cx="17.5" cy="5.8" r="2.3"/><circle cx="6.5" cy="12" r="2.3"/><circle cx="17.5" cy="18.2" r="2.3"/><path d="m8.5 10.9 7-4M8.5 13.1l7 4"/>',
