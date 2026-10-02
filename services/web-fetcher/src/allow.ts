@@ -12,6 +12,8 @@
 
 export interface AllowList {
   hosts: readonly string[];
+  /** أي مضيف عام (للوسائط فقط، بعد حراسة SSRF). */
+  any?: boolean;
 }
 
 const PRIVATE_SUFFIXES = ['localhost', '.local', '.internal', '.lan', '.home', '.arpa'];

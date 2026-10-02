@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '2a766169a709ac28d275fa94721efffb755c0129f300bc8d0cb02e3d0bec0e63';
+const SHELL_DIGEST = '288ad6c45477028a8c83166a89a04baa2c83c413ffa29e66916456c3b1a04c62';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -177,20 +177,29 @@ const SHELL = [
   // الـPWA (pwa/): جسور الويب ومحركات المصادر والكاش. تُستورد في المتصفح وحده،
   // وتُخزَّن هنا ليفتح التطبيق دون اتصال على آخر ما رآه.
   '/pwa/boot.js',
+  '/pwa/bridges/anime.js',
   '/pwa/bridges/manga.js',
   '/pwa/cache/images.js',
   '/pwa/cache/store.js',
   '/pwa/net/endpoint.js',
   '/pwa/net/fetcher.js',
   '/pwa/platform.js',
+  '/pwa/player/player.css',
+  '/pwa/player/player.js',
   '/pwa/runtime.js',
   '/pwa/sources/contract.js',
   '/pwa/sources/crypto.js',
   '/pwa/sources/dates.js',
   '/pwa/sources/defs.json',
   '/pwa/sources/dom.js',
+  '/pwa/sources/engines/arabseed.js',
   '/pwa/sources/engines/index.js',
   '/pwa/sources/engines/madara.js',
+  '/pwa/sources/engines/shahiid.js',
+  '/pwa/sources/engines/tuktuk.js',
+  '/pwa/sources/engines/video-common.js',
+  '/pwa/sources/engines/witanime.js',
+  '/pwa/sources/hosts.js',
   '/pwa/sources/registry.js',
 ];
 

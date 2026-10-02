@@ -16,7 +16,7 @@
 
 import { verifyIdentityToken } from '@vantara/domain';
 import allowJson from '../../../apps/web/pwa/sources/allow.json';
-import { hostAllowed, targetAllowed, type AllowList } from './allow.ts';
+import { hostAllowed, parseTarget, targetAllowed, type AllowList } from './allow.ts';
 import { mintGrant, verifyGrant } from './grant.ts';
 import { isPlaylist, rewritePlaylist } from './hls.ts';
 
@@ -37,7 +37,30 @@ const MAX_BODY_FOR_POST = 64 * 1024;
 /** حدّ لطيف لكل مستخدم في الدقيقة داخل نفس النسخة؛ يمنع حلقة خاطئة من الاستنزاف. */
 const PER_MINUTE = 900;
 
-const FORWARDED = ['referer', 'origin', 'accept', 'content-type', 'x-requested-with', 'accept-language'] as const;
+const FORWARDED = [
+  'referer',
+  'origin',
+  'accept',
+  'content-type',
+  'x-requested-with',
+  'accept-language',
+  // Laravel (WitAnime): طلبات السيرفرات تحمل رمز CSRF من الصفحة
+  'x-csrf-token',
+  // MegaMax (Inertia): قائمة المرايا تُطلب بهذه الترويسات
+  'x-inertia',
+  'x-inertia-version',
+  'x-inertia-partial-component',
+  'x-inertia-partial-data',
+] as const;
+
+/**
+ * الوسائط (صور وفيديو) تأتي من شبكات توزيع تتبدّل أسماؤها (mp4upload، lulustream…)
+ * فلا تُحصر في قائمة. لذلك `/v1/media` يقبل أي مضيف عام (حراسة SSRF كما هي) لكن
+ * لا يمرّر إلا وسائط: صفحة HTML أو JSON لا تخرج منه أبدًا، فلا يصير proxy مفتوحًا
+ * لتصفح المواقع. والطلب يحتاج إذنًا (مستخدم مسجّل) وحدًّا في الدقيقة.
+ */
+const ANY_PUBLIC_HOST: AllowList = { hosts: [], any: true };
+const NOT_MEDIA = /^(text\/html|application\/(json|xml|xhtml|javascript)|text\/(xml|javascript))/i;
 
 // ───────────────────────── CORS ─────────────────────────
 
@@ -52,7 +75,7 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'authorization, content-type, range',
-    'access-control-expose-headers': 'x-vf-status, x-vf-url, x-vf-set-cookie, x-vf-challenge, content-range, accept-ranges, content-length',
+    'access-control-expose-headers': 'x-vf-status, x-vf-url, x-vf-set-cookie, x-vf-challenge, x-vf-location, content-range, accept-ranges, content-length',
     'access-control-max-age': '86400',
     vary: 'Origin',
   };
@@ -106,6 +129,8 @@ interface UpstreamInit {
   /** كوكيز من المصدر نفسه (`a=1; b=2`): بعض المواقع تربط الطلب بكوكي الصفحة. */
   cookies?: string | undefined;
   range?: string | null | undefined;
+  /** لا يتبع التحويل: يرجع 3xx كما هو (بوابات تحوّل إلى مشغّل على موقع آخر). */
+  follow?: boolean | undefined;
 }
 
 /** كوكيز الرد بلا خصائصها (`name=value` فقط). */
@@ -137,7 +162,9 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
   let cookies = init.cookies;
   const collected: string[] = [];
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    if (!hostAllowed(url.hostname, list)) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
+    // كل قفزة تمرّ بحراسة SSRF (لا IP ولا localhost) حتى لو كانت القائمة «أي مضيف»
+    if (!parseTarget(url.toString())) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
+    if (!list.any && !hostAllowed(url.hostname, list)) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
     const headers = new Headers(init.headers);
     if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
     if (!headers.has('accept-language')) headers.set('accept-language', 'ar,en;q=0.8');
@@ -159,7 +186,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
     const fresh = cookiePairs(response);
     collected.push(...fresh);
     const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location) {
+    if (response.status >= 300 && response.status < 400 && location && init.follow !== false) {
       let next: URL;
       try {
         next = new URL(location, url);
@@ -203,6 +230,7 @@ async function handleFetch(request: Request, env: Env, cors: Record<string, stri
     headers?: unknown;
     body?: unknown;
     cookies?: unknown;
+    follow?: unknown;
   };
   try {
     input = (await request.json()) as typeof input;
@@ -225,13 +253,15 @@ async function handleFetch(request: Request, env: Env, cors: Record<string, stri
   const cookies = typeof input.cookies === 'string' && input.cookies.length < 8192 ? input.cookies : undefined;
 
   try {
-    const { response, finalUrl, setCookies } = await upstream(target, { method, headers, body, cookies }, ALLOW, fetchImpl);
+    const { response, finalUrl, setCookies } = await upstream(target, { method, headers, body, cookies, follow: input.follow !== false }, ALLOW, fetchImpl);
     const out = new Headers(cors);
     out.set('content-type', response.headers.get('content-type') ?? 'application/octet-stream');
     out.set('cache-control', 'no-store');
     out.set('x-vf-status', String(response.status));
     out.set('x-vf-url', finalUrl.toString());
     if (setCookies.length) out.set('x-vf-set-cookie', encodeURIComponent(JSON.stringify(setCookies)));
+    const location = response.headers.get('location');
+    if (location && response.status >= 300 && response.status < 400) out.set('x-vf-location', new URL(location, finalUrl).toString());
     // صفحة تحدٍّ قصيرة: نقرؤها لنقول نوعها، والباقي يمرّ تيارًا بلا قراءة
     if ([403, 429, 503].includes(response.status) && (response.headers.get('content-type') ?? '').includes('html')) {
       const text = await response.text();
@@ -268,14 +298,17 @@ async function handleMedia(request: Request, env: Env, cors: Record<string, stri
   const userId = await verifyGrant(params.get('g'), env.VANTARA_IDENTITY_SECRET);
   if (!userId) return json(401, { error: 'unauthorized' }, cors);
   if (overLimit(userId)) return json(429, { error: 'rate_limited' }, cors);
-  const target = targetAllowed(params.get('u'), ALLOW);
+  const target = parseTarget(params.get('u'));
   if (!target) return json(403, { error: 'host_not_allowed', host: safeHost(params.get('u')) }, cors);
   const referer = params.get('r');
   const headers = new Headers({ accept: request.headers.get('accept') ?? '*/*' });
   if (referer && /^https?:\/\//.test(referer)) headers.set('referer', referer);
 
   try {
-    const { response, finalUrl } = await upstream(target, { method: 'GET', headers, range: request.headers.get('range') }, ALLOW, fetchImpl);
+    const { response, finalUrl } = await upstream(target, { method: 'GET', headers, range: request.headers.get('range') }, ANY_PUBLIC_HOST, fetchImpl);
+    if (NOT_MEDIA.test(response.headers.get('content-type') ?? '') && !isPlaylist(response.headers.get('content-type'), finalUrl.toString())) {
+      return json(415, { error: 'not_media', status: response.status }, cors);
+    }
     const out = new Headers(cors);
     for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
       const value = response.headers.get(name);

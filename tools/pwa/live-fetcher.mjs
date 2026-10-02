@@ -24,7 +24,7 @@ export class LiveError extends Error {
 export function liveFetcher({ log = () => {} } = {}) {
   const jar = new Map();
   function text(url, opts = {}) {
-    const args = ['-s', '-L', '--max-redirs', '6', '-m', '30', '-A', UA, '-H', 'Accept-Language: ar,en;q=0.8', '-D', '-', '-o', '-', '-w', '\n__VF__%{http_code} %{url_effective}'];
+    const args = ['-s', ...(opts.follow === false ? [] : ['-L', '--max-redirs', '6']), '-m', '30', '-A', UA, '-H', 'Accept-Language: ar,en;q=0.8', '-D', '-', '-o', '-', '-w', '\n__VF__%{http_code} %{url_effective}'];
     const headers = { ...(opts.headers ?? {}) };
     if (opts.referer) headers.referer = opts.referer;
     if (opts.xhr) headers['x-requested-with'] = 'XMLHttpRequest';
@@ -57,7 +57,8 @@ export function liveFetcher({ log = () => {} } = {}) {
     const challenge = [403, 503, 429].includes(status) && /just a moment|cf-chl|challenge-platform/i.test(rest) ? 'js' : 'none';
     log(`${method} ${url} → ${status} ${Date.now() - started}ms`);
     if (challenge !== 'none' && !opts.allowChallenge) throw new LiveError('challenge', { status, challenge });
-    return Promise.resolve({ status, url: finalUrl, text: rest, challenge });
+    const location = headerBlock.match(/^location:\s*(\S+)/im)?.[1] ?? null;
+    return Promise.resolve({ status, url: finalUrl, text: rest, challenge, location: location ? new URL(location, finalUrl).toString() : null });
   }
   async function page(url, opts = {}) {
     const out = await text(url, opts);

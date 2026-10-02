@@ -117,6 +117,17 @@ describe('/v1/fetch', () => {
     expect(await foreign.json()).toMatchObject({ error: 'foreign_redirect', detail: '4u.571jrqh.shop' });
   });
 
+  it('can stop at a redirect and report where it points (gates that hand off to a player)', async () => {
+    const { impl, seen } = fakeUpstream({
+      'https://witanime.site/watch/stream-gate/abc': () => new Response(null, { status: 302, headers: { location: 'https://ok.ru/videoembed/1' } }),
+    });
+    const res = await createHandler(impl)(fetchReq({ url: 'https://witanime.site/watch/stream-gate/abc', follow: false, headers: { 'x-csrf-token': 't0k' } }, await bearer()), env);
+    expect(res.headers.get('x-vf-status')).toBe('302');
+    expect(res.headers.get('x-vf-location')).toBe('https://ok.ru/videoembed/1');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.headers.get('x-csrf-token')).toBe('t0k');
+  });
+
   it('labels a Cloudflare challenge instead of passing it off as a page', async () => {
     const { impl } = fakeUpstream({
       'https://w1.anime4up.rest/': () => new Response('<title>Just a moment...</title>', { status: 403, headers: { 'content-type': 'text/html' } }),
@@ -175,6 +186,23 @@ describe('/v1/media and grants', () => {
     expect(lines[1]).toContain(`URI="https://vantara-fetch.example/v1/media?u=${encodeURIComponent('https://vd1.mycdn.me/v/key.bin')}`);
     expect(lines[3]).toBe(`https://vantara-fetch.example/v1/media?u=${encodeURIComponent('https://vd1.mycdn.me/v/seg-1.ts')}&r=${encodeURIComponent('https://ok.ru/')}&g=${grant}`);
     expect(lines[5]).toContain(encodeURIComponent('https://cdn.okcdn.ru/seg-2.ts'));
+  });
+
+  it('passes media from any public CDN but never a page, and never a private address', async () => {
+    const { impl } = fakeUpstream({
+      'https://s3.unlisted-cdn.example/v.mp4': () => new Response('MP4', { status: 206, headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-2/3' } }),
+      'https://unlisted.example/page': () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+      'https://evil.example/hop': () => new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/admin' } }),
+    });
+    const { grant } = await mintGrant('u1', SECRET);
+    const media = (u: string) => new Request(`https://vantara-fetch.example/v1/media?u=${encodeURIComponent(u)}&g=${grant}`, { headers: { range: 'bytes=0-2' } });
+    const handle = createHandler(impl);
+    const video = await handle(media('https://s3.unlisted-cdn.example/v.mp4'), env);
+    expect(video.status).toBe(206);
+    expect(video.headers.get('content-range')).toBe('bytes 0-2/3');
+    expect((await handle(media('https://unlisted.example/page'), env)).status).toBe(415);
+    expect((await handle(media('https://evil.example/hop'), env)).status).toBe(403);
+    expect((await handle(media('http://10.0.0.1/x.mp4'), env)).status).toBe(403);
   });
 
   it('refuses media without a grant', async () => {

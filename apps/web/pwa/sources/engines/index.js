@@ -3,7 +3,9 @@
  * (`engine` في defs.json)؛ محرك غير مسجّل هنا ⇒ التعريف مرفوض.
  */
 import { madara } from './madara.js';
+import { witanime } from './witanime.js';
+import { shahiid } from './shahiid.js';
+import { arabseed } from './arabseed.js';
+import { tuktuk } from './tuktuk.js';
 
-export const ENGINES = Object.freeze({
-  [madara.kind]: madara,
-});
+export const ENGINES = Object.freeze(Object.fromEntries([madara, witanime, shahiid, arabseed, tuktuk].map((e) => [e.kind, e])));

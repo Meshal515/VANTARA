@@ -9,6 +9,7 @@ import { createStore } from './cache/store.js';
 import { publishConfig, requestPersistence } from './cache/images.js';
 import { createRegistry } from './sources/registry.js';
 import { ENGINES } from './sources/engines/index.js';
+import { createHostResolver } from './sources/hosts.js';
 
 let auth = { header: () => readToken(), refresh: null };
 let runtime = null;
@@ -38,7 +39,7 @@ export function getRuntime() {
   if (runtime) return runtime;
   const store = createStore();
   const fetcher = createFetcher({ auth: { header: () => auth.header(), refresh: () => auth.refresh?.() } });
-  const registry = createRegistry({ engines: ENGINES, store, ctx: { fetch: fetcher } });
+  const registry = createRegistry({ engines: ENGINES, store, ctx: { fetch: fetcher, hosts: createHostResolver(fetcher) } });
   let published = null; // { grant, at, promise }
 
   /**

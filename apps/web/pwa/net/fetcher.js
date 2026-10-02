@@ -113,7 +113,7 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
    * @param {string} url
    * @param {{ method?: 'GET'|'POST', form?: Record<string,string|number>, body?: string,
    *           headers?: Record<string,string>, referer?: string, xhr?: boolean,
-   *           signal?: AbortSignal, allowChallenge?: boolean }} [opts]
+   *           signal?: AbortSignal, allowChallenge?: boolean, follow?: boolean }} [opts]
    */
   async function text(url, opts = {}) {
     const headers = { ...(opts.headers ?? {}) };
@@ -125,7 +125,7 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
       headers['content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
     }
     const method = opts.method ?? (body !== undefined ? 'POST' : 'GET');
-    const res = await post('/v1/fetch', { url, method, headers, body, cookies: cookiesFor(url) }, { signal: opts.signal });
+    const res = await post('/v1/fetch', { url, method, headers, body, cookies: cookiesFor(url), ...(opts.follow === false ? { follow: false } : {}) }, { signal: opts.signal });
     if (!res.ok) {
       let info = {};
       try {
@@ -146,7 +146,7 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
       }
     }
     const challenge = res.headers.get('x-vf-challenge') ?? 'none';
-    const out = { status, url: finalUrl, text: await res.text(), challenge };
+    const out = { status, url: finalUrl, text: await res.text(), challenge, location: res.headers.get('x-vf-location') };
     if (challenge !== 'none' && !opts.allowChallenge) {
       throw new FetchError('challenge', { status, challenge, host: hostOf(url), message: challenge === 'interactive' ? 'المصدر يطلب تحقق إنسان' : 'المصدر خلف حماية Cloudflare' });
     }

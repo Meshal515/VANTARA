@@ -4,7 +4,9 @@
     {
       "id": "eu.kanade.tachiyomi.extension.ar.manga3asq",
       "label": "3asq",
-      "names": ["مانجا العاشق"],
+      "names": [
+        "مانجا العاشق"
+      ],
       "content": "manga",
       "engine": "madara",
       "version": 1,
@@ -15,23 +17,31 @@
         "archiveUrlSelector": "div.post-title a:not([target])",
         "chapterDateSelector": "span.chapter-release-date .timediff"
       },
-      "probe": { "query": "one piece" }
+      "probe": {
+        "query": "one piece"
+      }
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangastarz",
       "label": "Manga Starz",
-      "names": ["Manga Starz"],
+      "names": [
+        "Manga Starz"
+      ],
       "content": "manga",
       "engine": "madara",
       "version": 1,
       "domain": "starzmanga.com",
       "config": {},
-      "probe": { "query": "solo" }
+      "probe": {
+        "query": "solo"
+      }
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangaspark",
       "label": "MangaSpark",
-      "names": ["MangaSpark"],
+      "names": [
+        "MangaSpark"
+      ],
       "content": "manga",
       "engine": "madara",
       "version": 1,
@@ -40,23 +50,31 @@
         "chapterMode": "adminAjax",
         "pageSelector": "div.wp-manga-chapter-img img, div.reading-content img"
       },
-      "probe": { "query": "solo" }
+      "probe": {
+        "query": "solo"
+      }
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangalek",
       "label": "Mangalek",
-      "names": ["مانجا ليك"],
+      "names": [
+        "مانجا ليك"
+      ],
       "content": "manga",
       "engine": "madara",
       "version": 1,
       "domain": "mangalik.net",
       "config": {},
-      "probe": { "query": "solo" }
+      "probe": {
+        "query": "solo"
+      }
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.hizomanga",
       "label": "HizoManga",
-      "names": ["Hizo Manga"],
+      "names": [
+        "Hizo Manga"
+      ],
       "content": "manga",
       "engine": "madara",
       "version": 1,
@@ -66,7 +84,69 @@
         "descriptionSelector": ".manga-excerpt",
         "statusSelector": ".manga-status"
       },
-      "probe": { "query": "a" }
+      "probe": {
+        "query": "a"
+      }
+    },
+    {
+      "id": "witanime",
+      "label": "WitAnime",
+      "names": [
+        "WitAnime"
+      ],
+      "content": "anime",
+      "engine": "witanime-site",
+      "version": 1,
+      "domain": "witanime.site",
+      "config": {},
+      "probe": {
+        "query": "frieren"
+      }
+    },
+    {
+      "id": "shahiid",
+      "label": "Shahiid Anime",
+      "names": [
+        "شاهد انمي"
+      ],
+      "content": "anime",
+      "engine": "shahiid-site",
+      "version": 1,
+      "domain": "shahiid-anime.net",
+      "config": {},
+      "probe": {
+        "query": "naruto"
+      }
+    },
+    {
+      "id": "arabseed",
+      "label": "ArabSeed",
+      "names": [
+        "عرب سيد"
+      ],
+      "content": "cinema",
+      "engine": "arabseed-site",
+      "version": 1,
+      "domain": "m.myseed.pics",
+      "config": {},
+      "probe": {
+        "query": "toy story"
+      }
+    },
+    {
+      "id": "tuktukcinema",
+      "label": "TukTuk Cinema",
+      "names": [
+        "توك توك سينما"
+      ],
+      "content": "cinema",
+      "engine": "tuktuk-site",
+      "version": 1,
+      "domain": "tuktukhd.com",
+      "config": {},
+      "probe": {
+        "query": "the gentlemen"
+      }
     }
   ]
 }
