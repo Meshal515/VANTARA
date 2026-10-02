@@ -142,7 +142,105 @@ async function cleanup() {
   await d1Query("DELETE FROM applied_ops WHERE op_id >= '__verify__' AND op_id < '__verify_`'");
   await d1Query("DELETE FROM works WHERE series_ref >= '__verify__' AND series_ref < '__verify_`'");
   await d1Query('DELETE FROM pairing_tokens WHERE user_id = ?', [USER_ID]);
+  // حسابات التحقق المؤقتة (إضافة/حذف): ما بقي من Run انقطع قبل المسح النهائي،
+  // ثم شواهد قبور هذا الـRun نفسه. لا شيء منها يبقى على شاشة «من يتابع؟».
+  const temp = "SELECT user_id FROM accounts WHERE (username >= '__verify__' AND username < '__verify_`' AND user_id != ?)";
+  for (const table of ['trusted_devices', 'account_pins', 'profiles', 'presence', 'settings', 'applied_ops']) {
+    await d1Query(`DELETE FROM ${table} WHERE user_id IN (${temp})`, [USER_ID]);
+    if (tempAccounts.length) await d1Query(`DELETE FROM ${table} WHERE user_id IN (${tempAccounts.map(() => '?').join(', ')})`, tempAccounts);
+  }
+  await d1Query(`DELETE FROM accounts WHERE user_id IN (${temp})`, [USER_ID]);
+  if (tempAccounts.length) await d1Query(`DELETE FROM accounts WHERE user_id IN (${tempAccounts.map(() => '?').join(', ')})`, tempAccounts);
+  await d1Query('DELETE FROM account_pins WHERE user_id = ?', [USER_ID]);
   await d1Query('DELETE FROM accounts WHERE user_id = ? OR username = ?', [USER_ID, USERNAME]);
+}
+
+/** معرّفات حسابات أنشأها هذا الـRun: تُكنس شواهد قبورها في التنظيف. */
+const tempAccounts = [];
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * الحسابات على D1 الحقيقية: السقف، PIN (مجزّأ، مطلوب، خطأ، تغيير، إزالة)،
+ * إضافة حساب، ثم الحذف: PENDING_DELETE لا يمسح شيئًا ولا يحرر الاسم، التراجع
+ * يعيده ACTIVE، الإتمام قبل المهلة لا يمسح، وبعدها مسح نهائي وشاهد قبر
+ * بنفس الـUUID، والتوكن القديم لا يكتب.
+ */
+async function verifyAccounts(token, credentialOne) {
+  const sessionWith = (userId, extra = {}) =>
+    call('/v1/session', { method: 'POST', body: { userId, deviceId: DEVICE_ONE, deviceCredential: credentialOne, ...extra } });
+
+  const listed = await call('/v1/accounts');
+  check('سقف الحسابات عشرة يصل الواجهة', listed.json?.limit === 10, `limit=${listed.json?.limit}`);
+
+  // ─── PIN ───
+  const set = await call('/v1/pin', { method: 'POST', body: { action: 'set', pin: '4826' } }, token);
+  check('PIN من 4 أرقام يُضبط', set.status === 200 && set.json?.digits === 4);
+  const stored = (await d1Query('SELECT pin_hash, digits FROM account_pins WHERE user_id = ?', [USER_ID])).result?.[0]?.results?.[0];
+  check('PIN مجزّأ لا نص صريح', /^[0-9a-f]{64}$/.test(stored?.pin_hash ?? '') && !String(stored?.pin_hash).includes('4826'));
+  const required = await sessionWith(USER_ID);
+  check('الجلسة تطلب PIN', required.status === 401 && required.json?.error === 'pin_required' && required.json?.digits === 4);
+  const wrong = await sessionWith(USER_ID, { pin: '0000' });
+  check('PIN خاطئ يُرفض', wrong.status === 401 && wrong.json?.error === 'pin_wrong');
+  const right = await sessionWith(USER_ID, { pin: '4826' });
+  check('PIN صحيح يفتح ويعطي إذنًا', right.status === 200 && typeof right.json?.pinGrant === 'string' && right.json?.user?.pinDigits === 4);
+  const granted = await sessionWith(USER_ID, { pinGrant: right.json?.pinGrant });
+  check('الإذن يجدد الجلسة بلا سؤال', granted.status === 200);
+  const noCurrent = await call('/v1/pin', { method: 'POST', body: { action: 'set', pin: '135790' } }, token);
+  check('تغيير PIN بلا الحالي مرفوض', noCurrent.status === 401);
+  const changed = await call('/v1/pin', { method: 'POST', body: { action: 'set', pin: '135790', currentPin: '4826' } }, token);
+  check('تغيير PIN إلى 6 أرقام بالحالي', changed.status === 200 && changed.json?.digits === 6);
+  const removed = await call('/v1/pin', { method: 'POST', body: { action: 'remove', currentPin: '135790' } }, token);
+  check('إزالة PIN بالحالي', removed.status === 200);
+  check('بلا PIN تعود الجلسة بلا سؤال', (await sessionWith(USER_ID)).status === 200);
+
+  // ─── إضافة حساب ───
+  const username = `__verify__${randomBytes(3).toString('hex')}`;
+  const created = await call('/v1/accounts/create', { method: 'POST', body: { username, displayName: 'Verify Temp' } }, token);
+  const tempId = created.json?.account?.userId;
+  if (tempId) tempAccounts.push(tempId);
+  check('إضافة حساب بمعرّف ثابت جديد', created.status === 200 && /^[0-9a-f-]{36}$/.test(tempId ?? ''));
+  const taken = await call('/v1/accounts/create', { method: 'POST', body: { username, displayName: 'x' } }, token);
+  check('اسم المستخدم فريد', taken.status === 409 && taken.json?.error === 'username_taken');
+  const tempSession = await sessionWith(tempId);
+  const tempToken = tempSession.json?.token;
+  check('الحساب الجديد يُفتح من جهاز معتمد', tempSession.status === 200 && Boolean(tempToken));
+  if (!tempToken) return;
+  await call('/v1/pin', { method: 'POST', body: { action: 'set', pin: '2468' } }, tempToken);
+  await call('/v1/ops', { method: 'POST', body: { ops: [{ opId: `__verify__-temp-lib-${Date.now()}`, kind: 'library.add', payload: { seriesRef: '__verify__/temp', seriesTitle: 'Verify' } }] } }, tempToken);
+  const countRows = async () => {
+    const tables = ['profiles', 'presence', 'settings', 'library', 'account_pins', 'trusted_devices'];
+    let n = 0;
+    for (const table of tables) {
+      n += Number((await d1Query(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = ?`, [tempId])).result?.[0]?.results?.[0]?.n ?? 0);
+    }
+    return n;
+  };
+  const before = await countRows();
+  const accountRow = async () => (await d1Query('SELECT username, lifecycle FROM accounts WHERE user_id = ?', [tempId])).result?.[0]?.results?.[0];
+
+  // ─── الحذف والتراجع ───
+  const badDelete = await call('/v1/accounts/delete', { method: 'POST', body: { pin: '0000' } }, tempToken);
+  check('الحذف يطلب PIN الحساب', badDelete.status === 401);
+  const pending = await call('/v1/accounts/delete', { method: 'POST', body: { pin: '2468' } }, tempToken);
+  check('PIN صحيح ⇒ PENDING_DELETE بمهلة عشر ثوانٍ', pending.status === 200 && pending.json?.state === 'PENDING_DELETE' && pending.json?.graceMs === 10_000);
+  const pendingRow = await accountRow();
+  check('في المهلة: الاسم محجوز ولا شيء مُسح', pendingRow?.lifecycle === 'PENDING_DELETE' && pendingRow?.username === username && (await countRows()) === before, `rows=${before}`);
+  check('في المهلة: مخفي من «من يتابع؟»', !((await call('/v1/accounts')).json?.content ?? []).some((a) => a.userId === tempId));
+  const undo = await call('/v1/accounts/restore', { method: 'POST', body: {} }, tempToken);
+  check('التراجع يعيده ACTIVE فورًا', undo.status === 200 && undo.json?.state === 'ACTIVE' && (await accountRow())?.lifecycle === 'ACTIVE' && (await countRows()) === before);
+
+  await call('/v1/accounts/delete', { method: 'POST', body: { pin: '2468' } }, tempToken);
+  const early = await call('/v1/accounts/delete/commit', { method: 'POST', body: {} }, tempToken);
+  check('الإتمام قبل المهلة لا يمسح', early.json?.state === 'PENDING_DELETE' && Number(early.json?.retryInMs) > 0 && (await countRows()) === before);
+  await wait(Number(early.json?.retryInMs ?? 12_000) + 500);
+  const done = await call('/v1/accounts/delete/commit', { method: 'POST', body: {} }, tempToken);
+  const tomb = await accountRow();
+  check('بعد المهلة: مسح نهائي', done.json?.state === 'DELETED' && (await countRows()) === 0);
+  check('شاهد قبر بنفس الـUUID والاسم تحرر', tomb?.lifecycle === 'DELETED' && tomb?.username === `~${tempId}`);
+  const freed = Number((await d1Query('SELECT COUNT(*) AS n FROM accounts WHERE username = ?', [username])).result?.[0]?.results?.[0]?.n ?? 1);
+  check('اسم المستخدم متاح بعد المسح فقط', freed === 0);
+  const stale = await call('/v1/ops', { method: 'POST', body: { ops: [{ opId: `__verify__-stale-${Date.now()}`, kind: 'library.add', payload: { seriesRef: '__verify__/stale', seriesTitle: 'x' } }] } }, tempToken);
+  check('توكن الحساب المحذوف لا يكتب', stale.status === 410 && (await countRows()) === 0);
 }
 
 function rowsOf(payload, table) {
@@ -511,6 +609,8 @@ async function main() {
   const dahmi = (accounts.json?.content ?? []).find((row) => row.userId === USER_ID);
   check('user_id لم يتغير بتعديل وارد', Boolean(dahmi), `userId=${dahmi?.userId}`);
   check('الاسم بقي قابلًا للتعديل', dahmi?.displayName === 'دحمي', `name=${dahmi?.displayName}`);
+
+  await verifyAccounts(token, credentialOne);
 
   // ─── logout-all يقتل كل الأجهزة الموثوقة للحساب ───
   const logoutAll = await call('/v1/device/logout-all', { method: 'POST' }, token);

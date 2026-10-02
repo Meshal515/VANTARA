@@ -146,8 +146,8 @@ jobs:
           cat /tmp/health.json
           jq -e '.ok == true' /tmp/health.json > /dev/null
           jq -e '.rev >= 0' /tmp/health.json > /dev/null
-          curl -fsS "$url/v1/accounts" | jq -e '.content | length == 3' > /dev/null
-          echo 'Three accounts present.'
+          curl -fsS "$url/v1/accounts" | jq -e '(.content | length) >= 1 and (.content | length) <= 10 and .limit == 10' > /dev/null
+          echo 'Accounts present (1..10), limit 10.'
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "VANTARA_SYNC_URL=$url" >> "$GITHUB_STEP_SUMMARY"
 
