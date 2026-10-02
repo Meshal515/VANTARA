@@ -62,6 +62,14 @@ object Generic {
             .sortedBy { if (it.contains(".m3u8")) 0 else 1 }
     }
 
+    /** أول iframe لمشغّل (لا إعلان ولا يوتيوب) في الصفحة، رابطًا مطلقًا. */
+    fun iframe(html: String, pageUrl: String): String? = runCatching {
+        Jsoup.parse(html, pageUrl).select("iframe[src]").map { it.absUrl("src") }
+            .firstOrNull { it.startsWith("http") && !IFRAME_NOISE.containsMatchIn(it) }
+    }.getOrNull()
+
+    private val IFRAME_NOISE = Regex("""youtube\.com|youtu\.be|googletagmanager|doubleclick|/ads?/|facebook\.com|twitter\.com""", RegexOption.IGNORE_CASE)
+
     private fun absolute(u: String, pageUrl: String): String = when {
         u.startsWith("//") -> "https:$u"
         else -> u

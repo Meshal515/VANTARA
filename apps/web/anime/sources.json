@@ -245,12 +245,7 @@
       "name": "ArabSeed",
       "content": "cinema",
       "priority": 65,
-      "extension": {
-        "pkg": "eu.kanade.tachiyomi.animeextension.ar.arabseed",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.arabseed-v14.31.apk",
-        "sha256": "9ea6bf5b462d5055ce15b12a21b2dd7c2c75157f6f4dc48270c5c9096d1f7eb7",
-        "version": "14.31"
-      },
+      "adapter": "arabseed-site",
       "domains": {
         "current": "https://m.myseed.pics",
         "legacy": [
