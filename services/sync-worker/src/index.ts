@@ -119,7 +119,7 @@ class DuplicateOpConflict extends Error {
  * revision قبل الصفوف التابعة له، ولا يمكن لطلبين متزامنين بنفس op_id أن
  * يطبقا الأثر مرتين.
  */
-async function commitAtNextRevision(
+export async function commitAtNextRevision(
   env: Env,
   now: number,
   opIds: readonly string[],
@@ -215,6 +215,7 @@ interface AccountRow {
   status: string;
   beat_at: number;
   settings_data: string | null;
+  pin_digits: number | null;
 }
 
 /**
@@ -227,11 +228,13 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT a.user_id, a.username,
             p.display_name, p.avatar_key, p.banner_key, p.accent,
-            pr.status, pr.beat_at, s.data AS settings_data
+            pr.status, pr.beat_at, s.data AS settings_data, pin.digits AS pin_digits
        FROM accounts a
        LEFT JOIN profiles p USING (user_id)
        LEFT JOIN presence pr USING (user_id)
        LEFT JOIN settings s USING (user_id)
+       LEFT JOIN account_pins pin USING (user_id)
+      WHERE a.deleted_at IS NULL
       ORDER BY a.created_at, a.username`,
   ).all<AccountRow>();
 
@@ -260,8 +263,12 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
         // القفل: أحد جالس في هذا الحساب الآن
         active: status !== 'OFFLINE',
         lastSeenAt: row.beat_at || null,
+        // الـPIN نفسه لا يخرج أبدًا: فقط «عليه PIN» وطوله، لرسم لوحة الأرقام
+        pinDigits: row.pin_digits ?? null,
       };
     }),
+    // سقف المجموعة: الشاشة تخفي «+» عند الامتلاء، والخادم يرفض الحادي عشر وحده
+    limit: 10,
   });
 }
 
@@ -293,7 +300,7 @@ const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) 
 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
-  ['accounts', 'user_id, username, created_at, rev, badge'],
+  ['accounts', 'user_id, username, created_at, rev, badge, deleted_at'],
   ['profiles', 'user_id, display_name, avatar_key, banner_key, bio, accent, background_color, background_gradient, background_angle, card_color, rev'],
   ['library', 'user_id, series_ref, series_title, cover_url, source_id, added_at, removed, rev'],
   [

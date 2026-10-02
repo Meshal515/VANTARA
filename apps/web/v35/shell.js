@@ -51,6 +51,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
+import { pinPad } from '../screens/pin-pad.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
@@ -3524,6 +3525,191 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'friends') return openSocial('friends');
     if (key === 'activity') return openSocial('friends');
   }
+  // ───────────────────────── PIN وحذف الحساب ─────────────────────────
+
+  /** ردّ الخادم بلغة لوحة PIN. */
+  const padResult = (out) => {
+    if (out.ok) return { ok: true };
+    const error = out.data?.error ?? 'other';
+    const message = error === 'bad_pin' ? 'الرمز أرقام فقط: 4 أو 6' : error === 'pin_wrong' ? 'رمز غير صحيح' : error === 'pin_locked' ? undefined : 'تعذّر الحفظ. حاول مرة ثانية';
+    return { error, retryAt: out.data?.retryAt ?? null, message };
+  };
+  const pinFace = () => {
+    const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
+    const name = profile?.display_name || sync.user?.displayName || '';
+    return { avatar: profile?.avatar_key ?? null, initial: [...name][0] || '؟' };
+  };
+
+  function createPin() {
+    pinPad({
+      mode: 'create',
+      title: 'رمز PIN لحسابك',
+      ...pinFace(),
+      submit: async (pin) => padResult(await sync.setPin(pin)),
+      onDone: () => {
+        toast('حسابك صار محمي برمز');
+        renderSettings();
+      },
+    });
+  }
+
+  /** الرمز الحالي أولًا (يُحسب من محاولات القفل كأي إدخال)، ثم الجديد. */
+  function askCurrentPin(title, then) {
+    pinPad({
+      mode: 'enter',
+      digits: sync.user?.pinDigits,
+      title,
+      subtitle: 'اكتب رمزك الحالي',
+      ...pinFace(),
+      submit: async (pin) => {
+        try {
+          await sync.unlock(pin);
+          setTimeout(() => then(pin), 200);
+          return { ok: true };
+        } catch (error) {
+          if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
+          return { error: error?.status ? 'other' : 'network', message: 'تعذّر التحقق. حاول مرة ثانية' };
+        }
+      },
+    });
+  }
+
+  function managePin() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'رمز PIN'));
+      body.append(el('p', null, `حسابك محمي برمز من ${sync.user?.pinDigits} أرقام. يُطلب كل ما فُتح التطبيق على حسابك.`));
+      const actions = el('div', 'sheet-actions');
+      const remove = el('button', 'btn btn-secondary', 'إزالة الرمز');
+      remove.type = 'button';
+      remove.onclick = () => {
+        closeSheet();
+        pinPad({
+          mode: 'enter',
+          digits: sync.user?.pinDigits,
+          title: 'إزالة الرمز',
+          subtitle: 'اكتب رمزك الحالي',
+          ...pinFace(),
+          submit: async (pin) => padResult(await sync.removePin(pin)),
+          onDone: () => {
+            toast('أُزيل الرمز');
+            renderSettings();
+          },
+        });
+      };
+      const change = el('button', 'btn btn-primary', 'تغيير الرمز');
+      change.type = 'button';
+      change.onclick = () => {
+        closeSheet();
+        askCurrentPin('تغيير الرمز', (current) =>
+          pinPad({
+            mode: 'create',
+            title: 'الرمز الجديد',
+            ...pinFace(),
+            submit: async (pin) => padResult(await sync.setPin(pin, current)),
+            onDone: () => {
+              toast('تغيّر الرمز');
+              renderSettings();
+            },
+          }),
+        );
+      };
+      actions.append(remove, change);
+      body.append(actions);
+    });
+  }
+
+  function confirmDeleteAccount() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'حذف الحساب؟'));
+      body.append(el('p', null, 'يُحذف حسابك من السيرفر بكل ما فيه: مكتبتك، تقدّمك، تقييماتك، رسائلك وصورك. بعد الحذف ما يرجع.'));
+      const actions = el('div', 'sheet-actions');
+      const cancel = el('button', 'btn btn-secondary', 'إلغاء');
+      cancel.type = 'button';
+      cancel.onclick = () => closeSheet();
+      const ok = el('button', 'btn btn-danger', 'نعم أوافق');
+      ok.type = 'button';
+      ok.onclick = async () => {
+        closeSheet();
+        if (sync.user?.pinDigits) {
+          pinPad({
+            mode: 'enter',
+            digits: sync.user.pinDigits,
+            title: 'تأكيد الحذف',
+            subtitle: 'اكتب رمزك لحذف الحساب',
+            ...pinFace(),
+            submit: async (pin) => padResult(await sync.deleteAccount(pin)),
+            onDone: () => showDeleting(),
+          });
+          return;
+        }
+        const out = await sync.deleteAccount().catch(() => ({ ok: false }));
+        if (out.ok) showDeleting();
+        else toast('تعذّر الحذف. تأكد من النت وحاول مرة ثانية');
+      };
+      actions.append(cancel, ok);
+      body.append(actions);
+    });
+  }
+
+  /**
+   * «جارٍ حذف الحساب من السيرفر»: عشر ثوانٍ وزر تراجع. الحذف على الخادم معلّق
+   * (deleted_at) ودقيقة كاملة للتراجع هناك؛ بعد العشر يُمسح نهائيًا. ولو أُغلق
+   * التطبيق في المنتصف يكمل الخادم الحذف وحده بعد الدقيقة.
+   */
+  function showDeleting() {
+    const SECONDS = 10;
+    const wrap = el('div', 'vdel');
+    wrap.setAttribute('role', 'alertdialog');
+    wrap.setAttribute('aria-modal', 'true');
+    const box = el('div');
+    const ring = el('div', 'vdel__ring');
+    const count = el('div', 'vdel__count', String(SECONDS));
+    const title = el('h2', 'vdel__title', 'جارٍ حذف الحساب من السيرفر');
+    const text = el('p', 'vdel__text', 'تقدر تتراجع قبل ما يخلص العدّ.');
+    const undo = el('button', 'vdel__undo', 'تراجع');
+    undo.type = 'button';
+    box.append(ring, count, title, text, undo);
+    wrap.append(box);
+    document.body.append(wrap);
+    const start = performance.now();
+    let raf = 0;
+    let done = false;
+    const tick = () => {
+      const left = Math.max(0, SECONDS * 1000 - (performance.now() - start));
+      ring.style.setProperty('--p', String(left / (SECONDS * 1000)));
+      count.textContent = String(Math.ceil(left / 1000));
+      if (left <= 0) return void finish();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    async function finish() {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      undo.hidden = true;
+      title.textContent = 'نحذف حسابك…';
+      text.textContent = '';
+      await sync.commitDeletion().catch(() => {});
+      wrap.remove();
+      deps.switchAccount();
+    }
+    undo.onclick = async () => {
+      if (done) return;
+      cancelAnimationFrame(raf);
+      undo.disabled = true;
+      undo.textContent = 'نرجّع حسابك…';
+      const out = await sync.restoreAccount().catch(() => ({ ok: false }));
+      if (out.ok && out.data?.restored) {
+        done = true;
+        wrap.remove();
+        toast('رجع حسابك كما كان');
+        return;
+      }
+      text.textContent = 'ما قدرنا نتراجع: فات الوقت أو انقطع النت.';
+      void finish();
+    };
+  }
+
   function confirmSwitchAccount() {
     openSheet((body) => {
       body.append(el('h3', null, 'تبديل الحساب؟'));
@@ -3962,7 +4148,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     body.replaceChildren();
     const api = deps.settings;
     // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
-    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'ما يراه أصدقاؤك': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
+    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
     const group = (label, rows, { note, cls } = {}) => {
       if (label) {
         const head = el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}${EYEBROWS[label] ? '' : ' settings-sublabel'}`);
@@ -4044,6 +4230,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     group('الحساب', [
       row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
+      sync.deleteAccount ? row('trash', 'حذف الحساب', null, { danger: true, run: confirmDeleteAccount }) : null,
       sync.approveDevice
         ? row('shield', 'اعتماد جوال جديد', 'برمز الجوال الجديد', {
             value: pendingPhones ? `${pendingPhones} ينتظر` : null,
@@ -4052,7 +4239,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
-    // الخصوصية: اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    // الخصوصية: قفل الحساب أولًا، ثم اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
+    if (sync.setPin) {
+      const digits = sync.user?.pinDigits;
+      group('الخصوصية', [
+        row('lock', 'رمز PIN', digits ? `${digits} أرقام — يُطلب كل ما فُتح حسابك` : 'رمز من أرقام يُطلب كل ما فُتح حسابك', {
+          value: digits ? 'مفعّل' : 'مغلق',
+          tone: digits ? 'ok' : undefined,
+          run: digits ? managePin : createPin,
+        }),
+      ]);
+    }
     const privacy = mySettings();
     group(
       'ما يراه أصدقاؤك',

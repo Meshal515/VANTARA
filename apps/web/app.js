@@ -22,6 +22,7 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
+import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
@@ -2184,6 +2185,8 @@ function toastNewNotifications() {
 
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
+  if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
 });
@@ -2192,6 +2195,50 @@ setInterval(() => void sync.pull(), 60_000);
 // صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
 setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4_000);
 setInterval(() => void sync.push(), 15_000);
+
+/**
+ * قفل الحساب: عليه PIN وما أُدخل منذ فُتح التطبيق. الرمز قبل أي شاشة، وإذن
+ * الجلسة يعيش ما دام التطبيق مفتوحًا فقط (sessionStorage). «تبديل الحساب»
+ * مخرج دائم: لا أحد يُحبس خلف رمز لا يعرفه.
+ */
+let lockOpen = false;
+function showLock(onUnlocked = () => {}) {
+  if (lockOpen || !sync.user) return;
+  lockOpen = true;
+  const me = sync.user;
+  const profile = sync.rows('profiles', (p) => p.user_id === me.userId)[0];
+  const name = profile?.display_name || me.displayName || me.username || '';
+  pinPad({
+    mode: 'enter',
+    digits: me.pinDigits,
+    solid: true,
+    title: name,
+    subtitle: 'اكتب رمز الحساب',
+    avatar: profile?.avatar_key ?? null,
+    initial: [...name][0] || '؟',
+    cancelLabel: 'تبديل الحساب',
+    submit: async (pin) => {
+      try {
+        await sync.unlock(pin);
+        return { ok: true };
+      } catch (error) {
+        if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
+        if (!error?.status) return { error: 'network' };
+        return { error: 'other', message: 'تعذّر فتح الحساب. اختر «تبديل الحساب»' };
+      }
+    },
+    onDone: () => {
+      lockOpen = false;
+      onUnlocked();
+    },
+    onCancel: () => {
+      lockOpen = false;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+    },
+  });
+}
 
 async function boot() {
   // شاشة الدخول أو الرئيسية قد تنتظر الشبكة؛ واجهةٌ رسمت شيئًا وما زالت حيّة
@@ -2240,6 +2287,18 @@ async function boot() {
     return;
   }
 
+  if (sync.signedIn && sync.locked) {
+    // حساب محمي: لا رئيسية ولا نبض قبل الرمز
+    showLock(() => {
+      startHeartbeat();
+      void go({ name: 'home' });
+      void sync.pull();
+      void refreshPresence();
+      void drainProgressOutbox();
+    });
+    void startUpdates();
+    return;
+  }
   if (sync.signedIn) {
     // جلسة قائمة: نفتح على الرئيسية فورًا من المرآة، والشبكة تُصحّح بعدها
     startHeartbeat();

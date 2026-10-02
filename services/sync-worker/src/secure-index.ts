@@ -16,6 +16,7 @@ import {
 import legacyWorker from './index.ts';
 import { collectTimelines } from './collectors.ts';
 import { bearerFrom, mintToken } from './session.ts';
+import { checkPin, createAccount, grantPin, grantValid, pinOf, purgeAccount, purgeExpired, restore, softDelete, updatePin } from './accounts.ts';
 import type { Env, ExecutionContext } from './types.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -130,7 +131,7 @@ async function pairDevice(request: Request, env: Env, now: number): Promise<Resp
   const accounts = pairing.user_id
     ? [{ user_id: pairing.user_id }]
     : (
-        await env.DB.prepare('SELECT user_id FROM accounts ORDER BY created_at')
+        await env.DB.prepare('SELECT user_id FROM accounts WHERE deleted_at IS NULL ORDER BY created_at')
           .all<{ user_id: string }>()
       ).results;
 
@@ -246,7 +247,7 @@ async function claimDevice(request: Request, env: Env, now: number): Promise<Res
   if ((consumed.meta.changes ?? 0) !== 1) return json({ paired: false, pending: false });
 
   const accounts = (
-    await env.DB.prepare('SELECT user_id FROM accounts ORDER BY created_at').all<{ user_id: string }>()
+    await env.DB.prepare('SELECT user_id FROM accounts WHERE deleted_at IS NULL ORDER BY created_at').all<{ user_id: string }>()
   ).results;
   if (accounts.length === 0) return json({ error: 'no_accounts' }, { status: 409 });
   await env.DB.batch(
@@ -317,11 +318,25 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
   const account = await env.DB.prepare(
     `SELECT a.user_id, a.username, p.display_name
        FROM accounts a LEFT JOIN profiles p USING (user_id)
-      WHERE a.user_id = ?`,
+      WHERE a.user_id = ? AND a.deleted_at IS NULL`,
   )
     .bind(userId)
     .first<AccountRow>();
   if (!account) return json({ error: 'unknown_account' }, { status: 404 });
+
+  // PIN: يُفحص هنا، عند إصدار الجلسة نفسها. حساب محمي لا جلسة له إلا بـPIN
+  // صحيح أو بإذن هذا الجهاز من PIN صحيح سابق (يبقى في ذاكرة التطبيق المفتوح).
+  let pinGrant: string | undefined;
+  const pin = await pinOf(env, userId);
+  if (pin) {
+    if (body?.['pin'] !== undefined) {
+      const check = await checkPin(env, userId, body['pin'], now);
+      if (!check.ok) return json(check, { status: check.error === 'pin_locked' ? 429 : 401 });
+      pinGrant = await grantPin(env, deviceId, userId);
+    } else if (!(await grantValid(env, deviceId, userId, body?.['pinGrant']))) {
+      return json({ error: 'pin_required', digits: pin.digits }, { status: 401 });
+    }
+  }
 
   // هذه هي نقطة الخطّية لإصدار الجلسة: قد يكون الجهاز أُلغي بعد SELECT
   // الأول وقبل الوصول هنا. لا يجوز إصدار توكن جديد إن سبقنا logout إلى هذا
@@ -349,8 +364,67 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
       userId: account.user_id,
       username: account.username,
       displayName: account.display_name ?? account.username,
+      pinDigits: pin?.digits ?? null,
     },
+    ...(pinGrant ? { pinGrant } : {}),
   });
+}
+
+/** جهاز معتمد الآن لحساب واحد على الأقل من المجموعة (credential صحيح وغير ملغى). */
+async function trustedDevice(env: Env, body: Record<string, unknown> | null): Promise<boolean> {
+  const deviceId = typeof body?.['deviceId'] === 'string' ? body['deviceId'] : '';
+  const credential = body?.['deviceCredential'];
+  if (deviceId.length < 8 || !validSecretPart(credential)) return false;
+  const hash = await hashDeviceSecret(credential, env.VANTARA_DEVICE_PEPPER);
+  const row = await env.DB.prepare(
+    `SELECT 1 AS ok FROM trusted_devices t JOIN accounts a USING (user_id)
+      WHERE t.device_id = ? AND t.credential_hash = ? AND t.revoked_at IS NULL AND a.deleted_at IS NULL LIMIT 1`,
+  )
+    .bind(deviceId, hash)
+    .first<{ ok: number }>();
+  return Boolean(row);
+}
+
+/** نقاط الحساب: كلها بهوية جلسة سارية، وكلها على الحساب نفسه وحده. */
+async function accountRoute(path: string, request: Request, env: Env, now: number): Promise<Response | null> {
+  const routes = ['/v1/accounts/create', '/v1/pin', '/v1/accounts/delete', '/v1/accounts/restore', '/v1/accounts/delete/commit'];
+  if (request.method !== 'POST' || !routes.includes(path)) return null;
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const claims = await requireIdentity(request, env, now);
+  // «+» في شاشة «من يتابع؟» قبل أي دخول: يكفي إثبات جهاز معتمد لحساب قائم
+  if (!claims && path === '/v1/accounts/create' && (await trustedDevice(env, body))) {
+    const out = await createAccount(env, now, body);
+    return out.ok ? json({ account: out.account }) : json({ error: out.error }, { status: out.status });
+  }
+  if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
+  // حساب محذوف بجلسة ما زالت سارية: لا ينشئ ولا يغيّر شيئًا، إلا التراجع عن حذفه
+  const alive = await env.DB.prepare('SELECT deleted_at FROM accounts WHERE user_id = ?').bind(claims.userId).first<{ deleted_at: number | null }>();
+  if (!alive) return json({ error: 'unknown_account' }, { status: 404 });
+  const deleted = alive.deleted_at !== null;
+  if (deleted && path !== '/v1/accounts/restore' && path !== '/v1/accounts/delete/commit') return json({ error: 'account_deleted' }, { status: 410 });
+
+  if (path === '/v1/accounts/create') {
+    const out = await createAccount(env, now, body);
+    return out.ok ? json({ account: out.account }) : json({ error: out.error }, { status: out.status });
+  }
+  if (path === '/v1/pin') {
+    const out = await updatePin(env, now, claims.userId, claims.deviceId, body);
+    if (!out.ok) {
+      const { status, ...rest } = out;
+      return json(rest, { status });
+    }
+    return json(out);
+  }
+  if (path === '/v1/accounts/delete') {
+    const out = await softDelete(env, now, claims.userId, body?.['pin']);
+    if (!out.ok) {
+      const { status, ...rest } = out;
+      return json(rest, { status });
+    }
+    return json(out);
+  }
+  if (path === '/v1/accounts/restore') return json({ restored: await restore(env, now, claims.userId) });
+  return json({ purged: deleted ? await purgeAccount(env, now, claims.userId) : false });
 }
 
 async function requireIdentity(request: Request, env: Env, now: number) {
@@ -419,6 +493,7 @@ async function logoutAll(request: Request, env: Env, now: number): Promise<Respo
 export default {
   async scheduled(event: { scheduledTime: number }, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(collectTimelines(env, { now: event.scheduledTime, scheduled: true }));
+    ctx.waitUntil(purgeExpired(env, event.scheduledTime));
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -479,6 +554,13 @@ export default {
           headers: { ...JSON_HEADERS, ...cors },
         });
       }
+
+      const accountResponse = await accountRoute(path, request, env, now);
+      if (accountResponse) {
+        return new Response(accountResponse.body, { status: accountResponse.status, headers: { ...JSON_HEADERS, ...cors } });
+      }
+      // ما انتهت نافذة تراجعه يُمسح قبل أن تُرسم قائمة «من يتابع؟»
+      if (path === '/v1/accounts' && request.method === 'GET') await purgeExpired(env, now);
 
       // Health + account chooser stay public exactly as before. Profile images
       // too: `<img>` sends no identity, and the id is an unguessable content hash.

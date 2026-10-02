@@ -37,6 +37,12 @@ const MIRROR_KEY = 'vantara.mirror';
 const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
+/**
+ * إذن الـPIN: بعد إدخال PIN صحيح، الخادم يعطي هذا الجهاز إذنًا يجدد به الجلسة بلا
+ * إعادة السؤال. يُحفظ في sessionStorage لا localStorage عمدًا: يعيش ما دام
+ * التطبيق مفتوحًا (وتحديث الصفحة)، ويُنسى بإغلاقه — فمن يفتح التطبيق يُسأل.
+ */
+const PIN_GRANT_KEY = 'vantara.pin.grant';
 const TRANSLATION_TIMEOUT_MS = 240_000;
 
 /**
@@ -174,6 +180,23 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   const listeners = new Set();
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
   let user = accountWithIdentity(readJson(USER_KEY, null));
+  let accountsLimit = 10;
+  let pinGrant = (() => {
+    try {
+      return sessionStorage.getItem(PIN_GRANT_KEY) || null;
+    } catch {
+      return null;
+    }
+  })();
+  const keepGrant = (grant) => {
+    pinGrant = grant || null;
+    try {
+      if (pinGrant) sessionStorage.setItem(PIN_GRANT_KEY, pinGrant);
+      else sessionStorage.removeItem(PIN_GRANT_KEY);
+    } catch {
+      // تخزين محجوب: الإذن يبقى في الذاكرة فقط
+    }
+  };
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
@@ -310,13 +333,25 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     persistQueue();
   };
 
-  async function sessionPayload(userId) {
+  async function sessionPayload(userId, extra = {}) {
     const response = await fetch(`${baseUrl}/v1/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, ...(await deviceProof(deviceIdProvider)) }),
+      body: JSON.stringify({
+        userId,
+        ...(await deviceProof(deviceIdProvider)),
+        ...(pinGrant && extra.pin === undefined ? { pinGrant } : {}),
+        ...extra,
+      }),
     });
     if (!response.ok) {
+      // PIN: سبب الرفض ومعه طول الرمز ووقت انتهاء القفل
+      if (response.status === 401 || response.status === 429) {
+        const body = await response.clone().json().catch(() => null);
+        if (typeof body?.error === 'string' && body.error.startsWith('pin_')) {
+          throw Object.assign(new Error(body.error), { status: response.status, code: body.error, digits: body.digits ?? null, retryAt: body.retryAt ?? null });
+        }
+      }
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
       // رمز الخطأ من الخادم (`weekly_limit`، `translation_not_configured`…) إن وُجد
@@ -386,6 +421,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function persistSession(payload) {
+    if (payload.pinGrant) keepGrant(payload.pinGrant);
     token = payload.token;
     user = accountWithIdentity(payload.user);
     refreshOverlay();
@@ -408,6 +444,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     } catch (error) {
       token = null;
       localStorage.removeItem(TOKEN_KEY);
+      // PIN أُضيف من جهاز آخر أو الإذن انتهى: الحساب يُقفل بدل أن يُطرد
+      if (error?.code === 'pin_required' && user) {
+        keepGrant(null);
+        user = { ...user, pinDigits: error.digits ?? user.pinDigits ?? 4 };
+        writeJson(USER_KEY, user);
+      }
       emit(['session']);
       throw error;
     }
@@ -531,15 +573,19 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     await consumePairingFromUrl();
     const response = await fetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
-    return ((await response.json()).content ?? []).map(accountWithIdentity);
+    const body = await response.json();
+    accountsLimit = Number(body.limit) || 10;
+    return (body.content ?? []).map(accountWithIdentity);
   }
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
-  async function signIn(userId) {
+  async function signIn(userId, { pin } = {}) {
     const previousId = user?.userId ?? null;
+    // إذن PIN يخص حسابه: الدخول لحساب آخر يبدأ بلا إذن
+    if (previousId !== userId) keepGrant(null);
     let payload;
     try {
-      payload = await sessionPayload(userId);
+      payload = await sessionPayload(userId, pin === undefined ? {} : { pin });
     } catch (error) {
       // التثبيت النظيف يمسح credential. إذا كان هذا Android نفسه سبق اعتماده
       // ندوّر السر مرة واحدة؛ جهاز جديد فعليًا يبقى device_untrusted فتظهر
@@ -556,6 +602,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function signOut() {
+    keepGrant(null);
     sessionGeneration += 1;
     token = null;
     user = null;
@@ -955,6 +1002,73 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  // ───────────────────────── دورة حياة الحساب ─────────────────────────
+
+  /** طلب لا يرمي: `{ ok, status, data }` — رموز PIN والسقف تُقرأ من data. */
+  async function accountCall(path, body, { withDevice = false } = {}) {
+    const headers = { 'content-type': 'application/json' };
+    if (token && !withDevice) headers.authorization = `Bearer ${token}`;
+    const payload = withDevice ? { ...body, ...(await deviceProof(deviceIdProvider)) } : body;
+    let response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
+    if (response.status === 401 && !withDevice && user?.userId) {
+      // توكن انتهى (15 دقيقة): جدّد مرة ثم أعد
+      const data = await response.clone().json().catch(() => null);
+      if (data?.error === 'unauthorized') {
+        await refreshSession().catch(() => {});
+        if (token) headers.authorization = `Bearer ${token}`;
+        response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
+      }
+    }
+    const data = await response.json().catch(() => null);
+    return { ok: response.ok, status: response.status, data };
+  }
+
+  /** حساب جديد: من داخل حساب (بالجلسة) أو من «من يتابع؟» (بإثبات الجهاز). */
+  async function createAccount({ username, displayName, avatarKey = null }) {
+    return accountCall('/v1/accounts/create', { username, displayName, avatarKey }, { withDevice: !token });
+  }
+
+  /** فتح حساب عليه PIN بعد أن أُغلق التطبيق (الجلسة موجودة والإذن لا). */
+  async function unlock(pin) {
+    const payload = await sessionPayload(user.userId, { pin });
+    persistSession(payload);
+    emit(['session']);
+    return user;
+  }
+
+  function rememberPinDigits(digits) {
+    if (!user) return;
+    user = { ...user, pinDigits: digits ?? null };
+    writeJson(USER_KEY, user);
+    emit(['session']);
+  }
+
+  async function setPin(pin, currentPin) {
+    const out = await accountCall('/v1/pin', { action: 'set', pin, ...(currentPin ? { currentPin } : {}) });
+    if (out.ok) {
+      keepGrant(out.data?.pinGrant);
+      rememberPinDigits(out.data?.digits ?? pin.length);
+    }
+    return out;
+  }
+
+  async function removePin(currentPin) {
+    const out = await accountCall('/v1/pin', { action: 'remove', currentPin });
+    if (out.ok) {
+      keepGrant(null);
+      rememberPinDigits(null);
+    }
+    return out;
+  }
+
+  const deleteAccount = (pin) => accountCall('/v1/accounts/delete', pin ? { pin } : {});
+  const restoreAccount = () => accountCall('/v1/accounts/restore', {});
+  async function commitDeletion() {
+    const out = await accountCall('/v1/accounts/delete/commit', {});
+    signOut();
+    return out;
+  }
+
   /**
    * رفع صورة ملف شخصي (الصورة أو البانر). يرجع `{ url, hash }`.
    *
@@ -1020,6 +1134,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
       // حارس مركزي: ما يكتبه فحص الخادم (`__verify__…`) وأي كيان داخلي لا يصل شاشة أبدًا
       all = all.filter((r) => !isInternalRow(r));
+      // حساب محذوف (شاهد قبر): يختفي هو وملفه من كل شاشة
+      if (table === 'accounts') all = all.filter((r) => !r.deleted_at);
+      else if (table === 'profiles') all = all.filter((r) => !mirror.accounts?.[r.user_id]?.deleted_at);
       valuesCache.set(table, all);
     }
     return predicate ? all.filter(predicate) : [...all];
@@ -1080,6 +1197,20 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       return queue.length;
     },
     accounts,
+    get accountsLimit() {
+      return accountsLimit;
+    },
+    createAccount,
+    unlock,
+    setPin,
+    removePin,
+    deleteAccount,
+    restoreAccount,
+    commitDeletion,
+    /** الحساب الحالي عليه PIN ولم يُدخل منذ فُتح التطبيق. */
+    get locked() {
+      return Boolean(user?.pinDigits) && !pinGrant;
+    },
     requestDevice,
     claimDevice,
     approveDevice,
