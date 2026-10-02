@@ -1630,6 +1630,44 @@
   cursor: pointer;
 }
 
+/* «تحقّق»: شريحة صغيرة فوق الشريط السفلي، عشر ثوانٍ ثم تختفي */
+.v35 .an-verify {
+  position: fixed;
+  inset-inline: 16px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 420px;
+  margin-inline: auto;
+  padding: 8px 8px 8px 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35), inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.v35 .an-verify.in {
+  opacity: 1;
+  transform: none;
+}
+.v35 .an-verify-go,
+.v35 .an-src-btn--verify {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* ───────────── صحة المصادر (قائمتي ← المصادر) ───────────── */
 
 .v35 .an-health {

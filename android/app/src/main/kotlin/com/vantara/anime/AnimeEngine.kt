@@ -243,7 +243,36 @@ class AnimeEngine(context: Context) {
         val error: String? = null,
         /** في التبريد: فشل متكرر أو تحقق يحتاج إنسانًا؛ لم يُسأل هذه المرة. */
         val skipped: Boolean = false,
+        /** Cloudflare يطلب إنسانًا لهذا المصدر: الواجهة تعرض «تحقّق» لحظات. */
+        val needsHuman: Boolean = false,
     )
+
+    private fun needsHuman(id: String): Boolean = health.get(HealthStore.sourceKey(id))?.blocked == "cloudflare_interactive"
+
+    /**
+     * «تحقّق» بطلب الشخص: يُظهر تحدّي Cloudflare لهذا المصدر وحده (لا لغيره) ثم
+     * يبحث فيه مرة. ما يُحلّ يحفظ كوكي التحقق فتعود طلباته المخفية تعمل.
+     */
+    suspend fun verify(id: String, query: String = "naruto"): Pair<Boolean, String?> {
+        val key = HealthStore.sourceKey(id)
+        health.unblock(key)
+        AnimeHostRouter.allowVisible(id, VERIFY_WINDOW_MS)
+        return try {
+            val a = withTimeoutOrNull(STREAM_LOAD_TIMEOUT_MS) { adapter(id) } ?: return false to (loadErrors[id] ?: "الإضافة لم تُحمَّل")
+            val page = withTimeoutOrNull(VERIFY_WINDOW_MS) { a.page(Listing.SEARCH, 1, query) }
+            when {
+                page == null -> false to "انتهت مهلة التحقق"
+                else -> true.also { health.ok(key, 0) } to null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            false to AnimeHostRouter.describe(e)
+        } finally {
+            AnimeHostRouter.endVisible(id)
+            health.flush()
+        }
+    }
 
     /**
      * مصدر نتجاوزه في المسار السريع: قاطع الصحة مفتوح (فشل متتالٍ)، أو محجوب
@@ -275,7 +304,7 @@ class AnimeEngine(context: Context) {
         val ordered = health.rank(all, { it.priority }) { HealthStore.sourceKey(it.id) }
         val (cold, live) = ordered.partition { coolingDown(it.id, now) }
         for (s in cold) {
-            onHit(SourceHit(s.id, emptyList(), 0, health.get(HealthStore.sourceKey(s.id))?.lastError ?: "في التبريد", skipped = true))
+            onHit(SourceHit(s.id, emptyList(), 0, health.get(HealthStore.sourceKey(s.id))?.lastError ?: "في التبريد", skipped = true, needsHuman = needsHuman(s.id)))
         }
         val gate = Semaphore(concurrency.coerceAtLeast(1))
         coroutineScope {
@@ -303,7 +332,7 @@ class AnimeEngine(context: Context) {
                         health.fail(key, "خطأ في قراءة الصفحة: ${AnimeHostRouter.describe(e)}")
                         SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
                     }
-                    onHit(hit)
+                    onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
                 }
             }
         }
@@ -718,6 +747,8 @@ class AnimeEngine(context: Context) {
         const val STREAM_LOAD_TIMEOUT_MS = 25_000L
         /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */
         const val BLOCKED_RETRY_MS = 30 * 60_000L
+        /** نافذة «تحقّق»: يظهر التحدّي ويُنتظر حلّه حتى دقيقتين. */
+        const val VERIFY_WINDOW_MS = 120_000L
         /** فحص رابط فيديو جاهز: هل يرد فعلًا بفيديو أو قائمة HLS؟ */
         const val PROBE_TIMEOUT_MS = 6_000L
 

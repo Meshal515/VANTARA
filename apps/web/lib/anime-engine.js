@@ -45,6 +45,25 @@ export async function search(query, content = 'anime') {
   return (await call('search', { query, content }))?.works ?? null;
 }
 
+const humanListeners = new Set();
+/**
+ * مصدر يطلب من Cloudflare تحقق إنسان (الطلبات المخفية لا تستطيع حلّه):
+ * `fn(sourceId)` لتعرض الواجهة «تحقّق» لحظات. يرجع دالة إلغاء الاشتراك.
+ */
+export function onNeedsHuman(fn) {
+  humanListeners.add(fn);
+  return () => humanListeners.delete(fn);
+}
+
+/** «تحقّق»: يُظهر صفحة تحقق المصدر بملء الشاشة، ثم يبحث فيه مرة. `{ok, error}`. */
+export async function verify(sourceId) {
+  try {
+    return (await call('verify', { sourceId })) ?? { ok: false, error: 'المحرك غير متاح' };
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 /**
  * بحث متدفق: `onHit({sourceId, items, ms, error, skipped})` لكل مصدر لحظة يرد،
  * فأسرع مصدر يظهر بلا انتظار أبطئهم. يرجع `{done, cancel}`؛ `done` يكتمل بـtrue
@@ -79,7 +98,11 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
     }
     // المستمعان قبل الطلب: أسرع مصدر قد يرد قبل أن يعود النداء نفسه
     handles = [
-      await plugin.addListener('searchHit', (e) => !over && e.searchId === searchId && onHit(e)),
+      await plugin.addListener('searchHit', (e) => {
+        if (e.searchId !== searchId) return;
+        if (e.needsHuman) for (const fn of humanListeners) fn(e.sourceId);
+        if (!over) onHit(e);
+      }),
       await plugin.addListener('searchDone', (e) => e.searchId === searchId && end(true)),
     ];
     if (over) return end(false);

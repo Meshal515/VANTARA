@@ -244,6 +244,14 @@ class AnimeEnginePlugin : Plugin() {
         call.resolve()
     }
 
+    /** «تحقّق»: يُظهر تحدّي Cloudflare لمصدر واحد بطلب الشخص، ثم يبحث فيه مرة. */
+    @PluginMethod
+    fun verify(call: PluginCall) = run(call) {
+        val id = call.getString("sourceId") ?: error("sourceId مطلوب")
+        val (ok, why) = engine.verify(id)
+        JSObject().put("ok", ok).put("error", why)
+    }
+
     /** فحص مصدر خطوة خطوة (DNS، الاتصال، Cloudflare، البصمة، الإضافة، البحث). */
     @PluginMethod
     fun diagnose(call: PluginCall) = run(call) {
@@ -273,7 +281,7 @@ class AnimeEnginePlugin : Plugin() {
                     notifyListeners(
                         "searchHit",
                         JSObject().put("searchId", id).put("sourceId", hit.sourceId).put("ms", hit.ms)
-                            .put("error", hit.error).put("skipped", hit.skipped)
+                            .put("error", hit.error).put("skipped", hit.skipped).put("needsHuman", hit.needsHuman)
                             .put("items", hit.items, ListSerializer(SourceAnime.serializer())),
                     )
                 }

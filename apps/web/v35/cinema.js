@@ -1424,6 +1424,12 @@ export function createCinema(deps) {
       const deadSummary = el('summary');
       const deadGrid = el('div', 'an-srv-grid');
       deadFold.append(deadSummary, deadGrid);
+      // بعد أول سيرفر جاهز: ما زال يُفحص (غالبًا عبر المتصفح المخفي، بطيء) يُطوى
+      // فلا تمتلئ الورقة بانتظار لا يُعرف آخره
+      const waitFold = el('details', 'cn-srv-dead cn-srv-wait');
+      const waitSummary = el('summary');
+      const waitGrid = el('div', 'an-srv-grid');
+      waitFold.append(waitSummary, waitGrid);
       const paint = () => {
         queued = false;
         if (sheet.closed) return;
@@ -1459,7 +1465,10 @@ export function createCinema(deps) {
           b.onclick = () => verified ? void playRoute(r) : toast(r.reason || 'لم ينجح فحص رابط الفيديو', 5000);
           return b;
         };
+        const isPending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null);
+        const waiting = ready ? live.filter(isPending) : [];
         for (const r of live) {
+          if (ready && isPending(r)) continue;
           let group = routeGroups.get(r.id);
           if (!group) { group = engine.groupRoutes([r])[0]?.[0] ?? 'السيرفرات'; routeGroups.set(r.id, group); }
           if (!groupNodes.has(group)) {
@@ -1472,6 +1481,13 @@ export function createCinema(deps) {
           const grid = groupNodes.get(group), b = tile(r);
           if (b.parentNode !== grid) grid.append(b);
         }
+        for (const r of waiting) { const b = tile(r); if (b.parentNode !== waitGrid) waitGrid.append(b); }
+        if (waiting.length) {
+          waitSummary.textContent = `تُجهَّز بالخلفية (${waiting.length})`;
+          if (waitFold.parentNode !== list) list.insertBefore(waitFold, deadFold.parentNode === list ? deadFold : null);
+        } else if (waitFold.parentNode === list) waitFold.remove();
+        // مجموعة جودة صار كل ما فيها مطويًا: لا عنوان فوق شبكة فارغة
+        for (const grid of groupNodes.values()) grid.parentNode.hidden = !grid.children.length;
         if (dead.length) {
           deadSummary.textContent = `غير متاح (${dead.length})`;
           for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }
