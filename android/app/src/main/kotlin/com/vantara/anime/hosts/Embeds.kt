@@ -72,7 +72,7 @@ class EmbedResolver(
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
                 fallback(url, referer) { fetch(url, referer).let { Vk.parse(it.body, headersFor(it.url)) } }
-            else -> generic(url, referer)
+            else -> generic(url, referer, depth)
         }
     }
 
@@ -88,13 +88,21 @@ class EmbedResolver(
         return captured
     }
 
-    private suspend fun generic(url: String, referer: String?): List<Stream> {
+    private suspend fun generic(url: String, referer: String?, depth: Int = 0): List<Stream> {
         val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         if (page != null && page.ok) {
             val found = Generic.streams(page.body, page.url)
             if (found.isNotEmpty()) {
                 val headers = headersFor(page.url)
                 return found.take(3).map { Stream(it, headers, null, host(page.url)) }
+            }
+            // غلاف يضمّ المشغّل الحقيقي في iframe: طبقة واحدة بطلب عادي قبل المتصفح المخفي البطيء
+            if (depth == 0) {
+                val inner = Generic.iframe(page.body, page.url)
+                if (inner != null && inner != page.url) {
+                    val nested = try { resolve(inner, page.url, depth + 1) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+                    if (nested.isNotEmpty()) return nested
+                }
             }
         }
         // تحدٍّ (403) أو مشغّل يبني الرابط بسكربت: المتصفح المخفي آخر حل

@@ -13,6 +13,7 @@
  */
 
 import type { D1Database } from './types.ts';
+import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
 
 export interface UpdatesEnv {
   DB: D1Database;
@@ -93,8 +94,10 @@ export function parseReport(raw: unknown, now: number): Report | null {
   if (section === 'cinema' && kind === 'chapter') return null;
   const work = str(r.work, 220);
   if (!work || !WORK[section].test(work)) return null;
-  const title = str(r.title, 200);
+  const title = str(decodeEntities(r.title), 200);
   if (!title) return null;
+  // مفتاح مانجا حُسب من عنوان فيه «&#039;» (نسخ قديمة): يُعاد من العنوان المفكوك
+  const workKey = section === 'manga' && title !== str(r.title, 200) ? `ext:${normalizeTitle(title)}` : work;
   const cover = str(r.cover, 600);
   const s = r.source as Record<string, unknown> | undefined;
   const sid = str(s?.s, 120);
@@ -119,7 +122,7 @@ export function parseReport(raw: unknown, now: number): Report | null {
   }
   if (kind === 'movie' && !units.length) units.push({ season: null, number: 0, publishedAt: null });
   if (!units.length) return null;
-  return { work, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units };
+  return { work: workKey, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units };
 }
 
 function mergeSources(old: Source[], add: Source[]): Source[] {
@@ -298,14 +301,17 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
       } catch {
         sources = [];
       }
+      // أحداث سُجّلت قبل فكّ الكيانات: العنوان والمفتاح يُصحّحان عند القراءة
+      const title = decodeEntities(r.title);
+      const work = r.section === 'manga' && title !== r.title ? `ext:${normalizeTitle(title)}` : r.work;
       return {
         id: r.id,
-        work: r.work,
+        work,
         section: r.section,
         kind: r.kind,
         season: r.season,
         number: r.number,
-        title: r.title,
+        title,
         cover: r.cover,
         at: r.at,
         publishedAt: r.published_at,

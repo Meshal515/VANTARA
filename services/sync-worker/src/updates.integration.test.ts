@@ -28,6 +28,12 @@ describe('Update Engine: خط الأساس', () => {
     expect(await observe(e, [manga('ext:one piece', [1120], 'x', { 1120: NOW - H })], NOW)).toMatchObject({ accepted: 1, created: 1 });
     expect((await list(e, 'section=manga')).events[0]?.work).toBe('ext:one piece');
   });
+  it('stores titles copied from HTML decoded, under the same key the app uses', async () => {
+    const e = env();
+    const raw = { work: 'ext:don 039 t breathe', section: 'manga', kind: 'chapter', title: 'Don&#039;t Breathe', source: { s: 'x' }, units: [{ number: 5, publishedAt: NOW - H }] };
+    await observe(e, [raw], NOW);
+    expect((await list(e, 'section=manga')).events[0]).toMatchObject({ work: 'ext:don t breathe', title: "Don't Breathe" });
+  });
   it('keeps all trustworthy catch-up chapters at their historic time, including gaps below the watermark', async () => {
     const e = env();
     await observe(e, [manga('ext:backfill', [20], 'x')], NOW);

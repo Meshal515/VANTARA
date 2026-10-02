@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectTimelines } from './collectors.ts';
+import { collectTimelines, teamxCards } from './collectors.ts';
 import { sqliteEnv } from './test-d1.ts';
 import { handleUpdatesList } from './updates.ts';
 
@@ -29,6 +29,11 @@ describe('server collectors', () => {
     await collectTimelines(env, { now: NOW + H, fetchImpl: fetcher });
     expect((await list('manga')).events.every((r) => r.firstSeenAt === NOW)).toBe(true);
   });
+  it('decodes every HTML entity in Team-X titles so the work key matches the app', () => {
+    const html = '<div class="last-chapter"><div class="box"><a href="https://olympustaff.com/series/dont-breathe"><img src="https://olympustaff.com/images/manga/thumbnail_a.jpg"></a><h3>Don&#039;t Breathe &amp; Run</h3></div>';
+    const [card] = teamxCards(html);
+    expect(card).toMatchObject({ title: "Don't Breathe & Run", cover: 'https://olympustaff.com/images/manga/a.jpg' });
+  });
   it('identifies the server-side MangaDex collector with a User-Agent required by its API', async () => {
     const { env } = setup();
     const now = NOW - (Math.floor(NOW / 60_000) % 2) * 60_000;
@@ -37,16 +42,18 @@ describe('server collectors', () => {
       if (String(input).includes('api.mangadex.org')) {
         const headers = new Headers(init?.headers); requests.push(headers);
         if (!headers.get('User-Agent')?.includes('VANTARA/')) return new Response('You must set an appropriate User-Agent header', { status: 400 });
+        // غلاف كل عمل في طلب واحد بعد الفصول
+        if (String(input).includes('/manga?')) return reply({ data: [{ id: 'm1', relationships: [{ type: 'cover_art', attributes: { fileName: 'c0ver.jpg' } }] }] });
         return reply({ data: [{ attributes: { chapter: '627', publishAt: new Date(now - H).toISOString() }, relationships: [{ id: 'm1', type: 'manga', attributes: { title: { en: 'Lookism' } } }] }] });
       }
       return new Response('');
     }) as typeof fetch });
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.get('User-Agent')).toContain('https://github.com/Meshal515/VANTARA');
+    expect(requests).toHaveLength(2);
+    expect(requests.every((h) => h.get('User-Agent')?.includes('https://github.com/Meshal515/VANTARA'))).toBe(true);
     const status = await env.DB.prepare('SELECT last_success_at,last_error FROM collector_state WHERE source=?').bind('mangadex-ar').first<{ last_success_at: number; last_error: string | null }>();
     expect(status).toEqual({ last_success_at: now, last_error: null });
     const response = await handleUpdatesList(new URL('https://x/v1/updates?section=manga'), env);
-    expect((await response.json() as { events: unknown[] }).events).toEqual([expect.objectContaining({ work: 'ext:lookism', number: 627, at: now-H })]);
+    expect((await response.json() as { events: unknown[] }).events).toEqual([expect.objectContaining({ work: 'ext:lookism', number: 627, at: now-H, cover: 'https://uploads.mangadex.org/covers/m1/c0ver.jpg.512.jpg' })]);
   });
   it('falls back to exact AniList mappings and absolute episode numbers during an AniList outage', async () => {
     const { env } = setup();

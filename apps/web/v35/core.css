@@ -3170,12 +3170,10 @@ html,
 }
 .v35 .up-plus {
   flex: none;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  color: var(--text-3);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .v35 .up-unit,
 .v35 .up-when {

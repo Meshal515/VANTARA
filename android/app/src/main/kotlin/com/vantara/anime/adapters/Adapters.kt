@@ -211,10 +211,21 @@ class ExtensionAdapter(
     private suspend fun fetchPage(path: String, form: Map<String, String> = emptyMap()): Pair<String, String> {
         val http = source as? AnimeHttpSource ?: error("المصدر ليس HTTP")
         val url = if (path.startsWith("http")) path else http.baseUrl.trimEnd('/') + path
-        val request = if (form.isEmpty()) GET(url, http.headers) else okhttp3.Request.Builder().url(url)
-            .headers(http.headers).header("Referer", url)
-            .post(okhttp3.FormBody.Builder().apply { form.forEach { (k, v) -> add(k, v) } }.build()).build()
-        return http.client.newCall(request).awaitOk().use { it.request.url.toString() to it.body.string() }
+        val post = { target: String ->
+            okhttp3.Request.Builder().url(target).headers(http.headers).header("Referer", target)
+                .post(okhttp3.FormBody.Builder().apply { form.forEach { (k, v) -> add(k, v) } }.build()).build()
+        }
+        val request = if (form.isEmpty()) GET(url, http.headers) else post(url)
+        val (finalUrl, body, redirected) = http.client.newCall(request).awaitOk().use {
+            Triple(it.request.url.toString(), it.body.string(), it.priorResponse != null)
+        }
+        // تحويلة 301/302 (نطاق قديم أو مرآة ← الحالي) تجعل POST طلب GET بلا النموذج:
+        // صفحة EgyDead بلا «View=1» لا تحمل قائمة السيرفرات، فيبدو الفيلم بلا سيرفر.
+        // النموذج يُرسل ثانيةً إلى العنوان الذي انتهت إليه التحويلة.
+        if (form.isNotEmpty() && redirected) {
+            return http.client.newCall(post(finalUrl)).awaitOk().use { it.request.url.toString() to it.body.string() }
+        }
+        return finalUrl to body
     }
 
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {

@@ -468,10 +468,15 @@ class ExtensionEnginePlugin : Plugin() {
                 require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
                 val verdict = ImagePayloadPolicy.validate(contentType, bytes)
                 require(verdict.accepted) { "not an image: ${verdict.reason}" }
-                val type = contentType?.substringBefore(';')?.trim()?.takeIf { it.startsWith("image/") } ?: typeForUrl(url)
+                val original = contentType?.substringBefore(';')?.trim()?.takeIf { it.startsWith("image/") } ?: typeForUrl(url)
+                // غلاف بميغابايتين يُحفظ بحجم البطاقة: يُفكّ فورًا في كل فتحة بعدها
+                val shrunk = withContext(Dispatchers.Default) { runCatching { CoverShrink.shrink(bytes) }.getOrNull() }
+                val type = shrunk?.second ?: original
                 val file = java.io.File(coverDir, "${digestOf(url)}.${extensionForType(type)}")
                 withContext(Dispatchers.IO) {
-                    file.writeBytes(bytes)
+                    // امتداد قديم لنفس الرابط لا يسبق الجديد في البحث
+                    CACHE_EXTENSIONS.forEach { ext -> java.io.File(coverDir, "${digestOf(url)}.$ext").takeIf { it != file }?.delete() }
+                    file.writeBytes(shrunk?.first ?: bytes)
                     pruneCovers()
                 }
                 call.resolve(JSObject().put("path", file.absolutePath).put("cached", false))
