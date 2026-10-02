@@ -1,0 +1,974 @@
+/*
+ * VANTARA على الشاشات الكبيرة — آيباد وكمبيوتر وتابلت أندرويد.
+ *
+ * الجوال (< 700px) لا يتأثر بسطر واحد هنا: كل القواعد داخل استعلامات العرض.
+ *
+ *   700–1023  تابلت بالطول: التطبيق بعرض الشاشة كله (لا إطار جوال في النص)،
+ *             الشريط السفلي يبقى لأن الإبهام عنده، والبطاقات أكبر وأكثر.
+ *   ≥ 1024    كمبيوتر وآيباد بالعرض: لا شريط سفلي. القائمة الجانبية نفسها
+ *             (الأقسام، التنقّل، الاجتماع، قوائمي، الإعدادات، ملفّك) شريط
+ *             ثابت يمين المحتوى، والمحتوى بأعمدة تملأ الشاشة.
+ *
+ * نفس العناصر ونفس الأفعال على كل المقاسات: الذي يتغير التخطيط وحده.
+ */
+
+/* ═════════════════════════ ≥ 700: لا إطار جوال ═════════════════════════ */
+
+@media (min-width: 700px) {
+  .v35 {
+    --gutter: 28px;
+    --wide-max: 1640px;
+  }
+  .v35 .app {
+    width: 100%;
+    margin: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* الصفحة بأقصى عرض مريح للعين، في منتصف ما بقي */
+  .v35 .page {
+    max-width: var(--wide-max);
+    margin-inline: auto;
+  }
+
+  /* ── الشريط السفلي: بعرض الشاشة، والأزرار متقاربة في وسطه ── */
+  .v35 .bottom-nav {
+    bottom: 0;
+    width: 100%;
+    border-radius: 0;
+    grid-template-columns: repeat(4, minmax(0, 132px));
+    justify-content: center;
+  }
+
+  /* ── الأوراق: نافذة في الوسط بدل ورقة من الأسفل ── */
+  .v35 .sheet-backdrop,
+  .v35 .modal-backdrop {
+    place-items: center;
+    padding: 32px;
+  }
+  .v35 .sheet {
+    width: min(100%, 560px);
+    max-height: min(82vh, 760px);
+    border-radius: var(--r-xl);
+    box-shadow: 0 0 0 1px var(--line-strong), 0 40px 120px rgba(0, 0, 0, 0.6);
+    padding-bottom: 20px;
+  }
+
+  /* ── الترويسات الثابتة لصفحات الأنمي والسينما: بعرض المحتوى ── */
+  .v35 .an-detail-top {
+    width: 100%;
+    max-width: var(--wide-max);
+  }
+
+  /* ── الرئيسية ── */
+  .v35 .header {
+    padding-inline: calc(var(--gutter) - 10px);
+  }
+  .v35 .section-head {
+    margin-bottom: 16px;
+  }
+
+  /* الأغلفة: شبكة تملأ العرض بأعمدة بعرض غلاف حقيقي، لا ثلاثة أعمدة ممطوطة */
+  .v35 .grid {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 30px 20px;
+  }
+  .v35 .card-strip--grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 30px 20px;
+  }
+  .v35 .card-strip {
+    grid-auto-columns: 168px;
+    gap: 18px;
+  }
+  .v35 #homeSections .card-strip--covers {
+    grid-auto-columns: 176px;
+    gap: 20px;
+  }
+  .v35 .card-strip--resume {
+    grid-auto-columns: 340px;
+  }
+  .v35 .card-strip--chart {
+    grid-auto-columns: 360px;
+    gap: 0 32px;
+  }
+  .v35 .work-title {
+    font-size: 14.5px;
+  }
+
+  /* البانر: الغلاف والصفحة المقابلة أوسع، والاسم أكبر */
+  .v35 .hero {
+    height: 380px;
+  }
+  .v35 .hero-slide {
+    grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+    gap: 12px;
+  }
+  .v35 .hero-name {
+    font-size: 30px;
+  }
+  .v35 .hero-folio b {
+    font-size: 64px;
+  }
+  .v35 .hero-slide--empty {
+    grid-template-columns: 1fr;
+  }
+  .v35 .hero-slide--empty .hero-name {
+    font-size: 56px;
+    letter-spacing: 12px;
+  }
+  .v35 .hero > .skeleton {
+    width: 300px;
+  }
+
+  /* صفحة العمل بالطول: الغلاف بحجم غلاف، والمساحة للاسم */
+  .v35 #detail .detail-head {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+  .v35 #detail .detail-meta h1 {
+    font-size: 32px;
+  }
+
+  /* الفهرس: الأبواب الأربعة في صف واحد */
+  .v35 .shortcuts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  /* أنمي بلا لافتة عريضة: الغلاف (460px) لا يُمطّ على الشاشة الكبيرة فيتغبّش،
+     بل يصير ضبابًا سينمائيًا مقصودًا خلف الغلاف الحاد في الرأس */
+  .v35 .an-detail-art--poster .an-img {
+    filter: blur(36px) saturate(1.25) brightness(0.62);
+    transform: scale(1.18);
+  }
+
+  /* الإعدادات والنماذج: عمود مقروء لا سطر ممتد بعرض الشاشة */
+  .v35 #settingsBody,
+  .v35 #utilityBody,
+  .v35 #notificationsBody,
+  .v35 .notif-body {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+  .v35 .page-body {
+    padding-inline: var(--gutter);
+  }
+  .v35 .search-bar {
+    max-width: 720px;
+  }
+}
+
+/* ═══════════════════ ≥ 1024: كمبيوتر — شريط جانبي، لا شريط سفلي ═══════════════════ */
+
+@media (min-width: 1024px) {
+  .v35 {
+    --rail-w: 248px;
+    --gutter: 40px;
+  }
+  .v35 .app {
+    width: auto;
+    margin-inline-start: var(--rail-w);
+    padding-bottom: 48px;
+  }
+  .v35 .bottom-nav {
+    display: none;
+  }
+  /* زرّ القائمة لا معنى له والقائمة ظاهرة دائمًا */
+  .v35 [data-act='openDrawer'],
+  .v35 .drawer-head [data-act='closeDrawer'] {
+    display: none !important;
+  }
+
+  /* ── الشريط الجانبي: نفس القائمة، مثبّتة. مفتوح: أيقونة واسم. مطويّ: أيقونات وشعار ── */
+  .v35 .app {
+    transition: margin var(--dur-slow) var(--ease-out);
+  }
+  .v35 .drawer-backdrop {
+    inset: 0 0 0 auto;
+    width: var(--rail-w);
+    z-index: 60;
+    background: none;
+    opacity: 1;
+    pointer-events: auto;
+    transition: width var(--dur-slow) var(--ease-out);
+  }
+  .v35 .drawer {
+    width: 100%;
+    transform: none;
+    transition: none;
+    overflow: hidden;
+    border-inline-start: 0;
+    border-left: 1px solid var(--line);
+    background: var(--bg-raised);
+    padding: 18px 12px 16px;
+  }
+  .v35 .drawer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 4px 18px;
+  }
+  .v35 .rail-logo {
+    position: relative;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background-color: transparent;
+    color: var(--text-1);
+    transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  }
+  .v35 .rail-logo > * {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
+  }
+  /* شعار VANTARA نفسه قناعًا، يلبس لون القسم ويتحوّل إليه بنعومة مع كل تبديل */
+  .v35 .rail-mark {
+    width: 40px;
+    height: 40px;
+    background-color: var(--accent);
+    -webkit-mask: url('/icons/logo-mark.png') center / contain no-repeat;
+    mask: url('/icons/logo-mark.png') center / contain no-repeat;
+    transition: background-color 0.6s var(--ease), opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
+  }
+  .v35 .drawer-brand-word {
+    transition: color 0.6s var(--ease);
+  }
+  .v35 .drawer-section {
+    transition: background-color 0.4s var(--ease), box-shadow 0.4s var(--ease), color 0.4s var(--ease);
+  }
+  .v35 .drawer-item.active::before {
+    transition: background-color 0.6s var(--ease);
+  }
+  .v35 .rail-panel {
+    opacity: 0;
+    transform: scale(0.6) rotate(-90deg);
+  }
+  .v35 .rail-panel .icon {
+    width: 22px;
+    height: 22px;
+  }
+  .v35 .drawer-wordmark {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+    direction: ltr;
+    text-align: right;
+    white-space: nowrap;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .v35 .drawer-wordmark b {
+    font-size: 15px;
+    font-weight: 850;
+    letter-spacing: 4.5px;
+    margin-right: -4.5px;
+    color: var(--text-1);
+    line-height: 1;
+  }
+  .v35 .drawer-brand-word {
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 3.6px;
+    margin-right: -3.6px;
+    color: var(--accent-text);
+    line-height: 1;
+  }
+  .v35[data-section='manga'] .drawer-brand-word::before {
+    content: 'MANGA';
+  }
+  .v35[data-section='anime'] .drawer-brand-word::before {
+    content: 'ANIME';
+  }
+  .v35[data-section='cinema'] .drawer-brand-word::before {
+    content: 'CINEMA';
+  }
+  .v35 .rail-toggle {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    color: var(--text-3);
+    border-radius: 10px;
+  }
+  .v35 .rail-toggle .icon {
+    width: 20px;
+    height: 20px;
+  }
+  .v35 .rail-toggle:hover {
+    color: var(--text-1);
+  }
+  .v35 .drawer-head {
+    order: 3;
+    padding: 10px 0 0;
+    border-top: 1px solid var(--line);
+  }
+  .v35 .drawer-me {
+    margin: 0;
+    background: none !important;
+    box-shadow: none;
+    padding: 8px !important;
+    white-space: nowrap;
+  }
+  .v35 .drawer-me:hover {
+    background: var(--surface-1) !important;
+  }
+  .v35 .drawer-me img,
+  .v35 .drawer-me .avatar-letter {
+    width: 36px;
+    height: 36px;
+  }
+  .v35 .drawer-me strong {
+    font-size: var(--fs-body);
+  }
+  .v35 .drawer-scroll {
+    order: 2;
+    margin: 0 -4px;
+    padding: 0 4px;
+    overflow-x: hidden;
+  }
+  .v35 .drawer-version {
+    order: 4;
+    padding: 8px 10px 0;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+  .v35 .drawer-item {
+    min-height: 42px;
+    font-size: var(--fs-body);
+    gap: 14px;
+    padding: 0 10px;
+    color: var(--text-2);
+    white-space: nowrap;
+    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  }
+  .v35 .drawer-item .icon {
+    width: 21px;
+    height: 21px;
+    color: var(--text-3);
+  }
+  .v35 .drawer-item > span:not(.badge):not(.drawer-room-pic) {
+    transition: opacity var(--dur) var(--ease);
+  }
+  .v35 .drawer-item:hover {
+    background: var(--surface-1);
+    color: var(--text-1);
+  }
+  .v35 .drawer-item.active {
+    background: var(--surface-1);
+    color: var(--text-1);
+  }
+  .v35 .drawer-item.active::before {
+    top: 10px;
+    bottom: 10px;
+  }
+  .v35 .drawer-label {
+    white-space: nowrap;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .v35 .drawer-sections {
+    padding: 0 0 12px;
+  }
+  .v35 .drawer-section {
+    min-height: 52px;
+  }
+  .v35 .drawer-section:hover {
+    background: var(--surface-2);
+  }
+  .v35 .drawer-group {
+    padding: 6px 0;
+  }
+
+  /* ── مطويّ ── */
+  .v35.rail-collapsed {
+    --rail-w: 76px;
+  }
+  .v35.rail-collapsed .drawer {
+    padding-inline: 12px;
+  }
+  .v35.rail-collapsed .drawer-brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .v35.rail-collapsed .drawer-wordmark,
+  .v35.rail-collapsed .rail-toggle,
+  .v35.rail-collapsed .drawer-label,
+  .v35.rail-collapsed .drawer-version,
+  .v35.rail-collapsed .drawer-me > div,
+  .v35.rail-collapsed .drawer-me > .icon,
+  .v35.rail-collapsed .drawer-item > span:not(.badge):not(.drawer-room-pic) {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+  }
+  /* الشعار يتحوّل بنعومة إلى أيقونة الشريط تحت الماوس: «افتحني» */
+  .v35.rail-collapsed .rail-logo:hover {
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+  .v35.rail-collapsed .rail-logo:hover .rail-mark {
+    opacity: 0;
+    transform: scale(0.6) rotate(90deg);
+  }
+  .v35.rail-collapsed .rail-logo:hover .rail-panel {
+    opacity: 1;
+    transform: none;
+  }
+  .v35.rail-collapsed .drawer-item {
+    justify-content: center;
+    padding: 0;
+    min-height: 46px;
+  }
+  .v35.rail-collapsed .drawer-item.active::before {
+    inset-inline-start: -12px;
+  }
+  .v35.rail-collapsed .drawer-item .badge {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 9.5px;
+  }
+  .v35.rail-collapsed .drawer-group + .drawer-group {
+    margin-inline: 8px;
+  }
+  .v35.rail-collapsed .drawer-group > .drawer-item {
+    margin-inline: 0;
+  }
+  .v35.rail-collapsed .drawer-sections {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding-bottom: 10px;
+  }
+  .v35.rail-collapsed .drawer-section {
+    min-height: 40px;
+    padding: 0;
+    place-items: center;
+  }
+  .v35.rail-collapsed .drawer-section > * {
+    display: none;
+  }
+  .v35.rail-collapsed .drawer-section::before {
+    content: attr(data-short);
+    font-size: 14px;
+    font-weight: 850;
+    color: color-mix(in srgb, var(--tone) 60%, var(--text-2));
+  }
+  .v35.rail-collapsed .drawer-section[aria-checked='true']::before {
+    color: color-mix(in srgb, var(--tone) 70%, #fff);
+  }
+  .v35.rail-collapsed .drawer-me {
+    justify-content: center;
+    padding: 6px 0 !important;
+  }
+
+  /* ── المحتوى ── */
+  .v35 .page {
+    max-width: none;
+  }
+  .v35 .page:not(#detail):not(#anime):not(#cinema) > *:not(.page-top) {
+    max-width: var(--wide-max);
+    margin-inline: auto;
+  }
+  /* الترويسة: الشعار في الشريط الجانبي، فهنا البحث والجرس وحدهما */
+  .v35 .header {
+    min-height: 76px;
+    padding: 16px var(--gutter) 0;
+    justify-content: flex-end;
+  }
+  .v35 .header .brand-box {
+    display: none;
+  }
+  .v35 .header-end {
+    gap: 8px;
+  }
+  .v35 .header-end [data-act='openSearch'] {
+    display: flex;
+    align-items: center;
+    width: auto;
+    min-width: 300px;
+    height: 44px;
+    padding: 0 16px;
+    gap: 10px;
+    justify-content: flex-start;
+    border-radius: 99px;
+    background: var(--surface-1);
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--text-3);
+    font-size: var(--fs-body);
+  }
+  .v35 .header-end [data-act='openSearch']::after {
+    content: 'ابحث في كل المصادر';
+  }
+  .v35 .header-end [data-act='openSearch']:hover {
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+    color: var(--text-2);
+  }
+  .v35 .header-end .has-dot {
+    width: 44px;
+    height: 44px;
+    border-radius: 99px;
+    background: var(--surface-1);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  /* ترويسة الصفحات: العنوان كبيرًا في البداية كعناوين المواقع، لا مصغّرًا في الوسط */
+  .v35 .page-top {
+    grid-template-columns: auto 1fr auto;
+    min-height: 76px;
+    padding: 0 var(--gutter);
+    gap: 12px;
+  }
+  .v35 .page-top h1 {
+    font-size: 26px;
+    font-weight: 800;
+    text-align: start;
+  }
+  .v35 .page-top-right:empty,
+  .v35 .page-top-right:not(:has(:not([data-act='openDrawer']))) {
+    display: none;
+  }
+
+  /* الأغلفة أكبر */
+  .v35 .grid {
+    grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+    gap: 36px 24px;
+  }
+  .v35 .card-strip--grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 36px 24px;
+  }
+  .v35 .card-strip {
+    grid-auto-columns: 188px;
+    gap: 22px;
+  }
+  .v35 #homeSections .card-strip--covers {
+    grid-auto-columns: 196px;
+    gap: 24px;
+  }
+  .v35 #homeSections .section {
+    padding-top: 48px;
+  }
+  .v35 #homeSections .section-head h2 {
+    font-size: 28px;
+  }
+  .v35 .work-title {
+    font-size: 15px;
+  }
+  .v35 .work-meta {
+    font-size: var(--fs-meta);
+  }
+
+  /* البانر */
+  .v35 .hero {
+    height: 440px;
+    margin-top: 12px;
+  }
+  .v35 .hero-slide {
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    gap: 24px;
+  }
+  .v35 .hero-copy {
+    padding-inline-start: 28px;
+    gap: 12px;
+  }
+  .v35 .hero-name {
+    font-size: 40px;
+    max-width: 18ch;
+  }
+  .v35 .hero-facts {
+    font-size: var(--fs-body);
+  }
+  .v35 .hero-slide--empty {
+    grid-template-columns: 1fr;
+  }
+  .v35 .hero:has(.hero-slide--empty) {
+    height: 300px;
+  }
+  .v35 .hero-slide--empty .hero-name {
+    max-width: none;
+    font-size: 72px;
+    letter-spacing: 16px;
+  }
+  .v35 .hero > .skeleton {
+    width: 320px;
+  }
+
+  /* التمرير بالماوس: البطاقات ترتفع قليلًا، والغلاف يلمع */
+  .v35 .work-card .poster {
+    transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+  }
+  .v35 .work-card:hover .poster {
+    transform: translateY(-4px);
+    box-shadow: inset 0 0 0 1px var(--line-strong), 0 18px 36px -14px rgba(0, 0, 0, 0.8);
+  }
+  .v35 .work-card:hover .work-title {
+    color: var(--text-1);
+  }
+  .v35 .shortcut:hover {
+    background: var(--surface-1);
+  }
+  .v35 .link:hover {
+    color: var(--text-1);
+  }
+  .v35 .icon-btn:hover {
+    background: var(--surface-1);
+  }
+
+  /* شريط أفقي بالماوس: شريط تمرير رفيع بدل لا شيء (لا لمس للسحب) */
+  .v35 .card-strip {
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-3) transparent;
+    padding-bottom: 12px;
+  }
+  .v35 .card-strip::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .v35 .card-strip::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: 99px;
+  }
+
+  /* الرسائل فوق المحتوى لا فوق الشريط الجانبي */
+  .v35 .toast {
+    left: calc((100% - var(--rail-w)) / 2);
+  }
+}
+
+@media (min-width: 1280px) {
+  .v35 .card-strip--grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1440px) {
+  .v35 {
+    --rail-w: 272px;
+    --gutter: 48px;
+  }
+  .v35 .grid {
+    grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  }
+  .v35 .card-strip,
+  .v35 #homeSections .card-strip--covers {
+    grid-auto-columns: 208px;
+  }
+}
+
+/* الجوال والتابلت بالطول: علامة الشريط الجانبي لا تظهر في القائمة المنزلقة */
+@media (max-width: 1023px) {
+  .v35 .drawer-brand {
+    display: none;
+  }
+}
+
+/* ═══════════════ صفحة العمل (مانجا) على الكمبيوتر: عمودان ═══════════════
+ * عمود ثابت في البداية (الغلاف، اقرأ، مكتبتي/لاحقًا/المفضلة، التقدّم،
+ * المعلومات) وعمود رئيسي (الاسم، المصادر، القصة، الفصول). بالتعويم لا
+ * بتغيير ترتيب العناصر: الجوال يبقى كما هو حرفيًا. */
+@media (min-width: 1024px) {
+  .v35 #detail {
+    --side: 300px;
+    --side-gap: 48px;
+    max-width: 1440px;
+    margin-inline: auto;
+    padding: 0 var(--gutter) 56px;
+  }
+  .v35 #detail.page.active {
+    display: flow-root;
+  }
+  .v35 #detail .detail-top {
+    margin-inline: calc(var(--gutter) * -1);
+    padding-inline: calc(var(--gutter) - 8px);
+  }
+  .v35 #detail .detail-head {
+    display: contents;
+  }
+  /* العمود الجانبي (v35/side-dock.js): يلتصق بالشاشة مع التمرير */
+  .v35 #detail .detail-side {
+    float: right;
+    width: var(--side);
+    position: sticky;
+    top: 72px;
+    margin-top: 8px;
+    padding-bottom: 24px;
+  }
+  .v35 #detail .detail-side > * {
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* الغلاف لا يدفع الأزرار خارج الشاشة القصيرة */
+  .v35 #detail .detail-cover {
+    width: min(100%, calc((100vh - 330px) * 0.7));
+    margin-inline: auto;
+  }
+  .v35 #detail .detail-cta {
+    padding-top: 18px;
+  }
+  .v35 #detail .read-cta {
+    min-height: 56px;
+    border-radius: 10px;
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .v35 #detail .detail-quick {
+    margin-top: 12px;
+  }
+  .v35 #detail .quick-btn:hover {
+    background: var(--surface-1);
+  }
+  .v35 #detail .detail-progress {
+    margin-top: 16px;
+  }
+  .v35 #detail .detail-meta,
+  .v35 #detail .source-switch,
+  .v35 #detail .work-insights,
+  .v35 #detail .block {
+    margin-left: 0;
+    margin-right: calc(var(--side) + var(--side-gap));
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* رأس العمل: عنوان كبير كصفحات المواقع، والتصنيفات ظاهرة */
+  .v35 #detail .detail-meta {
+    margin-top: 8px;
+    padding: 0 0 22px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    gap: 10px;
+  }
+  .v35 #detail .detail-folio {
+    margin-bottom: 14px;
+  }
+  .v35 #detail .detail-folio b {
+    font-size: 52px;
+  }
+  .v35 #detail .detail-meta h1 {
+    font-size: 44px;
+    line-height: 1.12;
+    letter-spacing: -0.5px;
+    -webkit-line-clamp: 3;
+  }
+  .v35 #detail .detail-kicker {
+    font-size: var(--fs-body);
+  }
+  .v35 #detail .detail-sub {
+    font-size: var(--fs-body);
+  }
+  .v35 #detail .detail-meta .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .v35 #detail .source-switch {
+    padding-top: 18px;
+  }
+  .v35 #detail .source-row {
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+  }
+  .v35 #detail #summaryBlock {
+    margin-top: 26px;
+  }
+  .v35 #detail .summary {
+    font-size: 15.5px;
+    line-height: 1.85;
+    max-width: 75ch;
+  }
+  .v35 #detail .block:has(#chapterPanel) {
+    margin-top: 30px;
+  }
+  .v35 #detail .chapter-row:hover {
+    background: var(--surface-1);
+  }
+  /* الشريط مطويّ: المساحة تكفي، فالفصول صفّان */
+  .v35.rail-collapsed #detail .chapter-list {
+    column-count: 2;
+    column-gap: 48px;
+    column-rule: 1px solid var(--line);
+  }
+  .v35.rail-collapsed #detail .chapter-row {
+    break-inside: avoid;
+  }
+}
+@media (min-width: 1440px) {
+  .v35 #detail {
+    --side: 340px;
+    --side-gap: 64px;
+  }
+}
+
+/* ═══════════════ صفحة الأنمي على الكمبيوتر ═══════════════
+ * فن العمل بانر بعرض المحتوى، والملصق أكبر يتداخل معه، ثم عمودان: الأفعال
+ * والحقائق والبث في البداية، والمصادر والحلقات والقصة في الرئيسي. */
+@media (min-width: 1024px) {
+  .v35 .an-detail-top {
+    left: 0;
+    right: var(--rail-w);
+    width: auto;
+    max-width: none;
+    transform: none;
+    padding-inline: calc(var(--gutter) - 8px);
+    transition: right var(--dur-slow) var(--ease-out), background-color 0.25s ease, box-shadow 0.25s ease;
+  }
+  .v35 .an-detail {
+    --side: 340px;
+    --side-gap: 48px;
+    display: flow-root;
+    padding-bottom: 56px;
+  }
+  /* لافتة AniList بارتفاع 400 تقريبًا: لا نمطّها أطول منه فتتغبّش */
+  .v35 .an-detail-hero {
+    aspect-ratio: auto;
+    height: min(46vh, 420px);
+  }
+  .v35 .an-detail-head {
+    margin-top: -150px;
+    gap: 32px;
+    padding: 0 var(--gutter);
+  }
+  .v35 .an-detail-poster {
+    width: var(--side);
+    max-width: 220px;
+    border-radius: 16px;
+  }
+  .v35 .an-detail-titles {
+    gap: 10px;
+    padding-bottom: 8px;
+  }
+  .v35 .an-detail-titles h1 {
+    font-size: 44px;
+    line-height: 1.1;
+    letter-spacing: -0.5px;
+  }
+  .v35 .an-detail-alt {
+    font-size: var(--fs-body);
+  }
+  .v35 .an-detail > .an-facts,
+  .v35 .an-detail > .an-stats,
+  .v35 .an-detail > .an-onair,
+  .v35 .an-detail > .an-next,
+  .v35 .an-detail > .an-detail-actions {
+    float: right;
+    clear: right;
+    width: var(--side);
+    margin-right: var(--gutter);
+    margin-left: 0;
+  }
+  .v35 .an-detail > .an-facts,
+  .v35 .an-detail > .an-detail-actions {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .v35 .an-detail > .an-facts {
+    padding-top: 22px;
+  }
+  .v35 .an-detail > .an-detail-actions {
+    padding-top: 18px;
+  }
+  .v35 .an-detail > .work-insights,
+  .v35 .an-detail > .an-sources,
+  .v35 .an-detail > .an-block {
+    margin-right: calc(var(--gutter) + var(--side) + var(--side-gap));
+    margin-left: var(--gutter);
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .v35 .an-detail > .an-sources {
+    padding-top: 22px;
+  }
+  .v35 .an-synopsis {
+    font-size: 15.5px;
+    line-height: 1.85;
+    max-width: 75ch;
+  }
+  .v35 .an-btn:hover {
+    filter: brightness(1.12);
+  }
+}
+
+/* ═══════════════ صفحة السينما على الكمبيوتر ═══════════════
+ * كما في منصّات البث: الفن بعرض المحتوى، والاسم والفعل فوقه في البداية،
+ * والمشابه تحته بعرض الصفحة. */
+@media (min-width: 1024px) {
+  .v35 .cinema-page {
+    --cn-gutter: var(--gutter);
+  }
+  .v35 .cn-detail-bar {
+    padding-inline: calc(var(--gutter) - 8px);
+  }
+  .v35 .cn-detail-art {
+    aspect-ratio: auto;
+    height: min(76vh, 680px);
+  }
+  .v35 .cn-detail-art::after {
+    height: 100%;
+    background:
+      linear-gradient(to top, var(--bg) 2%, rgba(10, 7, 7, 0) 55%),
+      linear-gradient(to left, color-mix(in srgb, var(--bg) 88%, transparent) 0%, rgba(10, 7, 7, 0) 58%);
+  }
+  .v35 .cn-detail-body {
+    position: relative;
+    z-index: 1;
+    margin-top: -340px;
+    padding: 0 var(--gutter);
+  }
+  .v35 .cn-detail-body > :not(.cn-similar) {
+    max-width: 580px;
+  }
+  .v35 .cn-detail-mark .cn-mark-text {
+    font-size: 54px;
+    line-height: 1.05;
+  }
+  .v35 .cn-detail-mark .cn-mark-logo {
+    max-height: 140px;
+    max-width: 440px;
+  }
+  .v35 .cn-detail-body .cn-synopsis {
+    font-size: 15px;
+    line-height: 1.8;
+  }
+  .v35 .cn-similar {
+    margin-top: 40px;
+  }
+  .v35 .cn-btn:hover {
+    filter: brightness(1.1);
+  }
+}
+
+/* طيّ الشريط وفتحه: انتقال عرض واحد ناعم (View Transitions) للصفحة كلها،
+ * والشريط نفسه يتمدّد بشكله. بلا الواجهة: انتقالات العرض والهامش أعلاه. */
+@media (min-width: 1024px) {
+  .v35 .drawer-backdrop {
+    view-transition-name: vantara-rail;
+  }
+  .v35.rail-moving .app,
+  .v35.rail-moving .drawer-backdrop {
+    transition: none;
+  }
+}
+::view-transition-group(vantara-rail),
+::view-transition-group(root) {
+  animation-duration: 0.36s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+::view-transition-old(vantara-rail),
+::view-transition-new(vantara-rail) {
+  height: 100%;
+  object-fit: none;
+  object-position: right top;
+}
+

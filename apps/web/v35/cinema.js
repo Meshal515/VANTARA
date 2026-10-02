@@ -238,7 +238,17 @@ export function createCinema(deps) {
 
   // ───────────── قطع صغيرة ─────────────
 
+  /**
+   * الشاشة الكبيرة تأخذ نسخة أوضح من نفس الصورة (Metahub بثلاثة مقاسات):
+   * خلفية 1280 تُمطّ على شاشة كمبيوتر فتظهر مغبّشة. الجوال يبقى على مقاسه.
+   */
+  function sharp(src) {
+    if (!src || !globalThis.matchMedia?.('(min-width: 700px)').matches) return src;
+    return src.replace(/(metahub\.space\/background)\/(?:small|medium)\//, '$1/large/').replace(/(metahub\.space\/poster)\/small\//, '$1/medium/');
+  }
   function image(src, cls = 'cn-img', { eager = false, fallback = null } = {}) {
+    src = sharp(src);
+    fallback = sharp(fallback);
     const img = new Image();
     img.alt = '';
     img.className = cls;

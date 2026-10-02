@@ -13,6 +13,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -171,6 +172,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   });
   const q = (id) => root.querySelector(`#${id}`);
+  // الشريط الجانبي للشاشات العريضة يُرسم بعد اكتمال الإقلاع (يقرأ رفيق والحساب)
+  const wideScreen = globalThis.matchMedia?.('(min-width: 1024px)');
+  let railReady = false;
+  // صفحة العمل على الكمبيوتر: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب الفصول
+  const detailDock = sideDock(
+    () => [q('detailCover'), root.querySelector('#detail .detail-cta'), root.querySelector('#detail .detail-quick'), q('detailProgress')],
+    { query: wideScreen, className: 'detail-side' },
+  );
 
   const state = {
     home: { trending: [], featured: [], recent: [], popular: [] },
@@ -822,7 +831,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       h.append(b);
     }
     const strip = el('div', `card-strip card-strip--${spec.layout}`);
-    strip.dataset.limit = String(spec.limit);
+    // الشبكة على الشاشة العريضة 12 (صفوف كاملة من 4 أو 6 أعمدة)، وعلى الجوال 3×3
+    strip.dataset.limit = String(spec.layout === 'grid' && globalThis.matchMedia?.('(min-width: 700px)').matches ? 12 : spec.limit);
     renderStrip(strip, items);
     s.append(h, strip);
     return s;
@@ -3396,6 +3406,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const b = el('button', `drawer-section drawer-section--${id}`);
       b.type = 'button';
       b.dataset.arg = id;
+      b.dataset.short = id[0].toUpperCase();
+      b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
       const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
@@ -3432,6 +3444,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
             b.innerHTML = glyph(ic);
             b.append(el('span', null, key === 'later' ? laterLabel : text));
           }
+          b.title = b.textContent;
           if (key === 'notifications' && unread) b.append(el('span', 'badge', unread > 99 ? '99+' : String(unread)));
           if (key === here) {
             b.classList.add('active');
@@ -3450,6 +3463,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
+  // الشاشة العريضة (كمبيوتر، آيباد بالعرض): القائمة نفسها شريط ثابت بجانب
+  // المحتوى بدل الشريط السفلي، فتُرسم مع كل تنقّل ليبقى «أنت هنا» صحيحًا
+  function paintRail() {
+    if (railReady && wideScreen?.matches) buildDrawer();
+  }
+  // مطويّ: أيقونات وشعار فقط. يُحفظ على الجهاز كاختيار شخصي
+  const RAIL_KEY = 'vantara.rail.collapsed';
+  root.classList.toggle('rail-collapsed', (() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })());
+  function toggleRail() {
+    const collapsed = !root.classList.contains('rail-collapsed');
+    // انتقال عرض واحد: الشريط يضيق والمحتوى (والفصول بعمودين) يتمدد معه بنعومة
+    const swap = () => root.classList.toggle('rail-collapsed', collapsed);
+    const reduce = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !reduce) {
+      root.classList.add('rail-moving');
+      document.startViewTransition(swap).finished.finally(() => root.classList.remove('rail-moving'));
+    } else swap();
+    try {
+      localStorage.setItem(RAIL_KEY, collapsed ? '1' : '0');
+    } catch {
+      // تفضيل عرض فقط
+    }
+  }
+  /** الشعار: في الشريط المطويّ يفتحه، وفي المفتوح يرجع للرئيسية. */
+  function railLogo() {
+    if (root.classList.contains('rail-collapsed')) return toggleRail();
+    navTo('home');
+  }
+  wideScreen?.addEventListener?.('change', () => {
+    closeDrawer();
+    paintRail();
+  });
   function closeDrawer() {
     if (!q('drawerBackdrop').classList.contains('open')) return false;
     q('drawerBackdrop').classList.remove('open');
@@ -3558,6 +3609,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       room.close();
     }
     if (id !== 'profile') profile?.hide();
+    paintRail();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navTo(id) {
@@ -4414,6 +4466,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const unread = unreadNotifications();
     root.querySelectorAll('.notify-dot, .social-tab-dot').forEach((d) => (d.hidden = unread === 0));
     root.querySelectorAll('.has-dot').forEach((b) => b.setAttribute('aria-label', unread ? `الإشعارات، ${countLabel(unread, 'new')}` : 'الإشعارات'));
+    paintRail();
   }
 
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
@@ -4455,6 +4508,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', s.theme);
     document.documentElement.style.background = s.theme;
+    paintRail();
   }
   function pickSection(_e, t) {
     const id = t.dataset.arg;
@@ -4496,6 +4550,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const actions = {
     toggleSections: () => setSectionsOpen(!sectionsOpen()),
+    toggleRail,
+    railLogo,
     pickSection,
     shareAnime: () => anime.shareCurrent(),
     backFromDetail: () => goBack(),
@@ -4924,6 +4980,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   const chapterRefreshTimer = setInterval(refreshChapters, 60_000);
   document.addEventListener('visibilitychange', refreshChapters);
+  railReady = true;
   showPage(page);
 
   // الرجوع من القارئ أو الأصدقاء يعيد الصفحة كما تُركت، بتمريرها
@@ -4958,6 +5015,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      detailDock.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
       majlis.hide();
