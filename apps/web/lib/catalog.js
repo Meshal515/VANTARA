@@ -67,6 +67,26 @@ const NOISE = new Set(
 const LANGUAGE_TAG =
 	/[([【]\s*(?:english|eng|en|french|fr|français|francais|arabic|ar|spanish|español|espanol|portuguese|pt-br|indonesian|vietnamese|raw|عربي|العربية|عربية|انجليزي|إنجليزي|الإنجليزية|الانجليزية|فرنسي|الفرنسية)(?:\s+(?:version|ver|translation|نسخة|ترجمة))?\s*[)\]】]/giu;
 
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', ndash: '–', mdash: '—', hellip: '…' };
+
+/**
+ * عنوانٌ نُسخ من HTML كما هو: «Don&#039;t Breathe». يُفكّ قبل العرض وقبل المطابقة،
+ * وإلا صار مفتاحه «don 039 t breathe» فانفصل عن العمل نفسه من مصدر آخر (بطاقة
+ * مكررة بلا غلاف). مرتان تكفيان لما رُمّز مرتين («&amp;#039;»).
+ */
+export function decodeEntities(raw) {
+	if (typeof raw !== 'string' || !raw.includes('&')) return raw;
+	let text = raw;
+	for (let i = 0; i < 2 && text.includes('&'); i++) {
+		text = text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, code) => {
+			if (code[0] !== '#') return NAMED_ENTITIES[code.toLowerCase()] ?? whole;
+			const n = code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : Number(code.slice(1));
+			return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : whole;
+		});
+	}
+	return text;
+}
+
 /**
  * مفتاح مطابقة عملٍ عبر المصادر.
  *
@@ -77,7 +97,7 @@ const LANGUAGE_TAG =
  */
 export function normalizeTitle(raw) {
 	if (typeof raw !== 'string') return '';
-	const folded = fold(raw.replace(LANGUAGE_TAG, ' '));
+	const folded = fold(decodeEntities(raw).replace(LANGUAGE_TAG, ' '));
 	const kept = folded
 		.split(' ')
 		.filter((word) => word && !NOISE.has(word))

@@ -21,7 +21,7 @@ import { endWorkSession, setTranslation, translationOn } from './reader-translat
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
-import { announceCover, cachedCover, coverCandidates, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
+import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
 import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
 import { clearPerf, engineLines, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
@@ -505,7 +505,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       container.replaceChildren(img);
       return known;
     }
-    const tryUrl = (url, timeoutMs) =>
+    // `late`: غلافٌ ثقيل (ميغابايتان على شبكة جوال) تجاوز المهلة لا يُرمى: يكمل
+    // تحميله ويحلّ محل الحرف أو المعاينة حين يصل
+    const tryUrl = (url, timeoutMs, late = null) =>
       new Promise((resolve) => {
         const img = new Image();
         let finished = false;
@@ -518,7 +520,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const timer = setTimeout(() => done(false), timeoutMs);
         img.alt = '';
         img.decoding = 'async';
-        img.onload = () => done(true);
+        img.onload = () => {
+          if (!finished) return done(true);
+          if (late && container.dataset.imageToken === token) late(img);
+        };
         img.onerror = () => done(false);
         img.src = url;
       });
@@ -529,6 +534,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (opts.position) img.style.objectPosition = opts.position;
       container.replaceChildren(img);
       if (id) shownCovers.set(id, img.getAttribute('src') ?? url);
+      // بطاقات أخرى للعمل نفسه بقيت بحرفه (فشلت قبل أن يُعرف): تأخذه الآن
+      for (const [other, waiting] of waitingCovers) {
+        if (other === container || String(waiting.id) !== id) continue;
+        waitingCovers.delete(other);
+        if (other.isConnected) void mountImage(other, waiting);
+      }
       return url;
     };
     // الغلاف المعروف لهذا العمل أولًا (من أي شاشة عرفته)، ثم وصف الخادم، ثم القائمة
@@ -562,10 +573,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // تنشغل بستين غلافًا في آخر الصفحة قبل الذي أمامك
     await nearViewport(container);
     if (container.dataset.imageToken !== token) return null;
+    // مصدرٌ يعرض مصغّرًا خفيفًا لغلافه الكبير: يظهر فورًا والكبير يحلّ محله
+    let previewShown = false;
+    const preview = candidates.map((c) => coverPreview(c.url)).find(Boolean);
+    if (preview) {
+      const small = await tryUrl(preview, 4000);
+      if (container.dataset.imageToken !== token) return null;
+      if (small) {
+        if (opts.position) small.style.objectPosition = opts.position;
+        container.replaceChildren(small);
+        previewShown = true;
+      }
+    }
     for (const { url, sourceId } of candidates) {
       const saved = await nativeCover(url, sourceId);
       if (container.dataset.imageToken !== token) return null;
-      const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000));
+      const late = (img) => {
+        rememberCover(id, url);
+        show(img, img.src, url, sourceId);
+      };
+      const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000, late));
       if (container.dataset.imageToken !== token) return null;
       if (img) {
         rememberCover(id, url);
@@ -574,7 +601,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (url === canonical) failedCanonical.set(id, canonical);
     }
     if (container.dataset.imageToken !== token) return null;
-    fallbackArt(container, titleOf(work));
+    if (!previewShown) fallbackArt(container, titleOf(work));
     // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
     waitingCovers.set(container, work);
     resolveCoverLater(work);
@@ -2884,6 +2911,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const editions = (g.sources ?? []).filter((x) => x.u).map((x) => ({ sourceId: x.s, label: x.s, manga: { url: x.u, title: x.t ?? g.title, thumbnailUrl: g.cover ?? null, memo: x.m ?? '' } }));
       base._work = { ...base._work, editions };
     }
+    // غلاف الحدث مرشّحٌ دائمًا بعد غلاف العمل: غلافٌ محفوظ قديم لا يُسقط البطاقة إلى حرف
+    if (g.cover && base.bannerImage !== g.cover && !coverCandidates(base).some((c) => c.url === g.cover)) base.bannerImage = g.cover;
     return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at };
   }
   function openUpdate(g) {

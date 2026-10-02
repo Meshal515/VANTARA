@@ -33,14 +33,29 @@ describe('آخر التحديثات', () => {
     expect(agoAr(NOW - 3 * 24 * H, NOW)).toBe('قبل 3 أيام');
   });
 
-  it('groups a burst of chapters of the same work, never across another work', () => {
-    const ev = (work, number, at, s = 'x') => ({ work, kind: 'chapter', number, at, sources: [{ s }] });
+  it('shows a work once, at its newest release, even when other works came in between', () => {
+    const ev = (work, number, at, s = 'x') => ({ section: 'manga', work, kind: 'chapter', number, at, title: work, sources: [{ s }] });
     const groups = groupEvents([ev('ext:a', 403, NOW), ev('ext:a', 402, NOW - M, 'y'), ev('ext:b', 7, NOW - 2 * M), ev('ext:a', 401, NOW - 3 * M)]);
-    expect(groups.map((g) => [g.work, unitLabel(g), g.sources.length])).toEqual([
-      ['ext:a', 'الفصول 402–403', 2],
-      ['ext:b', 'الفصل 7', 1],
-      ['ext:a', 'الفصل 401', 1],
+    expect(groups.map((g) => [g.work, unitLabel(g), g.sources.length, g.events.length])).toEqual([
+      ['ext:a', 'الفصول 401–403', 2, 3],
+      ['ext:b', 'الفصل 7', 1, 1],
     ]);
+  });
+
+  it('decodes HTML entities in titles and joins the work they belong to', () => {
+    const groups = groupEvents([
+      { id: '1', section: 'manga', work: 'ext:don 039 t breathe', kind: 'chapter', number: 12, at: NOW, title: 'Don&#039;t Breathe', sources: [{ s: 'teamx' }] },
+      { id: '2', section: 'manga', work: 'ext:don t breathe', kind: 'chapter', number: 12, at: NOW - M, title: "Don't Breathe", sources: [{ s: 'other' }] },
+      { id: '3', section: 'manga', work: 'ext:don t breathe', kind: 'chapter', number: 11, at: NOW - 2 * M, title: "Don't Breathe", sources: [] },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ work: 'ext:don t breathe', title: "Don't Breathe", high: 12, low: 11 });
+    // الفصل 12 من المفتاحين لا يُعدّ مرتين
+    expect(groups[0].events).toHaveLength(2);
+    expect(groups[0].sources.map((s) => s.s)).toEqual(['teamx', 'other']);
+  });
+
+  it('labels units', () => {
     expect(unitLabel({ kind: 'episode', season: 2, high: 5, low: 5, events: [{}] })).toBe('S02E05');
     expect(unitLabel({ kind: 'episode', season: null, high: 8, low: 8, events: [{}] })).toBe('الحلقة 8');
     expect(unitLabel({ kind: 'movie', events: [{}] })).toBe('فيلم');

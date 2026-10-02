@@ -7,6 +7,7 @@
  */
 
 import { timeline } from '../lib/update-engine.js';
+import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -49,21 +50,47 @@ export function dayOf(at, now = Date.now()) {
 }
 
 /**
- * أحداث متتالية لنفس العمل في نفس الساعات (دفعة فصول) تُعرض بطاقة واحدة:
- * «الفصول 399–401». لا تُدمج عبر عمل آخر بينها: الترتيب الزمني يبقى صادقًا.
+ * حدثٌ سُجّل بعنوان منسوخ من HTML («Don&#039;t Breathe»): يُعرض مفكوكًا، ومفتاح
+ * المانجا يُعاد منه فيلتقي بالعمل نفسه (غلافه ونسخه) بدل بطاقة يتيمة بحرف.
  */
-export function groupEvents(events, windowMs = 6 * HOUR) {
+export function canonicalEvent(e) {
+  const title = decodeEntities(e.title);
+  if (title === e.title) return e;
+  const work = e.section === 'manga' && String(e.work).startsWith('ext:') ? `ext:${normalizeTitle(title)}` : e.work;
+  return { ...e, title, work };
+}
+
+/**
+ * بطاقة واحدة لكل عمل في مكان أحدث ما نزل منه، ومعها كم وحدة أخرى نزلت قبله
+ * («الفصل 201 +2»). كانت الدفعات تُدمج متتالية فقط، فعملٌ تخلّلته أعمال يظهر
+ * مرتين وثلاثًا في الشبكة نفسها. الترتيب يبقى صادقًا: أحدث حدث يقرّر الموضع.
+ */
+export function groupEvents(events) {
   const out = [];
-  for (const e of events) {
-    const last = out[out.length - 1];
-    if (last && last.work === e.work && last.kind === e.kind && (last.season ?? null) === (e.season ?? null) && last.at - e.at <= windowMs) {
-      last.events.push(e);
-      last.low = Math.min(last.low, e.number ?? 0);
-      last.sources = [...new Map([...last.sources, ...(e.sources ?? [])].map((s) => [s.s, s])).values()];
+  const byWork = new Map();
+  for (const raw of events) {
+    const e = canonicalEvent(raw);
+    const key = `${e.section ?? ''}|${e.work}`;
+    const g = byWork.get(key);
+    if (!g) {
+      const group = { ...e, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [], units: new Set([`${e.season ?? ''}:${e.number}`]) };
+      byWork.set(key, group);
+      out.push(group);
       continue;
     }
-    out.push({ ...e, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [] });
+    g.sources = [...new Map([...g.sources, ...(e.sources ?? [])].map((s) => [s.s, s])).values()];
+    g.cover ??= e.cover;
+    // نفس الفصل من مفتاحين قديمين (قبل التصحيح) لا يُعدّ مرتين
+    const unit = `${e.season ?? ''}:${e.number}`;
+    if (g.units.has(unit)) continue;
+    g.units.add(unit);
+    g.events.push(e);
+    if ((e.season ?? null) === (g.season ?? null)) {
+      g.low = Math.min(g.low, e.number ?? 0);
+      g.high = Math.max(g.high, e.number ?? 0);
+    }
   }
+  for (const g of out) delete g.units;
   return out;
 }
 

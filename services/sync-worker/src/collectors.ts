@@ -1,5 +1,5 @@
 /** Server-side release collectors. Publication dates come from providers, never the scan clock. */
-import { normalizeTitle } from '../../../apps/web/lib/catalog.js';
+import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
 import { handleUpdatesObserve } from './updates.ts';
 import type { Env } from './types.ts';
 
@@ -12,7 +12,8 @@ class PartialScan extends Error {
   readonly cursor: number;
   constructor(message: string, cursor: number) { super(message); this.cursor = cursor; }
 }
-const text = (value: string) => value.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+// كل الكيانات لا بعضها: «Don&#039;t» كانت تبقى كما هي فيصير مفتاح العمل غير مفتاحه
+const text = (value: string) => decodeEntities(value.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 const attr = (tag: string, name: string) => new RegExp(`\\b${name}=["']([^"']+)["']`, 'i').exec(tag)?.[1] ?? '';
 
 async function request(url: string, fetchImpl: Fetcher, init: RequestInit = {}): Promise<Response> {
@@ -96,6 +97,23 @@ async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
     const report = works.get(work) ?? { work, section: 'manga', kind: 'chapter', title, source: { s: 'eu.kanade.tachiyomi.extension.all.mangadex@ar', u: `/manga/${manga.id}` }, units: [] };
     report.units.push({ number, publishedAt });
     works.set(work, report);
+  }
+  // The chapter feed carries no art: one batched lookup of each manga's main cover,
+  // so timeline cards show the work instead of its initial. Optional — a failure keeps the chapters.
+  const ids = [...new Set([...works.values()].map((w) => w.source.u!.slice('/manga/'.length)))];
+  if (ids.length) {
+    try {
+      const q = ids.map((id) => `ids%5B%5D=${id}`).join('&');
+      const covers = await (await request(`https://api.mangadex.org/manga?limit=100&includes%5B%5D=cover_art&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&${q}`, fetchImpl, {
+        headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
+      })).json() as { data?: Array<{ id: string; relationships?: Array<{ type: string; attributes?: { fileName?: string } }> }> };
+      const art = new Map((covers.data ?? []).map((m) => [m.id, m.relationships?.find((r) => r.type === 'cover_art')?.attributes?.fileName]));
+      for (const w of works.values()) {
+        const id = w.source.u!.slice('/manga/'.length);
+        const file = art.get(id);
+        if (file && /^[\w.-]+$/.test(file)) w.cover = `https://uploads.mangadex.org/covers/${id}/${file}.512.jpg`;
+      }
+    } catch { /* covers are optional */ }
   }
   await observe(env, [...works.values()], now);
   return 0;

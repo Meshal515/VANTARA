@@ -55,6 +55,16 @@ export function coverCandidates(work) {
   return out;
 }
 
+/**
+ * مصغّرٌ خفيف لغلافٍ ثقيل، من مصدر نعرف أنه ينشره بجانبه. أغلفة Team-X الأصلية
+ * تبلغ ميغابايتين فتنتهي مهلتها على شبكة جوال ويظهر الحرف؛ مصغّرها (100×130،
+ * بضعة كيلوبايت) يظهر فورًا إلى أن يصل الكبير. `null` لغير ذلك.
+ */
+export function coverPreview(url) {
+  const m = typeof url === 'string' && /^(https:\/\/(?:www\.)?olympustaff\.com\/images\/manga\/)(?!thumbnail_)([^/?#]+)$/.exec(url);
+  return m ? `${m[1]}thumbnail_${m[2]}` : null;
+}
+
 export const cachedCover = (url) => index[url] ?? null;
 export function forgetCover(url) {
   if (!(url in index)) return;
