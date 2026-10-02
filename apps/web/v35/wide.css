@@ -933,9 +933,16 @@
     font-size: 54px;
     line-height: 1.05;
   }
+  /* شعار العنوان الرسمي بدل النص: كبيرًا كما في منصّات البث */
   .v35 .cn-detail-mark .cn-mark-logo {
-    max-height: 140px;
-    max-width: 440px;
+    max-height: 150px;
+    max-width: min(100%, 460px);
+    filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55));
+  }
+  .v35 .cn-bill-mark .cn-mark-logo {
+    max-height: 120px;
+    max-width: min(100%, 400px);
+    filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55));
   }
   .v35 .cn-detail-body .cn-synopsis {
     font-size: 15px;
