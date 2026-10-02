@@ -10,16 +10,26 @@
  *   PIN         4 أو 6 أرقام. لا نص صريح: HMAC(pepper، salt+pin). المحاولات
  *               الخاطئة تُقفل بتصاعد (دقيقة ← 5 ← 15 ← ساعة). الـPIN يُفحص عند
  *               إصدار الجلسة نفسها، فلا جلسة لحساب محمي بلا PIN أو إذن منه.
- *   حذف         شاهد قبر: الحساب يُخفى فورًا وتُلغى أجهزته، ونافذة تراجع
- *               دقيقة، ثم تُمسح بياناته كلها ويتحرر usernameه. صف الهوية يبقى
- *               ليصل الحذف كل جهاز عبر الفروقات.
+ *   حذف         ACTIVE → PENDING_DELETE (بعد PIN) → مهلة عشر ثوانٍ → DELETED.
+ *               في المهلة لا يُمسح شيء ولا يتحرر username: الحساب يختفي من
+ *               القوائم ولا تُصدر له جلسة، والتراجع يعيده ACTIVE فورًا. بعد
+ *               المهلة فقط يبدأ المسح النهائي: كل بياناته، ثم username يتحرر،
+ *               وصف الهوية نفسه (نفس الـUUID) يبقى شاهد قبر يصل كل جهاز.
  */
 
 import { commitAtNextRevision } from './index.ts';
 import type { D1PreparedStatement, Env } from './types.ts';
 
 export const MAX_ACCOUNTS = 10;
-export const UNDO_WINDOW_MS = 60_000;
+/** مهلة التراجع كما يراها المستخدم. */
+export const DELETE_GRACE_MS = 10_000;
+/**
+ * هامش الشبكة: «تراجع» ضُغط في الثانية التاسعة قد يصل بعد العاشرة. فالمسح لا
+ * يبدأ قبل المهلة + هذا الهامش، والتراجع مقبول حتى نهايته — لا يُمسح شيء قبل
+ * أن تنتهي المهلة التي رآها المستخدم أبدًا.
+ */
+export const DELETE_NETWORK_ALLOWANCE_MS = 2_000;
+export type Lifecycle = 'ACTIVE' | 'PENDING_DELETE' | 'DELETED';
 const USERNAME = /^[a-z0-9_.]{3,20}$/;
 const PIN = /^(\d{4}|\d{6})$/;
 /** بعد كل 5 محاولات خاطئة: قفل يتصاعد. */
@@ -135,7 +145,7 @@ export async function createAccount(env: Env, now: number, input: Record<string,
     env.DB.prepare(
       `INSERT INTO accounts (user_id, username, created_at, rev)
        SELECT ?, ?, ?, ?
-        WHERE (SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL) < ?
+        WHERE (SELECT COUNT(*) FROM accounts WHERE lifecycle != 'DELETED') < ?
           AND NOT EXISTS (SELECT 1 FROM accounts WHERE username = ?)`,
     ).bind(userId, username, now, rev, MAX_ACCOUNTS, username),
     env.DB.prepare(
@@ -202,68 +212,139 @@ export async function updatePin(env: Env, now: number, userId: string, deviceId:
 
 // ───────────────────────── الحذف ─────────────────────────
 
-export async function softDelete(env: Env, now: number, userId: string, pin: unknown): Promise<{ ok: true; undoUntil: number } | ({ ok: false; status: number } & Record<string, unknown>)> {
+export type DeleteResult =
+  | { ok: true; state: 'PENDING_DELETE'; graceMs: number; purgeAfter: number }
+  | ({ ok: false; status: number } & Record<string, unknown>);
+
+/** PIN صحيح ⇒ PENDING_DELETE. لا يُمسح شيء ولا تُلغى الأجهزة: التراجع قلب حالة لا استعادة. */
+export async function requestDeletion(env: Env, now: number, userId: string, pin: unknown): Promise<DeleteResult> {
   const check = await checkPin(env, userId, pin, now);
   if (!check.ok) return { ...check, ok: false, status: check.error === 'pin_locked' ? 429 : 401 };
+  const purgeAfter = now + DELETE_GRACE_MS + DELETE_NETWORK_ALLOWANCE_MS;
   await commitAtNextRevision(env, now, [], (rev) => [
-    env.DB.prepare('UPDATE accounts SET deleted_at = ?, rev = ? WHERE user_id = ? AND deleted_at IS NULL').bind(now, rev, userId),
-    env.DB.prepare('UPDATE trusted_devices SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').bind(now, userId),
+    env.DB.prepare(
+      `UPDATE accounts SET lifecycle = 'PENDING_DELETE', delete_requested_at = ?, purge_after = ?, rev = ?
+        WHERE user_id = ? AND lifecycle = 'ACTIVE'`,
+    ).bind(now, purgeAfter, rev, userId),
   ]);
-  return { ok: true, undoUntil: now + UNDO_WINDOW_MS };
+  const row = await lifecycleOf(env, userId);
+  if (row?.lifecycle !== 'PENDING_DELETE') return { ok: false, status: 409, error: 'not_active', state: row?.lifecycle ?? null };
+  return { ok: true, state: 'PENDING_DELETE', graceMs: Math.max(0, (row.purge_after ?? purgeAfter) - DELETE_NETWORK_ALLOWANCE_MS - now), purgeAfter: row.purge_after ?? purgeAfter };
 }
 
-export async function restore(env: Env, now: number, userId: string): Promise<boolean> {
-  const row = await env.DB.prepare('SELECT deleted_at, username FROM accounts WHERE user_id = ?').bind(userId).first<{ deleted_at: number | null; username: string }>();
-  if (!row?.deleted_at || now - row.deleted_at > UNDO_WINDOW_MS || row.username.startsWith('~')) return false;
-  const at = row.deleted_at;
+/** «تراجع»: يعيده ACTIVE فورًا ما دامت المهلة قائمة. الشرط داخل UPDATE نفسه فلا سباق مع المسح. */
+export async function cancelDeletion(env: Env, now: number, userId: string): Promise<boolean> {
   await commitAtNextRevision(env, now, [], (rev) => [
-    env.DB.prepare('UPDATE accounts SET deleted_at = NULL, rev = ? WHERE user_id = ? AND deleted_at = ?').bind(rev, userId, at),
-    env.DB.prepare('UPDATE trusted_devices SET revoked_at = NULL WHERE user_id = ? AND revoked_at = ?').bind(userId, at),
+    env.DB.prepare(
+      `UPDATE accounts SET lifecycle = 'ACTIVE', delete_requested_at = NULL, purge_after = NULL, rev = ?
+        WHERE user_id = ? AND lifecycle = 'PENDING_DELETE' AND purge_after > ?`,
+    ).bind(rev, userId, now),
   ]);
-  return true;
+  return (await lifecycleOf(env, userId))?.lifecycle === 'ACTIVE';
 }
 
-/** كل جدول يحمل بيانات شخص، بعموده. */
+export async function lifecycleOf(env: Env, userId: string) {
+  return env.DB.prepare('SELECT lifecycle, purge_after, username FROM accounts WHERE user_id = ?')
+    .bind(userId)
+    .first<{ lifecycle: Lifecycle; purge_after: number | null; username: string }>();
+}
+
+/** كل جدول يحمل بيانات شخص، بعموده. اختبار «لا بيانات يتيمة» يمسح القاعدة كلها بحثًا عن الـUUID. */
 const PERSONAL: ReadonlyArray<readonly [string, string]> = [
   ['profiles', 'user_id'], ['presence', 'user_id'], ['library', 'user_id'], ['progress', 'user_id'],
   ['chapter_reads', 'user_id'], ['usage_daily', 'user_id'], ['collections', 'user_id'],
   ['ratings', 'user_id'], ['reactions', 'user_id'], ['comments', 'author_id'],
   ['recommendation_recipients', 'user_id'], ['recommendations', 'from_id'], ['recommendations', 'to_id'],
-  ['notifications', 'user_id'], ['activity_receipts', 'user_id'], ['activity', 'actor_id'], ['settings', 'user_id'],
+  ['notifications', 'user_id'], ['activity_receipts', 'user_id'], ['activity', 'actor_id'], ['activity', 'target_user_id'],
+  ['settings', 'user_id'],
   ['pairing_tokens', 'user_id'], ['frames', 'from_id'], ['frames', 'to_id'], ['chapter_marks', 'user_id'],
   ['media', 'owner_id'], ['majlis_reactions', 'user_id'], ['majlis_receipts', 'user_id'], ['work_views', 'user_id'],
   ['public_work_views', 'user_id'], ['completions', 'user_id'], ['translation_usage', 'user_id'],
-  ['translation_usage_chapters', 'user_id'], ['rafiq_messages', 'user_id'], ['rafiq_conversations', 'user_id'],
+  ['translation_usage_chapters', 'user_id'], ['translation_creator_totals', 'created_by'],
+  ['rafiq_messages', 'user_id'], ['rafiq_conversations', 'user_id'],
   ['rafiq_prefs', 'user_id'], ['rafiq_recs', 'user_id'], ['rafiq_profile', 'user_id'], ['rafiq_usage', 'user_id'],
   ['rafiq_external', 'user_id'], ['majlis_message_receipts', 'user_id'], ['majlis_messages', 'sender_id'],
   ['majlis_hidden', 'user_id'], ['majlis_reads', 'user_id'], ['usage_sections', 'user_id'], ['work_insights', 'user_id'],
   ['view_privacy', 'user_id'], ['account_pins', 'user_id'], ['trusted_devices', 'user_id'], ['applied_ops', 'user_id'],
 ];
 
-/** يمسح بيانات حساب محذوف ويحرر username، ويُبقي صف الهوية شاهد قبر. */
+/**
+ * ما يخص الآخرين ويشير إلى محتوى الحساب (تفاعل على رسالته، إيصال لتوصيته):
+ * يُمسح قبل المحتوى نفسه، وإلا بقي يتيمًا يشير إلى لا شيء.
+ */
+const DEPENDENT: ReadonlyArray<string> = [
+  "DELETE FROM reactions WHERE comment_id IN (SELECT id FROM comments WHERE author_id = ?)",
+  "DELETE FROM recommendation_recipients WHERE recommendation_id IN (SELECT id FROM recommendations WHERE from_id = ?)",
+  "DELETE FROM activity_receipts WHERE event_id IN (SELECT id FROM activity WHERE actor_id = ?)",
+  "DELETE FROM majlis_reactions WHERE target_kind = 'frame' AND target_id IN (SELECT id FROM frames WHERE from_id = ?)",
+  "DELETE FROM majlis_reactions WHERE target_kind = 'rec' AND target_id IN (SELECT id FROM recommendations WHERE from_id = ?)",
+  "DELETE FROM majlis_reactions WHERE target_kind = 'activity' AND target_id IN (SELECT id FROM activity WHERE actor_id = ?)",
+  "DELETE FROM majlis_reactions WHERE target_kind = 'message' AND target_id IN (SELECT id FROM majlis_messages WHERE sender_id = ?)",
+  "DELETE FROM majlis_receipts WHERE target_kind = 'frame' AND target_id IN (SELECT id FROM frames WHERE from_id = ?)",
+  "DELETE FROM majlis_receipts WHERE target_kind = 'rec' AND target_id IN (SELECT id FROM recommendations WHERE from_id = ?)",
+  "DELETE FROM majlis_receipts WHERE target_kind = 'activity' AND target_id IN (SELECT id FROM activity WHERE actor_id = ?)",
+  "DELETE FROM majlis_message_receipts WHERE message_id IN (SELECT id FROM majlis_messages WHERE sender_id = ?)",
+];
+
+/** إشارات بلا ملكية: تُفرّغ ولا يُمسح صاحبها (رسالة غيره حذفها هو، اسم المجلس، صفحة ترجمة مشتركة). */
+const DETACH: ReadonlyArray<string> = [
+  'UPDATE notifications SET actor_id = NULL WHERE actor_id = ?',
+  'UPDATE majlis_messages SET deleted_by = NULL WHERE deleted_by = ?',
+  'UPDATE majlis_meta SET updated_by = NULL WHERE updated_by = ?',
+  "UPDATE translation_pages SET created_by = '~deleted' WHERE created_by = ?",
+  "UPDATE cinema_overviews SET created_by = '~deleted' WHERE created_by = ?",
+];
+
+/**
+ * المسح النهائي، بعد المهلة فقط. أول عبارة تقلب الحالة إلى DELETED بشرط أن
+ * المهلة انتهت والحساب ما زال PENDING_DELETE؛ وكل ما بعدها مشروط بأنها نجحت.
+ * الدفعة معاملة واحدة، فالتراجع والمسح لا يتداخلان: أحدهما يسبق ويُبطل الآخر.
+ */
 export async function purgeAccount(env: Env, now: number, userId: string): Promise<boolean> {
-  const row = await env.DB.prepare('SELECT deleted_at, username FROM accounts WHERE user_id = ?').bind(userId).first<{ deleted_at: number | null; username: string }>();
-  if (!row?.deleted_at || row.username.startsWith('~')) return false;
+  const row = await lifecycleOf(env, userId);
+  if (row?.lifecycle !== 'PENDING_DELETE' || (row.purge_after ?? Infinity) > now) return false;
+  const gone = "EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND lifecycle = 'DELETED')";
   await commitAtNextRevision(env, now, [], (rev) => [
-    env.DB.prepare('UPDATE notifications SET actor_id = NULL WHERE actor_id = ?').bind(userId),
-    ...PERSONAL.map(([table, column]): D1PreparedStatement => env.DB.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).bind(userId)),
-    env.DB.prepare("UPDATE accounts SET username = '~' || user_id, rev = ? WHERE user_id = ?").bind(rev, userId),
+    env.DB.prepare(
+      `UPDATE accounts SET lifecycle = 'DELETED', deleted_at = ?, username = '~' || user_id, badge = NULL,
+              delete_requested_at = NULL, purge_after = NULL, rev = ?
+        WHERE user_id = ? AND lifecycle = 'PENDING_DELETE' AND purge_after <= ?`,
+    ).bind(now, rev, userId, now),
+    ...wipeStatements(env, userId, gone),
   ]);
-  return true;
+  return (await lifecycleOf(env, userId))?.lifecycle === 'DELETED';
 }
 
-/** ما انتهت نافذة تراجعه يُمسح (من قائمة الحسابات ومن المؤقت). */
+function wipeStatements(env: Env, userId: string, guard: string): D1PreparedStatement[] {
+  return [
+    ...DEPENDENT.map((sql) => env.DB.prepare(`${sql} AND ${guard}`).bind(userId, userId)),
+    ...DETACH.map((sql) => env.DB.prepare(`${sql} AND ${guard}`).bind(userId, userId)),
+    ...PERSONAL.map(([table, column]) => env.DB.prepare(`DELETE FROM ${table} WHERE ${column} = ? AND ${guard}`).bind(userId, userId)),
+  ];
+}
+
+/**
+ * ما انتهت مهلته يُمسح (المؤقت كل دقيقة، وقائمة «من يتابع؟»، وطلب الجهاز
+ * نفسه). وتُعاد كنسُ شواهد القبر الحديثة: كتابة بتوكن قديم سبقت المسح بلحظة
+ * لا تبقى يتيمة.
+ */
 export async function purgeExpired(env: Env, now: number): Promise<number> {
   const { results } = await env.DB.prepare(
-    "SELECT user_id FROM accounts WHERE deleted_at IS NOT NULL AND deleted_at < ? AND username NOT LIKE '~%'",
+    "SELECT user_id FROM accounts WHERE lifecycle = 'PENDING_DELETE' AND purge_after <= ?",
   )
-    .bind(now - UNDO_WINDOW_MS)
+    .bind(now)
     .all<{ user_id: string }>();
   for (const { user_id } of results) await purgeAccount(env, now, user_id);
+  const recent = await env.DB.prepare("SELECT user_id FROM accounts WHERE lifecycle = 'DELETED' AND deleted_at > ?")
+    .bind(now - 60 * 60_000)
+    .all<{ user_id: string }>();
+  for (const { user_id } of recent.results) {
+    await env.DB.batch(wipeStatements(env, user_id, "EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND lifecycle = 'DELETED')"));
+  }
   return results.length;
 }
 
 export async function activeCount(env: Env): Promise<number> {
-  const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE deleted_at IS NULL').first<{ n: number }>();
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE lifecycle = 'ACTIVE'").first<{ n: number }>();
   return Number(row?.n ?? 0);
 }

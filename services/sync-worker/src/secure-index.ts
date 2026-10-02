@@ -16,7 +16,7 @@ import {
 import legacyWorker from './index.ts';
 import { collectTimelines } from './collectors.ts';
 import { bearerFrom, mintToken } from './session.ts';
-import { checkPin, createAccount, grantPin, grantValid, pinOf, purgeAccount, purgeExpired, restore, softDelete, updatePin } from './accounts.ts';
+import { cancelDeletion, checkPin, createAccount, grantPin, grantValid, lifecycleOf, pinOf, purgeAccount, purgeExpired, requestDeletion, updatePin } from './accounts.ts';
 import type { Env, ExecutionContext } from './types.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -131,7 +131,7 @@ async function pairDevice(request: Request, env: Env, now: number): Promise<Resp
   const accounts = pairing.user_id
     ? [{ user_id: pairing.user_id }]
     : (
-        await env.DB.prepare('SELECT user_id FROM accounts WHERE deleted_at IS NULL ORDER BY created_at')
+        await env.DB.prepare("SELECT user_id FROM accounts WHERE lifecycle = 'ACTIVE' ORDER BY created_at")
           .all<{ user_id: string }>()
       ).results;
 
@@ -247,7 +247,7 @@ async function claimDevice(request: Request, env: Env, now: number): Promise<Res
   if ((consumed.meta.changes ?? 0) !== 1) return json({ paired: false, pending: false });
 
   const accounts = (
-    await env.DB.prepare('SELECT user_id FROM accounts WHERE deleted_at IS NULL ORDER BY created_at').all<{ user_id: string }>()
+    await env.DB.prepare("SELECT user_id FROM accounts WHERE lifecycle = 'ACTIVE' ORDER BY created_at").all<{ user_id: string }>()
   ).results;
   if (accounts.length === 0) return json({ error: 'no_accounts' }, { status: 409 });
   await env.DB.batch(
@@ -318,7 +318,7 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
   const account = await env.DB.prepare(
     `SELECT a.user_id, a.username, p.display_name
        FROM accounts a LEFT JOIN profiles p USING (user_id)
-      WHERE a.user_id = ? AND a.deleted_at IS NULL`,
+      WHERE a.user_id = ? AND a.lifecycle = 'ACTIVE'`,
   )
     .bind(userId)
     .first<AccountRow>();
@@ -378,7 +378,7 @@ async function trustedDevice(env: Env, body: Record<string, unknown> | null): Pr
   const hash = await hashDeviceSecret(credential, env.VANTARA_DEVICE_PEPPER);
   const row = await env.DB.prepare(
     `SELECT 1 AS ok FROM trusted_devices t JOIN accounts a USING (user_id)
-      WHERE t.device_id = ? AND t.credential_hash = ? AND t.revoked_at IS NULL AND a.deleted_at IS NULL LIMIT 1`,
+      WHERE t.device_id = ? AND t.credential_hash = ? AND t.revoked_at IS NULL AND a.lifecycle = 'ACTIVE' LIMIT 1`,
   )
     .bind(deviceId, hash)
     .first<{ ok: number }>();
@@ -397,11 +397,12 @@ async function accountRoute(path: string, request: Request, env: Env, now: numbe
     return out.ok ? json({ account: out.account }) : json({ error: out.error }, { status: out.status });
   }
   if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
-  // حساب محذوف بجلسة ما زالت سارية: لا ينشئ ولا يغيّر شيئًا، إلا التراجع عن حذفه
-  const alive = await env.DB.prepare('SELECT deleted_at FROM accounts WHERE user_id = ?').bind(claims.userId).first<{ deleted_at: number | null }>();
-  if (!alive) return json({ error: 'unknown_account' }, { status: 404 });
-  const deleted = alive.deleted_at !== null;
-  if (deleted && path !== '/v1/accounts/restore' && path !== '/v1/accounts/delete/commit') return json({ error: 'account_deleted' }, { status: 410 });
+  // حساب في مهلة الحذف أو محذوف، بجلسة ما زالت سارية: لا ينشئ ولا يغيّر شيئًا،
+  // إلا التراجع عن حذفه أو إتمامه
+  const state = await lifecycleOf(env, claims.userId);
+  if (!state) return json({ error: 'unknown_account' }, { status: 404 });
+  const finishing = path === '/v1/accounts/restore' || path === '/v1/accounts/delete/commit';
+  if (state.lifecycle !== 'ACTIVE' && !finishing) return json({ error: 'account_deleted', state: state.lifecycle }, { status: 410 });
 
   if (path === '/v1/accounts/create') {
     const out = await createAccount(env, now, body);
@@ -416,15 +417,25 @@ async function accountRoute(path: string, request: Request, env: Env, now: numbe
     return json(out);
   }
   if (path === '/v1/accounts/delete') {
-    const out = await softDelete(env, now, claims.userId, body?.['pin']);
+    const out = await requestDeletion(env, now, claims.userId, body?.['pin']);
     if (!out.ok) {
       const { status, ...rest } = out;
       return json(rest, { status });
     }
     return json(out);
   }
-  if (path === '/v1/accounts/restore') return json({ restored: await restore(env, now, claims.userId) });
-  return json({ purged: deleted ? await purgeAccount(env, now, claims.userId) : false });
+  if (path === '/v1/accounts/restore') {
+    const restored = await cancelDeletion(env, now, claims.userId);
+    const after = await lifecycleOf(env, claims.userId);
+    return json({ restored, state: after?.lifecycle ?? null }, { status: restored ? 200 : 409 });
+  }
+  // إتمام من الجهاز بعد انتهاء العدّ: يمسح إن انتهت المهلة، وإلا يقول كم بقي
+  if (state.lifecycle === 'PENDING_DELETE' && (state.purge_after ?? 0) > now) {
+    return json({ state: 'PENDING_DELETE', retryInMs: (state.purge_after ?? now) - now });
+  }
+  if (state.lifecycle === 'PENDING_DELETE') await purgeAccount(env, now, claims.userId);
+  const final = await lifecycleOf(env, claims.userId);
+  return json({ state: final?.lifecycle ?? null });
 }
 
 async function requireIdentity(request: Request, env: Env, now: number) {
@@ -574,6 +585,12 @@ export default {
 
       const claims = await requireIdentity(request, env, now);
       if (!claims) return json({ error: 'unauthorized' }, { status: 401 }, cors);
+      // توكن سارٍ لحساب محذوف نهائيًا لا يقرأ ولا يكتب: كتابة بعد المسح كانت ستُنشئ
+      // بيانات يتيمة. في المهلة يبقى كما هو (لا شيء مُسح بعد، والتراجع ممكن).
+      const lifecycle = (await lifecycleOf(env, claims.userId))?.lifecycle;
+      if (lifecycle === 'DELETED' || lifecycle === undefined) {
+        return json({ error: 'account_deleted', state: lifecycle ?? null }, { status: 410 }, cors);
+      }
 
       // Temporary B2 adapter: old sync handlers receive a legacy token generated
       // inside the Worker. The browser never sees or can mint this token. B3 can

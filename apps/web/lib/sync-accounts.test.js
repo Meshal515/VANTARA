@@ -162,10 +162,73 @@ describe('accounts', () => {
     expect(sync.rows('profiles').map((r) => r.user_id)).toEqual(['u1']);
   });
 
+  it('hides an account in PENDING_DELETE but keeps its data until the tombstone arrives', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.mirror', JSON.stringify({
+      accounts: { u1: { user_id: 'u1' }, f: { user_id: 'f', lifecycle: 'PENDING_DELETE' } },
+      profiles: { u1: { user_id: 'u1' }, f: { user_id: 'f' } },
+      library: { 'f/a': { user_id: 'f', series_ref: 'a' } },
+    }));
+    const sync = await loadSync(vi.fn(async () => jsonResponse({})));
+    expect(sync.rows('accounts').map((r) => r.user_id)).toEqual(['u1']);
+    expect(sync.rows('profiles').map((r) => r.user_id)).toEqual(['u1']);
+    // في المهلة لا شيء يُمسح: التراجع يُظهره كما كان
+    expect(sync.rows('library')).toHaveLength(1);
+  });
+
+  it('a tombstone from the sync revision wipes that UUID from this device, and only that UUID', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.cursor', '5');
+    local.setItem('vantara.mirror', JSON.stringify({
+      accounts: { u1: { user_id: 'u1' }, f: { user_id: 'f', lifecycle: 'PENDING_DELETE' } },
+      profiles: { u1: { user_id: 'u1' }, f: { user_id: 'f' } },
+      library: { 'f/a': { user_id: 'f', series_ref: 'a' }, 'u1/a': { user_id: 'u1', series_ref: 'a' } },
+      comments: { c1: { id: 'c1', author_id: 'f' }, c2: { id: 'c2', author_id: 'u1' } },
+      majlis_messages: { m1: { id: 'm1', sender_id: 'f' } },
+      notifications: { n1: { id: 'n1', user_id: 'u1', actor_id: 'f' } },
+    }));
+    const sync = await loadSync(vi.fn(async (url) => String(url).includes('/v1/sync')
+      ? jsonResponse({ cursor: 6, more: false, changes: { accounts: [{ user_id: 'f', username: '~f', lifecycle: 'DELETED', rev: 6 }] } })
+      : jsonResponse({})));
+    await sync.pull();
+    expect(sync.rows('library').map((r) => r.user_id)).toEqual(['u1']);
+    expect(sync.rows('comments').map((r) => r.id)).toEqual(['c2']);
+    expect(sync.rows('majlis_messages')).toEqual([]);
+    expect(sync.rows('notifications')[0]).toMatchObject({ id: 'n1', actor_id: null });
+    expect(sync.rows('accounts').map((r) => r.user_id)).toEqual(['u1']);
+  });
+
+  it('reports its own account state, and a 410 from a stale token marks it DELETED', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.mirror', JSON.stringify({ accounts: { u1: { user_id: 'u1', lifecycle: 'PENDING_DELETE' } } }));
+    const sync = await loadSync(vi.fn(async () => jsonResponse({ error: 'account_deleted', state: 'DELETED' }, 410)));
+    expect(sync.accountState).toBe('PENDING_DELETE');
+    const seen = [];
+    sync.onChange((tables) => seen.push(...tables));
+    await sync.pull();
+    expect(sync.accountState).toBe('DELETED');
+    expect(seen).toContain('accounts');
+  });
+
+  it('waits for the server deadline before signing out', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    const answers = [{ state: 'PENDING_DELETE', retryInMs: 20 }, { state: 'DELETED' }];
+    const fetchImpl = vi.fn(async () => jsonResponse(answers.shift() ?? {}));
+    const sync = await loadSync(fetchImpl);
+    const out = await sync.commitDeletion();
+    expect(out.data).toEqual({ state: 'DELETED' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sync.signedIn).toBe(false);
+  });
+
   it('signs out after the deletion is committed', async () => {
     local.setItem('vantara.token', 't');
     local.setItem('vantara.user', JSON.stringify(ME));
-    const sync = await loadSync(vi.fn(async () => jsonResponse({ purged: true })));
+    const sync = await loadSync(vi.fn(async () => jsonResponse({ state: 'DELETED' })));
     const out = await sync.commitDeletion();
     expect(out.ok).toBe(true);
     expect(sync.signedIn).toBe(false);

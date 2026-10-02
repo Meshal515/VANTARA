@@ -2187,6 +2187,7 @@ function toastNewNotifications() {
 sync.onChange((tables) => {
   // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
   if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
+  if (tables.includes('accounts')) followAccountState();
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
 });
@@ -2195,6 +2196,46 @@ setInterval(() => void sync.pull(), 60_000);
 // صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
 setInterval(() => document.visibilityState === 'visible' && void sync.pulse(), 4_000);
 setInterval(() => void sync.push(), 15_000);
+
+/**
+ * حُذف حسابك من جهاز آخر (الحالة تصل بالمزامنة): في المهلة شاشة تقول ذلك
+ * وتختفي وحدها إن تراجع، وبعد المسح النهائي خروج إلى «من يتابع؟».
+ */
+let pendingNotice = null;
+function followAccountState() {
+  if (!sync.user || sync.deletingHere || state.screen === 'GATE') return;
+  const accountState = sync.accountState;
+  if (accountState !== 'PENDING_DELETE') {
+    pendingNotice?.remove();
+    pendingNotice = null;
+  }
+  if (accountState === 'DELETED') {
+    dropV35();
+    sync.signOut();
+    void go({ name: 'gate' });
+    showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    return;
+  }
+  if (accountState === 'PENDING_DELETE' && !pendingNotice) {
+    pendingNotice = el('div', 'vdel');
+    pendingNotice.setAttribute('role', 'alertdialog');
+    const box = el('div');
+    box.append(el('h2', 'vdel__title', 'هذا الحساب يُحذف الآن'));
+    box.append(el('p', 'vdel__text', 'بدأ حذفه من جهاز آخر. لو تراجع صاحبه يرجع كل شيء كما كان.'));
+    const out = el('button', 'vdel__undo', 'تبديل الحساب');
+    out.type = 'button';
+    out.onclick = () => {
+      pendingNotice?.remove();
+      pendingNotice = null;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+    };
+    box.append(out);
+    pendingNotice.append(box);
+    document.body.append(pendingNotice);
+  }
+}
 
 /**
  * قفل الحساب: عليه PIN وما أُدخل منذ فُتح التطبيق. الرمز قبل أي شاشة، وإذن

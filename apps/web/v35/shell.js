@@ -3628,6 +3628,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       cancel.onclick = () => closeSheet();
       const ok = el('button', 'btn btn-danger', 'نعم أوافق');
       ok.type = 'button';
+      let graceMs = 10_000;
       ok.onclick = async () => {
         closeSheet();
         if (sync.user?.pinDigits) {
@@ -3637,13 +3638,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
             title: 'تأكيد الحذف',
             subtitle: 'اكتب رمزك لحذف الحساب',
             ...pinFace(),
-            submit: async (pin) => padResult(await sync.deleteAccount(pin)),
-            onDone: () => showDeleting(),
+            submit: async (pin) => {
+              const out = await sync.deleteAccount(pin);
+              if (out.ok) graceMs = Number(out.data?.graceMs) || 10_000;
+              return padResult(out);
+            },
+            onDone: () => showDeleting(graceMs),
           });
           return;
         }
         const out = await sync.deleteAccount().catch(() => ({ ok: false }));
-        if (out.ok) showDeleting();
+        if (out.ok) showDeleting(Number(out.data?.graceMs) || 10_000);
         else toast('تعذّر الحذف. تأكد من النت وحاول مرة ثانية');
       };
       actions.append(cancel, ok);
@@ -3652,12 +3657,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   /**
-   * «جارٍ حذف الحساب من السيرفر»: عشر ثوانٍ وزر تراجع. الحذف على الخادم معلّق
-   * (deleted_at) ودقيقة كاملة للتراجع هناك؛ بعد العشر يُمسح نهائيًا. ولو أُغلق
-   * التطبيق في المنتصف يكمل الخادم الحذف وحده بعد الدقيقة.
+   * «جارٍ حذف الحساب من السيرفر»: الحساب على الخادم PENDING_DELETE — لا شيء
+   * مُسح بعد ولا اسمه تحرر. عشر ثوانٍ وزر تراجع يعيده ACTIVE فورًا؛ بعدها فقط
+   * يبدأ المسح النهائي. ولو أُغلق التطبيق في المنتصف يكمله الخادم وحده.
    */
-  function showDeleting() {
-    const SECONDS = 10;
+  function showDeleting(graceMs = 10_000) {
+    const SECONDS = Math.max(1, Math.round(graceMs / 1000));
     const wrap = el('div', 'vdel');
     wrap.setAttribute('role', 'alertdialog');
     wrap.setAttribute('aria-modal', 'true');

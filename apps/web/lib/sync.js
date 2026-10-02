@@ -181,6 +181,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let token = localStorage.getItem(TOKEN_KEY) ?? null;
   let user = accountWithIdentity(readJson(USER_KEY, null));
   let accountsLimit = 10;
+  let deletingHere = false;
   let pinGrant = (() => {
     try {
       return sessionStorage.getItem(PIN_GRANT_KEY) || null;
@@ -483,6 +484,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       throw error;
     }
 
+    if (response.status === 410 && user?.userId && !deletingHere) {
+      // الخادم يقول: هذا الحساب حُذف نهائيًا (توكن قديم). المرآة تعرف، والتطبيق يخرج
+      mirror.accounts = { ...(mirror.accounts ?? {}), [user.userId]: { ...(mirror.accounts?.[user.userId] ?? { user_id: user.userId }), lifecycle: 'DELETED' } };
+      valuesCache = new Map();
+      emit(['accounts']);
+    }
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
       error.status = response.status;
@@ -601,6 +608,33 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return user;
   }
 
+  /** حالة الحساب من مرآة المزامنة: ACTIVE، PENDING_DELETE، DELETED. */
+  function gone(account) {
+    return Boolean(account) && (account.lifecycle === 'PENDING_DELETE' || account.lifecycle === 'DELETED' || Boolean(account.deleted_at));
+  }
+
+  const OWNER_COLUMNS = ['user_id', 'author_id', 'from_id', 'to_id', 'sender_id', 'actor_id', 'target_user_id', 'owner_id'];
+  function dropAccountRows(userId) {
+    const touched = [];
+    for (const [table, bucket] of Object.entries(mirror)) {
+      if (table === 'accounts' || !bucket || typeof bucket !== 'object') continue;
+      let changed = false;
+      for (const [key, row] of Object.entries(bucket)) {
+        if (!row || typeof row !== 'object') continue;
+        // تنبيهك أنت عن فعلٍ له: يبقى تنبيهك، بلا اسمه
+        if (table === 'notifications' && row.actor_id === userId && row.user_id !== userId) {
+          bucket[key] = { ...row, actor_id: null };
+          changed = true;
+        } else if (OWNER_COLUMNS.some((column) => row[column] === userId)) {
+          delete bucket[key];
+          changed = true;
+        }
+      }
+      if (changed) touched.push(table);
+    }
+    return touched;
+  }
+
   function signOut() {
     keepGrant(null);
     sessionGeneration += 1;
@@ -692,6 +726,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
 
         const touched = [];
+        // شاهد قبر وصل: كل صف في المرآة يخص ذلك الـUUID يُمسح هنا أيضًا، فلا
+        // يبقى على هذا الجهاز ما مُسح من الخادم (الخادم يمسح ولا يرسل «حُذف»)
+        for (const account of payload.changes?.accounts ?? []) {
+          if (account?.lifecycle === 'DELETED' && account.user_id) touched.push(...dropAccountRows(account.user_id));
+        }
         for (const [table, rows] of Object.entries(payload.changes ?? {})) {
           const keyOf = KEYS[table];
           if (!keyOf || !Array.isArray(rows) || rows.length === 0) continue;
@@ -1061,10 +1100,30 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return out;
   }
 
-  const deleteAccount = (pin) => accountCall('/v1/accounts/delete', pin ? { pin } : {});
-  const restoreAccount = () => accountCall('/v1/accounts/restore', {});
+  /**
+   * الحذف: PENDING_DELETE على الخادم (لا شيء يُمسح)، ثم عشر ثوانٍ، ثم المسح
+   * النهائي. هذا الجهاز يعرف أنه صاحب العدّ، فلا يعامل حالته كحذف من جهاز آخر.
+   */
+  async function deleteAccount(pin) {
+    const out = await accountCall('/v1/accounts/delete', pin ? { pin } : {});
+    if (out.ok) deletingHere = true;
+    return out;
+  }
+  async function restoreAccount() {
+    const out = await accountCall('/v1/accounts/restore', {});
+    if (out.ok && out.data?.restored) deletingHere = false;
+    return out;
+  }
+  /** بعد العدّ: الخادم يمسح إن انتهت المهلة، وإلا يقول كم بقي فننتظره. ثم خروج. */
   async function commitDeletion() {
-    const out = await accountCall('/v1/accounts/delete/commit', {});
+    let out = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      out = await accountCall('/v1/accounts/delete/commit', {}).catch(() => null);
+      const wait = out?.data?.state === 'PENDING_DELETE' ? Number(out.data.retryInMs) || 0 : 0;
+      if (!wait) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(wait + 150, 5_000)));
+    }
+    deletingHere = false;
     signOut();
     return out;
   }
@@ -1134,9 +1193,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       all = table === 'profiles' ? Object.values(bucket).map((r) => view(table, r)) : Object.values(bucket);
       // حارس مركزي: ما يكتبه فحص الخادم (`__verify__…`) وأي كيان داخلي لا يصل شاشة أبدًا
       all = all.filter((r) => !isInternalRow(r));
-      // حساب محذوف (شاهد قبر): يختفي هو وملفه من كل شاشة
-      if (table === 'accounts') all = all.filter((r) => !r.deleted_at);
-      else if (table === 'profiles') all = all.filter((r) => !mirror.accounts?.[r.user_id]?.deleted_at);
+      // حساب في مهلة الحذف أو محذوف (شاهد قبر): يختفي هو وملفه من كل شاشة
+      if (table === 'accounts') all = all.filter((r) => !gone(r));
+      else if (table === 'profiles') all = all.filter((r) => !gone(mirror.accounts?.[r.user_id]));
       valuesCache.set(table, all);
     }
     return predicate ? all.filter(predicate) : [...all];
@@ -1207,6 +1266,15 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     deleteAccount,
     restoreAccount,
     commitDeletion,
+    /** حالة حسابك كما وصلت بالمزامنة: ACTIVE، PENDING_DELETE، DELETED. */
+    get accountState() {
+      const row = user?.userId ? mirror.accounts?.[user.userId] : null;
+      return row?.lifecycle ?? 'ACTIVE';
+    },
+    /** هذا الجهاز هو من بدأ الحذف (عدّه التنازلي ظاهر هنا). */
+    get deletingHere() {
+      return deletingHere;
+    },
     /** الحساب الحالي عليه PIN ولم يُدخل منذ فُتح التطبيق. */
     get locked() {
       return Boolean(user?.pinDigits) && !pinGrant;
