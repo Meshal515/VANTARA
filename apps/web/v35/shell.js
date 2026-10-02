@@ -49,7 +49,7 @@ import { momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
-import { onLongPress } from './social-kit.js';
+import { onLongPress, roomInitial } from './social-kit.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
@@ -100,7 +100,7 @@ const CHAPTER_BATCH = 60;
 const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
   ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
-  ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock'], ['آخر المشاهدات', 'history', 'history']]],
+  ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock'], ['آخر المشاهدات', 'history', 'history'], ['إحصائيات المتابعة', 'insights', 'chart']]],
   ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
 
@@ -3413,8 +3413,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
         for (const [text, key, ic] of items) {
           const b = el('button', 'drawer-item');
           b.type = 'button';
-          b.innerHTML = glyph(ic);
-          b.append(el('span', null, key === 'later' ? laterLabel : text));
+          if (key === 'majlisFeed') {
+            // المجلس باسمه وصورته كما سمّيتموه، كخوادم ديسكورد، لا «المجلس» ونبضًا ثابتين
+            const meta = sync.rows('majlis_meta', (m) => m.id === 'main')[0];
+            const roomName = meta?.name || text;
+            const pic = el('span', 'drawer-room-pic');
+            if (meta?.avatar_key) {
+              const img = new Image();
+              img.alt = '';
+              img.src = mediaUrl(meta.avatar_key);
+              pic.append(img);
+            } else pic.textContent = roomInitial(roomName);
+            b.append(pic, el('span', null, roomName));
+          } else {
+            b.innerHTML = glyph(ic);
+            b.append(el('span', null, key === 'later' ? laterLabel : text));
+          }
           if (key === 'notifications' && unread) b.append(el('span', 'badge', unread > 99 ? '99+' : String(unread)));
           if (key === here) {
             b.classList.add('active');
@@ -3446,6 +3460,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return navTo('library');
     }
     if (key === 'rafiq') return showPage('rafiq');
+    if (key === 'insights') return showPage('insights');
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
     if (key === 'majlisFeed') return openRoom();
@@ -3873,8 +3888,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const body = q('settingsBody');
     body.replaceChildren();
     const api = deps.settings;
+    // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
+    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'ما يراه أصدقاؤك': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
     const group = (label, rows, { note, cls } = {}) => {
-      if (label) body.append(el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}`, label));
+      if (label) {
+        const head = el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}${EYEBROWS[label] ? '' : ' settings-sublabel'}`);
+        if (EYEBROWS[label]) {
+          const eb = el('span', 'settings-eyebrow', EYEBROWS[label]);
+          eb.dir = 'ltr';
+          head.append(eb);
+        }
+        head.append(el('span', 'settings-title', label));
+        body.append(head);
+      }
       const list = el('div', `settings-list${cls ? ` ${cls}` : ''}`);
       list.append(...rows.filter(Boolean));
       body.append(list);
@@ -3926,12 +3952,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return d;
     };
 
-    group('حسابك', [
-      row('user', 'ملفّك الشخصي', 'اسمك وصورتك والبانر', { run: () => openProfile(me()) }),
-      row('clock', 'إحصائيات المتابعة', null, { run: () => showPage('insights') }),
-      row('switchUser', 'تبديل الحساب', null, { value: sync.user?.username ? `@${sync.user.username}` : null, run: confirmSwitchAccount }),
+    // رأس الصفحة: أنت. الصورة والاسم يفتحان ملفّك (كان صفًّا بين الصفوف)
+    const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
+    const name = profile?.display_name || sync.user?.displayName || sync.user?.username || 'حسابي';
+    const meCard = el('button', 'settings-me');
+    meCard.type = 'button';
+    const who = el('span', 'settings-me-text');
+    who.append(el('strong', null, name));
+    if (sync.user?.username) {
+      const handle = el('small', null, `@${sync.user.username}`);
+      handle.dir = 'ltr';
+      who.append(handle);
+    }
+    meCard.append(avatarNode({ avatarKey: profile?.avatar_key, displayName: name }, 56), who, el('span', 'settings-me-cta', 'ملفّك'));
+    meCard.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
+    meCard.onclick = () => openProfile(me());
+    body.append(meCard);
+
+    group('الحساب', [
+      row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
       sync.approveDevice
-        ? row('shield', 'اعتماد جوال جديد', 'اكتب الرمز اللي يطلع على الجوال الجديد', {
+        ? row('shield', 'اعتماد جوال جديد', 'برمز الجوال الجديد', {
             value: pendingPhones ? `${pendingPhones} ينتظر` : null,
             tone: pendingPhones ? 'warn' : undefined,
             run: openApprovePhone,
@@ -3941,9 +3982,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // الخصوصية: اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
     const privacy = mySettings();
     group(
-      'الخصوصية · ماذا يرى الآخرون عني',
+      'ما يراه أصدقاؤك',
       [
-        toggle('activity', 'إحصائيات المتابعة', 'مدة المتابعة والتقدم داخل صفحة العمل', privacy.shareInsights === true, (on) => {
+        toggle('activity', 'إحصائيات المتابعة', 'مدتك وتقدّمك في صفحة العمل', privacy.shareInsights === true, (on) => {
           setMySettings({ shareInsights: on });
           renderSettings();
         }),
@@ -3960,7 +4001,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           'عرض ماذا أشاهد الآن',
           privacy.shareCurrent === false
             ? `يشوفون «يقرأ» أو «يشاهد» بدون العمل${privacy.showRecentViews === false ? '' : '، وآخر مشاهداتك توصلهم بعد ساعة'}`
-            : 'أصدقاؤك يشوفون العمل اللي تقرأه أو تشاهده',
+            : 'العمل اللي تقرأه أو تشاهده الحين',
           privacy.shareCurrent !== false,
           (on) => {
             setMySettings({ shareCurrent: on });
@@ -3972,7 +4013,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           'إظهار آخر المشاهدات في ملفي',
           privacy.showRecentViews === false
             ? 'سجلّك لك وحدك؛ يُسحب من أجهزة الأصدقاء بعد مزامنتها'
-            : 'آخر الأعمال والفصول التي شاهدتها تظهر في ملفك عند أصدقائك',
+            : 'تظهر في ملفّك عند أصدقائك',
           privacy.showRecentViews !== false,
           async (on) => {
             try {
@@ -3988,7 +4029,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         toggle(
           'check',
           'إظهار إنهاء الفصول والحلقات',
-          privacy.shareCompletions === false ? 'ما يوصلهم «خلّص الفصل» ولا «أنهى الحلقة». تقدّمك يبقى محفوظ لك' : '«خلّص الفصل 72» و«أنهى الحلقة 8» تظهر لأصدقائك',
+          privacy.shareCompletions === false ? 'ما يوصلهم «خلّص الفصل»، وتقدّمك محفوظ لك' : '«خلّص الفصل 72» و«أنهى الحلقة 8»',
           privacy.shareCompletions !== false,
           (on) => {
             setMySettings({ shareCompletions: on });
@@ -4000,8 +4041,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? 'آخر المشاهدات مخفية عن الأصدقاء؛ العمل الحالي ونشاط الإنهاء لهما خياران مستقلان.'
         : 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
     );
-    group('الخصوصية · ما أراه أنا', [
-      row('activity', 'نشاط القراءة', '«خلّص الفصل» و«أنهى الحلقة» من أصدقائك في «آخر ما صار». يخصّك أنت، وما يغيّر شي عندهم', {
+    group('ما تراه أنت', [
+      row('activity', 'نشاط أصدقائك في القراءة', 'في «آخر ما صار». يخصّك وحدك', {
         value: privacy.feedReading === 'hide' ? 'إخفاء لدي' : 'إظهار لدي',
         run: () => {
           setMySettings({ feedReading: privacy.feedReading === 'hide' ? 'show' : 'hide' });
@@ -4026,7 +4067,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       group(
         'التنبيهات',
         [
-          toggle('bell', 'التنبيهات المنبثقة', 'تطلع فوق الشاشة لما يرسل لك أحد فريم أو ترشيح', popups.enabled, (enabled) => {
+          toggle('bell', 'التنبيهات المنبثقة', 'لما يوصلك فريم أو ترشيح', popups.enabled, (enabled) => {
             api.setPopups({ ...api.popups(), enabled });
             renderSettings();
           }),
@@ -4037,15 +4078,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
       renderTranslationSettings(group, row, toggle);
-      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'صار شي غلط؟ قل لنا وش صار', { run: () => openProblemSheet() })]);
+      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
     group('عن التطبيق', [
-      row('layers', 'المصادر', 'مصادر عربية تشتغل على جهازك', { value: 'عربي' }),
+      // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
+      globalThis.Capacitor?.Plugins?.AnimeEngine
+        ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
+        : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
       row('info', 'الإصدار', apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || '—' }),
       api?.checkUpdate
-        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث ويثبّتها بزرّ واحد', {
+        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {
               toast('نبحث عن تحديث…');
               const found = await api.checkUpdate().catch(() => null);
@@ -4055,10 +4099,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : null,
     ]);
 
-    // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
-    if (globalThis.Capacitor?.Plugins?.AnimeEngine) {
-      group('', [row('activity', 'أداء مصادر السينما', 'زمن أول تشغيل صالح لكل مصدر وسيرفر، ومقياس على عدة أفلام ومسلسلات', { run: () => cinema.openSourcesDebug() })]);
-    }
 
     if (!api) return;
     // ── النظام: مطويّ. من يفتحه يعرف أنه دخل مكانًا تقنيًّا ──
