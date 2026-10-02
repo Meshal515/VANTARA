@@ -2,8 +2,8 @@
 
 **الخطة التنفيذية الشاملة لتحويل الأنمي والسينما إلى تجربة: افتح العمل → اضغط تشغيل → يبدأ فورًا**
 
-**التاريخ:** 2026-10-02 · **الإصدار 2** (أُضيف: قاعدة الصخرة، Arabic First، فلسفة الإضافات، سياسة التحقق، نسب الفشل، اختبارات البث الخمسة)  
-**النطاق:** APK + PWA  
+**التاريخ:** 2026-10-02 · **الإصدار 3** (الإصدار 2: قاعدة الصخرة، Arabic First، الإضافات، التحقق، نسب الفشل، اختبارات البث الخمسة · الإصدار 3: نطاقات الفشل المستقلة، تصنيف تحقق الـPWA، تكافؤ التشغيل في الانتقال، بوابة Rock Core، ضمان الـPWA، منصة Windows)  
+**النطاق:** APK + PWA + Windows Desktop  
 **قيد معماري حاسم:** **لا Home Server، لا VPS، ولا اعتماد على جهاز منزلي يعمل دائمًا.**  
 **الأولوية القصوى:** **السيرفرات والتشغيل الفعلي قبل أي تحسينات جانبية.**  
 **قاعدة العربية:** **لا AI Translation ولا Subtitle Search خارجي داخل ONE SECOND؛ المسار الأساسي لا يُعد جاهزًا إلا إذا كانت العربية موجودة أصلًا مع العمل (Hard-sub أو Arabic track مرفق من نفس المزود/المسار).**
@@ -185,10 +185,163 @@ VANTARA internal failures    3
 يتكرر لكل حلقة                      ⇒ احتياط فقط، لا Stable، لا يُعرض إلا عند غياب البدائل
 ```
 
-**حدّ تقني صريح في الـPWA (لا اختيار):** ختم Cloudflare (`cf_clearance`) مربوط بمتصفح المستخدم وعنوان IP الخاص به. الـWeb Fetcher يطلب من IP خوادم Cloudflare، فلا يستطيع إعادة استعمال تحقق المستخدم. لذلك:
+**ملاحظة تقنية (ليست حكمًا مسبقًا):** ختم Cloudflare (`cf_clearance`) عادة مربوط بمتصفح المستخدم وعنوان IP الخاص به، والـWeb Fetcher يطلب من IP مختلف؛ فتحقق المستخدم في متصفحه **غالبًا** لا ينفع الـFetcher. لكن هذا **لا يعني** أن كل مصدر عليه Cloudflare مستحيل في الـPWA. القرار بالقياس فقط، بالتصنيف التالي.
+
+### ⓪C.1 تصنيف التحقق في الـPWA (يُختبر كل مسار مستقلًا)
+
+```text
+BROWSER_REUSABLE       المستخدم يتحقق مرة في المتصفح، وجلسة المتصفح نفسها (cookies)
+                       تخدم طلبات المصدر المباشرة بعدها، والحلقات التالية تعمل مباشرة.
+FETCHER_OK             الـWeb Fetcher يصل للمصدر أصلًا بلا تحدٍّ متكرر (أو بجلسة صالحة قابلة لإعادة الاستعمال).
+APK_PREFERRED          الـAPK (WebView + Cookie Jar) يحفظ الجلسة بموثوقية، والمتصفح/الـFetcher لا يستطيعان عمليًا.
+VERIFICATION_UNSTABLE  التحقق يتكرر كثيرًا (كل حلقة، أو مرارًا في الموسم نفسه).
+UNSUPPORTED            لا مسار صالح على هذه المنصة.
+```
+
+**قاعدة:** لا يُصنَّف مصدر عليه Cloudflare كـ`APK_PREFERRED`/`UNSUPPORTED` قبل اختبار **Browser Direct** و**Fetcher** كلٌّ على حدة. والـStable Core في الـPWA **لا يعتمد** على `VERIFICATION_UNSTABLE` أبدًا.
 
 - **APK:** التحقق مرة واحدة يعمل كما يريد المالك (WebView + Cookie Jar للجهاز نفسه).
-- **PWA:** مصدر يشترط تحدي Cloudflare على طلباته = **APK_ONLY** عمليًا، إلا إذا كان التحدي لا يظهر لطلبات الـFetcher (يُقاس في `/health/hosts` من الـWorker الحقيقي).
+- **Windows Desktop:** يُقاس فعليًا (⓪H) — لا نفترض النجاح نظريًا.
+
+### ⓪C.2 ضمان الـPWA (SLO) — لا «أفضل جهد»
+
+لا نريد PWA مليانًا بالمصادر نظريًا لكن كل شوي تحقق أو 0 سيرفر. قياسان منفصلان:
+
+```text
+1. AR_READY PLAYABLE COVERAGE      نسبة الأعمال التي لها مسار تشغيل عربي صالح على الـPWA
+2. VERIFICATION INTERRUPTION RATE  = جلسات تشغيل أجبرت المستخدم على تحقق بشري
+                                     ÷ كل جلسات التشغيل التي استخدمت Stable Core
+                                     الهدف: ≤ 1%
+```
+
+يعني: المستخدم يفتح ويتابع حلقاته وأفلامه بحرية، والتحقق حدث نادر جدًا وليس جزءًا طبيعيًا من المشاهدة.
+
+| سلوك المصدر | الحكم |
+|---|---|
+| تحقق كل حلقة | **ليس Stable** |
+| تحقق مرارًا خلال الموسم نفسه | **ليس Stable** |
+| تحقق مرة نادرة ثم تُحفظ الجلسة | **مقبول** |
+
+مصدر تجاوز المعدّل المقبول ⇒ تُخفض صحته وأولويته، يخرج من الـHot Path، ويُنتقل تلقائيًا لمصدر عربي Stable آخر، ويبقى Candidate/Backup فقط. **لا محاولة لتجاوز CAPTCHA أو حلّه آليًا.**
+
+
+---
+
+## ⓪E. نطاق الفشل المستقل — Independent Failure Domain
+
+«2–4 مسارات مستقلة» تحتاج تعريفًا صارمًا، وإلا أربعة أزرار تنتهي كلها لنفس المضيف تُعدّ أربعة بدائل وهي بديل واحد.
+
+```text
+A path is only considered independent if it differs in at least one real failure domain:
+- different content source
+- different video host
+- preferably different CDN / upstream chain
+
+4 server labels backed by the same host = 1 effective redundancy path.
+```
+
+- كل Stream يحمل بصمة نطاقه: `(sourceId, hostFamily, cdnHost)` — `cdnHost` من الرابط النهائي بعد التحويلات لا من اسم الزر.
+- مقياس `>= 2 independent paths` يُحسب على **البصمات المختلفة**، لا على عدد الأزرار.
+- الاحتياط المختار لبدء التشغيل الموازي (Tier backup) يُفضَّل أن يكون من **نطاق فشل مختلف** عن الأول؛ احتياط من نفس المضيف لا يحمي من سقوطه.
+
+---
+
+## ⓪F. تكافؤ التشغيل في الانتقال أثناء الحلقة — Playback Equivalence
+
+الانتقال لسيرفر آخر في الدقيقة 17 ثم القفز لنفس الثانية صحيح **فقط** إذا النسختان متكافئتان زمنيًا. نسختان من نفس الحلقة قد تختلفان: مقدمة أطول، recap، TV cut مقابل Blu-ray.
+
+```text
+Before seamless mid-playback failover:
+  compare duration and timeline compatibility.
+
+  If the duration difference is small (≤ ~2s or ≤ 0.5%):
+      resume the same position.
+
+  If materially different:
+      apply a known offset if one was learned for this (source A → source B) pair,
+      otherwise restart near the closest safe timestamp (scene/chapter boundary or a few seconds earlier)
+      and do not pretend exact continuity.
+```
+
+- الإزاحة المتعلّمة تُحفظ لكل زوج نسخ عند أول مطابقة ناجحة (مثلًا فرق مدة المقدمة).
+- «نجاح تقني» يوديك لمشهد غلط = فشل تجربة، يُسجَّل.
+
+---
+
+## ⓪G. بوابة Rock Core — حدّ أدنى إلزامي للمصادر العربية المدمجة
+
+الصخرة مكتفية **بدون إضافات**. Arabic First إلزامي. وحتى لا يصل الفريق إلى «5–8 providers» نصفها إضافات أو إنجليزي ويقول «حققنا الخطة»:
+
+```text
+ROCK CORE GATE
+
+Anime:
+  >= 4 genuinely independent Arabic Stable providers
+
+Cinema / TV:
+  >= 4 genuinely independent Arabic Stable providers
+
+Plus:
+  >= 1 non-Arabic fallback lane per vertical
+
+Independence per ⓪E: different sources, different video hosts, and
+where possible different failure domains.
+
+Extensions do NOT count toward satisfying the Rock Core Gate.
+```
+
+**الإنجليزي:** موجود ومسموح، لكنه احتياط فقط حين: العربي لم ينزل بعد، أو العربي لا يملك الحلقة، أو كل المسارات العربية فشلت. ولا يتقدم أبدًا على `AR_READY` صالح.
+
+**الإضافات** (أنمي/سينما/مانجا، وبعض إضافات الترجمة): The Rock works without extensions. الإضافة قد تزيد التغطية، أو تضيف أعمالًا نادرة، أو سيرفرات بديلة، أو قدرات ترجمة اختيارية، أو ترفع الـredundancy — لكنها لا تُحسب ضمن بوابة Rock Core.
+
+---
+
+## ⓪H. ثلاث منصات، قاعدة واحدة — APK · PWA · Windows Desktop
+
+```text
+إذا كان upstream قابلًا للتشغيل ومناسبًا للمنصة، VANTARA يشغّله.
+والإضافات لا تعوّض ضعف الصخرة الأساسية.
+```
+
+### ⓪H.1 Windows Desktop
+
+لا نكتفي بـInstalled PWA إذا كان Runtime أصلي يعطي موثوقية أعلى. **الخيار الأول للتقييم: Tauri + WebView2** (واجهة VANTARA أصلًا Web):
+
+```text
+VANTARA UI
+→ WebView2
+→ local provider/resolver runtime
+→ local HTTP (بلا CORS، ترويسات كاملة، cookies لكل مصدر)
+→ direct upstream / CDN
+→ native/web media playback
+No VPS. No Home Server.
+```
+
+- نفس العقود والـproviders قدر الإمكان، مع **network/runtime adapter** خاص بالمنصة (كما للـAPK).
+- **Cloudflare على Windows يُقاس فعليًا:** تحقق بشري داخل WebView2 مخصّص لكل مصدر، ملف تعريف/cookies دائم لكل مصدر، وقياس هل الحلقات التالية تعيد استعمال الختم. **لا نفترض النجاح نظريًا.**
+- القرار: إن تفوّق على الـPWA في المقارنة أدناه، يبدأ تنفيذه (المالك حدّد: الأسبوع القادم إن كان أفضل).
+
+### ⓪H.2 المقارنة النهائية (تُملأ بالقياس، لا بالتوقع)
+
+| المقياس | APK | PWA | Windows Desktop |
+|---|---|---|---|
+| Discovery | | | |
+| Playable (AR_READY) | | | |
+| Zero Server | | | |
+| Verification Interruption Rate | | | |
+| Time To First Playable (median / P95) | | | |
+| Host compatibility | | | |
+| Codec compatibility | | | |
+| Self-Inflicted Failure Rate | | | |
+
+---
+
+## ⓪I. Corpus الإلزامي للقياس (من المالك)
+
+- **أنمي:** على الأقل **10 أعمال نادرة/قديمة** قليلة المشاهدين وتصنيفاتها أقل شيوعًا — تُضاف للـcorpus كحالات ثابتة، ولا تكفي المشهورة وحدها.
+- **مسلسلات:** **Shameless** وأمثاله (مسلسلات أجنبية طويلة متعددة المواسم) — لكل موسم وحلقة عيّنة.
+- **هدف النطاق:** فوق **5,000** مسلسل وفيلم شغّالين بسلاسة ما دام المصدر سليمًا، والطموح **7,000**؛ والأنمي كذلك — على **PWA وAPK**.
+- «شغّال» = بوابة ⓪.4 كاملة (لا مجرد ظهور العمل في البحث).
 
 ---
 
@@ -1749,8 +1902,26 @@ The built-in curated rock comes first. Extensions may strengthen it but never ov
 run under the same tests/health, and are auto-demoted when they hurt the experience.
 
 VERIFICATION:
-A Cloudflare check once per source session (≥ 24h / a whole season) is acceptable; per-episode is not Stable.
-PWA cannot reuse a user's cf_clearance from the Worker (IP/UA bound) ⇒ such sources are APK_ONLY on the web.
+A Cloudflare check once per source session (>= 24h / a whole season) is acceptable; per-episode is not Stable.
+PWA classes: BROWSER_REUSABLE / FETCHER_OK / APK_PREFERRED / VERIFICATION_UNSTABLE / UNSUPPORTED.
+Test browser-direct and fetcher independently before classifying. Never assume Cloudflare = impossible on PWA.
+PWA SLO: Verification Interruption Rate <= 1% of Stable Core playback sessions.
+
+INDEPENDENCE:
+A path is independent only if it differs in source, video host, or preferably CDN chain.
+4 server labels backed by the same host = 1 effective path.
+
+FAILOVER EQUIVALENCE:
+Compare duration/timeline before resuming at the same position; apply a learned offset or
+restart at a safe nearby timestamp when versions differ materially.
+
+ROCK CORE GATE:
+Anime >= 4 and Cinema/TV >= 4 independent Arabic Stable providers, plus >= 1 non-Arabic fallback lane each.
+Extensions never count toward it.
+
+PLATFORMS:
+APK, PWA, and Windows Desktop (evaluate Tauri + WebView2 first; measure Cloudflare reuse in WebView2).
+Same rule on all three: if upstream is playable and fits the platform, VANTARA plays it.
 
 RELEASE TARGETS:
 Popular:
