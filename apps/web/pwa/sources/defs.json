@@ -86,7 +86,9 @@
       },
       "probe": {
         "query": "a"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.comicverse",
@@ -259,7 +261,9 @@
       },
       "probe": {
         "query": "solo"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangalink",
@@ -305,7 +309,9 @@
       "config": {},
       "probe": {
         "query": "solo"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangaswat",

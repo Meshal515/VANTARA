@@ -21,6 +21,7 @@ import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, searchState } from '../lib/source-states.js';
+import { reportSource } from '../lib/source-report.js';
 import { matchCriteria, mergeWork, namesOf } from '../lib/cinema-identity.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
@@ -759,7 +760,12 @@ export function createCinema(deps) {
     const h = locator({ key, ...matchCriteria(m, { season }), ready: identityFor(m, season) });
     h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
     if (h.found.fast) h.run.fastPath();
-    h.onHit((hit, info) => h.run.hit(hit, info));
+    h.onHit((hit, info) => {
+      h.run.hit(hit, info);
+      // صحة المصدر من هذا الجهاز: ردّ وطابق، ردّ بلا مطابقة، مهلة، خطأ
+      const outcome = hit.skipped ? 'unavailable' : hit.error ? (STATE.SOURCE_TIMEOUT === searchState({ error: hit.error }) ? 'timeout' : /challenge|cloudflare/i.test(hit.error) ? 'challenge' : 'error') : info?.matched ? 'ok' : 'no_match';
+      reportSource({ section: 'cinema', sourceId: hit.sourceId, stage: 'search', outcome, reason: hit.error, ms: hit.ms });
+    });
     state.works.set(key, h);
     void h.first.then((found) => found.copies.length && senseMovie(m, found.copies));
     // لم يرد أي مصدر: لا نحفظ «لا شيء»، فالفتحة القادمة تبحث من جديد

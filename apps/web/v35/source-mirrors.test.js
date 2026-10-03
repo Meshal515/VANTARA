@@ -8,11 +8,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/extension-engine.js', () => ({
-  default: { series: vi.fn(), chapters: vi.fn() },
+  default: { series: vi.fn(), chapters: vi.fn(), sources: vi.fn(async () => []) },
 }));
 
 import engine from '../lib/extension-engine.js';
-import { detail, failureOf, mirrorFamily } from './works.js';
+import { collapseMirrors, detail, failureOf, mirrorFamily, resetSources } from './works.js';
 
 const pkg = (slug) => `eu.kanade.tachiyomi.extension.ar.${slug}`;
 const edition = (slug, label) => ({ sourceId: pkg(slug), label, manga: { url: '169439', title: 'Solo Leveling' } });
@@ -22,6 +22,9 @@ const work = (editions) => ({ id: 'ext:solo', _work: { key: 'solo', title: 'Solo
 beforeEach(() => {
   engine.series.mockReset();
   engine.chapters.mockReset();
+  engine.sources.mockReset();
+  engine.sources.mockResolvedValue([]);
+  resetSources();
 });
 
 describe('mirror families', () => {
@@ -62,6 +65,26 @@ describe('mirror families', () => {
       { sourceId: pkg('teamx'), label: 'Team X', state: 'SOURCE_ERROR', reason: 'ردّ بخطأ 403' },
       { sourceId: pkg('azora'), label: 'Azora', state: 'SOURCE_TIMEOUT', reason: 'لم يرد في الوقت' },
     ]);
+  });
+});
+
+describe('listings ask one mirror', () => {
+  it('one source per family, Mangalek first', () => {
+    const list = ['teamx', 'mangastarz', 'mangalionz', 'mangalek', 'azora'].map((s) => ({ id: pkg(s), label: s }));
+    expect(collapseMirrors(list).map((s) => s.label)).toEqual(['teamx', 'mangalek', 'azora']);
+    expect(collapseMirrors(list.filter((s) => s.label !== 'mangalek')).map((s) => s.label)).toEqual(['teamx', 'mangastarz', 'azora']);
+  });
+
+  it('details fall back to an installed mirror that was not in the listing', async () => {
+    engine.sources.mockResolvedValue([{ id: pkg('mangalek'), label: 'Mangalek' }, { id: pkg('mangastarz'), label: 'Manga Starz' }]);
+    engine.series.mockImplementation(async (sourceId) => {
+      if (sourceId === pkg('mangalek')) throw new Error('timeout');
+      return { manga: { title: 'Solo Leveling' }, chapters: [ch(1), ch(2)] };
+    });
+    const out = await detail(work([edition('mangalek', 'Mangalek')]));
+    expect(engine.series.mock.calls.map((c) => c[0])).toEqual([pkg('mangalek'), pkg('mangastarz')]);
+    expect(out._chapters).toHaveLength(2);
+    expect(out._failedSources).toEqual([]);
   });
 });
 

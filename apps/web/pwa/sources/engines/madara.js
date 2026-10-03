@@ -17,6 +17,7 @@
 import { q, qa, absAttr, attr, imageOf, ownText, parseHtml, pathOf, resolve, text } from '../dom.js';
 import { parseDate } from '../dates.js';
 import { decryptCryptoJs } from '../crypto.js';
+import { aliasesFromDoc } from '../../../lib/manga-aliases.js';
 
 const COMPLETED = ['completed', 'complete', 'مكتملة', 'مكتمل', 'منتهية', 'منتهي', 'end'];
 const ONGOING = ['ongoing', 'on going', 'updating', 'مستمرة', 'مستمر', 'جارية', 'جاري', 'يصدر'];
@@ -225,6 +226,8 @@ export const madara = {
         description,
         genre: [...new Set([...genres.map((g) => g.name), ...tags].filter(Boolean))].join(', ') || null,
         status: statusOf(statusEls.length ? text(statusEls[statusEls.length - 1]) : ''),
+        // أسماؤه الأخرى (عربي/إنجليزي/روماجي): أساس ربطه بنفس العمل في المصادر الأخرى
+        altNames: aliasesFromDoc(doc, { q, qa, text }),
         initialized: true,
         memo: mangaMemo(path, genres.filter((g) => g.slug)),
       };

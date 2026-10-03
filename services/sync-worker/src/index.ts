@@ -10,6 +10,7 @@
  * تُستدعى دالة المجال للتحقق من المدخل، وتعليق يربط الاثنين.
  */
 
+import { handleSourceReportGet, handleSourceReportPost } from './source-reports.ts';
 import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
 import { handleUpdatesList, handleUpdatesObserve, type UpdatesEnv } from './updates.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
@@ -3094,6 +3095,9 @@ export default {
       if (path === '/v1/privacy/capabilities' && request.method === 'GET') response = json({ recentViewsRevocable: true });
       else if (path.startsWith('/v1/source-latest') && (request.method === 'GET' || request.method === 'POST')) response = await handleSourceLatest(request, env, path, now);
       // Update Engine: الأجهزة مجسّات تبلّغ ما تراه، والخط الزمني ذاكرة VANTARA الثابتة
+      // صحة المصادر من الأجهزة الحقيقية (عدّادات يومية بلا بيانات شخصية)
+      else if (path === '/v1/diag/sources' && request.method === 'POST') response = await handleSourceReportPost(request, env, now);
+      else if (path === '/v1/diag/sources' && request.method === 'GET') response = await handleSourceReportGet(url, env, now);
       else if (path === '/v1/updates/observe' && request.method === 'POST') response = await handleUpdatesObserve(request, env as UpdatesEnv, now);
       else if (path === '/v1/updates' && request.method === 'GET') response = await handleUpdatesList(url, env as UpdatesEnv);
       else if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);

@@ -95,9 +95,15 @@ export function decodeEntities(raw) {
  * الأبجديتين تخمينٌ يدمج أعمالًا مختلفة أكثر مما يجمع المتشابهة، وخطؤه
  * يظهر للقارئ فصولًا من عملٍ آخر — وهذا أسوأ من بطاقتين.
  */
+/**
+ * وسم فريق الترجمة في أول العنوان أو آخره: «(WAN) Blue Lock»، «Hajime No Ippo
+ * (BAKI)». أحرف لاتينية كبيرة قصيرة بين قوسين، في الطرف فقط — اسم الفريق لا العمل.
+ */
+const GROUP_TAG = /^\s*[([]\s*[A-Z]{2,6}\s*[)\]]\s*|\s*[([]\s*[A-Z]{2,6}\s*[)\]]\s*$/g;
+
 export function normalizeTitle(raw) {
 	if (typeof raw !== 'string') return '';
-	const folded = fold(decodeEntities(raw).replace(LANGUAGE_TAG, ' '));
+	const folded = fold(decodeEntities(raw).replace(LANGUAGE_TAG, ' ').replace(GROUP_TAG, ' '));
 	const kept = folded
 		.split(' ')
 		.filter((word) => word && !NOISE.has(word))
@@ -213,6 +219,142 @@ export function createWorkIndex() {
 				thumbnailUrl: manga.thumbnailUrl ?? null,
 				editions: [entry],
 			};
+			works.set(key, work);
+			return { work, isNew: true };
+		},
+		list() {
+			return [...works.values()];
+		},
+	};
+}
+
+// ───────────────────────── الهوية الواحدة (ZERO DUPLICATE / ZERO WRONG MERGE) ─────────────────────────
+
+/**
+ * نطاقات لموقع واحد: نفس قاعدة البيانات ونفس أرقام المنشورات (فُحص حيًّا
+ * 2026-10: mangalik.net وstarzmanga.com وsparkmanga.net وlink-manga.net
+ * وmanga-lionz.org تعيد نفس الأعمال بنفس الأرقام). هي مصدر واحد في الهوية
+ * والطلبات: نسخة واحدة تُسأل، والبقية بدائل.
+ */
+export const MIRROR_FAMILIES = Object.freeze([['mangalek', 'mangastarz', 'mangaspark', 'mangalink', 'mangalionz']]);
+const slugOfSource = (sourceId) => String(sourceId ?? '').split('@')[0].split('.').pop()?.toLowerCase() ?? '';
+export function mirrorFamily(sourceId) {
+	const slug = slugOfSource(sourceId);
+	return MIRROR_FAMILIES.find((f) => f.includes(slug))?.[0] ?? String(sourceId);
+}
+
+/** أبجدية الكلمة: لاتينية (وأرقام) أو غيرها (عربي…). */
+const scriptOf = (word) => (/[a-z0-9]/.test(word) ? 'latin' : 'other');
+
+/** كلمات المفتاح المميِّزة (بلا حشو): «the magic emperor» ← [magic, emperor]. */
+const keyWords = (key) => meaningful(normalizeTitle(key));
+
+/**
+ * هل اسم البطاقة `key` من أسماء عملٍ آخر البديلة؟ يرجع الدليل أو null.
+ *
+ * بعض المصادر تكتب الأسماء البديلة نصًّا واحدًا بلا فاصل («امبراطور السحر
+ * الامبراطور الشيطانى ديمونك امبرور Demonic Emperor»)، فلا يكفي التساوي:
+ * نقبل المفتاح متتاليةً كاملة داخل الاسم البديل — بشرط كلمتين مميِّزتين
+ * فأكثر و٨ أحرف، فكلمة واحدة شائعة («Magic») لا تدمج شيئًا أبدًا. ومفتاح بكلمة
+ * واحدة لا يُقبل إلا مساويًا لاسم بديل كامل.
+ */
+export function aliasEvidence(key, altNames) {
+	return evidenceIn(keyWords(key), (altNames ?? []).map((raw) => ({ raw, words: meaningful(normalizeTitle(raw)) })));
+}
+
+/** نفس `aliasEvidence` على أسماء مطبَّعة مسبقًا (للفهرس: تُطبَّع مرة لكل عمل). */
+function evidenceIn(words, prepared) {
+	if (!words.length) return null;
+	const joined = words.join(' ');
+	const script = scriptOf(words[0]);
+	for (const { raw, words: alt } of prepared) {
+		if (!alt.length) continue;
+		if (alt.join(' ') === joined) return `= «${raw}»`;
+		if (words.length < 2 || joined.replace(/\s/g, '').length < 8) continue;
+		// داخل نص أطول: يُقبل فقط إذا انتهى عند حدّ اسم واضح — أول النص أو آخره، أو
+		// تغيّر الأبجدية (عربي↔لاتيني). «Attack on Titan» داخل «Attack on Titan
+		// Requiem» يكمل اسمًا آخر بنفس الأبجدية: ليس دليلًا (عمل آخر).
+		for (let i = 0; i + words.length <= alt.length; i++) {
+			if (!words.every((w, j) => alt[i + j] === w)) continue;
+			const before = alt[i - 1];
+			const after = alt[i + words.length];
+			if ((before === undefined || scriptOf(before) !== script) && (after === undefined || scriptOf(after) !== script)) return `⊂ «${raw}»`;
+		}
+	}
+	return null;
+}
+
+/**
+ * فهرس الأعمال بالهوية الواحدة: نفس `createWorkIndex` + الأسماء البديلة.
+ *
+ * `aliases`: Map<مفتاح العمل، أسماؤه البديلة> (من صفحات الأعمال؛ تُحفظ وتُشارك).
+ * بطاقة اسمها من أسماء عمل آخر البديلة تنضم إليه — إلا إذا كان اسمها من أسماء
+ * أكثر من عمل (غامض): حينها تبقى منفصلة وتُسجَّل في `rejected`. دمج عملين
+ * مختلفين أسوأ من بطاقتين.
+ */
+export function canonicalIndex({ aliases = new Map() } = {}) {
+	const works = new Map();
+	const resolved = new Map();
+	const rejected = [];
+	// فهرس كلمات: لكل كلمة، الأعمال التي تحملها في أسمائها البديلة — فلا يُقارن
+	// اسم جديد إلا بمن يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
+	const prepared = new Map();
+	const byWord = new Map();
+	for (const [owner, names] of aliases) {
+		const list = (names ?? []).map((raw) => ({ raw, words: meaningful(normalizeTitle(raw)) }));
+		prepared.set(owner, list);
+		for (const { words } of list) for (const w of words) {
+			if (!byWord.has(w)) byWord.set(w, new Set());
+			byWord.get(w).add(owner);
+		}
+	}
+	const canonicalOf = (key) => {
+		if (resolved.has(key)) return resolved.get(key);
+		if (aliases.has(key)) {
+			resolved.set(key, key);
+			return key;
+		}
+		const words = keyWords(key);
+		let candidates = null;
+		for (const w of words) {
+			const set = byWord.get(w);
+			if (!set) {
+				candidates = null;
+				break;
+			}
+			candidates = candidates ? new Set([...candidates].filter((o) => set.has(o))) : new Set(set);
+		}
+		const hits = [...(candidates ?? [])].filter((owner) => owner !== key && evidenceIn(words, prepared.get(owner)));
+		let target = key;
+		if (hits.length === 1) target = hits[0];
+		else if (hits.length > 1) rejected.push(`«${key}» ← ${hits.map((u) => `«${u}»`).join(' / ')}`);
+		resolved.set(key, target);
+		return target;
+	};
+	return {
+		rejected,
+		/** المفتاح القانوني لعنوان (لربط مراجع قديمة بالعمل الذي صار جزءًا منه). */
+		canonicalOf: (title) => {
+			const own = normalizeTitle(title);
+			return own ? canonicalOf(own) : '';
+		},
+		add(entry) {
+			const manga = entry?.manga;
+			const own = normalizeTitle(manga?.title);
+			if (!own) return null;
+			const key = canonicalOf(own);
+			const found = works.get(key);
+			if (found) {
+				found.editions.push(entry);
+				// اسم العمل الأصلي يظهر أيًّا كان المصدر الذي وصل أولًا؛ والبقية أسماء بديلة
+				if (own === key && normalizeTitle(found.title) !== key) {
+					if (!found.aliases.includes(found.title)) found.aliases.push(found.title);
+					found.title = manga.title;
+				} else if (own !== key && !found.aliases.includes(manga.title)) found.aliases.push(manga.title);
+				found.thumbnailUrl ??= manga.thumbnailUrl ?? null;
+				return { work: found, isNew: false };
+			}
+			const work = { key, title: manga.title, thumbnailUrl: manga.thumbnailUrl ?? null, editions: [entry], aliases: own === key ? [] : [manga.title] };
 			works.set(key, work);
 			return { work, isNew: true };
 		},
