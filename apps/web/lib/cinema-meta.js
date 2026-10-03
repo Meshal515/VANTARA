@@ -25,6 +25,11 @@ const year = (m) => {
   const y = Number.parseInt(String(m.year ?? m.releaseInfo ?? ''), 10);
   return Number.isFinite(y) ? y : null;
 };
+/** نهاية عرض المسلسل من «2011–2021»؛ null لمسلسل مستمر أو فيلم. */
+const endYear = (m) => {
+  const y = /^\s*\d{4}\s*[–-]\s*(\d{4})/.exec(String(m.releaseInfo ?? m.year ?? ''));
+  return y ? Number(y[1]) : null;
+};
 
 /** مواسم مرتبة من `videos` (الموسم 0 = إضافات، في الآخر). */
 export function seasonsOf(videos = []) {
@@ -39,7 +44,8 @@ export function seasonsOf(videos = []) {
       title: v.name || v.title || null,
       overview: v.overview || v.description || null,
       thumb: v.thumbnail || null,
-      released: v.released ? Date.parse(v.released) || null : null,
+      // بعض أعمال Cinemeta (Besstydniki) تعطي firstAired بدل released
+      released: v.released || v.firstAired ? Date.parse(v.released || v.firstAired) || null : null,
     });
   }
   return [...map.entries()]
@@ -59,6 +65,7 @@ export function normalize(m) {
     background: m.background || null,
     logo: m.logo || null,
     year: year(m),
+    endYear: m.type === 'series' ? endYear(m) : null,
     rating: Number.isFinite(rating) && rating > 0 ? rating : null,
     genres: m.genres ?? m.genre ?? [],
     description: m.description || null,

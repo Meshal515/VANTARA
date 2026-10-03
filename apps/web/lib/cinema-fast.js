@@ -102,7 +102,10 @@ export function createLocator({ searchStream, queries, match, near = () => [], m
    *   - `onHit(fn)`: fn(hit, {matched, at}) لكل مصدر يرد (للقياس)
    *   - `cancel()`
    */
-  return function locate({ key, title, ...criteria }) {
+  return function locate({ key, ready = null, ...input }) {
+    // `ready`: معايير الهوية التي تحتاج شبكة (إخوة الاسم وسنواتهم)؛ البحث ينتظرها
+    // قبل أول استعلام، والمسار السريع من الذاكرة لا ينتظر شيئًا.
+    const criteria = { ...input };
     const started = clock();
     const found = { copies: [], near: [], total: 0, done: false, fast: false, answered: 0, sources: {} };
     const copyListeners = new Set();
@@ -140,7 +143,7 @@ export function createLocator({ searchStream, queries, match, near = () => [], m
     const finish = () => {
       if (found.done) return;
       found.done = true;
-      found.near = near([...seen.values()], { title, ...criteria });
+      found.near = near([...seen.values()], criteria);
       if (!firstSent) {
         firstSent = true;
         resolveFirst(found);
@@ -149,7 +152,8 @@ export function createLocator({ searchStream, queries, match, near = () => [], m
     };
 
     void (async () => {
-      const list = queries(title);
+      if (ready) Object.assign(criteria, await Promise.resolve(ready).catch(() => null));
+      const list = queries(criteria.title, criteria);
       for (let attempt = 0; attempt < 2 && !cancelled; attempt++) {
         let anyAnswer = false;
         for (const query of list) {
@@ -170,7 +174,7 @@ export function createLocator({ searchStream, queries, match, near = () => [], m
             }
             for (const c of hit.items ?? []) seen.set(copyKey(c), c);
             found.total = seen.size;
-            const matched = add(match(hit.items ?? [], { title, ...criteria }));
+            const matched = add(match(hit.items ?? [], criteria));
             if (matched.length) {
               matchedHere = true;
               s.matched += matched.length;
@@ -192,6 +196,9 @@ export function createLocator({ searchStream, queries, match, near = () => [], m
 
     return {
       found,
+      criteria,
+      /** كل ما ردّت به المصادر (المطابق وغيره) لتتبّع المطابقة. */
+      candidates: () => [...seen.values()],
       first,
       done,
       onCopies(fn) {

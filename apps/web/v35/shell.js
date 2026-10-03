@@ -1342,11 +1342,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
+        // مصدرٌ ردّ بلا فصول ليس مصدرًا صامتًا: نقول ما حدث فعلًا ولكل مصدر سببه
+        const failed = full._failedSources ?? [];
         emptyState(q('chapterPanel'), {
           icon: 'offline',
           error: true,
           title: 'تعذّر جلب الفصول',
-          text: 'المصادر لم تردّ الآن.',
+          text: failed.length
+            ? failed.map((f) => `${displayName(f.label, f.sourceId)}: ${f.reason ?? 'لم يرد في الوقت'}`).join(' · ')
+            : 'ردّت المصادر، ولا فصول فيها لهذا العمل الآن.',
           action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
         });
         setReadCta(null);
@@ -2027,7 +2031,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         b.innerHTML = glyph('alert');
         b.querySelector('.icon').style.color = 'var(--warning)';
         b.append(el('span', null, displayName(f.label, f.sourceId)));
-        const c = el('span', null, 'ما ردّ الآن');
+        const c = el('span', null, f.reason ?? 'لم يرد في الوقت');
         c.style.cssText = 'margin-inline-start:auto;color:var(--text-3);font-size:var(--fs-meta)';
         b.append(c);
         b.style.opacity = '.7';

@@ -441,16 +441,62 @@ export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldCont
   return recentWorks(entries);
 }
 
+/**
+ * نطاقات لموقع واحد: نفس قاعدة البيانات ونفس أرقام المنشورات (فُحص 2026-10:
+ * mangalik.net وsparkmanga.net وlink-manga.net وmanga-lionz.org تعيد بحثًا
+ * وفصولًا متطابقة). العمل يُسأل من أولها، والبقية بديل إن لم يرد، فلا يُضرب
+ * الخادم نفسه أربع مرات ولا تُعرض أربع نسخ متطابقة.
+ */
+const MIRROR_FAMILIES = [['mangalek', 'mangaspark', 'mangalink', 'mangalionz']];
+const slugOf = (sourceId) => String(sourceId ?? '').split('@')[0].split('.').pop()?.toLowerCase() ?? '';
+export function mirrorFamily(sourceId) {
+  const slug = slugOf(sourceId);
+  return MIRROR_FAMILIES.find((f) => f.includes(slug))?.[0] ?? String(sourceId);
+}
+
+/** خطأ المحرك → حالة التشخيص وسبب قصير يُعرض بدل «ما ردّ». */
+export function failureOf(error) {
+  const message = String(error?.message ?? error ?? '').trim();
+  const timeout = /timeout|timed out|لم يرد|مهلة/i.test(message);
+  const status = /\b(4\d\d|5\d\d)\b/.exec(message)?.[1] ?? null;
+  return {
+    state: timeout ? 'SOURCE_TIMEOUT' : 'SOURCE_ERROR',
+    reason: timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
+  };
+}
+
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
 export async function detail(v35work) {
   const work = v35work._work;
-  const [primary] = work.editions;
-  const { ok } = await gather(work.editions, async (edition) => {
-    if (edition === primary) {
+  // نسخة واحدة لكل موقع (المرايا عائلة واحدة)، وبقية العائلة بدائل بالترتيب
+  const families = new Map();
+  for (const e of work.editions) {
+    const f = mirrorFamily(e.sourceId);
+    if (!families.has(f)) families.set(f, []);
+    families.get(f).push(e);
+  }
+  const heads = [...families.values()].map((list) => list[0]);
+  const [primary] = heads;
+  const failures = new Map();
+  const ask = async (edition, withDetail) => {
+    if (withDetail) {
       const out = await engine.series(edition.sourceId, edition.manga);
       return { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters, detail: out.manga };
     }
     return { ...edition, chapters: await engine.chapters(edition.sourceId, edition.manga) };
+  };
+  const { ok } = await gather(heads, async (head) => {
+    const list = families.get(mirrorFamily(head.sourceId));
+    let last;
+    for (const edition of list) {
+      try {
+        return await ask(edition, head === primary);
+      } catch (error) {
+        last = error;
+        failures.set(edition.sourceId, failureOf(error));
+      }
+    }
+    throw last;
   });
   const values = ok.map((r) => r.value);
   const main = values.find((v) => v.detail) ?? null;
@@ -470,7 +516,10 @@ export async function detail(v35work) {
     _editions: values,
     _sources: sourceList(values),
     // المصدر الذي لم يردّ يُقال إنه لم يردّ، لا يختفي كأنه غير موجود
-    _failedSources: work.editions.filter((e) => !answered.has(e.sourceId) && !isFiller(e.sourceId)).map((e) => ({ sourceId: e.sourceId, label: e.label })),
+    // ومعه سببه: «لم يرد في الوقت» غير «ردّ بخطأ 403» غير «العمل غير موجود فيه»
+    _failedSources: heads
+      .filter((e) => !answered.has(e.sourceId) && !values.some((v) => mirrorFamily(v.sourceId) === mirrorFamily(e.sourceId)) && !isFiller(e.sourceId))
+      .map((e) => ({ sourceId: e.sourceId, label: e.label, ...(failures.get(e.sourceId) ?? { state: 'SOURCE_ERROR', reason: 'ردّ بخطأ' }) })),
   };
 }
 
