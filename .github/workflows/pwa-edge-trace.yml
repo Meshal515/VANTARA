@@ -19,9 +19,11 @@ permissions:
 jobs:
   trace:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
@@ -45,3 +47,11 @@ jobs:
           node tools/pwa/trace-work.mjs arabseed "spider-man across the spider-verse" || true
           node tools/pwa/trace-work.mjs shahiid "attack on titan" 1 || true
           node tools/pwa/trace-identity.mjs series tt1586680 1 1 || true
+      # قبل/بعد المطابقة والتشغيل على قائمة ثابتة، من العنوان الثابت نفسه
+      - name: Before/after benchmark (identity + playback)
+        if: always()
+        run: |
+          node tools/pwa/bench-identity.mjs --base=origin/main > bench.md 2> bench.log || true
+          cat bench.log
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+          cat bench.md
