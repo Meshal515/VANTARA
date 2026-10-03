@@ -54,6 +54,49 @@ describe('allowlist and SSRF guard', () => {
 });
 
 describe('/v1/fetch', () => {
+  it('accepts verified resolver aliases only within their own host family', async () => {
+    for (const [from, to] of [['share4max.com', 'share4max.net'], ['uqload.is', 'uqload.vc'], ['vidmoly.net', 'vidmoly.biz'], ['vidmoly.net', 'vmpx.online'], ['vmpx.online', 'vidmoly.net'], ['lulustream.com', 'lolololu.website']]) {
+      const { impl } = fakeUpstream({
+        [`https://${from}/embed/1`]: () => new Response(null, { status: 302, headers: { location: `https://${to}/embed/1` } }),
+        [`https://${to}/embed/1`]: () => new Response('verified player'),
+      });
+      const res = await createHandler(impl)(fetchReq({ url: `https://${from}/embed/1` }, await bearer()), env);
+      expect(res.status, `${from} -> ${to}`).toBe(200);
+      expect(res.headers.get('x-vf-url')).toBe(`https://${to}/embed/1`);
+    }
+  });
+  it('an unrelated allowed source cannot redirect into a newly trusted resolver alias', async () => {
+    const { impl, seen } = fakeUpstream({
+      'https://m.myseed.pics/a': () => new Response(null, { status: 302, headers: { location: 'https://uqload.vc/embed/1' } }),
+      'https://uqload.vc/embed/1': () => new Response('must not be fetched'),
+    });
+    const res = await createHandler(impl)(fetchReq({ url: 'https://m.myseed.pics/a' }, await bearer()), env);
+    expect(res.status).toBe(403);
+    expect(seen).toHaveLength(1);
+  });
+  it('a trusted new alias cannot redirect outward into another resolver family', async () => {
+    const { impl, seen } = fakeUpstream({
+      'https://uqload.vc/embed/1': () => new Response(null, { status: 302, headers: { location: 'https://share4max.com/iframe/1' } }),
+      'https://share4max.com/iframe/1': () => new Response('unrelated family'),
+    });
+    const res = await createHandler(impl)(fetchReq({ url: 'https://uqload.vc/embed/1' }, await bearer()), env);
+    expect(res.status).toBe(403);
+    expect(seen).toHaveLength(1);
+  });
+  it.each([
+    ['uqload.is', 'uqload.vc', 'share4max.com'],
+    ['vidmoly.biz', 'vmpx.online', 'mixdrop.top'],
+  ])('rejects %s → %s → %s at the actual second hop', async (start, alias, unrelated) => {
+    const { impl, seen } = fakeUpstream({
+      [`https://${start}/embed/1`]: () => new Response(null, { status: 302, headers: { location: `https://${alias}/embed/1` } }),
+      [`https://${alias}/embed/1`]: () => new Response(null, { status: 302, headers: { location: `https://${unrelated}/embed/1` } }),
+      [`https://${unrelated}/embed/1`]: () => new Response('must not be fetched'),
+    });
+    const res = await createHandler(impl)(fetchReq({ url: `https://${start}/embed/1` }, await bearer()), env);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: 'foreign_redirect', detail: unrelated });
+    expect(seen.map((s) => s.url)).toEqual([`https://${start}/embed/1`, `https://${alias}/embed/1`]);
+  });
   it('rejects a request without a valid sign-in token', async () => {
     const handle = createHandler(fakeUpstream({}).impl);
     expect((await handle(fetchReq({ url: 'https://3asq.online/' }), env)).status).toBe(401);

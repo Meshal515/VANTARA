@@ -12,6 +12,8 @@
 
 export interface AllowList {
   hosts: readonly string[];
+  /** Verified new aliases accept redirects only from their own resolver family. */
+  redirectAliases?: Readonly<Record<string, readonly string[]>>;
   /** أي مضيف عام (للوسائط فقط، بعد حراسة SSRF). */
   any?: boolean;
 }
@@ -53,4 +55,13 @@ export function hostAllowed(host: string, list: AllowList): boolean {
 export function targetAllowed(raw: unknown, list: AllowList): URL | null {
   const url = parseTarget(raw);
   return url && hostAllowed(url.hostname, list) ? url : null;
+}
+
+export function redirectAllowed(from: string, to: string, list: AllowList): boolean {
+  if (!hostAllowed(to, list)) return false;
+  for (const [alias, family] of Object.entries(list.redirectAliases ?? {})) {
+    if (hostAllowed(from, { hosts: [alias] }) && !hostAllowed(to, { hosts: family })) return false;
+    if (hostAllowed(to, { hosts: [alias] }) && !hostAllowed(from, { hosts: family })) return false;
+  }
+  return true;
 }

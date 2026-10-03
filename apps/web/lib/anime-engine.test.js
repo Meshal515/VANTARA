@@ -97,8 +97,8 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
     globalThis.Capacitor = { Plugins: { AnimeEngine: {
       configure: async () => ({ ok: true, errors: [] }),
       addListener: async (name, fn) => {
-        listeners[name] = fn;
-        return { remove() {} };
+        (listeners[name] ??= new Set()).add(fn);
+        return { remove() { listeners[name].delete(fn); } };
       },
       searchStream: async ({ query, searchId }) => {
         asked.push(query);
@@ -106,15 +106,44 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
         let last = 0;
         for (const h of hits) {
           last = Math.max(last, h.after);
-          setTimeout(() => listeners.searchHit?.({ searchId, sourceId: h.sourceId, items: h.items, ms: h.after }), h.after);
+          setTimeout(() => { for (const fn of listeners.searchHit ?? []) fn({ searchId, sourceId: h.sourceId, items: h.items, ms: h.after }); }, h.after);
         }
-        setTimeout(() => listeners.searchDone?.({ searchId }), last + 1);
+        setTimeout(() => { for (const fn of listeners.searchDone ?? []) fn({ searchId }); }, last + 1);
         return { searchId };
       },
     } } };
     return { asked };
   }
   const copy = (sourceId, title) => ({ sourceId, url: `/${sourceId}/${title}`, title });
+
+  it('ReZero romaji matches immediately while the English query is stalled', async () => {
+    vi.useFakeTimers();
+    try {
+      const { configure: cfg, findWorkStream } = await import('./anime-engine.js');
+      const english = 'Re:ZERO -Starting Life in Another World- Season 4';
+      const romaji = 'Re:Zero kara Hajimeru Isekai Seikatsu 4th Season';
+      fakeEngine({ [english]: [{ sourceId: 'slow', items: [], after: 12000 }], [romaji]: [{ sourceId: 'shahiid', items: [copy('shahiid', romaji)], after: 3 }] });
+      await cfg({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+      let result;
+      void findWorkStream([english, romaji], () => {}, { year: 2026 }).then((w) => { result = w; });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(result?.copies[0].sourceId).toBe('shahiid');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('skipped or failed sources cannot be reported as proof the anime is absent', async () => {
+    const { configure: cfg, findWorkStream } = await import('./anime-engine.js');
+    const events = new Map();
+    globalThis.Capacitor = { Plugins: { AnimeEngine: {
+      configure: async () => ({ ok: true }), addListener: async (e, fn) => { events.set(e, fn); return { remove() {} }; },
+      searchStream: async ({ searchId }) => { queueMicrotask(() => {
+        events.get('searchHit')({ searchId, sourceId: 'shahiid', items: [], skipped: true, error: 'لم يرد خلال 12 ثانية' });
+        events.get('searchDone')({ searchId });
+      }); return { searchId }; },
+    } } };
+    await cfg({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+    await expect(findWorkStream(['Re:Zero'])).rejects.toThrow('تعذّر');
+  });
 
   it('resolves on the first matching source and reports later copies', async () => {
     const { configure: cfg, findWorkStream } = await import('./anime-engine.js');
@@ -130,14 +159,14 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
     expect((await later).copies.map((c) => c.sourceId)).toEqual(['wit', 'ok']);
   });
 
-  it('asks the next title only when the first matched nothing', async () => {
+  it('searches the two leading aliases together without weakening title matching', async () => {
     const { configure: cfg, findWorkStream } = await import('./anime-engine.js');
     const { asked } = fakeEngine({ 'Shingeki no Kyojin': [{ sourceId: 'wit', items: [copy('wit', 'Attack on Titan')], after: 2 }], 'Attack on Titan': [{ sourceId: 'wit', items: [copy('wit', 'Attack on Titan')], after: 2 }] });
     await cfg({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
     const w = await findWorkStream(['Shingeki no Kyojin', 'Attack on Titan']);
     // «Attack on Titan» يطابق العنوان الثاني من نتائج الاستعلام الأول نفسه
     expect(w.title).toBe('Attack on Titan');
-    expect(asked).toEqual(['Shingeki no Kyojin']);
+    expect(asked).toEqual(['Shingeki no Kyojin', 'Attack on Titan']);
   });
 
   it('refuses a weak match and returns null when nothing matches', async () => {

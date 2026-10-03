@@ -16,7 +16,7 @@
 
 import { verifyIdentityToken } from '@vantara/domain';
 import allowJson from '../../../apps/web/pwa/sources/allow.json';
-import { hostAllowed, parseTarget, targetAllowed, type AllowList } from './allow.ts';
+import { hostAllowed, parseTarget, targetAllowed, redirectAllowed, type AllowList } from './allow.ts';
 import { mintGrant, verifyGrant } from './grant.ts';
 import { isPlaylist, rewritePlaylist } from './hls.ts';
 
@@ -27,7 +27,7 @@ export interface Env {
 
 /** ترويسات من المصدر تمرّ للعميل باسم x-vf-h-<الاسم>. */
 const PASSED_HEADERS = ['x-videa-xs'];
-const ALLOW: AllowList = { hosts: (allowJson as { hosts: string[] }).hosts };
+const ALLOW: AllowList = allowJson;
 
 /** متصفح جوال حقيقي: بعض المواقع ترفض وكيلًا لا يشبه متصفحًا. */
 export const USER_AGENT =
@@ -159,6 +159,7 @@ function mergeCookies(base: string | undefined, add: string[]): string | undefin
  */
 export async function upstream(target: URL, init: UpstreamInit, list: AllowList, fetchImpl: typeof fetch = fetch) {
   let url = target;
+  let previousHost = target.hostname;
   let method = init.method;
   let body = init.body;
   let cookies = init.cookies;
@@ -167,6 +168,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
     // كل قفزة تمرّ بحراسة SSRF (لا IP ولا localhost) حتى لو كانت القائمة «أي مضيف»
     if (!parseTarget(url.toString())) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
     if (!list.any && !hostAllowed(url.hostname, list)) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
+    if (hop > 0 && !list.any && !redirectAllowed(previousHost, url.hostname, list)) throw new FetchFailure('foreign_redirect', url.hostname);
     const headers = new Headers(init.headers);
     if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
     if (!headers.has('accept-language')) headers.set('accept-language', 'ar,en;q=0.8');
@@ -203,6 +205,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
         method = 'GET';
         body = undefined;
       }
+      previousHost = url.hostname;
       url = next;
       continue;
     }

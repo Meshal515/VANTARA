@@ -89,7 +89,7 @@ class EmbedResolver(
             host.endsWith("mega.nz") || host.endsWith("mega.co.nz") -> emptyList()
             host.endsWith("drive.google.com") || host.endsWith("docs.google.com") ->
                 listOfNotNull(GoogleDrive.stream(url, userAgent()))
-            (host.endsWith("share4max.com") || host.contains("megamax") || host.contains("megatuktuk")) && depth == 0 -> fallback(url, referer) { megamax(url, referer, onStreams) }
+            (host.endsWith("share4max.com") || host.endsWith("share4max.net") || host.contains("megamax") || host.contains("megatuktuk")) && depth == 0 -> fallback(url, referer) { megamax(url, referer, onStreams) }
             host.endsWith("videa.hu") -> fallback(url, referer) { videa(url, referer) }
             host.contains("yonaplay") && depth == 0 -> fallback(url, referer) { yonaplay(url, referer) }
             host.endsWith("vk.com") || host.endsWith("vkvideo.ru") || host.endsWith("vk.ru") ->
@@ -103,7 +103,7 @@ class EmbedResolver(
         val u = url.toHttpUrlOrNull() ?: return null
         val mirror = Mirrors.of(u.host) ?: return null
         val target = u.newBuilder().host(mirror).build().toString()
-        val page = try { fetch(target, url) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        val page = try { fetch(target, url) } catch (e: CancellationException) { throw e } catch (e: UpstreamUnavailable) { if (e.terminal) throw e else null } catch (_: Exception) { null }
         val found = page?.takeIf { it.ok }?.let { Generic.streams(it.body, it.url) }.orEmpty()
         if (found.isEmpty()) {
             Mirrors.forget(u.host)
@@ -118,6 +118,7 @@ class EmbedResolver(
         var failure: Exception? = null
         val streams = try { extract() }
         catch (e: CancellationException) { throw e }
+        catch (e: UpstreamUnavailable) { throw e }
         catch (e: Exception) { failure = e; emptyList() }
         if (streams.isNotEmpty()) return streams
         val captured = sniff(url, referer)
@@ -126,7 +127,7 @@ class EmbedResolver(
     }
 
     private suspend fun generic(url: String, referer: String?, depth: Int = 0): List<Stream> {
-        val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        val page = try { fetch(url, referer) } catch (e: CancellationException) { throw e } catch (e: UpstreamUnavailable) { throw e } catch (_: Exception) { null }
         if (page != null && page.ok) {
             val found = Generic.streams(page.body, page.url)
             if (found.isNotEmpty()) {
@@ -137,7 +138,7 @@ class EmbedResolver(
             if (depth == 0) {
                 val inner = Generic.iframe(page.body, page.url)
                 if (inner != null && inner != page.url) {
-                    val nested = try { resolve(inner, page.url, depth + 1) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+                    val nested = try { resolve(inner, page.url, depth + 1) } catch (e: CancellationException) { throw e } catch (e: UpstreamUnavailable) { throw e } catch (_: Exception) { emptyList() }
                     if (nested.isNotEmpty()) return nested
                 }
             }
@@ -269,6 +270,8 @@ class EmbedResolver(
         }
     }
 
+    private class UpstreamUnavailable(message: String, val terminal: Boolean) : java.io.IOException(message)
+
     private class Page(val url: String, val body: String, val ok: Boolean)
 
     private suspend fun fetch(url: String, referer: String?): Page {
@@ -276,7 +279,18 @@ class EmbedResolver(
             referer?.let { add("Referer", it) }
             userAgent()?.let { add("User-Agent", it) }
         }.build()
-        return client.newCall(GET(url, headers)).await().use { r -> Page(r.request.url.toString(), r.body.string(), r.isSuccessful) }
+        return client.newCall(GET(url, headers)).await().use { r ->
+            val body = r.body.string()
+            val doc = Jsoup.parse(body)
+            doc.select("script, style").remove()
+            val visible = doc.text()
+            val removed = Regex("""(?i)^File was deleted$|File is no longer available as it expired or has been deleted\.|We can't find the video you are looking for\.|Video not found""").containsMatchIn(visible)
+            if (removed || r.code == 404 || r.code == 410) throw UpstreamUnavailable(
+                "${if (removed) "UPSTREAM_REMOVED" else "UPSTREAM_HTTP_${r.code}"}: ${r.request.url.host}",
+                terminal = removed || r.code == 410,
+            )
+            Page(r.request.url.toString(), body, r.isSuccessful)
+        }
     }
 
     private fun host(url: String) = url.toHttpUrlOrNull()?.host?.removePrefix("www.").orEmpty()

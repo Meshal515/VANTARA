@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
  * وعناوين IPv6 من DoH لا تُعاد إلا إن كان للجوال مسار IPv6 فعلي: جوال بلا IPv6
  * يفشل عليها فورًا بـENETUNREACH (رأيناه على جوال حقيقي)، وOkHttp يبدأ بها.
  *
- * عميل DoH مستقل تمامًا (عناوين 1.1.1.1/8.8.8.8 ثابتة، بلا [eu.kanade.tachiyomi.network.HostRouting])
+ * عميل DoH مستقل تمامًا (عناوين IPv4/IPv6 ثابتة، بلا [eu.kanade.tachiyomi.network.HostRouting])
  * حتى لا يستدعي نفسه.
  */
 class AnimeDns(
@@ -44,8 +44,8 @@ class AnimeDns(
 
     private val resolvers: List<Pair<String, Dns>> by lazy {
         listOf(
-            "Cloudflare" to doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1"),
-            "Google" to doh("https://dns.google/dns-query", "8.8.8.8", "8.8.4.4"),
+            "Cloudflare" to doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"),
+            "Google" to doh("https://dns.google/dns-query", "8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"),
         )
     }
 
@@ -54,7 +54,7 @@ class AnimeDns(
             .client(bootstrap)
             .url(url.toHttpUrl())
             // عناوين حرفية: لا بحث DNS لحل خادم الـDNS نفسه
-            .bootstrapDnsHosts(ips.map { InetAddress.getByName(it) })
+            .bootstrapDnsHosts(usable(ips.map { InetAddress.getByName(it) }))
             .build()
 
     private class Cached(val addresses: List<InetAddress>, val until: Long)

@@ -191,12 +191,13 @@ class PlayerModelTest {
     @Test fun `unreported candidates are adopted as ready routes`() {
         val p = prepared()
         p.adopt("s1", listOf(cand("a1", "vid.x", 720), cand("a2", "vid.x", 480)))
-        val r = p.routes().single()
-        assertEquals(RouteState.READY, r.state)
-        assertEquals(2, r.candidates.size)
-        assertEquals(720, r.quality)
+        val routes = p.routes()
+        assertEquals(2, routes.size)
+        assertTrue(routes.all { it.state == RouteState.READY })
+        assertEquals(setOf(720, 480), routes.map { it.quality }.toSet())
+        assertTrue(routes.all { it.candidates.size == 1 })
         p.adopt("s1", listOf(cand("a1", "vid.x", 720)))
-        assertEquals(1, p.routes().size)
+        assertEquals(2, p.routes().size)
     }
 
     @Test fun `sheet groups by quality with unavailable last`() {

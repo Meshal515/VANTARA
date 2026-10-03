@@ -107,6 +107,7 @@ export function createAnime(deps) {
     work: null,
     workFor: null,
     workPending: null,
+    workError: false,
     playing: null,
     newestFirst: false,
     malTitles: {},
@@ -945,6 +946,7 @@ export function createAnime(deps) {
     // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
     if (state.workFor === m.id && state.workPending) return state.workPending;
     state.work = null;
+    state.workError = false;
     state.workFor = m.id;
     const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
     const current = () => token === state.detailToken && state.workFor === m.id;
@@ -971,7 +973,7 @@ export function createAnime(deps) {
         else paintSources(m, 'none');
         return work;
       } catch {
-        if (current()) paintSources(m, 'error');
+        if (current()) { state.workError = true; paintSources(m, 'error'); }
         return null;
       } finally {
         if (state.workPending === pending) state.workPending = null;
@@ -1227,8 +1229,7 @@ export function createAnime(deps) {
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
-    // `touched`: الشخص اختار بنفسه (فلتر/سيرفر) فلا نبدأ نيابة عنه؛ وإلا أول سيرفر جاهز يبدأ فورًا
-    const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false, auto: false };
+    const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
     let paintQueued = false;
     let off = [];
 
@@ -1334,26 +1335,17 @@ export function createAnime(deps) {
         }
       };
 
-      // أول سيرفر جاهز (مفحوص) يبدأ وحده: لا شاشة انتظار ولا ضغطة — والبقية بدائل
-      // خلفه في المشغّل. السيرفر الذي اشتغل لك آخر مرة مرتّب أولًا في التجهيز.
-      const autoStart = () => {
-        if (sheet.auto || sheet.touched || sheet.launched || sheet.busy || !sheet.session) return;
-        if (!sheet.routes.some((r) => r.state === 'READY' && r.probed !== false)) return;
-        sheet.auto = true;
-        void bestBtn.onclick?.();
-      };
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
-        autoStart();
         paintBest();
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
-        if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
+        if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.searchError ? 'تعذّر البحث في المصادر — أعد المحاولة' : sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
         else if (!sheet.done && ready) status.textContent = `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} · البقية تصل بالخلفية`;
         else if (!sheet.done) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
         else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
-        if (sheet.work === false) status.querySelector('i')?.remove();
+        if (sheet.work === false || sheet.searchError) status.querySelector('i')?.remove();
         const sections = [];
         for (const [name, routes] of shownGroups()) {
           let group = groupNodes.get(name);
@@ -1462,7 +1454,8 @@ export function createAnime(deps) {
         const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
         if (sheet.closed) return;
         if (!work) {
-          sheet.work = false;
+          sheet.searchError = state.workFor === m.id && state.workError;
+          sheet.work = sheet.searchError ? null : false;
           sheet.done = true;
           paint();
           return;

@@ -4,7 +4,54 @@
  * («Törölt videó!»، Dailymotion DM005) بدل «فارغ».
  */
 import { describe, expect, it } from 'vitest';
-import { dailymotionId, dailymotionStreams, rc4, videaSources, videaToken } from './hosts.js';
+import { createHostResolver, dailymotionId, dailymotionStreams, rc4, videaSources, videaToken } from './hosts.js';
+import { useLinkedom } from '../../../../tools/pwa/live-fetcher.mjs';
+useLinkedom();
+
+describe('upstream removal and progressive mirrors', () => {
+  it('distinguishes a deleted upstream file from an empty extractor result', async () => {
+    const resolver = createHostResolver({ text: async (url) => ({ url, status: 200, text: 'File was deleted' }) });
+    await expect(resolver.resolve('https://mp4upload.com/embed-x.html')).rejects.toThrow('UPSTREAM_REMOVED');
+  });
+  it.each([
+    [404, 'Not Found', false],
+    [404, 'File was deleted', true],
+    [410, 'Gone', true],
+  ])('mirror HTTP %s (%s) only permits origin fallback when not terminal', async (status, text, terminal) => {
+    const seen = [];
+    const resolver = createHostResolver({ text: async (url) => {
+      seen.push(new URL(url).hostname);
+      return new URL(url).hostname === 'vibuxer.com'
+        ? { url, status, text }
+        : { url, status: 200, text: '<video src="https://cdn.test/live.mp4"></video>' };
+    } });
+    const result = resolver.resolve('https://hgcloud.to/e/stale');
+    if (terminal) {
+      await expect(result).rejects.toThrow(status === 410 ? 'UPSTREAM_HTTP_410' : 'UPSTREAM_REMOVED');
+      expect(seen).toEqual(['vibuxer.com']);
+    } else {
+      expect((await result)[0].url).toBe('https://cdn.test/live.mp4');
+      expect(seen).toEqual(['vibuxer.com', 'hgcloud.to']);
+    }
+  });
+  it('returns the first MegaMax mirror without waiting for a dead parallel mirror', async () => {
+    let release;
+    const blocked = new Promise((r) => { release = r; });
+    const fetcher = { text: async (url, opts) => {
+      let text;
+      if (opts?.headers?.['x-inertia']) text = JSON.stringify({ props: { streams: { data: [{ label: '720p', mirrors: [{ driver: 'mp4upload', link: 'https://slow.test/embed/1' }, { driver: 'earnvids', link: 'https://fast.test/embed/1' }] }] } } });
+      else if (url.includes('share4max')) text = '<script data-page>{"version":"v"}</script>';
+      else if (url.includes('slow')) { await blocked; text = ''; }
+      else text = '<video src="https://cdn.test/720.mp4"></video>';
+      return { url, status: 200, text };
+    } };
+    const result = createHostResolver(fetcher).resolve('https://share4max.net/iframe/1');
+    const got = await Promise.race([result, new Promise((r) => setTimeout(() => r('blocked'), 100))]);
+    release();
+    expect(got).not.toBe('blocked');
+    expect(got[0].quality).toBe(720);
+  });
+});
 
 const XML = `<?xml version="1.0" encoding="UTF-8" ?>
 <videa_video><video_sources exp="1791025595">

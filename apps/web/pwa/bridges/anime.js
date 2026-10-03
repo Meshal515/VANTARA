@@ -126,30 +126,63 @@ async function runCopy(r, s, copy, episode) {
   const worker = async () => {
     while (next < work.length && !s.closed) {
       const { sv, route } = work[next++];
-      try {
-        const streams = await Promise.race([source.streams(sv), new Promise((_, rej) => setTimeout(() => rej(new Error('لم يرد خلال 45 ثانية')), 45_000))]);
-        const ids = [];
+      const qualities = new Map();
+      const seen = new Map();
+      let nextCandidate = 0;
+      const publications = [];
+      let accepting = true;
+      const publish = async (streams) => {
+        const fresh = [];
         for (const st of streams ?? []) {
-          const id = `${copy.sourceId}|${ep.url}|${st.url.length}|${ids.length}|${route.id}`;
-          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: route.code, route: route.id, url: st.url, referer: st.referer ?? null, type: st.type, quality: st.quality ?? sv.quality ?? null, variant: route.variant });
-          ids.push(id);
+          if (!st?.url || !/^https?:\/\//i.test(st.url)) continue;
+          const quality = st.quality ?? sv.quality ?? null;
+          if (!qualities.has(quality)) {
+            const qr = { ...route, id: qualities.size ? `${route.id}|q${quality ?? 'auto'}` : route.id, quality };
+            qualities.set(quality, qr);
+            upsert(s, qr);
+          }
+          const qr = qualities.get(quality);
+          const key = `${quality}|${st.url}`;
+          if (seen.has(key)) continue;
+          const id = `${route.id}|c${nextCandidate++}`;
+          seen.set(key, id);
+          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: qr.code, route: qr.id, url: st.url, referer: st.referer ?? null, type: st.type, quality, variant: qr.variant });
+          fresh.push({ id, qr });
         }
-        // الفحص قبل «جاهز» لا بعده: مقطع «This video is temporarily unavailable» (Sendvid) ملف mp4
-        // حقيقي من ثوانٍ؛ لو عُلّم جاهزًا أولًا لبدأ تشغيله قبل أن يُكشف
-        const judged = await judgeCandidates(r, s, ids);
-        const live = judged.ids;
-        const quality = Math.max(0, ...live.map((id) => s.cands.get(id).quality ?? 0)) || route.quality;
-        upsert(s, {
-          ...route,
-          state: live.length ? 'READY' : 'UNAVAILABLE',
-          candidates: live,
-          quality,
-          ...(judged.probed !== null && live.length ? { probed: judged.probed, probeMs: judged.ms } : {}),
-          reason: live.length ? null : ids.length ? judged.reason : 'لم يُستخرج رابط فيديو',
-        });
+        // Publish each verified quality separately; slower qualities keep resolving.
+        await Promise.all(fresh.map(async ({ id, qr }) => {
+          const t0 = Date.now();
+          const verdict = await probeCandidate(r, s.cands.get(id));
+          if (s.closed) return;
+          const old = s.routes.get(qr.id) ?? qr;
+          const candidates = verdict.ok === false ? old.candidates : [...new Set([...old.candidates, id])];
+          const good = candidates.length > 0;
+          upsert(s, { ...old, state: good ? 'READY' : 'UNAVAILABLE', candidates,
+            probed: old.probed === true || verdict.ok === true ? true : good ? null : false,
+            probeMs: Date.now() - t0, reason: good ? null : verdict.reason });
+        }));
+      };
+      const accept = (streams) => { if (accepting && !s.closed) publications.push(publish(streams)); };
+      let timer;
+      try {
+        const streams = await Promise.race([
+          source.streams(sv, accept),
+          new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('لم يرد خلال 45 ثانية')), 45_000); }),
+        ]);
+        accept(streams);
+        accepting = false;
+        await Promise.all(publications);
+        if (!qualities.size) upsert(s, { ...route, state: 'UNAVAILABLE', reason: 'RESOLVER_EMPTY: لم يُستخرج رابط فيديو' });
       } catch (error) {
-        upsert(s, { ...route, state: 'UNAVAILABLE', reason: String(error?.message ?? error) });
-      }
+        accepting = false;
+        await Promise.all(publications);
+        if (!qualities.size) upsert(s, { ...route, state: 'UNAVAILABLE', reason: String(error?.message ?? error) });
+        for (const qr of qualities.values()) {
+          const old = s.routes.get(qr.id);
+          if (old?.state === 'RESOLVING') upsert(s, { ...old, state: 'UNAVAILABLE', reason: String(error?.message ?? error) });
+        }
+      } finally { clearTimeout(timer); }
+
     }
   };
   await Promise.all([worker(), worker(), worker()]);
@@ -172,6 +205,7 @@ export async function probeCandidate(r, c, { timeoutMs = 8000, fetchImpl = fetch
     void res.body?.cancel?.().catch?.(() => {});
     const hls = /mpegurl/i.test(type) || /\.m3u8/.test(c.url);
     if (!res.ok) return { ok: false, reason: `المضيف ردّ ${res.status}` };
+    if (/text\/html|application\/json/i.test(type)) return { ok: false, reason: 'المضيف ردّ بصفحة لا فيديو' };
     if (!hls && !/video|octet-stream|mp2t/i.test(type)) return { ok: false, reason: 'المضيف ردّ بصفحة لا فيديو' };
     const total = Number(/\/(\d+)\s*$/.exec(res.headers.get('content-range') ?? '')?.[1] ?? NaN);
     if (!hls && Number.isFinite(total) && total < MIN_REAL_BYTES) return { ok: false, reason: 'مقطع بديل من المضيف (الفيديو غير متاح عنده)' };
@@ -179,25 +213,6 @@ export async function probeCandidate(r, c, { timeoutMs = 8000, fetchImpl = fetch
   } catch {
     return { ok: null, reason: null };
   }
-}
-
-/** الروابط التي تُبقى لسيرفر: يُحذف ما حُكم عليه بوضوح؛ وما لا حكم عليه يبقى. */
-async function judgeCandidates(r, s, ids) {
-  const t0 = Date.now();
-  const out = [];
-  let reason = null;
-  let probed = null;
-  for (const id of ids.slice(0, 3)) {
-    if (s.closed) break;
-    const v = await probeCandidate(r, s.cands.get(id));
-    if (v.ok === false) {
-      reason = v.reason;
-      continue;
-    }
-    out.push(id);
-    if (v.ok === true) probed = true;
-  }
-  return { ids: [...out, ...ids.slice(3)], probed: out.length ? probed : false, reason, ms: Date.now() - t0 };
 }
 
 async function startCopies(r, s, copies) {
@@ -276,7 +291,20 @@ export const AnimeEngine = {
     if (await step(`بحث «${query}»`, async () => `${(items = await src.search(query)).length} نتيجة`)) {
       if (items[0] && await step(`حلقات «${items[0].title}»`, async () => `${(eps = await src.episodes(items[0])).length} حلقة`)) {
         if (eps[0] && await step('السيرفرات', async () => `${(servers = await src.servers(eps[0])).length} سيرفر`)) {
-          for (const sv of servers.slice(0, 3)) await step(`تشغيل ${sv.name}`, async () => `${(await src.streams(sv)).length} رابط`);
+          let firstReadyMs = null;
+          const started = Date.now();
+          await Promise.all(servers.map((sv) => step(`تشغيل ${sv.name}`, async () => {
+            const host = (() => { try { return new URL(sv.data?.url ?? sv.data?.link ?? sv.data?.watch).hostname; } catch { return 'غير معروف'; } })();
+            const list = await src.streams(sv);
+            if (!list?.length) throw new Error(`RESOLVER_EMPTY · 0 رابط · host=${host} · ${Date.now() - started}ms`);
+            const verdicts = await Promise.all(list.map((st) => probeCandidate(r, st)));
+            const usable = list.filter((_st, i) => verdicts[i].ok === true);
+            if (!usable.length) throw new Error(`${verdicts.some((v) => v.ok === null) ? 'VERIFICATION_LIMITED' : 'STREAM_INVALID'} · host=${host} · ${verdicts.map((v) => v.reason).filter(Boolean).join(' | ')}`);
+            firstReadyMs ??= Date.now() - started;
+            return `${usable.length} رابط صالح · host=${host} · resolver=${r.registry.def(sourceId)?.engine ?? 'host'} · quality=${usable.map((st) => st.quality ?? sv.quality ?? 'auto').join('/')} · actual=${usable.map((st) => { try { return new URL(st.url).hostname; } catch { return 'invalid'; } }).join(',')} · IP family=unknown (edge) `;
+          })));
+          steps.push({ label: 'أول سيرفر Ready', state: firstReadyMs == null ? 'fail' : 'ok', detail: firstReadyMs == null ? 'لم يثبت رابط صالح' : `${firstReadyMs}ms` });
+          steps.push({ label: 'اكتمال فحص السيرفرات', state: 'ok', detail: `${Date.now() - started}ms · NO autoplay · اختيار السيرفر والجودة بيد المستخدم` });
         }
       }
     }

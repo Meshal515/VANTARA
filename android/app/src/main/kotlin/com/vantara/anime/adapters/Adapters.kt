@@ -231,7 +231,9 @@ class ExtensionAdapter(
     override suspend fun candidates(episode: SourceEpisode, now: Long, trace: ResolveTrace?, enough: Int): List<Candidate> {
         val primary = pageEmbeds()?.takeIf { it.primary }
         if (primary != null && resolver != null) {
-            val fromPage = pageCandidates(episode, primary, resolver, now, trace, enough)
+            val fromPage = try { pageCandidates(episode, primary, resolver, now, trace, enough) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { trace?.note("صفحة الحلقة", e.brief()); emptyList() }
             if (fromPage.isNotEmpty()) return fromPage
         }
         val fromExtension = try {
@@ -244,6 +246,7 @@ class ExtensionAdapter(
         }
         if (fromExtension.isNotEmpty()) return fromExtension
         trace?.note("الإضافة", "لا سيرفرات")
+        if (primary != null) return fromExtension
         val rule = pageEmbeds() ?: return fromExtension
         val r = resolver ?: return fromExtension
         return pageCandidates(episode, rule, r, now, trace, enough)
@@ -252,13 +255,16 @@ class ExtensionAdapter(
     override suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long, trace: ResolveTrace?): List<Candidate> {
         val primary = pageEmbeds()?.takeIf { it.primary }
         if (primary != null && resolver != null) {
-            val fromPage = pageCandidates(episode, primary, resolver, now, trace, Int.MAX_VALUE, server)
+            val fromPage = try { pageCandidates(episode, primary, resolver, now, trace, Int.MAX_VALUE, server) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { trace?.note("صفحة الحلقة", e.brief()); emptyList() }
             if (fromPage.isNotEmpty()) return fromPage
         }
         val fromExtension = try { extensionCandidates(episode, now, trace, server) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { trace?.note("الإضافة", e.brief()); emptyList() }
         if (fromExtension.isNotEmpty()) return fromExtension
+        if (primary != null) return fromExtension
         val rule = pageEmbeds()
         val r = resolver
         if (rule != null && r != null) {
