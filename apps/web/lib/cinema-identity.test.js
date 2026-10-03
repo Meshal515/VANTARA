@@ -180,6 +180,16 @@ describe('source matching never jumps to a namesake', () => {
     expect(pickCopies(copies, old).map((x) => x.sourceId)).toEqual(['b']);
   });
 
+  it('a series name with an extra word is another series (Dark ≠ Dark Hearts, The Office ≠ The Office Movers)', () => {
+    const office = matchCriteria(open('The Office', 'tt0386676').work, { season: 1, results: searchResults('The Office') });
+    expect(pickCopies([c('arabseed', 'مسلسل The Office Movers الموسم الاول')], office)).toEqual([]);
+    const dark = { id: 'tt5753856', type: 'series', title: 'Dark', year: 2017, endYear: 2020, seasons: [] };
+    const crit = matchCriteria(dark, { season: 1, results: [dark] });
+    const right = c('tuktukcinema', 'مسلسل Dark الموسم الاول');
+    expect(pickCopies([c('arabseed', 'مسلسل Dark Hearts الموسم الاول'), right], crit)).toEqual([right]);
+    expect(explainCopies([c('arabseed', 'مسلسل Dark Hearts الموسم الاول')], crit)[0].reason).toBe('year-unconfirmed');
+  });
+
   it('series queries ask for the season first (source search by name returns only the latest seasons)', () => {
     expect(queriesFor('Shameless', { type: 'series', season: 1 })[0]).toBe('Shameless الموسم الاول');
     expect(queriesFor('Shameless', { type: 'series', season: 11 })[0]).toBe('Shameless الموسم 11');

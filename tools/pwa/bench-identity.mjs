@@ -153,9 +153,12 @@ for (const [type, id, season, episode, expectNone] of CORPUS) {
   if (only && !only.split(',').includes(id)) continue;
   const full = await detail(type, id, { fetchImpl: curlFetch }).catch(() => null);
   if (!full) continue;
-  const peers = await search(full.title, { fetchImpl: curlFetch }).catch(() => []);
-  const card = peers.find((r) => r.id === id) ?? (await search(id, { fetchImpl: curlFetch }).catch(() => [])).find((r) => r.id === id) ?? { id, type };
+  const byName = await search(full.title, { fetchImpl: curlFetch }).catch(() => []);
+  const card = byName.find((r) => r.id === id) ?? (await search(id, { fetchImpl: curlFetch }).catch(() => [])).find((r) => r.id === id) ?? { id, type };
   const work = mergeWork(card, full);
+  // إخوة الاسم بكل أسماء العمل، كما في التطبيق (peersOf)
+  const lists = await Promise.all([...new Set([work.title, ...(work.aliases ?? [])].slice(0, 3))].map((n) => search(n, { fetchImpl: curlFetch }).catch(() => [])));
+  const peers = [...new Map(lists.flat().map((r) => [r.id, r])).values()];
   const label = `${work.title} ${work.year}${season ? ` S${season}E${episode}` : ''}`;
   // قبل: اسم التفاصيل كما كانت الصفحة تستعمله، ومعايير الاسم/السنة/الموسم فقط
   const oldCrit = { title: full.title, year: full.year, type, season };

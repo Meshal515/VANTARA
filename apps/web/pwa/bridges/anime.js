@@ -134,9 +134,19 @@ async function runCopy(r, s, copy, episode) {
           s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: route.code, route: route.id, url: st.url, referer: st.referer ?? null, type: st.type, quality: st.quality ?? sv.quality ?? null, variant: route.variant });
           ids.push(id);
         }
-        const quality = Math.max(0, ...ids.map((id) => s.cands.get(id).quality ?? 0)) || route.quality;
-        upsert(s, { ...route, state: ids.length ? 'READY' : 'UNAVAILABLE', candidates: ids, quality, reason: ids.length ? null : 'لم يُستخرج رابط فيديو' });
-        if (ids.length && s.probe) void probeRoute(r, s, s.routes.get(route.id));
+        // الفحص قبل «جاهز» لا بعده: مقطع «This video is temporarily unavailable» (Sendvid) ملف mp4
+        // حقيقي من ثوانٍ؛ لو عُلّم جاهزًا أولًا لبدأ تشغيله قبل أن يُكشف
+        const judged = await judgeCandidates(r, s, ids);
+        const live = judged.ids;
+        const quality = Math.max(0, ...live.map((id) => s.cands.get(id).quality ?? 0)) || route.quality;
+        upsert(s, {
+          ...route,
+          state: live.length ? 'READY' : 'UNAVAILABLE',
+          candidates: live,
+          quality,
+          ...(judged.probed !== null && live.length ? { probed: judged.probed, probeMs: judged.ms } : {}),
+          reason: live.length ? null : ids.length ? judged.reason : 'لم يُستخرج رابط فيديو',
+        });
       } catch (error) {
         upsert(s, { ...route, state: 'UNAVAILABLE', reason: String(error?.message ?? error) });
       }
@@ -145,28 +155,49 @@ async function runCopy(r, s, copy, episode) {
   await Promise.all([worker(), worker(), worker()]);
 }
 
+/** أصغر من هذا لا يكون حلقة أو فيلمًا: مقطع «غير متاح» من المضيف (Sendvid ~ مئات الكيلوبايت). */
+export const MIN_REAL_BYTES = 3 * 1024 * 1024;
+
 /**
- * فحص سريع بعد الجاهزية (السينما تطلبه): أول بايتين عبر الجالب. فيديو أو قائمة
- * HLS ⇒ `probed: true`، صفحة أو خطأ ⇒ `false`. يرتّب ولا يحجب (نفس الـAPK).
+ * حكم رابط واحد من أول بايتين عبر الجالب:
+ *   true  وسائط حقيقية (أو قائمة HLS)
+ *   false صفحة أو خطأ أو ملف أصغر من حلقة (مقطع بديل)، مع السبب
+ *   null  لا حكم (بطء أو انقطاع الفحص): لا يُحجب الرابط
  */
-async function probeRoute(r, s, route) {
-  const c = s.cands.get(route?.candidates?.[0]);
-  if (!c || s.closed) return;
-  const t0 = Date.now();
-  let ok = null;
+export async function probeCandidate(r, c, { timeoutMs = 8000, fetchImpl = fetch } = {}) {
   try {
     await r.ensureMedia();
-    const res = await fetch(r.fetcher.mediaUrl(c.url, c.referer), { headers: { range: 'bytes=0-1' }, signal: AbortSignal.timeout(8000) });
+    const res = await fetchImpl(r.fetcher.mediaUrl(c.url, c.referer), { headers: { range: 'bytes=0-1' }, signal: AbortSignal.timeout(timeoutMs) });
     const type = res.headers.get('content-type') ?? '';
-    // رد واضح فقط يحكم: وسائط ⇒ نعم، صفحة أو خطأ ⇒ لا. البطء أو انقطاع الفحص ⇒ لا حكم.
-    ok = res.ok && (/video|mpegurl|octet-stream|mp2t/i.test(type) || /\.m3u8/.test(c.url));
     void res.body?.cancel?.().catch?.(() => {});
+    const hls = /mpegurl/i.test(type) || /\.m3u8/.test(c.url);
+    if (!res.ok) return { ok: false, reason: `المضيف ردّ ${res.status}` };
+    if (!hls && !/video|octet-stream|mp2t/i.test(type)) return { ok: false, reason: 'المضيف ردّ بصفحة لا فيديو' };
+    const total = Number(/\/(\d+)\s*$/.exec(res.headers.get('content-range') ?? '')?.[1] ?? NaN);
+    if (!hls && Number.isFinite(total) && total < MIN_REAL_BYTES) return { ok: false, reason: 'مقطع بديل من المضيف (الفيديو غير متاح عنده)' };
+    return { ok: true, reason: null };
   } catch {
-    ok = null;
+    return { ok: null, reason: null };
   }
-  if (ok === null) return;
-  const now = s.routes.get(route.id);
-  if (now && !s.closed) upsert(s, { ...now, probed: ok, probeMs: Date.now() - t0 });
+}
+
+/** الروابط التي تُبقى لسيرفر: يُحذف ما حُكم عليه بوضوح؛ وما لا حكم عليه يبقى. */
+async function judgeCandidates(r, s, ids) {
+  const t0 = Date.now();
+  const out = [];
+  let reason = null;
+  let probed = null;
+  for (const id of ids.slice(0, 3)) {
+    if (s.closed) break;
+    const v = await probeCandidate(r, s.cands.get(id));
+    if (v.ok === false) {
+      reason = v.reason;
+      continue;
+    }
+    out.push(id);
+    if (v.ok === true) probed = true;
+  }
+  return { ids: [...out, ...ids.slice(3)], probed: out.length ? probed : false, reason, ms: Date.now() - t0 };
 }
 
 async function startCopies(r, s, copies) {

@@ -102,6 +102,9 @@ export function judgeCopy(c, criteria, minScore = 0.85) {
     if (score < 1 && !(info.year && year && info.year === year)) return { ok: false, score, reason: 'year-unconfirmed' };
   } else {
     if (info.year && !seriesYearFits(info.year, criteria, others)) return { ok: false, score, reason: 'year' };
+    // مسلسل بكلمة زائدة («Dark» مقابل «Dark Hearts»، «The Office» مقابل «The Office Movers») عملٌ آخر غالبًا:
+    // لا يُقبل إلا بسنة مكتوبة تطابقه
+    if (score < 1 && !info.year) return { ok: false, score, reason: 'year-unconfirmed' };
     if (season != null) {
       const s = info.season ?? (c.seasonNumber > 0 ? c.seasonNumber : null);
       if (s != null ? s !== season : !c.hasSeasons && season !== 1) return { ok: false, score, reason: 'season' };

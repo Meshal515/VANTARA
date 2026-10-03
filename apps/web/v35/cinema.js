@@ -739,10 +739,11 @@ export function createCinema(deps) {
   const peerResults = new Map();
   const peerKey = (t) => String(t ?? '').trim().toLowerCase();
   function peersOf(m) {
-    const k = peerKey(namesOf(m)[0]);
-    if (!k) return Promise.resolve([]);
-    if (!peerResults.has(k)) peerResults.set(k, searchMeta(k).catch(() => { peerResults.delete(k); return null; }));
-    return peerResults.get(k);
+    // بكل أسماء العمل: الروسي «Besstydniki» إخوته تحت «Shameless»
+    const keys = [...new Set(namesOf(m).slice(0, 3).map(peerKey).filter(Boolean))];
+    if (!keys.length) return Promise.resolve([]);
+    for (const k of keys) if (!peerResults.has(k)) peerResults.set(k, searchMeta(k).catch(() => { peerResults.delete(k); return null; }));
+    return Promise.all(keys.map((k) => peerResults.get(k))).then((lists) => (lists.every((l) => l == null) ? null : [...new Map(lists.flat().filter(Boolean).map((r) => [r.id, r])).values()]));
   }
   /** معايير هوية العمل للمطابقة؛ إخوة الاسم بمهلة قصيرة كي لا يتأخر البحث. */
   function identityFor(m, season) {
