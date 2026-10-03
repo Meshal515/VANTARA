@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '2b29746fe729ee4e4cbccde895b3003e0d17494b68608f903b308cac92d5f8d7';
+const SHELL_DIGEST = '6ed896bae8d07003abff8d39625a47659c01ce82ba32665dad07dc49b8bb6229';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -67,6 +67,12 @@ const KEEP = [IMAGE_CACHE, PWA_CONFIG_CACHE];
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
 // هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
 const SHELL = [
+  '/icons/pwa-icon-192.png',
+  '/icons/pwa-icon-512.png',
+  '/icons/pwa-maskable-192.png',
+  '/icons/pwa-maskable-512.png',
+  '/icons/pwa-apple-touch-icon.png',
+  '/icons/pwa-favicon-32.png',
   '/',
   '/app.js',
   '/reader.js',
