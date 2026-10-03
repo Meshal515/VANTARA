@@ -11,6 +11,9 @@ import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.stream.Candidate
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.Assume.assumeTrue
@@ -32,7 +35,16 @@ import java.util.concurrent.TimeUnit
 class NativeSourcesLiveTest {
 
     private val ua = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+    /** جلسة كوكيز في الذاكرة كما في `NetworkHelper` (WitAnime يرفض POST بلا جلسته: 419). */
+    private val jar = object : CookieJar {
+        private val store = mutableMapOf<String, MutableMap<String, Cookie>>()
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = synchronized(store) {
+            cookies.forEach { store.getOrPut(it.domain) { mutableMapOf() }[it.name] = it }
+        }
+        override fun loadForRequest(url: HttpUrl): List<Cookie> = synchronized(store) { store.values.flatMap { it.values }.filter { it.matches(url) } }
+    }
     private val client = OkHttpClient.Builder()
+        .cookieJar(jar)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", ua).build()) }

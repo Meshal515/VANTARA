@@ -3,8 +3,9 @@
  *
  *   node tools/pwa/bench-identity.mjs [--base=<git-ref>] [--only=tt…]
  *
- * «قبل» = cinema-match.js من `--base` (افتراضيًا origin/main) بالاسم الذي كانت
- * الصفحة تستعمله (اسم التفاصيل) والاستعلامات القديمة. «بعد» = الهوية الجديدة.
+ * «قبل» = cinema-match.js ومصادر defs.json من `--base` (افتراضيًا origin/main) بالاسم
+ * الذي كانت الصفحة تستعمله (اسم التفاصيل) والاستعلامات القديمة. «بعد» = الهوية
+ * الجديدة وكل المصادر الحالية.
  * لكل عمل: هل وُجد (Discovery)، عدد السيرفرات، هل يعمل فعلًا (فحص أول
  * البايتات/قائمة HLS)، أعلى جودة تعمل، والوقت حتى أول تشغيل صالح. والمطابقة
  * الخاطئة (Self-Inflicted) تُحسب على أعمالٍ نعرف أن المصادر لا تحملها
@@ -85,6 +86,16 @@ function probe(s) {
 }
 
 const defs = JSON.parse(readFileSync(new URL('../../apps/web/pwa/sources/defs.json', import.meta.url))).sources.filter((d) => d.content === 'cinema');
+// «قبل» بمصادر الأساس وحدها: مصدر جديد يُحسب في «بعد» فقط
+const baseIds = new Set(
+  (() => {
+    try {
+      return JSON.parse(execFileSync('git', ['show', `${base}:apps/web/pwa/sources/defs.json`]).toString()).sources.map((d) => d.id);
+    } catch {
+      return defs.map((d) => d.id);
+    }
+  })(),
+);
 const fetch = liveFetcher();
 const engines = Object.fromEntries(defs.map((def) => [def.id, ENGINES[def.engine].create(def, { fetch, hosts: createHostResolver(fetch) })]));
 const searchCache = new Map();
@@ -133,9 +144,9 @@ async function playOnce(copy, episode) {
 }
 
 /** نسخة كل مصدر لعمل بنسخة مطابقة ما (قبل/بعد): الاستعلامات بالترتيب حتى أول مطابقة. */
-async function locate(queries, match) {
+async function locate(queries, match, only = null) {
   const out = [];
-  for (const def of defs) {
+  for (const def of defs.filter((d) => !only || only.has(d.id))) {
     for (const q of queries) {
       const items = await searchOnce(def.id, q);
       const hit = items ? match(items) : [];
@@ -162,7 +173,7 @@ for (const [type, id, season, episode, expectNone] of CORPUS) {
   const label = `${work.title} ${work.year}${season ? ` S${season}E${episode}` : ''}`;
   // قبل: اسم التفاصيل كما كانت الصفحة تستعمله، ومعايير الاسم/السنة/الموسم فقط
   const oldCrit = { title: full.title, year: full.year, type, season };
-  const before = await locate(legacy.queriesFor(full.title), (items) => legacy.pickCopies(items, oldCrit));
+  const before = await locate(legacy.queriesFor(full.title), (items) => legacy.pickCopies(items, oldCrit), baseIds);
   // بعد: الهوية وإخوة الاسم والأسماء البديلة واستعلام الموسم
   const crit = matchCriteria(work, { season, results: peers });
   const after = await locate(queriesFor(crit.title, crit), (items) => pickCopies(items, crit));

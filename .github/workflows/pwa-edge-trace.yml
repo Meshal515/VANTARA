@@ -59,6 +59,8 @@ jobs:
         if: always()
         run: |
           node tools/pwa/trace-work.mjs arabseed "spider-man across the spider-verse" || true
+          node tools/pwa/trace-work.mjs akwam "toy story" || true
+          node tools/pwa/trace-work.mjs akwam "the gentlemen" 1 || true
           node tools/pwa/trace-work.mjs shahiid "attack on titan" 1 || true
           node tools/pwa/trace-identity.mjs series tt1586680 1 1 || true
       # قبل/بعد المطابقة والتشغيل على قائمة ثابتة، من العنوان الثابت نفسه
