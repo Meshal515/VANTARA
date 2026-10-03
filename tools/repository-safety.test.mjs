@@ -1214,8 +1214,9 @@ test('anime/cinema extensions are bundled in the APK with the manifest fingerpri
   assert.ok(specs.length >= 5, 'the anime manifest must pin its extensions');
   const dir = 'android/app/src/main/assets/anime-extensions';
   const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
-  for (const { pkg, sha256 } of specs) {
+  for (const { pkg, sha256, apk, version } of specs) {
     const path = `${dir}/${pkg}.apk`;
+    assert.equal(apk.match(/-v([\d.]+)\.apk$/)?.[1], version, `${pkg}: version must match its APK file name`);
     assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-anime-extensions.mjs`);
     const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
     assert.equal(actual, sha256, `${path} does not match the manifest sha256`);

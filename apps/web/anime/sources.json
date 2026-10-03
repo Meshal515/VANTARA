@@ -10,7 +10,7 @@
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.okanime",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.okanime-v14.27.apk",
         "sha256": "b2879c4eea6995de913ab8541334e040a5e917d0b923b74932d8f7fc923fefdd",
-        "version": "14.28"
+        "version": "14.27"
       },
       "domains": {
         "current": "https://ww3.okanime.xyz",
@@ -140,7 +140,7 @@
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.animeblkom",
         "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animeblkom-v14.28.apk",
         "sha256": "32968df66069b2b85cb7c3e99c58e284375ec039c7e3c3f10ed27c3cb35e449b",
-        "version": "14.27"
+        "version": "14.28"
       },
       "domains": {
         "current": "https://animeblkom.net",

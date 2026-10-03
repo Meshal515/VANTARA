@@ -44,8 +44,11 @@ for (const s of manifest.sources) {
     apk = `${REPO}/apk/${latest.apk}`;
     const buf = await bytes(apk);
     want = sha256(buf);
-    // تعديل نصي يحفظ تنسيق البيان كما هو
-    text = text.replace(ext.apk, apk).replace(ext.sha256, want).replace(`"version": "${version}"`, `"version": "${latest.version}"`);
+    // تعديل نصي يحفظ تنسيق البيان، داخل كتلة الإضافة نفسها فقط (رقم الإصدار يتكرر بين المصادر)
+    const start = text.indexOf(ext.apk);
+    const end = text.indexOf('}', start);
+    const block = text.slice(start, end).replace(ext.apk, apk).replace(ext.sha256, want).replace(`"version": "${version}"`, `"version": "${latest.version}"`);
+    text = text.slice(0, start) + block + text.slice(end);
     console.log(`${s.id.padEnd(12)} ${version} → ${latest.version}`);
     version = latest.version;
   }
