@@ -959,13 +959,13 @@ export function createAnime(deps) {
       state.work = remembered;
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
-      void engine.findWorkStream(titles, adopt).then((fresh) => fresh && adopt(fresh)).catch(() => {});
+      void engine.findWorkStream(titles, adopt, { year: m.year ?? null }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
       return remembered;
     }
     paintSources(m, 'loading');
     const pending = (async () => {
       try {
-        const work = await engine.findWorkStream(titles, adopt);
+        const work = await engine.findWorkStream(titles, adopt, { year: m.year ?? null });
         if (!current()) return null;
         if (work) adopt(work);
         else paintSources(m, 'none');
@@ -1227,7 +1227,8 @@ export function createAnime(deps) {
     const startAt = position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
-    const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null };
+    // `touched`: الشخص اختار بنفسه (فلتر/سيرفر) فلا نبدأ نيابة عنه؛ وإلا أول سيرفر جاهز يبدأ فورًا
+    const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false, auto: false };
     let paintQueued = false;
     let off = [];
 
@@ -1304,7 +1305,10 @@ export function createAnime(deps) {
       };
 
       const chip = (text, on, onClick) => {
-        const c = button(`an-pick-chip${on ? ' on' : ''}`, '', onClick);
+        const c = button(`an-pick-chip${on ? ' on' : ''}`, '', () => {
+          sheet.touched = true;
+          onClick();
+        });
         c.textContent = text;
         c.setAttribute('aria-pressed', String(on));
         return c;
@@ -1330,9 +1334,18 @@ export function createAnime(deps) {
         }
       };
 
+      // أول سيرفر جاهز (مفحوص) يبدأ وحده: لا شاشة انتظار ولا ضغطة — والبقية بدائل
+      // خلفه في المشغّل. السيرفر الذي اشتغل لك آخر مرة مرتّب أولًا في التجهيز.
+      const autoStart = () => {
+        if (sheet.auto || sheet.touched || sheet.launched || sheet.busy || !sheet.session) return;
+        if (!sheet.routes.some((r) => r.state === 'READY' && r.probed !== false)) return;
+        sheet.auto = true;
+        void bestBtn.onclick?.();
+      };
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
+        autoStart();
         paintBest();
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
@@ -1387,7 +1400,7 @@ export function createAnime(deps) {
           b.disabled = r.state === 'RESOLVING';
           b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
           b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
-          b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
+          b.onclick = () => ((sheet.touched = true), r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
           return b;
         }
         b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
@@ -1403,7 +1416,7 @@ export function createAnime(deps) {
         line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
         b.append(top, line);
         b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
-        b.onclick = () => r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000);
+        b.onclick = () => ((sheet.touched = true), r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
         routeNodes.set(r.id, b);
         return b;
       };

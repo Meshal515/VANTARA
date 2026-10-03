@@ -145,27 +145,57 @@ export async function findWork(titles) {
   return null;
 }
 
+// علامات «عمل آخر من نفس السلسلة»: موسم، جزء، فيلم، OVA، «-hen»… كلمة منها في
+// عنوان المصدر لا تحملها أسماء العمل ⇒ النسخة لموسم/عمل آخر، لا لهذا.
+const SEQUEL = /(?:^|\s)(?:season|seasons|s\d{1,2}|part|cour|\d+(?:st|nd|rd|th)|ii|iii|iv|v|movie|movies|film|ova|oad|ona|special|specials|final|recap|hen|arc|shippuden|kai|الموسم|موسم|الجزء|جزء|فيلم|الفيلم|اوفا|أوفا|الخاصة|خاصة|النهائي)(?=\s|$)/u;
+const YEAR = /(?:^|\D)((?:19|20)\d{2})(?!\d)/;
+
+/**
+ * حكم نسخة لعمل أنمي بعينه (هوية AniList): {ok, score, reason}.
+ *   exact          عنوانها أحد أسماء العمل بعد التطبيع
+ *   fuzzy ≥ 0.75   والكلمات الزائدة ليست علامة موسم/جزء/فيلم ليست في أسمائه،
+ *                  وسنتها المكتوبة (إن وُجدت) قريبة من سنة العمل
+ * reason ∈ title | sequel | year
+ */
+// وسم صيغة/نسخة بين قوسين ليس من الاسم: «Jujutsu Kaisen (TV)» = «Jujutsu Kaisen»
+const FORMAT_TAG = /\s*[([]\s*(?:tv|dub|dubbed|sub|subbed|uncensored|مترجم|مدبلج)\s*[)\]]\s*/giu;
+
+export function judgeAnimeCopy(c, titles, { year = null } = {}) {
+  const wanted = titles.filter(Boolean).map(fold);
+  const title = fold(String(c.title ?? '').replace(FORMAT_TAG, ' '));
+  const y = Number(YEAR.exec(String(c.title ?? ''))?.[1] ?? NaN);
+  if (year && Number.isFinite(y) && Math.abs(y - year) > 1 && !wanted.some((t) => t.includes(String(y)))) return { ok: false, score: 0, reason: 'year' };
+  if (wanted.includes(title)) return { ok: true, score: 1, reason: null };
+  const words = new Set(title.split(' '));
+  let best = 0;
+  let bestWanted = '';
+  for (const t of wanted) {
+    const tw = t.split(' ').filter(Boolean);
+    const score = tw.length ? tw.filter((x) => words.has(x)).length / Math.max(tw.length, words.size) : 0;
+    if (score > best) [best, bestWanted] = [score, t];
+  }
+  if (best < 0.75) return { ok: false, score: best, reason: 'title' };
+  const extra = [...words].filter((w) => !bestWanted.split(' ').includes(w)).join(' ');
+  if (SEQUEL.test(` ${extra} `) && !wanted.some((t) => SEQUEL.test(` ${t} `))) return { ok: false, score: best, reason: 'sequel' };
+  return { ok: true, score: best, reason: null };
+}
+
 /**
  * نسخ العمل من نتائج وصلت حتى الآن (من أي عدد من المصادر): المطابقة التامة
- * لأحد العناوين أولًا، وإلا الأقرب (≥ 0.75) ومعه كل نسخة بنفس عنوانه. `null`
- * إن لم يطابق شيء بعد.
+ * لأحد العناوين أولًا، وإلا الأقرب المقبول (judgeAnimeCopy) ومعه كل نسخة بنفس
+ * عنوانه. `null` إن لم يطابق شيء بعد.
  */
-export function pickCopies(items, titles) {
+export function pickCopies(items, titles, criteria = {}) {
   const wanted = titles.filter(Boolean).map(fold);
   const seen = new Set();
   const all = items.filter((c) => c && !seen.has(`${c.sourceId}|${c.url}`) && seen.add(`${c.sourceId}|${c.url}`));
-  let copies = all.filter((c) => wanted.includes(fold(c.title)));
+  const judged = all.map((c) => ({ c, j: judgeAnimeCopy(c, titles, criteria) })).filter((x) => x.j.ok);
+  const own = (c) => fold(String(c.title ?? '').replace(FORMAT_TAG, ' '));
+  let copies = judged.filter((x) => wanted.includes(own(x.c))).map((x) => x.c);
   if (!copies.length) {
-    const score = (c) => {
-      const words = new Set(fold(c.title).split(' '));
-      return Math.max(0, ...wanted.map((t) => {
-        const tw = t.split(' ').filter(Boolean);
-        return tw.length ? tw.filter((x) => words.has(x)).length / Math.max(tw.length, words.size) : 0;
-      }));
-    };
-    const best = all.map((c) => [c, score(c)]).sort((a, b) => b[1] - a[1])[0];
-    if (!best || best[1] < 0.75) return null;
-    copies = all.filter((c) => fold(c.title) === fold(best[0].title));
+    const best = judged.sort((a, b) => b.j.score - a.j.score)[0];
+    if (!best) return null;
+    copies = judged.filter((x) => own(x.c) === own(best.c)).map((x) => x.c);
   }
   // نسخة واحدة لكل مصدر: الأولى (أسرع رد) هي المرجّحة
   const one = [...new Map(copies.map((c) => [c.sourceId, c])).values()];
@@ -177,7 +207,7 @@ export function pickCopies(items, titles) {
  * المصادر (مصدر معطّل قد يأخذ 20 ثانية ليفشل). ما يصل بعدها من نسخ يُبلَّغ
  * عبر `onWork(work)` بالعمل نفسه وقد كبر. عنوان بديل يُسأل فقط إن لم يطابق الأول.
  */
-export function findWorkStream(titles, onWork = () => {}) {
+export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
   return new Promise((resolve) => {
     let first = null;
     const tried = new Set();
@@ -187,7 +217,7 @@ export function findWorkStream(titles, onWork = () => {}) {
       const items = [];
       const { done } = searchStream(queries[i], 'anime', (hit) => {
         items.push(...(hit.items ?? []));
-        const work = pickCopies(items, titles);
+        const work = pickCopies(items, titles, criteria);
         if (!work) return;
         if (!first) {
           first = work;
