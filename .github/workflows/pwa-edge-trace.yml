@@ -11,6 +11,7 @@ on:
       - 'tools/pwa/edge-trace.mjs'
       - 'tools/pwa/edge-cases.json'
       - 'apps/web/pwa/sources/**'
+      - 'tools/pwa/**'
       - '.github/workflows/pwa-edge-trace.yml'
 
 permissions:
@@ -34,6 +35,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @vantara/domain build
+      # مصفوفة المانجا كاملة: عبر الجالب (ما يراه متصفح الـPWA) ومن آلة GitHub مباشرة
+      - name: Manga matrix (edge fetcher + direct)
+        if: always()
+        env:
+          VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
+        run: |
+          {
+            echo '## Manga — عبر جالب الويب (PWA)'
+            node tools/pwa/manga-matrix.mjs --edge || true
+            echo
+            echo '## Manga — مباشرة من GitHub'
+            node tools/pwa/manga-matrix.mjs || true
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Trace sources through the live web fetcher
         env:
           VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
