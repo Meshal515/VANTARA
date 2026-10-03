@@ -47,11 +47,14 @@ export function readTitle(title) {
   return { season, year: y ? Number(y[1]) : null, kind };
 }
 
-/** 0..1: تطابق الكلمات اللاتينية (بلا السنة ولا رقم الموسم). */
+/** ذيل الحلقة في عنوان المصدر («الحلقة الاولى 1»، «الحلقة 14 الرابعة عشر»): لا يدخل في الاسم. */
+const EPISODE_TAIL = /(?:^|\s)(?:الحلقة|حلقة)(?:\s+[^A-Za-z\s]+)*\s*$/;
+
+/** 0..1: تطابق الكلمات اللاتينية (بلا السنة ولا رقم الموسم ولا رقم الحلقة). */
 export function titleScore(wanted, sourceTitle) {
   const strip = (words) => words.filter((w) => !/^(19|20)\d{2}$/.test(w) && !/^s\d{1,2}(e\d+)?$/.test(w));
   const a = strip(latinWords(wanted));
-  const b = strip(latinWords(sourceTitle));
+  const b = strip(latinWords(String(sourceTitle ?? '').replace(EPISODE_TAIL, ' ')));
   if (!a.length || !b.length) return 0;
   if (a.join(' ') === b.join(' ')) return 1;
   const sb = new Set(b);
