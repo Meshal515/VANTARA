@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'a3743f702a6daa24d2d1e44f7bbbd0705ef4eb480325f7e9ae381098e27488db';
+const SHELL_DIGEST = '6ed896bae8d07003abff8d39625a47659c01ce82ba32665dad07dc49b8bb6229';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -67,6 +67,12 @@ const KEEP = [IMAGE_CACHE, PWA_CONFIG_CACHE];
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
 // هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
 const SHELL = [
+  '/icons/pwa-icon-192.png',
+  '/icons/pwa-icon-512.png',
+  '/icons/pwa-maskable-192.png',
+  '/icons/pwa-maskable-512.png',
+  '/icons/pwa-apple-touch-icon.png',
+  '/icons/pwa-favicon-32.png',
   '/',
   '/app.js',
   '/reader.js',
@@ -296,15 +302,15 @@ self.addEventListener('fetch', (event) => {
   // ينتظر الشبكة قبل أول بكسل — على شبكة جوال متذبذبة تعني شاشة بيضاء
   // ثوانيَ، وهي أول ما يحكم به المستخدم على التطبيق.
   //
-  // ولا نفقد التحديث: النسخة الجديدة تُجلب في الخلفية وتُخزَّن للمرة القادمة،
-  // و`lib/updater.js` يسأل عن بيان آخر إصدار ويعرض «يوجد تحديث جديد» — فآلية
-  // التحديث موجودة أصلًا ولا تحتاج أن يدفع الإقلاع ثمنها.
+  // العامل الجديد ينزّل القشرة كاملة في كاش منفصل. لا نكتب ملفات النسخة
+  // الجديدة في كاش العامل القديم قبل تطبيق التحديث.
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
         const cache = await caches.open(VERSION);
         const cached = await cache.match('/');
 
+        if (cached) return cached;
         const fromNetwork = fetch(request)
           .then((response) => {
             if (response.ok) void cache.put('/', response.clone());
@@ -312,10 +318,6 @@ self.addEventListener('fetch', (event) => {
           })
           .catch(() => undefined);
 
-        if (cached) {
-          event.waitUntil(fromNetwork);
-          return cached;
-        }
         // أول زيارة في حياة الجهاز: لا قشرة مخزَّنة بعد، فالشبكة هي الطريق
         return (await fromNetwork) ?? Response.error();
       })(),
@@ -325,12 +327,13 @@ self.addEventListener('fetch', (event) => {
 
   if (!isShellRequest(url)) return;
 
-  // القشرة: من الكاش فورًا، وتحديث في الخلفية للمرة القادمة
+  // القشرة المثبتة ثابتة؛ العامل الجديد ينزّل التحديث في كاش منفصل.
   event.respondWith(
     (async () => {
       const cache = await caches.open(VERSION);
       const cached = await cache.match(request);
 
+      if (cached) return cached;
       const revalidate = fetch(request)
         .then((response) => {
           if (response.ok) void cache.put(request, response.clone());
@@ -338,11 +341,6 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => undefined);
 
-      if (cached) {
-        // لا ننتظر التحديث: الرد فوري، والنسخة الجديدة تُستخدم في الزيارة التالية
-        event.waitUntil(revalidate);
-        return cached;
-      }
       return (await revalidate) ?? Response.error();
     })(),
   );

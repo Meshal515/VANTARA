@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { justUpdated, watchForUpdates } from './update.js';
+import * as update from './update.js';
+const { justUpdated, watchForUpdates } = update;
 import { runMigrations } from '../lib/migrations.js';
 
 function memoryStorage() {
@@ -48,6 +49,61 @@ describe('PWA update', () => {
     expect(justUpdated(globalThis.localStorage)).toBe(true);
     expect(justUpdated(globalThis.localStorage)).toBe(false);
     stop();
+  });
+
+  it('checks for a new worker as soon as an existing app starts watching', () => {
+    const reg = fakeRegistration();
+    const stop = watchForUpdates(reg, { onReady() {}, nav: { serviceWorker: { controller: {} } }, doc });
+    expect(reg.updates).toBe(1);
+    stop();
+  });
+
+  it('manual checking reports a waiting update without activating it', async () => {
+    const reg = fakeRegistration();
+    const worker = fakeWorker('installed');
+    reg.waiting = worker;
+    const ready = [];
+    expect(await update.checkForUpdates(reg, { onReady: (apply) => ready.push(apply) })).toBe('available');
+    expect(reg.updates).toBe(1);
+    expect(ready).toHaveLength(1);
+    expect(worker.sent).toEqual([]);
+  });
+
+  it('a manual network failure cannot report the current version as latest', async () => {
+    const reg = fakeRegistration();
+    reg.update = async () => { throw new Error('offline'); };
+    expect(typeof update.checkForUpdates).toBe('function');
+    await expect(update.checkForUpdates(reg)).rejects.toThrow('offline');
+  });
+
+  it('reports a current build and a download in progress separately', async () => {
+    const reg = fakeRegistration();
+    expect(await update.checkForUpdates(reg)).toBe('current');
+    reg.installing = fakeWorker('installing');
+    expect(await update.checkForUpdates(reg)).toBe('installing');
+    expect(reg.installing.sent).toEqual([]);
+  });
+
+  it('cannot claim the latest version without a service worker registration', async () => {
+    await expect(update.checkForUpdates(null)).rejects.toThrow('تعذّر الوصول');
+  });
+
+  it('notices a changed build after an automatic update on the next launch', () => {
+    const storage = memoryStorage();
+    expect(justUpdated(storage, 'pwa-old')).toBe(false);
+    expect(justUpdated(storage, 'pwa-new')).toBe(true);
+    expect(justUpdated(storage, 'pwa-new')).toBe(false);
+  });
+
+  it('shows notes once after upgrading an older installed app that did not record its build', () => {
+    const storage = memoryStorage();
+    const installed = { nav: { serviceWorker: { controller: {} } } };
+    expect(justUpdated(storage, 'pwa-new', installed)).toBe(true);
+    expect(justUpdated(storage, 'pwa-new', installed)).toBe(false);
+  });
+
+  it('does not mistake a fresh install without a controller for an upgrade', () => {
+    expect(justUpdated(memoryStorage(), 'pwa-new', { nav: { serviceWorker: { controller: null } } })).toBe(false);
   });
 
   it('a first install (no page controlled yet) is not an update', () => {

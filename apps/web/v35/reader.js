@@ -61,7 +61,7 @@ function remember(map, key, value, max) {
   while (map.size > max) map.delete(map.keys().next().value);
 }
 
-const chapterId = (row) => `${row.sourceId}|${row.chapter?.url ?? ''}`;
+const chapterId = (row) => `${row.sourceId}|${row.chapter?.url ?? ''}|${row.chapter?.memo ?? ''}`;
 const imageKey = (row, index) => `${chapterId(row)}#${index}`;
 
 function ensureScheduler(engine) {
