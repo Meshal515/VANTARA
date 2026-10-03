@@ -239,6 +239,16 @@ export function dailymotionStreams(meta) {
 export function createHostResolver(fetch) {
   async function page(url, referer) {
     const res = await fetch.text(url, { referer: referer ?? undefined });
+    const doc = parseHtml(res.text);
+    qa(doc, 'script, style').forEach((node) => node.remove());
+    const visible = q(doc, 'body')?.textContent || doc.documentElement?.textContent || (res.text.includes('<') ? '' : res.text);
+    const removed = /^(?:\s*File was deleted\s*)$|File is no longer available as it expired or has been deleted\.|We can't find the video you are looking for\.|Video not found/i.test(visible);
+    if (removed || res.status === 404 || res.status === 410) {
+      const e = new Error(`${removed ? 'UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف' : `UPSTREAM_HTTP_${res.status}`} · ${hostOf(res.url)}`);
+      e.code = removed ? 'UPSTREAM_REMOVED' : `UPSTREAM_HTTP_${res.status}`;
+      e.host = hostOf(res.url);
+      throw e;
+    }
     return { url: res.url, body: res.text, ok: res.status >= 200 && res.status < 300 };
   }
 
@@ -269,7 +279,7 @@ export function createHostResolver(fetch) {
     return [];
   }
 
-  async function megamax(url, referer) {
+  async function megamax(url, referer, onStreams) {
     const first = await page(url, referer);
     // صفحة Inertia: JSON الصفحة نص `<script data-page>` (وقيمة السمة اسم التطبيق فقط)
     const doc = parseHtml(first.body);
@@ -292,20 +302,34 @@ export function createHostResolver(fetch) {
         accept: 'text/html, application/xhtml+xml',
       },
     });
-    const mirrors = megamaxMirrors(res.text).slice(0, 6);
-    // مرآتان معًا، وأول ناجحة تكفي
-    for (let i = 0; i < mirrors.length; i += 2) {
-      const batch = await Promise.all(
-        mirrors.slice(i, i + 2).map((m) =>
-          resolve(m.link, first.url, 1)
-            .then((list) => list.map((s) => ({ ...s, quality: s.quality ?? m.quality, label: `megamax/${m.driver}` })))
-            .catch(() => []),
-        ),
-      );
-      const ok = batch.flat();
-      if (ok.length) return ok;
-    }
-    return [];
+    const mirrors = megamaxMirrors(res.text).slice(0, onStreams ? 20 : 6);
+    // Each completed mirror starts the next; a dead peer cannot hold a ready one.
+    return new Promise((settle) => {
+      let next = 0, pending = 0, returned = false;
+      const gathered = [];
+      const start = () => {
+        if (next >= mirrors.length || returned) return;
+        const m = mirrors[next++];
+        pending++;
+        void resolve(m.link, first.url, 1).then((list) => {
+          const found = list.map((s) => ({ ...s, quality: s.quality ?? m.quality, label: `megamax/${m.driver}` }));
+          if (found.length && !returned) {
+            gathered.push(...found);
+            if (onStreams) onStreams(found);
+            else { returned = true; settle(found); }
+          }
+        }).catch(() => {}).finally(() => {
+          pending--;
+          start();
+          if (!pending && next >= mirrors.length && !returned) {
+            returned = true;
+            settle([...new Map(gathered.map((s) => [s.url, s])).values()]);
+          }
+        });
+      };
+      start(); start();
+      if (!mirrors.length) settle([]);
+    });
   }
 
   async function videa(url, referer) {
@@ -336,14 +360,14 @@ export function createHostResolver(fetch) {
   }
 
   /** @returns {Promise<Stream[]>} */
-  async function resolve(embed, referer = null, depth = 0) {
+  async function resolve(embed, referer = null, depth = 0, onStreams = null) {
     const url = String(embed).startsWith('//') ? `https:${embed}` : String(embed);
     const host = hostOf(url);
     if (!host) return [];
     if (host.endsWith('ok.ru') || host.endsWith('odnoklassniki.ru')) return okRuStreams((await page(url, referer)).body);
     if (host.endsWith('mega.nz') || host.endsWith('mega.co.nz')) return [];
     if (host.endsWith('drive.google.com') || host.endsWith('docs.google.com')) return googleDrive(url);
-    if ((host.endsWith('share4max.com') || host.includes('megamax') || host.includes('megatuktuk')) && depth === 0) return megamax(url, referer);
+    if ((host === 'share4max.net' || host.endsWith('share4max.com') || host.includes('megamax') || host.includes('megatuktuk')) && depth === 0) return megamax(url, referer, onStreams);
     if (host.endsWith('videa.hu')) return videa(url, referer);
     if (host.endsWith('dailymotion.com') || host === 'dai.ly') {
       const id = dailymotionId(url);

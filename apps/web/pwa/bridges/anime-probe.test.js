@@ -29,6 +29,9 @@ describe('probe before ready', () => {
     expect(await probe({ url: 'https://cdn/x.mp4' }, reply(206, 'video/mp4', `bytes 0-1/${MIN_REAL_BYTES * 40}`))).toMatchObject({ ok: true });
     expect(await probe({ url: 'https://cdn/x.mp4' }, reply(200, 'application/octet-stream', null))).toMatchObject({ ok: true });
   });
+  it('an HLS-looking URL returning HTML cannot be marked playable', async () => {
+    expect(await probe({ url: 'https://cdn/master.m3u8' }, reply(200, 'text/html', null))).toMatchObject({ ok: false });
+  });
   it('HLS playlists are small by nature and are not judged by size', async () => {
     expect(await probe({ url: 'https://cdn/master.m3u8' }, reply(206, 'application/vnd.apple.mpegurl', 'bytes 0-1/900'))).toMatchObject({ ok: true });
   });

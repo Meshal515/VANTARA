@@ -99,7 +99,7 @@ export const shahiid = {
         }
         return out;
       },
-      async streams(server) {
+      async streams(server, onStreams) {
         const { post, frame, serv, page } = server.data;
         const url = new URL(`${base}/wp-admin/admin-ajax.php`);
         url.searchParams.set('action', 'codecanal_ajax_request');
@@ -110,7 +110,7 @@ export const shahiid = {
         let embed = attr(q(parseHtml(html), 'iframe[src]'), 'src');
         if (embed.startsWith('//')) embed = `https:${embed}`;
         if (!embed.startsWith('http')) throw new Error('الموقع لم يُرجع مشغّلًا');
-        return hosts.resolve(embed, page);
+        return hosts.resolve(embed, page, 0, onStreams);
       },
     };
   },

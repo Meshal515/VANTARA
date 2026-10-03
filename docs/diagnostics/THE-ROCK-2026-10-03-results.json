@@ -1,0 +1,1347 @@
+{
+  "date": "2026-10-03",
+  "base": "2235ef1",
+  "branch": "fix/the-rock-playback",
+  "deviceRetest": false,
+  "deployedEdgeRetest": false,
+  "APK_Kotlin_JVM": [
+    {
+      "source": "okanime",
+      "platform": "JVM page-rule/JSON API shadow; extension discovery untested",
+      "search": 5,
+      "episodes": 292,
+      "work": "Boruto: Naruto Next Generations",
+      "firstResolvedMs": 1374,
+      "firstMediaVerifiedMs": 2582,
+      "allMs": 23657,
+      "routes": [
+        {
+          "server": "mp4upload",
+          "state": "UNAVAILABLE",
+          "ms": 378,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: www.mp4upload.com",
+          "media": []
+        },
+        {
+          "server": "megamax",
+          "state": "READY",
+          "ms": 1374,
+          "streams": 5,
+          "reason": null,
+          "media": [
+            {
+              "host": "9crtn2vez61il.tnmr.org",
+              "resolver": "megamax",
+              "quality": 720,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1203,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=161ms"
+            },
+            {
+              "host": "m5qqjwpatpzb.acek-cdn.com",
+              "resolver": "megamax",
+              "quality": 720,
+              "status": "VERIFICATION_FAILED",
+              "probeMs": 20089,
+              "network": "failed stage=HTTP · 20089ms · SocketTimeoutException",
+              "reason": "timeout"
+            },
+            {
+              "host": "a-delivery48.mxcontent.net",
+              "resolver": "megamax",
+              "quality": 720,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1151,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=71ms"
+            },
+            {
+              "host": "vy55q9198is2.tnmr.org",
+              "resolver": "megamax",
+              "quality": 480,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1116,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=154ms"
+            },
+            {
+              "host": "m5qqjwpatpzb.acek-cdn.com",
+              "resolver": "megamax",
+              "quality": 480,
+              "status": "VERIFICATION_FAILED",
+              "probeMs": 20001,
+              "network": "failed stage=HTTP · 20000ms · SocketTimeoutException",
+              "reason": "timeout"
+            }
+          ]
+        },
+        {
+          "server": "uqload",
+          "state": "UNAVAILABLE",
+          "ms": 1287,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: uqload.vc",
+          "media": []
+        }
+      ]
+    },
+    {
+      "source": "arabseed",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 1,
+      "episodes": 40,
+      "work": "انمي Boruto Naruto Next Generations",
+      "firstResolvedMs": -1,
+      "firstMediaVerifiedMs": -1,
+      "allMs": 6405,
+      "routes": [
+        {
+          "server": "سيرفر ماي سيد المباشر",
+          "state": "UNAVAILABLE",
+          "ms": 6405,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "سيرفر 1",
+          "state": "UNAVAILABLE",
+          "ms": 992,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "سيرفر 2",
+          "state": "UNAVAILABLE",
+          "ms": 6121,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "سيرفر 3",
+          "state": "UNAVAILABLE",
+          "ms": 1556,
+          "streams": 0,
+          "reason": "UPSTREAM_HTTP_404: vidoza.net",
+          "media": []
+        }
+      ]
+    },
+    {
+      "source": "ristoanime",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 1,
+      "episodes": 143,
+      "work": "Naruto",
+      "firstResolvedMs": 724,
+      "firstMediaVerifiedMs": 1614,
+      "allMs": 2395,
+      "routes": [
+        {
+          "server": "سيرفر 3.1",
+          "state": "UNAVAILABLE",
+          "ms": 1332,
+          "streams": 0,
+          "reason": "UPSTREAM_HTTP_404: sendvid.com",
+          "media": []
+        },
+        {
+          "server": "سيرفر 5",
+          "state": "UNAVAILABLE",
+          "ms": 796,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: uqload.vc",
+          "media": []
+        },
+        {
+          "server": "سيرفر 2",
+          "state": "UNAVAILABLE",
+          "ms": 1516,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "سيرفر 3",
+          "state": "UNAVAILABLE",
+          "ms": 2395,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "سيرفر 4",
+          "state": "UNAVAILABLE",
+          "ms": 392,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: www.mp4upload.com",
+          "media": []
+        },
+        {
+          "server": "سيرفر 1",
+          "state": "READY",
+          "ms": 724,
+          "streams": 1,
+          "reason": null,
+          "media": [
+            {
+              "host": "prx-vi-a-1.vmpx.online",
+              "resolver": "سيرفر 1",
+              "quality": 0,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 890,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=53ms"
+            }
+          ]
+        },
+        {
+          "server": "سيرفر احتياطي 1",
+          "state": "UNAVAILABLE",
+          "ms": 545,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: ghbrisk.com",
+          "media": []
+        }
+      ]
+    },
+    {
+      "source": "shahiid",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 22,
+      "episodes": 20,
+      "work": "Naruto",
+      "firstResolvedMs": 8815,
+      "firstMediaVerifiedMs": 9815,
+      "allMs": 10088,
+      "routes": [
+        {
+          "server": "Okru",
+          "state": "UNAVAILABLE",
+          "ms": 9428,
+          "streams": 0,
+          "reason": "لم يُستخرج رابط فيديو",
+          "media": []
+        },
+        {
+          "server": "الجودة HD",
+          "state": "UNAVAILABLE",
+          "ms": 8175,
+          "streams": 0,
+          "reason": "UPSTREAM_HTTP_404: www.file-upload.com",
+          "media": []
+        },
+        {
+          "server": "Sendvid",
+          "state": "READY",
+          "ms": 8815,
+          "streams": 1,
+          "reason": null,
+          "media": [
+            {
+              "host": "videos2.sendvid.com",
+              "resolver": "Sendvid",
+              "quality": 0,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1065,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=69ms"
+            }
+          ]
+        },
+        {
+          "server": "Megamax متعدد",
+          "state": "READY",
+          "ms": 8947,
+          "streams": 2,
+          "reason": null,
+          "media": [
+            {
+              "host": "kpk2jakbzwgv.tnmr.org",
+              "resolver": "Megamax متعدد",
+              "quality": 480,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 868,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=19ms"
+            },
+            {
+              "host": "a-delivery31.mxcontent.net",
+              "resolver": "Megamax متعدد",
+              "quality": 480,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1044,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=121ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "egydead",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 13,
+      "episodes": 1,
+      "work": "مشاهدة فيلم Naruto Shippuden 7 The Last 2014 مترجم",
+      "firstResolvedMs": 1040,
+      "firstMediaVerifiedMs": 2313,
+      "allMs": 3067,
+      "routes": [
+        {
+          "server": "EarnVids",
+          "state": "READY",
+          "ms": 1040,
+          "streams": 1,
+          "reason": null,
+          "media": [
+            {
+              "host": "dd2stliwt0bc.dramiyos-cdn.com",
+              "resolver": "EarnVids",
+              "quality": 0,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1270,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=17ms"
+            }
+          ]
+        },
+        {
+          "server": "DoodStream",
+          "state": "UNAVAILABLE",
+          "ms": 569,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: playmogo.com",
+          "media": []
+        },
+        {
+          "server": "Mixdrop",
+          "state": "UNAVAILABLE",
+          "ms": 781,
+          "streams": 0,
+          "reason": "UPSTREAM_REMOVED: mxdrop.top",
+          "media": []
+        },
+        {
+          "server": "StreamHG",
+          "state": "READY",
+          "ms": 1690,
+          "streams": 1,
+          "reason": null,
+          "media": [
+            {
+              "host": "g6m5vwc8rl.premilkyway.com",
+              "resolver": "StreamHG",
+              "quality": 0,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1376,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=60ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "akwam",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 2,
+      "episodes": 48,
+      "work": "مسلسل ناروتو الموسم الثاني 2003",
+      "firstResolvedMs": 2152,
+      "firstMediaVerifiedMs": 3293,
+      "allMs": 3293,
+      "routes": [
+        {
+          "server": "Akwam",
+          "state": "READY",
+          "ms": 2152,
+          "streams": 1,
+          "reason": null,
+          "media": [
+            {
+              "host": "s301d1.downet.net",
+              "resolver": "Akwam",
+              "quality": 720,
+              "status": "MEDIA_VERIFIED",
+              "probeMs": 1141,
+              "network": "winning address family=proxy (origin family unknown) · connection latency=48ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "witanime",
+      "platform": "APK Kotlin adapters on JVM/proxy; no Android/WebView",
+      "search": 0,
+      "episodes": 0,
+      "work": "",
+      "firstResolvedMs": -1,
+      "firstMediaVerifiedMs": -1,
+      "allMs": -1,
+      "failure": "SourceHttpException: HTTP 403 ← /search",
+      "routes": []
+    }
+  ],
+  "PWA_cloud_before": [
+    {
+      "source": "okanime",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 5,
+        "ms": 480
+      },
+      "work": "Boruto: Naruto Next Generations",
+      "episodes": {
+        "count": 293,
+        "ms": 375
+      },
+      "discoveryMs": 436,
+      "servers": [
+        {
+          "server": "mp4upload",
+          "candidateHost": "mp4upload.com",
+          "resolver": "mp4upload",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 455,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "megamax",
+          "candidateHost": "share4max.com",
+          "resolver": "megamax/earnvids",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 1678,
+          "streams": [
+            {
+              "quality": 720,
+              "actualHost": "m5qqjwpatpzb.acek-cdn.com",
+              "resolver": "megamax/earnvids",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "uqload",
+          "candidateHost": "uqload.is",
+          "resolver": "uqload",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 622,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "ristoanime",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 1,
+        "ms": 1754
+      },
+      "work": "Naruto",
+      "episodes": {
+        "count": 143,
+        "ms": 176
+      },
+      "discoveryMs": 281,
+      "servers": [
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "vidmoly.net",
+          "resolver": "vidmoly.biz",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 584,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "prx-vi-a-1.vmpx.online",
+              "resolver": "vidmoly.biz",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "video.sibnet.ru",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1252,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3.1",
+          "candidateHost": "sendvid.com",
+          "resolver": "سيرفر 3.1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1016,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "listeamed.net",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 3512,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 4",
+          "candidateHost": "www.mp4upload.com",
+          "resolver": "سيرفر 4",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 118,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 5",
+          "candidateHost": "uqload.net",
+          "resolver": "سيرفر 5",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 323,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر احتياطي 1",
+          "candidateHost": "ghbrisk.com",
+          "resolver": "سيرفر احتياطي 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 255,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "arabseed",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 1,
+        "ms": 749
+      },
+      "work": "انمي Boruto Naruto Next Generations",
+      "episodes": {
+        "count": 40,
+        "ms": 478
+      },
+      "discoveryMs": 453,
+      "servers": [
+        {
+          "server": "سيرفر ماي سيد المباشر",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر ماي سيد المباشر",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 5755,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 543,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 5531,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1093,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "tuktuk",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 2,
+        "ms": 1166
+      },
+      "work": "انمي Naruto",
+      "episodes": {
+        "count": 57,
+        "ms": 367
+      },
+      "discoveryMs": 330,
+      "servers": [
+        {
+          "server": "TukTuk",
+          "candidateHost": "lolololo.store",
+          "resolver": "TukTuk",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 204,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "egydead",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 13,
+        "ms": 1090
+      },
+      "work": "مشاهدة فيلم Naruto Shippuden 7 The Last 2014 مترجم",
+      "episodes": {
+        "count": 1,
+        "ms": 1
+      },
+      "discoveryMs": 398,
+      "servers": [
+        {
+          "server": "StreamHG",
+          "candidateHost": "hgcloud.to",
+          "resolver": "vibuxer.com",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 1282,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "jzddkefw9oeu0.premilkyway.com",
+              "resolver": "vibuxer.com",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "EarnVids",
+          "candidateHost": "morencius.com",
+          "resolver": "morencius.com",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 649,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "pfabiwmfmeza.dramiyos-cdn.com",
+              "resolver": "morencius.com",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "Mixdrop",
+          "candidateHost": "mixdrop.top",
+          "resolver": "Mixdrop",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 627,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "DoodStream",
+          "candidateHost": "playmogo.com",
+          "resolver": "DoodStream",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 330,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "akwam",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 2,
+        "ms": 1000
+      },
+      "work": "مسلسل ناروتو الموسم الثاني 2003",
+      "episodes": {
+        "count": 48,
+        "ms": 366
+      },
+      "discoveryMs": 193,
+      "servers": [
+        {
+          "server": "Akwam",
+          "candidateHost": "akwam.ss",
+          "resolver": "Akwam",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 670,
+          "streams": [
+            {
+              "quality": 720,
+              "actualHost": "s301d1.downet.net",
+              "resolver": "Akwam",
+              "type": "mp4"
+            }
+          ],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    }
+  ],
+  "PWA_cloud_after": [
+    {
+      "source": "okanime",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 5,
+        "ms": 442
+      },
+      "work": "Boruto: Naruto Next Generations",
+      "episodes": {
+        "count": 293,
+        "ms": 466
+      },
+      "discoveryMs": 453,
+      "servers": [
+        {
+          "server": "mp4upload",
+          "candidateHost": "mp4upload.com",
+          "resolver": "mp4upload",
+          "status": "FAIL",
+          "resolveMs": 466,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · mp4upload.com"
+        },
+        {
+          "server": "megamax",
+          "candidateHost": "share4max.com",
+          "resolver": "megamax/earnvids",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 1749,
+          "streams": [
+            {
+              "quality": 720,
+              "actualHost": "m5qqjwpatpzb.acek-cdn.com",
+              "resolver": "megamax/earnvids",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 720,
+              "actualHost": "m5qqjwpatpzb.acek-cdn.com",
+              "status": 200,
+              "bytes": 0,
+              "valid": false,
+              "ms": 12019,
+              "reason": "curl: (28) Operation timed out after 12002 milliseconds with 0 bytes received\n",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "uqload",
+          "candidateHost": "uqload.is",
+          "resolver": "uqload",
+          "status": "FAIL",
+          "resolveMs": 688,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · uqload.vc"
+        }
+      ]
+    },
+    {
+      "source": "ristoanime",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 1,
+        "ms": 968
+      },
+      "work": "Naruto",
+      "episodes": {
+        "count": 143,
+        "ms": 168
+      },
+      "discoveryMs": 298,
+      "servers": [
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "vidmoly.net",
+          "resolver": "vidmoly.biz",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 752,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "prx-vi-a-1.vmpx.online",
+              "resolver": "vidmoly.biz",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": null,
+              "actualHost": "prx-vi-a-1.vmpx.online",
+              "status": 200,
+              "type": "application/vnd.apple.mpegurl",
+              "bytes": 1217,
+              "valid": true,
+              "ms": 1622,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "video.sibnet.ru",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1510,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3.1",
+          "candidateHost": "sendvid.com",
+          "resolver": "سيرفر 3.1",
+          "status": "FAIL",
+          "resolveMs": 20021,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "Command failed: curl -sS -L --max-redirs 6 --max-time 20 -A Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 -D - -w \n__VF__%{http_code} %{url_effective} -H Referer: https://ristoanime.me/ https://sendvid.com/embed/9f5vl6mp\ncurl: (28) Operation timed out after 20001 milliseconds with 0 bytes received\n"
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "listeamed.net",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1400,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 4",
+          "candidateHost": "www.mp4upload.com",
+          "resolver": "سيرفر 4",
+          "status": "FAIL",
+          "resolveMs": 235,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · mp4upload.com"
+        },
+        {
+          "server": "سيرفر 5",
+          "candidateHost": "uqload.net",
+          "resolver": "سيرفر 5",
+          "status": "FAIL",
+          "resolveMs": 539,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · uqload.vc"
+        },
+        {
+          "server": "سيرفر احتياطي 1",
+          "candidateHost": "ghbrisk.com",
+          "resolver": "سيرفر احتياطي 1",
+          "status": "FAIL",
+          "resolveMs": 265,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · ghbrisk.com"
+        }
+      ]
+    },
+    {
+      "source": "arabseed",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 1,
+        "ms": 947
+      },
+      "work": "انمي Boruto Naruto Next Generations",
+      "episodes": {
+        "count": 40,
+        "ms": 656
+      },
+      "discoveryMs": 370,
+      "servers": [
+        {
+          "server": "سيرفر ماي سيد المباشر",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر ماي سيد المباشر",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 5912,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 552,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 5502,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 3",
+          "status": "FAIL",
+          "resolveMs": 1385,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_HTTP_404 · vidoza.net"
+        }
+      ]
+    },
+    {
+      "source": "tuktuk",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 2,
+        "ms": 1141
+      },
+      "work": "انمي Naruto",
+      "episodes": {
+        "count": 57,
+        "ms": 347
+      },
+      "discoveryMs": 312,
+      "servers": [
+        {
+          "server": "TukTuk",
+          "candidateHost": "lolololo.store",
+          "resolver": "TukTuk",
+          "status": "FAIL",
+          "resolveMs": 197,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_HTTP_404 · lolololo.store"
+        }
+      ]
+    },
+    {
+      "source": "egydead",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 13,
+        "ms": 1002
+      },
+      "work": "مشاهدة فيلم Naruto Shippuden 7 The Last 2014 مترجم",
+      "episodes": {
+        "count": 1,
+        "ms": 0
+      },
+      "discoveryMs": 557,
+      "servers": [
+        {
+          "server": "StreamHG",
+          "candidateHost": "hgcloud.to",
+          "resolver": "vibuxer.com",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 1412,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "jzddkefw9oeu0.premilkyway.com",
+              "resolver": "vibuxer.com",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": null,
+              "actualHost": "jzddkefw9oeu0.premilkyway.com",
+              "status": 206,
+              "type": "application/vnd.apple.mpegurl",
+              "bytes": 851,
+              "valid": true,
+              "ms": 1676,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "EarnVids",
+          "candidateHost": "morencius.com",
+          "resolver": "morencius.com",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 777,
+          "streams": [
+            {
+              "quality": null,
+              "actualHost": "dd2stliwt0bc.dramiyos-cdn.com",
+              "resolver": "morencius.com",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": null,
+              "actualHost": "dd2stliwt0bc.dramiyos-cdn.com",
+              "status": 206,
+              "type": "application/vnd.apple.mpegurl",
+              "bytes": 287,
+              "valid": true,
+              "ms": 1406,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "Mixdrop",
+          "candidateHost": "mixdrop.top",
+          "resolver": "Mixdrop",
+          "status": "FAIL",
+          "resolveMs": 864,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": "UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف · mxdrop.top"
+        },
+        {
+          "server": "DoodStream",
+          "candidateHost": "playmogo.com",
+          "resolver": "DoodStream",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 250,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "akwam",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 2,
+        "ms": 802
+      },
+      "work": "مسلسل ناروتو الموسم الثاني 2003",
+      "episodes": {
+        "count": 48,
+        "ms": 514
+      },
+      "discoveryMs": 380,
+      "servers": [
+        {
+          "server": "Akwam",
+          "candidateHost": "akwam.ss",
+          "resolver": "Akwam",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 420,
+          "streams": [
+            {
+              "quality": 720,
+              "actualHost": "s301d1.downet.net",
+              "resolver": "Akwam",
+              "type": "mp4"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 720,
+              "actualHost": "s301d1.downet.net",
+              "status": 206,
+              "type": "application/octet-stream",
+              "bytes": 2048,
+              "valid": true,
+              "ms": 1406,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        }
+      ]
+    }
+  ],
+  "PWA_fresh_title_after": [
+    {
+      "source": "tuktuk",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 4,
+        "ms": 1109
+      },
+      "work": "فيلم Toy Story 5 2026 مترجم اون لاين",
+      "episodes": {
+        "count": 1,
+        "ms": 0
+      },
+      "discoveryMs": 607,
+      "servers": [
+        {
+          "server": "TukTuk Vip",
+          "candidateHost": "megatuktuk.store",
+          "resolver": "megamax/earnvids",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 15902,
+          "streams": [
+            {
+              "quality": 1032,
+              "actualHost": "wt4pjiive9agjpl.dramiyos-cdn.com",
+              "resolver": "megamax/earnvids",
+              "type": "hls"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 1032,
+              "actualHost": "wt4pjiive9agjpl.dramiyos-cdn.com",
+              "status": 206,
+              "type": "application/vnd.apple.mpegurl",
+              "bytes": 287,
+              "valid": true,
+              "ms": 1307,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        }
+      ]
+    },
+    {
+      "source": "arabseed",
+      "platform": "PWA engines on cloud HTTP/proxy; deployed edge/browser not tested",
+      "search": {
+        "count": 10,
+        "ms": 1125
+      },
+      "work": "فيلم Toy Story 5 مدبلج مصري",
+      "episodes": {
+        "count": 1,
+        "ms": 0
+      },
+      "discoveryMs": 1112,
+      "servers": [
+        {
+          "server": "MySeed",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "MySeed",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 853,
+          "streams": [
+            {
+              "quality": 1080,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "resolver": "MySeed",
+              "type": "mp4"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 1080,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "status": 200,
+              "type": "application/octet-stream",
+              "bytes": 12288,
+              "valid": true,
+              "ms": 297,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "MySeed",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "MySeed",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 890,
+          "streams": [
+            {
+              "quality": 720,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "resolver": "MySeed",
+              "type": "mp4"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 720,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "status": 200,
+              "type": "application/octet-stream",
+              "bytes": 12288,
+              "valid": true,
+              "ms": 296,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "MySeed",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "MySeed",
+          "status": "RESOLVED_UNVALIDATED",
+          "resolveMs": 1118,
+          "streams": [
+            {
+              "quality": 480,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "resolver": "MySeed",
+              "type": "mp4"
+            }
+          ],
+          "mediaProbe": [
+            {
+              "quality": 480,
+              "actualHost": "cdnfdcp2503.cdn.makeup",
+              "status": 200,
+              "type": "application/octet-stream",
+              "bytes": 12288,
+              "valid": true,
+              "ms": 276,
+              "reason": "",
+              "ipFamily": "unknown (execution proxy)"
+            }
+          ],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 591,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 435,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1246,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 656,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 393,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1236,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 1",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 1",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 586,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 2",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 2",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 329,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        },
+        {
+          "server": "سيرفر 3",
+          "candidateHost": "m.myseed.pics",
+          "resolver": "سيرفر 3",
+          "status": "RESOLVER_EMPTY",
+          "resolveMs": 1223,
+          "streams": [],
+          "mediaProbe": [],
+          "failure": null
+        }
+      ]
+    }
+  ]
+}

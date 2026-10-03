@@ -78,7 +78,7 @@ export const okanime = {
         const variant = variantOf(episode.name);
         return serversOf(res.text).map((s) => ({ key: `o${s.url.length}${s.name}`, name: s.name, quality: s.quality, variant, data: { url: s.url, page: res.url } }));
       },
-      streams: (server) => hosts.resolve(server.data.url, server.data.page),
+      streams: (server, onStreams) => hosts.resolve(server.data.url, server.data.page, 0, onStreams),
     };
   },
 };

@@ -24,6 +24,7 @@ class PreparedEpisode(
     val probe: Boolean = false,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val primaryQuality = HashMap<String, Int?>()
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
     private val routeOfCandidate = HashMap<String, String>()
@@ -56,6 +57,24 @@ class PreparedEpisode(
     }
 
     fun report(r: RouteReport) {
+        if (r.state != RouteState.READY || r.candidates.isEmpty()) {
+            reportQuality(r)
+            return
+        }
+        val groups = r.candidates.groupBy { it.quality ?: r.quality }
+        val primary = synchronized(this) {
+            val id = "${r.sourceId}|${r.key}"
+            if (!primaryQuality.containsKey(id)) primaryQuality[id] = groups.keys.first()
+            primaryQuality[id]
+        }
+        for ((quality, list) in groups) reportQuality(r.copy(
+            key = if (quality == primary) r.key else "${r.key}|q${quality ?: "auto"}",
+            quality = quality,
+            candidates = list,
+        ))
+    }
+
+    private fun reportQuality(r: RouteReport) {
         val route: Route
         val fresh: List<Candidate>
         synchronized(this) {

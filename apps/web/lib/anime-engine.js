@@ -208,32 +208,39 @@ export function pickCopies(items, titles, criteria = {}) {
  * عبر `onWork(work)` بالعمل نفسه وقد كبر. عنوان بديل يُسأل فقط إن لم يطابق الأول.
  */
 export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let first = null;
+    let next = 0;
+    let uncertain = false;
+    const items = [];
     const tried = new Set();
     const queries = titles.filter(Boolean).map((t) => String(t).replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter((q) => q && !tried.has(q.toLowerCase()) && tried.add(q.toLowerCase()));
-    const run = async (i) => {
-      if (i >= queries.length) return resolve(first);
-      const items = [];
-      const { done } = searchStream(queries[i], 'anime', (hit) => {
-        items.push(...(hit.items ?? []));
-        const work = pickCopies(items, titles, criteria);
-        if (!work) return;
-        if (!first) {
-          first = work;
-          resolve(work);
-        } else if (work.copies.length > first.copies.length) {
-          first = work;
-          onWork(work);
-        }
-      });
-      const ok = await done;
-      if (!first) {
-        if (ok === null) return resolve(null);
-        return run(i + 1);
+    // English and romaji must not wait behind each other's slow sources.
+    // Matching still uses the complete canonical titles and season/year guards.
+    const worker = async () => {
+      while (next < queries.length && !first) {
+        const query = queries[next++];
+        const { done } = searchStream(query, 'anime', (hit) => {
+          if (hit.error || hit.skipped) uncertain = true;
+          items.push(...(hit.items ?? []));
+          const work = pickCopies(items, titles, criteria);
+          if (!work) return;
+          if (!first) {
+            first = work;
+            resolve(work);
+          } else if (work.copies.length > first.copies.length) {
+            first = work;
+            onWork(work);
+          }
+        });
+        if (await done === null) uncertain = true;
       }
     };
-    void run(0);
+    void Promise.all([worker(), worker()]).then(() => {
+      if (first) return;
+      if (uncertain) reject(new Error('تعذّر التحقق من بعض المصادر — أعد المحاولة'));
+      else resolve(null);
+    }, reject);
   });
 }
 

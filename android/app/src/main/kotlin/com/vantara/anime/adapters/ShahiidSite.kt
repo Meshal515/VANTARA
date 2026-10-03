@@ -83,6 +83,16 @@ class ShahiidSiteAdapter(
             servers.map { s ->
                 suspend {
                     var failure: String? = null
+                    val earlyFound = mutableListOf<Candidate>()
+                    fun convert(streams: List<com.vantara.anime.hosts.Stream>) = streams.map { st ->
+                        Candidate(
+                            id = "$id|${episode.url}|${st.url.hashCode()}", sourceId = id, sourceName = name,
+                            server = s.name, host = StreamClassifier.host(st.url), url = st.url, headers = st.headers,
+                            quality = st.quality, label = s.name, variant = variant,
+                            container = st.container ?: StreamClassifier.container(st.url), resolvedAt = now,
+                            expiresAt = StreamClassifier.expiresAt(st.url, now),
+                        )
+                    }
                     val got = withTimeoutOrNull(serverTimeoutMs) {
                         try {
                             val ajax = abs("/wp-admin/admin-ajax.php").toHttpUrl().newBuilder()
@@ -92,30 +102,19 @@ class ShahiidSiteAdapter(
                                 .addQueryParameter("serv", s.serv)
                                 .build().toString()
                             val embed = Parse.iframe(html(ajax, pageUrl).second) ?: error("الموقع لم يُرجع مشغّلًا")
-                            embeds.resolve(embed, pageUrl).map { st ->
-                                Candidate(
-                                    id = "$id|${episode.url}|${st.url.hashCode()}",
-                                    sourceId = id,
-                                    sourceName = name,
-                                    server = s.name,
-                                    host = StreamClassifier.host(st.url),
-                                    url = st.url,
-                                    headers = st.headers,
-                                    quality = st.quality,
-                                    label = s.name,
-                                    variant = variant,
-                                    container = st.container ?: StreamClassifier.container(st.url),
-                                    resolvedAt = now,
-                                    expiresAt = StreamClassifier.expiresAt(st.url, now),
-                                )
-                            }
+                            convert(embeds.resolve(embed, pageUrl) { streams ->
+                                val early = convert(streams)
+                                earlyFound += early
+                                if (early.isNotEmpty()) report(s, RouteState.READY, early)
+                            })
                         } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { failure = e.brief(); emptyList() }
+                        catch (e: Exception) { failure = e.brief(); earlyFound.toList() }
                     }
+                    val available = got ?: earlyFound.toList().takeIf { it.isNotEmpty() }
                     when {
-                        got == null -> emptyList<Candidate>().also { report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية") }
-                        got.isEmpty() -> got.also { report(s, RouteState.UNAVAILABLE, reason = failure ?: "لم يُستخرج رابط فيديو") }
-                        else -> got.also { report(s, RouteState.READY, it) }
+                        available == null -> emptyList<Candidate>().also { report(s, RouteState.UNAVAILABLE, reason = "لم يرد خلال ${serverTimeoutMs / 1000} ثانية") }
+                        available.isEmpty() -> available.also { report(s, RouteState.UNAVAILABLE, reason = failure ?: "لم يُستخرج رابط فيديو") }
+                        else -> available.also { report(s, RouteState.READY, it) }
                     }
                 }
             },

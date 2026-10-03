@@ -72,7 +72,7 @@ export const tuktuk = {
         if (crypt && !list.some((s) => s.url === crypt)) list.push({ name: 'TukTuk', url: crypt });
         return [...new Map(list.map((s) => [s.url, s])).values()].map((s) => ({ key: `t${s.url.length}${s.name}`, name: s.name, quality: null, variant, data: { url: s.url, page: res.url } }));
       },
-      streams: (server) => hosts.resolve(server.data.url, server.data.page),
+      streams: (server, onStreams) => hosts.resolve(server.data.url, server.data.page, 0, onStreams),
     };
   },
 };

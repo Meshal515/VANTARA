@@ -1,5 +1,12 @@
 {
   "$comment": "المواقع التي يحق لجالب الويب طلبها (services/web-fetcher). سطر يطابق الموقع ونطاقاته الفرعية. كل مضيف في تعريفات المصادر يجب أن يكون هنا (يحرسه repository-safety).",
+  "redirectAliases": {
+    "share4max.net": ["share4max.com", "share4max.net", "megamax.me", "megatuktuk.com", "megatuktuk.store"],
+    "lolololu.website": ["lulustream.com", "luluvdo.com", "earnvids.com", "lolololu.website"],
+    "uqload.vc": ["uqload.is", "uqload.net", "uqload.vc"],
+    "vidmoly.net": ["vidmoly.net", "vidmoly.biz", "vidmoly.to", "vmpx.online"],
+    "vmpx.online": ["vidmoly.net", "vidmoly.biz", "vidmoly.to", "vmpx.online"]
+  },
   "hosts": [
     "3asq.online",
     "starzmanga.com",
@@ -30,6 +37,7 @@
     "mycdn.me",
     "megamax.me",
     "share4max.com",
+    "share4max.net",
     "megatuktuk.com",
     "sendvid.com",
     "vidara.to",
@@ -41,6 +49,7 @@
     "earnvids.com",
     "lulustream.com",
     "luluvdo.com",
+    "lolololu.website",
     "streamwish.to",
     "mixdrop.ag",
     "mixdrop.co",
@@ -48,6 +57,7 @@
     "voe.sx",
     "filemoon.sx",
     "uqload.net",
+    "uqload.vc",
     "videa.hu",
     "vk.com",
     "vkvideo.ru",
@@ -83,6 +93,8 @@
     "mxcontent.net",
     "ristoanime.me",
     "vidmoly.biz",
+    "vidmoly.net",
+    "vmpx.online",
     "vidmoly.to",
     "uqload.is",
     "sibnet.ru",

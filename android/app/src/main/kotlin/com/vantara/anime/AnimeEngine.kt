@@ -160,10 +160,17 @@ class AnimeEngine(context: Context) {
         }
     }
 
+    private val sourceClient by lazy {
+        network.client.newBuilder()
+            .fastFallback(true)
+            .eventListenerFactory { com.vantara.anime.net.AnimeNetworkEvents() }
+            .build()
+    }
+
     /** سيرفرات الفيديو المضمّنة، والمتصفح المخفي لما لا نستخرجه مباشرة. */
     private val embeds by lazy {
         EmbedResolver(
-            network.client,
+            sourceClient,
             WebViewSniffer(appContext, network::defaultUserAgentProvider),
             userAgent = network::defaultUserAgentProvider,
         )
@@ -174,48 +181,48 @@ class AnimeEngine(context: Context) {
         WitAnimeSiteAdapter.KIND -> WitAnimeSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
         ArabSeedSiteAdapter.KIND -> ArabSeedSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
         TukTukSiteAdapter.KIND -> TukTukSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
         ShahiidSiteAdapter.KIND -> ShahiidSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
         AkwamSiteAdapter.KIND -> AkwamSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
         )
         EgyDeadSiteAdapter.KIND -> EgyDeadSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
         RistoAnimeSiteAdapter.KIND -> RistoAnimeSiteAdapter(
             id = e.id,
             name = e.name,
-            client = network.client,
+            client = sourceClient,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
             embeds = embeds,
         )
@@ -498,7 +505,7 @@ class AnimeEngine(context: Context) {
                     } ?: false
                     val ms = (System.nanoTime() - t0) / 1_000_000
                     if (ok) health.ok(HealthStore.hostKey(c.host), ms)
-                    prep.markProbe("${r.sourceId}|${r.key}", ok, ms, c.id)
+                    prep.routeOf(c.id)?.let { prep.markProbe(it.id, ok, ms, c.id) }
                 }
             }
         }
@@ -610,6 +617,7 @@ class AnimeEngine(context: Context) {
      */
     suspend fun diagnose(id: String, query: String = "naruto"): List<Step> {
         val e = entry(id) ?: error("مصدر غير معروف: $id")
+        val diagnosticStarted = System.currentTimeMillis()
         val steps = mutableListOf<Step>()
         fun add(label: String, state: String, detail: String) { steps += Step(label, state, detail) }
         val base = AnimeHostRouter.activeBase(id) ?: e.domains.current
@@ -626,6 +634,7 @@ class AnimeEngine(context: Context) {
                 if (sysBad && doh.isSuccess) " — الشبكة تحجب الاسم، والمحرك يتجاوزه" else "",
         )
 
+        add("سياسة الاتصال", "ok", "OkHttp 5 fastFallback: IPv6/IPv4 race, 250ms stagger; direct-IP probe alone does not prove hostname HTTPS failure")
         add("IPv6 في الجوال", "ok", if (AnimeDns.deviceHasIpv6()) "موجود" else "غير موجود — نستخدم IPv4 فقط")
         val v4 = (doh.getOrNull().orEmpty() + sys.getOrNull().orEmpty()).firstOrNull { it is java.net.Inet4Address }
         if (v4 != null) {
@@ -638,7 +647,7 @@ class AnimeEngine(context: Context) {
 
         val started = System.nanoTime()
         runCatching {
-            network.client.newCall(Request.Builder().url(base).build()).execute().use { r ->
+            sourceClient.newCall(Request.Builder().url(base).build()).execute().use { r ->
                 val ms = (System.nanoTime() - started) / 1_000_000
                 val body = runCatching { r.peekBody(400_000).string() }.getOrDefault("")
                 val title = Regex("<title[^>]*>([^<]{0,120})", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim().orEmpty()
@@ -695,25 +704,35 @@ class AnimeEngine(context: Context) {
             }
             add("حلقات «${first.title}»", "ok", "${list.size} حلقة · ${epsMs}ms")
 
-            val trace = com.vantara.anime.adapters.ResolveTrace()
             val t2 = System.nanoTime()
-            runCatching { withTimeout(PLAY_PROBE_TIMEOUT_MS) { a.candidates(ep, trace = trace) } }.fold(
-                { links ->
-                    val took = (System.nanoTime() - t2) / 1_000_000
-                    val servers = links.map { it.server }.distinct().joinToString("، ")
-                    val notes = trace.notes().take(8).joinToString(" | ")
-                    add(
-                        "تشغيل ${ep.name}",
-                        if (links.isNotEmpty()) "ok" else "fail",
-                        "${links.size} رابط" + (if (servers.isNotEmpty()) " ($servers)" else "") + " · ${took}ms" +
-                            (if (notes.isNotEmpty()) " — $notes" else ""),
-                    )
-                },
-                { t ->
-                    val notes = trace.notes().take(8).joinToString(" | ")
-                    add("تشغيل ${ep.name}", "fail", why(t, PLAY_PROBE_TIMEOUT_MS) + (if (notes.isNotEmpty()) " — $notes" else ""))
-                },
-            )
+            val routes = java.util.concurrent.ConcurrentHashMap<String, com.vantara.anime.stream.RouteReport>()
+            val latency = java.util.concurrent.ConcurrentHashMap<String, Long>()
+            val firstReady = java.util.concurrent.atomic.AtomicLong(-1)
+            val trace = com.vantara.anime.adapters.ResolveTrace { route ->
+                val key = "${route.sourceId}|${route.key}"
+                routes[key] = route
+                val took = (System.nanoTime() - t2) / 1_000_000
+                if (route.state != com.vantara.anime.stream.RouteState.RESOLVING) latency.putIfAbsent(key, took)
+                if (route.state == com.vantara.anime.stream.RouteState.READY && route.candidates.isNotEmpty()) firstReady.compareAndSet(-1, took)
+            }
+            val resolved = runCatching { withTimeout(PLAY_PROBE_TIMEOUT_MS) { a.candidates(ep, trace = trace, enough = Int.MAX_VALUE) } }
+            val took = (System.nanoTime() - t2) / 1_000_000
+            for ((key, route) in routes.entries.sortedBy { it.key }) {
+                val cs = route.candidates
+                add("سيرفر ${route.server}", if (cs.isNotEmpty()) "ok" else "fail",
+                    "${if (cs.isEmpty()) route.reason ?: "RESOLVER_EMPTY" else "RESOLVED (device playback verification required)"} · ${latency[key] ?: took}ms · ${cs.size} رابط" +
+                        cs.joinToString(separator = " | ", prefix = if (cs.isEmpty()) "" else " · ") { c ->
+                            "resolver=${route.server} · host=${c.host} · quality=${c.quality ?: "auto"} · ${com.vantara.anime.net.AnimeNetworkEvents.of(c.host) ?: "IP family unknown (extractor did not connect to media host)"}"
+                        })
+            }
+            val count = resolved.getOrNull()?.size ?: routes.values.sumOf { it.candidates.size }
+            add("تشغيل ${ep.name}", if (count > 0) "ok" else "fail", "$count رابط · ${took}ms" + (resolved.exceptionOrNull()?.let { " · ${why(it, PLAY_PROBE_TIMEOUT_MS)}" } ?: ""))
+            add("أول سيرفر Ready", if (firstReady.get() >= 0) "ok" else "fail", "${firstReady.get().takeIf { it >= 0 } ?: "unavailable"}ms (resolved stream, player validation separate)")
+            add("اكتمال السيرفرات", if (resolved.isSuccess) "ok" else "warn", "${took}ms · NO autoplay · اختيار السيرفر والجودة بيد المستخدم")
+
+        }
+        for ((networkHost, detail) in com.vantara.anime.net.AnimeNetworkEvents.since(diagnosticStarted)) {
+            add("شبكة $networkHost", if (detail.contains("failed stage=")) "warn" else "ok", detail)
         }
         health.flush()
         return steps

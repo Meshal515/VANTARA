@@ -48,6 +48,7 @@ class ManifestFileTest {
 
     @Test fun `OkAnime's server rule reads the redesigned episode page`() {
         val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "okanime" }.embeds!!
+        assertTrue("Maintained OkAnime page resolution must precede the old extension", rule.primary)
         val html = """
             <a href="javascript:void(0);" class="no-link ep-link" data-server="mp4upload" data-umami-event-quality="720p"
                @click="setServer('https://mp4upload.com/embed-dlhs6n110l8p.html')">HD Mp4upload</a>
