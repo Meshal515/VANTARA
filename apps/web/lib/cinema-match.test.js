@@ -25,6 +25,10 @@ describe('قراءة عنوان المصدر', () => {
     expect(titleScore('Inception', 'فيلم Bikini Inception 2015')).toBe(0.9);
     expect(titleScore('Dune: Part Two', 'فيلم Dune Part Two 2024 مترجم')).toBe(1);
     expect(titleScore('Dune', 'فيلم Dune Prophecy')).toBeLessThan(0.85 + 0.06);
+    // رقم الحلقة في ذيل العنوان ليس كلمة من الاسم (ArabSeed: «الحلقة الاولى 1»)
+    expect(titleScore('Shameless', 'مسلسل Shameless الموسم التاسع الحلقة الاولى 1')).toBe(1);
+    expect(titleScore('Shameless', 'مسلسل Shameless الموسم التاسع الحلقة 14 الرابعة عشر')).toBe(1);
+    expect(titleScore('Toy Story 5', 'فيلم Toy Story 5 مترجم')).toBe(1);
   });
 });
 

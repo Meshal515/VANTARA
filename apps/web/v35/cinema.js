@@ -19,7 +19,9 @@ import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
-import { pickCopies, queriesFor, readTitle, titleScore } from '../lib/cinema-match.js';
+import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
+import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, searchState } from '../lib/source-states.js';
+import { matchCriteria, mergeWork, namesOf } from '../lib/cinema-identity.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
@@ -28,7 +30,7 @@ const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
 const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
-const STATE_AR = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
+const STATE_AR_ROUTE = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
 const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV' };
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
 
@@ -717,9 +719,9 @@ export function createCinema(deps) {
   // مطابقة تكفي لبدء التجهيز؛ وما نجح لهذا العمل قبلًا يبدأ به التجهيز فورًا.
   const memory = createMemory();
   const metrics = createMetrics();
-  const nearCopies = (seen, { title, type }) =>
+  const nearCopies = (seen, { title, aliases = [], type }) =>
     seen
-      .map((c) => ({ c, score: titleScore(title, c.title), kind: readTitle(c.title).kind }))
+      .map((c) => ({ c, score: namesScore([title, ...aliases], c.title), kind: readTitle(c.title).kind }))
       .filter((x) => x.score >= 0.5 && (!x.kind || x.kind === type))
       .sort((a, b) => b.score - a.score)
       .slice(0, 6)
@@ -732,12 +734,29 @@ export function createCinema(deps) {
     memory,
   });
 
+  // إخوة الاسم من بحث Cinemeta (مرتبًا بالشهرة): نتائج شاشة البحث تُحفظ هنا،
+  // وما لم يمرّ بها يُسأل عنه مرة. الاستعلام مفتاح نتائج بحث، لا هوية عمل.
+  const peerResults = new Map();
+  const peerKey = (t) => String(t ?? '').trim().toLowerCase();
+  function peersOf(m) {
+    // بكل أسماء العمل: الروسي «Besstydniki» إخوته تحت «Shameless»
+    const keys = [...new Set(namesOf(m).slice(0, 3).map(peerKey).filter(Boolean))];
+    if (!keys.length) return Promise.resolve([]);
+    for (const k of keys) if (!peerResults.has(k)) peerResults.set(k, searchMeta(k).catch(() => { peerResults.delete(k); return null; }));
+    return Promise.all(keys.map((k) => peerResults.get(k))).then((lists) => (lists.every((l) => l == null) ? null : [...new Map(lists.flat().filter(Boolean).map((r) => [r.id, r])).values()]));
+  }
+  /** معايير هوية العمل للمطابقة؛ إخوة الاسم بمهلة قصيرة كي لا يتأخر البحث. */
+  function identityFor(m, season) {
+    const timeout = new Promise((r) => setTimeout(() => r(null), 2500));
+    return Promise.race([peersOf(m), timeout]).then((results) => matchCriteria(m, { season, results: results ?? null }));
+  }
+
   /** بحث حيّ لهذا العمل/الموسم، مشترك بين صفحة العمل وورقة السيرفرات والتجهيز المسبق. */
   function locateHandle(m, season) {
     const key = playKey(m, season);
     const old = state.works.get(key);
     if (old) return old;
-    const h = locator({ key, title: m.title, year: m.year, type: m.type, season: m.type === 'series' ? season : null });
+    const h = locator({ key, ...matchCriteria(m, { season }), ready: identityFor(m, season) });
     h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
     if (h.found.fast) h.run.fastPath();
     h.onHit((hit, info) => h.run.hit(hit, info));
@@ -1058,12 +1077,34 @@ export function createCinema(deps) {
   }
 
   /** فحص كل مصدر خطوة خطوة بعنوان هذا العمل: يقول أين يتعطّل بالضبط. */
+  /**
+   * تتبّع المطابقة لهذا العمل بعينه، مصدرًا مصدرًا: الهوية ← الاستعلامات ←
+   * ردّ المصدر ← النسخ المرشحة بدرجتها وسبب رفضها ← المطابقة ← السيرفرات
+   * وحالتها. من جلسة البحث نفسها، بلا طلبات جديدة؛ ثم الفحص العميق بالمحرك.
+   */
   function diagnoseSheet(m) {
+    const season = m.type === 'series' ? state.season : null;
+    const h = state.works.get(playKey(m, season));
+    const crit = h?.criteria ?? matchCriteria(m, { season });
     deps.openSheet((body) => {
       const head = el('div', 'an-sheet-head');
       head.append(el('div', 'an-sheet-kicker', 'فحص المصادر'), text('div', 'an-sheet-title', m.title));
+      const id = el('ol', 'cn-diag-steps');
+      const step = (cls, label, detail) => {
+        const li = el('li', `cn-diag-${cls}`);
+        li.append(el('b', null, label), text('span', null, detail ?? ''));
+        return li;
+      };
+      id.append(
+        step('ok', 'الهوية', [m.id, TYPE_AR[m.type], m.year, season ? `الموسم ${season}` : null].filter(Boolean).join(' · ')),
+        step('ok', 'الأسماء', namesOf(m).join(' · ')),
+      );
+      if (crit.sharedNames?.length) id.append(step(crit.primary ? 'ok' : 'warn', 'إخوة الاسم', `${crit.primary ? 'الأشهر بينها' : 'يوجد عمل أشهر بنفس الاسم'} · سنواتهم ${crit.namesakeYears.join('، ') || '—'}`));
+      id.append(step('ok', 'الاستعلامات', queriesFor(crit.title, crit).join(' | ')));
       const list = el('div', 'cn-diag');
-      body.append(head, list);
+      body.append(head, id, list);
+      const warm = state.warm?.key === playKey(m, season) ? state.warm : null;
+      const candidates = h?.candidates?.() ?? [];
       void (async () => {
         const all = (await engine.sources().catch(() => null)) ?? [];
         const mine = all.filter((x) => x.content === 'cinema' && x.enabled);
@@ -1073,19 +1114,29 @@ export function createCinema(deps) {
         }
         for (const src of mine) {
           const box = el('section', 'cn-diag-src');
-          box.append(el('h4', null, src.name ?? src.id));
+          box.append(el('h4', null, src.name ?? SOURCE_NAMES[src.id] ?? src.id));
           const steps = el('ol', 'cn-diag-steps');
-          steps.append(el('li', 'cn-diag-wait', 'نفحص…'));
           box.append(steps);
           list.append(box);
-          const out = await engine.diagnose(src.id, m.title).catch((e) => [{ label: 'الفحص', state: 'fail', detail: String(e?.message ?? e) }]);
-          steps.replaceChildren(
-            ...(out ?? []).map((st) => {
-              const li = el('li', `cn-diag-${st.state}`);
-              li.append(el('b', null, st.label), text('span', null, st.detail ?? ''));
-              return li;
-            }),
-          );
+          const rec = h?.found?.sources?.[src.id];
+          const st = searchState(rec);
+          const cls = st === STATE.MATCHED ? 'ok' : st === STATE.SOURCE_RESPONDED_NO_MATCH ? 'warn' : st === STATE.SEARCHING ? 'wait' : 'fail';
+          steps.append(step(cls, STATE_AR[st], rec ? [`${rec.items} نتيجة`, rec.searchMs != null ? `${rec.searchMs}ms` : null, rec.error].filter(Boolean).join(' · ') : ''));
+          const judged = explainCopies(candidates.filter((c) => c.sourceId === src.id), crit).sort((a, b) => Number(b.ok) - Number(a.ok) || b.score - a.score);
+          for (const j of judged.slice(0, 6)) {
+            steps.append(step(j.ok ? 'ok' : 'fail', `${j.ok ? '✓' : '✗'} ${j.score.toFixed(2)}`, `${j.copy.title}${j.ok ? '' : ` — ${REJECT_AR[j.reason] ?? j.reason}`}`));
+          }
+          if (st === STATE.MATCHED && warm) {
+            const routes = warm.routes.filter((r) => r.sourceId === src.id);
+            const ps = playState(routes, { done: warm.done });
+            steps.append(step(ps === STATE.PLAYABLE ? 'ok' : ps === STATE.SEARCHING ? 'wait' : 'fail', STATE_AR[ps], routes.map((r) => `${r.server ?? r.name ?? '؟'}${r.quality ? ` ${r.quality}p` : ''}: ${STATE_AR_ROUTE[r.state] ?? r.state}${r.state === 'READY' && r.probed !== true ? ' (لم يُفحص)' : ''}`).join(' · ')));
+          }
+          const deep = button('cn-link', 'فحص عميق', async () => {
+            deep.disabled = true;
+            const out = await engine.diagnose(src.id, crit.title).catch((e) => [{ label: 'الفحص', state: 'fail', detail: String(e?.message ?? e) }]);
+            deep.replaceWith(...(out ?? []).map((x) => step(x.state, x.label, x.detail ?? '')));
+          });
+          steps.append(deep);
         }
       })();
     }, { tone: 'cinema' });
@@ -1113,11 +1164,15 @@ export function createCinema(deps) {
       });
     if (!found || !found.copies.length) {
       host.dataset.state = 'none';
+      // «لم ترد» فقط لمصادر صامتة فعلًا؛ مصدر ردّ ولم نطابق فيه هذا العمل يُقال كذلك
+      const st = found ? overallSearchState(found.sources) : null;
       const msg = !found
         ? 'تعذّر البحث في المصادر — تحقّق من الاتصال'
-        : !found.total
-          ? 'المصادر لم ترد بأي نتيجة'
-          : m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'لم نجده بنفس الاسم في المصادر';
+        : st === STATE.SOURCE_RESPONDED_NO_MATCH
+          ? m.type === 'series' ? `ردّت المصادر، والموسم ${season} من هذا المسلسل غير موجود فيها حاليًا` : 'ردّت المصادر، وهذا الفيلم بعينه غير موجود فيها حاليًا'
+          : st === STATE.SOURCE_ERROR
+            ? 'المصادر ردّت بخطأ الآن'
+            : 'المصادر لم ترد في الوقت';
       const row = el('div', 'cn-sources-row');
       row.append(el('i', 'cn-dot'), el('span', null, msg), retry());
       const nodes = [row];
@@ -1183,8 +1238,10 @@ export function createCinema(deps) {
     deps.showPage('cinema');
     window.scrollTo?.(0, 0);
     renderDetail(m, { partial: true });
-    const full = await prefetch(m);
+    const fetched = await prefetch(m);
     if (token !== state.token) return;
+    // التفاصيل تُقبل لنفس المعرّف والنوع فقط، والاسم الذي ضغطه الشخص يبقى اسم الصفحة
+    const full = mergeWork(m, fetched);
     if (!full) {
       q('cinemaBody')?.append(emptyBox('offline', 'تعذّر جلب التفاصيل', 'تحقّق من الاتصال ثم افتح العمل من جديد.'));
       return;
@@ -1491,7 +1548,7 @@ export function createCinema(deps) {
           b.disabled = pending;
           b.querySelector('.an-srv-code').textContent = serverName(r);
           b.querySelector('.an-srv-tag').textContent = SOURCE_NAMES[r.sourceId] ?? r.sourceId;
-          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.probed === false ? 'غير متاح' : STATE_AR[r.state] ?? '';
+          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
           b.onclick = () => verified ? void playRoute(r) : toast(r.reason || 'لم ينجح فحص رابط الفيديو', 5000);
           return b;
         };
@@ -1769,6 +1826,7 @@ export function createCinema(deps) {
       let items = query ? await searchMeta(query) : await catalog(type, 'top', { genre });
       items = items.slice(0, 42);
       if (token !== state.discover.token) return;
+      if (query) peerResults.set(peerKey(query), Promise.resolve(items));
       grid.replaceChildren(...(items.length ? items.map((m) => posterCard(m)) : [emptyBox('search', 'لا نتائج', 'جرّب الاسم الإنجليزي للعمل.')]));
       stripIn([...grid.children].slice(0, 9));
     } catch {

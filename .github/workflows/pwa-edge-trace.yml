@@ -1,0 +1,57 @@
+name: PWA edge trace
+
+# تتبّع المصادر كما يراها متصفح الـPWA: المحركات نفسها، وكل طلب عبر جالب الويب
+# الحقيقي على Cloudflare. لا ينشر شيئًا ولا يكتب في أي قاعدة؛ يصكّ توكن هوية
+# مؤقتًا (15 دقيقة) لمستخدم وهمي فقط ليقبله الجالب. النتيجة في ملخص التشغيل.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'tools/pwa/edge-trace.mjs'
+      - 'tools/pwa/edge-cases.json'
+      - 'apps/web/pwa/sources/**'
+      - '.github/workflows/pwa-edge-trace.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vantara/domain build
+      - name: Trace sources through the live web fetcher
+        env:
+          VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
+        run: node tools/pwa/edge-trace.mjs
+      # نفس المحركات مباشرة من آلة GitHub (عنوان IP ثابت، بلا جالب): روابط مربوطة
+      # بعنوان من طلبها (Videa، MySeed) تُحكم هنا بصدق، فيُعرف إن كان العطل في
+      # الجالب أم عند المضيف. وهذا أقرب ما يكون للـAPK على جهاز.
+      - name: Direct trace from a fixed IP (no fetcher)
+        if: always()
+        run: |
+          node tools/pwa/trace-work.mjs arabseed "spider-man across the spider-verse" || true
+          node tools/pwa/trace-work.mjs shahiid "attack on titan" 1 || true
+          node tools/pwa/trace-identity.mjs series tt1586680 1 1 || true
+      # قبل/بعد المطابقة والتشغيل على قائمة ثابتة، من العنوان الثابت نفسه
+      - name: Before/after benchmark (identity + playback)
+        if: always()
+        run: |
+          node tools/pwa/bench-identity.mjs --base=origin/main > bench.md 2> bench.log || true
+          cat bench.log
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+          cat bench.md

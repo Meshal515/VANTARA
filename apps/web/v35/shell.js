@@ -15,7 +15,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
 import { SHELL_HTML } from './markup.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -1342,11 +1342,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
+        // مصدرٌ ردّ بلا فصول ليس مصدرًا صامتًا: نقول ما حدث فعلًا ولكل مصدر سببه
+        const failed = full._failedSources ?? [];
         emptyState(q('chapterPanel'), {
           icon: 'offline',
           error: true,
           title: 'تعذّر جلب الفصول',
-          text: 'المصادر لم تردّ الآن.',
+          text: failed.length
+            ? failed.map((f) => `${displayName(f.label, f.sourceId)}: ${f.reason ?? 'لم يرد في الوقت'}`).join(' · ')
+            : 'ردّت المصادر، ولا فصول فيها لهذا العمل الآن.',
           action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
         });
         setReadCta(null);
@@ -2026,8 +2030,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const b = el('div', 'sheet-item');
         b.innerHTML = glyph('alert');
         b.querySelector('.icon').style.color = 'var(--warning)';
-        b.append(el('span', null, f.label));
-        const c = el('span', null, 'ما ردّ الآن');
+        b.append(el('span', null, displayName(f.label, f.sourceId)));
+        const c = el('span', null, f.reason ?? 'لم يرد في الوقت');
         c.style.cssText = 'margin-inline-start:auto;color:var(--text-3);font-size:var(--fs-meta)';
         b.append(c);
         b.style.opacity = '.7';

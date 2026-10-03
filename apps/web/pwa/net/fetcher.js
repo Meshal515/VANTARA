@@ -14,6 +14,9 @@
 
 import { fetchBase } from './endpoint.js';
 
+/** ترويسات المصدر التي يمرّرها الجالب (services/web-fetcher PASSED_HEADERS). */
+const PASSED_HEADERS = ['x-videa-xs'];
+
 export class FetchError extends Error {
   /** @param {string} code @param {object} [info] */
   constructor(code, info = {}) {
@@ -146,7 +149,13 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
       }
     }
     const challenge = res.headers.get('x-vf-challenge') ?? 'none';
-    const out = { status, url: finalUrl, text: await res.text(), challenge, location: res.headers.get('x-vf-location') };
+    // ترويسات قليلة من المصدر يمرّرها الجالب باسم x-vf-h-<الاسم> (Videa: x-videa-xs)
+    const passed = {};
+    for (const name of PASSED_HEADERS) {
+      const v = res.headers.get(`x-vf-h-${name}`);
+      if (v) passed[name] = v;
+    }
+    const out = { status, url: finalUrl, text: await res.text(), challenge, location: res.headers.get('x-vf-location'), headers: passed };
     if (challenge !== 'none' && !opts.allowChallenge) {
       throw new FetchError('challenge', { status, challenge, host: hostOf(url), message: challenge === 'interactive' ? 'المصدر يطلب تحقق إنسان' : 'المصدر خلف حماية Cloudflare' });
     }
