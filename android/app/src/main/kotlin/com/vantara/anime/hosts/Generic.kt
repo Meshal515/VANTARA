@@ -50,7 +50,8 @@ object Generic {
         val texts = listOf(html) + Packer.unpackAll(html)
         val found = LinkedHashSet<String>()
         for (t in texts) {
-            MEDIA.findAll(t.replace("\\/", "/")).forEach { found += absolute(it.value, pageUrl) }
+            // نص الصفحة الخام: الرابط داخل سمة HTML يحمل `&amp;` (sendvid: validfrom=…&amp;validto=…)
+            MEDIA.findAll(t.replace("\\/", "/")).forEach { found += absolute(it.value.replace("&amp;", "&"), pageUrl) }
         }
         runCatching {
             Jsoup.parse(html, pageUrl).select("video[src], video source[src], source[type^=video][src]").forEach { el ->

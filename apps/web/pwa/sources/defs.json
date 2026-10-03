@@ -86,7 +86,9 @@
       },
       "probe": {
         "query": "a"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.comicverse",
@@ -259,7 +261,9 @@
       },
       "probe": {
         "query": "solo"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangalink",
@@ -305,7 +309,9 @@
       "config": {},
       "probe": {
         "query": "solo"
-      }
+      },
+      "edge": "challenge",
+      "edgeNote": "Cloudflare يتحدّى جالب الويب (مصفوفة الحافة 2026-10-03)؛ يعمل في الـAPK"
     },
     {
       "id": "eu.kanade.tachiyomi.extension.ar.mangaswat",
@@ -381,6 +387,70 @@
       "config": {},
       "probe": {
         "query": "the gentlemen"
+      }
+    },
+    {
+      "id": "akwam",
+      "label": "Akwam",
+      "names": [
+        "أكوام",
+        "اكوام"
+      ],
+      "content": "cinema",
+      "engine": "akwam-site",
+      "version": 1,
+      "domain": "akwam.ss",
+      "config": {},
+      "probe": {
+        "query": "dune"
+      }
+    },
+    {
+      "id": "egydead",
+      "label": "EgyDead",
+      "names": [
+        "ايجي ديد",
+        "إيجي ديد"
+      ],
+      "content": "cinema",
+      "engine": "egydead-site",
+      "version": 1,
+      "domain": "tv10.egydead.live",
+      "config": {},
+      "probe": {
+        "query": "dune"
+      }
+    },
+    {
+      "id": "ristoanime",
+      "label": "RistoAnime",
+      "names": [
+        "ريسطو انمي",
+        "ريستو انمي"
+      ],
+      "content": "anime",
+      "engine": "ristoanime-site",
+      "version": 1,
+      "domain": "ristoanime.me",
+      "config": {},
+      "probe": {
+        "query": "frieren"
+      }
+    },
+    {
+      "id": "okanime",
+      "label": "OkAnime",
+      "names": [
+        "اوك انمي",
+        "أوك أنمي"
+      ],
+      "content": "anime",
+      "engine": "okanime-site",
+      "version": 1,
+      "domain": "ww3.okanime.xyz",
+      "config": {},
+      "probe": {
+        "query": "one piece"
       }
     }
   ]

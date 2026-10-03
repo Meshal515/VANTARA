@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '2a894c6cf9b78acefc03b86b1330237410cafe844c07796bce2a96a843e2024a';
+const SHELL_DIGEST = 'ce3c63a7052396f7b0327450b02a4f6cccd1c27e2f3988941f95fbb3cafa0293';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -100,6 +100,9 @@ const SHELL = [
   '/screens/sources.js',
   '/lib/extension-engine.js',
   '/lib/catalog.js',
+  '/lib/manga-aliases.js',
+  '/lib/manga-alias-store.js',
+  '/data/manga-aliases.json',
   '/lib/manga-meta.js',
   '/v35/card-reconcile.js',
   '/v35/image-loading.js',
@@ -213,6 +216,10 @@ const SHELL = [
   '/pwa/sources/engines/zeistmanga.js',
   '/pwa/sources/engines/shahiid.js',
   '/pwa/sources/engines/tuktuk.js',
+  '/pwa/sources/engines/akwam.js',
+  '/pwa/sources/engines/egydead.js',
+  '/pwa/sources/engines/ristoanime.js',
+  '/pwa/sources/engines/okanime.js',
   '/pwa/sources/engines/video-common.js',
   '/pwa/sources/engines/witanime.js',
   '/pwa/sources/hosts.js',

@@ -1,0 +1,63 @@
+name: APK sources live
+
+# مصفوفة حيّة لمحوّلات الـAPK الأصلية (Akwam، ArabSeed، TukTuk، WitAnime، Shahiid):
+# نفس كود Kotlin الذي يشغّله التطبيق، على المواقع الحقيقية من آلة GitHub (عنوان IP
+# ثابت): بحث ← حلقات ← كل السيرفرات ← أول بايتات الفيديو. لا متصفح مخفي هنا، فما
+# يحتاجه يظهر «بلا رابط». لا يقرأ أي سر ولا يكتب شيئًا؛ النتيجة في ملخص التشغيل.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'android/app/src/main/kotlin/com/vantara/anime/**'
+      - 'android/app/src/test/java/com/vantara/anime/NativeSourcesLiveTest.kt'
+      - 'apps/web/anime/sources.json'
+      - '.github/workflows/apk-sources-live.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-sources-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: npx cap sync android
+      - name: Native adapters against the live sites
+        working-directory: android
+        env:
+          VANTARA_LIVE: '1'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'com.vantara.anime.NativeSourcesLiveTest' || true
+          {
+            echo '## APK — المحوّلات الأصلية من آلة GitHub'
+            cat app/build/reports/native-sources-live.md 2>/dev/null || echo 'لم يُنتج الجدول (راجع السجل)'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # خوادم ملفات Akwam التي ترفض مصافحة TLS من JVM: ما الذي تقدّمه فعلًا (شهادة/بروتوكول)؟
+      - name: TLS of failing file hosts
+        if: always()
+        run: |
+          for h in s205d1.downet.net s202d1.downet.net s302d3.downet.net; do
+            echo "== $h"
+            echo | timeout 15 openssl s_client -connect $h:443 -servername $h 2>&1 | grep -E "subject=|issuer=|Protocol|Cipher|Verify return|verify error|NotAfter" | head -8 || true
+            curl -sS -m 15 -r 0-15 -o /dev/null -w "curl %{http_code} ssl_verify=%{ssl_verify_result}\n" "https://$h/" || true
+            # بالوسيط الذي يضيفه network_security_config لهذا النطاق: هل تكتمل السلسلة؟
+            echo | timeout 15 openssl s_client -connect $h:443 -servername $h -CAfile android/app/src/main/res/raw/ssl2buy_emea_dv.pem -partial_chain 2>&1 | grep -E "Verify return code" || true
+          done

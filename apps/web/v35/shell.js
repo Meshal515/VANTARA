@@ -57,6 +57,8 @@ import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
+import { refsOf } from '../lib/manga-alias-store.js';
+import { connectSourceReports } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
@@ -153,6 +155,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   setSharedLatest(createSourceLatest(sync));
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
   connectUpdates((path, opts) => sync.translation(path, opts));
+  connectSourceReports((path, opts) => sync.translation(path, opts));
   onChapters(observeMangaChapters);
   const root = el('div', 'v35');
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
@@ -366,12 +369,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // الأنمي يشارك هذه الجداول بمرجع `anime:<id>`: شاشات المانجا لا تعرضه (له مكتبته)
   const libraryRows = () => sync.rows('library', (r) => r.user_id === me() && !r.removed && !isMediaRef(r.series_ref));
-  const inCollection = (kind, ref) =>
-    kind === 'completed'
-      ? sync.rows('completions', (r) => r.user_id === me() && r.series_ref === ref && r.member).length > 0
-      : sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && r.series_ref === ref && r.member).length > 0;
+  // عمل صار جزءًا من عمل قانوني (نفس العمل باسم آخر): ما حُفظ باسمه القديم يُقرأ معه
+  const inCollection = (kind, ref) => {
+    const refs = refsOf(ref);
+    return kind === 'completed'
+      ? sync.rows('completions', (r) => r.user_id === me() && refs.includes(r.series_ref) && r.member).length > 0
+      : sync.rows('collections', (r) => r.user_id === me() && r.kind === kind && refs.includes(r.series_ref) && r.member).length > 0;
+  };
   function libraryEntry(ref) {
-    const row = libraryRows().find((r) => r.series_ref === ref);
+    const refs = refsOf(ref);
+    const row = libraryRows().find((r) => refs.includes(r.series_ref));
     const later = inCollection('read_later', ref);
     const favorite = inCollection('favorite', ref);
     const completed = inCollection('completed', ref);
@@ -2052,12 +2059,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function continueRow(ref, base) {
     const userId = sync.user?.userId;
-    const rows = sync.rows('progress', (r) => r.user_id === userId && r.series_ref === ref);
+    const refs = refsOf(ref);
+    const rows = sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref));
     if (!rows.length || !base.length) return null;
     const latest = rows.reduce((a, b) => ((b.updated_at ?? 0) > (a.updated_at ?? 0) ? b : a));
-    // الترتيب من الأقدم للأحدث
+    // الترتيب من الأقدم للأحدث؛ مفتاح الفصل بمرجع صفّه نفسه (القديم إن كان منه)
     const ordered = [...base].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
-    const at = ordered.findIndex((r) => chapterKeyOf(ref, r) === latest.chapter_key);
+    const at = ordered.findIndex((r) => chapterKeyOf(latest.series_ref, r) === latest.chapter_key);
     if (at < 0) return null;
     if ((latest.ratio ?? 0) < 0.98) return ordered[at];
     return ordered[at + 1] ?? ordered[at];

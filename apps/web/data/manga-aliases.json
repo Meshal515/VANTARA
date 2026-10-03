@@ -1,0 +1,1045 @@
+{
+ "$comment": "الأسماء البديلة لأعمال المانجا: مفتاح العمل ← أسماؤه الأخرى (من صفحات الأعمال). tools/pwa/manga-dedup.mjs --aliases-out",
+ "aliases": {
+  "100 ghost stories that will lead to my own death": [
+   "أنجي ماتونو"
+  ],
+  "a villainess is a good match for the tyrant": [
+   "A villain is the perfect match for a tyrant",
+   "A Villainess Is a Good Match for the Tyrant"
+  ],
+  "a wicked husband": [
+   "악인 남편Evil Husband (SAHA)زوج شرير"
+  ],
+  "above all gods": [
+   "Above All Gods",
+   "فوق كل الالهة"
+  ],
+  "against the gods": [
+   "ضد الآلهة",
+   "ATG",
+   "逆天邪神",
+   "Against the gods"
+  ],
+  "almighty master": [
+   "Almighty Master",
+   "الحاكم الاعلى",
+   "السيد الحاكم",
+   "the peak master of the city"
+  ],
+  "ao ashi origin": [
+   "Aoashi",
+   "アオアシ"
+  ],
+  "apotheosis": [
+   "百炼成神 Bai Lian Cheng Shen الوصول إلى القمة"
+  ],
+  "area d inou ryouiki": [
+   "Area D",
+   "Area D - Inouryouiki",
+   "Area D - Inoyouiki",
+   "AreaD"
+  ],
+  "aria": [
+   "آريَّا",
+   "أريا"
+  ],
+  "asadora": [
+   "Renzoku Manga Shousetsu: Asadora!",
+   "Serial Manga Novel Asadora!",
+   "رواية مانجا متسلسلة: أسادورا"
+  ],
+  "ashita no joe": [
+   "جو الغد"
+  ],
+  "asura verdict": [
+   "حكم أسورا",
+   "アスラの沙汰"
+  ],
+  "attack on titan no requiem": [
+   "Attack on Titan Requiem"
+  ],
+  "auto hunting": [
+   "Auto Hunting",
+   "الصيد التلقائي"
+  ],
+  "ayakashi triangle": [
+   "مثلث أياكاشي",
+   "あやかしトライアングル"
+  ],
+  "bakemonogatari": [
+   "Monogatari"
+  ],
+  "baki dou": [
+   "باكي دو",
+   "Baki Dou"
+  ],
+  "baki dou 2018": [
+   "باكي دو 2018"
+  ],
+  "baki rahen": [
+   "باكي راهين",
+   "Baki Rahen"
+  ],
+  "battle frenzy": [
+   "Battle Frenzy"
+  ],
+  "battle through the heavens": [
+   "معركة عبر السماوات",
+   "斗破蒼穹",
+   "Battle Through the Heavens",
+   "Dou Po Cang Qiong",
+   "Fights Break Sphere"
+  ],
+  "beware of the villainess": [
+   "Beware of the Villainess! 그 악녀를 조심하세요!‎احترس من تلك الفتاة الشريرة! Beware the Villainess!"
+  ],
+  "black clover": [
+   "البرسيم الأسود"
+  ],
+  "blades of the guardians": [
+   "Biao Ren",
+   "镖人",
+   "Blades of the Guardians",
+   "نصال الحراس"
+  ],
+  "bleach": [
+   "بليتش"
+  ],
+  "blinded by the setting sun": [
+   "Blinded by the Setting Sun",
+   "The Setting Sun",
+   "Stinging Eyes blinded by the setting of the sun"
+  ],
+  "blooming love": [
+   "I Hanninmae no Koibito I 半人前の恋人 حبٌ مُتفتِح"
+  ],
+  "blue lock": [
+   "ブルーロック",
+   "القفل الأزرق",
+   "Blue Lock",
+   "بلولوك"
+  ],
+  "blue lock episode nagi origin": [
+   "ブルーロック-EPISODE 凪-",
+   "القفل الأزرق"
+  ],
+  "boku no hero academia": [
+   "My Hero Academia"
+  ],
+  "boku no namae wa shounen a": [
+   "اسمي هو \"الفتى A\"",
+   "Boku no Namae wa \"Shounen A\""
+  ],
+  "boy s abyss": [
+   "هاوية الصبي"
+  ],
+  "bug ego": [
+   "バグエゴ"
+  ],
+  "bungo stray dogs": [
+   "Bungou stray dogs",
+   "كلاب الأدب الضالة"
+  ],
+  "bungou stray dogs dazai wo hirotta hi": [
+   "文豪ストレイドッグス 太宰を拾った日",
+   "Bungou Stray Dogs: The Day I Picked Up Dazai",
+   "كلاب الأدب الضالة : اليوم الذي التقطت فيه دازاي"
+  ],
+  "call of the spear": [
+   "Call of the Spear",
+   "Fantastic Story of Nangseon",
+   "Story of Thorny Spear",
+   "The Story Of The Reincarnation Of The Tiger",
+   "История перерождения в тигра",
+   "浪仙奇幻谈",
+   "낭선기환담 The Story Of Thorny Spear"
+  ],
+  "captain tsubasa rising sun part 3": [
+   "كابتن تسوباسا: الشمس المشرقة - النهائيات"
+  ],
+  "chi no wadachi": [
+   "درب من الدم A Trail of Blood 血の轍"
+  ],
+  "choujin x": [
+   "Superhuman X"
+  ],
+  "city of heaven": [
+   "City of Heaven",
+   "مدينة السماء"
+  ],
+  "clevatess the devil beast king the baby the corpse hero": [
+   "كليفاتيس"
+  ],
+  "cultivation return on campus": [
+   "Cultivation Return on Campus",
+   "My Teacher is a Rebirthed Immortal",
+   "Cultivator Returns to School 修仙归来在校园",
+   "Xiu Xian returns to campus",
+   "شيوى زيان بعود الى الحرم الجامعي"
+  ],
+  "cultivator against hero society": [
+   "修仙者大战超能力 Immortal Cultivation Against SuperpowerCultivator vs superhero"
+  ],
+  "dafeng night watchman": [
+   "大奉打更人NightwatcherDafeng's Night Squadحارس الليل دافنغ"
+  ],
+  "dare i hope": [
+   "‏감히 바라옵건대I dare to hopeأجرؤ على الأمل"
+  ],
+  "dark gathering": [
+   "التجمع المظلم"
+  ],
+  "dear anemone": [
+   "دير انيمون",
+   "دير انيموني",
+   "عزيزتي انيمون."
+  ],
+  "detective conan": [
+   "المتحري كونان"
+  ],
+  "diamond no ace act ii": [
+   "Ace of Diamond Act II"
+  ],
+  "different kings": [
+   "دفرنت كينجس",
+   "ملوك مختلفة",
+   "Different Kings"
+  ],
+  "dig it": [
+   "أستوعبها",
+   "DIG IT",
+   "ディグイット"
+  ],
+  "dog and scum": [
+   "Inu to kuzu",
+   "كلب وحثالة"
+  ],
+  "douluo dalu ii jueshui tangmen": [
+   "ارض الروح 2 الجزء الثاني Douluo Dalu II – Soul Land II 斗罗大陆2绝世唐门（漫画）(CHINESE)",
+   "绝世唐门(漫画）Soul Land 2 - The Peerless Tang Sect",
+   "SOUL LAND 2 (ENGLISH)",
+   "SOULLAND II",
+   "ĐẤU LA ĐẠI LỤC II - TUYỆT THẾ ĐƯỜNG MÔN (VIETNAMESE - TIẾNG VIỆT - TV)"
+  ],
+  "dr hound": [
+   "دُكْتُور هَاوْنْد",
+   "닥터 하운드",
+   "داكْتَوْ هَاوُنْدُ"
+  ],
+  "dr stone": [
+   "dr. stone",
+   "ستون"
+  ],
+  "dragon ball super": [
+   "دراغون بول سوبر",
+   "Doragon Bōru Sūpā"
+  ],
+  "dungeon odyssey": [
+   "Dungeon Odessey Dungeon Odyssey"
+  ],
+  "duranki": [
+   "دورانكي"
+  ],
+  "edens zero": [
+   "エデンズゼロ"
+  ],
+  "emperor god ling tian": [
+   "Emperor Ling Tian Emperor LingTian High Overlord To Revenge",
+   "Divine 凌天神帝 凌天神帝～神界最強師匠の転生～"
+  ],
+  "enigmatica": [
+   "エニグマティカ",
+   "إينيغماتيكا"
+  ],
+  "face genius top star from age 0": [
+   "Face Genius: Top Star from Age 0Face Genius",
+   "0-Year-Old Top Star Face Genius: Top Star From Age 0 Handsome Since Birth",
+   "Road to Stardom 얼굴천재 0살 톱스타الوسيم العبقري: نجم منذ الولادة"
+  ],
+  "fairy 100 years quest": [
+   "フェアリーテイル 100年クエスト"
+  ],
+  "fairy tail": [
+   "フェアリーテイル"
+  ],
+  "for the beautiful juliet": [
+   "For Beautiful Juliet",
+   "아름다운 줄리엣을 위하여"
+  ],
+  "for the goddesses for daphne": [
+   "여신들을 위하여",
+   "لأجل الآلهة: لأجل دافني"
+  ],
+  "gintama": [
+   "غينتاما",
+   "銀魂"
+  ],
+  "gizmo riser": [
+   "الصعود بالآلات",
+   "Gizmorizer",
+   "ギズモライザー",
+   "Gizumoraizā"
+  ],
+  "god at random": [
+   "GaR",
+   "Randomly God",
+   "랜덤뽑기로 신이 되다",
+   "兼职神仙"
+  ],
+  "god of martial arts": [
+   "Dewa Seni Beladiri",
+   "Juéshì Wǔshén",
+   "Peerless Martial God",
+   "Бог боевых искусств",
+   "เทพยุทธ์พลิกลิขิตสวรรค์",
+   "绝世武神"
+  ],
+  "gokurakugai": [
+   "Gokuraku District",
+   "極楽街",
+   "غوكوراكوغاي"
+  ],
+  "grand blue": [
+   "Grand Blue Dreaming",
+   "الحلم الأزرق الكبير",
+   "ぐらんぶる"
+  ],
+  "haha to iu jubaku musume to iu rougoku": [
+   "قيد الأم",
+   "سجن الابنة"
+  ],
+  "hail the king": [
+   "Hail the King",
+   "فليحيا الملك",
+   "يحيا الملك"
+  ],
+  "haimiya senpai wa kowakute kawaii": [
+   "Haimiya-Senpai is Scary But Cuteهايميا-سينباي حسناء مهيبة"
+  ],
+  "hajime no ippo": [
+   "هاجيمي نو ايبو",
+   "الخطوة الأولى",
+   "はじめの一歩"
+  ],
+  "hana wa shinitagaru": [
+   "Wilted Flower",
+   "花は死にたがる",
+   "زهرة ذابلة"
+  ],
+  "happy": [
+   "سعيد"
+  ],
+  "heaven defying sword": [
+   "Heaven Defying Sword",
+   "السيف الماحي للسماء"
+  ],
+  "heavenly demon cultivation simulation": [
+   "محاكاة تطور الشيطان السماوي"
+  ],
+  "hero i quit that a long time ago": [
+   "Hero I Quit That A Long Time Ago",
+   "Hero? I Quit That A Lon g Time Ago",
+   "بطل لقد تركت ذلك منذ زمن طويل"
+  ],
+  "highserk senki": [
+   "Record of Highserk War",
+   "حرب هايسيرك",
+   "濁る瞳で何を願う ハイセルク戦記"
+  ],
+  "how to survive as the devil s child": [
+   "How to Survive As The Devil’s Daughter 마왕의 아이로 살아남는 법Way to survive as the demon king’s deughter"
+  ],
+  "how to turn you around": [
+   "너를 돌려차는 방법كيفية تحويلك"
+  ],
+  "hunter x hunter": [
+   "HxH",
+   "هنتر X هنتر"
+  ],
+  "hunter x hunter colored": [
+   "هنتر x هنتر ملون"
+  ],
+  "i am the precious daughter of the greatest villain in the fantasy world": [
+   "I Am the Precious Daughter of the Greatest Villain in the Fantasy World."
+  ],
+  "i born again as the emperor s daughter": [
+   "His Majesty high price babyThe treasure fell off the emperor's sky",
+   "皇帝陛下的天价宝贝صاحبة الجلالة ارتفاع سعر الأطفال"
+  ],
+  "i have a dragon in my body": [
+   "لدي تنين في جسدي",
+   "I Have a Dragon in my Body",
+   "我身上有条龙"
+  ],
+  "i m a doll but the tyrant is obsessed with me": [
+   "人形ですが暴君に執着されていますThe Tyrant Is Obsessive With Me",
+   "a Doll인형인데",
+   "폭군이 집착합니다انا دمية",
+   "لكن الطاغية مهووس بي"
+  ],
+  "i m the princess of all": [
+   "I’m the Princess of All 모두의 황녀님모두의 황녀님 The Empress of All"
+  ],
+  "i m the wife of the yandere second male lead": [
+   "흑화하는 서브 남주의 아내랍니다أنا زوجة قائد الذكور الثاني في يانديري The Blackened Second Male Lead's Wife",
+   "黑化男二的妻子",
+   "흑화하는 서브 남주의 아내랍니다"
+  ],
+  "i was just an ordinary lady": [
+   "I Was Just An Ordinary Lady",
+   "한 줄짜리 영애였을 터",
+   "في الأصل سيدة مع خط واحد Originally A Lady With One Line"
+  ],
+  "ichigeki": [
+   "الضربة القاتلة",
+   "اتشيقيكي",
+   "ichigeki"
+  ],
+  "ikoku nikki": [
+   "يوميات من عالم غريب",
+   "Foreign Country Diary",
+   "Journal with Witch",
+   "Diario con Bruja",
+   "Diario de Otro País",
+   "Diario en otro pais",
+   "Entre les lignes",
+   "違国日記"
+  ],
+  "in the name of special contract marriage": [
+   "특급 계약 결혼의 말로In a Special Contract's Nameباسم زواج تعاقدي بسيط."
+  ],
+  "introvert": [
+   "내향남녀an introverted man and womanMy Introverted Boy"
+  ],
+  "isekai yururi kikou kosodateshinagara boukensha shimasu": [
+   "Isekai Yururi Kikou: Raising Children While Being an Adventure",
+   "異世界ゆるり紀行 ～子育てしながら冒険者します～"
+  ],
+  "jojo no kimyou na bouken part 8 jojolion": [
+   "Jojorion",
+   "JoJo's Bizarre Adventure Part 8: Jojolion"
+  ],
+  "jojo s bizarre adventure part 9 the jojolands": [
+   "The JOJOLands ザ・ジョジョランズ ジョジョの奇妙な冒険 ザ・ジョジョランズ"
+  ],
+  "jujutsu kaisen": [
+   "جوجوتسو كايسن",
+   "صراع الشعوذة"
+  ],
+  "kaiju no 8": [
+   "Monster #8",
+   "وحش رقم 8"
+  ],
+  "kaiten no albus": [
+   "البوس المغيرAlbus Changes the World廻天のアルバス"
+  ],
+  "kaoru hana wa rin to saku": [
+   "the fragrant flower blooms with dignity"
+  ],
+  "kaze no tani no nausicaä": [
+   "ناوشيكا اميرة وادي الرياح",
+   "Nausicaä of the Valley of the Wind",
+   "風の谷のナウシカ"
+  ],
+  "kekkon yubiwa monogatari": [
+   "Tales of Wedding Rings",
+   "結婚指輪物語"
+  ],
+  "kengan omega": [
+   "كينغان آشورا",
+   "كينغان أوميغا",
+   "Kengan Asura",
+   "Kengan Omega",
+   "Кэнган Омега",
+   "ケンガンアシュラ"
+  ],
+  "kimetsu no yaiba": [
+   "قاتل الشياطين"
+  ],
+  "kimi wa yotsuba no clover": [
+   "You Are a Four-Leaf Clover",
+   "きみは四葉のクローバー",
+   "Você é um Trevo de Quatro Folhas",
+   "Cậuأنتِ زهرة الحظ",
+   "là cỏ 4 lá",
+   "恋人手中四叶草",
+   "戀人手中四葉草"
+  ],
+  "king of apocalypse": [
+   "King of Apocalypse",
+   "ملك نهاية العالم",
+   "ملك ابوكاليبس"
+  ],
+  "kingdom": [
+   "المملكة"
+  ],
+  "kingdom hearts": [
+   "キングダム ハーツ",
+   "Kingudamu Hātsu",
+   "كينغدوم هارتس"
+  ],
+  "kurogane no valhallian": [
+   "Valhallian the Black Iron",
+   "فالهاليان"
+  ],
+  "lady baby": [
+   "lady Baby ليدي بيبي"
+  ],
+  "level up with skills": [
+   "Leveling Up With Skills"
+  ],
+  "love through a prism": [
+   "Love Through a Prism",
+   "حب يمر عبر منشور زجاجي",
+   "Purizumu Rondo",
+   "プリズム輪舞曲",
+   "Prism Rondo"
+  ],
+  "mad": [
+   "マッド"
+  ],
+  "magi": [
+   "Magi: The Labyrinth of Magic"
+  ],
+  "magic emperor": [
+   "Magic emperor",
+   "امبراطور السحر الامبراطور الشيطانى ديمونك امبرور Demonic Emperor"
+  ],
+  "mairimashita iruma kun": [
+   "魔入りました！入間くんHere's Come The Demon!Iruma Kun The Demon",
+   "Iruma-kun",
+   "Came and Enrolled! Welcome to Demon School! Iruma-kun Welcome to Demon School",
+   "Iruma-kunاذهب للشيطان! ايروما-كن"
+  ],
+  "majin tantei nougami neuro": [
+   "魔人探偵脳噛ネウロ",
+   "Demon Detective Nougami Neuro",
+   "Rikon Choutei",
+   "Divorce Conciliation",
+   "المحقق الشيطاني نوغامي نيورو"
+  ],
+  "mao": [
+   "ماو"
+  ],
+  "marshal your wife run away": [
+   "Marshal your wife run away",
+   "Marshal-She Ran Away Again",
+   "The Epic Revenge",
+   "Shao shuai ni laopo you paole",
+   "Shǎo shuài nǐ lǎopó yòu pǎole"
+  ],
+  "martial arts reigns": [
+   "Martial Arts Reigns",
+   "Wu dao du zun",
+   "武道独尊"
+  ],
+  "martial peak": [
+   "الذروة القتاليه",
+   "الذروة العسكرية",
+   "MP",
+   "武炼巅峰",
+   "Martial Peak"
+  ],
+  "metaphor refantazio": [
+   "メタファー：リファンタジオ",
+   "ميتافور ريفانتازيو",
+   "Metafā: Rifantajio"
+  ],
+  "mission yozakura family origin team": [
+   "Yozakura-san Chi no Daisakusen",
+   "夜桜さんちの大作戦"
+  ],
+  "mookhyang dark lady": [
+   "MookHyang – Dark Lady MookHyang: Dark Lady"
+  ],
+  "mr devourer please act like a final boss": [
+   "The Unbeatable Dungeon's Lazy Boss Monster",
+   "Mr Devourer",
+   "Please Act Like a Final Boss The Unbeatable Dungeon's Lazy Boss Monster 보스 몹답게 행동하세요 스왈로우 씨 보스 몹답게 행동하세요",
+   "스왈로우 씨!The Unbeatable Dungeons Lazy Boss Monster"
+  ],
+  "naruto digital colored": [
+   "Naruto - Digital Colored Comics",
+   "ナルト",
+   "ناروتو الملونة"
+  ],
+  "ni nen b gumi yuusha destroyers": [
+   "Hero destroyer class 2-B"
+  ],
+  "night of the living cat": [
+   "ニャイト・オブ・ザ・リビングキャット",
+   "Nyaito obu za Ribingukyatto",
+   "Nyaight of the Living Cat",
+   "جائحة القطط"
+  ],
+  "noisering": [
+   "ノイズリング",
+   "noise ring",
+   "حلقة الضجيج",
+   "نويز رينغ"
+  ],
+  "one day i became a princess": [
+   "One Day I Became a Princess 어느 날 공주가 되어버렸다",
+   "Who Made Me a Princess",
+   "Suddenly Became a Princess One Day فجاه يوم واحد اصبحت اميرة",
+   "من جعلني اميرة"
+  ],
+  "one piece": [
+   "ون بيس"
+  ],
+  "one piece colored": [
+   "ون بيس"
+  ],
+  "one piece special boichi crossover": [
+   "One Piece Special Boichi Crossover"
+  ],
+  "operation name pure love": [
+   "작전명 순정 Operation Name Pure Love Operation Name Sunjeong작전명 순정اسم العملية الحب النقياسم العملية الحب النقي"
+  ],
+  "orb on the movements of the earth": [
+   "Chi: Chikyū no Undō ni Tsuite",
+   "محاكم التفتيش ودوران الأرض",
+   "Chi. Chikyuu no Undou ni Tsuite"
+  ],
+  "origin": [
+   "origin"
+  ],
+  "otherworldly evil monarch": [
+   "Otherworldly Evil Monarch",
+   "عاهل الشر القادم من عالم اخر"
+  ],
+  "otr of the flame": [
+   "أوتر",
+   "شعلة اللهب"
+  ],
+  "owari no seraph": [
+   "Seraph Of The End"
+  ],
+  "pandora hearts": [
+   "قلوب باندورا",
+   "باندورا هارتس"
+  ],
+  "peerless battle spirit": [
+   "روح القتال منقطعة النظير Peerless Battle Spirit"
+  ],
+  "peerless dad": [
+   "‏ dad",
+   "الاب منقطع النظير"
+  ],
+  "persona 5": [
+   "ペルソナ5",
+   "بيرسونا 5",
+   "Perusona Faibu"
+  ],
+  "perspective of immortal doctor": [
+   "منظور الطبيب الخالد",
+   "Perspective of Immortal Doctor"
+  ],
+  "poison genius consort": [
+   "Poison genius consort",
+   "السم العبقرى القرين"
+  ],
+  "pokémon adventures": [
+   "ポケットモンスター SPECIAL",
+   "Poketto Monsutā Supesharu",
+   "Pocket Monsters Special",
+   "مغامرات بوكيمون"
+  ],
+  "psycho pass kanshikan kogami shinya": [
+   "Inspecteur Kogami Shinya"
+  ],
+  "ragna crimson": [
+   "راغنا القرمزيّ"
+  ],
+  "ranger reject": [
+   "Sentai Daishikkaki",
+   "戦隊大失格"
+  ],
+  "re zero arc 1": [
+   "ري:زيرو الارك 1 Re:Zero kara Hajimeru Isekai Seikatsu: Dai-1 Shou - Outo no Ichinichi-hen"
+  ],
+  "re zero arc 2": [
+   "ري:زيرو الأرك 2"
+  ],
+  "rebirth city s deity": [
+   "Rebirth: City Deity"
+  ],
+  "rebirth of the urban immortal cultivator": [
+   "اعادة ميلاد المتدرب الحضارى",
+   "Rebirth Of The Urban Immortal Cultivator"
+  ],
+  "record of ragnarok": [
+   "Valkyrie Apocalypse",
+   "終末のワルキューレ",
+   "سجلات راغناروك"
+  ],
+  "ruridargon": [
+   "التنينة روري",
+   "Ruri Dragon"
+  ],
+  "sangeki": [
+   "Haunted peak",
+   "مسرحية الجبل"
+  ],
+  "sensou kyoushitsu": [
+   "The Bugle Call",
+   "نداء البوق"
+  ],
+  "she and the beast": [
+   "The Lady and the Beast"
+  ],
+  "shingeki no kyojin": [
+   "Attack On Titan",
+   "SNK"
+  ],
+  "shinobi goto": [
+   "شينوبي مُتخفي",
+   "Shinobi Undercover"
+  ],
+  "sincerely i became a duke s maid": [
+   "عزيزي اصبحت خادمة الدوق",
+   "Sincerely I Became a Duke’s Maid"
+  ],
+  "skeleton soldier couldn t protect the dungeon": [
+   "Gaikotsu heishi wa Danjon o mamorenakatta",
+   "Skeletal Soldiers Could Not Protect the Dungeon",
+   "Skeleton Soldier",
+   "The Skeleton Soldier Failed to Defend the Dungeon",
+   "해골병사는 던전을 지키지 못했다",
+   "骸骨兵士はダンジョンを守れなかった Skeleton Soldier Could not Protect the Dungeon",
+   "Skeleton Soldier Couldnt Protect the Dungeon The Skeleton Soldier Failed to Defend the Dungeon",
+   "Skeleton Soldier Couldn't Protect the Dungeon"
+  ],
+  "skip beat": [
+   "スキップ・ビート ！Skip Beat !Skip Beat! !سكيب بيت"
+  ],
+  "slam dunk": [
+   "Slam Dunk",
+   "スラム ダンク",
+   "سلام دانك"
+  ],
+  "solo leveling": [
+   "Alone",
+   "Level Up!",
+   "나 혼자만 레벨업"
+  ],
+  "soul land iv the ultimate combat": [
+   "Soul land 4 – The ultimate battle"
+  ],
+  "spare me great lord": [
+   "Spare Me",
+   "great lord! 大王饶命إعف عني أيها السيد العظيم"
+  ],
+  "spy x family": [
+   "Spy x Family",
+   "间谍过家家",
+   "Семья шпиона"
+  ],
+  "sss class suicide hunter": [
+   "الصياد الإنتحاري ذو الرتبة SSSSSS-Class Revival Hunter"
+  ],
+  "star martial god technique": [
+   "تقنية نجم الفنون القتالية",
+   "星武神诀 (Chinese)",
+   "Xing Wu Shen Jue (Novel)",
+   "Xīng Wǔ Shén Jué",
+   "Tinh Võ Thần Quyết",
+   "Tinh Vũ Thần Quyết"
+  ],
+  "starting from today i ll work as a city lord": [
+   "Starting From Today I’ll Work As A City Lord",
+   "ابتداء من اليوم سأعمل كسيد مدينة",
+   "Become the Castellan in Another World 从今天开始当城主 오늘부터 성주"
+  ],
+  "strongest anti m e t a": [
+   "Strongest Anti META",
+   "最强反套路系统",
+   "Strongest Anti M.E.T.A"
+  ],
+  "sunny": [
+   "صني"
+  ],
+  "supreme demon": [
+   "Demon Road Supreme",
+   "Fight The World!",
+   "Supreme Demon Road",
+   "Yao Dao Zhìzun",
+   "妖道至尊",
+   "Supremacy of The Demon World",
+   "Fight the world! الشيطان الاعلى"
+  ],
+  "supreme mad emperor system": [
+   "Supreme Mad Emperor System",
+   "الامبراطور المجنون"
+  ],
+  "tales of demons and gods": [
+   "Tales of Demons and Gods",
+   "حكايا الملوك والشياطين",
+   "حكايا الالهة والشياطين"
+  ],
+  "tang yin zai yi jie": [
+   "تانج يين فى عالم اخر",
+   "Tang Yin Zai Yi Jie"
+  ],
+  "temple": [
+   "معبد"
+  ],
+  "tenkaichi": [
+   "テンカイチ 日本最強武芸者決定戦"
+  ],
+  "tenkaichi nihon saikyou bugeisha ketteisen": [
+   "تينكايتشي: نيهون سايكيو بوغيشا كيتّيسين."
+  ],
+  "the amazing digital circus": [
+   "السيرك الرقمي المدهش",
+   "アメイジング デジタル サーカス"
+  ],
+  "the beginning after the end": [
+   "The Beginning After the End",
+   "البداية بعد النهاية"
+  ],
+  "the death mage who doesn t want a fourth time": [
+   "ساحر الموت الذي لا يرغب بمرة رابعة",
+   "Yondome wa Iyana Shi Zokusei Majutsushi"
+  ],
+  "the duchess 50 tea recipes": [
+   "The Duchess’s 50-Tea Recipe 50 وصفة للشاي من الدوقة"
+  ],
+  "the ghostly doctor": [
+   "الطبيبة الشبح",
+   "Gui Yi Feng Jiu Mesmerizing Ghost Doctor",
+   "鬼医凤九"
+  ],
+  "the glutton": [
+   "Eater of All"
+  ],
+  "the god of high school": [
+   "ملك المدارس الثانوية",
+   "اله المدرسة الثانوية",
+   "ملك المدرسة الثانوية",
+   "The God of High School"
+  ],
+  "the great mage returns after 4000 years": [
+   "الساحر العائد بعد 4000 عام",
+   "الساحر العظيم يعود بعد 4000 سنه The Archmage Returns After 4000 Years"
+  ],
+  "the great ruler": [
+   "The Great Ruler",
+   "الحاكم الاعلى",
+   "الحاكم العظيم"
+  ],
+  "the justice of villainous woman": [
+   "The Justice of Villainous Woman",
+   "عداله امراة خبيثة",
+   "عدالة امراة شريرة"
+  ],
+  "the last human": [
+   "Mortals of the Doom",
+   "末世凡人"
+  ],
+  "the marshal king": [
+   "المأمور الملك"
+  ],
+  "the monster duchess and contract princess": [
+   "괴물 공작의 계약 공녀The Monster Duchess and Contract PrincessWitch's counterattack الدوقة الوحش والعقد الأميرة"
+  ],
+  "the mythical realm": [
+   "，ذا ميثيكال ريالم",
+   "The Mythical Realm"
+  ],
+  "the portal of wonderland": [
+   "The Portal of Wonderland",
+   "بوابة ارض العجائب"
+  ],
+  "the princess in the dumpster": [
+   "廢墟中的皇女Princess in the Rough쓰레기장 속 황녀님الأميرة في القمامة"
+  ],
+  "the ravages of time": [
+   "Huǒ Fèng Liáo Yuán",
+   "火鳳燎原"
+  ],
+  "the ravages of time blue hawk": [
+   "Huǒ Fèng Liáo Yuán",
+   "火鳳燎原"
+  ],
+  "the rebirth of noble revenge": [
+   "The rebirth of noble revenge",
+   "reborn house of revenge ولدت من جديد. الثأر الحلو The Rebirth of Noble - Revenge"
+  ],
+  "the return of the corpse king": [
+   "ملك الجثث",
+   "عودة ملك الجثث"
+  ],
+  "the supreme lord system": [
+   "The Supreme System"
+  ],
+  "the survival rule of the queen": [
+   "قانون الملكة للبقاء How to be a princess A Queen's Law of Survival",
+   "皇女的生存法则قانون الملكة للبقاء على قيد الحياة"
+  ],
+  "the tyrant s tranquilizer": [
+   "폭군의 신경안정제"
+  ],
+  "the ultimate killer": [
+   "The ultimate killerJué Shì Shã Shén",
+   "Peerless God of Killing",
+   "绝世杀神",
+   "God of Killing",
+   "إله القتل",
+   "إله الذبح الذي لا مثيل له.القاتل النهائي"
+  ],
+  "the underworld s broker": [
+   "地府开发商 Hell’s DeveloperThe Underworld's Broker Underworld King"
+  ],
+  "the villain discovered my identity": [
+   "Agyeogege Jeongchereul Deulkyeobeoryeotda Caught By the Villain 악역에게 정체를 들켜버렸다اكتشف الشرير هويتي"
+  ],
+  "the villainess captured the grand duke": [
+   "악녀는 대공을 사로잡았다"
+  ],
+  "this man": [
+   "THIS MAN その顔を見た者には死を",
+   "This Man: Sono Kao o Mita Mono ni wa Shi o"
+  ],
+  "three days of happiness": [
+   "Jumyou wo Kaitotte Moratta. Ichinen ni Tsuki",
+   "Ichimanen de."
+  ],
+  "tokyo ghoul": [
+   "TG",
+   "طوكيو غول"
+  ],
+  "tokyo ghoul re": [
+   "Toukyou Kushu:re",
+   "طوكيو غول ري"
+  ],
+  "tokyo revengers": [
+   "منتقمو طوكيو",
+   "Tokyo 卍 Revengers",
+   "東京卍リベンジャーズ"
+  ],
+  "tougen anki": [
+   "Togen Demon 桃源暗鬼"
+  ],
+  "trample on the river of immortality": [
+   "World Shattered at My Hand World Shattered at My Handالعالم حطِم على يدي"
+  ],
+  "transformers skybound": [
+   "energon universe"
+  ],
+  "trash of the count s family": [
+   "قمامة عائلة الكونت Lout of Count's Family حثالة عائلة الكونت Trash of the Counts Family"
+  ],
+  "twin brothers new life": [
+   "Twin Brothers New Life",
+   "The Twin Siblings’ New Life"
+  ],
+  "ultimate soldier": [
+   "المحارب المطلق"
+  ],
+  "umineko no naku koro ni chiru episode 5 end of the golden witch": [
+   "When Seagulls Cry Episode 5",
+   "Umineko WHEN THEY CRY Episode 5",
+   "عندما تبكي طيور النورس الحلقة 5"
+  ],
+  "umineko no naku koro ni chiru episode 6 dawn of the golden witch": [
+   "When Seagulls Cry Episode 6",
+   "Umineko WHEN THEY CRY Episode 6",
+   "عندما تبكي طيور النورس الحلقة 6"
+  ],
+  "umineko no naku koro ni chiru episode 7 requiem of the golden witch": [
+   "When Seagulls Cry Episode 7",
+   "Umineko WHEN THEY CRY Episode 7",
+   "عندما تبكي طيور النورس الحلقة 7"
+  ],
+  "umineko no naku koro ni chiru episode 8 twilight of the golden witch": [
+   "When Seagulls Cry Episode 8",
+   "Umineko WHEN THEY CRY Episode 8",
+   "أومينيكو الحلقة 8",
+   "عندما تبكي طيور النورس الحلقة 8"
+  ],
+  "umineko no naku koro ni episode 1 legend of the golden witch": [
+   "When They Cry 3",
+   "Umineko no Naku Koro ni - Episode 1: Legend of the Golden Witch"
+  ],
+  "umineko no naku koro ni episode 2 turn of the golden witch": [
+   "When Seagulls Cry Episode 2: Turn of the Golden Witch",
+   "عندما تبكي طيور النورس - الحلقة 2: دور الساحرة الذهبية"
+  ],
+  "umineko no naku koro ni episode 3 banquet of the golden witch": [
+   "When Seagulls Cry Episode 3",
+   "Umineko WHEN THEY CRY Episode 3",
+   "عندما تبكي طيور النورس الحلقة 3"
+  ],
+  "umineko no naku koro ni episode 4 alliance of the golden witch": [
+   "When Seagulls Cry Episode 4",
+   "Umineko WHEN THEY CRY Episode 4",
+   "عندما تبكي طيور النورس الحلقة 4"
+  ],
+  "urareta henkyou haku reijou wa ringoku no outaishi ni dekiai sareru": [
+   "الأجودية والغريم 売られた辺境伯令嬢は隣国の王太子に溺愛される"
+  ],
+  "vagabond": [
+   "فاغابوند",
+   "الرحال",
+   "バガボンド",
+   "浪人劍客"
+  ],
+  "vanitas no carte": [
+   "Vanitas no Shuki",
+   "مُذّكرات فانيتاس"
+  ],
+  "veil": [
+   "Veil 1 - Body temperature of OrangeVeil 1 - オレンジの体温面纱.1漫画：橘色体温"
+  ],
+  "versatile mage": [
+   "Quanzhi Fashi",
+   "Quánzhí Fǎshī",
+   "Toàn Chức Pháp Sư",
+   "Маг на полную ставку",
+   "全职法师",
+   "全能魔導士",
+   "전직법사"
+  ],
+  "versus": [
+   "バーサス",
+   "فيرسوس",
+   "مواجهة"
+  ],
+  "watashi no shiawase na kekkon": [
+   "My Happy Marriage",
+   "زواجي السعيد",
+   "わたしの幸せな結婚"
+  ],
+  "witchriv": [
+   "ويتشريف"
+  ],
+  "with a no cooldown cheat i can transform into an undead calamity": [
+   "with a no cooldown cheat I can transform into an undead calamity"
+  ],
+  "yakusoku no neverland": [
+   "The Promised Neverland",
+   "نيفرلاند الموعودة",
+   "約束のネバーランド"
+  ],
+  "yong heng zhi zun": [
+   "Yong Heng Zhi Zun",
+   "الاحترام الأبدي",
+   "Eternal Reverence",
+   "永恒至尊"
+  ],
+  "yuan long": [
+   "Yuan Long",
+   "يوان لونج"
+  ],
+  "yuan zun": [
+   "元尊",
+   "Yuan Zun"
+  ],
+  "yuusha avan to gokuen no maou": [
+   "勇者アバン",
+   "البطل أفان وجحيم ملك الشياطين الملتهب"
+  ]
+ }
+}

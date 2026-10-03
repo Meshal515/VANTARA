@@ -3,5 +3,9 @@
   { "source": "tuktukcinema", "query": "spider-man across the spider-verse" },
   { "source": "arabseed", "query": "shameless", "episode": 1 },
   { "source": "shahiid", "query": "attack on titan", "episode": 1 },
-  { "source": "witanime", "query": "frieren", "episode": 1 }
+  { "source": "witanime", "query": "frieren", "episode": 1 },
+  { "source": "akwam", "query": "dune" },
+  { "source": "akwam", "query": "breaking bad", "episode": 1 },
+  { "source": "egydead", "query": "dune part 1" },
+  { "source": "egydead", "query": "shameless", "episode": 3 }
 ]

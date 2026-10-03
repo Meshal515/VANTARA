@@ -22,23 +22,26 @@ class ManifestFileTest {
         assertTrue(m.sources.any { it.id == "witanime" && it.enabled && it.adapter == "witanime-site" })
     }
 
-    @Test fun `EgyDead has a native MegaMax server extraction path`() {
-        val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "egydead" }.embeds
-        assertTrue("Old extension ignores MegaMax, so it needs the page server path", rule != null)
-        val embeds = rule!!.extract("""<ul class="serversList"><li data-link="https://megamax.me/iframe/x"><span><p>MegaMax</p></span></li></ul>""", "https://tv10.egydead.live/unabomber-2026/")
-        assertEquals("https://megamax.me/iframe/x", embeds.single().url)
-        assertEquals("MegaMax", embeds.single().name)
+    /** EgyDead محوّل أصلي (مسار الـPWA نفسه): الإضافة القديمة تتجاهل MegaMax وقائمة الجوال. */
+    @Test fun `EgyDead runs on the native adapter and reads MegaMax`() {
+        val e = ManifestParser.parse(file.readText()).sources.first { it.id == "egydead" }
+        assertEquals("egydead-site", e.adapter)
+        val servers = com.vantara.anime.adapters.EgyDeadSiteAdapter.Parse.servers(
+            """<ul class="serversList"><li data-link="https://megamax.me/iframe/x"><span><p>MegaMax</p></span></li></ul>""",
+            "https://tv10.egydead.live/unabomber-2026/",
+        )
+        assertEquals("https://megamax.me/iframe/x", servers.single().url)
+        assertEquals("MegaMax", servers.single().name)
     }
 
     /** للجوال يرسل الموقع قائمته داخل `.mob-servers` لا `ul.serversList`: كانت الأفلام كلها «GYD غير متاح». */
     @Test fun `EgyDead servers are read from the mobile page the phone actually gets`() {
-        val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "egydead" }.embeds!!
         val mobile = """
             <div class="mob-servers"><span><em>قائمه السيرفرات</em></span><ul>
               <li data-link="https://hgcloud.to/e/wfw0buonw2r9"><span><p>StreamHG</p></span></li>
               <li data-link="https://mxdrop.top/e/wln840w7f0zm6oz"><span><p>Mixdrop</p></span></li>
             </ul></div>"""
-        val e = rule.extract(mobile, "https://tv10.egydead.live/toy-story-5-2026-1080p-web-dl/")
+        val e = com.vantara.anime.adapters.EgyDeadSiteAdapter.Parse.servers(mobile, "https://tv10.egydead.live/toy-story-5-2026-1080p-web-dl/")
         assertEquals(listOf("StreamHG", "Mixdrop"), e.map { it.name })
         assertEquals("https://mxdrop.top/e/wln840w7f0zm6oz", e[1].url)
     }

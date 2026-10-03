@@ -37,8 +37,9 @@ export function readTitle(title) {
   const num = t.match(/الموسم\s*(\d{1,2})/) ?? t.match(/season\s*(\d{1,2})/i) ?? t.match(/\bS(\d{1,2})(?:E\d+)?\b/i);
   if (num) season = Number(num[1]);
   else {
-    const after = t.match(/الموسم\s+(ال\S+(?:\s+عشر)?)/);
-    if (after) season = ORDINALS[after[1]] ?? null;
+    // «الموسم لاول» (أكوام يكتبها بلا ألف) = «الموسم الاول»
+    const after = t.match(/الموسم\s+((?:ال|ل)\S+(?:\s+عشر)?)/);
+    if (after) season = ORDINALS[after[1]] ?? ORDINALS[`ا${after[1]}`] ?? null;
   }
   const y = t.match(/(?:^|\D)((?:19|20)\d{2})(?!\d)/);
   // «سلسلة أفلام X كاملة» صفحة تجميع لا عمل واحد

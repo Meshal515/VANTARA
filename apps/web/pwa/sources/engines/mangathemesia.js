@@ -14,6 +14,7 @@
  */
 
 import { absAttr, attr, imageOf, parseHtml, pathOf, q, qa, text } from '../dom.js';
+import { aliasesFromDoc } from '../../../lib/manga-aliases.js';
 import { parseDate } from '../dates.js';
 import { statusOf } from './madara.js';
 
@@ -82,6 +83,7 @@ export const mangathemesia = {
         author: null,
         artist: null,
         status: statusOf(text(q(box, cfg.statusSelector))),
+        altNames: aliasesFromDoc(doc, { q, qa, text }),
         initialized: true,
         ...(postId ? { memo: JSON.stringify({ postId }) } : {}),
       };

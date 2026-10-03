@@ -62,4 +62,18 @@
         <!-- Hijala — صور الفصول على http من hijala.com نفسه -->
         <domain includeSubdomains="true">hijala.com</domain>
     </domain-config>
+    <!--
+      ملفات Akwam على downet.net: بعض خوادمها (s205d1، s202d1) ترسل شهادة SSL2BUY بلا
+      الوسيط، فيرفض OkHttp/ExoPlayer المصافحة (المتصفحات تجلبه وحدها). نثق بذلك الوسيط
+      وحده لهذا النطاق وحده، فوق ثقة النظام (فحص 2026-10-03 من آلة GitHub: verify error 20).
+      الوسيط من مُصدره: crt.sectigo.com/SSL2BUYEMEARSADomainValidationSecureServerCA.crt
+      sha256 58:F0:F7:56:75:8E:93:FB:0B:6B:17:A3:6A:38:50:47:5D:68:BC:0D:6C:99:CB:E2:2A:1B:18:35:1C:89:FF:1F
+    -->
+    <domain-config>
+        <domain includeSubdomains="true">downet.net</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/ssl2buy_emea_dv" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

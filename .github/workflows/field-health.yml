@@ -1,0 +1,30 @@
+name: Field health
+
+# صحة المصادر كما تراها الهواتف والمتصفحات فعلًا (عدّادات `source_reports`
+# بلا بيانات شخصية). يقرأ فقط؛ النتيجة في ملخص التشغيل.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'عدد الأيام'
+        default: '2'
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Source health from real devices
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node tools/field-health.mjs --days=${{ github.event.inputs.days || '2' }} | tee -a "$GITHUB_STEP_SUMMARY"

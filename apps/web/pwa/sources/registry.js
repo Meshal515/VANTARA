@@ -191,7 +191,9 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
     cooling,
     def: (id) => live.get(id)?.def ?? null,
     source: (id) => live.get(id)?.source ?? null,
-    list: (content = null) => [...live.values()].map((e) => e.def).filter((d) => !content || d.content === content),
+    // `edge: 'challenge'`: الموقع يتحدّى عناوين جالب الويب (Cloudflare) فلا يصل منه شيء في
+    // المتصفح — يبقى للـAPK (يحل التحدي محليًا)، ومصفوفة الحافة الأسبوعية تقول متى يُعاد
+    list: (content = null) => [...live.values()].map((e) => e.def).filter((d) => (!content || d.content === content) && d.edge !== 'challenge'),
     status: () => JSON.parse(JSON.stringify(state)),
     probe,
   };
