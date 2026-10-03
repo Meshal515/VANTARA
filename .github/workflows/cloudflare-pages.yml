@@ -142,13 +142,22 @@ jobs:
             | jq -r '.result.subdomain // empty')
           sync=''
           if [ -n "$sub" ]; then sync="https://vantara-sync.$sub.workers.dev"; fi
-          SYNC_URL="$sync" API_URL="${API_URL_VAR:-}" python3 - <<'PY'
-          import os
+          SYNC_URL="$sync" API_URL="${API_URL_VAR:-}" PWA_VERSION="pwa-$(git rev-parse --short=7 HEAD)" python3 - <<'PY'
+          import hashlib, os, pathlib, re
           path = 'apps/web/lib/config.js'
           text = open(path, encoding='utf-8').read()
           text = text.replace('__VANTARA_SYNC_URL__', os.environ['SYNC_URL'])
           text = text.replace('__VANTARA_API_URL__', os.environ['API_URL'])
+          text = text.replace('__VANTARA_VERSION__', os.environ['PWA_VERSION'])
           open(path, 'w', encoding='utf-8').write(text)
+          worker = pathlib.Path('apps/web/sw.js')
+          source = worker.read_text()
+          digest = hashlib.sha256()
+          for asset in re.findall(r"^\s*'(/[^']+)',$", source, re.M):
+              digest.update(asset.encode())
+              digest.update(pathlib.Path('apps/web', 'index.html' if asset == '/' else asset[1:]).read_bytes())
+          source = re.sub(r"const SHELL_DIGEST = '[^']+';", f"const SHELL_DIGEST = '{digest.hexdigest()}';", source)
+          worker.write_text(source)
           PY
           echo "sync=$sync"
 

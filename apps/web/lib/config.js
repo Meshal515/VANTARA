@@ -31,7 +31,7 @@ const BAKED = {
   updates: '__VANTARA_UPDATES_URL__',
 };
 
-/** نسخة هذا البناء. يُستبدل عند بناء الـAPK. */
+/** نسخة هذا البناء. تُستبدل عند بناء APK أو نشر PWA. */
 const BAKED_VERSION = '__VANTARA_VERSION__';
 
 /**
@@ -67,7 +67,7 @@ export function endpoints() {
   };
 }
 
-/** نسخة التطبيق العاملة، أو null في المتصفح حيث لا معنى للتحديث. */
+/** نسخة التطبيق العاملة، أو null في بناء محلي لم يُخبز فيه رقم الإصدار. */
 export function appVersion() {
   return unreplaced(BAKED_VERSION) ? null : BAKED_VERSION;
 }

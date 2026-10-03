@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'a3743f702a6daa24d2d1e44f7bbbd0705ef4eb480325f7e9ae381098e27488db';
+const SHELL_DIGEST = '2b29746fe729ee4e4cbccde895b3003e0d17494b68608f903b308cac92d5f8d7';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -296,15 +296,15 @@ self.addEventListener('fetch', (event) => {
   // ينتظر الشبكة قبل أول بكسل — على شبكة جوال متذبذبة تعني شاشة بيضاء
   // ثوانيَ، وهي أول ما يحكم به المستخدم على التطبيق.
   //
-  // ولا نفقد التحديث: النسخة الجديدة تُجلب في الخلفية وتُخزَّن للمرة القادمة،
-  // و`lib/updater.js` يسأل عن بيان آخر إصدار ويعرض «يوجد تحديث جديد» — فآلية
-  // التحديث موجودة أصلًا ولا تحتاج أن يدفع الإقلاع ثمنها.
+  // العامل الجديد ينزّل القشرة كاملة في كاش منفصل. لا نكتب ملفات النسخة
+  // الجديدة في كاش العامل القديم قبل تطبيق التحديث.
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
         const cache = await caches.open(VERSION);
         const cached = await cache.match('/');
 
+        if (cached) return cached;
         const fromNetwork = fetch(request)
           .then((response) => {
             if (response.ok) void cache.put('/', response.clone());
@@ -312,10 +312,6 @@ self.addEventListener('fetch', (event) => {
           })
           .catch(() => undefined);
 
-        if (cached) {
-          event.waitUntil(fromNetwork);
-          return cached;
-        }
         // أول زيارة في حياة الجهاز: لا قشرة مخزَّنة بعد، فالشبكة هي الطريق
         return (await fromNetwork) ?? Response.error();
       })(),
@@ -325,12 +321,13 @@ self.addEventListener('fetch', (event) => {
 
   if (!isShellRequest(url)) return;
 
-  // القشرة: من الكاش فورًا، وتحديث في الخلفية للمرة القادمة
+  // القشرة المثبتة ثابتة؛ العامل الجديد ينزّل التحديث في كاش منفصل.
   event.respondWith(
     (async () => {
       const cache = await caches.open(VERSION);
       const cached = await cache.match(request);
 
+      if (cached) return cached;
       const revalidate = fetch(request)
         .then((response) => {
           if (response.ok) void cache.put(request, response.clone());
@@ -338,11 +335,6 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => undefined);
 
-      if (cached) {
-        // لا ننتظر التحديث: الرد فوري، والنسخة الجديدة تُستخدم في الزيارة التالية
-        event.waitUntil(revalidate);
-        return cached;
-      }
       return (await revalidate) ?? Response.error();
     })(),
   );

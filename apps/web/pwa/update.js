@@ -11,8 +11,33 @@
  * داخل الـAPK لا يُستعمل هذا: للـAPK نظام تحديثه (lib/updater.js).
  */
 
+import { appVersion } from '../lib/config.js';
+import { RELEASE } from '../lib/release.js';
+
 const CHECK_EVERY_MS = 30 * 60 * 1000;
 const UPDATED_KEY = 'vantara.web.updatedAt';
+const SEEN_BUILD_KEY = 'vantara.web.seenBuild';
+
+function applyUpdate(worker) {
+  try {
+    globalThis.localStorage?.setItem(UPDATED_KEY, String(Date.now()));
+  } catch {
+    // لا يمنع التخزين المحجوب تطبيق التحديث.
+  }
+  worker.postMessage('skip-waiting');
+}
+
+/** فحص المستخدم للـPWA: لا يدّعي أن النسخة حديثة عند فشل الشبكة. */
+export async function checkForUpdates(registration, { onReady = () => {} } = {}) {
+  if (!registration) throw new Error('تعذّر الوصول لنظام تحديث PWA');
+  await registration.update();
+  if (registration.waiting) {
+    const worker = registration.waiting;
+    onReady(() => applyUpdate(worker));
+    return 'available';
+  }
+  return registration.installing ? 'installing' : 'current';
+}
 
 /**
  * @param {ServiceWorkerRegistration} registration
@@ -25,14 +50,7 @@ export function watchForUpdates(registration, { onReady, nav = globalThis.naviga
   const announce = (worker) => {
     if (!worker || announced === worker || !nav.serviceWorker?.controller) return;
     announced = worker;
-    onReady(() => {
-      try {
-        globalThis.localStorage?.setItem(UPDATED_KEY, String(Date.now()));
-      } catch {
-        // التذكير بالجديد تحسين فقط
-      }
-      worker.postMessage('skip-waiting');
-    });
+    onReady(() => applyUpdate(worker));
   };
 
   const track = (worker) => {
@@ -45,6 +63,7 @@ export function watchForUpdates(registration, { onReady, nav = globalThis.naviga
   registration.addEventListener('updatefound', () => track(registration.installing));
 
   const check = () => void registration.update().catch(() => {});
+  check();
   const timer = setInterval(check, CHECK_EVERY_MS);
   const onVisible = () => doc.visibilityState === 'visible' && check();
   doc.addEventListener('visibilitychange', onVisible);
@@ -54,13 +73,15 @@ export function watchForUpdates(registration, { onReady, nav = globalThis.naviga
   };
 }
 
-/** هل هذا أول إقلاع بعد تحديث طبّقه الشخص؟ (لعرض «ما الجديد» مرة). يمسح العلامة. */
-export function justUpdated(storage = globalThis.localStorage) {
+/** أول إقلاع ببناء جديد، أو بعد تطبيق التحديث يدويًا: يعرض «ما الجديد» مرة. */
+export function justUpdated(storage = globalThis.localStorage, build = appVersion() ?? RELEASE.version, { nav = globalThis.navigator } = {}) {
   try {
+    const previous = storage?.getItem(SEEN_BUILD_KEY);
+    storage?.setItem(SEEN_BUILD_KEY, build);
     const at = Number(storage?.getItem(UPDATED_KEY));
-    if (!at) return false;
-    storage.removeItem(UPDATED_KEY);
-    return Date.now() - at < 5 * 60 * 1000;
+    if (at) storage.removeItem(UPDATED_KEY);
+    // نسخة مثبتة أقدم من seenBuild: اعرض سجل الإصلاح مرة دون اعتبار أول زيارة تحديثًا.
+    return Boolean(previous ? previous !== build : nav?.serviceWorker?.controller) || Boolean(at && Date.now() - at < 5 * 60 * 1000);
   } catch {
     return false;
   }

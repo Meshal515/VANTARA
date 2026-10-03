@@ -1973,6 +1973,17 @@ async function startUpdates() {
 
 /** `force`: من «تحديث التطبيق» في الإعدادات — الواجهة الجديدة تُطبَّق فورًا. */
 async function checkUpdates({ force = false } = {}) {
+  if (supports('webUpdate')) {
+    const { checkForUpdates } = await import('./pwa/update.js');
+    try {
+      const status = await checkForUpdates(await navigator.serviceWorker?.getRegistration(), { onReady: showWebUpdate });
+      if (force && status === 'installing') showToast({ title: 'جارٍ تنزيل تحديث PWA', body: 'سيظهر زر التحديث بعد اكتمال التنزيل' });
+      return status === 'current' ? null : { web: true, status };
+    } catch (error) {
+      if (force) throw error;
+      return null;
+    }
+  }
   const found = await findUpdate({ force });
   if (!found) return null;
   if (found.web) {
@@ -2085,8 +2096,8 @@ function showWebUpdate(apply) {
   bar.setAttribute('role', 'status');
   const card = el('div', 'vupdate__card');
   const copy = el('div', 'vupdate__copy');
-  copy.append(el('strong', null, 'تحديث جديد متاح'));
-  copy.append(el('span', null, 'نزل في الخلفية. يتطبّق بإعادة تحميل سريعة'));
+  copy.append(el('strong', null, 'تحديث PWA جديد جاهز'));
+  copy.append(el('span', null, `نسختك الحالية: ${appVersion() ?? RELEASE.version}. اضغط تحديث؛ سيظهر الإصدار الجديد وتفاصيله بعد إعادة التحميل`));
   const go = el('button', 'vupdate__go', 'تحديث');
   go.type = 'button';
   go.addEventListener('click', () => {
@@ -2112,9 +2123,9 @@ function showWhatsNew() {
   bar.setAttribute('role', 'status');
   const card = el('div', 'vupdate__card');
   const copy = el('div', 'vupdate__copy');
-  copy.append(el('strong', null, `${RELEASE.product} ${latest.version}`));
+  copy.append(el('strong', null, `${RELEASE.product} ${platform === 'pwa' ? 'PWA' : 'APK'} · ${appVersion() ?? latest.version}`));
   const list = el('ul', 'vupdate__notes');
-  for (const item of latest.items.slice(0, 4)) list.append(el('li', null, item.text));
+  for (const item of latest.items) list.append(el('li', null, item.text));
   copy.append(list);
   const done = el('button', 'vupdate__later', '×');
   done.type = 'button';
