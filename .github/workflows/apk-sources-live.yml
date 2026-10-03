@@ -50,3 +50,12 @@ jobs:
             echo '## APK — المحوّلات الأصلية من آلة GitHub'
             cat app/build/reports/native-sources-live.md 2>/dev/null || echo 'لم يُنتج الجدول (راجع السجل)'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # خوادم ملفات Akwam التي ترفض مصافحة TLS من JVM: ما الذي تقدّمه فعلًا (شهادة/بروتوكول)؟
+      - name: TLS of failing file hosts
+        if: always()
+        run: |
+          for h in s205d1.downet.net s202d1.downet.net s302d3.downet.net; do
+            echo "== $h"
+            echo | timeout 15 openssl s_client -connect $h:443 -servername $h 2>&1 | grep -E "subject=|issuer=|Protocol|Cipher|Verify return|verify error|NotAfter" | head -8 || true
+            curl -sS -m 15 -r 0-15 -o /dev/null -w "curl %{http_code} ssl_verify=%{ssl_verify_result}\n" "https://$h/" || true
+          done
