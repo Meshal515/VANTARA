@@ -58,4 +58,6 @@ jobs:
             echo "== $h"
             echo | timeout 15 openssl s_client -connect $h:443 -servername $h 2>&1 | grep -E "subject=|issuer=|Protocol|Cipher|Verify return|verify error|NotAfter" | head -8 || true
             curl -sS -m 15 -r 0-15 -o /dev/null -w "curl %{http_code} ssl_verify=%{ssl_verify_result}\n" "https://$h/" || true
+            # بالوسيط الذي يضيفه network_security_config لهذا النطاق: هل تكتمل السلسلة؟
+            echo | timeout 15 openssl s_client -connect $h:443 -servername $h -CAfile android/app/src/main/res/raw/ssl2buy_emea_dv.pem -partial_chain 2>&1 | grep -E "Verify return code" || true
           done
