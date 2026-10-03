@@ -84,6 +84,18 @@
       }
     },
     {
+      "id": "ristoanime",
+      "name": "RistoAnime",
+      "content": "anime",
+      "priority": 65,
+      "adapter": "ristoanime-site",
+      "domains": {
+        "current": "https://ristoanime.me",
+        "legacy": ["https://ristoanime.net"],
+        "fingerprint": "RistoAnime|ريسطو انمي"
+      }
+    },
+    {
       "id": "anime4up",
       "name": "Anime4Up",
       "content": "anime",

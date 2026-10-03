@@ -63,7 +63,9 @@ export function genericStreams(html, pageUrl) {
   const found = new Set();
   for (const t of [html, ...unpackAll(html)]) {
     for (const m of String(t).replace(/\\\//g, '/').matchAll(MEDIA)) {
-      const u = m[0].startsWith('//') ? `https:${m[0]}` : m[0];
+      // نص الصفحة الخام: الرابط داخل سمة HTML يحمل `&amp;` (sendvid: validfrom=…&amp;validto=…)
+      const raw = m[0].replace(/&amp;/g, '&');
+      const u = raw.startsWith('//') ? `https:${raw}` : raw;
       found.add(u.startsWith('http') ? u : resolveUrl(u, pageUrl));
     }
   }

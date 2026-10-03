@@ -5,6 +5,7 @@ import com.vantara.anime.adapters.AnimeAdapter
 import com.vantara.anime.adapters.ArabSeedSiteAdapter
 import com.vantara.anime.adapters.EgyDeadSiteAdapter
 import com.vantara.anime.adapters.Listing
+import com.vantara.anime.adapters.RistoAnimeSiteAdapter
 import com.vantara.anime.adapters.ShahiidSiteAdapter
 import com.vantara.anime.adapters.TukTukSiteAdapter
 import com.vantara.anime.adapters.WitAnimeSiteAdapter
@@ -60,6 +61,7 @@ class NativeSourcesLiveTest {
         Case("egydead", "dune part 1"), Case("egydead", "toy story"), Case("egydead", "shameless", 3f), Case("egydead", "the gentlemen"),
         Case("tuktukcinema", "dune"), Case("tuktukcinema", "the gentlemen"), Case("tuktukcinema", "shameless", 3f),
         Case("witanime", "naruto", 1f), Case("witanime", "one piece", 1f), Case("witanime", "solo leveling", 1f),
+        Case("ristoanime", "frieren", 1f), Case("ristoanime", "solo leveling", 1f), Case("ristoanime", "one piece", 1f), Case("ristoanime", "jujutsu", 1f),
         Case("shahiid", "naruto", 1f), Case("shahiid", "one piece", 1f), Case("shahiid", "solo leveling", 1f),
     )
 
@@ -69,6 +71,7 @@ class NativeSourcesLiveTest {
         "egydead" -> EgyDeadSiteAdapter(id, "EgyDead", client, { "https://tv10.egydead.live" }, embeds)
         "tuktukcinema" -> TukTukSiteAdapter(id, "TukTuk", client, { "https://tuktukhd.com" }, embeds)
         "witanime" -> WitAnimeSiteAdapter(id, "WitAnime", client, { "https://witanime.site" }, embeds)
+        "ristoanime" -> RistoAnimeSiteAdapter(id, "RistoAnime", client, { "https://ristoanime.me" }, embeds)
         "shahiid" -> ShahiidSiteAdapter(id, "Shahiid", client, { "https://shahiid-anime.net" }, embeds)
         else -> error(id)
     }

@@ -420,6 +420,22 @@
       "probe": {
         "query": "dune"
       }
+    },
+    {
+      "id": "ristoanime",
+      "label": "RistoAnime",
+      "names": [
+        "ريسطو انمي",
+        "ريستو انمي"
+      ],
+      "content": "anime",
+      "engine": "ristoanime-site",
+      "version": 1,
+      "domain": "ristoanime.me",
+      "config": {},
+      "probe": {
+        "query": "frieren"
+      }
     }
   ]
 }
