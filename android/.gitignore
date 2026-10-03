@@ -4,6 +4,7 @@
 *.apk
 # إضافات المصادر مضمّنة في التطبيق عمدًا (tools/bundle-extensions.mjs)
 !app/src/main/assets/extensions/*.apk
+!app/src/main/assets/anime-extensions/*.apk
 *.aar
 *.ap_
 *.aab

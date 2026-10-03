@@ -32,12 +32,20 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
 
     class LoadException(val stage: String, message: String, cause: Throwable? = null) : Exception("[$stage] $message", cause)
 
-    /** الملف المحلي إن بقيت بايتاته مطابقة للبصمة، وإلا تنزيل جديد. */
+    /**
+     * الملف المحلي إن بقيت بايتاته مطابقة للبصمة، ثم النسخة المضمّنة في التطبيق
+     * (`assets/anime-extensions`، tools/bundle-anime-extensions.mjs)، والتنزيل آخرًا:
+     * المستودع يحذف الإصدارات القديمة فيصير الرابط المثبّت 404 («تعذّر تنزيل»).
+     */
     suspend fun obtain(ref: ExtensionRef): AnimeCatalogueSource {
         val cached = File(dir, "${ref.pkg}.apk").takeIf { it.isFile }?.readBytes()?.takeIf { sha256(it).equals(ref.sha256, true) }
-        val bytes = cached ?: download(ref)
+        val bytes = cached ?: bundled(ref) ?: download(ref)
         return load(ref, bytes)
     }
+
+    private fun bundled(ref: ExtensionRef): ByteArray? = runCatching {
+        appContext.assets.open("$BUNDLED/${ref.pkg}.apk").use { it.readBytes() }
+    }.getOrNull()?.takeIf { sha256(it).equals(ref.sha256, true) }
 
     private suspend fun download(ref: ExtensionRef): ByteArray = try {
         http.newCall(GET(ref.apk)).awaitSuccess().use { it.body.bytes() }
@@ -94,6 +102,7 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private companion object {
+        const val BUNDLED = "anime-extensions"
         const val META_CLASS = "tachiyomi.animeextension.class"
         const val META_FACTORY = "tachiyomi.animeextension.factory"
         const val LIB_MIN = 14

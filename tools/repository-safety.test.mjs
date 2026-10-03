@@ -1206,6 +1206,25 @@ test('every source extension ships inside the app and matches its pinned hash', 
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
 });
 
+test('anime/cinema extensions are bundled in the APK with the manifest fingerprint', () => {
+  // المستودع يحذف الإصدار القديم مع كل بناء: رابط Anime4Up وOkAnime المثبّت صار 404
+  // («تعذّر تنزيل» على الجهاز). كل إضافة في البيان مضمّنة ببصمته نفسها.
+  const manifest = JSON.parse(read('apps/web/anime/sources.json'));
+  const specs = manifest.sources.filter((s) => s.extension).map((s) => s.extension);
+  assert.ok(specs.length >= 5, 'the anime manifest must pin its extensions');
+  const dir = 'android/app/src/main/assets/anime-extensions';
+  const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
+  for (const { pkg, sha256 } of specs) {
+    const path = `${dir}/${pkg}.apk`;
+    assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-anime-extensions.mjs`);
+    const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
+    assert.equal(actual, sha256, `${path} does not match the manifest sha256`);
+  }
+  assert.equal(onDisk.length, specs.length, 'no stale anime extension APKs may remain in the bundle');
+  const loader = read('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
+  assert.match(loader, /cached \?: bundled\(ref\) \?: download\(ref\)/, 'the anime loader must prefer the bundled copy over downloading');
+});
+
 test('hybrid updates: web bundles only on matching native code, APKs only if official and newer', async () => {
   const { nativeInputs, capacitorVersions } = await import('./native-fingerprint.mjs');
   const { buildManifest, changelogFrom } = await import('./update-manifest.mjs');

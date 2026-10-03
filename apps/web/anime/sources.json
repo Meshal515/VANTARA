@@ -8,9 +8,9 @@
       "priority": 70,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.okanime",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.okanime-v14.26.apk",
-        "sha256": "ff5c3fc383f2063a62ee954158669186a59fac66aefbebbe2c8b2cd11b774ed3",
-        "version": "14.26"
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.okanime-v14.27.apk",
+        "sha256": "b2879c4eea6995de913ab8541334e040a5e917d0b923b74932d8f7fc923fefdd",
+        "version": "14.28"
       },
       "domains": {
         "current": "https://ww3.okanime.xyz",
@@ -90,9 +90,9 @@
       "priority": 50,
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.anime4up",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.anime4up-v14.79.apk",
-        "sha256": "06247517185df570c0656eb289e13b5fd02fe6d47d6528447a3169123eb09add",
-        "version": "14.79"
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.anime4up-v14.80.apk",
+        "sha256": "78501fb9822521efd1f05a708e3f89e3033c2cae1f0de67a387cf144a57c0147",
+        "version": "14.80"
       },
       "domains": {
         "current": "https://w1.anime4up.rest",
@@ -107,9 +107,9 @@
       "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.animerco",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animerco-v14.58.apk",
-        "sha256": "794d1197b2046d87ad534270f58621c349197ff460af1e610d087a53af689457",
-        "version": "14.58"
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animerco-v14.59.apk",
+        "sha256": "d2f4413c5d29d8282aa433bafa610328f7bbf7d5817bae167cc04d7f1b52aa80",
+        "version": "14.59"
       },
       "domains": {
         "current": "https://det.animerco.org",
@@ -126,8 +126,8 @@
       "disabledReason": "لم يُدخل بعد: ينتظر دوره بعد OkAnime وWitAnime",
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.animeblkom",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animeblkom-v14.27.apk",
-        "sha256": "89fe005a7d5b33a7335ae01c3f2c01edd48515c6d3868473497eb70b5425aeb7",
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animeblkom-v14.28.apk",
+        "sha256": "32968df66069b2b85cb7c3e99c58e284375ec039c7e3c3f10ed27c3cb35e449b",
         "version": "14.27"
       },
       "domains": {
@@ -177,9 +177,9 @@
       "disabledReason": "الدومين لا يستجيب (animelek.me)",
       "extension": {
         "pkg": "eu.kanade.tachiyomi.animeextension.ar.animelek",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animelek-v14.39.apk",
-        "sha256": "8d856e08aa64b09279c0dea2595ed2ec099f6b47011ca8d57c5283d2829a7aea",
-        "version": "14.39"
+        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.animelek-v14.40.apk",
+        "sha256": "4d1fd724a7805b29c9a21c5ed6d3bf9b881e63d16e129e37d75d3011517b6096",
+        "version": "14.40"
       },
       "domains": {
         "current": "https://animelek.me",
