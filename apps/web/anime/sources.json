@@ -209,19 +209,8 @@
       "id": "egydead",
       "name": "EgyDead",
       "content": "cinema",
-      "priority": 60,
-      "embeds": {
-        "selector": "ul.serversList li[data-link], .mob-servers li[data-link]",
-        "attr": "data-link",
-        "form": { "View": "1" },
-        "primary": true
-      },
-      "extension": {
-        "pkg": "eu.kanade.tachiyomi.animeextension.ar.egydead",
-        "apk": "https://raw.githubusercontent.com/yuzono/anime-repo/repo/apk/aniyomi-ar.egydead-v14.29.apk",
-        "sha256": "0b0cf0ec85cf011ce60785d73d8cca538b683b082d46e92ad9748f601b1031ba",
-        "version": "14.29"
-      },
+      "priority": 70,
+      "adapter": "egydead-site",
       "domains": {
         "current": "https://tv10.egydead.live",
         "legacy": [

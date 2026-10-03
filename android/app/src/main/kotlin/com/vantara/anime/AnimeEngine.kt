@@ -10,6 +10,7 @@ import com.vantara.anime.adapters.ArabSeedSiteAdapter
 import com.vantara.anime.adapters.ShahiidSiteAdapter
 import com.vantara.anime.adapters.TukTukSiteAdapter
 import com.vantara.anime.adapters.AkwamSiteAdapter
+import com.vantara.anime.adapters.EgyDeadSiteAdapter
 import com.vantara.anime.adapters.WitAnimeSiteAdapter
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.hosts.WebViewSniffer
@@ -202,6 +203,13 @@ class AnimeEngine(context: Context) {
             name = e.name,
             client = network.client,
             base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
+        )
+        EgyDeadSiteAdapter.KIND -> EgyDeadSiteAdapter(
+            id = e.id,
+            name = e.name,
+            client = network.client,
+            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
+            embeds = embeds,
         )
         else -> error("محوّل غير معروف: $kind")
     }

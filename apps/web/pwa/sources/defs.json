@@ -404,6 +404,22 @@
       "probe": {
         "query": "dune"
       }
+    },
+    {
+      "id": "egydead",
+      "label": "EgyDead",
+      "names": [
+        "ايجي ديد",
+        "إيجي ديد"
+      ],
+      "content": "cinema",
+      "engine": "egydead-site",
+      "version": 1,
+      "domain": "tv10.egydead.live",
+      "config": {},
+      "probe": {
+        "query": "dune"
+      }
     }
   ]
 }

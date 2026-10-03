@@ -3,6 +3,7 @@ package com.vantara.anime
 import com.vantara.anime.adapters.AkwamSiteAdapter
 import com.vantara.anime.adapters.AnimeAdapter
 import com.vantara.anime.adapters.ArabSeedSiteAdapter
+import com.vantara.anime.adapters.EgyDeadSiteAdapter
 import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.ShahiidSiteAdapter
 import com.vantara.anime.adapters.TukTukSiteAdapter
@@ -56,6 +57,7 @@ class NativeSourcesLiveTest {
     private val cases = listOf(
         Case("akwam", "dune"), Case("akwam", "toy story"), Case("akwam", "shameless", 3f), Case("akwam", "breaking bad", 1f), Case("akwam", "the gentlemen"),
         Case("arabseed", "dune"), Case("arabseed", "toy story"), Case("arabseed", "shameless", 3f), Case("arabseed", "the gentlemen"),
+        Case("egydead", "dune part 1"), Case("egydead", "toy story"), Case("egydead", "shameless", 3f), Case("egydead", "the gentlemen"),
         Case("tuktukcinema", "dune"), Case("tuktukcinema", "the gentlemen"), Case("tuktukcinema", "shameless", 3f),
         Case("witanime", "naruto", 1f), Case("witanime", "one piece", 1f), Case("witanime", "solo leveling", 1f),
         Case("shahiid", "naruto", 1f), Case("shahiid", "one piece", 1f), Case("shahiid", "solo leveling", 1f),
@@ -64,6 +66,7 @@ class NativeSourcesLiveTest {
     private fun adapter(id: String): AnimeAdapter = when (id) {
         "akwam" -> AkwamSiteAdapter(id, "Akwam", client, { "https://akwam.ss" })
         "arabseed" -> ArabSeedSiteAdapter(id, "ArabSeed", client, { "https://m.myseed.pics" }, embeds)
+        "egydead" -> EgyDeadSiteAdapter(id, "EgyDead", client, { "https://tv10.egydead.live" }, embeds)
         "tuktukcinema" -> TukTukSiteAdapter(id, "TukTuk", client, { "https://tuktukhd.com" }, embeds)
         "witanime" -> WitAnimeSiteAdapter(id, "WitAnime", client, { "https://witanime.site" }, embeds)
         "shahiid" -> ShahiidSiteAdapter(id, "Shahiid", client, { "https://shahiid-anime.net" }, embeds)
