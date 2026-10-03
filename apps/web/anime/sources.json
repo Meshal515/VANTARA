@@ -252,6 +252,18 @@
       }
     },
     {
+      "id": "akwam",
+      "name": "Akwam",
+      "content": "cinema",
+      "priority": 75,
+      "adapter": "akwam-site",
+      "domains": {
+        "current": "https://akwam.ss",
+        "legacy": [],
+        "fingerprint": "أكوام|اكوام|akwam"
+      }
+    },
+    {
       "id": "arabseed",
       "name": "ArabSeed",
       "content": "cinema",

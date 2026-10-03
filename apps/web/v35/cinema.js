@@ -32,7 +32,7 @@ const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
 const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
 const STATE_AR_ROUTE = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
-const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV' };
+const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV', akwam: 'Akwam' };
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
 
 const userKey = (base, userId) => `vantara.cinema.${base}.v1.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;

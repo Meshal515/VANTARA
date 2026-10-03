@@ -13,5 +13,6 @@ import { witanime } from './witanime.js';
 import { shahiid } from './shahiid.js';
 import { arabseed } from './arabseed.js';
 import { tuktuk } from './tuktuk.js';
+import { akwam } from './akwam.js';
 
-export const ENGINES = Object.freeze(Object.fromEntries([madara, zeistmanga, mangathemesia, iken, mangadex, mangaswat, teamx, witanime, shahiid, arabseed, tuktuk].map((e) => [e.kind, e])));
+export const ENGINES = Object.freeze(Object.fromEntries([madara, zeistmanga, mangathemesia, iken, mangadex, mangaswat, teamx, witanime, shahiid, arabseed, tuktuk, akwam].map((e) => [e.kind, e])));

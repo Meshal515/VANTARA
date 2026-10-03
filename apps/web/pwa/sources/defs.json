@@ -388,6 +388,22 @@
       "probe": {
         "query": "the gentlemen"
       }
+    },
+    {
+      "id": "akwam",
+      "label": "Akwam",
+      "names": [
+        "أكوام",
+        "اكوام"
+      ],
+      "content": "cinema",
+      "engine": "akwam-site",
+      "version": 1,
+      "domain": "akwam.ss",
+      "config": {},
+      "probe": {
+        "query": "dune"
+      }
     }
   ]
 }
