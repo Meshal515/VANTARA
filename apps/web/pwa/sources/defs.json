@@ -436,6 +436,22 @@
       "probe": {
         "query": "frieren"
       }
+    },
+    {
+      "id": "okanime",
+      "label": "OkAnime",
+      "names": [
+        "اوك انمي",
+        "أوك أنمي"
+      ],
+      "content": "anime",
+      "engine": "okanime-site",
+      "version": 1,
+      "domain": "ww3.okanime.xyz",
+      "config": {},
+      "probe": {
+        "query": "one piece"
+      }
     }
   ]
 }
