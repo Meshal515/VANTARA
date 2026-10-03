@@ -175,7 +175,7 @@ describe('source matching never jumps to a namesake', () => {
     const d = searchResults('Dune');
     const p1 = matchCriteria(open('Dune', 'tt1160419').work, { results: d });
     const old = matchCriteria(open('Dune', 'tt0087182').work, { results: d });
-    const copies = [c('a', 'فيلم Dune 2021 مترجم'), c('b', 'فيلم Dune 1984 مترجم'), c('d', 'فيلم Dune مترجم')];
+    const copies = [c('a', 'فيلم Dune 2021 مترجم'), c('b', 'فيلم Dune 1984 مترجم'), c('d', 'فيلم Dune مترجم'), c('p', 'فيلم Planet Dune 2021 مترجم')];
     expect(pickCopies(copies, p1).map((x) => x.sourceId)).toEqual(['a']);
     expect(pickCopies(copies, old).map((x) => x.sourceId)).toEqual(['b']);
   });

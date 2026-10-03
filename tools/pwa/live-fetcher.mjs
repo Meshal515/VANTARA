@@ -9,6 +9,9 @@ import { setParser } from '../../apps/web/pwa/sources/dom.js';
 
 const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 
+/** ترويسات المصدر التي يحتاجها محرك (Videa: مفتاح فك XML). نفس قائمة الجالب. */
+const PASSED_HEADERS = ['x-videa-xs'];
+
 export function useLinkedom() {
   setParser((html, type = 'text/html') => new DOMParser().parseFromString(html, type));
 }
@@ -58,7 +61,9 @@ export function liveFetcher({ log = () => {} } = {}) {
     log(`${method} ${url} → ${status} ${Date.now() - started}ms`);
     if (challenge !== 'none' && !opts.allowChallenge) throw new LiveError('challenge', { status, challenge });
     const location = headerBlock.match(/^location:\s*(\S+)/im)?.[1] ?? null;
-    return Promise.resolve({ status, url: finalUrl, text: rest, challenge, location: location ? new URL(location, finalUrl).toString() : null });
+    // نفس الترويسات القليلة التي يمرّرها الجالب الحقيقي (x-vf-h-*)
+    const passed = Object.fromEntries(PASSED_HEADERS.map((h) => [h, headerBlock.match(new RegExp(`^${h}:\\s*(.+?)\\s*$`, 'im'))?.[1]]).filter(([, v]) => v));
+    return Promise.resolve({ status, url: finalUrl, text: rest, challenge, location: location ? new URL(location, finalUrl).toString() : null, headers: passed });
   }
   async function page(url, opts = {}) {
     const out = await text(url, opts);

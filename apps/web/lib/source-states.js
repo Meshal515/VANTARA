@@ -90,4 +90,5 @@ export const REJECT_AR = Object.freeze({
   'year-unconfirmed': 'اسم أطول بلا سنة تؤكده',
   season: 'موسم آخر',
   ambiguous: 'اسم يحمله عمل أشهر، بلا سنة تميّزه',
+  'other-work': 'اسم عمل آخر بعينه',
 });

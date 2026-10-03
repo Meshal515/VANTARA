@@ -167,7 +167,9 @@ for (const [type, id, season, episode, expectNone] of CORPUS) {
   const crit = matchCriteria(work, { season, results: peers });
   const after = await locate(queriesFor(crit.title, crit), (items) => pickCopies(items, crit));
   const measure = async (copies) => {
-    const plays = await Promise.all(copies.map((c) => playOnce(c, episode)));
+    // بالتتابع: curl متزامن يوقف المؤقتات، والتوازي يصنع مهلًا كاذبة
+    const plays = [];
+    for (const c of copies) plays.push(await playOnce(c, episode));
     const ttfps = plays.map((p) => p.ttfp).filter((x) => x != null);
     return {
       found: copies.length > 0,

@@ -82,6 +82,9 @@ export function matchCriteria(m, { season = null, results = null } = {}) {
     weakAliases: uniq(names.map(short)).filter((n) => !names.includes(n)),
   };
   if (!results) return base;
+  // أسماء أعمال أخرى من النوع نفسه: نسخة تحمل اسم أحدها حرفيًا ليست لهذا العمل
+  const otherTitles = [...new Set(results.filter((r) => r && r.type === m.type && r.id !== m.id).map((r) => r.title).filter((t) => t && !names.some((n) => titleScore(n, t) === 1)))];
+  base.otherTitles = otherTitles;
   const same = namesakes(m, results);
   const others = same.filter((r) => r.id !== m.id);
   if (!others.length) return { ...base, primary: true, sharedNames: [], namesakeYears: [] };

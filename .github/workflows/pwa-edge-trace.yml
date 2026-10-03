@@ -36,3 +36,12 @@ jobs:
         env:
           VANTARA_IDENTITY_SECRET: ${{ secrets.VANTARA_IDENTITY_SECRET }}
         run: node tools/pwa/edge-trace.mjs
+      # نفس المحركات مباشرة من آلة GitHub (عنوان IP ثابت، بلا جالب): روابط مربوطة
+      # بعنوان من طلبها (Videa، MySeed) تُحكم هنا بصدق، فيُعرف إن كان العطل في
+      # الجالب أم عند المضيف. وهذا أقرب ما يكون للـAPK على جهاز.
+      - name: Direct trace from a fixed IP (no fetcher)
+        if: always()
+        run: |
+          node tools/pwa/trace-work.mjs arabseed "spider-man across the spider-verse" || true
+          node tools/pwa/trace-work.mjs shahiid "attack on titan" 1 || true
+          node tools/pwa/trace-identity.mjs series tt1586680 1 1 || true

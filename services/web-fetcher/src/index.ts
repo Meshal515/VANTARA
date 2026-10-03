@@ -25,6 +25,8 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
 }
 
+/** ترويسات من المصدر تمرّ للعميل باسم x-vf-h-<الاسم>. */
+const PASSED_HEADERS = ['x-videa-xs'];
 const ALLOW: AllowList = { hosts: (allowJson as { hosts: string[] }).hosts };
 
 /** متصفح جوال حقيقي: بعض المواقع ترفض وكيلًا لا يشبه متصفحًا. */
@@ -75,7 +77,7 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'authorization, content-type, range',
-    'access-control-expose-headers': 'x-vf-status, x-vf-url, x-vf-set-cookie, x-vf-challenge, x-vf-location, content-range, accept-ranges, content-length',
+    'access-control-expose-headers': `x-vf-status, x-vf-url, x-vf-set-cookie, x-vf-challenge, x-vf-location, ${PASSED_HEADERS.map((h) => `x-vf-h-${h}`).join(', ')}, content-range, accept-ranges, content-length`,
     'access-control-max-age': '86400',
     vary: 'Origin',
   };
@@ -260,6 +262,11 @@ async function handleFetch(request: Request, env: Env, cors: Record<string, stri
     out.set('x-vf-status', String(response.status));
     out.set('x-vf-url', finalUrl.toString());
     if (setCookies.length) out.set('x-vf-set-cookie', encodeURIComponent(JSON.stringify(setCookies)));
+    // ترويسات قليلة يحتاجها محرك بعينه (Videa: مفتاح فك XML)، لا كل ترويسات المصدر
+    for (const name of PASSED_HEADERS) {
+      const value = response.headers.get(name);
+      if (value && value.length < 512) out.set(`x-vf-h-${name}`, value);
+    }
     const location = response.headers.get('location');
     if (location && response.status >= 300 && response.status < 400) out.set('x-vf-location', new URL(location, finalUrl).toString());
     // صفحة تحدٍّ قصيرة: نقرؤها لنقول نوعها، والباقي يمرّ تيارًا بلا قراءة

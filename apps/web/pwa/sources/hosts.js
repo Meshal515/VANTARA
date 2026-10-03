@@ -6,6 +6,8 @@
  *   Google Drive     رابط التنزيل المؤكَّد (MP4 بدعم المدى)
  *   MegaMax          Inertia ← مرايا بالجودات ← كل مرآة تُحلّ هنا
  *   vk               url720/hls من الصفحة
+ *   videa.hu         رمز `_xt` ← `/player/xml` (RC4 بمفتاح الرمز + `x-videa-xs`) ← كل جودة
+ *   Dailymotion      `/player/metadata/video/<id>` ← HLS بكل الجودات (أو سبب الحذف)
  *   الباقي           الاستخراج العام: روابط m3u8/mp4 في الصفحة وكتل packer بعد فكها،
  *                    وطبقة iframe واحدة، والمرايا المعروفة (StreamHG ← vibuxer)
  *
@@ -141,6 +143,94 @@ export function googleDrive(url) {
   return [{ url: `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`, referer: null, quality: null, label: 'google drive', type: 'mp4' }];
 }
 
+// ───────────── videa.hu (نفس Videa في Wrappers.kt) ─────────────
+
+const VIDEA_SECRET = 'xHb0ZvME5q8CBcoQi6AngerDu3FGO9fkUlwPmLVY_RTzj2hJIS4NasXWKy1td7p';
+
+/** رمز الطلب من `_xt`: أول 16 للطلب، والباقي لمفتاح فك RC4. */
+export function videaToken(html) {
+  const nonce = /_xt\s*=\s*"([^"]+)"/.exec(String(html))?.[1];
+  if (!nonce || nonce.length < 64) return null;
+  const l = nonce.slice(0, 32);
+  const s = nonce.slice(32);
+  let out = '';
+  for (let i = 0; i < 32; i++) {
+    const k = VIDEA_SECRET.indexOf(l[i]);
+    if (k < 0) return null;
+    const idx = i - (k - 31);
+    const ch = s[idx < 0 ? s.length + idx : idx];
+    if (ch === undefined) return null;
+    out += ch;
+  }
+  return out;
+}
+
+export function rc4(data, key) {
+  const k = new TextEncoder().encode(key);
+  const st = Array.from({ length: 256 }, (_, i) => i);
+  let j = 0;
+  for (let i = 0; i < 256; i++) {
+    j = (j + st[i] + k[i % k.length]) & 0xff;
+    [st[i], st[j]] = [st[j], st[i]];
+  }
+  const out = new Uint8Array(data.length);
+  let i = 0;
+  j = 0;
+  for (let n = 0; n < data.length; n++) {
+    i = (i + 1) & 0xff;
+    j = (j + st[i]) & 0xff;
+    [st[i], st[j]] = [st[j], st[i]];
+    out[n] = data[n] ^ st[(st[i] + st[j]) & 0xff];
+  }
+  return out;
+}
+
+const fromBase64 = (b64) => Uint8Array.from(atob(String(b64).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0));
+
+/** الجودات من XML، الأعلى أولًا، بروابط موقّعة (md5 + expires). */
+export function videaSources(xml, pageUrl) {
+  const exp = /<video_sources[^>]*\bexp="(\d+)"/.exec(xml)?.[1];
+  const out = [];
+  for (const m of String(xml).matchAll(/<video_source\b([^>]*)>([^<]+)<\/video_source>/g)) {
+    const a = (name) => new RegExp(`\\b${name}="([^"]*)"`).exec(m[1])?.[1];
+    const name = a('name');
+    if (!name) continue;
+    const hash = new RegExp(`<hash_value_${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}>([^<]+)<`).exec(xml)?.[1];
+    const itemExp = a('exp') ?? exp;
+    let url = m[2].trim().replace(/&amp;/g, '&');
+    if (url.startsWith('//')) url = `https:${url}`;
+    if (hash && itemExp) url += `${url.includes('?') ? '&' : '?'}md5=${hash}&expires=${itemExp}`;
+    const height = Number(a('height')) || null;
+    out.push({ url, referer: pageUrl, quality: height, label: 'videa', type: 'mp4' });
+  }
+  return out.sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0));
+}
+
+// ───────────── Dailymotion ─────────────
+
+/** معرّف الفيديو من رابط المشغّل أو الصفحة. */
+export const dailymotionId = (url) => /dailymotion\.com\/(?:embed\/)?video\/([a-z0-9]+)/i.exec(url)?.[1] ?? /dai\.ly\/([a-z0-9]+)/i.exec(url)?.[1] ?? null;
+
+/** metadata ← HLS (الجودة auto تحمل كل المستويات)؛ فيديو محذوف ⇒ خطأ بسببه. */
+export function dailymotionStreams(meta) {
+  if (meta?.error) {
+    const e = new Error(`Dailymotion: ${meta.error.title ?? meta.error.message ?? 'غير متاح'}`);
+    e.code = meta.error.code ?? 'removed';
+    throw e;
+  }
+  const q = meta?.qualities ?? {};
+  const out = [];
+  for (const [label, list] of Object.entries(q)) {
+    for (const v of list ?? []) {
+      if (!v?.url) continue;
+      const hls = /mpegurl/i.test(v.type ?? '') || /\.m3u8/.test(v.url);
+      out.push({ url: v.url, referer: 'https://www.dailymotion.com/', quality: label === 'auto' ? null : Number(label) || null, label: 'dailymotion', type: hls ? 'hls' : 'mp4' });
+    }
+  }
+  // auto (HLS بكل المستويات) أولًا، ثم الأعلى
+  return out.sort((a, b) => Number(b.quality === null) - Number(a.quality === null) || (b.quality ?? 0) - (a.quality ?? 0));
+}
+
 /**
  * @param {{ text: Function }} fetch جالب الويب (pwa/net/fetcher.js)
  */
@@ -216,6 +306,33 @@ export function createHostResolver(fetch) {
     return [];
   }
 
+  async function videa(url, referer) {
+    const p = await page(url, referer);
+    const token = videaToken(p.body);
+    const v = (() => {
+      try {
+        return new URL(p.url).searchParams.get('v') ?? new URL(url).searchParams.get('v');
+      } catch {
+        return null;
+      }
+    })();
+    if (!token || !v) return [];
+    const seed = Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+    const res = await fetch.text(`https://videa.hu/player/xml?v=${encodeURIComponent(v)}&_s=${seed}&_t=${token.slice(0, 16)}`, { referer: p.url });
+    let xml = res.text;
+    if (!xml.trimStart().startsWith('<?xml')) {
+      // XML مشفّر: المفتاح من الرمز + البذرة + رأس x-videa-xs (يمرّره الجالب)
+      const xs = res.headers?.['x-videa-xs'];
+      if (!xs) return [];
+      xml = new TextDecoder().decode(rc4(fromBase64(xml), token.slice(16) + seed + xs));
+    }
+    // «Törölt videó!» وأمثالها: المضيف حذف الفيديو، يُقال كذلك لا «فارغ»
+    const error = /<error\b[^>]*>([^<]+)</.exec(xml)?.[1]?.trim();
+    const list = videaSources(xml, p.url);
+    if (!list.length && error) throw new Error(`Videa: ${/törölt|deleted|removed/i.test(error) ? 'الفيديو محذوف عند المضيف' : error}`);
+    return list;
+  }
+
   /** @returns {Promise<Stream[]>} */
   async function resolve(embed, referer = null, depth = 0) {
     const url = String(embed).startsWith('//') ? `https:${embed}` : String(embed);
@@ -225,6 +342,13 @@ export function createHostResolver(fetch) {
     if (host.endsWith('mega.nz') || host.endsWith('mega.co.nz')) return [];
     if (host.endsWith('drive.google.com') || host.endsWith('docs.google.com')) return googleDrive(url);
     if ((host.endsWith('share4max.com') || host.includes('megamax') || host.includes('megatuktuk')) && depth === 0) return megamax(url, referer);
+    if (host.endsWith('videa.hu')) return videa(url, referer);
+    if (host.endsWith('dailymotion.com') || host === 'dai.ly') {
+      const id = dailymotionId(url);
+      if (!id) return [];
+      const res = await fetch.text(`https://www.dailymotion.com/player/metadata/video/${id}`, { referer: 'https://www.dailymotion.com/', headers: { accept: 'application/json' } });
+      return dailymotionStreams(JSON.parse(res.text));
+    }
     if (host.endsWith('vk.com') || host.endsWith('vkvideo.ru') || host.endsWith('vk.ru')) {
       const p = await page(url, referer);
       return vkStreams(p.body, p.url);

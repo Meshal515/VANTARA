@@ -80,7 +80,7 @@ export function namesScore(names, sourceTitle) {
  *     منها وحده (`primary`)، وغيره يحتاجها باسمه الخاص أو بسنته في العنوان.
  *
  * يرجع {ok, score, reason}: reason ∈ kind | collection | title | year |
- * year-unconfirmed | season | ambiguous.
+ * year-unconfirmed | season | ambiguous | other-work.
  */
 export function judgeCopy(c, criteria, minScore = 0.85) {
   const { title, aliases = [], year = null, type = 'movie', season = null } = criteria;
@@ -94,6 +94,10 @@ export function judgeCopy(c, criteria, minScore = 0.85) {
     if (weak >= minScore && year && info.year === year) score = Math.min(weak, 0.99);
   }
   if (score < minScore) return { ok: false, score, reason: 'title' };
+  // عنوان المصدر هو اسم عملٍ آخر بعينه («Planet Dune» 2021 ليس «Dune» 2021)
+  // (اسم يشاركنا فيه عمل آخر — «Dune» 1984 والاسم الضعيف لـ«Dune: Part One» — تحسمه السنة لا هذا)
+  const own = [title, ...aliases, ...(criteria.weakAliases ?? [])];
+  if (score < 1 && criteria.otherTitles?.some((t) => titleScore(t, c.title) === 1 && !own.some((n) => titleScore(n, t) === 1))) return { ok: false, score, reason: 'other-work' };
   const others = (criteria.namesakeYears ?? []).filter((y) => y !== year);
   if (type === 'movie') {
     if (year && info.year && Math.abs(info.year - year) > 1) return { ok: false, score, reason: 'year' };
