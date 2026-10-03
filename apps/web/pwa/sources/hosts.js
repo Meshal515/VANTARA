@@ -264,7 +264,8 @@ export function createHostResolver(fetch) {
         const p = await page(target.toString(), url);
         const found = p.ok ? genericStreams(p.body, p.url) : [];
         if (found.length) return fromPage(found, p.url);
-      } catch {
+      } catch (error) {
+        if (error?.code === 'UPSTREAM_REMOVED' || error?.code === 'UPSTREAM_HTTP_410') throw error;
         // المرآة ماتت: الطريق العادي
       }
     }

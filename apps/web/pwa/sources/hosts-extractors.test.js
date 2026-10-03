@@ -13,6 +13,27 @@ describe('upstream removal and progressive mirrors', () => {
     const resolver = createHostResolver({ text: async (url) => ({ url, status: 200, text: 'File was deleted' }) });
     await expect(resolver.resolve('https://mp4upload.com/embed-x.html')).rejects.toThrow('UPSTREAM_REMOVED');
   });
+  it.each([
+    [404, 'Not Found', false],
+    [404, 'File was deleted', true],
+    [410, 'Gone', true],
+  ])('mirror HTTP %s (%s) only permits origin fallback when not terminal', async (status, text, terminal) => {
+    const seen = [];
+    const resolver = createHostResolver({ text: async (url) => {
+      seen.push(new URL(url).hostname);
+      return new URL(url).hostname === 'vibuxer.com'
+        ? { url, status, text }
+        : { url, status: 200, text: '<video src="https://cdn.test/live.mp4"></video>' };
+    } });
+    const result = resolver.resolve('https://hgcloud.to/e/stale');
+    if (terminal) {
+      await expect(result).rejects.toThrow(status === 410 ? 'UPSTREAM_HTTP_410' : 'UPSTREAM_REMOVED');
+      expect(seen).toEqual(['vibuxer.com']);
+    } else {
+      expect((await result)[0].url).toBe('https://cdn.test/live.mp4');
+      expect(seen).toEqual(['vibuxer.com', 'hgcloud.to']);
+    }
+  });
   it('returns the first MegaMax mirror without waiting for a dead parallel mirror', async () => {
     let release;
     const blocked = new Promise((r) => { release = r; });

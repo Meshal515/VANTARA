@@ -103,7 +103,7 @@ class EmbedResolver(
         val u = url.toHttpUrlOrNull() ?: return null
         val mirror = Mirrors.of(u.host) ?: return null
         val target = u.newBuilder().host(mirror).build().toString()
-        val page = try { fetch(target, url) } catch (e: CancellationException) { throw e } catch (e: UpstreamUnavailable) { throw e } catch (_: Exception) { null }
+        val page = try { fetch(target, url) } catch (e: CancellationException) { throw e } catch (e: UpstreamUnavailable) { if (e.terminal) throw e else null } catch (_: Exception) { null }
         val found = page?.takeIf { it.ok }?.let { Generic.streams(it.body, it.url) }.orEmpty()
         if (found.isEmpty()) {
             Mirrors.forget(u.host)
@@ -270,7 +270,7 @@ class EmbedResolver(
         }
     }
 
-    private class UpstreamUnavailable(message: String) : java.io.IOException(message)
+    private class UpstreamUnavailable(message: String, val terminal: Boolean) : java.io.IOException(message)
 
     private class Page(val url: String, val body: String, val ok: Boolean)
 
@@ -287,6 +287,7 @@ class EmbedResolver(
             val removed = Regex("""(?i)^File was deleted$|File is no longer available as it expired or has been deleted\.|We can't find the video you are looking for\.|Video not found""").containsMatchIn(visible)
             if (removed || r.code == 404 || r.code == 410) throw UpstreamUnavailable(
                 "${if (removed) "UPSTREAM_REMOVED" else "UPSTREAM_HTTP_${r.code}"}: ${r.request.url.host}",
+                terminal = removed || r.code == 410,
             )
             Page(r.request.url.toString(), body, r.isSuccessful)
         }

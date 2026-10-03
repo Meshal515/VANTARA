@@ -83,6 +83,20 @@ describe('/v1/fetch', () => {
     expect(res.status).toBe(403);
     expect(seen).toHaveLength(1);
   });
+  it.each([
+    ['uqload.is', 'uqload.vc', 'share4max.com'],
+    ['vidmoly.biz', 'vmpx.online', 'mixdrop.top'],
+  ])('rejects %s → %s → %s at the actual second hop', async (start, alias, unrelated) => {
+    const { impl, seen } = fakeUpstream({
+      [`https://${start}/embed/1`]: () => new Response(null, { status: 302, headers: { location: `https://${alias}/embed/1` } }),
+      [`https://${alias}/embed/1`]: () => new Response(null, { status: 302, headers: { location: `https://${unrelated}/embed/1` } }),
+      [`https://${unrelated}/embed/1`]: () => new Response('must not be fetched'),
+    });
+    const res = await createHandler(impl)(fetchReq({ url: `https://${start}/embed/1` }, await bearer()), env);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: 'foreign_redirect', detail: unrelated });
+    expect(seen.map((s) => s.url)).toEqual([`https://${start}/embed/1`, `https://${alias}/embed/1`]);
+  });
   it('rejects a request without a valid sign-in token', async () => {
     const handle = createHandler(fakeUpstream({}).impl);
     expect((await handle(fetchReq({ url: 'https://3asq.online/' }), env)).status).toBe(401);

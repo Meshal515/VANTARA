@@ -159,6 +159,7 @@ function mergeCookies(base: string | undefined, add: string[]): string | undefin
  */
 export async function upstream(target: URL, init: UpstreamInit, list: AllowList, fetchImpl: typeof fetch = fetch) {
   let url = target;
+  let previousHost = target.hostname;
   let method = init.method;
   let body = init.body;
   let cookies = init.cookies;
@@ -167,7 +168,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
     // كل قفزة تمرّ بحراسة SSRF (لا IP ولا localhost) حتى لو كانت القائمة «أي مضيف»
     if (!parseTarget(url.toString())) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
     if (!list.any && !hostAllowed(url.hostname, list)) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
-    if (hop > 0 && !list.any && !redirectAllowed(target.hostname, url.hostname, list)) throw new FetchFailure('foreign_redirect', url.hostname);
+    if (hop > 0 && !list.any && !redirectAllowed(previousHost, url.hostname, list)) throw new FetchFailure('foreign_redirect', url.hostname);
     const headers = new Headers(init.headers);
     if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
     if (!headers.has('accept-language')) headers.set('accept-language', 'ar,en;q=0.8');
@@ -204,6 +205,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
         method = 'GET';
         body = undefined;
       }
+      previousHost = url.hostname;
       url = next;
       continue;
     }

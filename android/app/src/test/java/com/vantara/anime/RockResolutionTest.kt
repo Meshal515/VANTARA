@@ -36,6 +36,42 @@ class RockResolutionTest {
         }
     }
 
+    @Test fun `stale mirror 404 falls back to origin but deletion and 410 are terminal`() = runBlocking {
+        for ((status, body, terminal) in listOf(
+            Triple(404, "Not Found", false),
+            Triple(404, "File was deleted", true),
+            Triple(410, "Gone", true),
+        )) {
+            val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
+            val sniffed = AtomicInteger()
+            val original = "stale-origin.test"
+            val mirror = "stale-mirror.test"
+            val http = OkHttpClient.Builder().addInterceptor { chain ->
+                val host = chain.request().url.host
+                seen += host
+                val isMirror = host == mirror
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(if (isMirror) status else 200).message("fixture")
+                    .body((if (isMirror) body else "<video src='https://cdn.test/live.mp4'></video>").toResponseBody("text/html".toMediaType())).build()
+            }.build()
+            com.vantara.anime.hosts.Mirrors.learn(original, mirror)
+            try {
+                val resolver = EmbedResolver(http, Sniffer { _, _ -> sniffed.incrementAndGet(); null })
+                val result = runCatching { resolver.resolve("https://$original/e/stale", null) }
+                if (terminal) {
+                    val error = result.exceptionOrNull()
+                    assertNotNull(error)
+                    assertTrue(error!!.message.orEmpty(), error.message.orEmpty().contains(if (status == 410) "UPSTREAM_HTTP_410" else "UPSTREAM_REMOVED"))
+                    assertEquals(listOf(mirror), seen.toList())
+                } else {
+                    assertEquals("https://cdn.test/live.mp4", result.getOrThrow().single().url)
+                    assertEquals(listOf(mirror, original), seen.toList())
+                }
+                assertEquals(0, sniffed.get())
+            } finally { com.vantara.anime.hosts.Mirrors.forget(original) }
+        }
+    }
+
     private fun candidate(id: String, q: Int) = Candidate(id, "shahiid", "Shahiid", "Megamax", "cdn.test", "https://cdn.test/$id.mp4", quality = q, variant = Variant.SUB, container = Container.MP4, resolvedAt = 1, expiresAt = Long.MAX_VALUE)
 
     @Test fun `each quality of one host is selectable without mixing its candidates`() {
