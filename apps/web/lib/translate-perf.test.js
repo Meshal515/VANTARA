@@ -33,17 +33,28 @@ describe('translation performance log (on the phone)', () => {
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {
     const entries = [
       { at: 1000, chapterKey: 'c1', from: 'model', textless: true, total: 400, stages: { analyze: 380 }, native: { analyze: { stages: { detect: 300 } } } },
-      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { encode: 200 } } } },
+      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { encode: 200 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 40, fillChangedPixels: 30, inpaintChangedPixels: 10 } } } },
       { at: 11000, chapterKey: 'c1', from: 'cache', total: 5 },
+      { at: 12000, chapterKey: 'c1', from: 'error', error: 'offline', total: 60000, stages: { analyze: 1000, cacheProbe: 59000 } },
+      { at: 13000, chapterKey: 'c1', from: 'repair', error: 'busy', total: 45000, stages: { luna: 45000 } },
     ];
     const s = summarize(entries);
-    expect(s).toMatchObject({ pages: 2, cached: 1 });
+    expect(s).toMatchObject({ pages: 2, cached: 1, errors: 1, repairs: 1, repairErrors: 1 });
+    expect(s.errorCodes).toEqual({ offline: 1, busy: 1 });
     expect(s.textless).toMatchObject({ pages: 1, median: 400, stages: { analyze: 380, 'analyze.detect': 300 } });
     expect(s.text.stages).toMatchObject({ luna: 3000, 'render.encode': 200 });
     expect(s.chapters[0]).toMatchObject({ chapterKey: 'c1', pages: 2, wallMs: 10000 - (1000 - 400) });
-    const report = formatReport(entries, [{ page: 'p1', identical: true, legacy: { stages: { glyphs: 2000 } }, current: { stages: { glyphs: 1000 } } }]);
+    const report = formatReport(
+      entries,
+      [{ page: 'p1', identical: true, legacy: { stages: { glyphs: 2000 } }, current: { stages: { glyphs: 1000 } } }],
+      null,
+      { cleanedRegions: 1, perf: { stages: { erase: 12, 'load:lama': 50 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 45, fillChangedPixels: 35, inpaintChangedPixels: 10 } } },
+    );
     expect(report).toContain('بلا نص');
     expect(report).toContain('متطابق');
+    expect(report).toContain('التبييض الفعلي');
+    expect(report).toContain('اختبار التبييض المحلي');
+    expect(report).toContain('offline×1');
   });
 });
 
