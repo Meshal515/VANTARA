@@ -22,7 +22,7 @@ export const LIMITS = Object.freeze({
   resource: 2 * 1024 * 1024,
   items: 1000,
 });
-export const PRODUCT_VERSION = "0.2.1";
+export const PRODUCT_VERSION = "0.2.2";
 export function boundedItems(value) {
   if (!Array.isArray(value) || value.length > LIMITS.items)
     throw new Error("نتيجة إضافة مخالفة للعقد");

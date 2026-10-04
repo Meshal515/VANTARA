@@ -337,3 +337,33 @@ it('searches only catalogs whose required extras can be supplied by ordinary wor
  expect(found).toHaveLength(1);expect(requests.filter(x=>x.url.includes('/catalog/'))).toHaveLength(1);
  expect(requests.at(-1).url).toContain('/ordinary/search=Work.json');
 });
+it.each([
+  [{ infoHash: '0123456789abcdef' }, 'تورنت'],
+  [{ url: 'https://cdn.test/a.mp4', headers: { Referer: 'https://addon.test' } }, 'رؤوس HTTP'],
+  [{ url: 'https://cdn.test/a.mpd' }, 'DASH'],
+  [{ url: 'https://cdn.test/a.mp4', expiresAt: 1 }, 'صلاحية'],
+])('preserves the rejection reason across the source facade for %j', async (stream, reason) => {
+  const r = { ready: Promise.resolve(), store: createStore({ indexedDB: null }), registry: { list: () => [] } };
+  const a = createAddonRuntime({ runtime: r, transport: { json: async url => url.endsWith('manifest.json')
+    ? { id: 'org.reason', name: 'Reason', version: '1.0.0', types: ['movie'], resources: ['stream'], catalogs: [] }
+    : { streams: [stream] } } });
+  await a.ready;
+  const installed = await a.registry.install(await a.registry.inspect('https://addon.test/manifest.json'));
+  const s = a.sources.source(`addon|${installed.key}`);
+  const [server] = await s.servers({ url: 'tt29355505', type: 'movie', externalIds: { imdb: 'tt29355505' } });
+  await expect(s.streams(server)).rejects.toThrow(reason);
+});
+it('keeps a playable sibling and legitimate empty results through the facade', async () => {
+  let streams = [{ infoHash: 'abc' }, { url: 'https://cdn.test/a.mp4', name: '1080p' }];
+  const r = { ready: Promise.resolve(), store: createStore({ indexedDB: null }), registry: { list: () => [] } };
+  const a = createAddonRuntime({ runtime: r, transport: { json: async url => url.endsWith('manifest.json')
+    ? { id: 'org.mixed', name: 'Mixed', version: '1.0.0', types: ['movie'], resources: ['stream'], catalogs: [] }
+    : { streams } } });
+  await a.ready;
+  const installed = await a.registry.install(await a.registry.inspect('https://addon.test/manifest.json'));
+  const s = a.sources.source(`addon|${installed.key}`);
+  const [server] = await s.servers({ url: 'tt29355505', type: 'movie', externalIds: { imdb: 'tt29355505' } });
+  expect(await s.streams(server)).toMatchObject([{ status: 'RESOLVED', quality: 1080 }]);
+  streams = [];
+  expect(await s.streams({ ...server, url: 'tt1254207' })).toEqual([]);
+});

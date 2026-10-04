@@ -1340,6 +1340,7 @@
   gap: 8px;
 }
 .v35 .an-srv {
+  min-width: 0;
   position: relative;
   display: grid;
   justify-items: start;
@@ -1410,6 +1411,7 @@
   border-color: var(--accent-line);
 }
 .v35 .an-srv-top {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1418,6 +1420,11 @@
   width: 100%;
 }
 .v35 .an-srv-tag {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 6px;
   border-radius: 6px;
   font-size: 10px;

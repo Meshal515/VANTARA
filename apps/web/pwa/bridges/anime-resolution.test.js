@@ -122,3 +122,10 @@ it('preserves addon subtitle matching metadata through preparation without autop
  const session=await prepare();const {candidate}=await AnimeEngine.best({session});
  await AnimeEngine.play({session,candidate});expect(state.play.mock.calls[0][0].sessionOf(session).cands.get(candidate)).toMatchObject({filename:'actual.mkv',videoHash:'0123456789abcdef',videoSize:12345});
 });
+it('retains the friendly provider label in ready and rejected routes without autoplay', async () => {
+  const session = await prepare();
+  const routes = (await AnimeEngine.routes({ session })).routes;
+  expect(routes.length).toBeGreaterThan(0);
+  expect(routes.every(r => r.sourceName === 'Video')).toBe(true);
+  expect(state.play).not.toHaveBeenCalled();
+});

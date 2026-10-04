@@ -20,7 +20,7 @@ import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
-import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, searchState } from '../lib/source-states.js';
+import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
 import { matchCriteria, mergeWork, namesOf } from '../lib/cinema-identity.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
@@ -33,6 +33,10 @@ const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
 const STATE_AR_ROUTE = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
 const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV', akwam: 'Akwam' };
+/** Display metadata stays separate from the internal routing key/configured URL. */
+export const routeSourceLabel = (route) => SOURCE_NAMES[route.sourceId]
+  ?? route.sourceName
+  ?? (String(route.sourceId ?? '').startsWith('addon|') ? 'إضافة' : route.sourceId);
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
 
 const userKey = (base, userId) => `vantara.cinema.${base}.v1.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;
@@ -1566,9 +1570,9 @@ export function createCinema(deps) {
           b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}`;
           b.disabled = pending;
           b.querySelector('.an-srv-code').textContent = serverName(r);
-          b.querySelector('.an-srv-tag').textContent = SOURCE_NAMES[r.sourceId] ?? r.sourceId;
+          b.querySelector('.an-srv-tag').textContent = routeSourceLabel(r);
           b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
-          b.onclick = () => verified ? void playRoute(r) : toast(r.reason || 'لم ينجح فحص رابط الفيديو', 5000);
+          b.onclick = () => verified ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
           return b;
         };
         const isPending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null);
