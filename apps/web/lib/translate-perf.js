@@ -152,6 +152,13 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const s = summarize(entries);
   const lines = [`أداء الترجمة — ${s.pages} صفحة جديدة ناجحة، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
   if (Object.keys(s.errorCodes).length) lines.push(`الأخطاء: ${Object.entries(s.errorCodes).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
+  const modelPages = entries.filter((e) => !e.error && e.from === 'model' && !e.textless);
+  const serverCachedPages = entries.filter((e) => !e.error && e.from === 'friends' && !e.textless);
+  if (serverCachedPages.length && modelPages.length === 0) {
+    lines.push(`اللغة في هذه الجولة: ${serverCachedPages.length} صفحة من كاش الخادم؛ لا يوجد نداء Luna جديد في السجل.`);
+  } else if (serverCachedPages.length || modelPages.length) {
+    lines.push(`اللغة في هذه الجولة: Luna جديد ${modelPages.length} · كاش الخادم ${serverCachedPages.length}.`);
+  }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
   const rendered = entries.filter((e) => e.native?.render?.counts);
