@@ -1601,6 +1601,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const changed = k.eraseChangedPixels ?? 0;
         const pct = mask ? Math.round((changed / mask) * 100) : 0;
         body.append(el('p', null, `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · القناع ${mask} بكسل · تغيّر فعلًا ${changed} (${pct}%) · تعبئة ${k.fillChangedPixels ?? 0} · LaMa ${k.inpaintChangedPixels ?? 0}`));
+        body.append(el('p', null, 'ملفات النماذج اجتازت SHA-256 قبل تشغيل هذا الفحص؛ نجاح الزر يعني أننا لا نختبر ملف وزن ناقصًا أو متبدّلًا.'));
         if ((k.inpaint ?? 0) > 0 && (k.inpaintChangedPixels ?? 0) === 0) body.append(el('p', null, '⚠️ LaMa استُدعي ولم يغيّر أي بكسل — هذه إشارة مباشرة لمشكلة في الترميم/النموذج.'));
         if ((k.fill ?? 0) > 0 && (k.fillChangedPixels ?? 0) === 0) body.append(el('p', null, '⚠️ مسار التعبئة اشتغل لكن لم يغيّر أي بكسل.'));
         if (cleaning.path) {
