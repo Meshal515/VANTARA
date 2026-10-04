@@ -188,7 +188,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const r = e.native?.render?.stages ?? {};
       const queue = (a.queue ?? 0) + (r.queue ?? 0);
       const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · دور محلي ${sec(queue)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · دور محلي ${sec(queue)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · محرك ${e.engine ?? '—'} · مرسوم ${e.translated ?? 0}`);
     }
   }
 
