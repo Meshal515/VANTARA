@@ -63,7 +63,7 @@ describe('what the phone draws is what the reader shows', () => {
     expect(result.translated).toBe(1);
     await new Promise((r) => setTimeout(r, 10));
     const [entry] = readPerf();
-    expect(entry).toMatchObject({ chapterKey: 'c1', pageIndex: 1, from: 'model', translated: 1, textless: false });
+    expect(entry).toMatchObject({ chapterKey: 'c1', pageIndex: 1, from: 'model', translated: 1, textless: false, path: '/cache/pages/p2.jpg' });
     expect(Object.keys(entry.stages)).toEqual(expect.arrayContaining(['wait', 'fetch', 'hash', 'cacheRead', 'analyze', 'cacheProbe', 'render']));
     expect(entry.native.analyze.stages.glyphs).toBe(900);
     expect(entry.native.render.stages.encode).toBe(80);
