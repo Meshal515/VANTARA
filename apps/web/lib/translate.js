@@ -314,6 +314,7 @@ async function translatePageNow(deps, src, meta) {
       textless: !local.translated && !(local.regions ?? []).length,
       regions: (local.regions ?? []).length,
       translated: local.translated,
+      engine: local.engine ?? null,
     });
     return { ...local, hash, cacheKey: found.cacheKey, from: 'device' };
   }
@@ -347,6 +348,7 @@ async function translateOnce(deps, src, hash, meta, clock) {
     textless: Boolean(result.textless),
     regions: (result.regions ?? []).length,
     translated: result.translated,
+    engine: result.engine ?? null,
     native: result.native,
   }, saved.written);
   return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model' };
