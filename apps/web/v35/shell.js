@@ -1623,7 +1623,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const candidates = readPerf().filter((e) => e.path && e.hash && e.translated > 0).slice(-30);
         const page = [...candidates].reverse().find((e) => (e.native?.render?.counts?.inpaint ?? 0) > 0) ?? candidates.at(-1);
         if (!page) return toast('ترجم صفحة فيها حوار أولًا');
-        const saved = await cachedPage(page.hash);
+        const saved = await cachedPage(page.hash, page.cacheKey);
         const regions = (saved?.regions ?? []).filter((r) => typeof r.arabic === 'string' && r.arabic.trim()).map((r) => ({ id: r.id, arabic: r.arabic.trim() }));
         if (!regions.length) return toast('ما لقيت عربي محفوظ لهالصفحة');
         const leave = (saved?.regions ?? []).filter((r) => ['sfx', 'credit', 'sign'].includes(r.kind)).map((r) => r.id);
@@ -1646,7 +1646,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         bench.textContent = 'نقيس… (دقيقة تقريبًا)';
         benchmarks = [];
         for (const e of pages) {
-          const saved = await cachedPage(e.hash);
+          const saved = await cachedPage(e.hash, e.cacheKey);
           const regions = (saved?.regions ?? []).filter((r) => typeof r.arabic === 'string' && r.arabic).map((r) => ({ id: r.id, arabic: r.arabic }));
           const res = await benchmarkPage({ path: e.path, regions }).catch(() => null);
           if (res) benchmarks.push({ page: `${e.chapterKey?.split('#').pop() ?? ''}#${e.pageIndex}`, ...res });
