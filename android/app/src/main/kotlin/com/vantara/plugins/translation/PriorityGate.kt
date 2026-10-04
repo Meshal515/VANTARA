@@ -115,6 +115,9 @@ class PriorityGate {
         next?.go?.complete(Unit)
     }
 
+    /** هل المسار الثقيل يشغل الأنوية الآن؟ يستعمله كشف الصفحة الحالية فقط. */
+    fun isBusy(): Boolean = synchronized(this) { busy }
+
     /** نسبة الوقت الذي كان فيه المعالج يعمل منذ أول صفحة (0–100). */
     fun busyPercent(): Int = synchronized(this) {
         val wall = System.nanoTime() - firstUse
