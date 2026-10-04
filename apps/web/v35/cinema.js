@@ -1281,10 +1281,6 @@ export function createCinema(deps) {
 
     const bar = el('div', 'cn-detail-bar');
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
-    if (deps.openWorkMenu) {
-      const more = button('icon-btn cn-detail-more', glyph('more'), () => deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }), 'خيارات العمل');
-      bar.append(more);
-    }
 
     const art = el('div', 'cn-detail-art');
     art.append(image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true }));
@@ -1336,6 +1332,7 @@ export function createCinema(deps) {
         toggle('fav', 'heart', 'المفضلة', 'أُضيف إلى المفضلة', 'أُزيل من المفضلة'),
       );
       if (deps.share) actions.append(button('cn-action', `${glyph('send', { size: 22 })}<span>رشّح</span>`, () => deps.share({ ref: `cinema:${playKey(m, m.type === 'series' ? state.season : null)}`, title: displayTitle(m), cover: m.poster ?? null })));
+      if (deps.openWorkMenu) actions.append(button('cn-action cn-action--more', `${glyph('more', { size: 22 })}<span>المزيد</span>`, () => deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }), 'خيارات العمل'));
       body.append(actions);
 
       const sources = el('div', 'cn-sources');

@@ -740,6 +740,9 @@
 .v35 .cn-action[aria-pressed='true'] {
   color: var(--text);
 }
+.v35 .cn-action--more {
+  min-width: 44px;
+}
 .v35 .cn-action[aria-pressed='true'] svg {
   color: var(--accent-text);
 }
@@ -1282,5 +1285,3 @@
   font-size: 11px;
   color: var(--text-3);
 }
-
-.v35 .cn-detail-more { float: left; }
