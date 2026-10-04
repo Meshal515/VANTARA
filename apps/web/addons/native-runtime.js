@@ -123,18 +123,25 @@ export function getNativeAddonRuntime() {
           m.enabled &&
           m.protocol === "stremio" &&
           m.capabilities.includes("subtitles") &&
-          runtime.registry.health.allow(m.key, "subtitles", "apk"),
+          !(m.configuration?.required && !m.configuration.configured) &&
+          runtime.registry.health.ready(m.key, "subtitles", "apk"),
       )
-      .map((m) => ({
-        manifestUrl: runtime.registry.connection(m.key).manifestUrl,
-        key: m.key,
-        name: m.name,
-        types:
-          m.resources.find((r) => r.name === "subtitles")?.types ?? m.types,
-        idPrefixes:
-          m.resources.find((r) => r.name === "subtitles")?.idPrefixes ??
-          m.idPrefixes,
-      }));
+      .flatMap((m) => {
+        // Media3's existing descriptor treats [] as unrestricted. Project each
+        // supported type without widening explicit empty Stremio rules.
+        const groups = new Map();
+        for (const type of ["movie", "series"]) {
+          const rules = m.resources.filter(r => r.name === "subtitles" && r.types.includes(type));
+          if (!rules.length) continue;
+          const unrestricted = rules.some(r => r.idPrefixes == null || r.idPrefixes.includes(""));
+          const prefixes = unrestricted ? [] : [...new Set(rules.flatMap(r => r.idPrefixes))].sort();
+          if (!unrestricted && !prefixes.length) continue;
+          const group = JSON.stringify(prefixes);
+          if (!groups.has(group)) groups.set(group, { manifestUrl: runtime.registry.connection(m.key).manifestUrl, key: m.key, name: m.name, types: [], idPrefixes: prefixes });
+          groups.get(group).types.push(type);
+        }
+        return [...groups.values()];
+      });
   runtime.runtimeName = "apk";
   return runtime;
 }

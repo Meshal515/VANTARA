@@ -1,0 +1,289 @@
+{
+  "evidence": "AUTHORED_FIXTURES_NOT_LIVE",
+  "purpose": "Deterministic edge cases. Public example.com URLs are placeholders and must not be requested. No third-party code copied.",
+  "manifestCases": [
+    {
+      "case": "resource-types-independent",
+      "raw": {
+        "id": "org.vantara.fixture.subtitle",
+        "version": "1.0.0",
+        "name": "Subtitle fixture",
+        "description": "Authored",
+        "resources": [
+          {
+            "name": "subtitles",
+            "types": [
+              "movie",
+              "series"
+            ],
+            "idPrefixes": [
+              "tt"
+            ]
+          }
+        ],
+        "types": [
+          "subtitles"
+        ],
+        "catalogs": []
+      },
+      "expected": "Accept; subtitle requests movie/series; no browsing category inferred from subtitles"
+    },
+    {
+      "case": "object-prefix-missing",
+      "raw": {
+        "id": "org.vantara.fixture.prefix",
+        "version": "1.0.0",
+        "name": "Prefix fixture",
+        "description": "Authored",
+        "resources": [
+          {
+            "name": "stream",
+            "types": [
+              "movie"
+            ]
+          }
+        ],
+        "types": [
+          "movie"
+        ],
+        "idPrefixes": [
+          "tt"
+        ],
+        "catalogs": []
+      },
+      "request": {
+        "resource": "stream",
+        "type": "movie",
+        "id": "custom:1"
+      },
+      "expected": "Supported; object missing prefixes overrides top-level tt"
+    },
+    {
+      "case": "object-prefix-empty",
+      "raw": {
+        "id": "org.vantara.fixture.empty",
+        "version": "1.0.0",
+        "name": "Empty prefix fixture",
+        "description": "Authored",
+        "resources": [
+          {
+            "name": "subtitles",
+            "types": [
+              "movie"
+            ],
+            "idPrefixes": []
+          }
+        ],
+        "types": [
+          "movie"
+        ],
+        "catalogs": []
+      },
+      "request": {
+        "resource": "subtitles",
+        "type": "movie",
+        "id": "tt1254207"
+      },
+      "expected": "Unsupported under official client matching; explicit [] differs from omitted"
+    },
+    {
+      "case": "unknown-type",
+      "raw": {
+        "id": "org.vantara.fixture.type",
+        "version": "1.0.0",
+        "name": "Other type fixture",
+        "description": "Authored",
+        "resources": [
+          "catalog"
+        ],
+        "types": [
+          "Podcasts"
+        ],
+        "catalogs": [
+          {
+            "id": "episodes",
+            "type": "Podcasts",
+            "name": "Episodes"
+          }
+        ]
+      },
+      "expected": "Accept bounded external type; retain type; catalog-only capability; no automatic cinema assignment"
+    },
+    {
+      "case": "required-search",
+      "raw": {
+        "id": "org.vantara.fixture.search",
+        "version": "1.0.0",
+        "name": "Search fixture",
+        "description": "Authored",
+        "resources": [
+          "catalog"
+        ],
+        "types": [
+          "movie"
+        ],
+        "catalogs": [
+          {
+            "id": "search",
+            "type": "movie",
+            "name": "Search",
+            "extra": [
+              {
+                "name": "search",
+                "isRequired": true
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "Search request only; skip unfiltered feed request"
+    },
+    {
+      "case": "unknown-resource",
+      "raw": {
+        "id": "org.vantara.fixture.extension",
+        "version": "1.0.0",
+        "name": "Extension fixture",
+        "description": "Authored",
+        "resources": [
+          "subtitles",
+          "addon_catalog",
+          "future_resource"
+        ],
+        "types": [
+          "movie"
+        ],
+        "catalogs": []
+      },
+      "expected": "Known subtitles usable; addon_catalog known but unsupported discovery; future resource preserved and not dispatched"
+    }
+  ],
+  "requestCases": [
+    {
+      "case": "encoded-extra",
+      "manifestUrl": "https://example.com/addon/manifest.json",
+      "request": {
+        "resource": "catalog",
+        "type": "movie",
+        "id": "search",
+        "extra": {
+          "search": "A & B/C + D",
+          "skip": 0
+        }
+      },
+      "expectedSuffix": "/catalog/movie/search/search=A%20%26%20B%2FC%20%2B%20D&skip=0.json",
+      "note": "URLSearchParams + for spaces is semantically equivalent to SDK querystring percent-20"
+    },
+    {
+      "case": "configured-base",
+      "manifestUrl": "https://example.com/addon/fixture-public-settings/manifest.json",
+      "request": {
+        "resource": "subtitles",
+        "type": "series",
+        "id": "tt3107288:1:1",
+        "extra": {
+          "filename": "fixture.S01E01.mkv",
+          "videoHash": "0000000000000001",
+          "videoSize": 123456
+        }
+      },
+      "expectedSuffix": "/addon/fixture-public-settings/subtitles/series/tt3107288%3A1%3A1/filename=fixture.S01E01.mkv&videoHash=0000000000000001&videoSize=123456.json",
+      "note": "Settings and hash are authored placeholders; preservation is tested, no hash calculation or real secret"
+    },
+    {
+      "case": "configuration-required-response",
+      "response": {
+        "error": "config_required"
+      },
+      "expected": "Configuration needed; empty results not implied; no circuit-breaker penalty; this error shape is a compatibility extension, not canonical SDK"
+    },
+    {
+      "case": "empty-subtitles",
+      "response": {
+        "subtitles": []
+      },
+      "expected": "Successful empty result; provider remains healthy"
+    }
+  ],
+  "streamCases": [
+    {
+      "case": "https-direct",
+      "raw": {
+        "url": "https://example.com/bbb.mp4",
+        "behaviorHints": {
+          "filename": "fixture.mp4",
+          "videoHash": "0000000000000001",
+          "videoSize": 123456
+        }
+      },
+      "expected": "Preserve subtitle matching hints; candidate direct play only; media/CORS/codecs unverified"
+    },
+    {
+      "case": "headers",
+      "raw": {
+        "url": "https://example.com/bbb.mp4",
+        "behaviorHints": {
+          "notWebReady": true,
+          "proxyHeaders": {
+            "request": {
+              "Referer": "https://example.com/"
+            },
+            "response": {
+              "Content-Type": "video/mp4"
+            }
+          }
+        }
+      },
+      "expected": "PWA unsupported; preserve headers as data for native policy; no automatic proxy"
+    },
+    {
+      "case": "torrent",
+      "raw": {
+        "infoHash": "0000000000000000000000000000000000000001",
+        "fileIdx": 0
+      },
+      "expected": "PWA unsupported torrent; no torrent engine inferred for Kotlin/Media3"
+    },
+    {
+      "case": "youtube",
+      "raw": {
+        "ytId": "fixture-public-video"
+      },
+      "expected": "Special player needed; ordinary direct video unsupported"
+    },
+    {
+      "case": "external",
+      "raw": {
+        "externalUrl": "https://example.com/watch"
+      },
+      "expected": "External action, never direct video"
+    },
+    {
+      "case": "mixed-malformed",
+      "response": {
+        "streams": [
+          null,
+          {
+            "url": "https://example.com/bbb.mp4"
+          },
+          "bad"
+        ]
+      },
+      "expected": "Skip or isolate malformed entries; keep usable candidate; do not crash whole provider"
+    },
+    {
+      "case": "response-headers-only",
+      "raw": {
+        "url": "https://example.com/bbb.mp4",
+        "behaviorHints": {
+          "proxyHeaders": {
+            "response": {
+              "Content-Type": "video/mp4"
+            }
+          }
+        }
+      },
+      "expected": "Treat response proxy requirement as unsupported PWA too"
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import { validateManifest, publicUrl } from "./manifest.js";
 import { LIMITS } from "./contracts.js";
+import { assertBoundedData, canonicalData, manifestEndpoint, parseAddonImport } from "./import.js";
+import { assessAddon } from "./assessment.js";
 import { createHealth } from "./health.js";
 const STORAGE = "addons.v1";
 export function createAddonRegistry({
@@ -22,6 +24,12 @@ export function createAddonRegistry({
           .catch(() => {});
       },
     });
+  let mutations = Promise.resolve();
+  const mutate = fn => {
+    const pending = mutations.then(async () => { await ready; return fn(); });
+    mutations = pending.catch(() => {});
+    return pending;
+  };
   let sessions = 0,
     profileKey = "local";
   const pins = new Map();
@@ -47,6 +55,7 @@ export function createAddonRegistry({
     const saved = await store.get("state", STORAGE).catch(() => null);
     for (const row of Array.isArray(saved?.value) ? saved.value : []) {
       try {
+        assertBoundedData(row.manifestRaw);
         const checked = validateManifest(row.manifestRaw, {
           origin: publicUrl(row.url).origin,
         });
@@ -64,7 +73,7 @@ export function createAddonRegistry({
     if ((await store.set("state", STORAGE, [...entries.values()])) === false)
       throw new Error("تعذر حفظ الإضافات؛ مساحة التخزين غير كافية");
   };
-  const view = (row) => ({
+  const view = (row) => { const addon = ({
     ...structuredClone({ ...row.manifest, baseUrl: undefined }),
     enabled: row.enabled,
     cacheEpoch: row.cacheEpoch ?? "legacy-v2",
@@ -78,10 +87,13 @@ export function createAddonRegistry({
     health: Object.fromEntries(
       row.manifest.capabilities.map((c) => [
         c,
-        health.state(row.manifest.key, c, runtimeName),
+        structuredClone(health.state(row.manifest.key, c, runtimeName)),
       ]),
     ),
   });
+    addon.assessment = assessAddon(addon, runtimeName, clock());
+    return addon;
+  };
   function list(filter = {}) {
     return [
       ...coreAdapters.map((c) => ({
@@ -100,103 +112,143 @@ export function createAddonRegistry({
           (!filter.capability || a.capabilities?.includes(filter.capability)),
       );
   }
-  async function inspect(url, { signal } = {}) {
-    url = String(url).replace(/^stremio:\/\//i, "https://");
-    publicUrl(url);
-    const raw = await transport.json(url, { signal, limit: LIMITS.manifest });
-    const checked = validateManifest(raw, { origin: new URL(url).origin });
+  function previewRaw(raw, url) {
+    // Public preview objects are editable DOM data, never installation authority.
+    assertBoundedData(raw);
+    const privateRaw = structuredClone(raw);
+    const checked = validateManifest(privateRaw, { origin: new URL(url).origin });
     if (checked.errors.length)
-      throw new Error(`manifest غير متوافق: ${checked.errors.join(", ")}`);
-    const preview = {
-      manifest: checked.manifest,
-      compatibility: checked.compatibility,
-    };
-    previews.set(preview, { url, raw });
+      throw new Error(`بيانات الإضافة غير متوافقة (${checked.errors.join(", ")})`);
+    const preview = { manifest: structuredClone(checked.manifest), compatibility: structuredClone(checked.compatibility) };
+    previews.set(preview, { url, raw: privateRaw });
     return preview;
   }
-  async function install(preview) {
-    await ready;
-    const hidden = previews.get(preview);
-    if (!hidden) throw new Error("عاين رابط الإضافة أولًا");
-    const m = preview.manifest;
-    if (!entries.has(m.key) && entries.size >= 100)
-      throw new Error("الحد الأقصى 100 إضافة مثبتة");
-    if (entries.has(m.key) && sessions)
-      throw new Error("انتظر انتهاء الجلسة قبل استبدال نسخة الإضافة");
-    const before = entries.get(m.key);
-    entries.set(m.key, {
-      manifest: m,
-      manifestRaw: hidden.raw,
-      url: hidden.url,
-      enabled: true,
-      installedAt: clock(),
-      cacheEpoch: crypto.randomUUID(),
-      staged: null,
-      previous: null,
+  async function inspect(url, { signal } = {}) {
+    url = manifestEndpoint(url);
+    const raw = await transport.json(url, { signal, limit: LIMITS.manifest });
+    return previewRaw(raw, url);
+  }
+  async function inspectData(text, { serviceUrl, signal } = {}) {
+    const parsed = parseAddonImport(text, { serviceUrl });
+    const results = new Array(parsed.length);
+    let next = 0;
+    // Limit parallel manifest fetches; preserve bundle order and individual errors.
+    await Promise.all(Array.from({ length: Math.min(4, parsed.length) }, async () => {
+      while (next < parsed.length) {
+        if (signal?.aborted) throw new DOMException("ألغي الاستيراد", "AbortError");
+        const i = next++, item = parsed[i];
+        if (item.error) { results[i] = item; continue; }
+        try {
+          const preview = item.raw ? previewRaw(item.raw, item.url) : await inspect(item.url, { signal });
+          results[i] = { name: preview.manifest.name, preview };
+        } catch (e) {
+          if (e.name === 'AbortError') throw e;
+          results[i] = { name: item.name, error: e.message };
+        }
+      }
+    }));
+    return results;
+  }
+  function install(preview) {
+    return mutate(async () => {
+      const hidden = previews.get(preview);
+      if (!hidden) throw new Error("عاين الإضافة أولًا");
+      const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
+      if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
+      const m = checked.manifest, before = entries.get(m.key);
+      if (before && before.url === hidden.url && canonicalData(before.manifestRaw) === canonicalData(hidden.raw)) {
+        previews.delete(preview);
+        return view(before);
+      }
+      if (!before && entries.size >= 100) throw new Error("الحد الأقصى 100 إضافة مثبتة");
+      if (before && sessions) throw new Error("انتظر انتهاء الجلسة قبل استبدال نسخة الإضافة");
+      const next = {
+        manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url,
+        enabled: before?.enabled ?? true, installedAt: before?.installedAt ?? clock(),
+        cacheEpoch: crypto.randomUUID(), staged: null,
+        previous: before ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+      };
+      entries.set(m.key, next);
+      try { await save(); }
+      catch (e) { if (before) entries.set(m.key, before); else entries.delete(m.key); throw e; }
+      previews.delete(preview);
+      health.reset(m.key);
+      return view(next);
     });
-    previews.delete(preview);
-    try {
-      await save();
-    } catch (e) {
-      if (before) entries.set(m.key, before);
-      else entries.delete(m.key);
-      throw e;
-    }
-    return view(entries.get(m.key));
+  }
+  function configurationUrl(key) {
+    const r = row(key);
+    // Setup never leaks configured path/query tokens; installing the returned
+    // configured link is a separate preview/permissions step.
+    return new URL('/configure', new URL(r.url).origin).href;
   }
   function row(key) {
     const r = entries.get(key);
     if (!r) throw new Error("إضافة خارجية غير مثبتة");
     return r;
   }
-  async function pin(key, value) {
-    if (!entries.has(key) && !coreAdapters.some((c) => c.key === key))
-      throw new Error("الإضافة غير موجودة");
-    pins.set(JSON.stringify([profileKey, key]), Boolean(value));
-    if ((await store.set("state", "addons.pins.v1", [...pins])) === false)
-      throw new Error("تعذر حفظ الترتيب");
+  function pin(key, value) {
+    const pinKey = JSON.stringify([profileKey, key]);
+    return mutate(async () => {
+      if (!entries.has(key) && !coreAdapters.some((c) => c.key === key)) throw new Error("الإضافة غير موجودة");
+      const before = pins.get(pinKey);
+      pins.set(pinKey, Boolean(value));
+      try {
+        if ((await store.set("state", "addons.pins.v1", [...pins])) === false) throw new Error("تعذر حفظ الترتيب");
+      } catch (e) { if (before === undefined) pins.delete(pinKey); else pins.set(pinKey, before); throw e; }
+    });
   }
-  async function enable(key, value) {
-    row(key).enabled = Boolean(value);
-    await save();
+  function enable(key, value) {
+    return mutate(async () => {
+      const r = row(key), before = r.enabled;
+      r.enabled = Boolean(value);
+      try { await save(); } catch (e) { r.enabled = before; throw e; }
+    });
   }
-  async function remove(key) {
-    row(key);
-    entries.delete(key);
-    await save();
+  function remove(key) {
+    return mutate(async () => {
+      const before = row(key);
+      entries.delete(key);
+      try { await save(); } catch (e) { entries.set(key, before); throw e; }
+      health.reset(key);
+    });
   }
-  async function stage(key) {
-    const r = row(key),
-      p = await inspect(r.url),
-      h = previews.get(p);
-    if (p.manifest.key !== key) throw new Error("معرف التحديث تغير");
-    r.staged = { manifest: p.manifest, manifestRaw: h.raw, url: h.url };
-    await save();
+  function stage(key) {
+    return mutate(async () => {
+      const r = row(key), p = await inspect(r.url), h = previews.get(p);
+      if (p.manifest.key !== key) throw new Error("معرف التحديث تغير");
+      previews.delete(p);
+      if (canonicalData(r.manifestRaw) === canonicalData(h.raw)) return { changed: false };
+      const before = r.staged;
+      r.staged = { manifest: structuredClone(p.manifest), manifestRaw: h.raw, url: h.url };
+      try { await save(); } catch (e) { r.staged = before; throw e; }
+      return { changed: true };
+    });
   }
-  async function activateStaged(key) {
-    const r = row(key);
-    if (sessions || !r.staged) return false;
-    r.previous = {
-      manifest: r.manifest,
-      manifestRaw: r.manifestRaw,
-      url: r.url,
-    };
-    Object.assign(r, r.staged, { staged: null, cacheEpoch: crypto.randomUUID() });
-    await save();
-    return true;
+  function activateStaged(key) {
+    return mutate(async () => {
+      const r = row(key);
+      if (sessions || !r.staged) return false;
+      const before = structuredClone(r);
+      r.previous = { manifest: r.manifest, manifestRaw: r.manifestRaw, url: r.url };
+      Object.assign(r, r.staged, { staged: null, cacheEpoch: crypto.randomUUID() });
+      try { await save(); } catch (e) { entries.set(key, before); throw e; }
+      health.reset(key);
+      return true;
+    });
   }
-  async function rollback(key) {
-    const r = row(key);
-    if (sessions || !r.previous)
-      throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
-    const prev = r.previous;
-    if (
-      validateManifest(prev.manifestRaw, { origin: new URL(prev.url).origin })
-        .errors.length
-    )
-      throw new Error("النسخة السابقة غير متوافقة");
-    Object.assign(r, prev, { previous: null, staged: null, cacheEpoch: crypto.randomUUID() });
-    await save();
+  function rollback(key) {
+    return mutate(async () => {
+      const r = row(key);
+      if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
+      const prev = r.previous;
+      if (validateManifest(prev.manifestRaw, { origin: new URL(prev.url).origin }).errors.length)
+        throw new Error("النسخة السابقة غير متوافقة");
+      const before = structuredClone(r);
+      Object.assign(r, prev, { previous: null, staged: null, cacheEpoch: crypto.randomUUID() });
+      try { await save(); } catch (e) { entries.set(key, before); throw e; }
+      health.reset(key);
+    });
   }
   function snapshot() {
     sessions++;
@@ -226,6 +278,8 @@ export function createAddonRegistry({
     },
     list,
     inspect,
+    inspectData,
+    configurationUrl,
     install,
     enable,
     remove,

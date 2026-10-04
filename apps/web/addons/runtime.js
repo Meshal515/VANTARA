@@ -5,6 +5,10 @@ import { createTransport } from "./transport.js";
 import { createBundledAdapter } from "./adapters/bundled.js";
 import { createRemoteAdapter } from "./adapters/remote.js";
 import { createStremioAdapter } from "./adapters/stremio.js";
+import { assessAddon, supportedCapabilities } from "./assessment.js";
+import { catalogExtras, matchesStremioResource } from "./stremio-model.js";
+import { publicUrl } from "./manifest.js";
+import { plainObject } from "./contracts.js";
 
 const section = (m) =>
   m.contentTypes.includes("manga")
@@ -45,13 +49,15 @@ export function createAddonRuntime({
     );
   });
   const cache = createAddonCache({ store });
-  function adapter(key) {
+  function adapter(key, { diagnostic = false } = {}) {
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
       return createBundledAdapter({ sourceDef, engine: r.registry });
     }
     const c = registry.connection(key);
+    if (c.manifest.configuration?.required && !c.manifest.configuration.configured)
+      throw Object.assign(new Error("تحتاج الإضافة إلى إعداد قبل الاستخدام"), { code: "CONFIG_REQUIRED" });
     const raw =
       c.manifest.protocol === "stremio"
         ? createStremioAdapter({ ...c, transport })
@@ -59,43 +65,52 @@ export function createAddonRuntime({
     const out = {};
     for (const [method, fn] of Object.entries(raw)) {
       out[method] = async (...args) => {
-        const cap = { series: "details" }[method] ?? method;
+        const cap = method === "request" ? args[0] : { series: "details" }[method] ?? method;
+        if (!supportedCapabilities(c.manifest, runtimeName).includes(cap))
+          throw Object.assign(new Error("هذه القدرة غير مدعومة في هذه المنصة"), { code: "UNSUPPORTED_RESOURCE" });
         const input = JSON.stringify(args, (k, v) =>
             k === "signal" || typeof v === "function" ? undefined : v,
           ),
           cacheKey = `${key}@${c.manifest.version}@${c.cacheEpoch}`;
         const started = Date.now();
         try {
-          const hit = await cache.get(cacheKey, cap, input).catch(() => null);
+          const hit = diagnostic ? null : await cache.get(cacheKey, cap, input).catch(() => null);
           if (hit != null) return hit;
-          if (!registry.health.allow(key, cap, runtimeName))
+          if (!registry.health.allow(key, cap, runtimeName, { manual: diagnostic }))
             throw Object.assign(
               new Error("الإضافة في فترة تبريد بعد أعطال متكررة"),
               { name: "CooldownError" },
             );
           const result = await fn(...args);
-          const usable =
-            cap !== "streams" ||
-            (Array.isArray(result) &&
-              result.some(
-                (x) => x.url && (!x.status || x.status === "RESOLVED"),
-              ));
+          if (c.manifest.protocol !== "stremio" && (
+            ["home", "search"].includes(cap) && !Array.isArray(result?.items ?? result?.mangas) ||
+            cap === "details" && !plainObject(result?.item ?? result?.manga)
+          )) throw Object.assign(new Error("الإضافة أعادت بيانات غير صالحة"), { code: "INVALID_RESPONSE" });
+          if (cap === "subtitles" && (!Array.isArray(result) || result.some((x) => {
+            try { publicUrl(x?.url); return false; } catch { return true; }
+          }))) throw Object.assign(new Error("الإضافة أعادت بيانات ترجمة غير صالحة"), { code: "INVALID_RESPONSE" });
+          const items = Array.isArray(result) ? result : result?.items ?? result?.mangas ?? result?.chapters ?? result?.episodes ?? result?.pages;
+          const usable = cap === "streams"
+            ? Array.isArray(result) && result.some((x) => x.url && x.type !== "dash" && (!x.status || x.status === "RESOLVED"))
+            : !Array.isArray(items) || items.length > 0;
+          const evidence = { version: c.manifest.version, cacheEpoch: c.cacheEpoch };
           if (usable)
             registry.health.success(
               key,
               cap,
               runtimeName,
               Date.now() - started,
+              evidence,
             );
           else
-            registry.health.failure(
+            registry.health.empty(
               key,
               cap,
               runtimeName,
-              "RESOLVER_EMPTY",
               Date.now() - started,
+              evidence,
             );
-          if (usable)
+          if (usable && !diagnostic)
             await cache
               .set(
                 cacheKey,
@@ -113,7 +128,11 @@ export function createAddonRuntime({
               .catch(() => {});
           return result;
         } catch (error) {
-          if (!["AbortError", "CooldownError"].includes(error.name))
+          if (error.code === "CONFIG_REQUIRED")
+            registry.health.configuration(key, cap, runtimeName, Date.now() - started, { version: c.manifest.version, cacheEpoch: c.cacheEpoch });
+          else if (error.name === "AbortError" || ["UNSUPPORTED_RESOURCE", "REQUIRED_EXTRA", "INVALID_EXTRA"].includes(error.code))
+            registry.health.releaseProbe(key, cap, runtimeName);
+          else if (error.name !== "CooldownError")
             registry.health.failure(
               key,
               cap,
@@ -124,6 +143,7 @@ export function createAddonRuntime({
                   ? `HTTP_${error.status}`
                   : "request_failure",
               Date.now() - started,
+              { version: c.manifest.version, cacheEpoch: c.cacheEpoch },
             );
           throw error;
         }
@@ -136,11 +156,12 @@ export function createAddonRuntime({
       .list()
       .filter(
         (x) =>
-          !x.bundled && x.enabled && x.compatibility?.[runtimeName] !== false,
+          !x.bundled && x.enabled && x.compatibility?.[runtimeName] !== false &&
+          !(x.configuration?.required && !x.configuration.configured),
       );
   function def(id) {
     if (!id.startsWith("addon|")) return r.registry.def(id);
-    const m = external().find((x) => `addon|${x.key}` === id);
+    const m = external().find((x) => `addon|${x.key}` === id && x.contentTypes.some((t) => ["manga", "anime", "movie", "series"].includes(t)));
     return m
       ? {
           id,
@@ -159,6 +180,7 @@ export function createAddonRuntime({
     if (!d) return null;
     const m = d.manifest,
       a = adapter(m.key);
+    if (m.protocol === "stremio" && !m.capabilities.some((c) => ["catalog", "meta", "streams"].includes(c))) return null;
     if (m.protocol !== "stremio")
       return {
         ...a,
@@ -180,7 +202,7 @@ export function createAddonRuntime({
     return {
       async search(query) {
         const catalogs = m.catalogs.filter((c) =>
-          c.extra?.some((x) => x.name === "search"),
+          c.extra?.some((x) => x.name === "search") && !c.extra.some((x) => x.isRequired && x.name !== "search"),
         );
         const out = [];
         for (const c of catalogs)
@@ -261,6 +283,8 @@ export function createAddonRuntime({
           }));
       },
       async servers(ep) {
+        // Catalog/meta facets enumerate works; only stream providers own routes.
+        if (!m.capabilities.includes("streams")) return [];
         return [
           {
             key: ep.url,
@@ -273,6 +297,7 @@ export function createAddonRuntime({
         ];
       },
       async streams(server, onResult, { signal } = {}) {
+        if (!m.capabilities.includes("streams")) return [];
         const list = await a.streams({
           type: server.type,
           videoId: server.url,
@@ -301,13 +326,14 @@ export function createAddonRuntime({
       return [
         ...r.registry.list(content),
         ...external()
+          .filter(() => runtimeName !== "apk")
           .filter((m) =>
             m.capabilities.some((c) =>
               ["search", "streams", "pages"].includes(c),
             ),
           )
           .map((m) => def(`addon|${m.key}`))
-          .filter((d) => !content || d.content === content),
+          .filter((d) => d && (!content || d.content === content)),
       ];
     },
     def,
@@ -337,6 +363,75 @@ export function createAddonRuntime({
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));
   }
+  async function diagnose(key, { signal, sample } = {}) {
+    await ready;
+    if (signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
+    const addon = registry.list().find((x) => x.key === key);
+    if (!addon) throw new Error("الإضافة غير موجودة");
+    const checks = [];
+    const initial = assessAddon(addon, runtimeName);
+    if (["disabled", "configuration", "unsupported", "builtin"].includes(initial.level))
+      return { checks: [{ capability: "addon", state: initial.level, message: initial.detail }], assessment: initial };
+    const supported = supportedCapabilities(addon, runtimeName);
+    const a = adapter(key, { diagnostic: true });
+    let catalogItems = [];
+    const check = async (capability, run) => {
+      if (!run) { checks.push({ capability, state: "untested", message: "يتطلب الفحص هوية أو مرشحًا متاحًا؛ لم يُرسل طلب" }); return; }
+      try {
+        if (signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
+        const result = await run();
+        const h = registry.health.state(key, capability, runtimeName);
+        const unsupported = capability === "streams" && Array.isArray(result) && result.length > 0 && result.every((x) => x.status === "UNSUPPORTED" || x.type === "dash");
+        checks.push({ capability, state: unsupported ? "unsupported" : h.state === "empty" ? "empty" : "passed", message: unsupported ? "استجابت الخدمة؛ صيغ التشغيل المتاحة غير مدعومة في هذه المنصة" : h.state === "empty" ? "استجابة صالحة؛ لا توجد نتائج متاحة لهذا الطلب" : "استجابة فعلية صالحة؛ لا تعني جاهزية تشغيل الفيديو" });
+        return result;
+      } catch (error) {
+        if (error.name === "AbortError" || signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
+        const unsupported = ["UNSUPPORTED_RESOURCE", "REQUIRED_EXTRA", "INVALID_EXTRA"].includes(error.code);
+        const configuration = error.code === "CONFIG_REQUIRED";
+        checks.push({ capability, state: configuration ? "configuration" : unsupported ? "untested" : "failed", message: configuration ? "طلبت الخدمة إكمال إعدادها قبل الاستخدام" : unsupported ? "لا توجد هوية أو مرشحات مناسبة لهذه القدرة" : error.name === "TimeoutError" ? "انتهت مهلة الفحص" : "تعذر الطلب أو أعادت الإضافة بيانات غير صالحة" });
+      }
+    };
+    const order = { catalog: 0, meta: 1 };
+    const capabilities = [...(addon.capabilities ?? [])].sort((a, b) => (order[a] ?? 2) - (order[b] ?? 2));
+    for (const capability of capabilities) {
+      if (!supported.includes(capability)) { checks.push({ capability, state: "unsupported", message: "هذه القدرة غير مدعومة في هذه المنصة" }); continue; }
+      let run;
+      if (addon.protocol === "stremio") {
+        if (capability === "catalog") {
+          let choice;
+          for (const catalog of addon.catalogs ?? []) {
+            const extra = {}; let addressable = true;
+            for (const rule of catalogExtras(catalog).filter((x) => x.isRequired)) {
+              const value = sample?.extra?.[rule.name] ?? rule.options?.[0];
+              if (value == null || value === "") { addressable = false; break; }
+              extra[rule.name] = value;
+            }
+            if (addressable) { choice = { catalog, extra }; break; }
+          }
+          if (choice) run = async () => (catalogItems = await a.catalog({ type: choice.catalog.type, id: choice.catalog.id, extra: choice.extra, signal }));
+        } else if (capability === "meta") {
+          const identity = sample?.id ? { id: sample.id, type: sample.type } : catalogItems.find((x) => matchesStremioResource(addon, "meta", x.type, x.id));
+          if (identity && matchesStremioResource(addon, "meta", identity.type, identity.id)) run = () => a.meta({ ...identity, signal });
+        } else if (["streams", "subtitles"].includes(capability)) {
+          const videoId = sample?.videoId ?? sample?.id;
+          if (videoId && matchesStremioResource(addon, capability === "streams" ? "stream" : capability, sample.type, videoId))
+            run = () => a[capability]({ type: sample.type, videoId, extra: sample.extra, signal });
+        }
+      } else {
+        if (capability === "home") run = () => a.home(1, { signal });
+        else if (capability === "search" && sample?.query) run = () => a.search(sample.query, 1, { signal });
+        else if (capability === "details" && sample?.work) run = () => a.series(sample.work, { signal });
+        else if (capability === "episodes" && sample?.work) run = () => a.episodes(sample.work, { signal });
+        else if (capability === "pages" && sample?.chapter) run = () => a.pages(sample.chapter, { signal });
+        else if (capability === "streams" && sample?.work) run = () => a.streams(sample.work, null, { signal });
+        else if (capability === "subtitles" && sample?.videoId) run = () => a.subtitles({ ...sample, signal });
+      }
+      await check(capability, run);
+    }
+    for (const _resource of addon.diagnostics?.unsupportedResources ?? [])
+      checks.push({ capability: "other", state: "unsupported", message: "مورد معلن غير مدعوم في هذا الإصدار" });
+    return { checks, assessment: assessAddon(registry.list().find((x) => x.key === key), runtimeName) };
+  }
   return {
     registry,
     transport,
@@ -344,6 +439,7 @@ export function createAddonRuntime({
     sources,
     ready,
     subtitleProviders,
+    diagnose,
     runtimeName,
   };
 }

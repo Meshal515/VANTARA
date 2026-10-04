@@ -4,6 +4,7 @@ import {
   PRODUCT_VERSION,
   plainObject,
 } from "./contracts.js";
+import { normalizeStremioManifest } from "./stremio-model.js";
 /** قبول أسماء HTTPS العامة فقط؛ الطلب مباشر بلا cookies ولا proxy يتصل بعناوين داخلية. */
 export function publicUrl(input) {
   let u;
@@ -32,7 +33,7 @@ export function safeUrlLabel(input) {
   }
 }
 const version = (v) =>
-  typeof v === "string" && /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v);
+  typeof v === "string" && /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(v);
 const above = (a, b) => {
   const x = a.split(/[.+-]/).slice(0, 3).map(Number),
     y = b.split(/[.+-]/).slice(0, 3).map(Number);
@@ -66,47 +67,15 @@ export function validateManifest(
   if (!version(raw.version)) errors.push("version");
   const stremio = Array.isArray(raw.resources) && Array.isArray(raw.types);
   const protocol = stremio ? "stremio" : "vantara";
-  let capabilities, resources, types, permissions, baseUrl;
+  let capabilities, resources, types, permissions, baseUrl, stremioModel;
   if (stremio) {
     if (raw.protocolVersion != null && raw.protocolVersion !== 1)
       errors.push("protocolVersion");
-    if (!strings(raw.types, ["movie", "series", "anime", "other"]))
-      errors.push("types");
-    types = (raw.types ?? []).filter((x) => CONTENT_TYPES.includes(x));
-    resources = (raw.resources ?? []).map((x) =>
-      typeof x === "string" ? { name: x } : x,
-    );
-    if (
-      resources.length > 20 ||
-      resources.some(
-        (x) =>
-          !plainObject(x) ||
-          !["catalog", "meta", "stream", "subtitles"].includes(x.name) ||
-          (x.types != null && !strings(x.types, raw.types)) ||
-          (x.idPrefixes != null && !strings(x.idPrefixes)),
-      )
-    )
-      errors.push("resources");
-    capabilities = [
-      ...new Set(
-        resources
-          .filter(plainObject)
-          .map((x) => (x.name === "stream" ? "streams" : x.name)),
-      ),
-    ];
-    if (
-      raw.catalogs != null &&
-      (!Array.isArray(raw.catalogs) ||
-        raw.catalogs.length > 100 ||
-        raw.catalogs.some(
-          (c) =>
-            !plainObject(c) ||
-            typeof c.id !== "string" ||
-            typeof c.type !== "string" ||
-            !raw.types.includes(c.type),
-        ))
-    )
-      errors.push("catalogs");
+    stremioModel = normalizeStremioManifest(raw);
+    errors.push(...stremioModel.errors);
+    types = stremioModel.contentTypes;
+    resources = stremioModel.resources;
+    capabilities = stremioModel.capabilities;
     permissions = {
       networkHosts: base ? [new URL(base).hostname] : [],
       verification: false,
@@ -185,7 +154,7 @@ export function validateManifest(
   try {
     if (raw.logo) {
       const u = publicUrl(raw.logo);
-      if (u.origin === base) logo = u.href;
+      if (stremio || u.origin === base) logo = u.href;
     }
   } catch {
     /* شعار غير موثوق لا يُحمّل */
@@ -207,9 +176,15 @@ export function validateManifest(
       typeof raw.description === "string" ? raw.description.slice(0, 2000) : "",
     languages: strings(raw.languages) ? raw.languages : [],
     official: false,
-    catalogs: stremio ? (raw.catalogs ?? []) : [],
-    types: stremio ? raw.types : types,
-    idPrefixes: strings(raw.idPrefixes) ? raw.idPrefixes : [],
+    catalogs: stremio ? stremioModel.catalogs : [],
+    types: stremio ? stremioModel.types : types,
+    ...(stremio ? {
+      ...(stremioModel.idPrefixes != null ? { idPrefixes: stremioModel.idPrefixes } : {}),
+      configuration: stremioModel.configuration,
+      behaviorHints: stremioModel.behaviorHints,
+      config: stremioModel.config,
+      diagnostics: stremioModel.diagnostics,
+    } : { idPrefixes: strings(raw.idPrefixes) ? raw.idPrefixes : [] }),
     compatibility,
   };
   return { manifest, compatibility, errors: [] };

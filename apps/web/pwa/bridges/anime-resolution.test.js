@@ -116,3 +116,9 @@ it('retains the effective addon copy and season for the next episode',async()=>{
  const first=await AnimeEngine.prepare({copies:[{...copy,sourceId:'addon|demo',type:'series',requestedSeason:2,episode:1}],episode:1});sessions.push(first.session);await vi.advanceTimersByTimeAsync(0);
  const second=await AnimeEngine.prepare({copies:nextEpisodeCopies(first.copies,2,{kind:'series',season:2}),episode:2});sessions.push(second.session);await vi.advanceTimersByTimeAsync(0);expect(used).toEqual(['s2e1','s2e2']);expect(state.play).not.toHaveBeenCalled();
 });
+it('preserves addon subtitle matching metadata through preparation without autoplay',async()=>{
+ src.servers=async()=>[server('fast')];
+ src.streams=async()=>[{...stream(1080),addonKey:'demo',filename:'actual.mkv',videoHash:'0123456789abcdef',videoSize:12345}];
+ const session=await prepare();const {candidate}=await AnimeEngine.best({session});
+ await AnimeEngine.play({session,candidate});expect(state.play.mock.calls[0][0].sessionOf(session).cands.get(candidate)).toMatchObject({filename:'actual.mkv',videoHash:'0123456789abcdef',videoSize:12345});
+});

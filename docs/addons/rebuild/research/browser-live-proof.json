@@ -1,0 +1,71 @@
+{
+  "evidence": "ACTUAL_CHROMIUM_ORIGIN_LIVE",
+  "date": "2026-10-04",
+  "results": [
+    {
+      "name": "Cinemeta",
+      "version": "3.0.14",
+      "configuration": {
+        "required": false,
+        "configurable": false,
+        "configured": true
+      },
+      "catalogCount": 6,
+      "metaId": "tt1254207"
+    },
+    {
+      "name": "OpenSubtitles",
+      "version": "1.0.0",
+      "configuration": {
+        "required": false,
+        "configurable": false,
+        "configured": true
+      },
+      "subtitleCount": 97,
+      "languages": [
+        "eng",
+        "pob",
+        "por",
+        "ita",
+        "fin",
+        "spa",
+        "ron",
+        "hun",
+        "hrv",
+        "fre",
+        "nor",
+        "tur",
+        "per",
+        "nld",
+        "vie",
+        "dan",
+        "heb",
+        "srp",
+        "cze",
+        "ara",
+        "pol",
+        "jpn",
+        "ell",
+        "ind"
+      ]
+    },
+    {
+      "name": "SubDL",
+      "version": "1.2.2",
+      "configuration": {
+        "required": true,
+        "configurable": true,
+        "configured": false
+      }
+    },
+    {
+      "name": "SubSource",
+      "version": "1.4.2",
+      "configuration": {
+        "required": true,
+        "configurable": true,
+        "configured": false
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { validateManifest, publicUrl, safeUrlLabel } from "./manifest.js";
+import { readFileSync } from "node:fs";
 const native = () => ({
   id: "demo.manga",
   name: "Demo",
@@ -39,6 +40,52 @@ it.each([
 ])("rejects invalid or incompatible manifest %#", (raw) =>
   expect(check(raw).errors.length).toBeGreaterThan(0),
 );
+const observed = (name) => JSON.parse(readFileSync(new URL(`../../../docs/addons/rebuild/research/${name}-manifest.observed.json`, import.meta.url), "utf8")).manifest;
+it.each(["cinemeta", "opensubtitles-v3", "subdl", "subsource", "subsro"])("accepts observed public %s manifest semantics", (name) => {
+  const raw = observed(name);
+  const result = check(raw);
+  expect(result.errors).toEqual([]);
+  expect(result.manifest.types).toEqual(raw.types);
+  expect(result.manifest.capabilities).not.toContain("addon_catalog");
+});
+it("normalizes setup requirements and preserves safe external branding", () => {
+  const result = check({ ...observed("subdl"), logo: "https://cdn.test/subdl.png" });
+  expect(result.manifest.configuration).toEqual({ required: true, configurable: true, configured: false });
+  expect(result.manifest.logo).toBe("https://cdn.test/subdl.png");
+});
+it("keeps prefix absence separate from explicit empty resource prefixes", () => {
+  const raw = { ...observed("opensubtitles-v3"), resources: [{ name: "subtitles", types: ["movie"] }, { name: "stream", types: ["movie"], idPrefixes: [] }] };
+  const result = check(raw);
+  expect(result.manifest.resources[0]).not.toHaveProperty("idPrefixes");
+  expect(result.manifest.resources[1].idPrefixes).toEqual([]);
+});
+it("retains unknown resources for diagnostics without executable capabilities", () => {
+  const raw = { ...observed("opensubtitles-v3"), resources: ["subtitles", "future_resource", "addon_catalog"] };
+  const result = check(raw);
+  expect(result.errors).toEqual([]);
+  expect(result.manifest.capabilities).toEqual(["subtitles"]);
+  expect(result.manifest.diagnostics.unsupportedResources).toEqual(["future_resource", "addon_catalog"]);
+});
+it("keeps unfamiliar safe content types outside VANTARA cinema categories", () => {
+  const raw = { ...observed("opensubtitles-v3"), types: ["Podcasts", "tv", "channel", "subtitles"] };
+  const result = check(raw);
+  expect(result.errors).toEqual([]);
+  expect(result.manifest.types).toEqual(raw.types);
+  expect(result.manifest.contentTypes).toEqual([]);
+});
+it("accepts semantic versions carrying prerelease and build identifiers", () => {
+  expect(check({ ...observed("opensubtitles-v3"), version: "1.2.3-rc.1+build.42" }).errors).toEqual([]);
+});
+it.each([
+  { types: ["movie\nunsafe"] },
+  { resources: [{ name: "subtitles", types: {} }] },
+  { catalogs: [{ type: "movie", id: "x", extra: [{ name: "search", isRequired: "yes" }] }] },
+  { behaviorHints: { configurationRequired: "yes" } },
+])("rejects malformed Stremio nested data safely %#", (patch) => {
+  const result = check({ ...observed("opensubtitles-v3"), ...patch });
+  expect(result.manifest).toBeNull();
+  expect(result.errors.length).toBeGreaterThan(0);
+});
 it("normalizes real Stremio resources and preserves advertised filtering", () => {
   const x = check({
     id: "org.subtitles",

@@ -1,0 +1,55 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED_RESPONSE",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/series/tt3107288%3A1%3A1.json",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "role": "subtitles",
+  "sanitization": {
+    "omittedFields": [
+      "images",
+      "descriptions",
+      "links",
+      "large lists beyond first 2 entries",
+      "unknown response extensions"
+    ],
+    "urlRewrites": [
+      {
+        "field": "subtitles[].url",
+        "originalOrigins": [
+          "https://subs5.strem.io"
+        ],
+        "replacement": "https://example.com/observed-subtitles/{originalPublicId}.srt",
+        "meaning": "Authored non-fetchable placeholders; subtitle file paths/download tokens omitted; response field structure retained"
+      }
+    ]
+  },
+  "originalCount": 97,
+  "response": {
+    "subtitles": [
+      {
+        "id": "5737608",
+        "lang": "eng",
+        "subtitleFileName": "The.Flash.2014.S01E01.WEB.x264-NOGRP.srt",
+        "movieReleaseName": "The.Flash.2014.S01E01.WEB.x264-NOGRP",
+        "fpsMilli": 23976,
+        "season": 1,
+        "episode": 1,
+        "url": "https://example.com/observed-subtitles/5737608.srt"
+      },
+      {
+        "id": "5849296",
+        "lang": "eng",
+        "subtitleFileName": "The.Flash.2014.S01E01.HDTV.x264-LOL.srt",
+        "movieReleaseName": "The.Flash.2014.S01E01.HDTV.x264-LOL",
+        "fpsMilli": 23976,
+        "season": 1,
+        "episode": 1,
+        "url": "https://example.com/observed-subtitles/5849296.srt"
+      }
+    ],
+    "cacheMaxAge": 172800,
+    "staleRevalidate": 518400,
+    "staleError": 1036800
+  }
+}

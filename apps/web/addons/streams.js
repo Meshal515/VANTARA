@@ -1,5 +1,5 @@
 import { publicUrl } from "./manifest.js";
-import { boundedItems } from "./contracts.js";
+import { plainObject, boundedItems } from "./contracts.js";
 export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
   return boundedItems(raw).map((s, index) => {
     const base = {
@@ -11,7 +11,8 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       status: "UNSUPPORTED",
       reason: "نوع Stream غير مدعوم على هذه المنصة",
     };
-    if (s.infoHash || s.externalUrl || s.behaviorHints?.notWebReady)
+    if (!plainObject(s)) return { ...base, reason: "بيانات Stream غير صالحة" };
+    if (s.infoHash || s.ytId || s.externalUrl || s.nzbUrl || s.archiveUrl || s.behaviorHints?.notWebReady)
       return base;
     let url;
     try {
@@ -54,6 +55,7 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       });
     const needsHeaders =
       s.behaviorHints?.proxyHeaders?.request ||
+      s.behaviorHints?.proxyHeaders?.response ||
       (s.headers && Object.keys(s.headers).length > 0);
     return {
       ...base,
@@ -67,7 +69,9 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       quality,
       qualitySource: quality ? "advertised" : null,
       hdr: s.hdr === true || /\bHDR(?:10|10\+)?\b/i.test(hint) ? true : null,
-      filename: s.filename ?? s.behaviorHints?.filename ?? null,
+      filename: typeof (s.filename ?? s.behaviorHints?.filename) === "string" ? (s.filename ?? s.behaviorHints.filename).slice(0, 2000) : null,
+      videoHash: /^[a-fA-F0-9]{16}$/.test(s.behaviorHints?.videoHash ?? "") ? s.behaviorHints.videoHash : null,
+      videoSize: Number.isSafeInteger(s.behaviorHints?.videoSize) && s.behaviorHints.videoSize > 0 ? s.behaviorHints.videoSize : null,
       duration: Number.isFinite(s.duration) ? s.duration : null,
       fps: Number.isFinite(s.fps) ? s.fps : null,
       subtitles,

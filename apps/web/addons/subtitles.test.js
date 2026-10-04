@@ -74,3 +74,7 @@ it("converts Arabic SRT safely and retains timing without rendering HTML", () =>
   expect(v).not.toContain("<script>");
   expect(() => toWebVtt("not subtitles")).toThrow();
 });
+it('preserves a provider-confirmed video identity for compatible non-IMDb subtitle providers',()=>{
+ expect(subtitleRequest({kind:'series',addonKey:'https://addon.test|demo',videoId:'custom:episode:one',season:1,episode:1}, {videoHash:'0123456789abcdef',videoSize:12345})).toMatchObject({type:'series',videoId:'custom:episode:one',extra:{videoHash:'0123456789abcdef',videoSize:12345}});
+ expect(subtitleRequest({kind:'series',title:'Custom episode'},{})).toBeNull();
+});
