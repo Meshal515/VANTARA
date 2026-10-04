@@ -58,4 +58,34 @@ class PriorityGateTest {
         (waiting + first + job).awaitAll()
         assertEquals(listOf("p0", "p6", "p3", "p2", "p1", "next-chapter", "job"), order)
     }
+    @Test
+    fun `moving one page ahead finishes the previous render before heavy analysis`() = runBlocking {
+        val gate = PriorityGate()
+        val order = Collections.synchronizedList(ArrayList<String>())
+        val holding = CompletableDeferred<Unit>()
+        gate.focus(PriorityGate.Page("c1", 0))
+        val holder = async {
+            gate.run(PriorityGate.ANALYZE_READER, Perf(), PriorityGate.Page("c1", 0)) {
+                runBlocking { holding.await() }
+                order.add("holder")
+            }
+        }
+        delay(40)
+        val previousRender = async {
+            gate.run(PriorityGate.RENDER_READER, Perf(), PriorityGate.Page("c1", 0)) { order.add("p0-render") }
+        }
+        val currentDetect = async {
+            gate.run(PriorityGate.DETECT, Perf(), PriorityGate.Page("c1", 1)) { order.add("p1-detect") }
+        }
+        val currentAnalyze = async {
+            gate.run(PriorityGate.ANALYZE_READER, Perf(), PriorityGate.Page("c1", 1)) { order.add("p1-analyze") }
+        }
+        delay(40)
+        gate.focus(PriorityGate.Page("c1", 1))
+        holding.complete(Unit)
+        listOf(holder, previousRender, currentDetect, currentAnalyze).awaitAll()
+
+        assertEquals(listOf("holder", "p1-detect", "p0-render", "p1-analyze"), order)
+    }
+
 }
