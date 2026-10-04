@@ -73,7 +73,10 @@ const mean = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.
 const median = (xs) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
-  return Math.round(s[Math.floor(s.length / 2)]);
+  const mid = Math.floor(s.length / 2);
+  // كان يأخذ العنصر الأعلى عند عينتين؛ «وسيط 2 صفحة» كان عمليًا أبطأ صفحة،
+  // وهذا بالغ في البطء الذي ظهر في تقرير الجهاز.
+  return Math.round(s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2);
 };
 
 /** متوسط كل مرحلة (JS والأصلية) لمجموعة صفحات. */
