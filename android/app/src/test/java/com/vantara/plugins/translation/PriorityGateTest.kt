@@ -88,4 +88,20 @@ class PriorityGateTest {
         assertEquals(listOf("holder", "p1-detect", "p0-render", "p1-analyze"), order)
     }
 
+    @Test
+    fun `busy state is visible while a model owns the gate`() = runBlocking {
+        val gate = PriorityGate()
+        val hold = CompletableDeferred<Unit>()
+        val work = async {
+            gate.run(PriorityGate.ANALYZE_READER, Perf(), PriorityGate.Page("c", 0)) {
+                runBlocking { hold.await() }
+            }
+        }
+        delay(30)
+        assertTrue(gate.isBusy())
+        hold.complete(Unit)
+        work.await()
+        assertFalse(gate.isBusy())
+    }
+
 }
