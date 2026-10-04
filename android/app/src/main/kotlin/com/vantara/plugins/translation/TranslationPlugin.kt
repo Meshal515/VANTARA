@@ -60,6 +60,13 @@ class TranslationPlugin : Plugin() {
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
+    /**
+     * S23 Ultra وما شابهه (8 أنوية): RT-DETR صغير مستقل للصفحة التي أمام القارئ.
+     * إذا كان CTD/LaMa يشغل المسار الرئيسي، صفحة بلا كتابة لا تنتظر خلفه 8–30ث؛
+     * تفحص بالتوازي وتخرج فورًا. الأجهزة الأقل من 8 أنوية تبقى على المسار الواحد.
+     */
+    private val parallelDetect = Runtime.getRuntime().availableProcessors() >= 8
+    private val probePipeline by lazy { Pipeline(context, store) }
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
     private val outDir by lazy { File(context.filesDir, "translated-pages") }
@@ -106,6 +113,7 @@ class TranslationPlugin : Plugin() {
     fun removeModels(call: PluginCall) {
         scope.launch {
             pipeline.unload()
+            if (parallelDetect) probePipeline.unload()
             withContext(Dispatchers.IO) { store.remove() }
             call.resolve(status())
         }
@@ -121,11 +129,24 @@ class TranslationPlugin : Plugin() {
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
                 val page = pageOf(call)
-                val done = gate.run(PriorityGate.DETECT, perf, page) { pipeline.detectStage(file, perf) }
-                val (a, thumb) = if (done != null) {
-                    done to ""
+
+                // أهم حالة للقراءة: أنت على صفحة بلا كلام بينما الصفحة السابقة تشغل
+                // CTD/LaMa. لا معنى لانتظار القفل. على جهاز 8 أنوية نشغّل RT-DETR
+                // الصغير في lane مستقلة؛ إن كانت الصفحة بلا نص ننهيها هنا.
+                val parallelTextless = if (parallelDetect && high(call) && gate.isBusy()) {
+                    perf.time("parallelDetect") { runCatching { probePipeline.detectStage(file, perf) }.getOrNull() }
+                } else null
+
+                val (a, thumb) = if (parallelTextless != null) {
+                    perf.count("parallelTextless")
+                    parallelTextless to ""
                 } else {
-                    gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) { pipeline.finishForLuna(file, perf) }
+                    val done = gate.run(PriorityGate.DETECT, perf, page) { pipeline.detectStage(file, perf) }
+                    if (done != null) {
+                        done to ""
+                    } else {
+                        gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) { pipeline.finishForLuna(file, perf) }
+                    }
                 }
                 val regions = JSArray()
                 for (r in a.regions) {

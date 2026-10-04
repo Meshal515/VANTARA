@@ -180,10 +180,13 @@ object Cleaner {
                     val deviant = maxOf(Math.abs(img.r(x, y) - color[0]), Math.abs(img.g(x, y) - color[1]), Math.abs(img.b(x, y) - color[2])) > 12
                     if (near[x, y].toInt() != 0 || (deviant && halo[x, y].toInt() != 0)) mask[x, y] = 1
                 }
-                // فقاعة مسطّحة: صندوق النص كله داخلها يُملأ بلونها أيضًا، فلا يبقى حرف إنجليزي
-                // فاته قناع الحروف بجانب العربي (اللون واحد، فلا شيء يضيع)
+                // فقاعة مسطّحة: الكاشف قد يقصّ صندوق النص قبل ظلّ/طرف حرف ببضعة بكسلات.
+                // ±2 الثابتة تركت بقايا سوداء فعلية في صفحات الجهاز. بما أن الخلفية هنا
+                // اجتازت اختبار التجانس (spread < 7)، نوسّع شريط الصندوق بنسبة من ارتفاع
+                // الحرف، لكن لا نخرج أبدًا من داخل الفقاعة المتآكل.
                 val box = ByteMask(img.width, img.height)
-                box.fillRect(region.box.x1 - 2, region.box.y1 - 2, region.box.x2 + 2, region.box.y2 + 2)
+                val boxPad = maxOf(2, (gh * 0.60).toInt())
+                box.fillRect(region.box.x1 - boxPad, region.box.y1 - boxPad, region.box.x2 + boxPad, region.box.y2 + boxPad)
                 region.eraseMask = mask.open(1).or(near.and(inner)).or(box.and(inner)).or(enclosedInk(img, color, bubbleMask, near.and(inner), region.box, gh, others))
                 region.cleanMode = "fill"
                 region.fillColor = color

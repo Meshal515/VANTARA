@@ -162,6 +162,11 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     @Synchronized
     fun analyze(file: File, perf: Perf = Perf()): Analysis = analyzeImpl(file, perf, useCache = true)
 
+    /** كاشف النص صغير (~11MB): نسخة ثانية مستقلة تستعملها الصفحة الحالية إن كان المسار الثقيل مشغولًا. */
+    fun warmDetector(perf: Perf) {
+        if (store.isInstalled()) detector(perf)
+    }
+
     /** نموذج التبييض يُحمَّل مسبقًا (أثناء انتظار Luna) خارج قفل الصفحات: لا يوقف أحدًا. */
     fun warmInpainter(perf: Perf) {
         if (store.isInstalled()) inpainter(perf)
@@ -232,8 +237,41 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
         val gray = perf.time("gray") { img.gray() }
-        // القطع التي فيها نص وحدها: الحروف حول كل صندوق (بهامش المناطق)، والفقاعات بعرض
-        // الصفحة فوق الصندوق وتحته (فقاعة تحيط بالنص كاملة مع ما ينافسها في الدمج)
+
+        // ── المسار السريع: RT-DETR + استخراج لون/حبر محلي ──
+        // لا CTD ولا BubbleSeg ولا LaMa هنا. إن لم تكن الصفحة «سهلة وواضحة» تمامًا
+        // أو كانت ثقة OCR أقل من الحد المحافظ، نسقط فورًا للمسار الثقيل القديم.
+        val fast = perf.time("fastFlat") { Regions.fastFlatRegions(img, gray, hash, dets) }
+        if (fast != null && fast.isNotEmpty()) {
+            val reader = ocr(perf)
+            var safe = true
+            perf.time("fastOcr") {
+                for (r in fast) {
+                    val res = reader.read(img, r.glyph, r.box)
+                    perf.count("ocrLines", res.lines.size)
+                    r.ocr = res
+                    r.source = res.text
+                    // المسار السريع أعلى تحفظًا من الثقيل: أي شك يعيد CTD/BubbleSeg.
+                    if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
+                        safe = false
+                        r.status = "skipped:unreadable"
+                    }
+                }
+            }
+            if (safe) {
+                perf.count("fastFlatHit")
+                perf.count("fastFlatRegions", fast.size)
+                perf.count("regions", fast.size)
+                val analysis = perf.time("pack") { freeze(hash, img.width, img.height, fast) }
+                if (useCache) analyses[hash] = analysis
+                return analysis
+            }
+            perf.count("fastFlatOcrFallback")
+        } else {
+            perf.count("fastFlatFallback")
+        }
+
+        // ── المسار الثقيل الموثوق لكل ما ليس فقاعة مسطحة واضحة ──
         val texts = dets.filter { it.label.startsWith("text") }
         val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
         val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
@@ -251,8 +289,6 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.count("bubbles", bubbleList.size)
         val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
         perf.count("regions", regions.size)
-        // كل منطقة تُقرأ، ومنها «نص حر بثقة منخفضة» (تلميح sfx): قد يكون سردًا فوق الرسم،
-        // وLuna ترى الصفحة وتقرر؛ المؤثر الحقيقي يعود منها sfx فلا يُرسم
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
             for (r in regions) {
@@ -584,27 +620,37 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         src.recycle()
         val kx = big.width.toFloat() / sw
         val ky = big.height.toFloat() / sh
-        val mask = ByteMask(big.width, big.height)
+        // صفحات الـFast Path كلها تقريبًا fill. سابقًا كنا نبني قناعًا كاملًا بدقة
+        // الأصل ثم نمر فوقه مرة ثانية لكل فقاعة. في صفحة ويب تون طويلة هذا وحده
+        // يضيف ثوانٍ. التعبئة يمكن تطبيقها مباشرة من القناع المصغّر؛ LaMa وحده
+        // يحتاج ByteMask كامل الدقة.
+        var inpaintMask: ByteMask? = null
         for (r in regions) {
             if (r.status != "translated") continue
             val m = r.eraseMask ?: continue
             val w = m.bounds() ?: continue
             val x0 = (w[0] * kx).toInt(); val y0 = (w[1] * ky).toInt()
             val x1 = minOf(big.width, Math.ceil(w[2] * kx.toDouble()).toInt()); val y1 = minOf(big.height, Math.ceil(w[3] * ky.toDouble()).toInt())
-            for (y in y0 until y1) {
-                val my = minOf(sh - 1, (y / ky).toInt())
-                for (x in x0 until x1) mask[x, y] = m[minOf(sw - 1, (x / kx).toInt()), my]
-            }
             if (r.cleanMode == "fill") {
-                val c = r.fillColor
-                if (c != null) for (y in y0 until y1) for (x in x0 until x1) if (mask[x, y].toInt() != 0) {
-                    val i = (y * big.width + x) * 3
-                    big.data[i] = c[0].toByte(); big.data[i + 1] = c[1].toByte(); big.data[i + 2] = c[2].toByte()
+                val color = r.fillColor ?: continue
+                for (y in y0 until y1) {
+                    val my = minOf(sh - 1, (y / ky).toInt())
+                    for (x in x0 until x1) {
+                        val mx = minOf(sw - 1, (x / kx).toInt())
+                        if (m[mx, my].toInt() == 0) continue
+                        val i = (y * big.width + x) * 3
+                        big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
+                    }
                 }
             } else if (lama != null) {
+                val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
+                for (y in y0 until y1) {
+                    val my = minOf(sh - 1, (y / ky).toInt())
+                    for (x in x0 until x1) mask[x, y] = m[minOf(sw - 1, (x / kx).toInt()), my]
+                }
                 lama.inpaint(big, mask, Box(x0, y0, x1, y1))
+                mask.fillRect(x0, y0, x1, y1, 0)
             }
-            mask.fillRect(x0, y0, x1, y1, 0)
         }
         val out = ArabicLayout.bitmapOf(big)
         val canvas = Canvas(out)

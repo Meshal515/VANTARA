@@ -73,7 +73,10 @@ const mean = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.
 const median = (xs) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
-  return Math.round(s[Math.floor(s.length / 2)]);
+  const mid = Math.floor(s.length / 2);
+  // كان يأخذ العنصر الأعلى عند عينتين؛ «وسيط 2 صفحة» كان عمليًا أبطأ صفحة،
+  // وهذا بالغ في البطء الذي ظهر في تقرير الجهاز.
+  return Math.round(s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2);
 };
 
 /** متوسط كل مرحلة (JS والأصلية) لمجموعة صفحات. */
@@ -152,8 +155,20 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const s = summarize(entries);
   const lines = [`أداء الترجمة — ${s.pages} صفحة جديدة ناجحة، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
   if (Object.keys(s.errorCodes).length) lines.push(`الأخطاء: ${Object.entries(s.errorCodes).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
+  const modelPages = entries.filter((e) => !e.error && e.from === 'model' && !e.textless);
+  const serverCachedPages = entries.filter((e) => !e.error && e.from === 'friends' && !e.textless);
+  if (serverCachedPages.length && modelPages.length === 0) {
+    lines.push(`اللغة في هذه الجولة: ${serverCachedPages.length} صفحة من كاش الخادم؛ لا يوجد نداء Luna جديد في السجل.`);
+  } else if (serverCachedPages.length || modelPages.length) {
+    lines.push(`اللغة في هذه الجولة: Luna جديد ${modelPages.length} · كاش الخادم ${serverCachedPages.length}.`);
+  }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
+  const analyzed = entries.filter((e) => e.native?.analyze?.counts);
+  const fastPages = analyzed.filter((e) => (e.native.analyze.counts?.fastFlatHit ?? 0) > 0).length;
+  const heavyPages = analyzed.filter((e) => !e.textless && (e.native.analyze.counts?.fastFlatHit ?? 0) === 0 && ((e.native.analyze.counts?.glyphTiles ?? 0) > 0 || (e.native.analyze.counts?.bubbleTiles ?? 0) > 0)).length;
+  if (fastPages || heavyPages) lines.push(`المسار المحلي: سريع ${fastPages} صفحة · ثقيل ${heavyPages} صفحة.`);
+
   const rendered = entries.filter((e) => e.native?.render?.counts);
   const sumRender = (k) => rendered.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
   const eraseMask = sumRender('eraseMaskPixels');
@@ -178,6 +193,22 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
   }
+  // آخر الصفحات واحدةً واحدة: الملخّص السابق كان يخفي فرق «الأولى لا تظهر والثانية تظهر».
+  // هذا السطر يجعل الدور والعمل والشبكة مرئية لكل صفحة بدل وسيط واحد.
+  const recentText = entries.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends') && !e.textless).slice(-12);
+  if (recentText.length) {
+    lines.push('', 'آخر صفحات الحوار (كل صفحة وحدها):');
+    for (const e of recentText) {
+      const a = e.native?.analyze?.stages ?? {};
+      const ac = e.native?.analyze?.counts ?? {};
+      const r = e.native?.render?.stages ?? {};
+      const queue = (a.queue ?? 0) + (r.queue ?? 0);
+      const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
+      const route = (ac.fastFlatHit ?? 0) > 0 ? 'سريع' : ((ac.glyphTiles ?? 0) > 0 || (ac.bubbleTiles ?? 0) > 0) ? 'ثقيل' : 'خفيف';
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
+    }
+  }
+
   if (s.chapters.length) {
     lines.push('', 'الفصول (الزمن الفعلي من أول صفحة لآخرها):');
     for (const c of s.chapters.slice(-10)) lines.push(`  ${c.chapterKey}: ${c.pages} صفحة · ${sec(c.wallMs)}`);

@@ -58,12 +58,13 @@ describe('what the phone draws is what the reader shows', () => {
     device({ drawn: 1 });
     globalThis.fetch = async () => new Response(new Uint8Array([4, 5, 6]));
     globalThis.localStorage = memory();
-    const result = await translatePage({ ...deps(), waitMs: 50, fetchMs: 30 }, 'http://localhost/_capacitor_file_/cache/pages/p2.jpg', { chapterKey: 'c1', pageIndex: 1 });
+    // القارئ الحقيقي لا يمرر imagePath؛ يجب أن يُشتق من convertFileSrc نفسه.
+    const result = await translatePage({ ...deps(), imagePath: null, waitMs: 50, fetchMs: 30 }, 'http://localhost/_capacitor_file_/cache/pages/p2.jpg', { chapterKey: 'c1', pageIndex: 1 });
     expect(result.image).toContain('h-abc.webp');
     expect(result.translated).toBe(1);
     await new Promise((r) => setTimeout(r, 10));
     const [entry] = readPerf();
-    expect(entry).toMatchObject({ chapterKey: 'c1', pageIndex: 1, from: 'model', translated: 1, textless: false });
+    expect(entry).toMatchObject({ chapterKey: 'c1', pageIndex: 1, from: 'model', translated: 1, textless: false, path: '/cache/pages/p2.jpg' });
     expect(Object.keys(entry.stages)).toEqual(expect.arrayContaining(['wait', 'fetch', 'hash', 'cacheRead', 'analyze', 'cacheProbe', 'render']));
     expect(entry.native.analyze.stages.glyphs).toBe(900);
     expect(entry.native.render.stages.encode).toBe(80);

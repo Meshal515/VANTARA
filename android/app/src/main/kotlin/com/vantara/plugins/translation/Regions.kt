@@ -108,6 +108,178 @@ object Regions {
     }
 
     /**
+     * المسار السريع للفقاعات المسطحة.
+     *
+     * RT-DETR أعطانا أصلًا صندوق النص وصندوق الفقاعة. إذا كانت الفقاعة ذات لون
+     * واحد فعليًا، لا توجد فائدة من تشغيل CTD (1024²) ثم BubbleSeg (1024²):
+     * نستخرج ورق الفقاعة من اللون نفسه ونستخرج الحبر باختلافه عن لون الورق.
+     *
+     * null = غير متأكد 100%؛ ارجع للمسار الثقيل بلا أي مخاطرة بالجودة.
+     */
+    fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
+        val texts = mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }
+        if (texts.isEmpty()) return emptyList()
+        val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
+        if (holders.isEmpty()) return null
+
+        // فقاعة واحدة قد يكون RT-DETR قسم نصها صندوقين: اجمعهما قبل OCR/Luna.
+        val grouped = LinkedHashMap<Detection, MutableList<Detection>>()
+        for (d in texts) {
+            val holder = holders
+                .filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
+                .maxByOrNull { it.box.contains(d.box) * 2f + it.score }
+                ?: return null
+            grouped.getOrPut(holder) { ArrayList() }.add(d)
+        }
+
+        val out = ArrayList<Region>(grouped.size)
+        for ((holder, group) in grouped) {
+            val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
+            val flat = fastBubbleMask(img, holder.box, textBox) ?: return null
+            val glyph = fastGlyphMask(img, flat.first, textBox, flat.second) ?: return null
+            val n = glyph.count()
+            if (n < MIN_GLYPH_PIXELS) return null
+            val gb = glyph.bounds() ?: return null
+            val box = textBox.union(Box(gb[0], gb[1], gb[2], gb[3]))
+            val light = fastInkLight(img, glyph, flat.second)
+            val bubble = Bubble(holder.box, holder.score, flat.first)
+            out.add(
+                Region(
+                    stableId(pageHash, textBox, img.width, img.height),
+                    box,
+                    group.maxOf { it.score },
+                    "speech",
+                    bubble,
+                    holder.box,
+                    glyph,
+                    n,
+                    light,
+                ),
+            )
+        }
+        return out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
+    }
+
+    /**
+     * قناع فقاعة من لونها نفسه. يرجع القناع + لون الخلفية إن كانت مسطحة حقًا.
+     * الشروط متعمدة المحافظة: فشل واحد فقط يعيد الصفحة لـCTD/BubbleSeg.
+     */
+    internal fun fastBubbleMask(img: RgbImage, bubbleBox: Box, textBox: Box): Pair<ByteMask, IntArray>? {
+        val x0 = maxOf(0, bubbleBox.x1); val y0 = maxOf(0, bubbleBox.y1)
+        val x1 = minOf(img.width, bubbleBox.x2); val y1 = minOf(img.height, bubbleBox.y2)
+        if (x1 - x0 < 24 || y1 - y0 < 24) return null
+
+        // وسيط كامل الصندوق مقاوم للنص الأسود والإطار؛ داخل فقاعة حقيقية الورق هو الأغلبية.
+        val rs = ArrayList<Int>(); val gs = ArrayList<Int>(); val bs = ArrayList<Int>()
+        val stride = maxOf(1, minOf(x1 - x0, y1 - y0) / 96)
+        for (y in y0 until y1 step stride) for (x in x0 until x1 step stride) {
+            // لا نأخذ مركز النص حتى لا يلوّث اللون إذا كان الخط ضخمًا.
+            if (x in (textBox.x1 - 3)..(textBox.x2 + 3) && y in (textBox.y1 - 3)..(textBox.y2 + 3)) continue
+            rs.add(img.r(x, y)); gs.add(img.g(x, y)); bs.add(img.b(x, y))
+        }
+        if (rs.size < 80) return null
+        rs.sort(); gs.sort(); bs.sort()
+        val color = intArrayOf(rs[rs.size / 2], gs[gs.size / 2], bs[bs.size / 2])
+
+        val close = ByteMask(img.width, img.height)
+        var closeN = 0
+        var total = 0
+        for (y in y0 until y1) for (x in x0 until x1) {
+            total++
+            val d = maxOf(
+                Math.abs(img.r(x, y) - color[0]),
+                Math.abs(img.g(x, y) - color[1]),
+                Math.abs(img.b(x, y) - color[2]),
+            )
+            if (d <= 20) { close[x, y] = 1; closeN++ }
+        }
+        // اللون الواحد يجب أن يكوّن جزءًا كبيرًا من الصندوق؛ أقل من ذلك = رسم/تدرج.
+        if (closeN < total * 0.42) return null
+
+        val paper = close.close(1).largestComponent().filledHoles()
+        val pb = paper.bounds() ?: return null
+        if (pb[2] - pb[0] < textBox.w || pb[3] - pb[1] < textBox.h) return null
+
+        // صندوق النص نفسه يجب أن يقع داخل الورق تقريبًا كله.
+        var inside = 0; var tn = 0
+        for (y in maxOf(0, textBox.y1) until minOf(img.height, textBox.y2)) for (x in maxOf(0, textBox.x1) until minOf(img.width, textBox.x2)) {
+            tn++
+            if (paper[x, y].toInt() != 0) inside++
+        }
+        if (tn == 0 || inside < tn * 0.84) return null
+
+        // تحقق تجانس حقيقي بعيدًا عن النص؛ ليس مجرد نسبة مساحة.
+        var spread = 0.0; var sn = 0
+        val pw = paper.scanWindow() ?: return null
+        for (y in pw[1] until pw[3] step 2) for (x in pw[0] until pw[2] step 2) {
+            if (paper[x, y].toInt() == 0) continue
+            if (x in (textBox.x1 - 8)..(textBox.x2 + 8) && y in (textBox.y1 - 8)..(textBox.y2 + 8)) continue
+            spread += (
+                Math.abs(img.r(x, y) - color[0]) +
+                    Math.abs(img.g(x, y) - color[1]) +
+                    Math.abs(img.b(x, y) - color[2])
+                ) / 3.0
+            sn++
+        }
+        if (sn < 40 || spread / sn > 7.5) return null
+        return paper to color
+    }
+
+    /** حبر النص داخل الفقاعة المسطحة، بلا شبكة عصبية. */
+    internal fun fastGlyphMask(img: RgbImage, bubble: ByteMask, box: Box, bg: IntArray): ByteMask? {
+        val inner = bubble.erode(2)
+        val pad = maxOf(5, minOf(14, box.h / 5))
+        val x0 = maxOf(0, box.x1 - pad); val y0 = maxOf(0, box.y1 - pad)
+        val x1 = minOf(img.width, box.x2 + pad); val y1 = minOf(img.height, box.y2 + pad)
+        val ink = ByteMask(img.width, img.height)
+        var candidate = 0
+        for (y in y0 until y1) for (x in x0 until x1) {
+            if (inner[x, y].toInt() == 0) continue
+            val d = maxOf(
+                Math.abs(img.r(x, y) - bg[0]),
+                Math.abs(img.g(x, y) - bg[1]),
+                Math.abs(img.b(x, y) - bg[2]),
+            )
+            // 18 يمسك anti-aliasing لكنه لا يأكل ضجيج JPEG الخفيف.
+            if (d >= 18) { ink[x, y] = 1; candidate++ }
+        }
+        if (candidate < MIN_GLYPH_PIXELS) return null
+
+        // ارفض إن كان «الحبر» يملأ أغلب الصندوق: هذا رسم داخل الفقاعة لا نص بسيط.
+        val area = maxOf(1, (x1 - x0) * (y1 - y0))
+        if (candidate > area * 0.38) return null
+
+        // نقاط JPEG الصغيرة ليست حروفًا. أبق المكوّنات ذات حجم حقيقي.
+        val (labels, comps) = ink.components(true)
+        val keep = ByteMask(img.width, img.height)
+        var kept = 0
+        for (comp in comps) {
+            val h = comp.y1 - comp.y0; val w = comp.x1 - comp.x0
+            if (comp.area < 3 || h < 2 || w < 1) continue
+            if (h > box.h * 1.25 || w > maxOf(box.w, box.h * 5)) return null
+            for (y in comp.y0 until comp.y1) for (x in comp.x0 until comp.x1) {
+                val i = y * img.width + x
+                if (labels[i] == comp.label) { keep.data[i] = 1; kept++ }
+            }
+        }
+        if (kept < MIN_GLYPH_PIXELS) return null
+        return keep.close(1)
+    }
+
+    private fun fastInkLight(img: RgbImage, glyph: ByteMask, bg: IntArray): Boolean {
+        val b = glyph.bounds() ?: return false
+        var sum = 0L; var n = 0L
+        for (y in b[1] until b[3]) for (x in b[0] until b[2]) if (glyph[x, y].toInt() != 0) {
+            sum += (299L * img.r(x, y) + 587L * img.g(x, y) + 114L * img.b(x, y)) / 1000L
+            n++
+        }
+        if (n == 0L) return false
+        val ink = sum.toDouble() / n
+        val paper = (299.0 * bg[0] + 587.0 * bg[1] + 114.0 * bg[2]) / 1000.0
+        return ink > paper
+    }
+
+    /**
      * قناع صندوق سرد مستطيل فاته YOLO-seg: المكوّن المتصل بلون الحافة الداخلية
      * للصندوق. null إن لم يكن مسطّح اللون (نص فوق رسم).
      */
