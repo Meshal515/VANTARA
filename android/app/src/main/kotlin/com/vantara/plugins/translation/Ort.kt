@@ -65,7 +65,12 @@ class RgbImage(val width: Int, val height: Int, val data: ByteArray) {
         return RgbImage(w, h, out)
     }
 
-    fun paste(sub: RgbImage, x0: Int, y0: Int, where: ByteMask? = null) {
+    /**
+     * يلصق القطعة ويرجع عدد البكسلات التي تغيّرت فعليًا. هذا ليس قياسًا تجميليًا:
+     * مسار التبييض يستعمله ليفرّق بين «شغّلنا LaMa» و«LaMa لم يغيّر شيئًا».
+     */
+    fun paste(sub: RgbImage, x0: Int, y0: Int, where: ByteMask? = null): Int {
+        var changed = 0
         for (y in 0 until sub.height) {
             val yy = y0 + y
             if (yy < 0 || yy >= height) continue
@@ -75,11 +80,13 @@ class RgbImage(val width: Int, val height: Int, val data: ByteArray) {
                 if (where != null && where[xx, yy] == 0.toByte()) continue
                 val s = (y * sub.width + x) * 3
                 val d = (yy * width + xx) * 3
+                if (data[d] != sub.data[s] || data[d + 1] != sub.data[s + 1] || data[d + 2] != sub.data[s + 2]) changed++
                 data[d] = sub.data[s]
                 data[d + 1] = sub.data[s + 1]
                 data[d + 2] = sub.data[s + 2]
             }
         }
+        return changed
     }
 
     /** إعادة تحجيم ثنائية الخطية. */

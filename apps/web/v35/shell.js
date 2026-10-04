@@ -28,7 +28,7 @@ import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapte
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
-import { benchmarkEngines, benchmarkPage, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
+import { benchmarkEngines, benchmarkPage, diagnoseCleaning, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
 import { clearPerf, engineLines, formatReport, readPerf, summarize, totalOf } from '../lib/translate-perf.js';
 import { BLOCK_TEXT, createJob, createJobRunner, englishSources, estimateMinutes, finishedText, pickChapters, progressOf, readPace } from '../lib/translate-jobs.js';
 import { cachedPage, readerQuiet, translatePage } from '../lib/translate.js';
@@ -1572,6 +1572,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openPerfSheet() {
     let benchmarks = [];
     let engines = null;
+    let cleaning = null;
     const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
     const build = (body) => {
       body.append(el('h3', null, 'أداء الترجمة'));
@@ -1590,10 +1591,51 @@ export function mountV35(deps, { page = 'home' } = {}) {
         body.append(list);
       }
       for (const c of s.chapters.slice(-3)) body.append(el('p', null, `فصل ${c.chapterKey.split('#').pop()}: ${c.pages} صفحة في ${sec(c.wallMs)}`));
+      if (s.errors || s.repairs) {
+        const failures = Object.entries(s.errorCodes ?? {}).map(([k, v]) => `${k}×${v}`).join(' · ');
+        body.append(el('p', null, `محاولات منفصلة عن السرعة: فشل ${s.errors} · إصلاح ${s.repairs}${failures ? ` · ${failures}` : ''}`));
+      }
+      if (cleaning?.perf) {
+        const k = cleaning.perf.counts ?? {};
+        const mask = k.eraseMaskPixels ?? 0;
+        const changed = k.eraseChangedPixels ?? 0;
+        const pct = mask ? Math.round((changed / mask) * 100) : 0;
+        body.append(el('p', null, `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · القناع ${mask} بكسل · تغيّر فعلًا ${changed} (${pct}%) · تعبئة ${k.fillChangedPixels ?? 0} · LaMa ${k.inpaintChangedPixels ?? 0}`));
+        body.append(el('p', null, 'ملفات النماذج اجتازت SHA-256 قبل تشغيل هذا الفحص؛ نجاح الزر يعني أننا لا نختبر ملف وزن ناقصًا أو متبدّلًا.'));
+        if ((k.inpaint ?? 0) > 0 && (k.inpaintChangedPixels ?? 0) === 0) body.append(el('p', null, '⚠️ LaMa استُدعي ولم يغيّر أي بكسل — هذه إشارة مباشرة لمشكلة في الترميم/النموذج.'));
+        if ((k.fill ?? 0) > 0 && (k.fillChangedPixels ?? 0) === 0) body.append(el('p', null, '⚠️ مسار التعبئة اشتغل لكن لم يغيّر أي بكسل.'));
+        if (cleaning.path) {
+          const img = document.createElement('img');
+          const convert = globalThis.Capacitor?.convertFileSrc;
+          img.src = convert ? convert(cleaning.path) : cleaning.path;
+          img.alt = 'ناتج التبييض قبل رسم العربية';
+          img.style.cssText = 'display:block;width:100%;max-height:52vh;object-fit:contain;border-radius:12px;margin:10px 0;background:#111';
+          body.append(img, el('p', null, '↑ هذه الصفحة بعد التبييض فقط وقبل رسم العربي. إذا بقي الإنجليزي هنا فالعلة محلية في الكشف/القناع/Cleaner/LaMa، وليست Luna.'));
+          if (cleaning.width !== cleaning.fullWidth || cleaning.height !== cleaning.fullHeight) body.append(el('p', null, `ملاحظة: التشخيص على دقة التحليل ${cleaning.width}×${cleaning.height}، والأصل ${cleaning.fullWidth}×${cleaning.fullHeight}.`));
+        }
+      }
       for (const b of benchmarks) {
         body.append(el('p', null, `القديم ${sec(totalOf(b.legacy))} ← الجديد ${sec(totalOf(b.current))} · ${b.identical ? 'الناتج متطابق بكسلًا بكسلًا' : 'الناتج مختلف!'}`));
       }
-      const bench = el('button', 'btn btn-secondary btn-block', 'قِس القديم مقابل الجديد');
+      const cleanProbe = el('button', 'btn btn-secondary btn-block', 'اختبر التبييض فعليًا');
+      cleanProbe.type = 'button';
+      cleanProbe.onclick = async () => {
+        const candidates = readPerf().filter((e) => e.path && e.hash && e.translated > 0).slice(-30);
+        const page = [...candidates].reverse().find((e) => (e.native?.render?.counts?.inpaint ?? 0) > 0) ?? candidates.at(-1);
+        if (!page) return toast('ترجم صفحة فيها حوار أولًا');
+        const saved = await cachedPage(page.hash);
+        const regions = (saved?.regions ?? []).filter((r) => typeof r.arabic === 'string' && r.arabic.trim()).map((r) => ({ id: r.id, arabic: r.arabic.trim() }));
+        if (!regions.length) return toast('ما لقيت عربي محفوظ لهالصفحة');
+        const leave = (saved?.regions ?? []).filter((r) => ['sfx', 'credit', 'sign'].includes(r.kind)).map((r) => r.id);
+        cleanProbe.disabled = true;
+        cleanProbe.textContent = 'نفحص النماذج والتبييض…';
+        cleaning = await diagnoseCleaning({ path: page.path, regions, leave, chapterKey: page.chapterKey, pageIndex: page.pageIndex }).catch(() => null);
+        if (!cleaning) toast('فشل تشخيص التبييض — انسخ التقرير بعد تجربة صفحة ثانية');
+        refresh();
+      };
+      body.append(cleanProbe);
+      body.append(el('p', null, 'الفحص أعلاه يعيد تشغيل نماذج أندرويد المحلية ويوقف الصورة بعد المسح وقبل العربي؛ هذا هو الاختبار المباشر للتبييض.'));
+      const bench = el('button', 'btn btn-secondary btn-block', 'قِس المسار القديم مقابل الجديد');
       bench.type = 'button';
       bench.onclick = async () => {
         const pages = readPerf()
@@ -1614,7 +1656,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       body.append(bench);
       for (const line of engineLines(engines)) body.append(el('p', null, line));
-      const tune = el('button', 'btn btn-secondary btn-block', 'قِس إعدادات المحرك');
+      const tune = el('button', 'btn btn-secondary btn-block', 'قِس CTD والفقاعات');
       tune.type = 'button';
       tune.onclick = async () => {
         // أطول صفحة فيها حوار ترجمتها (فيها أكثر مربعات، والفرق يظهر أوضح)
@@ -1624,7 +1666,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           .sort((a, b) => (b.native?.analyze?.counts?.glyphTiles ?? 0) - (a.native?.analyze?.counts?.glyphTiles ?? 0))[0];
         if (!page) return toast('ترجم صفحة فيها حوار أولًا');
         tune.disabled = true;
-        tune.textContent = 'نقيس… (دقيقتان تقريبًا، خلّ الشاشة مفتوحة)';
+        tune.textContent = 'نقيس CTD والفقاعات… (دقيقتان تقريبًا)';
         engines = await benchmarkEngines({ path: page.path }).catch(() => null);
         if (!engines) toast('القياس يحتاج تحديث التطبيق، أو ملف الصفحة انمسح');
         refresh();
@@ -1635,7 +1677,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       copy.innerHTML = `${glyph('share')}<span>انسخ التقرير</span>`;
       copy.onclick = async () => {
         try {
-          await navigator.clipboard.writeText(formatReport(readPerf(), benchmarks, engines));
+          await navigator.clipboard.writeText(formatReport(readPerf(), benchmarks, engines, cleaning));
           toast('انسخ. ألصقه لي');
         } catch {
           toast('ما قدرت أنسخ');
@@ -1647,6 +1689,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clear.onclick = () => {
         clearPerf();
         benchmarks = [];
+        engines = null;
+        cleaning = null;
         refresh();
       };
       body.append(clear);

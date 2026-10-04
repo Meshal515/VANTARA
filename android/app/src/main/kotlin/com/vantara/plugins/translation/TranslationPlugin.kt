@@ -63,6 +63,7 @@ class TranslationPlugin : Plugin() {
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
     private val outDir by lazy { File(context.filesDir, "translated-pages") }
+    private val diagnosticDir by lazy { File(context.cacheDir, "translation-diagnostics") }
 
     private fun status(): JSObject {
         val files = JSArray()
@@ -184,6 +185,48 @@ class TranslationPlugin : Plugin() {
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * تشخيص التبييض على الصفحة نفسها: يعيد تشغيل نماذج أندرويد الحالية ثم
+     * يحفظ صورة بعد المسح وقبل العربي. لا يمس كاش القارئ.
+     */
+    @PluginMethod
+    fun diagnoseCleaning(call: PluginCall) {
+        val path = call.getString("path") ?: return call.reject("path required")
+        val regions = call.getArray("regions") ?: return call.reject("regions required")
+        scope.launch {
+            try {
+                val file = File(path)
+                require(file.exists()) { "page file missing" }
+                val byId = HashMap<String, String>()
+                for (i in 0 until regions.length()) {
+                    val o = regions.getJSONObject(i)
+                    val id = o.optString("id", "")
+                    val ar = o.optString("arabic", "")
+                    if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
+                }
+                val leave = HashSet<String>()
+                call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
+                val perf = Perf()
+                val thermalWait = coolDown(perf)
+                val probe = gate.run(PriorityGate.BACKGROUND, perf, pageOf(call)) {
+                    pipeline.diagnoseCleaning(file, byId, diagnosticDir, perf, leave)
+                }
+                call.resolve(
+                    JSObject()
+                        .put("path", probe.file.absolutePath)
+                        .put("width", probe.width)
+                        .put("height", probe.height)
+                        .put("fullWidth", probe.fullWidth)
+                        .put("fullHeight", probe.fullHeight)
+                        .put("cleanedRegions", probe.cleanedRegions)
+                        .put("perf", perfJs(perf, thermalWait)),
+                )
+            } catch (t: Throwable) {
+                call.reject(t.message ?: "cleaning diagnostic failed", t.javaClass.simpleName)
             }
         }
     }

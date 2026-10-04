@@ -8,6 +8,19 @@ package com.vantara.plugins.translation
  * لا بكسل خارج `eraseMask` يتغير.
  */
 object Cleaner {
+    /** ما حدث فعلًا أثناء التبييض، لا مجرد «دخلنا الدالة». */
+    data class EraseStats(
+        var maskPixels: Int = 0,
+        var changedPixels: Int = 0,
+        var fillMaskPixels: Int = 0,
+        var fillChangedPixels: Int = 0,
+        var inpaintMaskPixels: Int = 0,
+        var inpaintChangedPixels: Int = 0,
+        var fillRegions: Int = 0,
+        var inpaintRegions: Int = 0,
+        var noOpRegions: Int = 0,
+        var scaledInpaintRegions: Int = 0,
+    )
 
     fun glyphHeight(glyph: ByteMask, box: Box): Int {
         val runs = ArrayList<Int>()
@@ -192,23 +205,45 @@ object Cleaner {
     fun needsInpaint(regions: List<Region>): Boolean =
         regions.any { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true }
 
-    /** ينفّذ المسح المخطَّط على `img` في مكانها. `inpainter` لازم متى [needsInpaint]. */
-    fun applyErase(img: RgbImage, regions: List<Region>, inpainter: Inpainter?) {
+    /**
+     * ينفّذ المسح المخطَّط على `img` في مكانها. `inpainter` لازم متى [needsInpaint].
+     * ويرجع قياسًا من البكسلات نفسها؛ بهذا نعرف إن كان التبييض فعليًا أم no-op.
+     */
+    fun applyErase(img: RgbImage, regions: List<Region>, inpainter: Inpainter?): EraseStats {
+        val stats = EraseStats()
         for (r in regions) {
             if (r.status != "translated") continue
             val mask = r.eraseMask ?: continue
             if (!mask.any()) continue
             if (r.cleanMode == "fill") {
-                val c = r.fillColor ?: continue
+                val color = r.fillColor ?: continue
                 val w = mask.scanWindow() ?: continue
+                stats.fillRegions++
+                var regionChanged = 0
                 for (y in w[1] until w[3]) for (x in w[0] until w[2]) if (mask[x, y].toInt() != 0) {
+                    stats.maskPixels++
+                    stats.fillMaskPixels++
                     val i = (y * img.width + x) * 3
-                    img.data[i] = c[0].toByte(); img.data[i + 1] = c[1].toByte(); img.data[i + 2] = c[2].toByte()
+                    if ((img.data[i].toInt() and 0xff) != color[0] || (img.data[i + 1].toInt() and 0xff) != color[1] || (img.data[i + 2].toInt() and 0xff) != color[2]) {
+                        stats.changedPixels++
+                        stats.fillChangedPixels++
+                        regionChanged++
+                    }
+                    img.data[i] = color[0].toByte(); img.data[i + 1] = color[1].toByte(); img.data[i + 2] = color[2].toByte()
                 }
+                if (regionChanged == 0) stats.noOpRegions++
             } else {
                 val b = mask.bounds() ?: continue
-                (inpainter ?: error("lama not loaded")).inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
+                stats.inpaintRegions++
+                val s = (inpainter ?: error("lama not loaded")).inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
+                stats.maskPixels += s.maskPixels
+                stats.inpaintMaskPixels += s.maskPixels
+                stats.changedPixels += s.changedPixels
+                stats.inpaintChangedPixels += s.changedPixels
+                if (s.changedPixels == 0) stats.noOpRegions++
+                if (s.scaled) stats.scaledInpaintRegions++
             }
         }
+        return stats
     }
 }
