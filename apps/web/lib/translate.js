@@ -254,8 +254,8 @@ export async function translatePage(deps, src, meta) {
 
 async function translatePageNow(deps, src, meta) {
   const clock = stopwatch();
-  const hash = await clock.time('hash', pageHashOf(src));
-  const local = await clock.time('cacheRead', (async () => (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash)))());
+  const hash = await clock.time('hash', () => pageHashOf(src));
+  const local = await clock.time('cacheRead', async () => (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash)));
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
   if (local && typeof local.translated === 'number' && !downgraded) {
@@ -335,7 +335,7 @@ const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await clock.time('analyze', analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+    analysis = await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -356,9 +356,9 @@ async function translateOnDevice(deps, hash, meta, clock) {
         regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
       },
     });
-  let res = await clock.time('luna', ask(''));
+  let res = await clock.time('cacheProbe', () => ask(''));
   if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
-    res = await clock.time('luna', ask(analysis.thumbnail ?? ''));
+    res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
   }
   if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
   const plan = renderPlan(analysis, res.body);
@@ -366,7 +366,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
-    rendered = await clock.time('render', renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+    rendered = await clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
   } catch {
     return { error: 'device_failed', native };
   }
