@@ -182,7 +182,14 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     fun detectStage(file: File, perf: Perf): Analysis? {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
-        analyses[hash]?.let { perf.count("analysisReused"); return it }
+        analyses[hash]?.let {
+            perf.count("analysisReused")
+            // تحليل محفوظ لصفحة فيها نص ليس «انتهى»: نحتاج المرور بـ finishForLuna
+            // ليُعاد إنشاء المصغّرة عند إعادة المحاولة. قبل هذا الإصلاح كان الاستدعاء
+            // الثاني يعيد التحليل مع thumbnail فارغة، فيطلب الخادم need_image إلى الأبد.
+            if (!needsLuna(it)) return it
+            return null
+        }
         val img = image(bytes, hash, perf, true).img
         val dets = detect(img, perf)
         textless(hash, img, dets, perf, true)?.let { return it }
@@ -199,7 +206,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             val dets = detections.remove(hash) ?: detect(img, perf)
             textless(hash, img, dets, perf, true) ?: finish(hash, img, dets, perf, true)
         }
-        val asks = a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
+        val asks = needsLuna(a)
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
@@ -604,6 +611,15 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     }
 
     companion object {
+        /**
+         * هل هذا التحليل يحتاج نداء Luna وصورة السياق؟
+         *
+         * مهم خصوصًا لإعادة المحاولة: وجود Analysis في الذاكرة لا يعني أن الصفحة
+         * انتهت. إن كان فيها نص pending مقروءًا، يجب أن تُبنى المصغّرة من جديد.
+         */
+        internal fun needsLuna(a: Analysis): Boolean =
+            a.regions.any { it.status == "pending" && it.source.isNotEmpty() }
+
         fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     }
 }
