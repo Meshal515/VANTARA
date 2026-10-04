@@ -667,3 +667,44 @@ html.pwa-playing body {
     transition: none;
   }
 }
+
+/* Subtitle selection and adjustment are separate, content-sized panels. */
+.pwa-player .pp-sheet--subtitles { max-height: 60%; box-sizing: border-box; }
+.pwa-player .pp-sheet--subtitle-adjust {
+  box-sizing: border-box;
+  width: min(calc(100% - 24px), 340px);
+  max-height: 60%;
+  bottom: 12px;
+  border-radius: 20px;
+}
+.pwa-player .pp-sub-step { margin-block: 12px; }
+.pwa-player .pp-sub-step > small { display: block; margin-bottom: 7px; font-size: 12.5px; line-height: 1.4; color: var(--text-2); }
+.pwa-player .pp-sub-step__pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .06);
+}
+.pwa-player .pp-sub-step__pill button {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .08);
+  font-size: 23px;
+}
+.pwa-player .pp-sub-step__pill button:disabled { opacity: .3; }
+.pwa-player .pp-sub-step__pill output { flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
+.pwa-player .pp-sub-hint { display: block; font-size: 12px; line-height: 1.4; color: var(--text-3); }
+.pwa-player .pp-video::cue { font-size: var(--pp-subtitle-size, revert); }
+
+@media (min-width: 1024px) {
+  .pwa-player .pp-sheet--subtitle-adjust {
+    left: auto;
+    right: 16px;
+    transform: translateY(100%);
+  }
+  .pwa-player.pp--sheet .pp-sheet--subtitle-adjust { transform: translateY(0); }
+}

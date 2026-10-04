@@ -241,13 +241,20 @@ export function createHostResolver(fetch) {
     const res = await fetch.text(url, { referer: referer ?? undefined });
     const doc = parseHtml(res.text);
     qa(doc, 'script, style').forEach((node) => node.remove());
-    const visible = q(doc, 'body')?.textContent || doc.documentElement?.textContent || (res.text.includes('<') ? '' : res.text);
+    const body = q(doc, 'body');
+    const visible = body ? body.textContent ?? '' : doc.documentElement?.textContent || (res.text.includes('<') ? '' : res.text);
     const removed = /^(?:\s*File was deleted\s*)$|File is no longer available as it expired or has been deleted\.|We can't find the video you are looking for\.|Video not found/i.test(visible);
     if (removed || res.status === 404 || res.status === 410) {
       const e = new Error(`${removed ? 'UPSTREAM_REMOVED: الفيديو حُذف أو انتهت صلاحيته عند المضيف' : `UPSTREAM_HTTP_${res.status}`} · ${hostOf(res.url)}`);
       e.code = removed ? 'UPSTREAM_REMOVED' : `UPSTREAM_HTTP_${res.status}`;
       e.host = hostOf(res.url);
       throw e;
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw Object.assign(new Error(`UPSTREAM_HTTP_${res.status} · ${hostOf(res.url)}`), { code: `UPSTREAM_HTTP_${res.status}`, host: hostOf(res.url) });
+    }
+    if (!visible.trim() && /window\.location\.replace\(/.test(res.text) && /[?&](?:ch|js)=/.test(res.text)) {
+      throw Object.assign(new Error(`RESOLVER_BROWSER_REQUIRED: المضيف يطلب تحقق متصفح · ${hostOf(res.url)}`), { code: 'RESOLVER_BROWSER_REQUIRED', host: hostOf(res.url) });
     }
     return { url: res.url, body: res.text, ok: res.status >= 200 && res.status < 300 };
   }

@@ -25,3 +25,5 @@ describe('labels shared with the APK player', () => {
     expect(clock(3725)).toBe('1:02:05');
   });
 });
+
+it('preserves actual UHD and QHD quality instead of advertising them as 1080', () => { expect([2160, 1440, 1080].map(bucket)).toEqual([2160, 1440, 1080]); });

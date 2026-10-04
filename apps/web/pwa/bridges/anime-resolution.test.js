@@ -82,3 +82,37 @@ describe('diagnostic verdicts', () => {
     expect(playback[0].detail).toContain('one.test');
   });
 });
+it.each([null,720])('publishes a master labelled %s immediately and its real levels in background without autoplay', async (quality) => {
+ let release;
+ state.runtime.fetcher.ensureGrant=async()=> 'grant';
+ src.servers=async()=>[server('fast')]; src.streams=async()=>[{url:'https://cdn.test/master.m3u8',type:'hls',quality}];
+ vi.stubGlobal('fetch',async (url,options)=>{
+  if(!options?.headers?.range) { await new Promise(r=>{release=r;}); return new Response('#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1920x1080\n1080.m3u8\n#EXT-X-STREAM-INF:RESOLUTION=1280x720\n720.m3u8',{headers:{'content-type':'application/vnd.apple.mpegurl'}}); }
+  return new Response('#EXTM3U',{headers:{'content-type':'application/vnd.apple.mpegurl'}});
+ });
+ const session=await prepare();
+ expect((await AnimeEngine.routes({session})).routes.some(r=>r.state==='READY')).toBe(true);
+ expect(release).toBeTypeOf('function'); release(); await vi.advanceTimersByTimeAsync(0);
+ expect((await AnimeEngine.routes({session})).routes.filter(r=>r.state==='READY').map(r=>r.quality)).toEqual(quality === null ? [null,1080,720] : [720,1080]); expect(state.play).not.toHaveBeenCalled();
+});
+it('never reuses season-one addon episodes for season two with the same work URL',async()=>{
+ const cache=new Map();state.runtime.store.cached=async(_area,key,fn)=>{if(!cache.has(key))cache.set(key,await fn());return {value:cache.get(key)};};
+ state.runtime.registry.def=()=>({...def,manifest:{version:'1.0.0'}});
+ src.episodes=async c=>[{url:`https://addon.test/${c.requestedSeason}/1`,number:1,season:c.requestedSeason}];
+ src.servers=async ep=>[server(`season-${ep.season}`)];src.streams=async()=>[stream(720)];
+ for(const season of [1,2]){const p=await AnimeEngine.prepare({copies:[{...copy,sourceId:'addon|demo',requestedSeason:season}],episode:1});sessions.push(p.session);await vi.advanceTimersByTimeAsync(0);expect((await AnimeEngine.routes({session:p.session})).routes[0].server).toBe(`season-${season}`);}
+});
+it('matches both season and episode when a remote response includes all seasons',async()=>{
+ const used=[];src.episodes=async()=>[{url:'s1e1',number:1,season:1},{url:'s2e1',number:1,season:2}];src.servers=async ep=>{used.push(ep.url);return [server('fast')];};src.streams=async()=>[stream(720)];
+ const p=await AnimeEngine.prepare({copies:[{...copy,sourceId:'addon|demo',requestedSeason:2}],episode:1});sessions.push(p.session);await vi.advanceTimersByTimeAsync(0);expect(used).toEqual(['s2e1']);
+});
+it.each([{status:'EXPIRED',reason:'expired'},{status:'UNSUPPORTED',reason:'headers'},{status:'RESOLVED',type:'dash',reason:'dash'}])('never marks rejected Remote stream $reason READY',async rejected=>{
+ src.servers=async()=>[server('fast')];src.streams=async()=>[{...stream(1080),addonKey:'demo',...rejected}];const session=await prepare();
+ const routes=(await AnimeEngine.routes({session})).routes;expect(routes.some(r=>r.state==='READY')).toBe(false);expect(routes[0].reason).not.toContain('RESOLVER_EMPTY');expect(state.play).not.toHaveBeenCalled();
+});
+it('retains the effective addon copy and season for the next episode',async()=>{
+ const {nextEpisodeCopies}=await import('../../addons/video.js');
+ src.episodes=async c=>[{url:`s${c.requestedSeason}e${c.episode}`,number:c.episode,season:c.requestedSeason}];const used=[];src.servers=async ep=>{used.push(ep.url);return [server('fast')];};src.streams=async()=>[stream(720)];
+ const first=await AnimeEngine.prepare({copies:[{...copy,sourceId:'addon|demo',type:'series',requestedSeason:2,episode:1}],episode:1});sessions.push(first.session);await vi.advanceTimersByTimeAsync(0);
+ const second=await AnimeEngine.prepare({copies:nextEpisodeCopies(first.copies,2,{kind:'series',season:2}),episode:2});sessions.push(second.session);await vi.advanceTimersByTimeAsync(0);expect(used).toEqual(['s2e1','s2e2']);expect(state.play).not.toHaveBeenCalled();
+});

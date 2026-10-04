@@ -107,7 +107,8 @@ export function createAnimeAccount(sync) {
       .map((ref) => {
         const w = sync.rows('works', (x) => x.series_ref === ref)[0];
         const v = sync.rows('work_views', (x) => x.user_id === me() && x.series_ref === ref)[0];
-        const id = Number(ref.slice(6));
+        const rawId = ref.slice(6);
+        const id = rawId.startsWith("addon-") ? rawId : Number(rawId);
         const cover = w?.cover_url ?? v?.cover_url ?? null;
         return { id, title: w?.title ?? v?.series_title ?? `#${id}`, poster: cover, posterSmall: cover };
       });

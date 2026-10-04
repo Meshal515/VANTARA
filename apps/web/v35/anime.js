@@ -340,9 +340,10 @@ export function createAnime(deps) {
     // The owner's server history survives reinstall and is visible on every device.
     // A local position is useful for resume, but never stands in for another user's data.
     if (signedIn()) for (const row of deps.sync.rows('work_views', (r) => r.user_id === currentUser() && !r.removed && r.series_ref?.startsWith('anime:'))) {
-      const id = Number(row.series_ref.slice(6));
+      const rawId = row.series_ref.slice(6);
+      const id = rawId.startsWith("addon-") ? rawId : Number(rawId);
       const episode = Number(row.chapter_number ?? /\d+(?:\.\d+)?/.exec(row.chapter_label ?? '')?.[0]);
-      if (!Number.isFinite(id) || !Number.isFinite(episode) || episode <= 0) continue;
+      if ((!String(id).startsWith("addon-") && !Number.isFinite(id)) || !Number.isFinite(episode) || episode <= 0) continue;
       const old = entries.get(String(id));
       if (old && old.at >= row.viewed_at) continue;
       entries.set(String(id), {
@@ -495,7 +496,7 @@ export function createAnime(deps) {
     deps.showPage('anime');
     renderDetail(m, { partial: true });
     try {
-      const full = await fetchAnimeDetail(m.id);
+      const full = String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`anime:${m.id}`, m) : m._sourceCopy ? m : await fetchAnimeDetail(m.id);
       if (token !== state.detailToken || !full) return;
       state.detail = full;
       if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
@@ -587,6 +588,11 @@ export function createAnime(deps) {
     const bar = el('div', 'an-detail-top');
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' }) + `<span class="an-detail-top-title" dir="auto"></span>` + iconButton('share', 'شارك', { act: 'shareAnime' });
     bar.querySelector('.an-detail-top-title').textContent = m.title;
+    if (deps.openWorkMenu) {
+      const more = el('button', 'icon-btn'); more.type = 'button'; more.setAttribute('aria-label', 'خيارات العمل');
+      more.innerHTML = glyph('more'); more.onclick = () => deps.openWorkMenu({ ref: `anime:${m.id}`, title: m.title, cover: m.posterSmall ?? m.poster ?? null });
+      bar.append(more);
+    }
 
     const hero = el('div', 'an-detail-hero');
     // بلا لافتة عريضة: الغلاف (460px) خلفيةٌ — على الشاشة الكبيرة تُضبَّب عمدًا بدل أن تُمطّ
@@ -956,6 +962,7 @@ export function createAnime(deps) {
       state.work = work;
       paintSources(m, 'found');
     };
+    if (m._sourceCopy) { const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
     const remembered = knownWork(m.id);
     if (remembered) {
       state.work = remembered;
@@ -1485,6 +1492,7 @@ export function createAnime(deps) {
             return;
           }
           sheet.session = out.session;
+          sheet.copies = out.copies ?? copies;
           // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
           const snap = await engine.routes(out.session);
           sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);
@@ -1525,15 +1533,14 @@ export function createAnime(deps) {
         prefer: code ?? prefer,
         title: m.title,
         animeId: String(m.id),
+        subtitleIdentity: { canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', externalIds: m.externalIds ?? { mal: m.idMal, anilist: m.id }, season: m.season ?? null, episode: n },
         usageUserId: currentUser(),
         episode: n,
         total: m.aired || m.episodes || 0,
         position: startAt,
         poster: m.posterSmall ?? m.poster ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
-        copies: previousServer?.sourceId
-          ? [...sheet.work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
-          : sheet.work.copies,
+        copies: sheet.copies ?? sheet.work.copies,
         malId: m.idMal ?? null,
         resume,
         presenceEndpoint: presence?.endpoint ?? null,

@@ -1955,3 +1955,24 @@
   font-size: 11.5px;
   color: var(--text-3);
 }
+
+/* Desktop: keep the first ready row visible without changing the mobile picker. */
+@media (min-width: 1024px) {
+  .v35 .an-pick-scroll {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-content: start;
+    column-gap: 28px;
+    width: 100%;
+    max-width: 1160px;
+    margin-inline: auto;
+  }
+  .v35 .an-pick-scroll > :not(.an-pick-hero) { grid-column: 2; }
+  .v35 .an-pick-hero {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    align-self: start;
+    height: auto;
+    width: 100%;
+  }
+}

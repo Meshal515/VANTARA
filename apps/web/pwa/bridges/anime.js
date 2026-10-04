@@ -8,12 +8,16 @@
  * والمرشّح (candidate) رابط فيديو جاهز من سيرفر: { id, url, type, referer, quality, … }.
  */
 
+import { runProgressive } from '../../addons/scheduler.js';
+import { candidatePaths } from '../../addons/media.js';
+import { discoverHlsVariants } from '../sources/hls-variants.js';
 import { getRuntime } from '../runtime.js';
 import { supports } from '../../lib/capabilities.js';
 
 /** القسم مفعّل في الويب؟ (مفاتيح الميزات في lib/release.js) */
 const sectionOn = (content) => (content === 'cinema' ? supports('pwaCinema') : supports('animeWebSources'));
-const videoDefs = (r, content = null) => r.registry.list(content).filter((d) => d.content !== 'manga' && sectionOn(d.content));
+const sourcesOf = r => r.addons?.sources ?? r.registry;
+const videoDefs = (r, content = null) => sourcesOf(r).list(content).filter((d) => d.content !== 'manga' && sectionOn(d.content));
 
 const listeners = new Map();
 function emit(event, data) {
@@ -47,13 +51,14 @@ const fold = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[̀
 async function rt() {
   const r = getRuntime();
   await r.ready;
+  await r.addons?.ready;
   return r;
 }
 
 // ───────────────────────── البحث ─────────────────────────
 
 async function searchSource(r, def, query) {
-  const { value } = await r.store.cached('source', `${def.id}|vsearch|${fold(query)}`, () => r.registry.call(def.id, (src) => src.search(query)), { ttlMs: 30 * 60 * 1000 });
+  const { value } = await r.store.cached('source', `${def.id}${def.manifest ? `@${def.manifest.version}@${def.manifest.cacheEpoch ?? "legacy-v2"}` : ""}|vsearch|${fold(query)}`, () => sourcesOf(r).call(def.id, (src) => src.search(query)), { ttlMs: 30 * 60 * 1000 });
   return (value ?? []).map((it) => ({ ...it, sourceId: def.id }));
 }
 
@@ -64,7 +69,7 @@ const searches = new Map();
 const sessions = new Map();
 
 function snapshot(s) {
-  return { routes: [...s.routes.values()].map((r) => ({ ...r })), done: s.done, retryAt: 0 };
+  return { copies: [...s.effectiveCopies], routes: [...s.routes.values()].map((r) => ({ ...r })), done: s.done, retryAt: 0 };
 }
 
 function upsert(s, route) {
@@ -73,8 +78,9 @@ function upsert(s, route) {
   for (const w of s.waiters.splice(0)) w();
 }
 
-async function episodesOf(r, copy) {
-  const { value } = await r.store.cached('meta', `${copy.sourceId}|episodes|${copy.url}`, () => r.registry.call(copy.sourceId, (src) => src.episodes(copy)), { ttlMs: 30 * 60 * 1000 });
+async function episodesOf(r, copy, signal) {
+  const cacheKey=copy.sourceId.startsWith("addon|") ? JSON.stringify([copy.sourceId,sourcesOf(r).def(copy.sourceId)?.manifest?.version,sourcesOf(r).def(copy.sourceId)?.manifest?.cacheEpoch ?? "legacy-v2",copy.url,copy.type,copy.requestedSeason,copy.episode,copy.memo]) : `${copy.sourceId}|episodes|${copy.url}`;
+  const { value } = await r.store.cached('meta', cacheKey, () => sourcesOf(r).call(copy.sourceId, (src) => src.episodes(copy, { signal })), { ttlMs: 30 * 60 * 1000 });
   return value ?? [];
 }
 
@@ -85,23 +91,27 @@ function rank(s, list) {
 }
 
 async function runCopy(r, s, copy, episode) {
-  const source = r.registry.source(copy.sourceId);
-  const def = r.registry.def(copy.sourceId);
+  const source = sourcesOf(r).source(copy.sourceId);
+  const def = sourcesOf(r).def(copy.sourceId);
   if (!source || !def) return;
   let eps;
   try {
-    eps = await episodesOf(r, copy);
+    eps = await episodesOf(r, copy, s.controller.signal);
   } catch {
     return;
   }
   // فيلم: السينما تطلب الحلقة -1 (نفس عقد الـAPK) ⇒ الصفحة نفسها
   const ep = Number(episode) < 0
     ? eps[0] ?? null
-    : eps.find((e) => Number(e.number) === Number(episode)) ?? (eps.length === 1 && Number(episode) === 1 ? eps[0] : null);
+    : (() => {
+      const numbered = eps.filter(e => Number(e.number) === Number(episode));
+      const matches = copy.requestedSeason == null ? numbered : numbered.filter(e => e.season == null || Number(e.season) === Number(copy.requestedSeason));
+      return matches.length === 1 ? matches[0] : null;
+    })();
   if (!ep || s.closed) return;
   let servers;
   try {
-    servers = await r.registry.call(copy.sourceId, (src) => src.servers(ep));
+    servers = await sourcesOf(r).call(copy.sourceId, (src) => src.servers(ep));
   } catch {
     return;
   }
@@ -128,12 +138,18 @@ async function runCopy(r, s, copy, episode) {
       const { sv, route } = work[next++];
       const qualities = new Map();
       const seen = new Map();
+      const masters = new Set();
       let nextCandidate = 0;
+      let rejectedReason = null;
       const publications = [];
       let accepting = true;
       const publish = async (streams) => {
         const fresh = [];
         for (const st of streams ?? []) {
+          if ((st?.addonKey || copy.sourceId.startsWith("addon|")) && ((st?.status && st.status !== "RESOLVED") || st?.type === "dash" || (st?.expiresAt && st.expiresAt <= Date.now()))) {
+            rejectedReason = st.reason ?? (st.type === "dash" ? "DASH غير مدعوم في مشغل PWA الحالي" : st.status ?? "EXPIRED");
+            continue;
+          }
           if (!st?.url || !/^https?:\/\//i.test(st.url)) continue;
           const quality = st.quality ?? sv.quality ?? null;
           if (!qualities.has(quality)) {
@@ -146,8 +162,14 @@ async function runCopy(r, s, copy, episode) {
           if (seen.has(key)) continue;
           const id = `${route.id}|c${nextCandidate++}`;
           seen.set(key, id);
-          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: qr.code, route: qr.id, url: st.url, referer: st.referer ?? null, type: st.type, quality, variant: qr.variant });
+          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: qr.code, route: qr.id, url: st.url, referer: st.referer ?? null, type: st.type, quality, variant: qr.variant, subtitles: st.subtitles ?? [], audio: st.audio ?? [], identity: st.identity ?? { ...copy.identity, externalIds: copy.externalIds, kind: copy.type ?? (def.content === "anime" ? "anime" : undefined), season: ep.season ?? copy.requestedSeason, episode: ep.number }, addonKey: st.addonKey ?? null, filename: st.filename ?? null, duration: st.duration ?? null, fps: st.fps ?? null, expiresAt: st.expiresAt ?? null });
           fresh.push({ id, qr });
+          if (st.type === 'hls' && st.qualitySource !== 'hls-master' && r.fetcher.ensureGrant && !masters.has(st.url)) {
+            masters.add(st.url);
+            publications.push(discoverHlsVariants(st, r.fetcher, { signal: s.controller.signal }).then((variants) => {
+              if (!s.closed) return publish(variants);
+            }).catch(() => {}));
+          }
         }
         // Publish each verified quality separately; slower qualities keep resolving.
         await Promise.all(fresh.map(async ({ id, qr }) => {
@@ -166,13 +188,13 @@ async function runCopy(r, s, copy, episode) {
       let timer;
       try {
         const streams = await Promise.race([
-          source.streams(sv, accept),
+          source.streams(sv, accept, { signal: s.controller.signal }),
           new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('لم يرد خلال 45 ثانية')), 45_000); }),
         ]);
         accept(streams);
         accepting = false;
         await Promise.all(publications);
-        if (!qualities.size) upsert(s, { ...route, state: 'UNAVAILABLE', reason: 'RESOLVER_EMPTY: لم يُستخرج رابط فيديو' });
+        if (!qualities.size) upsert(s, { ...route, state: 'UNAVAILABLE', reason: rejectedReason ?? 'RESOLVER_EMPTY: لم يُستخرج رابط فيديو' });
       } catch (error) {
         accepting = false;
         await Promise.all(publications);
@@ -199,8 +221,8 @@ export const MIN_REAL_BYTES = 3 * 1024 * 1024;
  */
 export async function probeCandidate(r, c, { timeoutMs = 8000, fetchImpl = fetch } = {}) {
   try {
-    await r.ensureMedia();
-    const res = await fetchImpl(r.fetcher.mediaUrl(c.url, c.referer), { headers: { range: 'bytes=0-1' }, signal: AbortSignal.timeout(timeoutMs) });
+    const paths = await candidatePaths(c,r,{requireGrant:true});
+    const res = await fetchImpl(paths.at(-1)[1], { credentials:"omit", referrerPolicy:"no-referrer", headers: { range: 'bytes=0-1' }, signal: AbortSignal.timeout(timeoutMs) });
     const type = res.headers.get('content-type') ?? '';
     void res.body?.cancel?.().catch?.(() => {});
     const hls = /mpegurl/i.test(type) || /\.m3u8/.test(c.url);
@@ -217,9 +239,12 @@ export async function probeCandidate(r, c, { timeoutMs = 8000, fetchImpl = fetch
 
 async function startCopies(r, s, copies) {
   const fresh = copies.filter((c) => c?.sourceId && !s.copies.has(`${c.sourceId}|${c.url}`));
-  for (const c of fresh) s.copies.add(`${c.sourceId}|${c.url}`);
+  for (const c of fresh) { s.copies.add(`${c.sourceId}|${c.url}`); s.effectiveCopies.push(c); }
   s.running += 1;
-  await Promise.all(fresh.map((c) => runCopy(r, s, c, s.episode)));
+  await Promise.all([
+    ...fresh.filter(c => !c.sourceId.startsWith('addon|')).map(c => runCopy(r, s, c, s.episode)),
+    runProgressive(fresh.filter(c => c.sourceId.startsWith('addon|')).map(c => ({ origin: sourcesOf(r).def(c.sourceId)?.domain, run: () => runCopy(r, s, c, s.episode) })), { signal: s.controller.signal }),
+  ]);
   s.running -= 1;
   if (s.running === 0 && !s.closed) {
     s.done = true;
@@ -258,7 +283,7 @@ export const AnimeEngine = {
     const status = r.registry.status();
     return {
       records: Object.entries(status)
-        .filter(([id]) => r.registry.def(id)?.content !== 'manga')
+        .filter(([id]) => sourcesOf(r).def(id)?.content !== 'manga')
         .map(([id, rec]) => ({ key: `source:${id}`, ok: rec.health?.ok ?? 0, fail: rec.health?.fail ?? 0, lastOk: rec.health?.lastOk ?? 0, lastError: rec.health?.lastError ?? null, blockedUntil: rec.health?.coolUntil ?? 0, domain: rec.stable?.def?.domain ?? null })),
     };
   },
@@ -283,7 +308,7 @@ export const AnimeEngine = {
         return false;
       }
     };
-    const src = r.registry.source(sourceId);
+    const src = sourcesOf(r).source(sourceId);
     if (!src) return { steps: [{ label: 'المصدر', state: 'fail', detail: 'غير متاح في نسخة الويب' }] };
     let items = [];
     let eps = [];
@@ -301,7 +326,7 @@ export const AnimeEngine = {
             const usable = list.filter((_st, i) => verdicts[i].ok === true);
             if (!usable.length) throw new Error(`${verdicts.some((v) => v.ok === null) ? 'VERIFICATION_LIMITED' : 'STREAM_INVALID'} · host=${host} · ${verdicts.map((v) => v.reason).filter(Boolean).join(' | ')}`);
             firstReadyMs ??= Date.now() - started;
-            return `${usable.length} رابط صالح · host=${host} · resolver=${r.registry.def(sourceId)?.engine ?? 'host'} · quality=${usable.map((st) => st.quality ?? sv.quality ?? 'auto').join('/')} · actual=${usable.map((st) => { try { return new URL(st.url).hostname; } catch { return 'invalid'; } }).join(',')} · IP family=unknown (edge) `;
+            return `${usable.length} رابط صالح · host=${host} · resolver=${sourcesOf(r).def(sourceId)?.engine ?? 'host'} · quality=${usable.map((st) => st.quality ?? sv.quality ?? 'auto').join('/')} · actual=${usable.map((st) => { try { return new URL(st.url).hostname; } catch { return 'invalid'; } }).join(',')} · IP family=unknown (edge) `;
           })));
           steps.push({ label: 'أول سيرفر Ready', state: firstReadyMs == null ? 'fail' : 'ok', detail: firstReadyMs == null ? 'لم يثبت رابط صالح' : `${firstReadyMs}ms` });
           steps.push({ label: 'اكتمال فحص السيرفرات', state: 'ok', detail: `${Date.now() - started}ms · NO autoplay · اختيار السيرفر والجودة بيد المستخدم` });
@@ -313,7 +338,7 @@ export const AnimeEngine = {
 
   async search({ query, content = 'anime' }) {
     const r = await rt();
-    const defs = videoDefs(r, content);
+    const defs = videoDefs(r, content).filter(d => d.engine !== "remote-addon");
     const lists = await Promise.all(defs.map((d) => searchSource(r, d, query).catch(() => [])));
     const works = new Map();
     for (const it of lists.flat()) {
@@ -332,7 +357,7 @@ export const AnimeEngine = {
     searches.set(searchId, job);
     void (async () => {
       await Promise.all(
-        videoDefs(r, content).map(async (def) => {
+        videoDefs(r, content).filter(d => d.engine !== 'remote-addon').map(async (def) => {
           const t0 = Date.now();
           if (r.registry.cooling(def.id)) {
             if (!job.cancelled) emit('searchHit', { searchId, sourceId: def.id, ms: 0, items: [], error: 'يرتاح بعد أعطال', skipped: true, needsHuman: false });
@@ -373,7 +398,7 @@ export const AnimeEngine = {
   async prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, session = null, probe = false }) {
     const r = await rt();
     const id = session ?? rid('s');
-    const s = { id, episode: Number(episode), quality, variant, probe: Boolean(probe), preferredSourceId, preferredServer, routes: new Map(), cands: new Map(), copies: new Set(), done: false, closed: false, running: 0, waiters: [] };
+    const s = { id, episode: Number(episode), quality, variant, probe: Boolean(probe), preferredSourceId, preferredServer, routes: new Map(), cands: new Map(), copies: new Set(), effectiveCopies: [], done: false, closed: false, running: 0, waiters: [], controller: new AbortController(), addonSnapshot: r.addons?.registry.snapshot() };
     sessions.set(id, s);
     const ordered = preferredSourceId ? [...copies].sort((a, b) => Number(b.sourceId === preferredSourceId) - Number(a.sourceId === preferredSourceId)) : copies;
     void startCopies(r, s, ordered ?? []);
@@ -426,6 +451,8 @@ export const AnimeEngine = {
     const s = sessions.get(session);
     if (s) {
       s.closed = true;
+      s.controller.abort();
+      s.addonSnapshot?.release();
       sessions.delete(session);
     }
   },

@@ -37,6 +37,7 @@ export function installWebBridges(g = globalThis) {
   g.VantaraWeb = Object.freeze({
     ExtensionEngine: lazyPlugin(() => import('./bridges/manga.js'), (m) => m.MangaEngine),
     AnimeEngine: lazyPlugin(() => import('./bridges/anime.js'), (m) => m.AnimeEngine),
+    AddonFabric: { runtime },
     attachAuth: (auth) => void runtime().then((m) => m.attachAuth(auth)),
   });
   return g.VantaraWeb;

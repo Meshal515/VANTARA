@@ -1,36 +1,13 @@
-# حالة VANTARA Addon Fabric
+# حالة Addon Fabric — 2026-10-04
 
-آخر تحديث: 2026-10-03. branch البحث والخطة: `feat/addon-fabric`، أساس `ffeb20c`.
+المالك اعتمد التنفيذ بـ«ابدأ». الفرع `feat/addon-fabric`، PR #143 مسودة للمراجعة قبل الدمج. لم يُنشر هذا الإصدار بعد.
 
-## المنجز فعليًا
+نُفذ مسار PWA فعلي: مدير واحد ثابت، تثبيت URL بعد المعاينة، Remote v1 وStremio، Source Mode لكل الأقسام، سيرفرات تدريجية، جودات HLS الحقيقية، وترجمات مصدر وإضافة داخل المشغل. يوجد مسار APK أصلي محدود بإضافات الترجمة، دون نقل مصادره إلى محرك الويب.
 
-- قراءة SPEC كاملة (64 بندًا) وفحص كود المشغل APK/PWA وregistry/bridges/sidebar الحالي.
-- تثبيت تعديلات المالك في REQUIREMENTS: خانة SVG أحجية ثابتة، فلاتر داخلية، CSS محفوظ، no autoplay، minimal subtitle integration.
-- إعداد REQUIREMENTS بمعرفات AF-01–48 وST-01–12، وخطة T0–T8 ومصفوفة تغطية كل بنود SPEC.
-- بحث GitHub/Context7/Stremio/hls.js/Keiyoushi ومراجعة الفرق بين APK extensions وremote addons.
-- Provider حي مع اختبار CORS من Chromium على أصل PWA: OpenSubtitles v3، The Mentalist S01E01، 87 نتيجة/4 عربية وSRT عربي قابل للتنزيل. لم يُربط بالمشغل بعد ولم يثبت على حساب المستخدم.
-- baseline: 23 اختبارًا مرتبطًا ناجحًا على الكود الحالي.
-- إعادة فحص EgyDead مباشرة: الموسم الصحيح،23 حلقة،4 سيرفرات؛ HGC/EarnVids استخرجا، Mixdrop حذف صريح، Dood فارغ.
-- تجربة Chrome151 native/MSE مؤقتة: قراءة metadata تحسنت بـMSE، لكن التشغيل الفعلي لم يثبت؛ لا root-cause claim نهائي.
+الاختبارات الحالية: **1509 اختبارًا /176 ملفًا**، حراسة المستودع **54**، TypeScript API/sync/fetcher ناجح، Kotlin **243 منها 2 skipped موجودة سابقًا** وبناء debug ناجح. Chromium اختبر catalog→اختيار→إطار فيديو controlled، وترجمة OpenSubtitles عربية حقيقية **609 cues** فوق فيديو fixture، دون page errors.
 
-## التنفيذ
+هذه نتائج تطوير، وليست ضمان تشغيل كل مصادر الإنتاج أو إثبات استقرار Media3 على هاتف. T0 يبقى محدود التحقق للفيديو الحي عبر جالب الإنتاج؛ T7 يحتاج اختبار جهاز؛ T8 اجتاز المراجعة المستقلة وإصلاح ملاحظاتها التسعة؛ آخر أمر المالك أجاز الدمج والنشر بعد الفحوص. المواصفة الأوسع لم تُنفذ بالكامل: البحث العام الموحد، إعدادات declarative، زر جميع المصادر في Source Mode، كاش شعار المزود، وtelemetry الجلسة الشاملة لم تكتمل. لا توجد واجهة تتظاهر بتوفيرها.
 
-| المهمة | الحالة | دليل اكتمال المطلوب |
-|---|---|---|
-| T0 مشاكل PWA | فحص جارٍ؛ لا product fix بعد | frame حقيقي قبل/بعد ومقارنة direct/edge |
-| T1 العقود | مخطط، ينتظر مراجعة الخطة | validation/identity tests |
-| T2 registry/runtime | مخطط، ينتظر مراجعة الخطة | security/cancellation/health/stage tests |
-| T3 مدير الإضافات | مخطط، ينتظر مراجعة الخطة | stable entry/filter/install/screenshots |
-| T4 Source Mode | مخطط، ينتظر مراجعة الخطة | مصدر فعلي لكل قسم وBack/cache identity |
-| T5 Stremio/streams | مخطط، ينتظر مراجعة الخطة | real addon→stream→frame، no wrong match |
-| T6 ترجمة PWA | مخطط، provider موجود فعلًا | live subtitle داخل player دون تأخير فيديو |
-| T7 APK parity | مخطط، المشغل فُحص | native tests + device proof |
-| T8 مراجعة/إطلاق | لم يبدأ | all tests، مراجعة، أمر دمج، تحقق إنتاج |
+التفاصيل والحدود والملفات وأسباب التعديلات: [تقرير التنفيذ](IMPLEMENTATION-REPORT.md). النتائج المنقحة بلا روابط موقعة: [تدقيق المصادر](proofs/source-audit.json).
 
-لم يُغيّر product code أو CSS أو المصادر أو APK بهذا البحث. لا نشر/دمج جديد. SPEC الأصلي لم يُعدّل؛ المتطلبات تسجل التصحيحات والقيود الواقعية بدل اعتبار كل مثال قابلًا للتطبيق تلقائيًا.
-
-## الخطوة التالية
-
-مراجعة المالك للخطة الجديدة واختيار التنفيذ المتسلسل أو بالوكلاء بحسب مسار Superpowers. بند SPEC63 يطلب هذه المراجعة قبل بدء Fabric. فحص مشاكل المصادر مستقل ويمكن استكمال الأدلة دون تثبيت الإضافات.
-
-المتابعة: fixture HLS محلية اشتغلت native وMSE بفيديو حقيقي؛ فرضية عطل native عام لم تثبت، ولا product fix تخميني. master منتلست الحي MIME/CORS/codecs صحيحة، وفحص segment/frame ما زال جارياً.
+[تقرير الواجهة وصور قبل/بعد](UI-REPORT.md)، [مراجعة الحدود وإصلاحها](REVIEW-REPORT.md). آخر تصحيح: أبعاد البنر الأصلية محفوظة، وتحريك focal position على Desktop فقط؛ بانل تعديل الترجمة على الجانب المحدد بالصورة.

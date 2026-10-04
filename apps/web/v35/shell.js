@@ -13,6 +13,10 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { renderAddons } from './addons-view.js';
+import { renderSourceMode } from './source-mode.js';
+import { getAddonRuntime } from '../addons/runtime.js';
+import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
@@ -107,7 +111,7 @@ const drawerGroups = [
   ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
   ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
   ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock'], ['آخر المشاهدات', 'history', 'history'], ['إحصائيات المتابعة', 'insights', 'chart']]],
-  ['', [['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
+  ['', [['الإضافات', 'addons', 'puzzle'], ['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
 ];
 
 const WORKS_KEY = 'vantara.v35.works';
@@ -2206,8 +2210,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // المرسلة («الحلقة 12 · 12:10–12:20») تفتح ورقة سيرفراتها من ثانيتها.
 
   function openAnimeRef(ref, { title = null, cover = null, chapter = null } = {}) {
-    const id = Number(ref.slice('anime:'.length));
-    if (!Number.isFinite(id) || id <= 0) return toast('ما قدرنا نفتح هذا الأنمي');
+    const rawId = ref.slice('anime:'.length);
+    const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
+    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
     closeSheet();
     if (root.dataset.section !== 'anime') {
       writeSection('anime');
@@ -2222,14 +2227,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
   function openCinemaRef(ref, { title = null, cover = null } = {}) {
     const [, id, season] = ref.split(':');
-    if (!/^tt\d+$/.test(id ?? '')) return toast('ما قدرنا نفتح هذا العمل');
+    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
     closeSheet();
     if (root.dataset.section !== 'cinema') {
       writeSection('cinema');
       applySection('cinema');
       showHome('cinema');
     }
-    void cinema.openWork({ id, type: season ? 'series' : 'movie', title: title ?? '', poster: cover });
+    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover });
   }
 
   // ── ورقة المعاينة ──
@@ -2546,6 +2551,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
           }),
         );
       }
+    });
+  }
+  // Same saved five slots as manga; media keeps its canonical section reference.
+  function openMediaWorkMenu({ ref, title, cover }) {
+    const w = workFromRef(ref, title, cover);
+    openSheet((body) => {
+      const heading = el('h3', null, title); heading.dir = 'auto'; body.append(heading);
+      body.append(sheetItem('star', inCollection('top', ref) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
+        closeSheet(); openTopPicker(w);
+      }, { pressed: inCollection('top', ref) }));
     });
   }
   function avatarNode(person, size = 44) {
@@ -3528,6 +3543,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (key === 'rafiq') return supports('rafiq') ? showPage('rafiq') : undefined;
     if (key === 'insights') return showPage('insights');
+    if (key === 'addons') return void openAddons();
     if (key === 'switchAccount') return confirmSwitchAccount();
     if (key === 'notifications') return openSocial('notifications');
     if (key === 'majlisFeed') return openRoom();
@@ -3536,6 +3552,47 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'recommendations') return openSocial('recs');
     if (key === 'friends') return openSocial('friends');
     if (key === 'activity') return openSocial('friends');
+  }
+  let sourceView = null, sourceSnapshot = null, addonViewGeneration = 0;
+  function closeAddonSource() {
+    sourceView?.close?.(); sourceView=null;
+    sourceSnapshot?.release(); sourceSnapshot=null;
+  }
+  async function openAddons() {
+    closeAddonSource();
+    const run=++addonViewGeneration;
+    q('utilityTitle').textContent = 'الإضافات';
+    showPage('utility');
+    q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
+    try {
+      const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
+      if(run!==addonViewGeneration || currentPage()!=='utility')return;
+      q('utilityBody').replaceChildren(renderAddons({ registry: addons.registry, onOpenSource: openAddonSource }));
+    } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
+  }
+  async function openAddonSource(addon, sourceState = {}) {
+    const run=++addonViewGeneration;
+    const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
+    if(run!==addonViewGeneration)return;
+    closeAddonSource();
+    sourceSnapshot=addons.registry.snapshot();
+    q('utilityTitle').textContent = addon.name;
+    showPage('utility');
+    const adapter = addons.adapter(addon.key);
+    sourceView = renderSourceMode({ addon, adapter, state: sourceState, onBack: openAddons, onOpenWork: async (item) => {
+      try {
+        const sourceId = addon.sourceId ?? `addon|${addon.key}`;
+        const source = addons.sources.source(sourceId);
+        const copy = { ...item, url: item.url ?? item.id, type: item.type };
+        const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
+        if(run!==addonViewGeneration)return;
+        const work = sourceWorkModel(item, { addon, episodes });
+        if (work._work) { root.dataset.section = 'manga'; buildDrawer(); await openWork(work); }
+        else if (addon.contentTypes.includes('anime')) { root.dataset.section = 'anime'; buildDrawer(); await anime.openAnime(work); }
+        else { root.dataset.section = 'cinema'; buildDrawer(); await cinema.openWork(work); }
+      } catch (error) { toast(error.message); }
+    } });
+    q('utilityBody').replaceChildren(sourceView);
   }
   // ───────────────────────── PIN وحذف الحساب ─────────────────────────
 
@@ -3755,6 +3812,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       id = 'majlis';
     }
     const from = currentPage();
+    if(from === "utility" && id !== "utility")sourceView?.pause?.();
+    if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
     // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
@@ -3814,6 +3873,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id !== 'profile') profile?.hide();
     paintRail();
     window.scrollTo({ top: 0, behavior: 'instant' });
+    if(id === 'utility')sourceView?.resume?.();
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -5046,11 +5106,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     void profile.show(userId);
   }
 
+  async function restoreAddonWork(ref, fallback) {
+    const addons = await getAddonRuntime();
+    await addons.ready;
+    return restoreSourceWork(ref, { addons, title: fallback.title, cover: fallback.poster ?? fallback.cover });
+  }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     openUpdates: (section) => openUpdates(section),
     sync,
+    openWorkMenu: openMediaWorkMenu,
+    restoreSourceWork: restoreAddonWork,
     openProfile,
     friends: () => deps.friends?.() ?? [],
     // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
@@ -5071,6 +5138,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    openWorkMenu: openMediaWorkMenu,
+    restoreSourceWork: restoreAddonWork,
     // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
     share: (work) =>
       openShareSheet({
@@ -5236,6 +5305,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      addonViewGeneration++;closeAddonSource();
       detailDock.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}

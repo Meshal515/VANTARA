@@ -1,6 +1,6 @@
 # بحث التكامل: المستودع والبروتوكولات والأدلة الحية
 
-التاريخ: 2026-10-03. هذا بحث وخطة، وليس ادعاء تنفيذ Addon Fabric.
+التاريخ: 2026-10-03. البحث السابق محفوظ أدناه؛ نتائج التنفيذ المحدثة في آخر الملف وفي IMPLEMENTATION-REPORT.md.
 
 ## المشغل الموجود فعلًا
 
@@ -49,3 +49,12 @@
 - Chromium على أصل الإنتاج `https://vantara-bcf.pages.dev` جلب manifest ونتائج OpenSubtitles وملف SRT العربي بـ`credentials: omit`: 87 نتيجة،4 عربية،HTTP200 للملف. CORS صالح لهذا Provider دون جالب فيديو أو token فانتارا. بقي اختبار اختيار الترجمة داخل player شرطًا قبل ادعاء تنفيذ الربط.
 - fixture HLS حقيقية مولدة بـffmpeg (H.264/AAC،320×180،48 ثانية) اشتغلت بالطريقين في Chromium151: native وصل readyState4 وcurrentTime17.66، وMSE وصل readyState4 وcurrentTime4.60 ضمن نافذتيهما. لا دليل أن native HLS معطل بالكامل؛ لا تعديل transport من هذه الفرضية وحدها.
 - master StreamHG الحي أعاد HTTP200 و`application/vnd.apple.mpegurl` وCORS `*`، وثلاثة streams H.264/AAC بدقات480/720/1080. قراءة master تبقى أقل من إثبات تنزيل segment وتشغيل frame.
+
+## نتيجة التنفيذ، لا الفرضية الأولى
+
+- مشغل PWA الفعلي عرض ملف OpenSubtitles العربي: 609 cues، الفيديو عند4.318s وreadyState4، دون errors؛ source VTT عربية ظهرت أيضًا. الفيديو controlled fixture، لا فيديو Mentalist upstream. [لقطة الملف الحقيقي](proofs/subtitle-live-on-frame.png).
+- Chromium أكمل manifest→catalog→meta→stream→محدد السيرفر→اختيار Play→إطار320×180؛ لم يوجد video قبل ضغط Play. first route كان warm عند فتح المحدد+7ms، لا قياس cold upstream.
+- Media3 docs/Context7 تؤكد SubtitleConfiguration وText Track selection؛ نتائج providers لا تستدعي prepare. الاختيار الصريح وحده يضيف ملفًا محليًا إلى MediaItem مع position/playWhenReady؛ الجهاز يحتاج اختبارًا مستقلًا.
+- راجعت extractors الفعلية في [Cloudstream](https://github.com/recloudstream/cloudstream/tree/master/library/src/commonMain/kotlin/com/lagradost/cloudstream3/extractors): Mp4Upload، Uqload، Vidmoly، MixDrop، Sendvid، StreamWishExtractor. المصدر يحتاج extractor خاصًا عند protocol خاص؛ الاسم لا يثبت أن alias جديد موثوق. Existing generic/packer/iframe يغطي عدة حالات، والـJS browser challenge ليس رابط فيديو.
+- live8source audit فرّق Sibnet HTTP403، Sendvid HTTP503، Mixdrop/MP4Upload deleted، WitAnime Cloudflare، وAkwam timeout عبر proxy. رابط محذوف لا يصلح بتخفيض timeout، ومجهول EMPTY لا يُتهم upstream أو parser دون دليل.
+- لا تغيير عالمي native/MSE أو DoH/race بهذه المرحلة؛ fixture تعمل بالطريقين، والحالة الحية لم تثبت frame عبر edge الإنتاج. نشر وروابط الإنتاج ما زالت النسخة السابقة حتى أمر الدمج.
