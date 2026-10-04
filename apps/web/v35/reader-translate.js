@@ -166,7 +166,7 @@ export function createReaderTranslation(deps) {
     if (result && img) {
       swapPageImage(img, result, isOn(), () => {
         seg.tl?.results.delete(index);
-        void forgetPage(result.hash).then(() => enqueuePage(seg, index));
+        void forgetPage(result.hash, result.cacheKey, result.sourceHash).then(() => enqueuePage(seg, index));
       });
     }
   }
@@ -200,6 +200,7 @@ export function createReaderTranslation(deps) {
       return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader' }, src, {
         seriesRef: ref,
         seriesTitle: title,
+        sourceId: seg.row.sourceId,
         chapterKey,
         chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
         pageIndex: index,
