@@ -162,6 +162,11 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     @Synchronized
     fun analyze(file: File, perf: Perf = Perf()): Analysis = analyzeImpl(file, perf, useCache = true)
 
+    /** كاشف النص صغير (~11MB): نسخة ثانية مستقلة تستعملها الصفحة الحالية إن كان المسار الثقيل مشغولًا. */
+    fun warmDetector(perf: Perf) {
+        if (store.isInstalled()) detector(perf)
+    }
+
     /** نموذج التبييض يُحمَّل مسبقًا (أثناء انتظار Luna) خارج قفل الصفحات: لا يوقف أحدًا. */
     fun warmInpainter(perf: Perf) {
         if (store.isInstalled()) inpainter(perf)
