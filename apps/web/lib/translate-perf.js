@@ -178,6 +178,20 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
   }
+  // آخر الصفحات واحدةً واحدة: الملخّص السابق كان يخفي فرق «الأولى لا تظهر والثانية تظهر».
+  // هذا السطر يجعل الدور والعمل والشبكة مرئية لكل صفحة بدل وسيط واحد.
+  const recentText = entries.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends') && !e.textless).slice(-12);
+  if (recentText.length) {
+    lines.push('', 'آخر صفحات الحوار (كل صفحة وحدها):');
+    for (const e of recentText) {
+      const a = e.native?.analyze?.stages ?? {};
+      const r = e.native?.render?.stages ?? {};
+      const queue = (a.queue ?? 0) + (r.queue ?? 0);
+      const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · دور محلي ${sec(queue)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
+    }
+  }
+
   if (s.chapters.length) {
     lines.push('', 'الفصول (الزمن الفعلي من أول صفحة لآخرها):');
     for (const c of s.chapters.slice(-10)) lines.push(`  ${c.chapterKey}: ${c.pages} صفحة · ${sec(c.wallMs)}`);
