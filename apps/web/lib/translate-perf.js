@@ -173,7 +173,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   }
   // المعالج مشغول فعلًا أم الصفحات تنتظر بعضها؟ من آخر صفحة قاسها الجهاز
   const last = [...entries].reverse().find((e) => Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
-  if (last) lines.push(`المعالج مشغول ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة`);
+  if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
   for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
@@ -195,7 +195,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     const stages = cleaning.perf.stages ?? {};
     const mask = counts.eraseMaskPixels ?? 0;
     const changed = counts.eraseChangedPixels ?? 0;
-    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · fill ${counts.fillChangedPixels ?? 0} · LaMa ${counts.inpaintChangedPixels ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0}`);
+    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · fill ${counts.fillChangedPixels ?? 0} · LaMa ${counts.inpaintChangedPixels ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0} · SHA النماذج: مجتاز`);
     for (const k of ['detect', 'glyphs', 'bubbles', 'ocr', 'plan', 'lamaLockWait', 'load:lama', 'erase', 'encode', 'write']) {
       if (typeof stages[k] === 'number') lines.push(`  probe.${k}: ${sec(stages[k])}`);
     }
