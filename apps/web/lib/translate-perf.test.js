@@ -22,10 +22,10 @@ describe('translation performance log (on the phone)', () => {
     const clock = stopwatch(() => t);
     t = 5;
     clock.lap('hash');
-    await clock.time('luna', (async () => {
+    await clock.time('luna', async () => {
       await null;
       t = 105;
-    })());
+    });
     expect(clock.stages).toEqual({ hash: 5, luna: 100 });
     expect(clock.total()).toBe(105);
   });
@@ -76,7 +76,7 @@ describe('engine settings measured on the phone', () => {
     expect(lines[2]).toContain('مطابق');
     expect(lines[3]).toContain('مختلف: 14 بكسل');
     expect(lines[3]).toContain('فقاعات مختلفة');
-    expect(formatReport([], [], run)).toContain('إعدادات المحرك');
+    expect(formatReport([], [], run)).toContain('إعدادات CTD والفقاعات');
     expect(engineLines(null)).toEqual([]);
   });
 });
