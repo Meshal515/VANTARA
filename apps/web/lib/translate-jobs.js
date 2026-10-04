@@ -243,6 +243,7 @@ export function createJobRunner(deps) {
       {
         seriesRef: job.ref,
         seriesTitle: job.title,
+        sourceId: ch.row.sourceId,
         chapterKey: ch.key,
         chapterNumber: Number.isFinite(ch.number) && ch.number >= 0 ? ch.number : null,
         pageIndex: p,
