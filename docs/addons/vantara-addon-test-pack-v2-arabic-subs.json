@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 2,
+  "name": "VANTARA Addon Test Pack — Streams + Strong Subtitle Stack",
+  "generatedAt": "2026-10-04",
+  "defaults": {
+    "preferredSubtitleLanguages": ["ar", "en"],
+    "arabicFirst": true,
+    "dedupeSubtitles": true,
+    "doNotExposeSecrets": true
+  },
+  "notes": [
+    "This pack is for testing VANTARA addon compatibility and subtitle aggregation.",
+    "Only public manifest URLs are embedded. Personalized manifests/API keys/tokens must be added by the user inside VANTARA and treated as secrets.",
+    "Arabic subtitle coverage should be tested across multiple providers because sync and release matching vary by stream."
+  ],
+  "streamAddons": [
+    {
+      "name": "Torrentio",
+      "kind": "stream",
+      "priority": 1,
+      "manifestUrl": "https://torrentio.strem.fun/manifest.json",
+      "configureUrl": "https://torrentio.strem.fun",
+      "requiresConfiguration": false
+    },
+    {
+      "name": "Comet | ElfHosted",
+      "kind": "stream",
+      "priority": 1,
+      "manifestUrl": "https://comet.elfhosted.com/manifest.json",
+      "configureUrl": "https://comet.elfhosted.com/configure",
+      "requiresConfiguration": false
+    },
+    {
+      "name": "MediaFusion | ElfHosted",
+      "kind": "mixed",
+      "priority": 1,
+      "manifestUrl": "https://mediafusion.elfhosted.com/manifest.json",
+      "configureUrl": "https://mediafusion.elfhosted.com/configure",
+      "requiresConfiguration": false
+    },
+    {
+      "name": "StremThru Torz",
+      "kind": "stream",
+      "priority": 2,
+      "manifestUrl": "https://stremthru.13377001.xyz/stremio/torz/manifest.json",
+      "configureUrl": "https://stremthru.13377001.xyz/stremio/torz/configure",
+      "requiresConfiguration": true
+    },
+    {
+      "name": "AIOStreams | ElfHosted",
+      "kind": "aggregator",
+      "priority": 2,
+      "manifestUrl": "https://aiostreams.elfhosted.com/stremio/manifest.json",
+      "configureUrl": "https://aiostreams.elfhosted.com",
+      "requiresConfiguration": true
+    }
+  ],
+  "subtitleAddons": [
+    {
+      "name": "SubSource",
+      "kind": "subtitles",
+      "priority": 1,
+      "arabicPriority": 1,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://subsource.strem.top/configure",
+      "requiresConfiguration": true,
+      "requiresApiKey": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "SubDL Official",
+      "kind": "subtitles",
+      "priority": 1,
+      "arabicPriority": 1,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://subdl.com/stremio",
+      "requiresConfiguration": true,
+      "requiresApiKey": true,
+      "supportsArabic": true,
+      "supportsAnimeIds": true
+    },
+    {
+      "name": "Stremio Community Subtitles",
+      "kind": "subtitle-aggregator",
+      "priority": 1,
+      "arabicPriority": 2,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://stremio-community-subtitles.top/",
+      "requiresConfiguration": true,
+      "requiresAccount": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "OpenSubtitles v3",
+      "kind": "subtitles",
+      "priority": 1,
+      "arabicPriority": 2,
+      "status": "active",
+      "manifestUrl": "https://opensubtitles-v3.strem.io/manifest.json",
+      "configureUrl": null,
+      "requiresConfiguration": false,
+      "supportsArabic": true
+    },
+    {
+      "name": "OpenSubtitles PRO",
+      "kind": "subtitles",
+      "priority": 2,
+      "arabicPriority": 2,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://opensubtitlesv3-pro.dexter21767.com/configure/",
+      "requiresConfiguration": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "SubSense",
+      "kind": "subtitle-aggregator",
+      "priority": 1,
+      "arabicPriority": 2,
+      "status": "active",
+      "manifestUrl": "https://subsense.nepiraw.com/manifest.json",
+      "configureUrl": "https://subsense.nepiraw.com/configure",
+      "requiresConfiguration": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "SubMaker | ElfHosted",
+      "kind": "subtitle-aggregator-ai",
+      "priority": 2,
+      "arabicPriority": 2,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://submaker.elfhosted.com/configure",
+      "requiresConfiguration": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "Wyzie Subs",
+      "kind": "subtitle-aggregator",
+      "priority": 2,
+      "arabicPriority": 3,
+      "status": "active",
+      "manifestUrl": "https://stremio.wyzie.io/manifest.json",
+      "configureUrl": "https://stremio.wyzie.io/",
+      "requiresConfiguration": true,
+      "requiresApiKey": true,
+      "supportsArabic": true
+    },
+    {
+      "name": "Arabic Subtitles — SubDL + SubSource",
+      "kind": "arabic-subtitle-aggregator",
+      "priority": 1,
+      "arabicPriority": 1,
+      "status": "community-active",
+      "manifestUrl": "https://arabic-subtitle-stremio.lovable.app/api/public/manifest.json",
+      "configureUrl": null,
+      "requiresConfiguration": false,
+      "supportsArabic": true,
+      "arabicOnly": true,
+      "sourceRepo": "https://github.com/peacefulnessisme/Arabic-subs-addon"
+    },
+    {
+      "name": "DexSubtitles",
+      "kind": "arabic-subtitle-aggregator",
+      "priority": 2,
+      "arabicPriority": 1,
+      "status": "active",
+      "manifestUrl": null,
+      "configureUrl": "https://dexworld.cc/subtitles/stremio/configure",
+      "requiresConfiguration": true,
+      "requiresSubscriptionCode": true,
+      "supportsArabic": true,
+      "arabicOnly": true
+    }
+  ]
+}
