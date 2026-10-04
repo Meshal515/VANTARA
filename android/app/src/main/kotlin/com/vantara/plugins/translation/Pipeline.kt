@@ -232,8 +232,41 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
         val gray = perf.time("gray") { img.gray() }
-        // القطع التي فيها نص وحدها: الحروف حول كل صندوق (بهامش المناطق)، والفقاعات بعرض
-        // الصفحة فوق الصندوق وتحته (فقاعة تحيط بالنص كاملة مع ما ينافسها في الدمج)
+
+        // ── المسار السريع: RT-DETR + استخراج لون/حبر محلي ──
+        // لا CTD ولا BubbleSeg ولا LaMa هنا. إن لم تكن الصفحة «سهلة وواضحة» تمامًا
+        // أو كانت ثقة OCR أقل من الحد المحافظ، نسقط فورًا للمسار الثقيل القديم.
+        val fast = perf.time("fastFlat") { Regions.fastFlatRegions(img, gray, hash, dets) }
+        if (fast != null && fast.isNotEmpty()) {
+            val reader = ocr(perf)
+            var safe = true
+            perf.time("fastOcr") {
+                for (r in fast) {
+                    val res = reader.read(img, r.glyph, r.box)
+                    perf.count("ocrLines", res.lines.size)
+                    r.ocr = res
+                    r.source = res.text
+                    // المسار السريع أعلى تحفظًا من الثقيل: أي شك يعيد CTD/BubbleSeg.
+                    if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
+                        safe = false
+                        r.status = "skipped:unreadable"
+                    }
+                }
+            }
+            if (safe) {
+                perf.count("fastFlatHit")
+                perf.count("fastFlatRegions", fast.size)
+                perf.count("regions", fast.size)
+                val analysis = perf.time("pack") { freeze(hash, img.width, img.height, fast) }
+                if (useCache) analyses[hash] = analysis
+                return analysis
+            }
+            perf.count("fastFlatOcrFallback")
+        } else {
+            perf.count("fastFlatFallback")
+        }
+
+        // ── المسار الثقيل الموثوق لكل ما ليس فقاعة مسطحة واضحة ──
         val texts = dets.filter { it.label.startsWith("text") }
         val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
         val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
@@ -251,8 +284,6 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.count("bubbles", bubbleList.size)
         val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
         perf.count("regions", regions.size)
-        // كل منطقة تُقرأ، ومنها «نص حر بثقة منخفضة» (تلميح sfx): قد يكون سردًا فوق الرسم،
-        // وLuna ترى الصفحة وتقرر؛ المؤثر الحقيقي يعود منها sfx فلا يُرسم
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
             for (r in regions) {
