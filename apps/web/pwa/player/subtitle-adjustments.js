@@ -32,10 +32,9 @@ export function createSubtitleAdjustments({ video, onChange = () => {} }) {
     if (!track || size === 100)
       video.style.removeProperty("--pp-subtitle-size");
     else {
-      const height = Math.min(
-        video.clientHeight,
-        video.clientWidth * (video.videoHeight / video.videoWidth || 9 / 16),
-      );
+      // Browser cues use 5% of the smaller video viewport dimension, not
+      // the letterboxed picture height (390x844 portrait => 19.5px at 100%).
+      const height = Math.min(video.clientHeight, video.clientWidth);
       video.style.setProperty(
         "--pp-subtitle-size",
         `${(height * 0.05 * size) / 100}px`,

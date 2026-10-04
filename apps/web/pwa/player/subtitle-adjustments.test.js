@@ -94,3 +94,6 @@ it("switching track restores original cues and resets delay; newly arriving cues
 it('notifies when real soft cues arrive after the selection sheet opened',()=>{
  const {video,track,cue}=setup();track.cues=[];const changed=vi.fn();const a=createSubtitleAdjustments({video,onChange:changed});a.bind(track,{timing:true});changed.mockClear();track.cues.push(cue);a.refresh();expect(changed).toHaveBeenCalledTimes(1);a.refresh();expect(changed).toHaveBeenCalledTimes(1);
 });
+it('scales portrait captions from the actual browser baseline, preserving the 100 percent default',()=>{
+ const {video,track}=setup();Object.assign(video,{clientWidth:390,clientHeight:844,videoWidth:320,videoHeight:180});const a=createSubtitleAdjustments({video});a.bind(track,{timing:true});a.set('size',75);expect(video.style.setProperty).toHaveBeenLastCalledWith('--pp-subtitle-size','14.625px');a.set('size',250);expect(video.style.setProperty).toHaveBeenLastCalledWith('--pp-subtitle-size','48.75px');
+});

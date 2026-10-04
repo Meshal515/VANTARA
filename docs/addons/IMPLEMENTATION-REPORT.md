@@ -49,7 +49,7 @@
 
 | الفحص | النتيجة |
 |---|---|
-| Vitest whole repository | **1509/1509 ، 176 ملفًا**، 65.39s |
+| Vitest whole repository | **1510/1510 ، 176 ملفًا**، 64.80s |
 | repository safety | **54/54**؛ imports/precache/digest/platform gate/allowlist/CSS guards |
 | TypeScript direct compiler API/sync/fetcher | ناجح؛ pnpm wrapper توقف قبل mutation لأنه أراد reinstall linked node_modules بلا TTY ؛ استخدمنا compiler المثبت، لا dependency change |
 | Kotlin + assembleDebug | **243 tests ، 0 failures ، 2 existing skipped**؛ build ناجح |
@@ -181,7 +181,7 @@ Anime4Up redirect المشبوه لم يُمنح ثقة جديدة؛ المصد�
 
 ## المراجعة المستقلة
 
-المراجعة المستقلة للفرع كله أعادت تشغيل 96 اختبار حدود ووجدت **9 Important، بلا Critical**. أُصلحت التسعة في مرور واحد، ثم أُعيدت المجموعة الكاملة (1509) وحراسة المستودع (54)، دون دورة إعادة مراجعة مستقلة أخرى. التفاصيل والسبب والاختبار لكل ملاحظة في [تقرير المراجعة](REVIEW-REPORT.md).
+المراجعة المستقلة للفرع كله أعادت تشغيل 96 اختبار حدود ووجدت **9 Important، بلا Critical**. أُصلحت التسعة في مرور واحد، ثم أُعيدت المجموعة الكاملة (1510) وحراسة المستودع (54)، دون دورة إعادة مراجعة مستقلة أخرى. التفاصيل والسبب والاختبار لكل ملاحظة في [تقرير المراجعة](REVIEW-REPORT.md).
 
 تحقق المتصفح النهائي: مرجع provider-local محفوظ في أفضل 5 أعاد فتح الفيلم عبر المزود نفسه؛ إضافة IMDb وصلت Ready خلال **208ms** بينما core locator معلق؛ لا video قبل ضغط الشخص؛ الانتقال S2E1→S2E2 طلب المسار الصحيح نفسه. هذه fixture محلية وليست قياس إنتاج أو وعد ONE SECOND.
 
