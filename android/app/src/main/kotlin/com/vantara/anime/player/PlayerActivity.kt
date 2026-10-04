@@ -43,6 +43,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import com.vantara.addons.*
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.ExoPlayer
@@ -125,6 +127,8 @@ class PlayerActivity : Activity() {
         val variant: String = "SUB",
         /** مواضع الحلقات غير المكتملة (JSON: {"12": 61000}). */
         val resume: String? = null,
+        val subtitleIdentity: String? = null,
+        val addonSubtitleProviders: String? = null,
         val presenceEndpoint: String? = null,
         val presenceAuthorization: String? = null,
         val presenceUserId: String? = null,
@@ -228,6 +232,72 @@ class PlayerActivity : Activity() {
     private var prep: PreparedEpisode? = null
     private var unlisten: (() -> Unit)? = null
     private var current: Candidate? = null
+    private val addonSubtitles = SubtitleSession()
+    private val addonClient by lazy { nativeAddonClient(this) }
+    private var subtitleJobs: Job? = null
+    private val subtitleFiles = mutableListOf<File>()
+    private var selectedAddonSubtitle: String? = null
+
+    private fun clearAddonSubtitles(): Int {
+        subtitleJobs?.cancel()
+        addonClient.cancelPrefix("subtitle-")
+        subtitleFiles.forEach { it.delete() }; subtitleFiles.clear()
+        selectedAddonSubtitle = null
+        return addonSubtitles.begin()
+    }
+
+    private fun discoverAddonSubtitles(c: Candidate, generation: Int) {
+        val providers = SubtitleProviders.providers(launch.addonSubtitleProviders)
+        if (providers.isEmpty() || SubtitleProviders.videoId(launch.subtitleIdentity, episode) == null) return
+        subtitleJobs = scope.launch {
+            // لا ينتظر الفيديو أو بقية المزوّدين؛ كل نتيجة تصل إلى الورقة وحدها.
+            val gate = kotlinx.coroutines.sync.Semaphore(6)
+            for (provider in providers) launch {
+                gate.acquire()
+                try {
+                val tracks = withContext(Dispatchers.IO) {
+                    runCatching { SubtitleProviders.discover(addonClient, provider, launch.subtitleIdentity, episode, "subtitle-$generation-${provider.key}") }.getOrDefault(emptyList())
+                }
+                if (current?.id == c.id && addonSubtitles.accept(generation, tracks) && openSheet == SheetKind.SUBTITLES) sheet.refresh()
+                } finally { gate.release() }
+            }
+        }
+    }
+
+    private fun selectAddonSubtitle(track: AddonSubtitle) {
+        val c = current ?: return
+        val generation = addonSubtitles.generation
+        val selection = addonSubtitles.select()
+        sheet.close()
+        scope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = addonClient.request(track.url, "subtitle-$generation-file-${track.id}")
+                    val vtt = text.trimStart().startsWith("WEBVTT")
+                    require(vtt || Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->").containsMatchIn(text))
+                    File.createTempFile("addon-subtitle-", if (vtt) ".vtt" else ".srt", cacheDir).apply { writeText(text) }
+                }.getOrNull()
+            }
+            if (file == null) { if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
+            if (!addonSubtitles.current(generation, selection) || current?.id != c.id) { file.delete(); return@launch }
+            subtitleFiles.add(file)
+            val item = player.currentMediaItem ?: return@launch
+            val source = item.localConfiguration?.subtitleConfigurations.orEmpty().filter { it.id?.startsWith("addon|") != true }
+            val config = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.fromFile(file))
+                .setId("addon|${track.id}").setLabel("${track.lang} — ${track.provider}").setLanguage(track.lang)
+                .setMimeType(if (file.extension == "vtt") MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP)
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()
+            // التحديث يحدث باختيار المستخدم فقط، ويحفظ الموضع وحالة الوقف بعد تنزيل الملف.
+            val at = position(); val playing = player.playWhenReady
+            val media = item.buildUpon().setSubtitleConfigurations(source + config).build()
+            val factory = DefaultDataSource.Factory(this@PlayerActivity, MediaCache.factory(this@PlayerActivity, network.client, c.headers))
+            selectedAddonSubtitle = track.id
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setPreferredTextLanguage(track.lang).build()
+            player.setMediaSource(DefaultMediaSourceFactory(factory).createMediaSource(media), at)
+            player.prepare(); player.playWhenReady = playing
+        }
+    }
     private var preferCode: String? = null
     private var startedAt = 0L
     private var reportedStart = false
@@ -457,13 +527,24 @@ class PlayerActivity : Activity() {
 
         override fun onPlayerError(error: PlaybackException) = fail(error.errorCodeName)
 
-        override fun onTracksChanged(tracks: Tracks) = updateQualityLabel()
+        override fun onTracksChanged(tracks: Tracks) {
+            updateQualityLabel()
+            val selected = selectedAddonSubtitle ?: return
+            if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return
+            for (g in tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }) for (i in 0 until g.length) {
+                if (g.getTrackFormat(i).id == "addon|$selected" && !g.isTrackSelected(i)) {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
+                    return
+                }
+            }
+        }
     }
 
     private fun start(c: Candidate, positionMs: Long) {
         waiting?.cancel()
         hideError()
         clearSkipTimings()
+        val subtitleGeneration = clearAddonSubtitles()
         current = c
         reportedStart = false
         startedAt = System.currentTimeMillis()
@@ -500,6 +581,7 @@ class PlayerActivity : Activity() {
         main.postDelayed(startupWatchdog, STARTUP_TIMEOUT_MS)
         updateQualityLabel()
         if (openSheet == SheetKind.SERVERS) sheet.refresh()
+        discoverAddonSubtitles(c, subtitleGeneration)
     }
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
@@ -1238,27 +1320,36 @@ class PlayerActivity : Activity() {
 
     private fun showSubtitles() {
         open(SheetKind.SUBTITLES, "الترجمة") { body ->
-            val text = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
-            if (text.isEmpty()) {
-                body.addView(sheetRow("الترجمة مدمجة في الفيديو", "هذا السيرفر لا يوفّر ترجمة منفصلة", selected = true))
+            val text = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && (0 until it.length).any { i -> it.getTrackFormat(i).id?.startsWith("addon|") != true } }
+            if (text.isEmpty() && addonSubtitles.tracks.isEmpty()) {
+                body.addView(sheetRow("لا توجد ترجمة منفصلة لهذا الفيديو", null, selected = true))
                 return@open
             }
             val disabled = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
             body.addView(sheetRow("إيقاف", null, trailing = if (disabled) check() else null, selected = disabled) {
+                addonSubtitles.select(); selectedAddonSubtitle = null
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 sheet.close()
             })
+            if (text.isNotEmpty()) body.addView(sectionLabel("الترجمة من الفيديو"))
             for (g in text) for (i in 0 until g.length) {
                 val f = g.getTrackFormat(i)
+                if (f.id?.startsWith("addon|") == true) continue
                 val on = !disabled && g.isTrackSelected(i)
                 val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
                 body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
+                    addonSubtitles.select(); selectedAddonSubtitle = null
                     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
                         .build()
                     sheet.close()
                 })
+            }
+            if (addonSubtitles.tracks.isNotEmpty()) body.addView(sectionLabel("ترجمات إضافية"))
+            for (track in addonSubtitles.tracks) {
+                val on = !disabled && selectedAddonSubtitle == track.id
+                body.addView(sheetRow(java.util.Locale(track.lang).getDisplayLanguage(java.util.Locale("ar")), track.provider, trailing = if (on) check() else null, selected = on) { selectAddonSubtitle(track) })
             }
         }
     }
@@ -1615,6 +1706,7 @@ class PlayerActivity : Activity() {
         presenceActive = false
         clip?.release()
         unlisten?.invoke()
+        clearAddonSubtitles()
         scope.cancel()
         main.removeCallbacksAndMessages(null)
         report(final = true)

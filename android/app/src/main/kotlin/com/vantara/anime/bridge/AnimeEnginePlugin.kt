@@ -95,6 +95,8 @@ class AnimeEnginePlugin : Plugin() {
                 quality = call.getInt("quality") ?: 1080,
                 variant = call.getString("variant") ?: "SUB",
                 resume = call.getObject("resume")?.toString(),
+                subtitleIdentity = call.getObject("subtitleIdentity")?.toString(),
+                addonSubtitleProviders = call.getArray("addonSubtitleProviders")?.toString(),
                 presenceEndpoint = call.getString("presenceEndpoint"),
                 presenceAuthorization = call.getString("presenceAuthorization"),
                 presenceUserId = call.getString("presenceUserId"),
