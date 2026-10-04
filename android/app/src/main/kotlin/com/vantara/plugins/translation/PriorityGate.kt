@@ -52,12 +52,28 @@ class PriorityGate {
         return if (d >= 0) d else 10_000 - d
     }
 
+    /**
+     * صفحة القارئ التي انتهى تحليلها ووصل رد Luna لا نترك رسمها عالقًا فقط لأن
+     * المستخدم مرّ للصفحة التالية. قبل هذا كان الانتقال صفحة واحدة يجعل الصفحة
+     * السابقة «خلفك» بمسافة 10000، فتبدأ الصفحة الجديدة تحليل CTD/Bubble (عشرات
+     * الثواني) قبل أن تُكمل السابقة؛ وهذا ظهر فعليًا كـ render.queue ≈ 31.5ث.
+     *
+     * نمنح Render للصفحة السابقة مباشرة مسافة الصفر: الكشف الخفيف للحالية يبقى
+     * قبله بالرتبة، ثم نكمل الصفحة السابقة، ثم ندخل التحليل الثقيل للحالية.
+     */
+    private fun readerDistance(w: Waiter): Int {
+        val f = focus
+        val p = w.page
+        if (w.rank == RENDER_READER && f != null && p != null && p.chapter == f.chapter && f.index - p.index == 1) return 0
+        return distance(p)
+    }
+
     private fun better(a: Waiter, b: Waiter): Boolean {
         val ga = if (a.rank <= ANALYZE_READER) 0 else 1
         val gb = if (b.rank <= ANALYZE_READER) 0 else 1
         if (ga != gb) return ga < gb
         if (ga == 0) {
-            val da = distance(a.page); val db = distance(b.page)
+            val da = readerDistance(a); val db = readerDistance(b)
             if (da != db) return da < db
         }
         if (a.rank != b.rank) return a.rank < b.rank
