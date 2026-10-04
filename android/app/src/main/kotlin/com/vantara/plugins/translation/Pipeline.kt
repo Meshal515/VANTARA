@@ -395,13 +395,15 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val out = File(outDir, name)
         val tmp = File(outDir, "$name.part")
         perf.time("write") {
-            java.io.FileOutputStream(tmp).use { stream ->
-                stream.write(encoded)
-                stream.fd.sync()
-            }
-            if (!tmp.renameTo(out)) {
-                tmp.delete()
-                error("cannot publish cleaning probe")
+            if (!(out.exists() && out.length() == encoded.size.toLong())) {
+                java.io.FileOutputStream(tmp).use { stream ->
+                    stream.write(encoded)
+                    stream.fd.sync()
+                }
+                if (!tmp.renameTo(out)) {
+                    tmp.delete()
+                    error("cannot publish cleaning probe")
+                }
             }
             outDir.listFiles()?.forEach { old ->
                 if (old.name != name && old.name.startsWith(prefix)) old.delete()
