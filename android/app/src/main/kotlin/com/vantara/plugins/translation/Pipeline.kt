@@ -66,6 +66,16 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>)
 
+    /** صورة بعد التبييض وقبل العربي، من المحرك المحلي نفسه. */
+    class CleaningProbe(
+        val file: File,
+        val width: Int,
+        val height: Int,
+        val fullWidth: Int,
+        val fullHeight: Int,
+        val cleanedRegions: Int,
+    )
+
     /**
      * الصورة مفكوكة. `exact`: بكسلاتها هي بكسلات الملف (لم تُصغَّر ولا شفافية).
      * `fullW`/`fullH`: مقاس الملف نفسه؛ صفحة أطول من [MAX_EDGE] تُحلَّل مصغّرة وتُرسم بمقاسها.
@@ -80,17 +90,27 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     private inline fun <T> load(perf: Perf, name: String, make: () -> T): T {
         val t = System.nanoTime()
-        val m = make()
-        perf.add("load", System.nanoTime() - t)
-        perf.count("load:$name")
-        return m
+        try {
+            return make()
+        } finally {
+            val elapsed = System.nanoTime() - t
+            perf.add("load", elapsed)
+            perf.add("load:$name", elapsed)
+            perf.count("load:$name")
+        }
     }
 
     private fun detector(perf: Perf) = detector ?: load(perf, "rtdetr") { Detector(store.file("rtdetr")) }.also { detector = it }
     private fun glyphs(perf: Perf) = glyphs ?: load(perf, "ctd") { GlyphSegmenter(store.file("ctd")) }.also { glyphs = it }
     private fun bubbles(perf: Perf) = bubbles ?: load(perf, "bubbleseg") { BubbleSegmenter(store.file("bubbleseg")) }.also { bubbles = it }
     private val lamaLock = Any()
-    private fun inpainter(perf: Perf) = synchronized(lamaLock) { inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it } }
+    private fun inpainter(perf: Perf): Inpainter {
+        val waiting = System.nanoTime()
+        return synchronized(lamaLock) {
+            perf.add("lamaLockWait", System.nanoTime() - waiting)
+            inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it }
+        }
+    }
     private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict")) }.also { ocr = it }
 
     /** ملف قناع الحروف المستعمل: `seg` (الرأس وحده) أو `full` (الأصل، إلى أن يصل تحديث الملفات). */
@@ -307,6 +327,96 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         return out to translated
     }
 
+    private fun recordErase(perf: Perf, s: Cleaner.EraseStats) {
+        perf.count("eraseMaskPixels", s.maskPixels)
+        perf.count("eraseChangedPixels", s.changedPixels)
+        perf.count("fillMaskPixels", s.fillMaskPixels)
+        perf.count("fillChangedPixels", s.fillChangedPixels)
+        perf.count("inpaintMaskPixels", s.inpaintMaskPixels)
+        perf.count("inpaintChangedPixels", s.inpaintChangedPixels)
+        perf.count("eraseNoOpRegions", s.noOpRegions)
+        perf.count("inpaintScaledRegions", s.scaledInpaintRegions)
+    }
+
+    /**
+     * فحص تبييض حقيقي على الجهاز: نفس النماذج والتخطيط وCleaner وLaMa،
+     * لكنه يتوقف قبل رسم العربي ويحفظ صورة تشخيصية خارج كاش القراءة.
+     */
+    @Synchronized
+    fun diagnoseCleaning(
+        file: File,
+        arabicById: Map<String, String>,
+        outDir: File,
+        perf: Perf = Perf(),
+        leave: Set<String> = emptySet(),
+    ): CleaningProbe {
+        store.requireInstalled()
+        val analysis = analyzeImpl(file, perf, useCache = false)
+        val (bytes, hash) = read(file, perf)
+        val decoded = image(bytes, hash, perf, useCache = false)
+        val img = decoded.img.copy()
+        val regions = thaw(analysis)
+        val sibs = Regions.siblings(regions)
+
+        for (r in regions) {
+            val ar = arabicById[r.id]?.trim()
+            if (r.status != "pending" && r.status != "translated") continue
+            if (ar.isNullOrEmpty()) { r.status = "skipped:untranslated"; continue }
+            r.arabic = ar
+            r.status = "translated"
+        }
+        perf.time("layout") {
+            for (r in regions) {
+                if (r.status != "translated") continue
+                val fitted = layout.layoutRegion(img, r, r.arabic!!, sibs[r.id])
+                if (fitted == null) { r.status = "skipped:no_fit"; perf.count("noFit"); continue }
+                r.layout = fitted
+            }
+        }
+        keepWholeBubbles(regions, sibs, leave, perf)
+        perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
+        perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
+        val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
+        recordErase(perf, eraseStats)
+
+        val encoded = perf.time("encode") {
+            val bitmap = ArabicLayout.bitmapOf(img)
+            val buf = ByteArrayOutputStream()
+            val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
+            bitmap.compress(format, if (android.os.Build.VERSION.SDK_INT >= 30) 10 else 100, buf)
+            bitmap.recycle()
+            buf.toByteArray()
+        }
+        outDir.mkdirs()
+        val prefix = "$hash-clean-"
+        val name = "$prefix${ModelStore.sha256Hex(encoded).substring(0, 12)}.webp"
+        val out = File(outDir, name)
+        val tmp = File(outDir, "$name.part")
+        perf.time("write") {
+            java.io.FileOutputStream(tmp).use { stream ->
+                stream.write(encoded)
+                stream.fd.sync()
+            }
+            if (!tmp.renameTo(out)) {
+                tmp.delete()
+                error("cannot publish cleaning probe")
+            }
+            outDir.listFiles()?.forEach { old ->
+                if (old.name != name && old.name.startsWith(prefix)) old.delete()
+            }
+        }
+        return CleaningProbe(
+            out,
+            analysis.width,
+            analysis.height,
+            decoded.fullW,
+            decoded.fullH,
+            regions.count { it.status == "translated" && it.eraseMask?.any() == true },
+        )
+    }
+
     /**
      * نشر الصورة المترجمة: اسم جديد لكل محتوى (`<بصمة الصفحة>-<بصمة الناتج>.webp`)
      * فالقارئ يرى الإكمال فورًا (الرابط تغيّر) ولا يُكتب فوق ملف معروض. والكتابة
@@ -386,7 +496,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
         perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
-        perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
+        val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
+        recordErase(perf, eraseStats)
         // ٣. الرسم: بلون الحبر الأصلي، إلا إن كان سيختفي في خلفيته بعد المسح
         val inks = HashMap<String, Boolean>()
         val bmp = perf.time("draw") {
