@@ -157,3 +157,6 @@ describe('anime in the account', () => {
     expect(sync.ops.filter((o) => o.kind === 'view.add')).toHaveLength(2);
   });
 });
+it('keeps an addon anime identity intact in the existing shelf instead of converting it to NaN',()=>{
+ const id='addon-anime%7Cprovider%3Ademo%3Alocal%7Cs%7Cp';const s=fakeSync({library:[{user_id:'me',series_ref:`anime:${id}`,removed:0}]});expect(createAnimeAccount(s).shelf('library')[0].id).toBe(id);
+});

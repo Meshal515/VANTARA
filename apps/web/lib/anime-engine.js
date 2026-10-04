@@ -10,6 +10,8 @@
  * والـPWA لها جسر حقيقي بنفس الواجهة: محركات ويب عبر جالب الويب.
  */
 
+import { addonCopies } from '../addons/video.js';
+import { getAddonRuntime } from '../addons/runtime.js';
 import { webPlugin } from '../pwa/platform.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
@@ -277,9 +279,26 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined }) {
-  return (await call('prepare', { copies, episode, quality, variant, preferredSourceId, preferredServer, probe, ...(session ? { session } : {}) })) ?? null;
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null }) {
+  if (identity) copies = await withAddonCopies(copies, { ...identity, episode: Number(episode) });
+  const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, ...(session ? { session } : {}) });
+  return out ? { ...out, copies: out.copies ?? copies } : null;
 }
+
+/** إضافات الفيديو تستخدم الهوية المؤكدة فقط؛ مصادر APK تبقى في المحرك الأصلي. */
+export async function withAddonCopies(copies, identity) {
+  if(globalThis.Capacitor?.getPlatform?.()==='android')return copies;
+  const a=await getAddonRuntime();await a.ready;
+  const extra=addonCopies(a.registry,identity);
+  return [...copies,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
+}
+/** First confirmed copies can prepare while the other discovery path remains pending. */
+export async function firstAvailableCopies(locator, addons) {
+  const found = Promise.resolve(locator);
+  const extra = Promise.resolve(addons).then(copies => ({ copies }), () => ({ copies: [] }));
+  return Promise.race([found.then(x => x.copies.length ? x : extra.then(y => y.copies.length ? y : x)), extra.then(x => x.copies.length ? x : found)]);
+}
+export async function hasAddonStreams(identity){try{return (await withAddonCopies([],identity)).length>0;}catch{return false;}}
 
 /** اسم السيرفر ومعرّف المصدر ثابتان بين الأعمال؛ رمز البطاقة ورابط الحلقة ليسا كذلك. */
 export function matchingWorkingRoute(routes, working) {
@@ -312,6 +331,12 @@ export async function pick(session, route) {
 export async function open(args) {
   const plugin = bridge();
   if (!plugin) return null;
+  if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
+    try {
+      const a = await getAddonRuntime(); await a.ready;
+      args = {...args, addonSubtitleProviders: a.nativeSubtitleProviders()};
+    } catch { /* ترجمة الإضافة لا تمنع الفيديو */ }
+  }
   await plugin.play(args);
   return true;
 }
@@ -326,7 +351,7 @@ export async function outbox(userId) {
 
 // ───────────── نموذج ورقة السيرفرات (نفس قاعدة المشغّل الأصلي) ─────────────
 
-const bucket = (q) => (q == null ? null : q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360);
+const bucket = (q) => (q == null ? null : q >= 2000 ? 2160 : q >= 1400 ? 1440 : q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360);
 const ORDER = { READY: 0, RESOLVING: 1, FAILED: 2, UNAVAILABLE: 3 };
 
 /** [[«1080p»، سيرفرات]…] من الأعلى، ثم غير المحددة، وغير المتاحة في الآخر. */

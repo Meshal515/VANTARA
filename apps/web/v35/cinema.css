@@ -1282,3 +1282,5 @@
   font-size: 11px;
   color: var(--text-3);
 }
+
+.v35 .cn-detail-more { float: left; }

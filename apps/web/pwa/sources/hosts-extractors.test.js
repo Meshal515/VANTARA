@@ -94,3 +94,5 @@ describe('dailymotion', () => {
     expect(() => dailymotionStreams({ error: { title: 'Content rejected.', code: 'DM005' } })).toThrow('Dailymotion: Content rejected.');
   });
 });
+it.each([403,429,503])('reports HTTP %s rather than an empty extraction',async status=>{const r=createHostResolver({text:async url=>({url,status,text:'Forbidden'})});await expect(r.resolve('https://video.sibnet.ru/video.php?videoid=1')).rejects.toMatchObject({code:`UPSTREAM_HTTP_${status}`});});
+it('classifies a script-only verification redirect without executing it',async()=>{const r=createHostResolver({text:async url=>({url,status:200,text:"<html><head><title>Loading...</title></head><body><script>window.location.replace('https://listeamed.net/e/1?ch=1&js=token');</script></body></html>"})});await expect(r.resolve('https://listeamed.net/e/1')).rejects.toMatchObject({code:'RESOLVER_BROWSER_REQUIRED'});});

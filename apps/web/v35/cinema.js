@@ -754,6 +754,7 @@ export function createCinema(deps) {
 
   /** بحث حيّ لهذا العمل/الموسم، مشترك بين صفحة العمل وورقة السيرفرات والتجهيز المسبق. */
   function locateHandle(m, season) {
+    if (m._sourceCopy) return pinnedHandle(m, season, m._sourceCopy);
     const key = playKey(m, season);
     const old = state.works.get(key);
     if (old) return old;
@@ -819,14 +820,15 @@ export function createCinema(deps) {
       h.run.fastPath();
     }
     const session = `cn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    const w = { key, episode, at: Date.now(), session: null, routes: [], done: false, missing: false, closed: false, launched: false, remembered: false, handle: h, run: h.run, off: [], listeners: new Set() };
+    const w = { key, episode, at: Date.now(), session: null, routes: [], done: false, missing: false, closed: false, launched: false, remembered: false, handle: h, copies: [], run: h.run, off: [], listeners: new Set() };
     state.warm = w;
     const notify = () => {
       for (const fn of w.listeners) fn(w);
     };
     w.notify = notify;
     void (async () => {
-      const found = await h.first;
+      const identity = {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n};
+      const found = await engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identity));
       if (w.closed) return;
       if (!found.copies.length) {
         w.missing = true;
@@ -866,6 +868,7 @@ export function createCinema(deps) {
         const out = await engine.prepare({
           session,
           copies: forPreparation(initial),
+          identity: {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n},
           episode,
           preferredSourceId: pref?.sourceId ?? null,
           preferredServer: pref?.server ?? null,
@@ -873,6 +876,7 @@ export function createCinema(deps) {
         });
         if (w.closed) return;
         w.session = out?.session ?? session;
+        w.copies = out?.copies ?? forPreparation(initial);
         for (const r of out?.routes ?? []) if (!w.routes.some((x) => x.id === r.id)) w.routes.push(r);
         if (out?.done) w.done = true;
       } catch (e) {
@@ -883,7 +887,9 @@ export function createCinema(deps) {
       // مصدر ردّ بعد بدء التجهيز: نسخته تدخل الجلسة نفسها، وما يعمل لا يتوقف
       w.copyOff = h.onCopies((fresh) => {
           if (w.closed || !w.session) return;
-          void engine.extend(w.session, forPreparation(fresh)).then((added) => {
+          const prepared = forPreparation(fresh);
+          for (const c of prepared) if (!w.copies.some(old => old.sourceId === c.sourceId && old.url === c.url)) w.copies.push(c);
+          void engine.extend(w.session, prepared).then((added) => {
             if (added && !w.closed) {
               w.done = false;
               notify();
@@ -895,7 +901,11 @@ export function createCinema(deps) {
         notify();
       });
       const late = h.found.copies.filter((c) => !initial.includes(c));
-      if (late.length && w.session) void engine.extend(w.session, forPreparation(late));
+      if (late.length && w.session) {
+        const prepared = forPreparation(late);
+        for (const c of prepared) if (!w.copies.some(old => old.sourceId === c.sourceId && old.url === c.url)) w.copies.push(c);
+        void engine.extend(w.session, prepared);
+      }
     })();
     return w;
   }
@@ -1244,7 +1254,9 @@ export function createCinema(deps) {
     deps.showPage('cinema');
     window.scrollTo?.(0, 0);
     renderDetail(m, { partial: true });
-    const fetched = await prefetch(m);
+    let fetched;
+    try { fetched = String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`cinema:${m.id}`, m) : m._sourceCopy ? m : await prefetch(m); }
+    catch (error) { if (token === state.token) toast(error.message); return; }
     if (token !== state.token) return;
     // التفاصيل تُقبل لنفس المعرّف والنوع فقط، والاسم الذي ضغطه الشخص يبقى اسم الصفحة
     const full = mergeWork(m, fetched);
@@ -1269,6 +1281,10 @@ export function createCinema(deps) {
 
     const bar = el('div', 'cn-detail-bar');
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
+    if (deps.openWorkMenu) {
+      const more = button('icon-btn cn-detail-more', glyph('more'), () => deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }), 'خيارات العمل');
+      bar.append(more);
+    }
 
     const art = el('div', 'cn-detail-art');
     art.append(image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true }));
@@ -1687,13 +1703,14 @@ export function createCinema(deps) {
         title,
         animeId: key,
         section: 'cinema',
+        subtitleIdentity: { canonicalId: m.canonicalId ?? `cinema:${m.id}`, kind: m.type, externalIds: m.externalIds ?? { imdb: /^tt\d+$/.test(m.id) ? m.id : null }, season, episode: n },
         usageUserId: currentUser(),
         episode: m.type === 'movie' ? 1 : n,
         total: m.type === 'series' ? eps.length : 1,
         position,
         poster: m.poster ?? null,
         friends: [],
-        copies: sheet.found.copies,
+        copies: sheet.warm?.copies ?? sheet.found.copies,
         resume,
         presenceEndpoint: presence?.endpoint ?? null,
         presenceAuthorization: presence?.authorization ?? null,

@@ -1,0 +1,4 @@
+import {expect,it,vi} from 'vitest';
+const state=vi.hoisted(()=>({r:null}));vi.mock('../runtime.js',()=>({getRuntime:()=>state.r}));
+const {MangaEngine}=await import('./manga.js');
+it('remote manga pages and covers stay on their public URL without requesting core image grants',async()=>{state.r={ready:Promise.resolve(),registry:{source:()=>({}),def:()=>({domain:'addon.test'})},ensureMedia:async()=>{throw new Error('auth');},fetcher:{mediaUrl:()=>{throw new Error('proxy');}}};expect((await MangaEngine.image({sourceId:'addon|demo',page:{imageUrl:'https://cdn.test/page.jpg'}})).path).toBe('https://cdn.test/page.jpg');expect((await MangaEngine.cover({sourceId:'addon|demo',url:'https://cdn.test/cover.jpg'})).path).toBe('https://cdn.test/cover.jpg');await expect(MangaEngine.image({sourceId:'addon|demo',page:{imageUrl:'javascript:evil()'}})).rejects.toThrow();});

@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '6ed896bae8d07003abff8d39625a47659c01ce82ba32665dad07dc49b8bb6229';
+const SHELL_DIGEST = 'fdbd2fd878ce5529048c68e6b77c9f3a9020ee954530c7aa85bb21129a202013';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -118,6 +118,31 @@ const SHELL = [
   '/v35/work-insights.js',
   '/v35.css',
   '/v35/core.css',
+  '/addons/adapters/bundled.js',
+  '/addons/adapters/remote.js',
+  '/addons/adapters/stremio.js',
+  '/addons/cache.js',
+  '/addons/contracts.js',
+  '/addons/health.js',
+  '/addons/identity.js',
+  '/addons/manifest.js',
+  '/addons/media.js',
+  '/addons/native-runtime.js',
+  '/addons/native-transport.js',
+  '/addons/registry.js',
+  '/addons/runtime.js',
+  '/addons/scheduler.js',
+  '/addons/streams.js',
+  '/addons/subtitles.js',
+  '/addons/transport.js',
+  '/addons/video.js',
+  '/addons/work-view.js',
+  '/pwa/player/subtitles.js',
+  '/pwa/player/subtitle-adjustments.js',
+  '/pwa/sources/hls-variants.js',
+  '/v35/addons-view.js',
+  '/v35/source-mode.js',
+  '/vendor/hls.min.js',
   '/v35/shell.js',
   '/v35/markup.js',
   '/v35/icons.js',

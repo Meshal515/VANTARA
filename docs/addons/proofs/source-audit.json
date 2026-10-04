@@ -1,0 +1,684 @@
+[
+  {
+    "source": "witanime",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "witanime.site",
+    "query": "frieren",
+    "servers": [],
+    "failure": "challenge",
+    "ms": 109
+  },
+  {
+    "source": "shahiid",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "shahiid-anime.net",
+    "query": "naruto",
+    "servers": [
+      {
+        "server": "Megamax متعدد",
+        "host": "share4max.com",
+        "adapter": "shahiid-site",
+        "resolver": "MegaMax mirror hub",
+        "hops": [
+          {
+            "host": "shahiid-anime.net",
+            "status": 200,
+            "ms": 499
+          },
+          {
+            "host": "share4max.com",
+            "status": 200,
+            "ms": 490
+          },
+          {
+            "host": "share4max.com",
+            "status": 200,
+            "ms": 419
+          },
+          {
+            "host": "lulustream.com",
+            "status": 200,
+            "ms": 385
+          },
+          {
+            "host": "streamwish.to",
+            "status": 200,
+            "ms": 129
+          }
+        ],
+        "ms": 1930,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "kpk2jakbzwgv.tnmr.org",
+            "quality": 480,
+            "type": "hls"
+          }
+        ]
+      },
+      {
+        "server": "Sendvid",
+        "host": "sendvid.com",
+        "adapter": "shahiid-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "shahiid-anime.net",
+            "status": 200,
+            "ms": 769
+          },
+          {
+            "host": "sendvid.com",
+            "status": 200,
+            "ms": 2514
+          }
+        ],
+        "ms": 3287,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "videos2.sendvid.com",
+            "quality": null,
+            "type": "mp4"
+          }
+        ]
+      },
+      {
+        "server": "الجودة HD",
+        "host": null,
+        "adapter": "shahiid-site",
+        "resolver": "source adapter direct",
+        "hops": [
+          {
+            "host": "shahiid-anime.net",
+            "status": 200,
+            "ms": 467
+          }
+        ],
+        "ms": 468,
+        "status": "UPSTREAM_OR_FETCH_ERROR"
+      },
+      {
+        "server": "Okru",
+        "host": "ok.ru",
+        "adapter": "shahiid-site",
+        "resolver": "OK.ru metadata",
+        "hops": [
+          {
+            "host": "shahiid-anime.net",
+            "status": 200,
+            "ms": 455
+          },
+          {
+            "host": "ok.ru",
+            "status": 200,
+            "ms": 1628
+          }
+        ],
+        "ms": 2086,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      }
+    ],
+    "search": {
+      "count": 22,
+      "ms": 1934
+    },
+    "selected": "Naruto",
+    "episodes": {
+      "count": 20,
+      "ms": 2545
+    },
+    "episode": "الحلقة 1",
+    "serverCount": 4,
+    "serverMs": 5871,
+    "firstResolvedMs": 1930,
+    "allMs": 7771
+  },
+  {
+    "source": "arabseed",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "m.myseed.pics",
+    "query": "toy story",
+    "servers": [
+      {
+        "server": "MySeed",
+        "host": null,
+        "adapter": "arabseed-site",
+        "resolver": "source adapter direct",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 112
+          },
+          {
+            "host": "d.myseed.tv",
+            "status": 200,
+            "ms": 884
+          }
+        ],
+        "ms": 1000,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "cdnfdcp2503.cdn.makeup",
+            "quality": 1080,
+            "type": "mp4"
+          }
+        ]
+      },
+      {
+        "server": "MySeed",
+        "host": null,
+        "adapter": "arabseed-site",
+        "resolver": "source adapter direct",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 111
+          },
+          {
+            "host": "d.myseed.tv",
+            "status": 200,
+            "ms": 589
+          }
+        ],
+        "ms": 701,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "cdnfdcp2503.cdn.makeup",
+            "quality": 720,
+            "type": "mp4"
+          }
+        ]
+      },
+      {
+        "server": "MySeed",
+        "host": null,
+        "adapter": "arabseed-site",
+        "resolver": "source adapter direct",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 152
+          },
+          {
+            "host": "d.myseed.tv",
+            "status": 200,
+            "ms": 557
+          }
+        ],
+        "ms": 712,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "cdnfdcp2503.cdn.makeup",
+            "quality": 480,
+            "type": "mp4"
+          }
+        ]
+      },
+      {
+        "server": "سيرفر 1",
+        "host": "vidara.to",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 143
+          },
+          {
+            "host": "vidara.to",
+            "status": 200,
+            "ms": 449
+          }
+        ],
+        "ms": 596,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 2",
+        "host": "bysezejataos.com",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 127
+          },
+          {
+            "host": "bysezejataos.com",
+            "status": 200,
+            "ms": 160
+          }
+        ],
+        "ms": 289,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 3",
+        "host": "voe.sx",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 259
+          },
+          {
+            "host": "voe.sx",
+            "status": 200,
+            "ms": 834
+          }
+        ],
+        "ms": 1094,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 1",
+        "host": "vidara.to",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 138
+          },
+          {
+            "host": "vidara.to",
+            "status": 200,
+            "ms": 391
+          }
+        ],
+        "ms": 532,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 2",
+        "host": "bysezejataos.com",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 127
+          },
+          {
+            "host": "bysezejataos.com",
+            "status": 200,
+            "ms": 190
+          }
+        ],
+        "ms": 318,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 3",
+        "host": "voe.sx",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "m.myseed.pics",
+            "status": 200,
+            "ms": 122
+          },
+          {
+            "host": "voe.sx",
+            "status": 200,
+            "ms": 772
+          }
+        ],
+        "ms": 894,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 1",
+        "host": "vidara.to",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "vidara.to",
+            "status": 200,
+            "ms": 371
+          }
+        ],
+        "ms": 374,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 2",
+        "host": "bysezejataos.com",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "bysezejataos.com",
+            "status": 200,
+            "ms": 241
+          }
+        ],
+        "ms": 242,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 3",
+        "host": "voe.sx",
+        "adapter": "arabseed-site",
+        "resolver": "generic/packer/iframe",
+        "hops": [
+          {
+            "host": "voe.sx",
+            "status": 200,
+            "ms": 376
+          }
+        ],
+        "ms": 377,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      }
+    ],
+    "search": {
+      "count": 10,
+      "ms": 373
+    },
+    "selected": "فيلم Toy Story 5 مدبلج مصري",
+    "episodes": {
+      "count": 1,
+      "ms": 0
+    },
+    "episode": "فيلم Toy Story 5 مدبلج مصري",
+    "serverCount": 12,
+    "serverMs": 687,
+    "firstResolvedMs": 1000,
+    "allMs": 7130
+  },
+  {
+    "source": "tuktukcinema",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "tuktukhd.com",
+    "query": "the gentlemen",
+    "servers": [
+      {
+        "server": "TukTuk Vip",
+        "host": "megatuktuk.store",
+        "resolver": "tuktuk-site",
+        "ms": 21662,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "h85mclle5sxf9yf.acek-cdn.com",
+            "quality": 800,
+            "type": "hls"
+          }
+        ]
+      }
+    ],
+    "search": {
+      "count": 3,
+      "ms": 1182
+    },
+    "selected": "مسلسل The Gentlemen الموسم الثاني",
+    "episodes": {
+      "count": 8,
+      "ms": 325
+    },
+    "episode": "الحلقة 1",
+    "serverCount": 1,
+    "serverMs": 294,
+    "firstResolvedMs": 21662,
+    "allMs": 21662
+  },
+  {
+    "source": "akwam",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "akwam.ss",
+    "query": "dune",
+    "servers": [],
+    "failure": "HTTP_28",
+    "ms": 30019
+  },
+  {
+    "source": "egydead",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "tv10.egydead.live",
+    "query": "dune",
+    "servers": [
+      {
+        "server": "StreamHG",
+        "host": "hgcloud.to",
+        "resolver": "egydead-site",
+        "ms": 1218,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "qcsh3mkrd1sg2.premilkyway.com",
+            "quality": null,
+            "type": "hls"
+          }
+        ]
+      },
+      {
+        "server": "EarnVids",
+        "host": "morencius.com",
+        "resolver": "egydead-site",
+        "ms": 795,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "dd2stliwt0bc.dramiyos-cdn.com",
+            "quality": null,
+            "type": "hls"
+          }
+        ]
+      },
+      {
+        "server": "Mixdrop",
+        "host": "mixdrop.top",
+        "resolver": "egydead-site",
+        "ms": 769,
+        "status": "UPSTREAM_REMOVED"
+      },
+      {
+        "server": "DoodStream",
+        "host": "playmogo.com",
+        "resolver": "egydead-site",
+        "ms": 296,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      }
+    ],
+    "search": {
+      "count": 9,
+      "ms": 1441
+    },
+    "selected": "مشاهدة فيلم Dune Part 2 2024 مترجم",
+    "episodes": {
+      "count": 1,
+      "ms": 0
+    },
+    "episode": "مشاهدة فيلم Dune Part 2 2024 مترجم",
+    "serverCount": 4,
+    "serverMs": 722,
+    "firstResolvedMs": 1218,
+    "allMs": 3078
+  },
+  {
+    "source": "ristoanime",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "ristoanime.me",
+    "query": "frieren",
+    "servers": [
+      {
+        "server": "سيرفر 1",
+        "host": "vidmoly.net",
+        "resolver": "ristoanime-site",
+        "ms": 349,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "prx-vi-a-1.vmpx.online",
+            "quality": null,
+            "type": "hls"
+          }
+        ]
+      },
+      {
+        "server": "سيرفر 2",
+        "host": "video.sibnet.ru",
+        "resolver": "ristoanime-site",
+        "ms": 1245,
+        "status": "UPSTREAM_HTTP_403"
+      },
+      {
+        "server": "سيرفر 3.1",
+        "host": "sendvid.com",
+        "resolver": "ristoanime-site",
+        "ms": 517,
+        "status": "UPSTREAM_HTTP_503"
+      },
+      {
+        "server": "سيرفر 3",
+        "host": "listeamed.net",
+        "resolver": "ristoanime-site",
+        "ms": 2464,
+        "count": 0,
+        "status": "RESOLVER_EMPTY",
+        "streams": []
+      },
+      {
+        "server": "سيرفر 4",
+        "host": "www.mp4upload.com",
+        "resolver": "ristoanime-site",
+        "ms": 181,
+        "status": "UPSTREAM_REMOVED"
+      },
+      {
+        "server": "سيرفر 5",
+        "host": "uqload.ws",
+        "resolver": "ristoanime-site",
+        "ms": 862,
+        "status": "UPSTREAM_REMOVED"
+      },
+      {
+        "server": "سيرفر احتياطي 1",
+        "host": "hlswish.com",
+        "resolver": "ristoanime-site",
+        "ms": 224,
+        "status": "UPSTREAM_REMOVED"
+      }
+    ],
+    "search": {
+      "count": 2,
+      "ms": 1831
+    },
+    "selected": "Sousou no Frieren",
+    "episodes": {
+      "count": 28,
+      "ms": 504
+    },
+    "episode": "الحلقة 1",
+    "serverCount": 7,
+    "serverMs": 285,
+    "firstResolvedMs": 349,
+    "allMs": 5842
+  },
+  {
+    "source": "okanime",
+    "platform": "terminal direct proxy (not PWA edge)",
+    "domain": "ww3.okanime.xyz",
+    "query": "one piece",
+    "servers": [
+      {
+        "server": "mp4upload",
+        "host": "mp4upload.com",
+        "resolver": "okanime-site",
+        "ms": 493,
+        "status": "UPSTREAM_REMOVED"
+      },
+      {
+        "server": "megamax",
+        "host": "share4max.com",
+        "resolver": "okanime-site",
+        "ms": 2224,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "m5qqjwpatpzb.acek-cdn.com",
+            "quality": 1080,
+            "type": "hls"
+          }
+        ]
+      },
+      {
+        "server": "uqload",
+        "host": "uqload.is",
+        "resolver": "okanime-site",
+        "ms": 1044,
+        "count": 1,
+        "status": "RESOLVED_NOT_FRAME_VERIFIED",
+        "streams": [
+          {
+            "host": "strm2.uqload.vc",
+            "quality": null,
+            "type": "hls"
+          }
+        ]
+      }
+    ],
+    "search": {
+      "count": 8,
+      "ms": 616
+    },
+    "selected": "One Piece",
+    "episodes": {
+      "count": 1180,
+      "ms": 226
+    },
+    "episode": "الحلقة 1",
+    "serverCount": 3,
+    "serverMs": 292,
+    "firstResolvedMs": 2717,
+    "allMs": 3761
+  }
+]

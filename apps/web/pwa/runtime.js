@@ -3,9 +3,10 @@
  * يُنشأ عند أول نداء من جسر (pwa/bridges/*)، لا عند الإقلاع.
  */
 
+import { createAddonRuntime } from '../addons/runtime.js';
 import { createFetcher } from './net/fetcher.js';
 import { fetchBase } from './net/endpoint.js';
-import { createStore } from './cache/store.js';
+import { createStore, SPACES } from './cache/store.js';
 import { publishConfig, requestPersistence } from './cache/images.js';
 import { createRegistry } from './sources/registry.js';
 import { ENGINES } from './sources/engines/index.js';
@@ -65,6 +66,7 @@ export function getRuntime() {
     }, 15_000);
   })();
 
-  runtime = { store, fetcher, registry, ready, ensureMedia };
+  let addons = null;
+  runtime = { store, fetcher, registry, ready, ensureMedia, get addons() { return addons ??= createAddonRuntime({runtime, store:createStore({name:'vantara-addons',spaces:{...SPACES,state:{ttlMs:Infinity,maxBytes:16*1024*1024}}})}); } };
   return runtime;
 }

@@ -16,6 +16,11 @@
  * التقدّم يُبلَّغ كما يبلّغ الأصلي (`playback`، `server`، `episode`).
  */
 
+import { candidatePaths, addonMedia } from '../../addons/media.js';
+import { createSubtitleSession } from './subtitles.js';
+import { nextEpisodeCopies } from '../../addons/video.js';
+import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
+
 const START_TIMEOUT_MS = 15_000;
 const REPORT_EVERY_MS = 5_000;
 /** أقصر من هذا ليس حلقة ولا فيلمًا: صورة خطأ يبثّها المضيف بدل الفيديو. */
@@ -41,7 +46,7 @@ function loadHls() {
   hlsPromise ??= new Promise((resolve, reject) => {
     if (globalThis.Hls) return resolve(globalThis.Hls);
     const s = document.createElement('script');
-    s.src = '/vendor/hls.light.min.js';
+    s.src = '/vendor/hls.min.js';
     s.onload = () => resolve(globalThis.Hls);
     s.onerror = () => {
       hlsPromise = null;
@@ -61,10 +66,10 @@ function el(tag, cls, text) {
   return n;
 }
 
-/** نفس دلاء الـAPK: 1080 / 720 / 480 / 360. */
-export const bucket = (q) => (q ? (q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360) : null);
+/** الجودات المعلنة، مع الحفاظ على 4K و1440p. */
+export const bucket = (q) => (q ? (q >= 2000 ? 2160 : q >= 1400 ? 1440 : q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360) : null);
 const fmtQ = (q) => (bucket(q) ? `${bucket(q)}p` : '');
-const badgeOf = (q) => (!q ? 'HD' : bucket(q) >= 1080 ? 'FHD' : bucket(q) >= 720 ? 'HD' : 'SD');
+const badgeOf = (q) => (!q ? 'Auto' : bucket(q) >= 2160 ? 'UHD' : bucket(q) >= 1440 ? 'QHD' : bucket(q) >= 1080 ? 'FHD' : bucket(q) >= 720 ? 'HD' : 'SD');
 
 export function clock(seconds) {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -408,7 +413,8 @@ export function openPlayer(args) {
 
   // ───────────────────────── الأوراق ─────────────────────────
 
-  function openSheet(title, subtitle, build) {
+  function openSheet(title, subtitle, build, modifier = '') {
+    sheet.className = `pp-sheet${modifier ? ` ${modifier}` : ''}`;
     sheet.replaceChildren();
     sheet.append(el('i', 'pp-sheet__grip'));
     const head = el('div', 'pp-sheet__head');
@@ -607,8 +613,71 @@ export function openPlayer(args) {
     });
   }
 
+  let subtitleSheetBody = null;
+  const providers = runtime.addons?.subtitleProviders?.() ?? [];
+  const subtitleSession = createSubtitleSession({ video, getHls: () => state.hls, providers, identity: args.subtitleIdentity ?? {},
+    onHealth: (key, ok) => {
+      const provider = providers.find(p => p.key === key); if (provider) provider.healthy = ok;
+      if (ok) runtime.addons?.registry.health.success(key, 'subtitles', 'pwa');
+      else runtime.addons?.registry.health.failure(key, 'subtitles', 'pwa', 'provider_failure');
+    },
+    onChange: () => {
+      if (subtitleSheetBody && !sheet.hidden && sheet.contains(subtitleSheetBody)) paintSubtitles(subtitleSheetBody);
+      if (!sheet.hidden && sheet.classList.contains('pp-sheet--subtitle-adjust') && !Object.values(subtitleSession.adjustments.capabilities()).some(Boolean)) closeSheet();
+    },
+  });
+  function subtitleLabel(track) {
+    if (track.lang === 'ar') return 'العربية';
+    if (track.lang === 'en') return 'English';
+    try { return new Intl.DisplayNames(['ar'], { type: 'language' }).of(track.lang) || track.label; } catch { return track.label; }
+  }
+  function paintSubtitles(body) {
+    body.replaceChildren();
+    const tracks = subtitleSession.tracks();
+    if (!tracks.length) { body.append(sheetRow(subtitleSession.pending() ? 'جارٍ جلب الترجمات من الإضافة…' : 'لا توجد ترجمة منفصلة لهذا الفيديو', null)); return; }
+    body.append(sheetRow('إيقاف', null, { on: subtitleSession.selected() === null, onClick: () => void subtitleSession.select(null) }));
+    for (const [kind, label] of [['source', 'الترجمة من الفيديو'], ['addon', 'ترجمات إضافية']]) {
+      const group = tracks.filter(t => t.kind === kind); if (!group.length) continue;
+      body.append(el('p', 'pp-servers__quality', label));
+      for (const track of group) body.append(sheetRow(subtitleLabel(track),
+        kind === 'addon' ? `${track.provider} · ${track.match === 'release' ? 'مطابقة للإصدار' : 'مطابقة للحلقة؛ تحقق من التوقيت'}` : track.label,
+        { on: subtitleSession.selected() === track.id, onClick: () => void subtitleSession.select(track.id).catch(error => message(error.message)) }));
+    }
+    if (Object.values(subtitleSession.adjustments.capabilities()).some(Boolean)) body.append(sheetRow('تعديل الترجمة', null, { onClick: showSubtitleAdjustment }));
+  }
+  function showSubtitles() { subtitleSheetBody = openSheet('الترجمة', null, paintSubtitles, 'pp-sheet--subtitles'); }
+  function showSubtitleAdjustment() {
+    const adjust = subtitleSession.adjustments;
+    const caps = adjust.capabilities();
+    if (!Object.values(caps).some(Boolean)) return;
+    openSheet('تعديل الترجمة', null, (body) => {
+      const stepper = (key, title, label, next) => {
+        const group = el('div', 'pp-sub-step');
+        group.append(el('small', null, title));
+        const pill = el('div', 'pp-sub-step__pill'); pill.dir = 'ltr';
+        const value = el('output'); value.setAttribute('aria-live', 'polite');
+        const minus = el('button', null, '−'), plus = el('button', null, '+');
+        const paint = () => {
+          const current = adjust.values()[key]; value.textContent = label(current);
+          minus.disabled = next(current, -1) === current; plus.disabled = next(current, 1) === current;
+        };
+        for (const [button, direction] of [[minus, -1], [plus, 1]]) {
+          button.type = 'button'; button.setAttribute('aria-label', `${direction > 0 ? 'زيادة' : 'تقليل'} ${title}`);
+          button.onclick = () => { adjust.set(key, next(adjust.values()[key], direction)); paint(); };
+        }
+        pill.append(minus, value, plus); group.append(pill); body.append(group); paint();
+      };
+      if (caps.timing) {
+        stepper('delay', 'توقيت الترجمة', n => `${n.toFixed(2)} ث`, (n, d) => Math.round(Math.max(-10, Math.min(10, n + d * 0.1)) * 10) / 10);
+        body.append(el('small', 'pp-sub-hint', '+ يؤخر الترجمة، − يقدمها'));
+      }
+      if (caps.size) stepper('size', 'حجم الترجمة', n => `${n}%`, (n, d) => SUBTITLE_SIZES[Math.max(0, Math.min(SUBTITLE_SIZES.length - 1, SUBTITLE_SIZES.indexOf(n) + d))]);
+      if (caps.position) stepper('position', 'موضع الترجمة', n => `${n}%`, (n, d) => Math.max(0, Math.min(100, n + d)));
+    }, 'pp-sheet--subtitle-adjust');
+  }
   function showMore() {
     openSheet('المزيد', null, (body) => {
+      if (subtitleSession.available()) body.append(sheetRow('الترجمة', null, { onClick: () => { closeSheet(); showSubtitles(); } }));
       body.append(sheetRow('السرعة', state.speed === 1 ? 'عادية' : `${state.speed}×`, { onClick: () => { closeSheet(); showSpeed(); } }));
       body.append(sheetRow('قفل الشاشة', 'يمنع اللمس الخاطئ أثناء المشاهدة', { onClick: () => { closeSheet(); setLocked(true); } }));
       body.append(sheetRow(state.fill ? 'ملاءمة الصورة' : 'ملء الشاشة', 'قصّ الحواف لملء الشاشة أو إظهار الصورة كاملة', { onClick: () => { closeSheet(); toggleFill(); } }));
@@ -678,6 +747,7 @@ export function openPlayer(args) {
 
   function teardownSource() {
     clearTimeout(state.startTimer);
+    subtitleSession.resetMedia();
     state.hls?.destroy?.();
     state.hls = null;
     state.level = -1;
@@ -729,6 +799,7 @@ export function openPlayer(args) {
             if (!Hls?.isSupported?.()) return done(false, 'unsupported');
             const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30, capLevelToPlayerSize: false, startLevel: -1 });
             state.hls = hls;
+            subtitleSession.attachHls(hls, Hls);
             hls.on(Hls.Events.ERROR, (_, data) => {
               if (data?.fatal) {
                 if (state.started && data.type === Hls.ErrorTypes.MEDIA_ERROR) return hls.recoverMediaError();
@@ -769,15 +840,16 @@ export function openPlayer(args) {
 
   async function playCandidate(c, { seek = 0 } = {}) {
     state.current = c;
+    subtitleSession.setStream(c);
     state.started = false;
     state.tried.add(c.id);
     errorCard.hidden = true;
     paint();
     setBusy(true, `جارٍ التشغيل · ${c.code}`);
-    await runtime.ensureMedia().catch(() => null);
-    const proxied = runtime.fetcher.mediaUrl(c.url, c.referer);
+    const paths = await candidatePaths(c,runtime);
+    if(addonMedia(c))video.crossOrigin="anonymous";else video.removeAttribute("crossorigin");
     let reason = null;
-    for (const [via, url] of [['direct', c.url], ['edge', proxied]]) {
+    for (const [via, url] of paths) {
       if (state.closed || state.current !== c) return false;
       const out = await attempt(url, c.type);
       if (out.ok) {
@@ -834,7 +906,7 @@ export function openPlayer(args) {
     const c = state.current;
     message(`انقطع ${c.code} — نكمل من نفس اللحظة`, 3000);
     try {
-      if (state.via === 'direct') {
+      if (state.via === 'direct' && !addonMedia(c)) {
         await runtime.ensureMedia().catch(() => null);
         const out = await attempt(runtime.fetcher.mediaUrl(c.url, c.referer), c.type);
         if (out.ok) {
@@ -853,14 +925,17 @@ export function openPlayer(args) {
   }
 
   async function goEpisode(n) {
-    const copies = args.copies ?? [];
+    const copies = nextEpisodeCopies(args.copies, n, args.subtitleIdentity);
     if (!copies.length || n < 1 || (state.total > 0 && n > state.total)) return;
     report();
     setBusy(true, `نجهّز الحلقة ${n}…`);
     errorCard.hidden = true;
     teardownSource();
+    args.subtitleIdentity = {...args.subtitleIdentity, episode:n};
+    subtitleSession.setIdentity(args.subtitleIdentity);
     void engine.closeSession({ session: state.session });
     const prep = await engine.prepare({ copies, episode: n, preferredSourceId: state.current?.sourceId ?? null, preferredServer: state.current?.server ?? null });
+    args.copies = prep.copies ?? copies;
     state.session = prep.session;
     state.episode = n;
     state.tried.clear();
@@ -914,6 +989,7 @@ export function openPlayer(args) {
     state.closed = true;
     clearInterval(countdown);
     clearInterval(watchdog);
+    subtitleSession.close();
     teardownSource();
     root.remove();
     meta.remove();

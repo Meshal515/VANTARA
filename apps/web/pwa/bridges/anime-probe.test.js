@@ -41,3 +41,4 @@ describe('probe before ready', () => {
     expect(await probe({ url: 'https://h/e.mp4' }, async () => { throw new Error('timeout'); })).toEqual({ ok: null, reason: null });
   });
 });
+it('probes an addon stream directly without source grant or source fetcher allowlist',async()=>{const r={ensureMedia:async()=>{throw new Error('must not request VANTARA auth');},fetcher:{mediaUrl:()=>{throw new Error('must not proxy addon');}}};let target;const out=await probeCandidate(r,{sourceId:'addon|demo',url:'https://cdn.test/video.mp4'},{fetchImpl:async u=>{target=u;return new Response(null,{status:206,headers:{'content-type':'video/mp4','content-range':'bytes 0-1/9000000'}});}});expect(target).toBe('https://cdn.test/video.mp4');expect(out.ok).toBe(true);});
