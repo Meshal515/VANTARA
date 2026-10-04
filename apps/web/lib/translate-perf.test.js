@@ -44,6 +44,12 @@ describe('translation performance log (on the phone)', () => {
     expect(s.textless).toMatchObject({ pages: 1, median: 400, stages: { analyze: 380, 'analyze.detect': 300 } });
     expect(s.text.stages).toMatchObject({ luna: 3000, 'render.encode': 200 });
     expect(s.chapters[0]).toMatchObject({ chapterKey: 'c1', pages: 2, wallMs: 10000 - (1000 - 400) });
+
+    const even = summarize([
+      { at: 1000, from: 'model', textless: false, total: 1000, stages: {} },
+      { at: 3000, from: 'model', textless: false, total: 3000, stages: {} },
+    ]);
+    expect(even.text.median).toBe(2000);
     const report = formatReport(
       entries,
       [{ page: 'p1', identical: true, legacy: { stages: { glyphs: 2000 } }, current: { stages: { glyphs: 1000 } } }],
