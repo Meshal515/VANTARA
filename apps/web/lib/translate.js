@@ -30,6 +30,44 @@ export const MAX_UPLOAD_WIDTH = 1600;
 // لا يُغيَّر اسم الكاش مرة أخرى: تغييره يُخفي كل صفحة مترجمة محفوظة (tl3 → tl4 فعلها مرة).
 const CACHE_PREFIX = 'tl4:';
 const OLD_CACHE_PREFIX = 'tl3:';
+/**
+ * فهرس الصفحة المنطقي: كاش البصمة يبقى مصدر الحقيقة، لكن بعض مصادر الصور
+ * تعيد ترميز البايتات نفسها أو تغيّر رابطها بين فتحتي الفصل. حينها SHA البايتات
+ * يتغير رغم أن الصفحة نفسها، وكان القارئ يرجع للإنجليزي ويعيد 40–100 ثانية عملًا.
+ *
+ * المفتاح يشمل المصدر + الفصل + رقم الصفحة، فلا تختلط نسختان مختلفتان للعمل.
+ * القيمة نفسها لها مهلة طويلة لكن محدودة؛ ملف الصورة المترجمة نفسه سيكشف إن اختفى.
+ */
+const PAGE_CACHE_PREFIX = 'tl-page-v1:';
+export const PAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function pageCacheKey(meta) {
+  const index = Number(meta?.pageIndex);
+  if (!meta?.seriesRef || !meta?.sourceId || !meta?.chapterKey || !Number.isInteger(index) || index < 0) return null;
+  return PAGE_CACHE_PREFIX + [meta.seriesRef, meta.sourceId, meta.chapterKey, index].map((v) => encodeURIComponent(String(v))).join('|');
+}
+
+async function readPageCache(hash, meta) {
+  const direct = (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash));
+  if (direct && typeof direct.translated === 'number') return { value: direct, cacheKey: pageCacheKey(meta), kind: 'hash' };
+  const cacheKey = pageCacheKey(meta);
+  if (!cacheKey) return { value: null, cacheKey: null, kind: null };
+  const alias = (await readKv(cacheKey))?.value;
+  if (!alias || typeof alias.translated !== 'number') return { value: null, cacheKey, kind: null };
+  if (Date.now() - Number(alias.at ?? 0) > PAGE_CACHE_TTL_MS) {
+    void writeKv(cacheKey, null);
+    return { value: null, cacheKey, kind: null };
+  }
+  return { value: alias, cacheKey, kind: 'page' };
+}
+
+function writePageCache(hash, meta, value) {
+  const cacheKey = pageCacheKey(meta);
+  const stored = { ...value, sourceHash: hash };
+  const writes = [writeKv(CACHE_PREFIX + hash, stored)];
+  if (cacheKey) writes.push(writeKv(cacheKey, stored));
+  return { cacheKey, stored, written: Promise.all(writes) };
+}
 /** بين محاولتي إكمال لنفس الصفحة: تعود للفصل بعد دقيقة فيُكمل الناقص فورًا. */
 export const RETRY_INCOMPLETE_MS = 60 * 1000;
 /** محاولات إكمال صفحة ناقصة قبل أن تُقبل كما هي. */
@@ -229,7 +267,7 @@ export function renderPlan(analysis, reply) {
  * يترجم صفحة.
  *   `deps`: `{ api, sync, imagePath }` — `api` نداء خادم المحتوى، `sync.translation`
  *   نداء sync-worker، `imagePath` مسار ملف الصفحة على الجهاز (من الإضافة) إن وُجد.
- *   `meta`: `{ seriesRef, seriesTitle, chapterKey, chapterNumber, pageIndex, sourceLang }`.
+ *   `meta`: `{ seriesRef, seriesTitle, sourceId, chapterKey, chapterNumber, pageIndex, sourceLang }`.
  * @returns {Promise<{ image: string | null, regions, translated, hash, from } | { error: string }>}
  */
 /** صفحات القارئ الجارية: الترجمة المقدّمة لا تبدأ صفحة جديدة وهي تعمل (النت للصفحة أمامك). */
@@ -254,24 +292,36 @@ export async function translatePage(deps, src, meta) {
 
 async function translatePageNow(deps, src, meta) {
   const clock = stopwatch();
+  // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
+  // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
+  const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  const runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
   const hash = await clock.time('hash', () => pageHashOf(src));
-  const local = await clock.time('cacheRead', async () => (await readKv(CACHE_PREFIX + hash))?.value ?? (await fromOldCache(hash)));
+  const found = await clock.time('cacheRead', () => readPageCache(hash, meta));
+  const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
   if (local && typeof local.translated === 'number' && !downgraded) {
-    // المحفوظ يُعرض دائمًا. وإن كانت فيه فقاعة ناقصة (أو تُرجم بتعليمات أقدم): يُكمل في
-    // الخلفية (مرات محدودة) بلا إعادة الصفحة كلها: التحليل محفوظ على الجهاز، وما ردّت
-    // عليه Luna محفوظ في الخادم، فلا يُسأل إلا عن الناقص. لا تعود للإنجليزي أثناءه أبدًا
+    // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
+    // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
+    if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
     const due = (local.incomplete || staleEngine(local.engine)) && (local.tries ?? 0) < MAX_REPAIRS && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
-    if (due) void repairInBackground(deps, src, hash, meta, local);
-    logPage(deps, meta, hash, clock, { from: 'cache', textless: !local.translated && !(local.regions ?? []).length, regions: (local.regions ?? []).length, translated: local.translated });
-    return { ...local, hash, from: 'device' };
+    if (due) void repairInBackground(runDeps, src, hash, meta, local);
+    logPage(runDeps, meta, hash, clock, {
+      from: 'cache',
+      cacheKind: found.kind,
+      cacheKey: found.cacheKey,
+      textless: !local.translated && !(local.regions ?? []).length,
+      regions: (local.regions ?? []).length,
+      translated: local.translated,
+    });
+    return { ...local, hash, cacheKey: found.cacheKey, from: 'device' };
   }
 
   // الصفحة نفسها من القارئ والترجمة المقدّمة معًا: تُترجم مرة، والثاني ينتظر الأول
   const running = inflight.get(hash);
   if (running) return running;
-  const job = translateOnce(deps, src, hash, meta, clock);
+  const job = translateOnce(runDeps, src, hash, meta, clock);
   inflight.set(hash, job);
   try {
     return await job;
@@ -290,9 +340,16 @@ async function translateOnce(deps, src, hash, meta, clock) {
     return result;
   }
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries: 0 };
-  const written = writeKv(CACHE_PREFIX + hash, value);
-  logPage(deps, meta, hash, clock, { from: result.cached ? 'friends' : 'model', textless: Boolean(result.textless), regions: (result.regions ?? []).length, translated: result.translated, native: result.native }, written);
-  return { ...value, hash, from: result.cached ? 'friends' : 'model' };
+  const saved = writePageCache(hash, meta, value);
+  logPage(deps, meta, hash, clock, {
+    from: result.cached ? 'friends' : 'model',
+    cacheKey: saved.cacheKey,
+    textless: Boolean(result.textless),
+    regions: (result.regions ?? []).length,
+    translated: result.translated,
+    native: result.native,
+  }, saved.written);
+  return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model' };
 }
 
 /** سطر في سجل الأداء (الانتظار في الطابور وجلب الصورة يأتيان من القارئ أو المهام). */
@@ -319,14 +376,15 @@ function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
 async function repairInBackground(deps, src, hash, meta, local) {
   const tries = (local.tries ?? 0) + 1;
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
-  await writeKv(CACHE_PREFIX + hash, { ...local, at: Date.now(), tries });
+  await writePageCache(hash, meta, { ...local, at: Date.now(), tries }).written;
   const clock = stopwatch();
   const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
   logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
   if (result.error || !(result.translated >= (local.translated ?? 0))) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
-  await writeKv(CACHE_PREFIX + hash, value);
-  deps.onRepaired?.({ ...value, hash, from: 'model' });
+  const saved = writePageCache(hash, meta, value);
+  await saved.written;
+  deps.onRepaired?.({ ...saved.stored, hash, cacheKey: saved.cacheKey, from: 'model' });
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
@@ -403,14 +461,19 @@ async function fromOldCache(hash) {
 }
 
 /** المحفوظ لصفحة ببصمتها (للقياس: عربيّها يُعاد رسمه بالطريقين). */
-export async function cachedPage(hash) {
-  return hash ? ((await readKv(CACHE_PREFIX + hash))?.value ?? null) : null;
+export async function cachedPage(hash, cacheKey = null) {
+  const direct = hash ? (await readKv(CACHE_PREFIX + hash))?.value : null;
+  if (direct) return direct;
+  return cacheKey ? ((await readKv(cacheKey))?.value ?? null) : null;
 }
 
-/** صورة مترجمة محفوظة اختفت من الجهاز (أندرويد ينظّف مجلد الكاش): تُنسى فتُترجم من جديد. */
-export async function forgetPage(hash) {
-  if (!hash) return;
-  await Promise.all([writeKv(CACHE_PREFIX + hash, null), writeKv(OLD_CACHE_PREFIX + hash, null)]);
+/** صورة مترجمة محفوظة اختفت من الجهاز: امسح بصمة البايتات وفهرس الصفحة معًا. */
+export async function forgetPage(hash, cacheKey = null, sourceHash = null) {
+  const writes = [];
+  if (hash) writes.push(writeKv(CACHE_PREFIX + hash, null), writeKv(OLD_CACHE_PREFIX + hash, null));
+  if (sourceHash && sourceHash !== hash) writes.push(writeKv(CACHE_PREFIX + sourceHash, null), writeKv(OLD_CACHE_PREFIX + sourceHash, null));
+  if (cacheKey) writes.push(writeKv(cacheKey, null));
+  await Promise.all(writes);
 }
 
 /** ما قالت Luna إنه يبقى أصله عمدًا (مؤثر، حقوق، لافتة): ليس نقصًا في فقاعته. */
