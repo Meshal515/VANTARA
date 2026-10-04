@@ -7,7 +7,7 @@ vi.mock('./chapter-store.js', () => ({
   writeKv: async (key, value) => void kv.set(key, { value, at: Date.now() }),
 }));
 
-const { forgetPage, pageHashOf, translatePage } = await import('./translate.js');
+const { PAGE_CACHE_TTL_MS, forgetPage, pageCacheKey, pageHashOf, translatePage } = await import('./translate.js');
 
 const page = new Uint8Array([1, 2, 3, 4]);
 beforeEach(() => {
@@ -79,5 +79,36 @@ describe('smart and fast: a fast page is upgraded when you ask for smart, never 
     kv.set(`tl4:${hash}`, { value: saved({ engine: 'gpt-6-luna:t3' }), at: 1 });
     expect((await translatePage(noTranslate, 'file://p', { speed: 'fast' })).from).toBe('device');
     expect((await translatePage(noTranslate, 'file://p', {})).from).toBe('device');
+  });
+});
+
+
+describe('stable logical page cache', () => {
+  const meta = { seriesRef: 'ext:w', sourceId: 'src-a', chapterKey: 'ext:w#n:9', pageIndex: 0 };
+
+  it('keeps Arabic when a source re-encodes the same logical page into different bytes', async () => {
+    const key = pageCacheKey(meta);
+    kv.set(key, { value: saved({ at: Date.now(), sourceHash: 'old-byte-hash' }), at: Date.now() });
+    vi.stubGlobal('fetch', async () => new Response(new Uint8Array([99, 88, 77, 66])));
+
+    const res = await translatePage(noTranslate, 'file://same-page-new-bytes', meta);
+
+    expect(res).toMatchObject({ from: 'device', translated: 2, cacheKey: key });
+    expect(res.image).toContain('translated-pages');
+  });
+
+  it('does not trust a logical alias forever if the source really changed', async () => {
+    const key = pageCacheKey(meta);
+    kv.set(key, { value: saved({ at: Date.now() - PAGE_CACHE_TTL_MS - 1 }), at: 1 });
+    vi.stubGlobal('fetch', async () => new Response(new Uint8Array([12, 34, 56, 78])));
+
+    const res = await translatePage(noTranslate, 'file://changed-page-after-ttl', meta);
+
+    expect(res.error).toBe('device_only');
+    expect(kv.get(key)?.value).toBeNull();
+  });
+
+  it('different sources never share a logical alias for the same chapter/page', () => {
+    expect(pageCacheKey(meta)).not.toBe(pageCacheKey({ ...meta, sourceId: 'src-b' }));
   });
 });
