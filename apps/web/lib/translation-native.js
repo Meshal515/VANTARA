@@ -13,6 +13,7 @@
  *   analyzePage({ path, sourceLang, priority })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
  *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
+ *   diagnoseCleaning({ path, regions, leave }) → صورة بعد التبييض وقبل العربي + قياس البكسلات
  *   benchmarkEngines({ path }) → { engines: [{ name, loadMs, glyphsMs, bubblesMs, glyphDiff, glyphPixels, bubblesSame, bubbles }], cores, thermal }
  *   jobProgress({ title, text, done, total }) / jobFinished({ title, text }) / jobStop()  (خدمة الترجمة المقدّمة)
  *   notificationPermission() → { granted }
@@ -102,6 +103,13 @@ export async function benchmarkPage({ path, regions }) {
   const p = plugin();
   if (!p?.benchmarkPage) return null;
   return p.benchmarkPage({ path, regions });
+}
+
+/** تشخيص محلي: نفس Cleaner/LaMa الفعليين، لكن الناتج قبل رسم العربي. */
+export async function diagnoseCleaning({ path, regions, leave = [], chapterKey = null, pageIndex = null }) {
+  const p = plugin();
+  if (!p?.diagnoseCleaning) return null;
+  return p.diagnoseCleaning({ path, regions, leave, ...where(chapterKey, pageIndex) });
 }
 
 /** «٤١٢ ميجابايت» وما شابه، للإعدادات. */
