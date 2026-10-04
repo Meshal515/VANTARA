@@ -74,3 +74,75 @@ it("catalog IDs are not video IDs and are not filtered by IMDb prefixes", async 
   });
   expect(await a.catalog({ type: "series", id: "demo" })).toHaveLength(1);
 });
+function make(raw, respond = async () => ({ subtitles: [] })) {
+  return createStremioAdapter({ manifest: validateManifest(raw, { origin: "https://addon.test" }).manifest, manifestUrl: "https://addon.test/public-settings/manifest.json", transport: { json: respond } });
+}
+const raw = () => ({ id: "org.regression", name: "Regression", version: "1.0.0", types: ["movie"], resources: ["subtitles"], idPrefixes: ["tt"], catalogs: [] });
+it("uses object resource rules independently of global prefixes", async () => {
+  const a = make({ ...raw(), resources: [{ name: "subtitles", types: ["movie"] }] });
+  expect(await a.subtitles({ type: "movie", videoId: "custom:1" })).toEqual([]);
+});
+it("explicit empty prefixes dispatch no requests", async () => {
+  let calls = 0;
+  const a = make({ ...raw(), resources: [{ name: "subtitles", types: ["movie"], idPrefixes: [] }] }, async () => { calls++; return { subtitles: [] }; });
+  await expect(a.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "UNSUPPORTED_RESOURCE" });
+  expect(calls).toBe(0);
+});
+it("catalog dispatch requires a declared identity and required extras", async () => {
+  let calls = 0;
+  const a = make({ ...raw(), resources: ["catalog"], catalogs: [{ type: "movie", id: "search", extra: [{ name: "search", isRequired: true }] }] }, async () => { calls++; return { metas: [] }; });
+  await expect(a.catalog({ type: "movie", id: "unknown" })).rejects.toMatchObject({ code: "UNSUPPORTED_RESOURCE" });
+  await expect(a.catalog({ type: "movie", id: "search" })).rejects.toMatchObject({ code: "REQUIRED_EXTRA" });
+  expect(await a.catalog({ type: "movie", id: "search", extra: { search: "A & B/C + D" } })).toEqual([]);
+  expect(calls).toBe(1);
+});
+it("catalog declarations match independently of top-level types", async () => {
+  const a = make({ ...raw(), types: ["subtitles"], resources: ["catalog"], catalogs: [{ type: "movie", id: "work" }] }, async () => ({ metas: [] }));
+  expect(await a.catalog({ type: "movie", id: "work" })).toEqual([]);
+});
+it("distinguishes configuration-required responses from empty results", async () => {
+  const a = make(raw(), async () => ({ error: "config_required" }));
+  await expect(a.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "CONFIG_REQUIRED", resource: "subtitles" });
+});
+it("blocks unconfigured providers before the transport", async () => {
+  let calls = 0;
+  const a = make({ ...raw(), behaviorHints: { configurationRequired: true, configurable: true } }, async () => { calls++; return { subtitles: [] }; });
+  await expect(a.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "CONFIG_REQUIRED" });
+  expect(calls).toBe(0);
+});
+it("isolates malformed subtitle entries and preserves safe fields", async () => {
+  const a = make(raw(), async () => ({ subtitles: [null, { id: "x", url: "https://cdn.test/x.srt", lang: "eng", label: "English", subtitleFileName: "release.srt" }, { id: "bad", url: "http://127.0.0.1/x", lang: "ara" }, "bad"] }));
+  const result = await a.subtitles({ type: "movie", videoId: "tt1" });
+  expect(result).toHaveLength(1);
+  expect(result[0]).toMatchObject({ id: "x", url: "https://cdn.test/x.srt", lang: "eng", label: "English", subtitleFileName: "release.srt" });
+});
+it("isolates malformed stream entries without hiding usable direct candidates", async () => {
+  const a = make({ ...raw(), resources: ["stream"] }, async () => ({ streams: [null, { url: "https://cdn.test/video.mp4" }, "bad"] }));
+  const result = await a.streams({ type: "movie", videoId: "tt1" });
+  expect(result).toHaveLength(1);
+  expect(result[0].status).toBe("RESOLVED");
+});
+it.each([
+  ["subtitles", { subtitles: [null, { id: "missing-url", lang: "eng" }] }],
+  ["catalog", { metas: [{ name: "Missing identity" }] }],
+  ["stream", { streams: [null, {}] }],
+])("does not turn entirely malformed %s entries into healthy empty results", async (resource, response) => {
+  const instance = make({ ...raw(), resources: [resource], catalogs: resource === "catalog" ? [{ type: "movie", id: "works" }] : [] }, async () => response);
+  const input = resource === "catalog" ? { type: "movie", id: "works" } : { type: "movie", videoId: "tt1" };
+  await expect(instance[{ stream: "streams", catalog: "catalog", subtitles: "subtitles" }[resource]](input)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});
+it("bounds resource lists and returns structured errors without configured URLs", async () => {
+  const a = make(raw(), async () => ({ subtitles: Array(1001).fill({}) }));
+  await expect(a.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  const b = make(raw(), async () => { throw Object.assign(new Error("https://addon.test/private-secret/manifest.json"), { status: 403 }); });
+  await expect(b.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "HTTP_403", status: 403 });
+  try { await b.subtitles({ type: "movie", videoId: "tt1" }); } catch (error) { expect(error.message).not.toContain("private-secret"); }
+});
+it("does not expose arbitrary transport status data or fail on a null rejection", async () => {
+  const a = make(raw(), async () => { throw { status: "private-secret" }; });
+  const error = await a.subtitles({ type: "movie", videoId: "tt1" }).catch((error) => error);
+  expect(error.code).toBe("REQUEST_FAILED");
+  expect(JSON.stringify(error)).not.toContain("private-secret");
+  const b = make(raw(), async () => { throw null; });
+  await expect(b.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "REQUEST_FAILED" });
+});

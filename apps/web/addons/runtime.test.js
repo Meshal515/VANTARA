@@ -88,7 +88,7 @@ it("rejects zero playable addon streams and keeps native/bundled calls independe
   expect(await a.sources.call("core", (s) => s.search("q"))).toEqual(["core"]);
   expect(coreCalls).toEqual(["core"]);
 });
-it("keeps stream health failed on zero links and isolates cached catalog results by addon version", async () => {
+it("keeps empty stream availability separate from failures and isolates cached catalog results by addon version", async () => {
   let calls = 0;
   const r = {
     ready: Promise.resolve(),
@@ -125,8 +125,54 @@ it("keeps stream health failed on zero links and isolates cached catalog results
   expect(calls).toBe(2);
   await adapter.streams({ type: "series", videoId: "tt1:1:1" });
   expect(a.registry.health.state(p.manifest.key, "streams", "pwa").state).toBe(
-    "failed",
+    "empty",
   );
+});
+
+const diagnosticSetup = async (manifest, resources, native = false) => {
+  const requests=[];
+  const a=createAddonRuntime({runtime:{native,ready:Promise.resolve(),registry:{list:()=>[]}},store:createStore({indexedDB:null}),transport:{json:async(url,options)=>{
+    requests.push({url,signal:options?.signal});
+    if(url.endsWith('manifest.json'))return manifest;
+    return resources(url);
+  }}});
+  await a.ready;
+  const installed=await a.registry.install(await a.registry.inspect('https://addon.test/secret-token/manifest.json'));
+  return {a,key:installed.key,requests};
+};
+const diagnosticManifest = (resources=['catalog','meta','stream','subtitles'], catalogs=[{type:'movie',id:'demo'}]) => ({id:'org.diagnostic',name:'Diagnostic',version:'1.0.0',types:['movie'],resources,catalogs});
+it('diagnoses real catalog and matching metadata without inventing stream or subtitle identities', async()=>{
+  const {a,key,requests}=await diagnosticSetup(diagnosticManifest(),url=>url.includes('/catalog/')?{metas:[{id:'tt123',type:'movie',name:'Real work'}]}:{meta:{id:'tt123',type:'movie',name:'Real work'}});
+  await a.adapter(key).catalog({type:'movie',id:'demo'});
+  const first=await a.diagnose(key);
+  const second=await a.diagnose(key);
+  expect(first.checks.map(x=>[x.capability,x.state])).toEqual([['catalog','passed'],['meta','passed'],['streams','untested'],['subtitles','untested']]);
+  expect(second.assessment.level).toBe('candidate');
+  expect(requests.filter(x=>x.url.includes('/catalog/'))).toHaveLength(3);
+  expect(requests.some(x=>x.url.includes('/stream/')||x.url.includes('/subtitles/'))).toBe(false);
+  expect(JSON.stringify(first)).not.toContain('secret-token');
+});
+it('uses only explicit sample identities and treats empty results as valid availability', async()=>{
+  const {a,key,requests}=await diagnosticSetup(diagnosticManifest(['stream','subtitles'],[]),url=>url.includes('/stream/')?{streams:[]}:{subtitles:[]});
+  const controller=new AbortController();
+  const result=await a.diagnose(key,{signal:controller.signal,sample:{type:'movie',videoId:'tt123'}});
+  expect(result.checks.map(x=>x.state)).toEqual(['empty','empty']);
+  expect(result.assessment.level).toBe('candidate');
+  expect(a.registry.health.state(key,'streams','pwa').state).toBe('empty');
+  expect(requests.at(-1).signal).toBe(controller.signal);
+});
+it('reports safe failure messages and never promotes malformed responses', async()=>{
+  const {a,key}=await diagnosticSetup(diagnosticManifest(['stream'],[]),()=>{throw new Error('https://addon.test/secret-token/stream/movie/tt123.json');});
+  const result=await a.diagnose(key,{sample:{type:'movie',videoId:'tt123'}});
+  expect(result.checks[0].state).toBe('failed');
+  expect(result.assessment.level).toBe('broken');
+  expect(JSON.stringify(result)).not.toContain('secret-token');
+});
+it('does not expose subtitle-only or catalog-only addons as playback sources on either platform', async()=>{
+  for(const [resources,native] of [[['subtitles'],false],[['catalog'],false],[['catalog','stream','subtitles'],true]]){
+    const {a}=await diagnosticSetup(diagnosticManifest(resources,resources.includes('catalog')?[{type:'movie',id:'demo'}]:[]),()=>({subtitles:[]}),native);
+    expect(a.sources.list()).toEqual([]);
+  }
 });
 it("passes playback cancellation through the Stremio facade to its actual HTTP request", async () => {
   const controller = new AbortController();
@@ -198,10 +244,82 @@ it("listing subtitle providers does not consume the half-open health probe", asy
     await providers[0].subtitles({ type: "series", videoId: "tt1:1:1" });
     expect(
       a.registry.health.state(p.manifest.key, "subtitles", "pwa").state,
-    ).toBe("healthy");
+    ).toBe("empty");
   } finally {
     vi.useRealTimers();
   }
+});
+it('chooses declared required filter options and probes meta after catalog regardless of resource order',async()=>{
+  const m=diagnosticManifest(['meta','catalog'],[{type:'movie',id:'filtered',extra:[{name:'genre',isRequired:true,options:['Drama','Comedy']}]}]);
+  const {a,key,requests}=await diagnosticSetup(m,url=>url.includes('/catalog/')?{metas:[{id:'tt123',type:'movie',name:'Film'}]}:{meta:{id:'tt123',type:'movie',name:'Film'}});
+  const result=await a.diagnose(key);
+  expect(result.checks.map(x=>[x.capability,x.state])).toEqual([['catalog','passed'],['meta','passed']]);
+  expect(requests.find(x=>x.url.includes('/catalog/')).url).toContain('genre=Drama');
+  expect(result.assessment.level).toBe('stable');
+});
+it('does not invent a required search query or count an unaddressable catalog as broken',async()=>{
+  const {a,key,requests}=await diagnosticSetup(diagnosticManifest(['catalog'],[{type:'movie',id:'search',extra:[{name:'search',isRequired:true}]}]),()=>{throw new Error('should not request');});
+  expect((await a.diagnose(key)).checks[0].state).toBe('untested');
+  expect(requests).toHaveLength(1);
+  expect(a.registry.list()[0].assessment.level).toBe('candidate');
+});
+it('excludes configuration-required providers and keeps direct use from creating failure health',async()=>{
+  const m={...diagnosticManifest(['stream','subtitles'],[]),behaviorHints:{configurable:true,configurationRequired:true}};
+  const {a,key,requests}=await diagnosticSetup(m,()=>{throw new Error('should not request');});
+  expect(a.sources.list()).toEqual([]);expect(a.subtitleProviders()).toEqual([]);
+  expect((await a.diagnose(key)).checks[0].state).toBe('configuration');
+  expect(()=>a.adapter(key)).toThrow();
+  expect(a.registry.health.state(key,'streams','pwa').state).toBe('unknown');
+  expect(requests).toHaveLength(1);
+});
+it('keeps unsupported sample identities and aborted checks separate from provider failure',async()=>{
+  const {a,key,requests}=await diagnosticSetup(diagnosticManifest([{name:'stream',types:['movie'],idPrefixes:['tt']}],[]),(_url)=>{throw new DOMException('cancelled','AbortError');});
+  expect((await a.diagnose(key,{sample:{type:'movie',videoId:'wrong'}})).checks[0].state).toBe('untested');
+  expect(requests).toHaveLength(1);
+  await expect(a.diagnose(key,{sample:{type:'movie',videoId:'tt123'}})).rejects.toMatchObject({name:'AbortError'});
+  expect(a.registry.health.state(key,'streams','pwa').state).toBe('unknown');
+});
+it('keeps unknown external types out of playback source categories without blocking direct catalogs',async()=>{
+  const {a,key}=await diagnosticSetup({...diagnosticManifest(['catalog','stream']),types:['book'],catalogs:[{id:'c',type:'book'}]},()=>({metas:[]}));
+  expect(a.sources.list()).toEqual([]);
+  expect(a.sources.def(`addon|${key}`)).toBeNull();
+  expect(await a.adapter(key).catalog({type:'book',id:'c'})).toEqual([]);
+});
+it('does not manufacture servers for a catalog and metadata-only source',async()=>{
+  const {a,key}=await diagnosticSetup(diagnosticManifest(['catalog','meta']),()=>({meta:{id:'tt123',type:'movie',name:'Film'}}));
+  const source=a.sources.source(`addon|${key}`);
+  const episodes=await source.episodes({type:'movie',id:'tt123'});
+  expect(await source.servers(episodes[0])).toEqual([]);
+  expect(await source.streams({type:'movie',url:'tt123'})).toEqual([]);
+});
+it('provider configuration-required responses are separate from broken requests',async()=>{
+  const {a,key}=await diagnosticSetup(diagnosticManifest(['stream'],[]),()=>({error:'config_required'}));
+  const result=await a.diagnose(key,{sample:{type:'movie',videoId:'tt123'}});
+  expect(result.checks[0].state).toBe('configuration');
+  expect(result.assessment.level).toBe('configuration');
+  expect(a.registry.health.state(key,'streams','pwa').failures).toBe(0);
+});
+it('invalid caller identities and filters do not classify the provider as broken',async()=>{
+  const {a,key}=await diagnosticSetup(diagnosticManifest([{name:'stream',types:['movie'],idPrefixes:['tt']}],[]),()=>({streams:[]}));
+  await expect(a.adapter(key).streams({type:'movie',videoId:'wrong'})).rejects.toMatchObject({code:'UNSUPPORTED_RESOURCE'});
+  expect(a.registry.health.state(key,'streams','pwa').state).toBe('unknown');
+});
+it('reports unsupported stream formats without network failure or functional success',async()=>{
+  for(const stream of [{infoHash:'torrent'},{url:'https://cdn.test/video.mpd',type:'dash'},{url:'https://cdn.test/video.mp4',headers:{referer:'https://provider.test'}}]){
+    const {a,key}=await diagnosticSetup(diagnosticManifest(['stream'],[]),()=>({streams:[stream]}));
+    const result=await a.diagnose(key,{sample:{type:'movie',videoId:'tt123'}});
+    expect(result.checks[0].state).toBe('unsupported');
+    expect(result.assessment.level).toBe('candidate');
+    expect(a.registry.health.state(key,'streams','pwa').failures).toBe(0);
+    expect(a.registry.health.state(key,'streams','pwa').functionalSuccessAt).toBeNull();
+  }
+});
+it('does not promote malformed Remote v1 home or details responses',async()=>{
+  const m={id:'org.remote',name:'Remote',version:'1.0.0',protocolVersion:1,minVantaraVersion:'0.2.0',runtime:'remote',contentTypes:['movie'],capabilities:['home','details'],permissions:{networkHosts:['addon.test'],verification:false},baseUrl:'https://addon.test',resources:{home:'/home',details:'/work/{workId}'}};
+  const {a,key}=await diagnosticSetup(m,()=>({}));
+  const result=await a.diagnose(key,{sample:{work:{id:'real'}}});
+  expect(result.checks.map(x=>x.state)).toEqual(['failed','failed']);
+  expect(result.assessment.level).toBe('broken');
 });
 it('isolates configured URL changes at the same addon id/version',async()=>{
  const store=createStore({indexedDB:null});const requests=[];
@@ -209,4 +327,13 @@ it('isolates configured URL changes at the same addon id/version',async()=>{
  const one=await a.registry.install(await a.registry.inspect('https://addon.test/config-A/manifest.json'));const first=await a.adapter(one.key).catalog({type:'movie',id:'c'});
  const two=await a.registry.install(await a.registry.inspect('https://addon.test/config-B/manifest.json'));const second=await a.adapter(two.key).catalog({type:'movie',id:'c'});
  expect(second).not.toEqual(first);expect(requests.some(u=>u.includes('/config-B/catalog/'))).toBe(true);expect(two.cacheEpoch).not.toBe(one.cacheEpoch);
+});
+it('searches only catalogs whose required extras can be supplied by ordinary work search',async()=>{
+ const {a,key,requests}=await diagnosticSetup(diagnosticManifest(['catalog','stream'],[
+ {type:'movie',id:'genre-only',extraSupported:['search','genre'],extraRequired:['genre'],genres:['Drama']},
+ {type:'movie',id:'ordinary',extraSupported:['search'],extraRequired:['search']}
+ ]),()=>({metas:[{id:'tt1',name:'Work',type:'movie'}]}));
+ const found=await a.sources.source(`addon|${key}`).search('Work');
+ expect(found).toHaveLength(1);expect(requests.filter(x=>x.url.includes('/catalog/'))).toHaveLength(1);
+ expect(requests.at(-1).url).toContain('/ordinary/search=Work.json');
 });

@@ -3553,8 +3553,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'friends') return openSocial('friends');
     if (key === 'activity') return openSocial('friends');
   }
-  let sourceView = null, sourceSnapshot = null, addonViewGeneration = 0;
+  let sourceView = null, addonHubView = null, sourceSnapshot = null, addonViewGeneration = 0;
   function closeAddonSource() {
+    addonHubView?.close?.(); addonHubView=null;
     sourceView?.close?.(); sourceView=null;
     sourceSnapshot?.release(); sourceSnapshot=null;
   }
@@ -3567,7 +3568,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      q('utilityBody').replaceChildren(renderAddons({ registry: addons.registry, onOpenSource: openAddonSource }));
+      addonHubView = renderAddons({ registry: addons.registry, onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options) });
+      q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
   async function openAddonSource(addon, sourceState = {}) {
@@ -3583,6 +3585,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       try {
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);
+        if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');
         const copy = { ...item, url: item.url ?? item.id, type: item.type };
         const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
         if(run!==addonViewGeneration)return;

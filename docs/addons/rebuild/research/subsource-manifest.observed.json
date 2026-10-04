@@ -1,0 +1,38 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://subsource.strem.top/manifest.json",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "omittedFields": [
+    "branding URLs",
+    "contact data",
+    "config schema if any",
+    "issuer/signature metadata",
+    "unknown extension properties"
+  ],
+  "manifest": {
+    "id": "community.subsource.subtitles",
+    "name": "SubSource Subtitles",
+    "version": "1.4.2",
+    "description": "Unofficial addon for getting subtitles from SubSource.net",
+    "resources": [
+      "subtitles"
+    ],
+    "types": [
+      "movie",
+      "series",
+      "anime",
+      "subtitles"
+    ],
+    "catalogs": [],
+    "idPrefixes": [
+      "tt",
+      "kitsu"
+    ],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": true
+    }
+  }
+}

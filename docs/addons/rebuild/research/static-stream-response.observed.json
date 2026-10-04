@@ -1,0 +1,22 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED_RESPONSE",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://stremio.github.io/stremio-static-addon-example/stream/movie/BigBuckBunny.json",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "role": "streams",
+  "sanitization": {
+    "omittedFields": [],
+    "urlRewrites": []
+  },
+  "originalCount": 1,
+  "mediaBytesFetched": false,
+  "response": {
+    "streams": [
+      {
+        "availability": 1,
+        "url": "http://distribution.bbb3d.renderfarming.net/video/mp4/bbb_sunflower_1080p_30fps_normal.mp4"
+      }
+    ]
+  }
+}

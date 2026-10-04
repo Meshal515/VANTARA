@@ -1,0 +1,14 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED_ERROR",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://subdl.strem.top/subtitles/movie/tt1254207.json",
+  "httpStatus": 404,
+  "corsAllowOrigin": "*",
+  "role": "unconfigured-resource-error",
+  "observedBody": "404 Not Found",
+  "adapterTransportErrorFixture": {
+    "status": 404,
+    "message": "Authored transport error; actual error body does not enter diagnostics"
+  },
+  "limitation": "Actual configured-resource response remains UNVERIFIED; this is an unconfigured path, not universal config_required JSON evidence"
+}

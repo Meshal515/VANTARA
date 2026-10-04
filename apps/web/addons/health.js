@@ -17,18 +17,23 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       p95: ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] ?? null,
     };
   }
-  function success(a, c, r = "pwa", latencyMs) {
+  function success(a, c, r = "pwa", latencyMs, evidence = {}) {
+    const old = state(a, c, r);
     map.set(key(a, c, r), {
-      ...measured(state(a, c, r), latencyMs),
+      ...old, ...measured(old, latencyMs),
       lastSuccessAt: clock(),
       state: "healthy",
       failures: 0,
       retryAt: 0,
       at: clock(),
+      ...evidence,
+      reason: null,
+      probing: false,
+      functionalSuccessAt: evidence.version && evidence.cacheEpoch ? clock() : old.functionalSuccessAt ?? null,
     });
     onChange();
   }
-  function failure(a, c, r = "pwa", reason = "failure", latencyMs) {
+  function failure(a, c, r = "pwa", reason = "failure", latencyMs, evidence = {}) {
     const old = state(a, c, r),
       failures = old.failures + 1;
     const delay =
@@ -48,8 +53,30 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       reason,
       at: clock(),
       probing: false,
+      ...evidence,
     });
     onChange();
+  }
+  function empty(a, c, r = "pwa", latencyMs, evidence = {}) {
+    const old = state(a, c, r);
+    map.set(key(a, c, r), {
+      ...old, ...measured(old, latencyMs), ...evidence,
+      state: "empty", failures: 0, retryAt: 0, reason: null, probing: false, at: clock(),
+      functionalSuccessAt: evidence.version && evidence.cacheEpoch && (old.version !== evidence.version || old.cacheEpoch !== evidence.cacheEpoch) ? null : old.functionalSuccessAt ?? null,
+    });
+    onChange();
+  }
+  function configuration(a, c, r = "pwa", latencyMs, evidence = {}) {
+    const old = state(a, c, r);
+    map.set(key(a, c, r), {
+      ...old, ...measured(old, latencyMs), ...evidence,
+      state: "configuration", failures: 0, retryAt: 0, reason: "CONFIG_REQUIRED", probing: false, at: clock(),
+    });
+    onChange();
+  }
+  function releaseProbe(a, c, r = "pwa") {
+    const s = map.get(key(a, c, r));
+    if (s?.probing) { s.probing = false; onChange(); }
   }
   const ready = (a, c, r = "pwa") => {
     const s = state(a, c, r);
@@ -70,7 +97,7 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       if (
         typeof key === "string" &&
         row &&
-        ["healthy", "failed", "cooling"].includes(row.state) &&
+        ["healthy", "empty", "configuration", "failed", "cooling"].includes(row.state) &&
         Number.isFinite(row.failures) &&
         Number.isFinite(row.retryAt)
       )
@@ -94,6 +121,9 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
     state,
     success,
     failure,
+    empty,
+    configuration,
+    releaseProbe,
     allow,
     ready,
     restore,

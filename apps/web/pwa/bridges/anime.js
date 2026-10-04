@@ -162,7 +162,7 @@ async function runCopy(r, s, copy, episode) {
           if (seen.has(key)) continue;
           const id = `${route.id}|c${nextCandidate++}`;
           seen.set(key, id);
-          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: qr.code, route: qr.id, url: st.url, referer: st.referer ?? null, type: st.type, quality, variant: qr.variant, subtitles: st.subtitles ?? [], audio: st.audio ?? [], identity: st.identity ?? { ...copy.identity, externalIds: copy.externalIds, kind: copy.type ?? (def.content === "anime" ? "anime" : undefined), season: ep.season ?? copy.requestedSeason, episode: ep.number }, addonKey: st.addonKey ?? null, filename: st.filename ?? null, duration: st.duration ?? null, fps: st.fps ?? null, expiresAt: st.expiresAt ?? null });
+          s.cands.set(id, { id, sourceId: copy.sourceId, sourceName: def.label, server: sv.name, code: qr.code, route: qr.id, url: st.url, referer: st.referer ?? null, type: st.type, quality, variant: qr.variant, subtitles: st.subtitles ?? [], audio: st.audio ?? [], identity: st.identity ?? { ...copy.identity, externalIds: copy.externalIds, kind: copy.type ?? (def.content === "anime" ? "anime" : undefined), season: ep.season ?? copy.requestedSeason, episode: ep.number }, addonKey: st.addonKey ?? null, filename: st.filename ?? null, videoHash: st.videoHash ?? null, videoSize: st.videoSize ?? null, duration: st.duration ?? null, fps: st.fps ?? null, expiresAt: st.expiresAt ?? null });
           fresh.push({ id, qr });
           if (st.type === 'hls' && st.qualitySource !== 'hls-master' && r.fetcher.ensureGrant && !masters.has(st.url)) {
             masters.add(st.url);

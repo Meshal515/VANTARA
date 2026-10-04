@@ -1,0 +1,28 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED_RESPONSE",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://v3-cinemeta.strem.io/meta/movie/tt1254207.json",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "role": "meta",
+  "sanitization": {
+    "omittedFields": [
+      "images",
+      "descriptions",
+      "links",
+      "large lists beyond first 2 entries",
+      "unknown response extensions"
+    ],
+    "urlRewrites": []
+  },
+  "originalVideoCount": 0,
+  "response": {
+    "meta": {
+      "name": "Big Buck Bunny",
+      "type": "movie",
+      "id": "tt1254207",
+      "releaseInfo": "2008",
+      "videos": []
+    }
+  }
+}

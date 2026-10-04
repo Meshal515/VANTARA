@@ -9,7 +9,8 @@ export const language = (v) =>
       : String(v ?? "und");
 export function subtitleRequest(identity, stream = {}) {
   const imdb = identity?.externalIds?.imdb;
-  if (!/^tt\d+$/.test(imdb ?? "")) return null;
+  const providerId = identity?.addonKey && typeof identity.videoId === "string" && identity.videoId.length <= 2000 && !/[\x00-\x1f]/.test(identity.videoId) ? identity.videoId : null;
+  if (!providerId && !/^tt\d+$/.test(imdb ?? "")) return null;
   const type =
     identity.kind === "movie"
       ? "movie"
@@ -18,7 +19,7 @@ export function subtitleRequest(identity, stream = {}) {
         : null;
   if (!type) return null;
   if (
-    type === "series" &&
+    !providerId && type === "series" &&
     (!Number.isInteger(identity.season) ||
       identity.season < 0 ||
       !Number.isInteger(identity.episode) ||
@@ -31,9 +32,9 @@ export function subtitleRequest(identity, stream = {}) {
   return {
     type,
     videoId:
-      type === "movie"
+      providerId ?? (type === "movie"
         ? imdb
-        : `${imdb}:${identity.season}:${identity.episode}`,
+        : `${imdb}:${identity.season}:${identity.episode}`),
     extra,
   };
 }

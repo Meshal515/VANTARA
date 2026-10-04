@@ -1,0 +1,260 @@
+{
+  "evidence": "LIVE_OBSERVATIONS",
+  "records": [
+    {
+      "key": "subdl",
+      "sourceUrl": "https://subdl.strem.top/manifest.json",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "key": "subsource",
+      "sourceUrl": "https://subsource.strem.top/manifest.json",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "key": "subsro",
+      "sourceUrl": "https://cdcd7719a6b3-stremio-subs-ro.baby-beamup.club/manifest.json",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "key": "cinemeta-bbb",
+      "sourceUrl": "https://v3-cinemeta.strem.io/meta/movie/tt1254207.json",
+      "observedAt": "2026-10-04T07:58:41.023252+00:00",
+      "httpStatus": 200,
+      "allowOrigin": "*",
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 1979,
+      "topLevelKeys": [
+        "meta"
+      ],
+      "itemCount": 0,
+      "metaIdentity": {
+        "id": "tt1254207",
+        "type": "movie",
+        "name": "Big Buck Bunny"
+      }
+    },
+    {
+      "key": "cinemeta-series",
+      "sourceUrl": "https://v3-cinemeta.strem.io/meta/series/tt3107288.json",
+      "observedAt": "2026-10-04T07:58:39.160521+00:00",
+      "httpStatus": 200,
+      "allowOrigin": "*",
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 172306,
+      "topLevelKeys": [
+        "meta"
+      ],
+      "itemCount": 0,
+      "metaIdentity": {
+        "id": "tt3107288",
+        "type": "series",
+        "name": "The Flash"
+      }
+    },
+    {
+      "key": "cinemeta-search",
+      "sourceUrl": "https://v3-cinemeta.strem.io/catalog/movie/top/search=Big%20Buck%20Bunny.json",
+      "observedAt": "2026-10-04T07:58:39.513724+00:00",
+      "httpStatus": 200,
+      "allowOrigin": "*",
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 14585,
+      "topLevelKeys": [
+        "query",
+        "rank",
+        "cacheMaxAge",
+        "metas"
+      ],
+      "itemCount": 6,
+      "metaIdentity": null
+    },
+    {
+      "key": "opensubtitles-bbb",
+      "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "key": "opensubtitles-series",
+      "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/series/tt3107288%3A1%3A1.json",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "key": "subdl",
+      "sourceUrl": "https://subdl.strem.top/manifest.json",
+      "observedAt": "2026-10-04T07:59:25.641124+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ]
+    },
+    {
+      "key": "subsource",
+      "sourceUrl": "https://subsource.strem.top/manifest.json",
+      "observedAt": "2026-10-04T07:59:25.612202+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ]
+    },
+    {
+      "key": "subsro",
+      "sourceUrl": "https://cdcd7719a6b3-stremio-subs-ro.baby-beamup.club/manifest.json",
+      "observedAt": "2026-10-04T07:59:25.730064+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ]
+    },
+    {
+      "key": "opensubtitles-bbb",
+      "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json",
+      "observedAt": "2026-10-04T07:59:25.657507+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "topLevelKeys": [
+        "subtitles",
+        "cacheMaxAge",
+        "staleRevalidate",
+        "staleError"
+      ],
+      "itemCount": 2
+    },
+    {
+      "key": "opensubtitles-series",
+      "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/series/tt3107288%3A1%3A1.json",
+      "observedAt": "2026-10-04T07:59:25.691735+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "topLevelKeys": [
+        "subtitles",
+        "cacheMaxAge",
+        "staleRevalidate",
+        "staleError"
+      ],
+      "itemCount": 97
+    },
+    {
+      "key": "static-manifest",
+      "sourceUrl": "https://stremio.github.io/stremio-static-addon-example/manifest.json",
+      "observedAt": "2026-10-04T08:00:36.922689+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "topLevelKeys": [
+        "id",
+        "version",
+        "name",
+        "description",
+        "resources",
+        "types",
+        "catalogs"
+      ]
+    },
+    {
+      "key": "static-bbb-stream",
+      "sourceUrl": "https://stremio.github.io/stremio-static-addon-example/stream/movie/tt1254207.json",
+      "observedAt": "2026-10-04T08:00:36.918784+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 404 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "parseError": "Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "key": "subdl-unconfigured",
+      "sourceUrl": "https://subdl.strem.top/subtitles/movie/tt1254207.json",
+      "observedAt": "2026-10-04T08:00:36.897665+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 404 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "parseError": "Extra data: line 1 column 5 (char 4)"
+    },
+    {
+      "key": "subsource-unconfigured",
+      "sourceUrl": "https://subsource.strem.top/subtitles/movie/tt1254207.json",
+      "observedAt": "2026-10-04T08:00:36.918081+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 404 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "parseError": "Extra data: line 1 column 5 (char 4)"
+    },
+    {
+      "key": "opensubtitles-extra",
+      "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207/filename=big_buck_bunny.mp4.json",
+      "observedAt": "2026-10-04T08:00:36.622081+00:00",
+      "transport": "curl",
+      "httpStatusLines": [
+        "HTTP/1.1 200 OK",
+        "HTTP/2 200 "
+      ],
+      "allowOrigin": [
+        "access-control-allow-origin: *"
+      ],
+      "topLevelKeys": [
+        "subtitles",
+        "cacheMaxAge",
+        "staleRevalidate",
+        "staleError"
+      ],
+      "itemCount": 2
+    },
+    {
+      "key": "static-bbb-stream-correct-id",
+      "sourceUrl": "https://stremio.github.io/stremio-static-addon-example/stream/movie/BigBuckBunny.json",
+      "observedDate": "2026-10-04",
+      "transport": "curl",
+      "httpStatus": 200,
+      "corsAllowOrigin": "*",
+      "itemCount": 1,
+      "streamKinds": [
+        "http-url"
+      ],
+      "pwaCompatibility": "UNSUPPORTED_HTTP",
+      "mediaBytesFetched": false
+    }
+  ]
+}

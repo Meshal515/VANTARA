@@ -1,0 +1,55 @@
+{
+  "evidence": "LIVE_CAPTURE_SANITIZED_RESPONSE",
+  "observedDate": "2026-10-04",
+  "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "role": "subtitles",
+  "sanitization": {
+    "omittedFields": [
+      "images",
+      "descriptions",
+      "links",
+      "large lists beyond first 2 entries",
+      "unknown response extensions"
+    ],
+    "urlRewrites": [
+      {
+        "field": "subtitles[].url",
+        "originalOrigins": [
+          "https://subs5.strem.io"
+        ],
+        "replacement": "https://example.com/observed-subtitles/{originalPublicId}.srt",
+        "meaning": "Authored non-fetchable placeholders; subtitle file paths/download tokens omitted; response field structure retained"
+      }
+    ]
+  },
+  "originalCount": 2,
+  "response": {
+    "subtitles": [
+      {
+        "id": "5833874",
+        "lang": "eng",
+        "subtitleFileName": "big_buck_bunny.eng.srt",
+        "movieReleaseName": "big_buck_bunny",
+        "fpsMilli": 24000,
+        "season": 0,
+        "episode": 0,
+        "url": "https://example.com/observed-subtitles/5833874.srt"
+      },
+      {
+        "id": "5511948",
+        "lang": "ind",
+        "subtitleFileName": "Big Buck Bunny.srt",
+        "movieReleaseName": "Big Buck Bunny",
+        "fpsMilli": 30000,
+        "season": 0,
+        "episode": 0,
+        "url": "https://example.com/observed-subtitles/5511948.srt"
+      }
+    ],
+    "cacheMaxAge": 3600,
+    "staleRevalidate": 10800,
+    "staleError": 21600
+  }
+}

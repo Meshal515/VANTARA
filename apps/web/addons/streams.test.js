@@ -58,3 +58,11 @@ it("preserves an explicit HLS container on an extensionless URL and refuses requ
     )[0].status,
   ).toBe("UNSUPPORTED");
 });
+it('keeps valid siblings when a provider returns malformed stream entries',()=>{
+ const out=normalizeStreams([null,42,'wrong',{url:'https://cdn.test/a.mp4',name:'1080p'}],{addonKey:'a'});
+ expect(out).toHaveLength(4);expect(out[0].status).toBe('UNSUPPORTED');expect(out[3]).toMatchObject({status:'RESOLVED',quality:1080});
+});
+it('preserves real subtitle file matching hints and refuses response-header-only proxy requirements',()=>{
+ const [s]=normalizeStreams([{url:'https://cdn.test/a.mp4',behaviorHints:{filename:'real.mkv',videoHash:'0123456789abcdef',videoSize:12345,proxyHeaders:{response:{'Access-Control-Allow-Origin':'*'}}}}],{addonKey:'a'});
+ expect(s).toMatchObject({filename:'real.mkv',videoHash:'0123456789abcdef',videoSize:12345,status:'UNSUPPORTED'});
+});
