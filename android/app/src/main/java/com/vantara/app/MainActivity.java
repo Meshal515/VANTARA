@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
         // يُسجَّل بعده لا تراه صفحة الويب.
         registerPlugin(ExtensionEnginePlugin.class);
         registerPlugin(SystemUiPlugin.class);
+        registerPlugin(com.vantara.addons.AddonEnginePlugin.class);
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(TranslationPlugin.class);
         registerPlugin(com.vantara.anime.bridge.AnimeEnginePlugin.class);
