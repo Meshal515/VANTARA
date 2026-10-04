@@ -92,3 +92,12 @@ export const REJECT_AR = Object.freeze({
   ambiguous: 'اسم يحمله عمل أشهر، بلا سنة تميّزه',
   'other-work': 'اسم عمل آخر بعينه',
 });
+
+/** Everyday playback feedback; raw diagnostics remain on the route for diagnosis. */
+export function routeFailureMessage(reason) {
+  const text = String(reason ?? '');
+  if (/UPSTREAM_HTTP_403|المضيف ردّ?\s*403/i.test(text)) return 'رفض مضيف الفيديو الوصول (403)';
+  if (/RESOLVER_EMPTY/.test(text)) return 'لم يوفر هذا السيرفر رابط فيديو صالحًا';
+  if (/الإضافة.*HTTP\s*403/.test(text)) return 'الإضافة رفضت الطلب (403)';
+  return text || 'لم ينجح فحص رابط الفيديو';
+}

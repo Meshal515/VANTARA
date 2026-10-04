@@ -12,7 +12,9 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       reason: "نوع Stream غير مدعوم على هذه المنصة",
     };
     if (!plainObject(s)) return { ...base, reason: "بيانات Stream غير صالحة" };
-    if (s.infoHash || s.ytId || s.externalUrl || s.nzbUrl || s.archiveUrl || s.behaviorHints?.notWebReady)
+    if (s.infoHash) return { ...base, reason: "رابط تورنت يحتاج خدمة تحولّه إلى رابط فيديو مباشر؛ تشغيل PWA الحالي لا يدعمه" };
+    if (s.externalUrl) return { ...base, reason: "هذه النتيجة تفتح موقعًا خارجيًا ولا توفر رابط فيديو مباشرًا" };
+    if (s.ytId || s.nzbUrl || s.archiveUrl || s.behaviorHints?.notWebReady)
       return base;
     let url;
     try {

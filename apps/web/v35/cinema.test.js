@@ -17,3 +17,12 @@ describe('السينما: صياغة الأرقام', () => {
     expect(playKey({ id: 'tt2', type: 'series' }, 3)).toBe('tt2:3');
   });
 });
+describe('server picker source labels', () => {
+  it('shows provider names and never the internal addon key', async () => {
+    const { routeSourceLabel } = await import('./cinema.js');
+    const sourceId = 'addon|https://comet.elfhosted.com|comet.elfhosted.com';
+    expect(routeSourceLabel({ sourceId, sourceName: 'Comet | ElfHosted' })).toBe('Comet | ElfHosted');
+    expect(routeSourceLabel({ sourceId })).toBe('إضافة');
+    expect(routeSourceLabel({ sourceId: 'arabseed' })).toBe('ArabSeed');
+  });
+});

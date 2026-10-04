@@ -118,6 +118,7 @@ async function runCopy(r, s, copy, episode) {
   const routes = servers.map((sv) => ({
     id: `${copy.sourceId}|${sv.key}`,
     sourceId: copy.sourceId,
+    sourceName: def.label,
     server: sv.name,
     code: codeOf(sv.name),
     quality: sv.quality ?? null,

@@ -316,6 +316,14 @@ export function createAddonRuntime({
               addonKey: m.key,
             },
           }));
+        // Keep unsupported/expired responses distinct from an actually empty result.
+        // Mixed responses still publish every usable sibling; readiness remains in the engine.
+        if (!usable.length && list.length) {
+          const rejected = list[0];
+          throw new Error(rejected.reason ?? (rejected.type === "dash"
+            ? "DASH غير مدعوم في مشغل PWA الحالي"
+            : "نوع الفيديو غير مدعوم في مشغل PWA الحالي"));
+        }
         onResult?.(usable);
         return usable;
       },
