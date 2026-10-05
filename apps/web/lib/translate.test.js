@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, resultOf, staleEngine, unansweredIds, uploadPlan } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -158,5 +158,14 @@ describe('reader exception classification', () => {
     expect(classifyTranslationError(new Error('bridge exploded'))).toBe('native_bridge_failed');
     expect(classifyTranslationError(new Error('unexpected'))).toBe('reader_exception');
     expect(classifyTranslationError(new Error('anything'), false)).toBe('offline');
+  });
+});
+
+
+describe('local translation cache revision', () => {
+  it('refreshes outputs produced before the coverage/residual pipeline revision', () => {
+    expect(staleLocalPipeline({ translated: 3 })).toBe(true);
+    expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1 })).toBe(true);
+    expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION })).toBe(false);
   });
 });
