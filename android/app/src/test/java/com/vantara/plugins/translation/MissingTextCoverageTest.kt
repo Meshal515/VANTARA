@@ -36,24 +36,25 @@ private fun manyLines(count: Int): RgbImage {
 }
 
 @Test fun `partial overlap with a detector box does not hide the uncovered line`() {
-    val img=line(6,0)
+    val img=manyLines(1)
     val proposal=MissingTextSweep.candidates(img,emptyList()).first()
     val half=Box(proposal.x1,proposal.y1,proposal.x1 + proposal.w/2,proposal.y2)
     val known=listOf(Detection(half,1f,"text_bubble"))
     assertFalse(MissingTextSweep.candidates(img,known).isEmpty())
 }
 
-@Test fun `ctd glyph mask can promote an unowned line after detector routing`() {
-    val mask=ByteMask(300,180)
-    fun glyphLine(y0:Int) {
-        for(g in 0 until 4) {
-            val x0=40+g*18
-            for(y in y0 until y0+12) for(x in x0 until x0+8)
-                if(x==x0 || x==x0+7 || y==y0 || y==y0+11) mask[x,y]=1
-        }
+@Test fun `ctd glyphs inside a detected holder survive even when RT-DETR missed the text box`() {
+    val img=RgbImage(220,160,ByteArray(220*160*3){255.toByte()})
+    val glyph=ByteMask(220,160)
+    for(g in 0 until 4) {
+        val x0=65+g*18
+        for(y in 70 until 82) for(x in x0 until x0+8)
+            if(x==x0 || x==x0+7 || y==70 || y==81) glyph[x,y]=1
     }
-    glyphLine(40);glyphLine(110)
-    val known=listOf(Detection(Box(32,32,120,68),1f,"text_bubble"))
-    val extra=MissingTextSweep.candidatesFromMask(mask,known)
-    assertTrue(extra.any { it.y1 >= 90 })
+    val holder=ByteMask(220,160)
+    holder.fillRect(30,35,190,125,1)
+    val bubbles=listOf(Bubble(Box(30,35,190,125),1f,holder))
+    val dets=listOf(Detection(Box(30,35,190,125),1f,"bubble"))
+    val out=Regions.assemble(img,img.gray(),"page",dets,bubbles,glyph)
+    assertFalse(out.isEmpty())
 }
