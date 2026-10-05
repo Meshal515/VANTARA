@@ -292,7 +292,8 @@ class TranslationPlugin : Plugin() {
                 for (r in results) {
                     arr.put(
                         JSObject().put("name", r.name).put("loadMs", r.loadMs).put("glyphsMs", r.glyphsMs).put("bubblesMs", r.bubblesMs)
-                            .put("glyphDiff", r.glyphDiff).put("glyphPixels", r.glyphPixels).put("bubblesSame", r.bubblesSame).put("bubbles", r.bubbles),
+                            .put("glyphDiff", r.glyphDiff).put("glyphPixels", r.glyphPixels).put("bubblesSame", r.bubblesSame).put("bubbles", r.bubbles)
+                            .put("error", r.error),
                     )
                 }
                 call.resolve(JSObject().put("engines", arr).put("cores", Runtime.getRuntime().availableProcessors()).put("thermal", thermal()))
