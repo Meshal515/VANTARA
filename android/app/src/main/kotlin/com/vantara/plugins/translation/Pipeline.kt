@@ -268,14 +268,21 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             val repaired = thaw(cached).toMutableList()
             val unresolved = ArrayList<Box>()
             for (box in cached.rescue.distinct()) {
-                val target=cached.regions.firstOrNull {it.box==box}
-                val promoted=target?.let {
-                    val dets=listOf(Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")) +
-                        listOfNotNull(it.bubbleBox?.let {b->Detection(b,.95f,"bubble")})
-                    finish(hash,img,dets,perf,false,forceHeavy=true)
-                }
-                if (target!=null && promoted!=null && promoted.regions.isNotEmpty()) {
-                    repaired.removeAll {it.id==target.id};repaired.addAll(thaw(promoted))
+                // A rescue box is the visible holder (whole balloon) when one exists.
+                // Rebuild every snapshot owned by that holder so a missed second line
+                // cannot survive beside a freshly re-analysed first line.
+                val targets=cached.regions.filter { (it.bubbleBox ?: it.box)==box }
+                val promoted=if(targets.isNotEmpty()) {
+                    val textDets=targets.map {
+                        Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")
+                    }
+                    val holders=targets.mapNotNull {it.bubbleBox}.distinct().map {Detection(it,.95f,"bubble")}
+                    finish(hash,img,textDets+holders,perf,false,forceHeavy=true)
+                } else null
+                if (promoted!=null && promoted.regions.isNotEmpty()) {
+                    val ids=targets.map {it.id}.toSet()
+                    repaired.removeAll {it.id in ids}
+                    repaired.addAll(thaw(promoted))
                     perf.count("residualPromoted")
                 } else {unresolved.add(box);perf.count("residualRescueFailed")}
             }
@@ -536,7 +543,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     }
 
     private fun readResidual(img:RgbImage,r:Region,perf:Perf):OcrResult {
-        val crop=img.crop(r.box.x1,r.box.y1,r.box.x2,r.box.y2)
+        val scope=ResidualLatin.inspectionBox(r)
+        val crop=img.crop(scope.x1,scope.y1,scope.x2,scope.y2)
         val mask=ResidualLatin.inspectionMask(img,r)
         return ocr(perf).read(crop,mask,Box(0,0,crop.width,crop.height))
     }
