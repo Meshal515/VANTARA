@@ -13,7 +13,9 @@ class Inpainter(file: File) {
 
     private val session: OrtSession = Ort.open(file)
     private val context = 96
-    private val maxEdge = 1024
+    // يطابق مرجع Fable/Python في services/translation-worker: كان أندرويد وحده
+    // يصغّر القطع الصعبة إلى 1024، فيفقد تفاصيل دخان/شعاع/نقوش قبل LaMa.
+    private val maxEdge = 1536
 
     private fun forward(rgb: RgbImage, mask: ByteMask): RgbImage {
         val w = rgb.width; val h = rgb.height
