@@ -548,7 +548,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
     }
     if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
     const plan = renderPlan(analysis, res.body);
-    let incomplete = unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
+    let incomplete = coverageUnknown > 0 || unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
     try {
