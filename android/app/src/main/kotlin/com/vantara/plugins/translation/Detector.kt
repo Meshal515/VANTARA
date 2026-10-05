@@ -42,8 +42,8 @@ fun nms(boxes: List<Box>, scores: FloatArray, iouThr: Float): List<Int> {
  * ثلاث فئات: bubble / text_bubble / text_free. الصفحة الطويلة تُقسَّم شرائح
  * بنسبة ≤ 2.2 مع تداخل، لأن النموذج يرى 640×640 مشوَّهة.
  */
-class Detector(file: File) {
-    private val session: OrtSession = Ort.open(file)
+class Detector(file: File, engine: Ort.Engine? = null) {
+    private val session: OrtSession = Ort.open(file, engine = engine)
     private val labels = mapOf(0L to "bubble", 1L to "text_bubble", 2L to "text_free")
     var conf = 0.3f
 
