@@ -126,6 +126,40 @@ describe('weak network: nothing is uploaded that is not needed', () => {
     expect(calls.release).toBe(1);
   });
 
+  it('an ahead reader page batches the image request instead of calling Luna page-by-page', async () => {
+    device({ drawn: 1 });
+    globalThis.fetch = async () => new Response(new Uint8Array([9, 4, 2]));
+    globalThis.localStorage = memory();
+    const paths = [];
+    const sync = {
+      translation: async (path, o) => {
+        paths.push(path);
+        if (path === '/v1/translate/text' && !o.body.image.data) return { status: 409, body: { error: 'need_image' } };
+        if (path === '/v1/translate/text-batch') {
+          return {
+            status: 200,
+            body: {
+              pages: o.body.pages.map((p) => ({
+                pageHash: p.pageHash,
+                pageIndex: p.pageIndex,
+                status: 200,
+                body: { engine: 'gpt-6-luna:t3', regions: [{ id: 'r1', kind: 'speech', arabic: 'مرحبًا' }] },
+              })),
+            },
+          };
+        }
+        throw new Error(`unexpected direct Luna request: ${path}`);
+      },
+    };
+    const result = await translatePage(
+      { ...deps(), sync, via: 'reader', interactive: false },
+      'http://localhost/_capacitor_file_/cache/pages/p-batch.jpg',
+      { chapterKey: 'c1', pageIndex: 12 },
+    );
+    expect(result.translated).toBe(1);
+    expect(paths).toEqual(['/v1/translate/text', '/v1/translate/text-batch']);
+  });
+
   it('a new page is asked once without the image, then sent with it', async () => {
     device({ drawn: 1 });
     globalThis.fetch = async () => new Response(new Uint8Array([9, 2, 2]));
