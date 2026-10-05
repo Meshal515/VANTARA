@@ -77,7 +77,7 @@ const MAX_REPAIRS = 3;
  * `services/sync-worker/src/translate.ts` (اختبار يتحقق). ترجمة محفوظة بإصدار
  * أقدم تُعرض فورًا وتُجدَّد في الخلفية حين تزور صفحتها.
  */
-export const TEXT_PROMPT_VERSION = 2;
+export const TEXT_PROMPT_VERSION = 3;
 
 /** محرّك أقدم من التعليمات الحالية؟ (`model:t1`، `model:t1:fast`؛ 'device' = لا نص، لا يُجدَّد). */
 export function staleEngine(engine) {
