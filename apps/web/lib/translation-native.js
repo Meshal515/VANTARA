@@ -11,6 +11,7 @@
  *   cancelDownload()
  *   removeModels()        → { installed: false }
  *   analyzePage({ path, sourceLang, priority })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
+ *   releasePageReservation({ chapterKey, pageIndex })    → يحرر حجز Analyze إن لم يصل Render بعد Luna
  *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
  *   diagnoseCleaning({ path, regions, leave }) → صورة بعد التبييض وقبل العربي + قياس البكسلات
@@ -65,6 +66,16 @@ export async function analyzePage({ path, sourceLang = 'auto', priority = 'high'
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
   return p.analyzePage({ path, sourceLang, priority, ...where(chapterKey, pageIndex) });
+}
+
+/**
+ * إذا انتهى Analyze لكن Luna فشلت أو لم تُنتج نصًا للرسم، نحرر الحجز الأصلي.
+ * APK أقدم لا يملك الدالة: تمر بصمت.
+ */
+export async function releasePageReservation(chapterKey, pageIndex) {
+  const p = plugin();
+  if (!p?.releasePageReservation) return;
+  await p.releasePageReservation(where(chapterKey, pageIndex));
 }
 
 /** التبييض والرسم على الجهاز. يرجع مسار الصورة المترجمة. */

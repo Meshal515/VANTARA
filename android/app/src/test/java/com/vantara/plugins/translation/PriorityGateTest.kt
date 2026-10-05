@@ -11,7 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Collections
 
-/** الدور بترتيب ثابت: الكشف، ثم إكمال صفحة القارئ، ثم تحليلها، ثم المقدّمة؛ ومن وصل أولًا في الرتبة نفسها. */
+/** الدور: كشف الصفحة الحالية، ثم Render جاهز، ثم بقية الكشف، ثم Analyze الثقيل. */
 class PriorityGateTest {
     @Test
     fun `waiting pages go by rank, then by arrival`() = runBlocking {
@@ -36,7 +36,7 @@ class PriorityGateTest {
     }
 
     @Test
-    fun `reader pages go by distance from the page in front of you, decided at hand-over`() = runBlocking {
+    fun `reader pages go by distance from the page in front of you within the same class`() = runBlocking {
         val gate = PriorityGate()
         val order = Collections.synchronizedList(ArrayList<String>())
         val holding = CompletableDeferred<Unit>()
@@ -52,7 +52,6 @@ class PriorityGateTest {
         ).map { (name, page) ->
             async { gate.run(PriorityGate.ANALYZE_READER, Perf(), page) { order.add(name) } }.also { delay(20) }
         }
-        // قفزت للصفحة 6 وهي في الانتظار: تتقدّم على ما طُلب قبلها
         gate.focus(PriorityGate.Page("c1", 6))
         val job = async { gate.run(PriorityGate.ANALYZE_JOB, Perf()) { order.add("job") } }
         delay(20)
@@ -60,6 +59,7 @@ class PriorityGateTest {
         (waiting + first + job).awaitAll()
         assertEquals(listOf("p0", "p6", "p3", "p2", "p1", "next-chapter", "job"), order)
     }
+
     @Test
     fun `moving one page ahead finishes the previous render before heavy analysis`() = runBlocking {
         val gate = PriorityGate()
@@ -91,6 +91,42 @@ class PriorityGateTest {
     }
 
     @Test
+    fun `heavy analysis waits for Luna render but light detect may continue`() = runBlocking {
+        val gate = PriorityGate()
+        val order = Collections.synchronizedList(ArrayList<String>())
+        val p0 = PriorityGate.Page("c", 0)
+        val p1 = PriorityGate.Page("c", 1)
+        gate.focus(p0)
+        gate.expectRender(p0)
+
+        val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { order.add("p1-heavy") } }
+        delay(30)
+        assertFalse(heavy.isCompleted)
+
+        val detect = async { gate.run(PriorityGate.DETECT, Perf(), p1) { order.add("p1-detect") } }
+        detect.await()
+        assertFalse(heavy.isCompleted)
+
+        val render = async { gate.run(PriorityGate.RENDER_READER, Perf(), p0) { order.add("p0-render") } }
+        render.await()
+        heavy.await()
+        assertEquals(listOf("p1-detect", "p0-render", "p1-heavy"), order)
+    }
+
+    @Test
+    fun `failed Luna releases reserved reader slot`() = runBlocking {
+        val gate = PriorityGate()
+        val p0 = PriorityGate.Page("c", 0)
+        val p1 = PriorityGate.Page("c", 1)
+        gate.expectRender(p0)
+        val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { "done" } }
+        delay(30)
+        assertFalse(heavy.isCompleted)
+        gate.cancelExpectedRender(p0)
+        assertEquals("done", heavy.await())
+    }
+
+    @Test
     fun `busy state is visible while a model owns the gate`() = runBlocking {
         val gate = PriorityGate()
         val hold = CompletableDeferred<Unit>()
@@ -105,5 +141,4 @@ class PriorityGateTest {
         work.await()
         assertFalse(gate.isBusy())
     }
-
 }

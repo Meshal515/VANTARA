@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERF_LIMIT, clearPerf, formatReport, readPerf, recordPerf, stopwatch, summarize } from './translate-perf.js';
+import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, stopwatch, summarize } from './translate-perf.js';
 
 const memory = () => {
   const m = new Map();
@@ -28,6 +28,22 @@ describe('translation performance log (on the phone)', () => {
     });
     expect(clock.stages).toEqual({ hash: 5, luna: 100 });
     expect(clock.total()).toBe(105);
+  });
+
+  it('reports fast, mixed and heavy pages without calling mixed pages fast', () => {
+    expect(localRoute({ fastFlatRegions: 3 })).toBe('fast');
+    expect(localRoute({ fastFlatRegions: 1, glyphTiles: 2, bubbleTiles: 2 })).toBe('mixed');
+    expect(localRoute({ glyphTiles: 2, bubbleTiles: 2 })).toBe('heavy');
+
+    const entries = [
+      { at: 1000, pageIndex: 0, from: 'model', textless: false, total: 1000, stages: {}, native: { analyze: { counts: { fastFlatRegions: 2, fastFlatHit: 1 } } } },
+      { at: 2000, pageIndex: 1, from: 'model', textless: false, total: 2000, stages: {}, native: { analyze: { counts: { fastFlatRegions: 1, fastFlatHit: 1, heavyRegions: 2, glyphTiles: 1, bubbleTiles: 1, renderBarrierWait: 1 } } } },
+      { at: 3000, pageIndex: 2, from: 'model', textless: false, total: 3000, stages: {}, native: { analyze: { counts: { heavyRegions: 2, glyphTiles: 1, bubbleTiles: 1 } } } },
+    ];
+    const report = formatReport(entries);
+    expect(report).toContain('سريع بالكامل 1 صفحة · مختلط 1 صفحة · ثقيل بالكامل 1 صفحة');
+    expect(report).toContain('مسار مختلط');
+    expect(report).toContain('أولوية العرض: 1 صفحة');
   });
 
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {

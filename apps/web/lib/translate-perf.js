@@ -139,6 +139,16 @@ export function summarize(entries) {
 
 const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
 
+/** لا نسمي الصفحة «سريعة» لمجرد أن فيها Region سريع إذا شغلت CTD/BubbleSeg أيضًا. */
+export function localRoute(counts = {}) {
+  const fast = (counts.fastFlatRegions ?? 0) > 0 || (counts.fastFlatHit ?? 0) > 0;
+  const heavy = (counts.heavyRegions ?? 0) > 0 || (counts.glyphTiles ?? 0) > 0 || (counts.bubbleTiles ?? 0) > 0;
+  if (fast && heavy) return 'mixed';
+  if (fast) return 'fast';
+  if (heavy) return 'heavy';
+  return 'light';
+}
+
 /** تقرير نصي يُنسخ ويُرسل كما هو. */
 /** سطر لكل إعداد محرك: زمن الحروف والفقاعات، ومطابقة ناتجه للإعداد الحالي. */
 export function engineLines(run) {
@@ -165,10 +175,15 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
-  const analyzed = entries.filter((e) => e.native?.analyze?.counts);
-  const fastPages = analyzed.filter((e) => (e.native.analyze.counts?.fastFlatHit ?? 0) > 0).length;
-  const heavyPages = analyzed.filter((e) => !e.textless && (e.native.analyze.counts?.fastFlatHit ?? 0) === 0 && ((e.native.analyze.counts?.glyphTiles ?? 0) > 0 || (e.native.analyze.counts?.bubbleTiles ?? 0) > 0)).length;
-  if (fastPages || heavyPages) lines.push(`المسار المحلي: سريع ${fastPages} صفحة · ثقيل ${heavyPages} صفحة.`);
+  const analyzed = entries.filter((e) => e.native?.analyze?.counts && !e.textless);
+  const fastPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'fast').length;
+  const mixedPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'mixed').length;
+  const heavyPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'heavy').length;
+  if (fastPages || mixedPages || heavyPages) {
+    lines.push(`المسار المحلي: سريع بالكامل ${fastPages} صفحة · مختلط ${mixedPages} صفحة · ثقيل بالكامل ${heavyPages} صفحة.`);
+  }
+  const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
+  if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
 
   const rendered = entries.filter((e) => e.native?.render?.counts);
   const sumRender = (k) => rendered.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
@@ -205,7 +220,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const r = e.native?.render?.stages ?? {};
       const queue = (a.queue ?? 0) + (r.queue ?? 0);
       const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
-      const route = (ac.fastFlatHit ?? 0) > 0 ? 'سريع' : ((ac.glyphTiles ?? 0) > 0 || (ac.bubbleTiles ?? 0) > 0) ? 'ثقيل' : 'خفيف';
+      const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
       lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
     }
   }

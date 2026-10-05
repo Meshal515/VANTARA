@@ -99,6 +99,13 @@ class TranslationPlugin : Plugin() {
         gate.focus(if (chapter != null && index != null) PriorityGate.Page(chapter, index) else null)
         call.resolve()
     }
+
+    /** Luna لم تُنتج Render لهذه الصفحة؛ حرّر حجزها حتى لا يتوقف Analyze التالي. */
+    @PluginMethod
+    fun releasePageReservation(call: PluginCall) {
+        gate.cancelExpectedRender(pageOf(call))
+        call.resolve()
+    }
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
@@ -188,7 +195,16 @@ class TranslationPlugin : Plugin() {
                     if (done != null) {
                         done to ""
                     } else {
-                        gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) { pipeline.finishForLuna(file, perf) }
+                        gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) {
+                            val finished = pipeline.finishForLuna(file, perf)
+                            // قبل تحرير بوابة المعالج نحجز الدور للـRender المتوقع.
+                            // بهذا لا تبدأ صفحة لاحقة CTD/BubbleSeg أثناء 10–20ث انتظار Luna.
+                            if (high(call) && Pipeline.needsLuna(finished.first)) {
+                                gate.expectRender(page)
+                                perf.count("renderReserved")
+                            }
+                            finished
+                        }
                     }
                 }
                 val regions = JSArray()
