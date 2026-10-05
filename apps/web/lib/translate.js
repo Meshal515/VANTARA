@@ -20,7 +20,7 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeTranslationAvailable, observeRefinements, renderPage } from './translation-native.js';
+import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
 
@@ -445,48 +445,60 @@ async function translateOnDevice(deps, hash, meta, clock) {
   const textless = !(analysis.regions ?? []).length;
   if (!readable.length) return { incomplete: !textless, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
-  // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
-  // الخادم يردّ need_image (أو bad_image الأقدم) لصفحة جديدة، فتُرسل بمصغّرتها
-  const bodyFor = data => ({
-    ...meta, pageHash: hash,
-    image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
-    regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
-  });
-  const ask = data => data
-    ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: priorityOf(deps) === 'high', signal: deps.signal })
-    : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
-  let res = await clock.time('cacheProbe', () => ask(''));
-  if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
-    res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
-  }
-  if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
-  const plan = renderPlan(analysis, res.body);
-  let incomplete = unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
-  if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
-  let rendered;
+  // analyzePage في القارئ يحجز المسار الثقيل لهذه الصفحة حتى يعود Luna ثم يبدأ
+  // Render. إذا لم نصل إلى Render لأي سبب يجب تحرير الحجز في finally.
+  let renderCompleted = false;
   try {
-    rendered = await clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
-  } catch {
-    return { error: 'device_failed', native };
+    // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
+    // الخادم يردّ need_image (أو bad_image الأقدم) لصفحة جديدة، فتُرسل بمصغّرتها
+    const bodyFor = data => ({
+      ...meta, pageHash: hash,
+      image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
+      regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
+    });
+    const ask = data => data
+      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: priorityOf(deps) === 'high', signal: deps.signal })
+      : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
+    let res = await clock.time('cacheProbe', () => ask(''));
+    if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
+      res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
+    }
+    if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
+    const plan = renderPlan(analysis, res.body);
+    let incomplete = unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
+    if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
+    let rendered;
+    try {
+      rendered = await clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+      renderCompleted = true;
+    } catch {
+      return { error: 'device_failed', native };
+    }
+    native.render = rendered.perf ?? null;
+    // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
+    // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
+    const drawn = Number.isFinite(rendered.translated) ? rendered.translated : plan.length;
+    incomplete ||= drawn < plan.length;
+    if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
+    const convert = globalThis.Capacitor?.convertFileSrc;
+    return {
+      image: convert ? convert(rendered.path) : rendered.path,
+      refinementPath: rendered.perf?.counts?.refinementPending ? rendered.path : null,
+      regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
+      translated: drawn,
+      engine: res.body?.engine ?? 'device',
+      cached: Boolean(res.body?.cached),
+      incomplete,
+      error: null,
+      native,
+    };
+  } finally {
+    // Render نفسه يستهلك الحجز ذريًا داخل PriorityGate. هذا النداء مهم فقط
+    // لمسارات Luna error / no-plan / exception حتى لا تتوقف بقية الصفحات.
+    if (!renderCompleted && priorityOf(deps) === 'high') {
+      try { await releasePageReservation(meta.chapterKey, meta.pageIndex); } catch { /* APK قديم أو إغلاق الصفحة */ }
+    }
   }
-  native.render = rendered.perf ?? null;
-  // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
-  // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
-  const drawn = Number.isFinite(rendered.translated) ? rendered.translated : plan.length;
-  incomplete ||= drawn < plan.length;
-  if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
-  const convert = globalThis.Capacitor?.convertFileSrc;
-  return {
-    image: convert ? convert(rendered.path) : rendered.path,
-    refinementPath: rendered.perf?.counts?.refinementPending ? rendered.path : null,
-    regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
-    translated: drawn,
-    engine: res.body?.engine ?? 'device',
-    cached: Boolean(res.body?.cached),
-    incomplete,
-    error: null,
-    native,
-  };
 }
 
 /**
