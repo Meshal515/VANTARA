@@ -5,13 +5,15 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 class InferenceLaneTest {
- @Test fun `heavy inference serializes while detector lane stays independent`() {
+ @Test fun `detector cannot oversubscribe CPU while heavy inference owns the compute lane`() {
   val lanes=InferenceLanes();val entered=CountDownLatch(1);val release=CountDownLatch(1);val detected=CountDownLatch(1);val other=CountDownLatch(1)
-  val a=thread {lanes.run(true) {entered.countDown();release.await()}}
+  val a=thread {lanes.run(InferenceWork.HEAVY) {entered.countDown();release.await()}}
   assertTrue(entered.await(1,TimeUnit.SECONDS))
-  val b=thread {lanes.run(true) {other.countDown()}}
-  val c=thread {lanes.run(false) {detected.countDown()}}
-  assertTrue(detected.await(1,TimeUnit.SECONDS));assertEquals(1,other.count);release.countDown();a.join();b.join();c.join();assertEquals(0,other.count)
+  val b=thread {lanes.run(InferenceWork.HEAVY) {other.countDown()}}
+  val c=thread {lanes.run(InferenceWork.DETECT) {detected.countDown()}}
+  assertFalse(detected.await(100,TimeUnit.MILLISECONDS));assertEquals(1,other.count)
+  release.countDown();a.join();b.join();c.join()
+  assertEquals(0,other.count);assertEquals(0,detected.count)
  }
  @Test fun `missing text confirmation remains independent while a heavy inference is held`() {
   val lanes=InferenceLanes();val pool=java.util.concurrent.Executors.newFixedThreadPool(2)
