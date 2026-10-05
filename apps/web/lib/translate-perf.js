@@ -145,6 +145,7 @@ export function engineLines(run) {
   if (!run?.engines?.length) return [];
   const lines = [`إعدادات CTD والفقاعات (${run.cores} أنوية، حرارة ${run.thermal}):`];
   for (const e of run.engines) {
+    if (e.error) { lines.push(`  ${e.name}: تعذر القياس (${e.error})؛ المحرك الحالي محفوظ`); continue; }
     const same = e.glyphDiff === 0 && e.bubblesSame ? 'مطابق' : `مختلف: ${e.glyphDiff} بكسل حروف من ${e.glyphPixels}${e.bubblesSame ? '' : '، فقاعات مختلفة'}`;
     lines.push(`  ${e.name}: حروف ${sec(e.glyphsMs)} · فقاعات ${sec(e.bubblesMs)} · تحميل ${sec(e.loadMs)} · ${same}`);
   }
@@ -235,3 +236,33 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
 }
 
 export const totalOf = (perf) => Object.entries(perf?.stages ?? {}).reduce((a, [k, v]) => (k === 'load' ? a : a + v), 0);
+
+/** Complete chapter evidence: accepted output persisted, never just analysis or summed overlapping work. */
+export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResults = [], device = null, environment = {} }) {
+  const count = Number.isInteger(expectedPages) && expectedPages > 0 ? expectedPages : 0;
+  const pages = new Map();
+  for (const page of pageResults) {
+    if (!Number.isInteger(page?.pageIndex) || page.pageIndex < 0 || page.pageIndex >= count) continue;
+    const previous = pages.get(page.pageIndex);
+    // A retry failure must not erase already accepted, saved output.
+    if (!previous || !(previous.accepted && previous.saved && !previous.error)) pages.set(page.pageIndex, page);
+  }
+  const accepted = [...pages.values()].filter(p => p.accepted === true && p.saved === true && !p.error && typeof p.hash === 'string' && p.hash.length);
+  const completed = accepted.length;
+  const wallMs = Number.isFinite(endedAt - startedAt) ? Math.round(endedAt - startedAt) : null;
+  const cachePages = accepted.filter(p => ['cache', 'device', 'friends'].includes(p.from)).length;
+  const timingValid = Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt && accepted.every(p => Number.isFinite(p.at) && p.at >= startedAt && p.at <= endedAt);
+  const proven = timingValid && device?.physical === true && Boolean(device.model) && environment.evidence === 'device' && ['warm', 'cold'].includes(environment.models) && environment.translationCache === 'fresh' && Boolean(environment.images);
+  const stages = {};
+  const values = {};
+  for (const p of accepted) for (const [name, ms] of Object.entries(p.stages ?? {})) {
+    if (Number.isFinite(ms) && ms >= 0) (values[name] ??= []).push(ms);
+  }
+  const percentile = (xs, q) => xs[Math.max(0, Math.ceil(xs.length * q) - 1)];
+  for (const [name, xs] of Object.entries(values)) {
+    xs.sort((a, b) => a - b);
+    stages[name] = { p50: percentile(xs, 0.5), p95: percentile(xs, 0.95) };
+  }
+  const target = !count || completed !== count ? 'incomplete' : cachePages === count ? 'cache-only' : !proven || cachePages > 0 ? 'UNVERIFIED' : count !== 100 ? 'not-target-chapter' : wallMs <= 120000 ? 'met' : 'not-met';
+  return { expectedPages: count, completed, failed: count - completed, wallMs, cachePages, stages, target, device, environment };
+}

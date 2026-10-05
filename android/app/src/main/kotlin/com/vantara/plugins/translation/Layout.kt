@@ -4,6 +4,14 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.text.TextPaint
+import android.text.StaticLayout
+import android.text.SpannableString
+import android.text.Layout
+import android.text.TextDirectionHeuristics
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 
 /** تخطيط نص عربي: الحجم والأسطر ومركز كل سطر وقاعدته وحدود الكتلة. */
 class TextLayout(val size: Float, val lines: List<String>, val centers: List<FloatArray>, val bounds: Box, val lineBounds: List<Box>)
@@ -14,11 +22,11 @@ class TextLayout(val size: Float, val lines: List<String>, val centers: List<Flo
  * حجم يدخل. القياس والرسم بـ`Paint` أندرويد: تشكيل العربي والاتجاه من النظام
  * نفسه (HarfBuzz/ICU داخل Minikin)، بخط Baloo Bhaijaan 2 المرفق.
  */
-class ArabicLayout(private val typeface: Typeface) {
+class ArabicLayout(private val typeface: Typeface, bold: Boolean = false) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = this@ArabicLayout.typeface
         textAlign = Paint.Align.CENTER
-        isFakeBoldText = false
+        isFakeBoldText = bold
     }
     private val minSize = 12f
     private val lineSpacing = 1.08f
@@ -185,10 +193,11 @@ class ArabicLayout(private val typeface: Typeface) {
     }
 
     /** يرسم التخطيط على الـBitmap: لون الحبر الأصلي، وحدّ مضاد فوق الرسم. */
-    fun draw(canvas: Canvas, layout: TextLayout, inkLight: Boolean, onArt: Boolean) {
+    fun draw(canvas: Canvas, layout: TextLayout, inkLight: Boolean, onArt: Boolean, lettering: LetteringStyle = LetteringStyle()) {
         val fill = Paint(paint).apply {
             textSize = layout.size
-            color = if (inkLight) 0xFFFFFFFF.toInt() else 0xFF101010.toInt()
+            isFakeBoldText = lettering.intensity in setOf("strong","extreme")
+            color = lettering.color(inkLight)
             style = Paint.Style.FILL
         }
         val stroke = if (onArt) Paint(paint).apply {
@@ -201,7 +210,23 @@ class ArabicLayout(private val typeface: Typeface) {
         for (k in layout.lines.indices) {
             val (cx, base) = layout.centers[k].let { it[0] to it[1] }
             stroke?.let { canvas.drawText(layout.lines[k], cx, base, it) }
-            canvas.drawText(layout.lines[k], cx, base, fill)
+            if (lettering.emphasis.isEmpty()) {
+                canvas.drawText(layout.lines[k], cx, base, fill)
+            } else {
+                // Shape a complete RTL line once. Spans never split a joining Arabic word into drawText calls.
+                val text = SpannableString(layout.lines[k])
+                val validated = LetteringStyle.normalize(lettering.role,lettering.ink,lettering.intensity,lettering.emphasis,text.toString())
+                for (phrase in validated.emphasis) for (match in Regex(Regex.escape(phrase)).findAll(text)) {
+                    text.setSpan(StyleSpan(Typeface.BOLD),match.range.first,match.range.last+1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    text.setSpan(ForegroundColorSpan(lettering.color(inkLight)),match.range.first,match.range.last+1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                val textPaint = TextPaint(fill).apply { textAlign = Paint.Align.LEFT }
+                val width = kotlin.math.ceil(fill.measureText(text.toString()) + layout.size * 2).toInt()
+                val shaped = StaticLayout.Builder.obtain(text,0,text.length,textPaint,width)
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER).setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_RTL)
+                    .setIncludePad(false).setMaxLines(1).build()
+                canvas.save(); canvas.translate(cx-width/2f,base-shaped.getLineBaseline(0)); shaped.draw(canvas); canvas.restore()
+            }
         }
     }
 

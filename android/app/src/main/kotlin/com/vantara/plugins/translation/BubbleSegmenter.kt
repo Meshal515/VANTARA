@@ -11,7 +11,7 @@ data class Bubble(val box: Box, val score: Float, val mask: ByteMask)
  * الخرج: `output0` [1, 37, anchors] (cx,cy,w,h,conf + 32 معاملات) و`output1`
  * [1, 32, mh, mw] بروتوتايبات القناع. القناع = sigmoid(coef · proto).
  */
-class BubbleSegmenter(file: File, engine: Ort.Engine? = null) {
+class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
     private val session: OrtSession = Ort.open(file, engine = engine)
     var conf = 0.35f
     var iouThr = 0.5f
@@ -23,7 +23,7 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) {
         val nh = Math.round(img.height * r)
         val input = Ort.tensor(chw, 1, 3, size.toLong(), size.toLong())
         val out = ArrayList<Bubble>()
-        session.run(mapOf("images" to input)).use { res ->
+        Ort.run(session, mapOf("images" to input)).use { res ->
             @Suppress("UNCHECKED_CAST")
             val o0 = (res[0].value as Array<Array<FloatArray>>)[0] // 37 × anchors
             @Suppress("UNCHECKED_CAST")
@@ -75,7 +75,7 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) {
                 out.add(Bubble(Box(b[0], b[1], b[2], b[3]), scores[k], one))
             }
         }
-        input.close()
+
         return out
     }
 
@@ -110,5 +110,22 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) {
         return kept
     }
 
-    fun close() = session.close()
+    /** Candidate ROI masks mapped back to original coordinates, measured against the validated path. */
+    fun segmentRoi(img: RgbImage, crops: List<Box>): List<Bubble> {
+        val out=ArrayList<Bubble>();var totalTiles=0
+        for(box in crops) {
+            val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
+            val found=segment(crop)
+            totalTiles+=tiles
+            for(b in found) {
+                val mask=ByteMask(img.width,img.height)
+                for(y in 0 until crop.height) System.arraycopy(b.mask.data,y*crop.width,mask.data,(box.y1+y)*img.width+box.x1,crop.width)
+                out.add(Bubble(Box(b.box.x1+box.x1,b.box.y1+box.y1,b.box.x2+box.x1,b.box.y2+box.y1),b.score,mask))
+            }
+        }
+        tiles=totalTiles
+        return out
+    }
+
+    override fun close() = session.close()
 }

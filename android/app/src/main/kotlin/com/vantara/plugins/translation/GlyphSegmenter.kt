@@ -8,7 +8,7 @@ import java.io.File
  * المدخل 1024×1024 ثابت؛ الصفحة تُقسَّم شرائح مربعة بعرضها، والمتوسط في التداخل.
  * الخرج خريطة احتمال [0,1] بحجم الصورة.
  */
-class GlyphSegmenter(file: File, engine: Ort.Engine? = null) {
+class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
     private val session: OrtSession = Ort.open(file, engine = engine)
     private val size = 1024
 
@@ -35,7 +35,7 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) {
             val nw = Math.round(crop.width * r)
             val nh = Math.round(crop.height * r)
             val input = Ort.tensor(chw, 1, 3, size.toLong(), size.toLong())
-            session.run(mapOf("images" to input)).use { res ->
+            Ort.run(session, mapOf("images" to input)).use { res ->
                 val seg = res.get("seg").get().value
                 @Suppress("UNCHECKED_CAST")
                 val plane = (seg as Array<Array<Array<FloatArray>>>)[0][0] // size × size
@@ -53,11 +53,25 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) {
                     }
                 }
             }
-            input.close()
+
         }
         for (i in acc.indices) if (cnt[i] > 0) acc[i] /= cnt[i]
         return acc
     }
 
-    fun close() = session.close()
+    /** Experimental ROI input; not the same context as full-width tiles, so never silently selected. */
+    fun probabilitiesRoi(img: RgbImage, crops: List<Box>): FloatArray {
+        val out=FloatArray(img.width*img.height)
+        var totalTiles=0
+        for(box in crops) {
+            val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
+            val prob=probabilities(crop)
+            totalTiles+=tiles
+            for(y in 0 until crop.height) for(x in 0 until crop.width) out[(box.y1+y)*img.width+box.x1+x]=prob[y*crop.width+x]
+        }
+        tiles=totalTiles
+        return out
+    }
+
+    override fun close() = session.close()
 }

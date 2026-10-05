@@ -20,7 +20,8 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeTranslationAvailable, renderPage } from './translation-native.js';
+import { analyzePage, nativeTranslationAvailable, observeRefinements, renderPage } from './translation-native.js';
+import { createTextBatcher } from './translate-batch.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
@@ -77,7 +78,7 @@ const MAX_REPAIRS = 3;
  * `services/sync-worker/src/translate.ts` (اختبار يتحقق). ترجمة محفوظة بإصدار
  * أقدم تُعرض فورًا وتُجدَّد في الخلفية حين تزور صفحتها.
  */
-export const TEXT_PROMPT_VERSION = 2;
+export const TEXT_PROMPT_VERSION = 3;
 
 /** محرّك أقدم من التعليمات الحالية؟ (`model:t1`، `model:t1:fast`؛ 'device' = لا نص، لا يُجدَّد). */
 export function staleEngine(engine) {
@@ -258,7 +259,7 @@ export function renderPlan(analysis, reply) {
     const hit = byId.get(r.id);
     if (!hit || typeof hit.arabic !== 'string' || !hit.arabic.trim()) continue;
     if (hit.kind === 'sfx' || hit.kind === 'credit') continue;
-    regions.push({ id: r.id, arabic: hit.arabic.trim(), kind: hit.kind ?? r.kind, source: hit.source ?? r.source });
+    regions.push({ id: r.id, arabic: hit.arabic.trim(), kind: hit.kind ?? r.kind, source: hit.source ?? r.source, ...(hit.lettering ? { lettering: hit.lettering } : {}) });
   }
   return regions;
 }
@@ -301,7 +302,7 @@ async function translatePageNow(deps, src, meta) {
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
-  if (local && typeof local.translated === 'number' && !downgraded) {
+  if (local && typeof local.translated === 'number' && !downgraded && !(deps.via === 'job' && local.incomplete)) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
@@ -316,7 +317,7 @@ async function translatePageNow(deps, src, meta) {
       translated: local.translated,
       engine: local.engine ?? null,
     });
-    return { ...local, hash, cacheKey: found.cacheKey, from: 'device' };
+    return { ...local, hash, cacheKey: found.cacheKey, from: 'device', saved: true };
   }
 
   // الصفحة نفسها من القارئ والترجمة المقدّمة معًا: تُترجم مرة، والثاني ينتظر الأول
@@ -334,6 +335,34 @@ async function translatePageNow(deps, src, meta) {
 /** صفحات تُترجم الآن ببصمتها (للجهاز كله: القارئ والترجمة المقدّمة). */
 const inflight = new Map();
 
+const refinementTargets = new Map();
+const earlyRefinements = new Map();
+const convertedPath = path => globalThis.Capacitor?.convertFileSrc ? globalThis.Capacitor.convertFileSrc(path) : path;
+async function acceptRefinement(event) {
+  const target = refinementTargets.get(event?.previewPath);
+  if (!target) {
+    if (event?.previewPath) {
+      earlyRefinements.set(event.previewPath,event);
+      if (earlyRefinements.size > 32) earlyRefinements.delete(earlyRefinements.keys().next().value);
+    }
+    return;
+  }
+  refinementTargets.delete(event.previewPath);
+  const current = (await readKv(CACHE_PREFIX + target.hash))?.value;
+  if (!current || current.image !== convertedPath(event.previewPath) || current.at !== target.value.at) return;
+  const saved = writePageCache(target.hash,target.meta,{...current,image:convertedPath(event.path)});
+  if ((await saved.written).every(key => typeof key === 'string')) target.deps.onRepaired?.({...saved.stored,hash:target.hash,cacheKey:saved.cacheKey,from:'device',saved:true});
+}
+
+function registerRefinement(deps,hash,meta,result,saved,persisted) {
+  if (persisted && result.refinementPath) {
+    refinementTargets.set(result.refinementPath,{deps,hash,meta,value:saved.stored});
+    if (refinementTargets.size > 32) refinementTargets.delete(refinementTargets.keys().next().value);
+    const event=earlyRefinements.get(result.refinementPath);
+    if (event) { earlyRefinements.delete(result.refinementPath); void acceptRefinement(event); }
+  }
+}
+
 async function translateOnce(deps, src, hash, meta, clock) {
   const result = await translateFresh(deps, src, hash, meta, clock);
   if (result.error) {
@@ -342,6 +371,8 @@ async function translateOnce(deps, src, hash, meta, clock) {
   }
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries: 0 };
   const saved = writePageCache(hash, meta, value);
+  const persisted = (await saved.written).every(key => typeof key === 'string');
+  registerRefinement(deps,hash,meta,result,saved,persisted);
   logPage(deps, meta, hash, clock, {
     from: result.cached ? 'friends' : 'model',
     cacheKey: saved.cacheKey,
@@ -350,8 +381,9 @@ async function translateOnce(deps, src, hash, meta, clock) {
     translated: result.translated,
     engine: result.engine ?? null,
     native: result.native,
+    saved: persisted,
   }, saved.written);
-  return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model' };
+  return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model', saved: persisted, stages: { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages }, ...(deps.via === 'job' && !persisted ? { error: 'storage_failed' } : {}) };
 }
 
 /** سطر في سجل الأداء (الانتظار في الطابور وجلب الصورة يأتيان من القارئ أو المهام). */
@@ -369,8 +401,9 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   );
 }
 
-function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
+async function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  if (nativeTranslationAvailable() && imagePath) await observeRefinements(acceptRefinement);
   return nativeTranslationAvailable() && imagePath ? translateOnDevice({ ...deps, imagePath }, hash, meta, clock) : translateViaServer(deps, src, hash, meta);
 }
 
@@ -385,12 +418,20 @@ async function repairInBackground(deps, src, hash, meta, local) {
   if (result.error || !(result.translated >= (local.translated ?? 0))) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   const saved = writePageCache(hash, meta, value);
-  await saved.written;
+  const persisted=(await saved.written).every(key => typeof key === 'string');
+  if (!persisted) return;
+  registerRefinement(deps,hash,meta,result,saved,persisted);
   deps.onRepaired?.({ ...saved.stored, hash, cacheKey: saved.cacheKey, from: 'model' });
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
 const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low' : 'high');
+
+const textBatchers = new WeakMap();
+function textBatcher(sync) {
+  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body})));
+  return textBatchers.get(sync);
+}
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
@@ -402,27 +443,25 @@ async function translateOnDevice(deps, hash, meta, clock) {
   const native = { analyze: analysis.perf ?? null };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const textless = !(analysis.regions ?? []).length;
-  if (!readable.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
+  if (!readable.length) return { incomplete: !textless, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
   // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
   // الخادم يردّ need_image (أو bad_image الأقدم) لصفحة جديدة، فتُرسل بمصغّرتها
-  const ask = (data) =>
-    deps.sync.translation('/v1/translate/text', {
-      method: 'POST',
-      body: {
-        ...meta,
-        pageHash: hash,
-        image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
-        regions: readable.map((r) => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
-      },
-    });
+  const bodyFor = data => ({
+    ...meta, pageHash: hash,
+    image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
+    regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
+  });
+  const ask = data => data
+    ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: priorityOf(deps) === 'high', signal: deps.signal })
+    : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
   let res = await clock.time('cacheProbe', () => ask(''));
   if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
     res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
   }
   if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
   const plan = renderPlan(analysis, res.body);
-  const incomplete = unansweredIds(readable, res.body).length > 0;
+  let incomplete = unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
   if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   let rendered;
   try {
@@ -434,10 +473,12 @@ async function translateOnDevice(deps, hash, meta, clock) {
   // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
   // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
   const drawn = Number.isFinite(rendered.translated) ? rendered.translated : plan.length;
+  incomplete ||= drawn < plan.length;
   if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
   const convert = globalThis.Capacitor?.convertFileSrc;
   return {
     image: convert ? convert(rendered.path) : rendered.path,
+    refinementPath: rendered.perf?.counts?.refinementPending ? rendered.path : null,
     regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
     translated: drawn,
     engine: res.body?.engine ?? 'device',

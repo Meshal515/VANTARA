@@ -128,3 +128,14 @@ describe('learning from the Arabic edition', () => {
     expect((await handleTranslateLearn(learnReq({ pairs: [{ english: { mediaType: 'text/html', data: 'x' }, arabic: pair(0).arabic }] }), env, A, 0)).status).toBe(400);
   });
 });
+
+
+it('learned character spelling survives a delayed earlier model page', async () => {
+  const {env}=testEnv();
+  const model=(index:number)=>new Request('https://sync.test/v1/translate/text',{method:'POST',body:JSON.stringify({pageHash:hash(String(index)),seriesRef:'ext:the breaker',chapterKey:'ext:the breaker#n:70',pageIndex:index,sourceLang:'en',image:{mediaType:'image/jpeg',data:'AAAA',width:800,height:1200},regions:[{id:'r1',source:'Hello',kind:'speech',box:[1,2,100,100]}]})});
+  const gpt=fakeGpt(()=>({regions:[{id:'r1',source:'Hello',kind:'speech',arabic:'مرحبا',speaker:null}],summary:'',new_terms:[],characters:[{name:'Shioon',arabic:'تخمين',gender:'male'}]}));
+  await handleTranslateText(model(5),env,A,Date.UTC(2026,9,5),{fetch:gpt.fetch});
+  await handleTranslateLearn(learnReq(),env,A,Date.UTC(2026,9,5),{fetch:fakeGpt(()=>lesson).fetch});
+  await handleTranslateText(model(0),env,A,Date.UTC(2026,9,5),{fetch:gpt.fetch});
+  expect(await env.DB.prepare("SELECT arabic,origin_chapter_key,origin_page_index FROM translation_characters WHERE name='Shioon'").first()).toEqual({arabic:'شيون',origin_chapter_key:null,origin_page_index:null});
+});

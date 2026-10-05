@@ -10,6 +10,8 @@
  * جاهزًا. خدمة أندرويد الأمامية تُبقي التطبيق حيًّا والشاشة مطفأة وتعرض التقدّم.
  */
 
+import { chapterBenchmark } from './translate-perf.js';
+
 const JOBS_KEY = 'vantara.translate.jobs';
 const PACE_KEY = 'vantara.translate.pace';
 /**
@@ -18,7 +20,7 @@ const PACE_KEY = 'vantara.translate.pace';
  */
 export const JOB_CONCURRENCY = 4;
 /** أخطاء لا تُحل بالانتظار: توقف الطابور وتنتظرك. */
-export const BLOCKING = new Set(['translation_locked', 'models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit']);
+export const BLOCKING = new Set(['translation_locked', 'models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit', 'storage_failed']);
 /** أخطاء عابرة: تُعاد بعد مهلة. */
 const TRANSIENT = new Set(['offline', 'busy', 'upstream', 'unauthorized', 'http_0', 'http_401', 'http_502', 'http_503', 'too_long', 'bad_output', 'device_failed']);
 const MAX_PAGE_TRIES = 4;
@@ -235,6 +237,7 @@ export function createJobRunner(deps) {
   async function translateOne(job, c, p) {
     const ch = job.chapters[c];
     const started = now();
+    ch.startedAt ??= started;
     const list = await pagesOf(job, c);
     const image = await engine.pageImage(ch.row.sourceId, list[p]);
     const result = await translatePage(
@@ -252,6 +255,11 @@ export function createJobRunner(deps) {
       },
     );
     if (result?.error) return result.error;
+    if (!result || result.incomplete) return 'incomplete';
+    if (result.saved === false) return 'storage_failed';
+    ch.pageResults ??= {};
+    ch.pageResults[p] = { pageIndex: p, hash: result.hash ?? '', accepted: true, saved: true, from: result.from, at: now(), stages: result.stages ?? {} };
+    ch.benchmark = chapterBenchmark({ startedAt: ch.startedAt, endedAt: now(), expectedPages: ch.pages, pageResults: Object.values(ch.pageResults), device: deps.device, environment: deps.environment });
     if (!ch.done.includes(p)) ch.done.push(p);
     if (result.from !== 'device') recordPace(job.mode, now() - started, storage);
     return null;
@@ -413,6 +421,7 @@ export function createJobRunner(deps) {
 }
 
 export const BLOCK_TEXT = {
+  storage_failed: 'تعذر حفظ الصفحات على الجهاز. أفرغ مساحة ثم استأنف من نفس الصفحة.',
   models_missing: 'ملفات الترجمة مو منزّلة. حمّلها من الإعدادات ← الترجمة',
   device_only: 'الترجمة تشتغل في تطبيق أندرويد فقط',
   translation_locked: 'الترجمة قيد التطوير',

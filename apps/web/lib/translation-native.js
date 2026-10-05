@@ -145,3 +145,21 @@ export function formatBytes(bytes) {
   if (n >= 1024) return `${Math.round(n / 1024)} كيلوبايت`;
   return `${n} بايت`;
 }
+
+
+const refinementListeners = new WeakMap();
+/** One listener per native plugin, shared across pages; older APKs safely omit this event. */
+export async function observeRefinements(callback) {
+  const p = plugin();
+  if (!p?.addListener) return;
+  let entry = refinementListeners.get(p);
+  if (!entry) {
+    entry = { callbacks: new Set(), attached: null };
+    refinementListeners.set(p,entry);
+    entry.attached = Promise.resolve(p.addListener('refinementReady',event => {
+      for (const cb of entry.callbacks) void Promise.resolve(cb(event)).catch(() => {});
+    })).catch(() => { refinementListeners.delete(p); });
+  }
+  entry.callbacks.add(callback);
+  await entry.attached;
+}
