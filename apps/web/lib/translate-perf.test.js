@@ -192,3 +192,18 @@ describe('truthful per-run translation reports', () => {
     expect(report).toContain('native_bridge_failed×1');
   });
 });
+it('shows model-call counts, thermal state and heap beside slow page timings',()=> {
+  const entry={runId:'diag',at:1000,from:'model',textless:false,incomplete:false,total:1000,pageIndex:0,stages:{luna:100},native:{
+    route:{stages:{detect:200},counts:{detectTiles:2},thermal:1,heapMb:111},
+    analyze:{stages:{glyphs:300},counts:{heavyRegions:1,glyphTiles:3,bubbleTiles:2,heavyRoiCrops:2,coverageCandidates:4,coveragePending:3},thermal:2,heapMb:222},
+    render:{stages:{erase:50},counts:{translated:3},thermal:2,heapMb:230}
+  }};
+  const report=formatReport([entry]);
+  expect(report).toContain('قطع كشف 2');
+  expect(report).toContain('CTD 3');
+  expect(report).toContain('فقاعات 2');
+  expect(report).toContain('ROI 2');
+  expect(report).toContain('تغطية 3/4');
+  expect(report).toContain('حرارة 2');
+  expect(report).toContain('ذاكرة 230MB');
+});
