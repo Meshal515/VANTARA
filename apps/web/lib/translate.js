@@ -22,6 +22,7 @@
 import { readKv, writeKv } from './chapter-store.js';
 import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
+import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
@@ -464,7 +465,7 @@ async function repairInBackground(deps, src, hash, meta, local) {
   const clock = stopwatch();
   const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
   logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
-  if (result.error || !(result.translated >= (local.translated ?? 0))) return;
+  if (!canAcceptTranslationRepair(local, result)) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   const saved = writePageCache(hash, meta, value);
   const persisted=(await saved.written).every(key => typeof key === 'string');

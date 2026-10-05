@@ -44,3 +44,19 @@ it('background repair registers its refinement and preserves the repaired URL',a
   expect(test.repaired).toHaveLength(2);
   expect(test.repaired.at(-1).image).toBe('file:/refined.webp');
 });
+
+it('accepts a complete merged repair without losing either previous source phrase',async()=> {
+  const test=setup();
+  const meta={seriesRef:'work',sourceId:'s',chapterKey:'work#1',pageIndex:0};
+  await translatePage(test.deps,'file:/source.jpg',meta);
+  for(const row of kv.values())row.value={...row.value,at:0,incomplete:true,translated:2,regions:[
+    {id:'old1',source:'HELLO',arabic:'مرحبًا',status:'pending',kind:'speech',box:[1,2,2,4]},
+    {id:'old2',source:'WORLD',arabic:'يا عالم',status:'pending',kind:'speech',box:[2,2,3,4]},
+  ]};
+  globalThis.Capacitor.Plugins.Translation.analyzePage=async()=>({width:800,height:1200,thumbnail:'AAAA',regions:[{id:'r1',source:'HELLO WORLD',kind:'speech',status:'pending',box:[1,2,3,4]}]});
+  test.deps.sync.translation=async()=>({status:200,body:{engine:'luna:t4',regions:[{id:'r1',source:'HELLO WORLD',kind:'speech',arabic:'مرحبًا يا عالم'}]}});
+  await translatePage(test.deps,'file:/source.jpg',meta);
+  for(let i=0;i<80;i++)await Promise.resolve();
+  expect(test.repaired).toHaveLength(1);
+  expect(test.repaired[0]).toMatchObject({translated:1,incomplete:false});
+});

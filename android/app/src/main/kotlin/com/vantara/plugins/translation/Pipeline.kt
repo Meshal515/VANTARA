@@ -528,14 +528,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
 
     /** الصفحات المترجمة فوق ٢٫٥ جيجا: الأقدم كتابةً يُحذف حتى ٢ جيجا (يُترجم من جديد إن عدت له). */
     private fun prune(outDir: File, protectedHash:String) {
-        val files = outDir.listFiles { f -> f.name.endsWith(".webp") }?.sortedBy { it.lastModified() } ?: return
-        var total = files.sumOf { it.length() }
-        if (total <= OUT_CAP) return
-        for (f in files) {
-            if (total <= OUT_KEEP) break
-            if(f.name.startsWith("$protectedHash-")) continue
-            if(f.delete()) total -= f.length()
-        }
+        PagePublisher.prune(outDir,protectedHash,OUT_CAP,OUT_KEEP)
     }
 
     private fun readResidual(img:RgbImage,r:Region,perf:Perf):OcrResult {

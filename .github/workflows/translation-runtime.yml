@@ -58,15 +58,18 @@ jobs:
         run: |
           set -euo pipefail
           pkg='system-images;android-30;default;x86_64'
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          sdk_manager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdk_manager"
           log="$RUNNER_TEMP/sdkmanager-system-image.log"
           for attempt in 1 2 3; do
-            if sdkmanager --install "$pkg" >"$log" 2>&1; then
+            if "$sdk_manager" --install "$pkg" >"$log" 2>&1; then
               exit 0
             fi
             echo "::warning::sdkmanager failed on attempt $attempt"
             cat "$log"
-            rm -rf "$ANDROID_SDK_ROOT/system-images/android-30/default/x86_64" || true
-            find "$ANDROID_SDK_ROOT" -type d -name '.installer' -prune -exec rm -rf {} + 2>/dev/null || true
+            rm -rf "$sdk_root/system-images/android-30/default/x86_64" || true
+            find "$sdk_root" -type d -name '.installer' -prune -exec rm -rf {} + 2>/dev/null || true
             sleep $((attempt * 5))
           done
           cat "$log"

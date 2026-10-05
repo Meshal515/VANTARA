@@ -4,10 +4,10 @@ This record distinguishes executable regressions from real Android/model evidenc
 
 ## Completed local checks
 
-- Web + sync-worker: **151 files, 1219 tests passed**. Includes real SQLite worker-context regression with controlled Luna response: page 99 terms/characters cannot enter page 3 of the same chapter.
+- Web + sync-worker: **152 files, 1254 tests passed**. Includes real SQLite worker-context regression with controlled Luna response: page 99 terms/characters cannot enter page 3 of the same chapter.
 - Domain, DB, API, web-fetcher: **36 files, 468 tests passed**.
 - Repository safety: **54 passed**; service-worker cache digest recomputed from actual shell contents.
-- Native app JVM suite: **305 tests, 0 failures/errors, 2 skipped** (303 passed). Includes live anchor ordering, retained-output publication, cumulative erasure, unreadable shared bubbles, propagation through multiple overlap/sibling groups, retained glyphs beyond detector boxes, and expiration while another heavy owner still holds its lock.
+- Native app JVM suite: **307 tests, 0 failures/errors, 2 skipped** (305 passed). Includes live anchor ordering, retained-output publication, cumulative erasure, unreadable shared bubbles, propagation through multiple overlap/sibling groups, retained glyphs beyond detector boxes, and expiration while another heavy owner still holds its lock.
 - Debug APK and app instrumentation APK built successfully for x86_64 emulator review. The x86_64 override is a temporary machine-local Gradle init script, not a product ABI change.
 - sync-worker TypeScript: passed.
 - 20 pinned OFL fonts: original hashes/notices, Arabic cmap, shaping tables passed; this does not prove glyph appearance on a physical phone.
@@ -30,6 +30,10 @@ Local Android35 software-emulator service crashes and the very slow Android30 so
 ## Whole-holder rescue candidate
 
 Three focused JVM regressions were observed failing against stale-text-box rescue and passing against the explicit-holder repair: far missed glyphs reach assembly, a1200px holder is covered by tiles≤1024, and one holder coalesces duplicate rescue requests while free text keeps its scope. The complete app JVM suite and both APK builds pass locally.
+
+Additional cache regressions reproduced post-delete file-size accounting failure and pass with pre-delete size capture. The original cache cap/keep budgets remain unchanged. Repair admission has34 focused tests plus a reader integration regression:2old regions→1complete merged output is accepted only with valid geometry and disjoint source-word coverage. Missing words, incomplete output, malformed evidence and repeated-text double counting are rejected.
+
+Candidate108d5e's runtime workflow failed before model execution because `sdkmanager` was absent from PATH. The next workflow uses the hosted SDK executable's explicit path; it still needs a successful run and image audit before merge.
 
 A seventh Android instrumentation test now constructs a1250px-tall holder with English lines separated by880px, injects the stale upper-line analysis, requires actual pinned-model OCR to recover both lines and accepted Arabic render/save. Its final workflow result and actual `source-rescue.png` / `rendered-rescue.png` must be checked before merging. See this branch's [PR153](https://github.com/Meshal515/VANTARA/pull/153) for the final runtime/image evidence; this document does not infer a pass from compilation.
 
