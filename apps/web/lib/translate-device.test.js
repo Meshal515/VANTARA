@@ -4,7 +4,7 @@ import { readPerf } from './translate-perf.js';
 
 /** الإضافة الأصلية مزيّفة: ما يعيده الجهاز هو ما يقرر ما يُعرض. */
 function device({ drawn }) {
-  const calls = { render: 0 };
+  const calls = { render: 0, release: 0 };
   globalThis.Capacitor = {
     convertFileSrc: (p) => `http://localhost/_capacitor_file_${p}`,
     Plugins: {
@@ -17,6 +17,9 @@ function device({ drawn }) {
           regions: [{ id: 'r1', box: [1, 2, 3, 4], kind: 'speech', source: 'HELLO', status: 'pending' }],
           perf: { stages: { detect: 120, glyphs: 900 }, counts: { detectTiles: 1 } },
         }),
+        releasePageReservation: async () => {
+          calls.release += 1;
+        },
         renderPage: async () => {
           calls.render += 1;
           return { path: '/cache/translated-pages/h-abc.webp', translated: drawn, perf: { stages: { encode: 80 } } };
@@ -110,6 +113,17 @@ describe('weak network: nothing is uploaded that is not needed', () => {
     const result = await translatePage({ ...deps(), sync }, 'http://localhost/_capacitor_file_/cache/pages/p9.jpg', { chapterKey: 'c1', pageIndex: 8 });
     expect(sent).toEqual(['']);
     expect(result.translated).toBe(1);
+  });
+
+  it('releases the native reader reservation when Luna fails before render', async () => {
+    const calls = device({ drawn: 1 });
+    globalThis.fetch = async () => new Response(new Uint8Array([9, 8, 8]));
+    globalThis.localStorage = memory();
+    const sync = { translation: async () => ({ status: 503, body: { error: 'busy' } }) };
+    const result = await translatePage({ ...deps(), sync, via: 'reader' }, 'http://localhost/_capacitor_file_/cache/pages/p8.jpg', { chapterKey: 'c1', pageIndex: 7 });
+    expect(result.error).toBe('busy');
+    expect(calls.render).toBe(0);
+    expect(calls.release).toBe(1);
   });
 
   it('a new page is asked once without the image, then sent with it', async () => {
