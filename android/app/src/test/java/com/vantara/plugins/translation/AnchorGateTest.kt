@@ -29,15 +29,15 @@ class AnchorGateTest {
         delay(20); gate.focus(current)
         assertEquals(42, withTimeout(300) { waiting.await() })
     }
-    @Test fun `current then chapter first and last overtake background analysis`() = runBlocking {
+    @Test fun `current and near forward pages beat missed-behind then far future`() = runBlocking {
         val gate=PriorityGate();val entered=CompletableDeferred<Unit>();val hold=CompletableDeferred<Unit>();val order=arrayListOf<Int>()
         gate.focus(PriorityGate.Page("c",50),100)
         val owner=async(Dispatchers.Default) {gate.run(PriorityGate.ANALYZE_JOB,Perf()) {entered.complete(Unit);runBlocking {hold.await()}}}
         entered.await()
-        val jobs=listOf(51,99,0,50).map {index->async {gate.run(PriorityGate.ANALYZE_JOB,Perf(),PriorityGate.Page("c",index)) {order.add(index)}}}
+        val jobs=listOf(95,49,53,51,50).map {index->async {gate.run(PriorityGate.ANALYZE_JOB,Perf(),PriorityGate.Page("c",index)) {order.add(index)}}}
         delay(20);hold.complete(Unit)
         withTimeout(1000) {(jobs+owner).awaitAll()}
-        assertEquals(listOf(50,0,99,51),order)
+        assertEquals(listOf(50,51,53,49,95),order)
     }
 
 }
