@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { smallerThanOriginal, swapPageImage } from './reader-translate.js';
+import { applyPublishedPage, smallerThanOriginal, swapPageImage } from './reader-translate.js';
 
 const fakeImg = (src, naturalHeight) => ({
   src,
@@ -34,5 +34,46 @@ describe('a saved translation smaller than its page is redone at full size', () 
     expect(smallerThanOriginal({ dataset: {}, naturalHeight: 100 })).toBe(false);
     expect(smallerThanOriginal({ dataset: { originalHeight: '6000' }, naturalHeight: 5990 })).toBe(false);
     expect(smallerThanOriginal({ dataset: { originalHeight: '6000' }, naturalHeight: 4096 })).toBe(true);
+  });
+});
+
+
+describe('background chapter translation publishes into the open reader', () => {
+  it('stores and paints an accepted page immediately instead of waiting for chapter completion', () => {
+    const seg = {
+      row: { chapter: 'c1' },
+      tl: { results: new Map(), failed: new Set([1]) },
+      slots: [{}, {}],
+    };
+    const painted = [];
+    let gates = 0;
+    const accepted = applyPublishedPage({
+      event: { ref: 'ext:x', chapterKey: 'c1', pageIndex: 1, result: { image: 'file:///translated.webp', translated: 2 } },
+      ref: 'ext:x',
+      segs: [seg],
+      keyOf: () => 'c1',
+      paint: (_seg, index) => painted.push(index),
+      updateGate: () => { gates += 1; },
+    });
+    expect(accepted).toBe(true);
+    expect(seg.tl.results.get(1)).toMatchObject({ image: 'file:///translated.webp', translated: 2 });
+    expect(seg.tl.failed.has(1)).toBe(false);
+    expect(painted).toEqual([1]);
+    expect(gates).toBe(1);
+  });
+
+  it('ignores a published page from another work or unloaded chapter', () => {
+    const seg = { row: {}, tl: { results: new Map(), failed: new Set() }, slots: [{}] };
+    const painted = [];
+    expect(applyPublishedPage({
+      event: { ref: 'ext:other', chapterKey: 'c2', pageIndex: 0, result: { image: 'x' } },
+      ref: 'ext:x',
+      segs: [seg],
+      keyOf: () => 'c1',
+      paint: (_seg, index) => painted.push(index),
+      updateGate: () => {},
+    })).toBe(false);
+    expect(painted).toEqual([]);
+    expect(seg.tl.results.size).toBe(0);
   });
 });
