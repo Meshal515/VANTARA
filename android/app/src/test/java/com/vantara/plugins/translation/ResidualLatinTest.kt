@@ -9,4 +9,8 @@ class ResidualLatinTest {
         assertFalse(ResidualLatin.readable("42 i",.99f,"speech"))
         assertFalse(ResidualLatin.readable("مرحبا",.99f,"speech"))
     }
+ @Test fun `short standalone English dialogue cannot pass the gate`() {
+  assertTrue(ResidualLatin.readable("GO",.95f,"speech"))
+  assertTrue(ResidualLatin.readable("NO!",.95f,"speech"))
+ }
 }

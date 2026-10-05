@@ -11,8 +11,8 @@ data class OcrResult(val text: String, val confidence: Float, val lines: List<Oc
  * قراءة النص اللاتيني سطرًا سطرًا: PP-OCRv5 mobile rec (CTC).
  * الأسطر تُشتق من الإسقاط الأفقي لقناع الحروف داخل صندوق النص.
  */
-class LatinOcr(model: File, dict: File) {
-    private val session: OrtSession = Ort.open(model, threads = 2)
+class LatinOcr(model: File, dict: File, private val work:InferenceWork=InferenceWork.HEAVY) {
+    private val session: OrtSession = Ort.open(model, threads = 2, engine=if(work==InferenceWork.CONFIRM) Ort.Engine("confirm-lane",1,2,spin=false) else null)
     private val chars: List<String> = dict.readLines(Charsets.UTF_8)
     private val inputName = session.inputNames.first()
     private val height = 48
@@ -64,7 +64,7 @@ class LatinOcr(model: File, dict: File) {
         val input = Ort.tensor(x, 1, 3, height.toLong(), w.toLong())
         val sb = StringBuilder()
         val confs = ArrayList<Float>()
-        Ort.run(session, mapOf(inputName to input)).use { res ->
+        Ort.run(session, mapOf(inputName to input),work=work).use { res ->
             @Suppress("UNCHECKED_CAST")
             val logits = (res[0].value as Array<Array<FloatArray>>)[0] // T × C
             val c = logits[0].size

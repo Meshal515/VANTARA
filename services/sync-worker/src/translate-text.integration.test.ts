@@ -81,6 +81,17 @@ const answer = {
   summary: 'يوريا تكشف أن الساحر وحده يعرف الحقيقة.',
 };
 
+it('processing the last page first cannot inject future glossary or character context into an earlier page', async () => {
+  const { env } = testEnv();
+  const later = fakeGpt(() => ({ ...answer, new_terms: [{ term: 'FutureTerm', arabic: 'مصطلح النهاية', kind: 'name' }], characters: [{ name: 'FuturePerson', arabic: 'شخصية النهاية', gender: 'male' }] }));
+  expect((await handleTranslateText(req({ pageIndex: 99, pageHash: hash('f') }), env, A, Date.UTC(2026, 9, 5), { fetch: later.fetch })).status).toBe(200);
+  const earlier = fakeGpt(() => answer);
+  expect((await handleTranslateText(req({ pageIndex: 3 }), env, A, Date.UTC(2026, 9, 5), { fetch: earlier.fetch })).status).toBe(200);
+  const payload = JSON.stringify(earlier.calls[0]?.body);
+  expect(payload).not.toContain('FutureTerm');
+  expect(payload).not.toContain('FuturePerson');
+});
+
 describe('translate by region id (vision pipeline)', () => {
   it('sends ids + OCR drafts + the page, returns Arabic by id, drops sfx Arabic and invented ids', async () => {
     const { env } = testEnv();

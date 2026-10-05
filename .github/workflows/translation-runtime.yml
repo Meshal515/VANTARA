@@ -1,0 +1,92 @@
+name: Android translation runtime
+
+on:
+  push:
+    branches: [chatgpt/translation-three-anchor-integration, main]
+    paths:
+      - 'android/app/src/**/translation/**'
+      - 'android/app/src/androidTest/assets/source-*'
+      - 'tools/translation-*'
+      - '.github/workflows/translation-runtime.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: translation-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      # Hosted Ubuntu already supplies Android SDK/licences. setup-android
+      # requests the removed tools package (see existing android-debug workflow).
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: Build app and test APK for emulator, preserving product arm64 ABI
+        run: |
+          cat > "$RUNNER_TEMP/translation-x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/translation-x86.gradle" :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/translation-models
+          key: translation-runtime-models-${{ hashFiles('android/app/src/main/kotlin/com/vantara/plugins/translation/ModelStore.kt') }}
+      - run: python3 tools/translation-download-models.py "$RUNNER_TEMP/translation-models"
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      # android-emulator-runner occasionally hits a corrupted CDN/system-image archive
+      # ("Error on ZipFile unknown archive"). Pre-install the exact image with bounded
+      # retries so one bad SDK download does not make the native-model gate flaky.
+      - name: Preinstall emulator image with retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg='system-images;android-30;default;x86_64'
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          sdk_manager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdk_manager"
+          log="$RUNNER_TEMP/sdkmanager-system-image.log"
+          for attempt in 1 2 3; do
+            if "$sdk_manager" --install "$pkg" >"$log" 2>&1; then
+              exit 0
+            fi
+            echo "::warning::sdkmanager failed on attempt $attempt"
+            cat "$log"
+            rm -rf "$sdk_root/system-images/android-30/default/x86_64" || true
+            find "$sdk_root" -type d -name '.installer' -prune -exec rm -rf {} + 2>/dev/null || true
+            sleep $((attempt * 5))
+          done
+          cat "$log"
+          exit 1
+      - name: Run original models, actual Android fonts/pixels, save and reopen
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/translation-runtime-check.sh "$RUNNER_TEMP/translation-models" runtime-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: translation-runtime-${{ github.sha }}
+          path: |
+            runtime-evidence/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn

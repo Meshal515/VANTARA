@@ -63,4 +63,34 @@ class MixedRegionPlanTest {
         }
         assertTrue(fast.single().glyph.count()>0)
     }
+ @Test fun `uniform free dialogue can skip CTD but textured art cannot`() {
+  val img=RgbImage(220,150,ByteArray(220*150*3){250.toByte()})
+  for(i in 0..4) for(y in 55..75) for(x in 60+i*15..65+i*15) for(c in 0..2) img.data[(y*220+x)*3+c]=20
+  val text=Detection(Box(54,49,135,83),.95f,"text_free")
+  val fast=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(text),allowFlatFree=true)
+  assertEquals(1,fast.fast.size);assertTrue(fast.heavy.isEmpty())
+  for(y in 35..100) for(x in 35..155) if((x+y)%4==0) for(c in 0..2) img.data[(y*220+x)*3+c]=110
+  val hard=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(text),allowFlatFree=true)
+  assertTrue(hard.fast.isEmpty());assertEquals(1,hard.heavy.size)
+ }
+
+    @Test fun `low confidence free dialogue stays translatable instead of becoming sfx`() {
+        val w=180; val h=120
+        val data=ByteArray(w*h*3){245.toByte()}
+        fun dark(x0:Int,y0:Int,x1:Int,y1:Int) {
+            for(y in y0 until y1) for(x in x0 until x1) for(ch in 0..2) data[(y*w+x)*3+ch]=20
+        }
+        dark(55,45,62,68); dark(68,45,75,68); dark(81,45,88,68)
+        val img=RgbImage(w,h,data)
+        val glyph=ByteMask(w,h).apply {
+            fillRect(55,45,62,68); fillRect(68,45,75,68); fillRect(81,45,88,68)
+        }
+        val regions=Regions.assemble(
+            img,img.gray(),"hash",
+            listOf(Detection(Box(50,40,95,75),.45f,"text_free")),
+            emptyList(),glyph
+        )
+        assertEquals(1,regions.size)
+        assertEquals("free",regions.single().kind)
+    }
 }

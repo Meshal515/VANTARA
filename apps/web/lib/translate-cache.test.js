@@ -28,6 +28,15 @@ const saved = (over = {}) => ({
 // بلا جهاز ولا خادم: أي محاولة ترجمة ترجع device_only، فنعرف أنها حاولت
 const noTranslate = {};
 
+it('retains visible v3 output while retrying the corrected chapter context in background', async () => {
+  const hash = await pageHashOf('file://p');
+  kv.set(`tl4:${hash}`, { value: saved({ engine: 'gpt-6-luna:t3' }), at: 1 });
+  const res = await translatePage(noTranslate, 'file://p', {});
+  expect(res.image).toBe('/files/translated-pages/abc.webp');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(kv.get(`tl4:${hash}`)?.value.tries).toBe(1);
+});
+
 describe('pages saved before the cache rename come back without translating again', () => {
   it('a complete page from the old cache is shown as is and moved to the current one', async () => {
     const hash = await pageHashOf('file://p');

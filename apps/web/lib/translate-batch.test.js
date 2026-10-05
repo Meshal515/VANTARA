@@ -37,3 +37,11 @@ describe('bounded background text assembly',()=> {
     pending.splice(0).forEach(f=>f());await Promise.all(work);
   });
 });
+
+it('backs off after 429 and never dispatches queued work during cooldown',async()=> {
+ vi.useFakeTimers();const calls=[];
+ const batch=createTextBatcher(async(path,body)=>{calls.push(body.pages);return {status:429,body:{error:'busy',retryAfterMs:1000}};},{maxInFlight:1,adaptive:true});
+ const first=batch.enqueueTextPage(page(0));await vi.advanceTimersByTimeAsync(200);expect((await first).status).toBe(429);
+ const second=batch.enqueueTextPage(page(1));await vi.advanceTimersByTimeAsync(200);expect(calls).toHaveLength(1);
+ await vi.advanceTimersByTimeAsync(1000);expect((await second).status).toBe(429);expect(calls).toHaveLength(2);vi.useRealTimers();
+});

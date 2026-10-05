@@ -216,10 +216,11 @@ object Cleaner {
         val stats = EraseStats()
         for (r in regions) {
             if (r.status != "translated") continue
-            val mask = r.eraseMask ?: continue
-            if (!mask.any()) continue
+            val mask = r.eraseMask
+            if (mask == null || !mask.any()) { r.status = "skipped:no_erase"; stats.noOpRegions++; continue }
             if (r.cleanMode == "fill") {
-                val color = r.fillColor ?: continue
+                val color = r.fillColor
+                if (color == null) { r.status = "skipped:no_erase"; stats.noOpRegions++; continue }
                 val w = mask.scanWindow() ?: continue
                 stats.fillRegions++
                 var regionChanged = 0
@@ -234,7 +235,7 @@ object Cleaner {
                     }
                     img.data[i] = color[0].toByte(); img.data[i + 1] = color[1].toByte(); img.data[i + 2] = color[2].toByte()
                 }
-                if (regionChanged == 0) stats.noOpRegions++
+                if (regionChanged == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
             } else {
                 val b = mask.bounds() ?: continue
                 stats.inpaintRegions++
@@ -243,7 +244,7 @@ object Cleaner {
                 stats.inpaintMaskPixels += s.maskPixels
                 stats.changedPixels += s.changedPixels
                 stats.inpaintChangedPixels += s.changedPixels
-                if (s.changedPixels == 0) stats.noOpRegions++
+                if (s.changedPixels == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
                 if (s.scaled) stats.scaledInpaintRegions++
             }
         }

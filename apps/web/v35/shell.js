@@ -348,7 +348,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const me = () => sync.user?.userId;
 
   // ترجمة الفصول مقدمًا: الطابور المحفوظ (lib/translate-jobs.js)، يُنشأ مبكرًا فكل من يسأله يجده
-  const translationJobs = createJobRunner({ sync, engine, translatePage, readerQuiet, native: { jobProgress, jobFinished, jobStop } });
+  const translationJobs = createJobRunner({ sync, engine, translatePage, readerQuiet, concurrency:24, lookahead:40, prepareConcurrency:2, native: { jobProgress, jobFinished, jobStop } });
   const jobStatus = new Map(translationJobs.jobs().map((j) => [j.id, j.status]));
   let jobSheetRefresh = null;
   translationJobs.subscribe((list) => {

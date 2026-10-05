@@ -182,3 +182,13 @@ it('partial pages never announce complete and retries preserve successful pages'
   expect(notes.find(([kind]) => kind === 'finished')[1].title).toContain('بنقص');
   expect(runner.jobs()[0].chapters[0].benchmark.target).toBe('incomplete');
 });
+
+it('advance translation probes past occupied dialogue slots to save textless pages',async()=> {
+ let release;const waiting=new Promise(r=>{release=r});
+ const {deps,storage}=fakeDeps({pagesPer:5,translate:async(src)=>src.endsWith('/4')?{translated:0,textless:true,from:'device',saved:true}: (await waiting,{translated:1,from:'model',saved:true})});
+ deps.lookahead=8;deps.prepareTranslation=async(src,meta)=>({src,bypass:meta.pageIndex===4});
+ const runner=createJobRunner(deps);runner.add(createJob({ref:'ext:x',sourceId:'weeb',rows:[row(1)],keyOf}));
+ await until(()=>readJobs(storage)[0]?.chapters[0].done.includes(4));
+ const done=readJobs(storage)[0].chapters[0].done;release();
+ expect(done).toEqual([4]);await until(()=>runner.jobs()[0]?.status==='done');
+});

@@ -38,6 +38,11 @@ import java.util.concurrent.TimeUnit
 class TranslationPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val gate = PriorityGate()
+    private val detectGate = PriorityGate()
+    private val renderGate = PriorityGate()
+    private val routedPages = object:LinkedHashMap<String,Pipeline.Routed>(32,.75f,true) { override fun removeEldestEntry(e:MutableMap.MutableEntry<String,Pipeline.Routed>?)=size>24 }
+    private val snapshots = AnalysisHandoff<Pipeline.Analysis>(24) {it.revision}
+    private val renderPipeline by lazy {Pipeline(context,store,renderOnly=true)}
     private data class Refinement(val path: String, val byId: Map<String, String>, val leave: Set<String>, val page: PriorityGate.Page?, val output: File, val version: Long, val lettering: Map<String, LetteringStyle>)
     private val pendingRefinement = java.util.concurrent.atomic.AtomicReference<Refinement?>()
     private val renderVersion = java.util.concurrent.atomic.AtomicLong()
@@ -56,11 +61,11 @@ class TranslationPlugin : Plugin() {
                     activeRefinement.set(budget)
                     try {
                         val perf = Perf()
-                        gate.run(PriorityGate.BACKGROUND, perf, next.page) {
+                        renderGate.run(PriorityGate.BACKGROUND, perf, next.page) {
                             if (renderVersion.get() != next.version) return@run
                             Ort.withBudget(budget) {
                                 val tempDir = File(context.cacheDir, "translation-refinement")
-                                val (refined, count) = pipeline.render(File(next.path), next.byId, tempDir, perf, next.leave, refinement = true, lettering = next.lettering)
+                                val (refined, count) = renderPipeline.render(File(next.path), next.byId, tempDir, perf, next.leave, refinement = true, lettering = next.lettering)
                                 budget.check()
                                 if (count == next.byId.size && renderVersion.get() == next.version) {
                                     // Same filesystem, atomic replacement; failure never downgrades the accepted preview.
@@ -96,7 +101,9 @@ class TranslationPlugin : Plugin() {
         val chapter = call.getString("chapterKey")
         val index = call.getInt("pageIndex")
         activeRefinement.get()?.cancel()
-        gate.focus(if (chapter != null && index != null) PriorityGate.Page(chapter, index) else null)
+        val page=if (chapter != null && index != null) PriorityGate.Page(chapter,index) else null
+        val count = call.getInt("pageCount")
+        gate.focus(page,count); detectGate.focus(page,count); renderGate.focus(page,count)
         call.resolve()
     }
 
@@ -109,13 +116,8 @@ class TranslationPlugin : Plugin() {
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
-    /**
-     * S23 Ultra وما شابهه (8 أنوية): RT-DETR صغير مستقل للصفحة التي أمام القارئ.
-     * إذا كان CTD/LaMa يشغل المسار الرئيسي، صفحة بلا كتابة لا تنتظر خلفه 8–30ث؛
-     * تفحص بالتوازي وتخرج فورًا. الأجهزة الأقل من 8 أنوية تبقى على المسار الواحد.
-     */
-    private val parallelDetect = Runtime.getRuntime().availableProcessors() >= 8
-    private val probePipeline by lazy { Pipeline(context, store) }
+    /** Detector owner is independent; at most one detector request executes at once. */
+    private val probePipeline by lazy { Pipeline(context, store,InferenceWork.CONFIRM) }
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
     private val outDir by lazy { File(context.filesDir, "translated-pages") }
@@ -162,9 +164,23 @@ class TranslationPlugin : Plugin() {
     fun removeModels(call: PluginCall) {
         scope.launch {
             pipeline.unload()
-            if (parallelDetect) probePipeline.unload()
+            probePipeline.unload(); renderPipeline.unload()
+            synchronized(routedPages) {routedPages.clear()};snapshots.clear()
             withContext(Dispatchers.IO) { store.remove() }
             call.resolve(status())
+        }
+    }
+
+    @PluginMethod
+    fun routePage(call:PluginCall) {
+        val path=call.getString("path") ?: return call.reject("path required")
+        scope.launch {
+            try {
+                val perf=Perf()
+                val a=detectGate.run(PriorityGate.DETECT,perf,pageOf(call)) {probePipeline.route(File(path),perf)}
+                synchronized(routedPages) {routedPages[a.pageHash]=a}
+                call.resolve(JSObject().put("pageHash",a.pageHash).put("width",a.width).put("height",a.height).put("textless",a.textless).put("perf",perfJs(perf,0)))
+            } catch(t:Throwable) {call.reject(t.message ?: "route failed")}
         }
     }
 
@@ -180,33 +196,19 @@ class TranslationPlugin : Plugin() {
                 val thermalWait = coolDown(perf)
                 val page = pageOf(call)
 
-                // أهم حالة للقراءة: أنت على صفحة بلا كلام بينما الصفحة السابقة تشغل
-                // CTD/LaMa. لا معنى لانتظار القفل. على جهاز 8 أنوية نشغّل RT-DETR
-                // الصغير في lane مستقلة؛ إن كانت الصفحة بلا نص ننهيها هنا.
-                val parallelTextless = if (parallelDetect && high(call) && gate.isBusy()) {
-                    perf.time("parallelDetect") { runCatching { probePipeline.detectStage(file, perf) }.getOrNull() }
-                } else null
-
-                val (a, thumb) = if (parallelTextless != null) {
-                    perf.count("parallelTextless")
-                    parallelTextless to ""
-                } else {
-                    val done = gate.run(PriorityGate.DETECT, perf, page) { pipeline.detectStage(file, perf) }
-                    if (done != null) {
-                        done to ""
-                    } else {
-                        gate.run(if (high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB, perf, page) {
-                            val finished = pipeline.finishForLuna(file, perf)
-                            // قبل تحرير بوابة المعالج نحجز الدور للـRender المتوقع.
-                            // بهذا لا تبدأ صفحة لاحقة CTD/BubbleSeg أثناء 10–20ث انتظار Luna.
-                            if (high(call) && Pipeline.needsLuna(finished.first)) {
-                                gate.expectRender(page)
-                                perf.count("renderReserved")
-                            }
-                            finished
-                        }
-                    }
+                val supplied=call.getString("routeHash")?.let { synchronized(routedPages) {routedPages.remove(it)} }
+                    ?.takeIf { it.pageHash==perf.time("routeHash") {ModelStore.sha256Hex(file.readBytes())} }
+                val routed=supplied ?: detectGate.run(PriorityGate.DETECT,perf,page) {probePipeline.route(file,perf)}
+                perf.count(if(supplied!=null) "detectReused" else "detectLane")
+                val (a,thumb)=if(routed.textless) {
+                    perf.count("textless")
+                    Pipeline.Analysis(routed.pageHash,routed.width,routed.height,emptyList(),emptyList()) to ""
+                } else gate.run(if(high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB,perf,page) {
+                    synchronized(snapshots) {snapshots[routed.pageHash]}?.let {pipeline.acceptAnalysis(it)}
+                    pipeline.finishForLuna(file,perf,routed)
                 }
+                // Snapshot is compressed/immutable; rendering has its own owner and model sessions.
+                synchronized(snapshots) {snapshots[a.pageHash]=a}
                 val regions = JSArray()
                 for (r in a.regions) {
                     regions.put(
@@ -223,8 +225,8 @@ class TranslationPlugin : Plugin() {
                 }
                 // صفحة فيها ما يُسأل عنه: نموذج التبييض يُحمَّل الآن في الخلفية (دور منخفض) فيجهز
                 // قبل أن يعود رد Luna، لا حين تنتظره الصفحة
-                if (thumb.isNotEmpty() && !pipeline.inpainterReady()) {
-                    scope.launch(Dispatchers.IO) { runCatching { pipeline.warmInpainter(Perf()) } }
+                if (thumb.isNotEmpty() && !renderPipeline.inpainterReady()) {
+                    scope.launch(Dispatchers.IO) { runCatching { renderPipeline.warmInpainter(Perf()) } }
                 }
                 call.resolve(
                     JSObject()
@@ -268,8 +270,18 @@ class TranslationPlugin : Plugin() {
                 call.getArray("leave")?.let { for (i in 0 until it.length()) leave.add(it.getString(i)) }
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
-                val (out, translated) = gate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf, pageOf(call)) {
-                    pipeline.render(File(path), byId, outDir, perf, leave, lettering = lettering)
+                val file=File(path)
+                val hash=perf.time("handoffHash") {ModelStore.sha256Hex(file.readBytes())}
+                // Pin this compressed snapshot while awaiting render. Cache eviction never starts CTD in the renderer.
+                val snapshot=snapshots[hash] ?: gate.run(if(high(call)) PriorityGate.ANALYZE_READER else PriorityGate.ANALYZE_JOB,perf,pageOf(call)) {
+                    pipeline.finishForLuna(file,perf).first
+                }
+                val (out, translated) = renderGate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf, pageOf(call)) {
+                    renderPipeline.acceptAnalysis(snapshot)
+                    val result=renderPipeline.render(file, byId, outDir, perf, leave, lettering = lettering)
+                    // Heavy residual promotion must survive the next retry and owner handoff.
+                    renderPipeline.analysisSnapshot(hash)?.let { synchronized(snapshots) {snapshots[hash]=it} }
+                    result
                 }
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
                 if ((perf.counts["refinementPending"] ?: 0) > 0) refine(Refinement(path, byId.toMap(), leave.toSet(), pageOf(call), out, version, lettering.toMap()))
@@ -406,6 +418,7 @@ class TranslationPlugin : Plugin() {
             .put("thermal", thermal())
             .put("thermalWaitMs", thermalWait)
             .put("busyPct", gate.busyPercent())
+            .put("laneBusy",JSObject().put("detect",detectGate.busyPercent()).put("analyze",gate.busyPercent()).put("render",renderGate.busyPercent()))
             .put("lowMemory", mem.lowMemory)
             .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
     }

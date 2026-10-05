@@ -1,0 +1,56 @@
+{
+  "device": "Android SDK built for x86_64",
+  "physical": false,
+  "luna": "controlled replies; UNVERIFIED live provider",
+  "rendered": 3,
+  "route": {
+    "read": 0.1,
+    "hash": 0.7,
+    "decode": 12.9,
+    "load": 290.6,
+    "load:rtdetr": 290.6,
+    "detect": 437,
+    "missingSweep": 75.5
+  },
+  "analysis": {
+    "read": 0.2,
+    "hash": 0.8,
+    "decode": 9.7,
+    "gray": 2.8,
+    "fastFlat": 115.2,
+    "load": 94.2,
+    "load:ppocr": 94.2,
+    "fastOcr": 302.8,
+    "pack": 7,
+    "thumbnail": 21.3
+  },
+  "render": {
+    "read": 0.1,
+    "hash": 0.9,
+    "unpack": 4.1,
+    "decode": 10.5,
+    "copy": 0.8,
+    "layout": 23.3,
+    "plan": 322.7,
+    "erase": 17.4,
+    "residual": 15.5,
+    "draw": 9.7,
+    "visible": 6.6,
+    "verify": 15.3,
+    "encode": 15.7,
+    "write": 2.7
+  },
+  "counts": {
+    "fill": 3,
+    "inpaint": 0,
+    "eraseMaskPixels": 59642,
+    "eraseChangedPixels": 6230,
+    "fillMaskPixels": 59642,
+    "fillChangedPixels": 6230,
+    "inpaintMaskPixels": 0,
+    "inpaintChangedPixels": 0,
+    "eraseNoOpRegions": 0,
+    "inpaintScaledRegions": 0,
+    "translated": 3
+  }
+}

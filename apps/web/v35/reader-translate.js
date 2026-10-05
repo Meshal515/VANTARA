@@ -15,7 +15,7 @@
  */
 
 import { isFiller } from './works.js';
-import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage } from '../lib/translate.js';
+import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage, prepareTranslation } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings, setTranslationLocked } from '../lib/translate-settings.js';
 import { supports } from '../lib/capabilities.js';
 import { readJobs } from '../lib/translate-jobs.js';
@@ -54,7 +54,7 @@ const store = {
 
 // أربع صفحات في الطريق معًا: صفحتك وثلاث أمامها. على الجوال المعالج لصفحة واحدة في كل
 // مرة، والدور للأقرب من صفحتك الآن (`focusPage`)، وLuna تترجم الباقي في الوقت نفسه
-const queue = createQueue({ concurrency: 4 });
+const queue = createQueue({ concurrency: 8, prepareConcurrency: 1, maxPrepared: 24 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -186,10 +186,12 @@ export function createReaderTranslation(deps) {
   function enqueuePage(seg, index) {
     if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
-    const run = async ({ waitedMs = 0 } = {}) => {
+    const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
+    const prepare=async()=> { if(stopped || disabledReason || !isOn()) return null; return prepareTranslation(await getImage(seg,index),meta); };
+    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
-      const src = await getImage(seg, index);
+      const src = prepared?.src ?? await getImage(seg, index);
       const fetchMs = Date.now() - fetchStarted;
       // صفحة ناقصة تُكمَل في الخلفية: حين تجهز تُبدَّل وهي أمامك
       const onRepaired = (better) => {
@@ -197,7 +199,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader' }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',prepareMs,route:prepared?.route,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
@@ -209,7 +211,7 @@ export function createReaderTranslation(deps) {
       });
     };
     queue
-      .add({ key: `${chapterKey}#${index}`, chapterKey, index, run })
+      .add({ key: `${chapterKey}#${index}`, chapterKey, index, run, prepare })
       .then((result) => {
         if (!result) return;
         if (result.error) return failed(seg, index, result.error);
@@ -253,8 +255,8 @@ export function createReaderTranslation(deps) {
     if (segs[i + 1]) ranks[keyOf(segs[i + 1].row)] = 1;
     if (segs[i - 1]) ranks[keyOf(segs[i - 1].row)] = 2;
     ranks[keyOf(seg.row)] = 0;
-    queue.focus(keyOf(seg.row), index, ranks);
-    focusPage(keyOf(seg.row), index);
+    queue.focus(keyOf(seg.row), index, ranks, { pageCount: seg.slots.length });
+    focusPage(keyOf(seg.row), index, seg.slots.length);
     if (!isOn()) return;
     if (!ensureModelsOrOffer()) return;
     startLesson();

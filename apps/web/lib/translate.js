@@ -20,8 +20,9 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage } from './translation-native.js';
+import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
+import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
@@ -78,7 +79,7 @@ const MAX_REPAIRS = 3;
  * `services/sync-worker/src/translate.ts` (اختبار يتحقق). ترجمة محفوظة بإصدار
  * أقدم تُعرض فورًا وتُجدَّد في الخلفية حين تزور صفحتها.
  */
-export const TEXT_PROMPT_VERSION = 3;
+export const TEXT_PROMPT_VERSION = 4;
 
 /** محرّك أقدم من التعليمات الحالية؟ (`model:t1`، `model:t1:fast`؛ 'device' = لا نص، لا يُجدَّد). */
 export function staleEngine(engine) {
@@ -106,54 +107,97 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
   const jobs = new Map();
   let running = 0;
+  let preparing = 0;
+  let bypassRunning = 0;
+  let focusedBurstRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
+  let lastIndex = null;
   const ranks = new Map();
   const listeners = new Set();
+  const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
+  const isAnchor = job => job.chapterKey === focusKey && (job.index === focusIndex || (lastIndex !== null && (job.index === 0 || job.index === lastIndex)));
 
   // ترتيب ثابت لا يتبع سرعتك: من صفحتك للأمام بالترتيب، ثم ما خلفك (الأقرب أولًا)،
   // فلا تُترك صفحة عبرتها بسرعة. الفصل الحالي، ثم التالي، ثم السابق.
   const priority = (job) => {
     const rank = ranks.get(job.chapterKey) ?? 3;
     const d = job.chapterKey === focusKey ? job.index - focusIndex : job.index;
-    return rank * 100_000 + (d >= 0 ? d : 50_000 - d);
+    const anchor = isFocused(job) ? 0 : isAnchor(job) ? (job.index === 0 ? 1 : 2) : 3;
+    return rank * 1_000_000 + anchor * 100_000 + (isAnchor(job) ? 0 : d >= 0 ? d : 50_000 - d);
   };
-  const next = () => {
+  const next = (predicate) => {
     let best = null;
-    for (const job of jobs.values()) if (!job.started && (!best || priority(job) < priority(best))) best = job;
+    for (const job of jobs.values()) if (!job.started && predicate(job) && (!best || priority(job) < priority(best))) best = job;
     return best;
   };
+  const finish = (job) => {
+    jobs.delete(job.key);
+    for (const fn of listeners) fn(job);
+    pump();
+  };
+  const start = (job, bypass = false, focusedBurst = false) => {
+    job.started = true;
+    if (bypass) bypassRunning++;
+    else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
+    else running++;
+    Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
+      prepared: job.prepared, interactive: isFocused(job), isInteractive: () => isFocused(job) }))
+      .then(job.resolve, job.reject).finally(() => {
+        if (bypass) bypassRunning--;
+        else if (focusedBurst) focusedBurstRunning--;
+        else running--;
+        finish(job);
+      });
+  };
   const pump = () => {
-    while (running < concurrency) {
-      const job = next();
-      if (!job) return;
-      job.started = true;
-      running += 1;
-      const waitedMs = Date.now() - job.addedAt;
-      Promise.resolve()
-        .then(() => job.run({ waitedMs }))
-        .then(
-          (value) => job.resolve(value),
-          (error) => job.reject(error),
-        )
-        .finally(() => {
-          running -= 1;
-          jobs.delete(job.key);
-          for (const fn of listeners) fn(job);
-          pump();
-        });
+    while (bypassRunning < bypassConcurrency) {
+      const job = next(j => j.ready && j.prepared?.bypass);
+      if (!job) break;
+      start(job,true);
+    }
+    while (true) {
+      const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
+      if (!job) break;
+      const normalSlot = running < concurrency;
+      // Former focus work may still await Luna. Count live anchor ownership,
+      // while keeping a hard cap on all outstanding runs during rapid scrolling.
+      const activeAnchors = [...jobs.values()].filter(j => j.started && j.burst && isAnchor(j)).length;
+      const burstSlot = concurrency > 0 && isAnchor(job) && activeAnchors < (lastIndex === null ? 1 : 3) &&
+        running + focusedBurstRunning < concurrency + maxPrepared + 3;
+      if (!normalSlot && !burstSlot) break;
+      start(job, false, !normalSlot);
+    }
+    const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
+    while (true) {
+      const job = next(j => j.prepare && !j.ready && !j.preparing);
+      if (!job) break;
+      // Three chapter anchors have reserved metadata admission. One extra
+      // preparation call may queue for the native detector, which remains serial.
+      const anchor = isAnchor(job);
+      const preparingAnchors = [...jobs.values()].filter(j => j.preparing && isAnchor(j)).length;
+      if ((anchor ? preparingAnchors >= 3 || preparing >= prepareConcurrency + 3 : preparing >= prepareConcurrency) ||
+          readyCount() + preparing >= maxPrepared + (anchor ? 3 : 0)) break;
+      job.preparing = true; preparing++;
+      const preparedAt=Date.now();
+      Promise.resolve().then(() => job.prepare()).then(prepared => {
+        if (jobs.get(job.key) !== job) return;
+        job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
+        if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
+      }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
+        .finally(() => { preparing--; job.preparing = false; pump(); });
     }
   };
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
-    add({ key, chapterKey, index, run }) {
+    add({ key, chapterKey, index, run, prepare }) {
       const existing = jobs.get(key);
       if (existing) {
         // مهمة لم تبدأ من جلسة قارئ سابقة: يأخذها صاحبها الجديد، فلا يرث وعدًا ميتًا
-        if (!existing.started) existing.run = run;
+        if (!existing.started) { existing.run = run; if (!existing.preparing && !existing.ready) existing.prepare = prepare; }
         return existing.promise;
       }
       let resolve;
@@ -162,17 +206,21 @@ export function createQueue({ concurrency = 3 } = {}) {
         resolve = a;
         reject = b;
       });
-      jobs.set(key, { key, chapterKey, index, run, resolve, reject, promise, started: false, addedAt: Date.now() });
+      jobs.set(key, { key, chapterKey, index, run, prepare, resolve, reject, promise, started: false, addedAt: Date.now() });
       queueMicrotask(pump);
       return promise;
     },
-    focus(chapterKey, index, chapterRanks = null) {
+    focus(chapterKey, index, chapterRanks = null, { pageCount = null } = {}) {
       focusKey = chapterKey;
       focusIndex = index;
+      lastIndex = Number.isInteger(pageCount) && pageCount > 0 ? pageCount - 1 : null;
       if (chapterRanks) {
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
       }
+      // A page can already be waiting when the user scrolls onto it. Re-run
+      // admission now so one bounded focused burst can bypass stale slots.
+      queueMicrotask(pump);
     },
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
     order: () => [...jobs.values()].filter((j) => !j.started).sort((a, b) => priority(a) - priority(b)).map((j) => j.key),
@@ -182,7 +230,7 @@ export function createQueue({ concurrency = 3 } = {}) {
       return () => listeners.delete(fn);
     },
     drop(chapterKey) {
-      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) jobs.delete(job.key);
+      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) { jobs.delete(job.key); job.resolve(null); }
     },
   };
 }
@@ -296,8 +344,10 @@ async function translatePageNow(deps, src, meta) {
   // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
   // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
-  const runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  if(deps.prepareMs) clock.stages.prepare=deps.prepareMs;
   const hash = await clock.time('hash', () => pageHashOf(src));
+  if(runDeps.route && runDeps.route.pageHash!==hash) runDeps={...runDeps,route:null};
   const found = await clock.time('cacheRead', () => readPageCache(hash, meta));
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
@@ -415,7 +465,7 @@ async function repairInBackground(deps, src, hash, meta, local) {
   const clock = stopwatch();
   const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
   logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
-  if (result.error || !(result.translated >= (local.translated ?? 0))) return;
+  if (!canAcceptTranslationRepair(local, result)) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   const saved = writePageCache(hash, meta, value);
   const persisted=(await saved.written).every(key => typeof key === 'string');
@@ -425,22 +475,33 @@ async function repairInBackground(deps, src, hash, meta, local) {
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low' : 'high');
+const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.isInteractive?.() ?? deps.interactive ?? true;
+const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body})));
+  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
   return textBatchers.get(sync);
+}
+
+export async function prepareTranslation(src, meta) {
+  const path=filePathFromSrc(src);
+  if (!path || !nativeTranslationAvailable()) return {src};
+  const hash=await pageHashOf(src);
+  const cached=(await readPageCache(hash,meta)).value;
+  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) return {src,bypass:true};
+  const route=await routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex});
+  return {src,route,bypass:Boolean(route?.textless)};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
-  const native = { analyze: analysis.perf ?? null };
+  const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const textless = !(analysis.regions ?? []).length;
   if (!readable.length) return { incomplete: !textless, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
@@ -457,7 +518,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
       regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     });
     const ask = data => data
-      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: priorityOf(deps) === 'high', signal: deps.signal })
+      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
       : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
