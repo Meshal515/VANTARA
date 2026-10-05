@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, createQueue, resultOf, staleEngine, unansweredIds, uploadPlan } from './translate.js';
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, resultOf, staleEngine, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -137,5 +137,26 @@ describe('queue reports how long a page waited', () => {
     let seen = null;
     await q.add({ key: 'c1#0', chapterKey: 'c1', index: 0, run: async (ctx) => (seen = ctx) });
     expect(seen.waitedMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+
+describe('reader scheduling under fast scrolling', () => {
+  it('runs current and next three, then the nearest missed page behind, before far future pages', () => {
+    const q = createQueue({ concurrency: 0 });
+    const add = index => q.add({ key: `c#${index}`, chapterKey: 'c', index, run: async () => index });
+    for (const index of [95, 28, 29, 33, 32, 31, 30]) add(index);
+    q.focus('c', 30, { c: 0 }, { pageCount: 100 });
+    expect(q.order()).toEqual(['c#30', 'c#31', 'c#32', 'c#33', 'c#29', 'c#28', 'c#95']);
+  });
+});
+
+describe('reader exception classification', () => {
+  it('does not label every thrown exception as offline', () => {
+    expect(classifyTranslationError(new Error('image'))).toBe('image_fetch_failed');
+    expect(classifyTranslationError(new DOMException('cancelled', 'AbortError'))).toBe('aborted');
+    expect(classifyTranslationError(new Error('bridge exploded'))).toBe('native_bridge_failed');
+    expect(classifyTranslationError(new Error('unexpected'))).toBe('reader_exception');
+    expect(classifyTranslationError(new Error('anything'), false)).toBe('offline');
   });
 });
