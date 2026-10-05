@@ -111,6 +111,7 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   let running = 0;
   let preparing = 0;
   let bypassRunning = 0;
+  let focusedBurstRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
   const ranks = new Map();
@@ -133,12 +134,19 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     for (const fn of listeners) fn(job);
     pump();
   };
-  const start = (job, bypass = false) => {
+  const start = (job, bypass = false, focusedBurst = false) => {
     job.started = true;
-    if (bypass) bypassRunning++; else running++;
+    if (bypass) bypassRunning++;
+    else if (focusedBurst) focusedBurstRunning++;
+    else running++;
     Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
       prepared: job.prepared, interactive: job.chapterKey === focusKey && job.index === focusIndex }))
-      .then(job.resolve, job.reject).finally(() => { if (bypass) bypassRunning--; else running--; finish(job); });
+      .then(job.resolve, job.reject).finally(() => {
+        if (bypass) bypassRunning--;
+        else if (focusedBurst) focusedBurstRunning--;
+        else running--;
+        finish(job);
+      });
   };
   const pump = () => {
     while (bypassRunning < bypassConcurrency) {
@@ -146,10 +154,14 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       if (!job) break;
       start(job,true);
     }
-    while (running < concurrency) {
+    while (true) {
       const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
       if (!job) break;
-      start(job);
+      const focused = job.chapterKey === focusKey && job.index === focusIndex;
+      const normalSlot = running < concurrency;
+      const burstSlot = concurrency > 0 && focused && focusedBurstRunning === 0;
+      if (!normalSlot && !burstSlot) break;
+      start(job, false, !normalSlot);
     }
     const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
     while (preparing < prepareConcurrency && readyCount() + preparing < maxPrepared) {
@@ -191,6 +203,9 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
       }
+      // A page can already be waiting when the user scrolls onto it. Re-run
+      // admission now so one bounded focused burst can bypass stale slots.
+      queueMicrotask(pump);
     },
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
     order: () => [...jobs.values()].filter((j) => !j.started).sort((a, b) => priority(a) - priority(b)).map((j) => j.key),
