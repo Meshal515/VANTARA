@@ -29,5 +29,16 @@ object MissingTextSweep {
   }
   return proposals.sortedWith(compareBy({it.y1},{it.x1})).take(limit)
  }
+ /**
+  * A bubble is itself evidence that text may exist even when RT-DETR missed the
+  * text class. Only used when no confirmed text seed exists; CTD + OCR still
+  * decide whether a real Region survives.
+  */
+ fun holderFallbacks(known:List<Detection>):List<Detection> {
+  if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE}) return emptyList()
+  return known.filter {it.label=="bubble" && it.score>=.30f}
+   .sortedByDescending {it.score}.take(8)
+   .map {Detection(it.box,maxOf(Regions.MIN_SCORE,it.score),"text_bubble")}
+ }
  fun confirmed(text:String,confidence:Float)= confidence>=.80f && Regex("[A-Za-z]{2,}").containsMatchIn(text)
 }
