@@ -172,3 +172,23 @@ it('reports detector work and each independent lane without calling one gate CPU
 
 
 });
+
+describe('truthful per-run translation reports', () => {
+  it('uses the latest run only, deduplicates retried page indexes and exposes partial pages', () => {
+    const entries = [
+      { runId:'run-a', at:1000, chapterKey:'c', pageIndex:0, from:'model', textless:false, total:900, incomplete:false, stages:{} },
+      { runId:'run-b', at:2000, chapterKey:'c', pageIndex:0, from:'model', textless:false, total:800, incomplete:false, stages:{} },
+      { runId:'run-b', at:2400, chapterKey:'c', pageIndex:0, from:'model', textless:false, total:700, incomplete:false, stages:{} },
+      { runId:'run-b', at:3000, chapterKey:'c', pageIndex:1, from:'model', textless:false, total:1000, incomplete:true, stages:{} },
+      { runId:'run-b', at:3100, chapterKey:'c', pageIndex:2, from:'error', error:'native_bridge_failed', total:100, stages:{} },
+    ];
+    const s = summarize(entries);
+    expect(s).toMatchObject({ runId:'run-b', pages:2, complete:1, partial:1, errors:1 });
+    expect(s.chapters[0]).toMatchObject({ chapterKey:'c', pages:2 });
+    const report = formatReport(entries);
+    expect(report).toContain('2 صفحة فريدة');
+    expect(report).toContain('مكتملة 1');
+    expect(report).toContain('جزئية 1');
+    expect(report).toContain('native_bridge_failed×1');
+  });
+});
