@@ -131,6 +131,20 @@ describe('translations saved with an older prompt are refreshed, not served as c
   });
 });
 
+describe('reader queue dispatch classifies only the focused page as interactive', () => {
+  it('marks the focused page interactive and the next page prefetch at dispatch time', async () => {
+    const q = createQueue({ concurrency: 1 });
+    q.focus('c1', 5, { c1: 0 });
+    let focused = null;
+    let ahead = null;
+    const a = q.add({ key: 'c1#5', chapterKey: 'c1', index: 5, run: async (ctx) => (focused = ctx) });
+    const b = q.add({ key: 'c1#6', chapterKey: 'c1', index: 6, run: async (ctx) => (ahead = ctx) });
+    await Promise.all([a, b]);
+    expect(focused.interactive).toBe(true);
+    expect(ahead.interactive).toBe(false);
+  });
+});
+
 describe('queue reports how long a page waited', () => {
   it('passes the waiting time to the page when it starts', async () => {
     const q = createQueue({ concurrency: 1 });
