@@ -109,6 +109,7 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
 export function createQueue({ concurrency = 3 } = {}) {
   const jobs = new Map();
   let running = 0;
+  let burstRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
   const ranks = new Map();
@@ -127,16 +128,24 @@ export function createQueue({ concurrency = 3 } = {}) {
     return best;
   };
   const pump = () => {
-    while (running < concurrency) {
+    // Normal prefetch capacity stays bounded. If all normal slots are occupied
+    // by pages the reader has already passed, admit exactly one extra job only
+    // when it is the page currently in front of the reader. This removes JS
+    // head-of-line blocking without opening unbounded native/model concurrency.
+    while (true) {
       const job = next();
       if (!job) return;
-      job.started = true;
-      running += 1;
-      const waitedMs = Date.now() - job.addedAt;
-      // Interactive is a dispatch-time fact, not a permanent property of every
-      // reader job. Only the page currently in front of the reader gets the
-      // low-latency direct Luna/native lane; ahead pages are prefetch work.
       const interactive = job.chapterKey === focusKey && job.index === focusIndex;
+      const normalSlot = running < concurrency;
+      const burstSlot = concurrency > 0 && interactive && burstRunning === 0;
+      if (!normalSlot && !burstSlot) return;
+
+      const burst = !normalSlot;
+      job.started = true;
+      job.burst = burst;
+      running += 1;
+      if (burst) burstRunning += 1;
+      const waitedMs = Date.now() - job.addedAt;
       Promise.resolve()
         .then(() => job.run({ waitedMs, interactive }))
         .then(
@@ -145,6 +154,7 @@ export function createQueue({ concurrency = 3 } = {}) {
         )
         .finally(() => {
           running -= 1;
+          if (job.burst) burstRunning -= 1;
           jobs.delete(job.key);
           for (const fn of listeners) fn(job);
           pump();
@@ -177,6 +187,9 @@ export function createQueue({ concurrency = 3 } = {}) {
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
       }
+      // The focused page may already have been queued before the user reached
+      // it. Re-run admission immediately so it can use the one focused burst.
+      queueMicrotask(pump);
     },
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
     order: () => [...jobs.values()].filter((j) => !j.started).sort((a, b) => priority(a) - priority(b)).map((j) => j.key),
