@@ -119,15 +119,18 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   const ranks = new Map();
   const listeners = new Set();
   const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
-  const isAnchor = job => job.chapterKey === focusKey && (job.index === focusIndex || (lastIndex !== null && (job.index === 0 || job.index === lastIndex)));
+  const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + 3;
 
-  // ترتيب ثابت لا يتبع سرعتك: من صفحتك للأمام بالترتيب، ثم ما خلفك (الأقرب أولًا)،
-  // فلا تُترك صفحة عبرتها بسرعة. الفصل الحالي، ثم التالي، ثم السابق.
+  // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
+  // الحالية + الثلاث التالية، ثم أقرب الصفحات الفائتة خلفك، ثم بقية الحالي.
   const priority = (job) => {
     const rank = ranks.get(job.chapterKey) ?? 3;
-    const d = job.chapterKey === focusKey ? job.index - focusIndex : job.index;
-    const anchor = isFocused(job) ? 0 : isAnchor(job) ? (job.index === 0 ? 1 : 2) : 3;
-    return rank * 1_000_000 + anchor * 100_000 + (isAnchor(job) ? 0 : d >= 0 ? d : 50_000 - d);
+    if (job.chapterKey !== focusKey) return rank * 1_000_000 + Math.max(0, job.index);
+    const d = job.index - focusIndex;
+    if (d === 0) return rank * 1_000_000;
+    if (d > 0 && d <= 3) return rank * 1_000_000 + d;
+    if (d < 0) return rank * 1_000_000 + 10 + (-d);
+    return rank * 1_000_000 + 100 + d;
   };
   const next = (predicate) => {
     let best = null;
@@ -163,11 +166,10 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
       if (!job) break;
       const normalSlot = running < concurrency;
-      // Former focus work may still await Luna. Count live anchor ownership,
-      // while keeping a hard cap on all outstanding runs during rapid scrolling.
-      const activeAnchors = [...jobs.values()].filter(j => j.started && j.burst && isAnchor(j)).length;
-      const burstSlot = concurrency > 0 && isAnchor(job) && activeAnchors < (lastIndex === null ? 1 : 3) &&
-        running + focusedBurstRunning < concurrency + maxPrepared + 3;
+      // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
+      // بتحويل 8 slots إلى عشرات الأعمال المعلقة في Luna/Native.
+      const burstSlot = concurrency > 0 && isFocused(job) && focusedBurstRunning < 1 &&
+        running + focusedBurstRunning < concurrency + 1;
       if (!normalSlot && !burstSlot) break;
       start(job, false, !normalSlot);
     }
@@ -175,12 +177,12 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     while (true) {
       const job = next(j => j.prepare && !j.ready && !j.preparing);
       if (!job) break;
-      // Three chapter anchors have reserved metadata admission. One extra
-      // preparation call may queue for the native detector, which remains serial.
-      const anchor = isAnchor(job);
-      const preparingAnchors = [...jobs.values()].filter(j => j.preparing && isAnchor(j)).length;
-      if ((anchor ? preparingAnchors >= 3 || preparing >= prepareConcurrency + 3 : preparing >= prepareConcurrency) ||
-          readyCount() + preparing >= maxPrepared + (anchor ? 3 : 0)) break;
+      // لا نحجز أول/آخر الفصل. فقط الحالية والثلاث أمامها لها admission
+      // إضافي محدود، حتى لا يتكدس detector أثناء فصل ثقيل.
+      const near = isNearForward(job);
+      const preparingNear = [...jobs.values()].filter(j => j.preparing && isNearForward(j)).length;
+      if ((near ? preparingNear >= 2 || preparing >= prepareConcurrency + 1 : preparing >= prepareConcurrency) ||
+          readyCount() + preparing >= maxPrepared + (near ? 1 : 0)) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
       Promise.resolve().then(() => job.prepare()).then(prepared => {
@@ -328,6 +330,17 @@ export async function readerQuiet({ sleep = (ms) => new Promise((r) => setTimeou
   while (readerBusy > 0 || now() - readerLastAt < 2000) await sleep(500);
 }
 
+export function classifyTranslationError(error, online = globalThis.navigator?.onLine) {
+  if (online === false) return 'offline';
+  const name=String(error?.name ?? '').toLowerCase();
+  const message=String(error?.message ?? error ?? '').toLowerCase();
+  if (name === 'aborterror' || message.includes('abort') || message.includes('cancel')) return 'aborted';
+  if (message === 'image' || message.includes('image fetch') || message.includes('image load')) return 'image_fetch_failed';
+  if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
+  if (message.includes('bridge') || message.includes('capacitor') || message.includes('native')) return 'native_bridge_failed';
+  return 'reader_exception';
+}
+
 export async function translatePage(deps, src, meta) {
   if (deps.via !== 'reader') return translatePageNow(deps, src, meta);
   readerBusy += 1;
@@ -365,6 +378,7 @@ async function translatePageNow(deps, src, meta) {
       textless: !local.translated && !(local.regions ?? []).length,
       regions: (local.regions ?? []).length,
       translated: local.translated,
+      incomplete: Boolean(local.incomplete),
       engine: local.engine ?? null,
     });
     return { ...local, hash, cacheKey: found.cacheKey, from: 'device', saved: true };
@@ -429,10 +443,16 @@ async function translateOnce(deps, src, hash, meta, clock) {
     textless: Boolean(result.textless),
     regions: (result.regions ?? []).length,
     translated: result.translated,
+    incomplete: Boolean(result.incomplete),
     engine: result.engine ?? null,
     native: result.native,
     saved: persisted,
   }, saved.written);
+  // Partial output is useful immediately, but it is not "done": start one repair
+  // pass now so residual/coverage rescue can complete while the reader is still here.
+  if (persisted && result.incomplete && (value.tries ?? 0) < MAX_REPAIRS) {
+    queueMicrotask(() => void repairInBackground(deps, src, hash, meta, saved.stored));
+  }
   return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model', saved: persisted, stages: { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages }, ...(deps.via === 'job' && !persisted ? { error: 'storage_failed' } : {}) };
 }
 
@@ -441,7 +461,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -463,8 +483,9 @@ async function repairInBackground(deps, src, hash, meta, local) {
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
   await writePageCache(hash, meta, { ...local, at: Date.now(), tries }).written;
   const clock = stopwatch();
-  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock).catch(() => ({ error: 'offline' }));
-  logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
+  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock)
+    .catch(error => ({ error: classifyTranslationError(error) }));
+  logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, incomplete: Boolean(result.incomplete), translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
   if (!canAcceptTranslationRepair(local, result)) return;
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   const saved = writePageCache(hash, meta, value);
@@ -503,8 +524,9 @@ async function translateOnDevice(deps, hash, meta, clock) {
   }
   const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
-  const textless = !(analysis.regions ?? []).length;
-  if (!readable.length) return { incomplete: !textless, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
+  const coverageUnknown = Number(analysis.coverageUnknown ?? analysis.perf?.counts?.coverageUnknown ?? 0);
+  const textless = !(analysis.regions ?? []).length && coverageUnknown === 0;
+  if (!readable.length) return { incomplete: !textless || coverageUnknown > 0, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
   // analyzePage في القارئ يحجز المسار الثقيل لهذه الصفحة حتى يعود Luna ثم يبدأ
   // Render. إذا لم نصل إلى Render لأي سبب يجب تحرير الحجز في finally.
@@ -539,7 +561,10 @@ async function translateOnDevice(deps, hash, meta, clock) {
     // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
     // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
     const drawn = Number.isFinite(rendered.translated) ? rendered.translated : plan.length;
-    incomplete ||= drawn < plan.length;
+    incomplete ||= drawn < plan.length ||
+      Number(rendered.perf?.counts?.residualLatin ?? 0) > 0 ||
+      Number(rendered.perf?.counts?.residualUnknown ?? 0) > 0 ||
+      Number(rendered.perf?.counts?.residualRescueQueued ?? 0) > 0;
     if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     const convert = globalThis.Capacitor?.convertFileSrc;
     return {
@@ -620,7 +645,7 @@ async function translateViaServer(deps, src, hash, meta) {
       body: { ...meta, pageHash: hash, image: { mediaType: 'image/jpeg', data: encodePage(img, plan) } },
     });
   } catch (error) {
-    if (!error?.status) return { error: 'offline' };
+    if (!error?.status) return { error: classifyTranslationError(error) };
     return { error: error.code ?? `http_${error.status}` };
   }
   const result = resultOf(body);
@@ -642,5 +667,10 @@ export const TRANSLATE_ERRORS = {
   no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',
   offline: 'ما فيه اتصال — الصفحات المترجمة قبل تشتغل',
+  image_fetch_failed: 'صورة الصفحة ما وصلت للمترجم — بنحاولها مرة ثانية',
+  aborted: 'توقفت محاولة الترجمة لأن الصفحة تغيّرت — بنعيدها عند الحاجة',
+  timeout: 'الترجمة أخذت وقتًا أطول من الحد — بنحاولها مرة ثانية',
+  native_bridge_failed: 'اتصال التطبيق بمحرك الترجمة تعثّر لهالصفحة',
+  reader_exception: 'حصل خطأ محلي في مسار الصفحة — بنحاولها مرة ثانية',
   refused: 'هالصفحة ما انترجمت',
 };
