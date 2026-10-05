@@ -127,6 +127,51 @@ class PriorityGateTest {
     }
 
     @Test
+    fun `a prefetch already waiting is promoted when it becomes the focused page`() = runBlocking {
+        val gate = PriorityGate()
+        val order = Collections.synchronizedList(ArrayList<String>())
+        val holding = CompletableDeferred<Unit>()
+        val p0 = PriorityGate.Page("c", 0)
+        val p1 = PriorityGate.Page("c", 1)
+        val p2 = PriorityGate.Page("c", 2)
+        gate.focus(p0)
+        val holder = async {
+            gate.run(PriorityGate.ANALYZE_READER, Perf(), p0) {
+                runBlocking { holding.await() }
+                order.add("holder")
+            }
+        }
+        delay(30)
+        val prefetched = async {
+            gate.run(PriorityGate.ANALYZE_JOB, Perf(), p1) { order.add("p1-prefetch") }
+        }
+        val oldReader = async {
+            gate.run(PriorityGate.ANALYZE_READER, Perf(), p2) { order.add("p2-reader") }
+        }
+        delay(30)
+        gate.focus(p1)
+        holding.complete(Unit)
+        listOf(holder, prefetched, oldReader).awaitAll()
+        assertEquals(listOf("holder", "p1-prefetch", "p2-reader"), order)
+    }
+
+    @Test
+    fun `leaving a page releases its stale Luna render reservation`() = runBlocking {
+        val gate = PriorityGate()
+        val p0 = PriorityGate.Page("c", 0)
+        val p1 = PriorityGate.Page("c", 1)
+        gate.focus(p0)
+        gate.expectRender(p0)
+        val current = async {
+            gate.run(PriorityGate.ANALYZE_JOB, Perf(), p1) { "current" }
+        }
+        delay(30)
+        assertFalse(current.isCompleted)
+        gate.focus(p1)
+        assertEquals("current", current.await())
+    }
+
+    @Test
     fun `busy state is visible while a model owns the gate`() = runBlocking {
         val gate = PriorityGate()
         val hold = CompletableDeferred<Unit>()
