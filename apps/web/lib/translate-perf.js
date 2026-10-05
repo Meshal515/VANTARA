@@ -115,6 +115,21 @@ function uniqueFreshPages(entries) {
   return [...loose,...indexed.values()].sort((a,b)=>(a.at ?? 0)-(b.at ?? 0));
 }
 
+function overlayAcceptedRepairs(fresh, repairs) {
+  const keyed=new Map();
+  const loose=[];
+  for(const e of fresh) {
+    if(e?.chapterKey && Number.isInteger(e.pageIndex)) keyed.set(`${e.chapterKey}#${e.pageIndex}`,e);
+    else loose.push(e);
+  }
+  for(const r of repairs.filter(e => e.accepted && !e.error)) {
+    const key=r?.chapterKey && Number.isInteger(r.pageIndex) ? `${r.chapterKey}#${r.pageIndex}` : null;
+    if(!key || !keyed.has(key)) continue;
+    keyed.set(key,{...keyed.get(key),...r,from:keyed.get(key).from});
+  }
+  return [...loose,...keyed.values()].sort((a,b)=>(a.at ?? 0)-(b.at ?? 0));
+}
+
 /**
  * الملخّص: آخر run فقط، وصفحة منطقية واحدة لكل chapter/pageIndex.
  * Partial ليست نجاحًا؛ المحاولة الكاملة لا تُخفضها محاولة إصلاح لاحقة ناقصة.
@@ -122,10 +137,11 @@ function uniqueFreshPages(entries) {
 export function summarize(entries) {
   const scoped = latestRunEntries(entries);
   // «سرعة الصفحة» = صفحة منطقية جديدة واحدة، لا كل retry لنفس index.
-  const fresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
+  const initialFresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
   const cached = uniqueFreshPages(scoped.filter((e) => e.from === 'cache'));
-  const errors = scoped.filter((e) => e.from === 'error');
-  const repairs = scoped.filter((e) => e.from === 'repair');
+  const errors = uniqueFreshPages(scoped.filter((e) => e.from === 'error'));
+  const repairs = uniqueFreshPages(scoped.filter((e) => e.from === 'repair'));
+  const fresh = overlayAcceptedRepairs(initialFresh, repairs);
   const textless = fresh.filter((e) => e.textless);
   const text = fresh.filter((e) => !e.textless);
   const chapters = new Map();
@@ -188,11 +204,13 @@ export function engineLines(run) {
 export function formatReport(entries, benchmarks = [], engines = null, cleaning = null) {
   const s = summarize(entries);
   const scoped = latestRunEntries(entries);
-  const fresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
+  const initialFresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
+  const repairs = uniqueFreshPages(scoped.filter((e) => e.from === 'repair'));
+  const fresh = overlayAcceptedRepairs(initialFresh, repairs);
   const lines = [`أداء الترجمة — ${s.complete} مكتملة، ${s.partial} جزئية، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
   if (Object.keys(s.errorCodes).length) lines.push(`الأخطاء: ${Object.entries(s.errorCodes).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
-  const modelPages = fresh.filter((e) => e.from === 'model' && !e.textless);
-  const serverCachedPages = fresh.filter((e) => e.from === 'friends' && !e.textless);
+  const modelPages = initialFresh.filter((e) => e.from === 'model' && !e.textless);
+  const serverCachedPages = initialFresh.filter((e) => e.from === 'friends' && !e.textless);
   if (serverCachedPages.length && modelPages.length === 0) {
     lines.push(`اللغة في هذه الجولة: ${serverCachedPages.length} صفحة من كاش الخادم؛ لا يوجد نداء Luna جديد في السجل.`);
   } else if (serverCachedPages.length || modelPages.length) {
