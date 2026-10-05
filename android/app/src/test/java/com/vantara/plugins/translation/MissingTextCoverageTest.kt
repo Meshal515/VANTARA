@@ -35,4 +35,12 @@ class MissingTextCoverageTest {
         val partial = Detection(Box(35,55,70,85), .95f, "text_bubble")
         assertFalse(MissingTextSweep.candidates(img, listOf(partial)).isEmpty())
     }
+    @Test fun `bubble holder keeps a page out of false textless when text box is missed`() {
+        val holder=Detection(Box(20,20,260,150),.91f,"bubble")
+        val fallback=MissingTextSweep.holderFallbacks(listOf(holder))
+        assertEquals(1,fallback.size)
+        assertEquals("text_bubble",fallback.single().label)
+        assertEquals(holder.box,fallback.single().box)
+        assertTrue(fallback.single().score >= Regions.MIN_SCORE)
+    }
 }
