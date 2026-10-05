@@ -31,7 +31,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # Hosted Ubuntu already supplies Android SDK/licences. setup-android
+      # requests the removed tools package (see existing android-debug workflow).
+      - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec cap sync android
       - name: Build app and test APK for emulator, preserving product arm64 ABI
