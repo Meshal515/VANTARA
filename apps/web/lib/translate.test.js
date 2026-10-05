@@ -59,6 +59,29 @@ describe('queue: a fixed order, forward from your page, never leaving a page beh
     expect(q.order()).toEqual(['c1#33', 'c1#95', 'c1#31', 'c1#30']);
   });
 
+  it('a newly focused page starts through one bounded burst even when ordinary slots are occupied', async () => {
+    const q = createQueue({ concurrency: 1, focusBurst: 1 });
+    let releaseOld;
+    const held = new Promise((resolve) => { releaseOld = resolve; });
+    const started = [];
+    const old = q.add({
+      key: 'c1#90', chapterKey: 'c1', index: 90,
+      run: async () => { started.push('old'); await held; return 'old'; },
+    });
+    await Promise.resolve();
+    q.focus('c1', 5, { c1: 0 });
+    const focused = q.add({
+      key: 'c1#5', chapterKey: 'c1', index: 5,
+      run: async () => { started.push('focused'); return 'focused'; },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started).toEqual(['old', 'focused']);
+    expect(await focused).toBe('focused');
+    releaseOld();
+    await old;
+  });
+
   it('the same page is queued once', async () => {
     const q = createQueue({ concurrency: 1 });
     let runs = 0;
