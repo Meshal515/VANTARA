@@ -358,10 +358,30 @@ object Regions {
         }
     }
 
+    private fun promoteUnownedBubbleText(dets: List<Detection>, bubbles: List<Bubble>, glyphFull: ByteMask): List<Detection> {
+        if (bubbles.isEmpty()) return dets
+        val out = ArrayList<Detection>(dets)
+        val known = dets.filter { it.label.startsWith("text") && it.score >= MIN_SCORE }
+        for (b in bubbles) {
+            if (known.any { b.box.contains(it.box) >= .50f }) continue
+            val stray = ByteMask(glyphFull.width, glyphFull.height)
+            val x0=maxOf(0,b.box.x1); val y0=maxOf(0,b.box.y1); val x1=minOf(glyphFull.width,b.box.x2); val y1=minOf(glyphFull.height,b.box.y2)
+            for (y in y0 until y1) for (x in x0 until x1) {
+                val i=y*glyphFull.width+x
+                if (glyphFull.data[i].toInt()!=0 && b.mask.data[i].toInt()!=0) stray.data[i]=1
+            }
+            if (stray.count() < MIN_GLYPH_PIXELS) continue
+            val bounds=stray.bounds() ?: continue
+            out.add(Detection(Box(bounds[0],bounds[1],bounds[2],bounds[3]),maxOf(MIN_SCORE,b.score),"text_bubble"))
+        }
+        return out
+    }
+
     fun assemble(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, bubbles: List<Bubble>, glyphFull: ByteMask): List<Region> {
-        val bubbleBoxes = dets.filter { it.label == "bubble" }
+        val promoted = promoteUnownedBubbleText(dets,bubbles,glyphFull)
+        val bubbleBoxes = promoted.filter { it.label == "bubble" }
         val out = ArrayList<Region>()
-        for (d in mergeTextBoxes(dets)) {
+        for (d in mergeTextBoxes(promoted)) {
             if (d.score < MIN_SCORE) continue
             val pad = 10
             var glyph = glyphFull.clipped(d.box.x1 - pad, d.box.y1 - pad, d.box.x2 + pad, d.box.y2 + pad)
