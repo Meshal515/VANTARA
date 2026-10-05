@@ -118,7 +118,6 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   let focusedBurstRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
-  let lastIndex = null;
   const ranks = new Map();
   const listeners = new Set();
   const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
@@ -171,8 +170,12 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       const normalSlot = running < concurrency;
       // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
       // بتحويل 8 slots إلى عشرات الأعمال المعلقة في Luna/Native.
-      const burstSlot = concurrency > 0 && isFocused(job) && focusedBurstRunning < 1 &&
-        running + focusedBurstRunning < concurrency + 1;
+      const activeFocusedBurst = [...jobs.values()].filter(j => j.started && j.burst && isFocused(j)).length;
+      // If focus moves while the previous visible page is still waiting on Luna,
+      // the new visible page may take one more bounded burst slot. Hard cap:
+      // normal concurrency + two focus bursts, never unbounded scroll backlog.
+      const burstSlot = concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
+        running + focusedBurstRunning < concurrency + 2;
       if (!normalSlot && !burstSlot) break;
       start(job, false, !normalSlot);
     }
@@ -182,10 +185,17 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       if (!job) break;
       // لا نحجز أول/آخر الفصل. فقط الحالية والثلاث أمامها لها admission
       // إضافي محدود، حتى لا يتكدس detector أثناء فصل ثقيل.
+      const focused = isFocused(job);
       const near = isNearForward(job);
+      const preparingFocused = [...jobs.values()].filter(j => j.preparing && isFocused(j)).length;
       const preparingNear = [...jobs.values()].filter(j => j.preparing && isNearForward(j)).length;
-      if ((near ? preparingNear >= 2 || preparing >= prepareConcurrency + 1 : preparing >= prepareConcurrency) ||
-          readyCount() + preparing >= maxPrepared + (near ? 1 : 0)) break;
+      const prepBlocked = focused
+        ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
+        : near
+          ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
+          : preparing >= prepareConcurrency;
+      const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
+      if (prepBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
       Promise.resolve().then(() => job.prepare()).then(prepared => {
@@ -218,7 +228,7 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     focus(chapterKey, index, chapterRanks = null, { pageCount = null } = {}) {
       focusKey = chapterKey;
       focusIndex = index;
-      lastIndex = Number.isInteger(pageCount) && pageCount > 0 ? pageCount - 1 : null;
+      void pageCount; // kept in the public signature for reader compatibility
       if (chapterRanks) {
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
