@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanTextRegionsIn, cleanTextRegionsOut, handleTranslateText, handleTranslateUsage, TEXT_SYSTEM_PROMPT, textEngineOf, translationAllowed } from './translate.ts';
+import { cleanTextRegionsIn, cleanTextRegionsOut, handleTranslateText, handleTranslateUsage, looksLikeProse, TEXT_SYSTEM_PROMPT, textEngineOf, translationAllowed } from './translate.ts';
 import { sqliteEnv } from './test-d1.ts';
 
 /**
@@ -379,3 +379,46 @@ describe('translation is open only to its owner while it is being built', () => 
   });
 });
 
+
+
+describe('long prose and fantasy title safeguards', () => {
+  it('recognizes sentence-like text over art without treating short signs or sfx as prose', () => {
+    expect(looksLikeProse('IT WAS NEVER IMPLEMENTED IN THE GAME')).toBe(true);
+    expect(looksLikeProse('I SAW IT IN DUNGEON & WEAPON\'S LORE BOOK.')).toBe(true);
+    expect(looksLikeProse('EXIT')).toBe(false);
+    expect(looksLikeProse('BOOM CLANG')).toBe(false);
+  });
+
+  it('prompt makes fantasy God-Deity titles contextual instead of mechanically using إله', () => {
+    expect(TEXT_SYSTEM_PROMPT).toContain('do NOT translate “God” or “Deity” mechanically');
+    expect(TEXT_SYSTEM_PROMPT).toContain('Use «إله/إلهة» only for an actual deity');
+    expect(TEXT_SYSTEM_PROMPT).toContain('Long sentence-like English prose lettered directly over artwork is narration');
+  });
+
+  it('retries long narration when Luna mistakenly calls it a sign and leaves it null', async () => {
+    const { env } = testEnv();
+    const prose = [{
+      id: 'rpurple01',
+      source: 'IT WAS NEVER IMPLEMENTED IN THE GAME, BUT THERE IS A SETTING WHERE INSTEAD OF SACRIFICING AN ITEM',
+      kind: 'free',
+      box: [210, 780, 980, 1180],
+    }];
+    const reply = (regions: unknown[]) => ({ regions, new_terms: [], characters: [], summary: '' });
+    const gpt = fakeGpt((body) => {
+      const input = body.input as Array<{ content?: Array<{ type?: string; text?: string }> }>;
+      const prompt = input?.[0]?.content?.find((x) => x.type === 'input_text')?.text ?? '';
+      if (prompt.includes('NOT sfx/sign')) {
+        return reply([{ id: 'rpurple01', source: prose[0]!.source, kind: 'narration', arabic: 'لم يُطبّق هذا في اللعبة، لكن هناك إعدادًا يستبدل التضحية بغرضٍ ما…', speaker: null }]);
+      }
+      return reply([{ id: 'rpurple01', source: prose[0]!.source, kind: 'sign', arabic: null, speaker: null }]);
+    });
+
+    const res = await handleTranslateText(req({ pageHash: hash('p'), regions: prose }), env, A, Date.UTC(2026, 9, 5), { fetch: gpt.fetch });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { regions: Array<{ id: string; kind: string; arabic: string | null }> };
+    expect(gpt.calls).toHaveLength(2);
+    expect(body.regions).toEqual([
+      expect.objectContaining({ id: 'rpurple01', kind: 'narration', arabic: expect.stringContaining('اللعبة') }),
+    ]);
+  });
+});
