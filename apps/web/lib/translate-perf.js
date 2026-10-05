@@ -145,6 +145,10 @@ export function engineLines(run) {
   if (!run?.engines?.length) return [];
   const lines = [`إعدادات CTD والفقاعات (${run.cores} أنوية، حرارة ${run.thermal}):`];
   for (const e of run.engines) {
+    if (e.error) {
+      lines.push(`  ${e.name}: غير مدعوم/فشل — ${e.error}`);
+      continue;
+    }
     const same = e.glyphDiff === 0 && e.bubblesSame ? 'مطابق' : `مختلف: ${e.glyphDiff} بكسل حروف من ${e.glyphPixels}${e.bubblesSame ? '' : '، فقاعات مختلفة'}`;
     lines.push(`  ${e.name}: حروف ${sec(e.glyphsMs)} · فقاعات ${sec(e.bubblesMs)} · تحميل ${sec(e.loadMs)} · ${same}`);
   }
