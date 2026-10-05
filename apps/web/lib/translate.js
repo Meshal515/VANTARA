@@ -66,9 +66,9 @@ async function readPageCache(hash, meta) {
   return { value: alias, cacheKey, kind: 'page' };
 }
 
-function writePageCache(hash, meta, value) {
+function writePageCache(hash, meta, value, { stampPipeline = true } = {}) {
   const cacheKey = pageCacheKey(meta);
-  const stored = { ...value, sourceHash: hash, pipelineVersion: LOCAL_PIPELINE_VERSION };
+  const stored = { ...value, sourceHash: hash, ...(stampPipeline ? { pipelineVersion: LOCAL_PIPELINE_VERSION } : {}) };
   const writes = [writeKv(CACHE_PREFIX + hash, stored)];
   if (cacheKey) writes.push(writeKv(cacheKey, stored));
   return { cacheKey, stored, written: Promise.all(writes) };
@@ -484,11 +484,17 @@ async function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
   return nativeTranslationAvailable() && imagePath ? translateOnDevice({ ...deps, imagePath }, hash, meta, clock) : translateViaServer(deps, src, hash, meta);
 }
 
+export function repairAttemptValue(local, tries, at = Date.now()) {
+  return { ...local, at, tries };
+}
+
 /** إكمال صفحة ناقصة بلا إخفاء الموجود. نجح بأفضل: يُحفظ ويُبلَّغ القارئ (`deps.onRepaired`). */
 async function repairInBackground(deps, src, hash, meta, local) {
   const tries = (local.tries ?? 0) + 1;
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
-  await writePageCache(hash, meta, { ...local, at: Date.now(), tries }).written;
+  // Starting a retry is bookkeeping, not proof that old rendered pixels came
+  // from the current vision pipeline. Preserve the old revision until success.
+  await writePageCache(hash, meta, repairAttemptValue(local, tries), { stampPipeline: false }).written;
   const clock = stopwatch();
   const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock)
     .catch(error => ({ error: classifyTranslationError(error) }));
