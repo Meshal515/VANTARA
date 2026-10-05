@@ -141,4 +141,19 @@ class PriorityGateTest {
         work.await()
         assertFalse(gate.isBusy())
     }
+    @Test
+    fun `current and next three beat missed behind, then missed behind beats far future`() = runBlocking {
+        val gate = PriorityGate()
+        val order = Collections.synchronizedList(ArrayList<String>())
+        val holding = CompletableDeferred<Unit>()
+        val holder = async { gate.run(PriorityGate.BACKGROUND, Perf()) { runBlocking { holding.await() }; order.add("holder") } }
+        delay(30)
+        gate.focus(PriorityGate.Page("c", 30), 100)
+        val pages = listOf(95,34,28,29,31,32,33,30).map { index ->
+            async { gate.run(PriorityGate.ANALYZE_READER, Perf(), PriorityGate.Page("c", index)) { order.add("p$index") } }.also { delay(10) }
+        }
+        holding.complete(Unit)
+        (pages + holder).awaitAll()
+        assertEquals(listOf("holder","p30","p31","p32","p33","p29","p28","p34","p95"), order)
+    }
 }
