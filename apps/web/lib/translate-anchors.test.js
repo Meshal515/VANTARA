@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { createQueue } from './translate.js';
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-it('admits current, first and last behind full running and prepared prefetch slots', async () => {
+it('admits only the current page behind full running and prepared prefetch slots', async () => {
   let release;
   const hold = new Promise(resolve => { release = resolve; });
   const events = [];
@@ -19,7 +19,7 @@ it('admits current, first and last behind full running and prepared prefetch slo
   for (let i = 0; i < 12; i++) await tick();
   const beforeRelease = [...events];
   release(); await Promise.all([old, ready, ...tasks]);
-  expect(beforeRelease).toEqual([50, 0, 99]);
+  expect(beforeRelease).toEqual([50]);
 });
 
 it('deduplicates first and focused and updates live focus for already dispatched work', async () => {
@@ -41,7 +41,7 @@ it('deduplicates first and focused and updates live focus for already dispatched
   expect(stillFocused).toBe(false);
 });
 
-it('promotes a new focus while former current, first and last still await Luna', async () => {
+it('promotes a new focus while the former current still awaits Luna without admitting chapter edges', async () => {
  let release; const hold=new Promise(r=>release=r), seen=[];
  const q=createQueue({concurrency:1,maxPrepared:1});
  const tasks=[q.add({key:'old',chapterKey:'old',index:0,run:()=>hold})]; await tick();
@@ -50,7 +50,7 @@ it('promotes a new focus while former current, first and last still await Luna',
  await tick();q.focus('c',51,{c:0},{pageCount:100});
  tasks.push(q.add({key:'c51',chapterKey:'c',index:51,run:async()=>{seen.push(51);await hold;}}));
  await tick();const before=[...seen];release();await Promise.all(tasks);
- expect(before).toEqual([50,0,99,51]);
+ expect(before).toEqual([50,51]);
 });
 it('admits current preparation despite a blocked former focus preparation', async () => {
  let release;const hold=new Promise(r=>release=r),seen=[];
@@ -69,5 +69,5 @@ it('caps outstanding work even across many focus changes', async () => {
   q.focus('c',index,{c:0},{pageCount:100});
   tasks.push(q.add({key:`c${index}`,chapterKey:'c',index,run:async()=>{started++;await hold;}}));await tick();
  }
- const before=started;release();await Promise.all(tasks);expect(before).toBe(5);
+ const before=started;release();await Promise.all(tasks);expect(before).toBe(3);
 });
