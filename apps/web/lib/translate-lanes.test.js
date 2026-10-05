@@ -32,3 +32,22 @@ it('textless bypass also has a finite active budget',async()=> {
  const tasks=Array.from({length:10},(_,index)=>q.add({key:String(index),chapterKey:'c',index,prepare:async()=>({bypass:true}),run:async()=>{active++;max=Math.max(max,active);await blocked;active--;}}));
  for(let i=0;i<12;i++) await tick();expect(max).toBeLessThanOrEqual(2);release();await Promise.all(tasks);
 });
+
+
+it('the newly focused reader page can start before stale full dialogue slots finish',async()=> {
+ let releaseA,releaseB;
+ const holdA=new Promise(r=>{releaseA=r});
+ const holdB=new Promise(r=>{releaseB=r});
+ const q=createQueue({concurrency:2,prepareConcurrency:1,maxPrepared:4});
+ const a=q.add({key:'old-a',chapterKey:'c',index:1,run:async()=>holdA});
+ const b=q.add({key:'old-b',chapterKey:'c',index:2,run:async()=>holdB});
+ await tick();await tick();
+ q.focus('c',99,{c:0});
+ let focusedStarted=false;
+ const focused=q.add({key:'focused',chapterKey:'c',index:99,run:async({interactive})=>{focusedStarted=interactive;return 'focused'}});
+ await tick();await tick();
+ const startedBeforeRelease=focusedStarted;
+ releaseA();releaseB();
+ await Promise.all([a,b,focused]);
+ expect(startedBeforeRelease).toBe(true);
+});
