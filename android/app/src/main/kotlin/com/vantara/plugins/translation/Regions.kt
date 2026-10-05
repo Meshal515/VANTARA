@@ -383,10 +383,11 @@ object Regions {
                 if (holder != null && holder.box.area > 1.15 * d.box.area) bubbleBox = holder.box
             }
             val light = inkIsLight(gray, img.width, glyph, d.box)
+            // Detector confidence is not semantics. Short dialogue such as “HUH?” is often
+            // low-confidence text_free; only Luna, which sees the page context, may call it SFX.
             val kind = when {
                 bubble != null -> "speech"
                 bubbleBox != null -> "narration"
-                d.label == "text_free" && d.score < 0.5f -> "sfx"
                 else -> "free"
             }
             out.add(Region(stableId(pageHash, d.box, img.width, img.height), d.box, d.score, kind, bubble, bubbleBox, glyph, n, light))
