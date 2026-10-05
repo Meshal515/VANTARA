@@ -116,48 +116,74 @@ object Regions {
      *
      * null = غير متأكد 100%؛ ارجع للمسار الثقيل بلا أي مخاطرة بالجودة.
      */
-    fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
-        val texts = mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }
-        if (texts.isEmpty()) return emptyList()
-        val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
-        if (holders.isEmpty()) return null
+    data class FastCandidate(val region: Region, val texts: List<Detection>)
+    data class FastPartition(val candidates: List<FastCandidate>, val remaining: List<Detection>)
 
-        // فقاعة واحدة قد يكون RT-DETR قسم نصها صندوقين: اجمعهما قبل OCR/Luna.
+    /**
+     * نفس فكرة fastFlat القديمة لكن على مستوى الفقاعة/المنطقة، لا الصفحة كلها.
+     * الفقاعة السهلة تُقبل، وأي نص آخر يبقى وحده للمسار الثقيل.
+     */
+    fun fastFlatPartition(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): FastPartition {
+        val texts = mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }
+        if (texts.isEmpty()) return FastPartition(emptyList(), emptyList())
+        val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
+
         val grouped = LinkedHashMap<Detection, MutableList<Detection>>()
+        val remaining = ArrayList<Detection>()
         for (d in texts) {
             val holder = holders
                 .filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
                 .maxByOrNull { it.box.contains(d.box) * 2f + it.score }
-                ?: return null
-            grouped.getOrPut(holder) { ArrayList() }.add(d)
+            if (holder == null) {
+                remaining.add(d)
+            } else {
+                grouped.getOrPut(holder) { ArrayList() }.add(d)
+            }
         }
 
-        val out = ArrayList<Region>(grouped.size)
+        val out = ArrayList<FastCandidate>(grouped.size)
         for ((holder, group) in grouped) {
             val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
-            val flat = fastBubbleMask(img, holder.box, textBox) ?: return null
-            val glyph = fastGlyphMask(img, flat.first, textBox, flat.second) ?: return null
+            val flat = fastBubbleMask(img, holder.box, textBox)
+            if (flat == null) {
+                remaining.addAll(group)
+                continue
+            }
+            val glyph = fastGlyphMask(img, flat.first, textBox, flat.second)
+            if (glyph == null) {
+                remaining.addAll(group)
+                continue
+            }
             val n = glyph.count()
-            if (n < MIN_GLYPH_PIXELS) return null
-            val gb = glyph.bounds() ?: return null
+            val gb = glyph.bounds()
+            if (n < MIN_GLYPH_PIXELS || gb == null) {
+                remaining.addAll(group)
+                continue
+            }
             val box = textBox.union(Box(gb[0], gb[1], gb[2], gb[3]))
             val light = fastInkLight(img, glyph, flat.second)
             val bubble = Bubble(holder.box, holder.score, flat.first)
-            out.add(
-                Region(
-                    stableId(pageHash, textBox, img.width, img.height),
-                    box,
-                    group.maxOf { it.score },
-                    "speech",
-                    bubble,
-                    holder.box,
-                    glyph,
-                    n,
-                    light,
-                ),
+            val region = Region(
+                stableId(pageHash, textBox, img.width, img.height),
+                box,
+                group.maxOf { it.score },
+                "speech",
+                bubble,
+                holder.box,
+                glyph,
+                n,
+                light,
             )
+            out.add(FastCandidate(region, group.toList()))
         }
-        return out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
+        return FastPartition(out, remaining)
+    }
+
+    /** API الاختبار القديم: النجاح فقط إن كانت الصفحة كلها مؤهلة للمسار السريع. */
+    fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
+        val p = fastFlatPartition(img, gray, pageHash, dets)
+        if (p.remaining.isNotEmpty()) return null
+        return p.candidates.map { it.region }.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
     }
 
     /**
