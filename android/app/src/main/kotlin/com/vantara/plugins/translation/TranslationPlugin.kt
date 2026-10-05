@@ -66,7 +66,7 @@ class TranslationPlugin : Plugin() {
      * تفحص بالتوازي وتخرج فورًا. الأجهزة الأقل من 8 أنوية تبقى على المسار الواحد.
      */
     private val parallelDetect = Runtime.getRuntime().availableProcessors() >= 8
-    private val probePipeline by lazy { Pipeline(context, store) }
+    private val probePipeline by lazy { Pipeline(context, store, Ort.Engine("probe-1", 1, 1, spin = false)) }
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
     private val outDir by lazy { File(context.filesDir, "translated-pages") }
