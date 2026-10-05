@@ -97,17 +97,35 @@ function stageMeans(entries) {
   return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, mean(v)]));
 }
 
+function latestRunEntries(entries) {
+  const last=[...entries].reverse().find(e => typeof e?.runId === 'string' && e.runId);
+  return last ? entries.filter(e => e.runId === last.runId) : entries;
+}
+
+function uniqueFreshPages(entries) {
+  const indexed=new Map();
+  const loose=[];
+  entries.forEach((e,i) => {
+    if (!e?.chapterKey || !Number.isInteger(e.pageIndex)) { loose.push(e); return; }
+    const key=`${e.chapterKey}#${e.pageIndex}`;
+    const previous=indexed.get(key);
+    // Never let a later partial retry downgrade an already complete accepted page.
+    if (!previous || previous.incomplete || !e.incomplete) indexed.set(key,e);
+  });
+  return [...loose,...indexed.values()].sort((a,b)=>(a.at ?? 0)-(b.at ?? 0));
+}
+
 /**
- * الملخّص: الصفحات الجديدة (لا المحفوظة) مقسومة: بلا نص / بنص؛ وكل فصل
- * بمجموعه الفعلي من أول صفحة دخلت إلى آخر صفحة جهزت.
+ * الملخّص: آخر run فقط، وصفحة منطقية واحدة لكل chapter/pageIndex.
+ * Partial ليست نجاحًا؛ المحاولة الكاملة لا تُخفضها محاولة إصلاح لاحقة ناقصة.
  */
 export function summarize(entries) {
-  // «سرعة الصفحة» = محاولة جديدة ناجحة فقط. قبل هذا كان error وrepair يدخلان
-  // وسيط صفحات الحوار، فيبدو العطل الشبكي أو محاولة إصلاح كأنه بطء CTD/LaMa.
-  const fresh = entries.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends'));
-  const cached = entries.filter((e) => e.from === 'cache');
-  const errors = entries.filter((e) => e.from === 'error');
-  const repairs = entries.filter((e) => e.from === 'repair');
+  const scoped = latestRunEntries(entries);
+  // «سرعة الصفحة» = صفحة منطقية جديدة واحدة، لا كل retry لنفس index.
+  const fresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
+  const cached = uniqueFreshPages(scoped.filter((e) => e.from === 'cache'));
+  const errors = scoped.filter((e) => e.from === 'error');
+  const repairs = scoped.filter((e) => e.from === 'repair');
   const textless = fresh.filter((e) => e.textless);
   const text = fresh.filter((e) => !e.textless);
   const chapters = new Map();
@@ -125,8 +143,12 @@ export function summarize(entries) {
     const code = e.error || 'unknown';
     errorCodes[code] = (errorCodes[code] ?? 0) + 1;
   }
+  const complete=fresh.filter(e => !e.incomplete).length;
+  const partial=fresh.length-complete;
   return {
     pages: fresh.length,
+    complete,
+    partial,
     cached: cached.length,
     errors: errors.length,
     repairs: repairs.length,
@@ -165,10 +187,12 @@ export function engineLines(run) {
 
 export function formatReport(entries, benchmarks = [], engines = null, cleaning = null) {
   const s = summarize(entries);
-  const lines = [`أداء الترجمة — ${s.pages} صفحة جديدة ناجحة، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
+  const scoped = latestRunEntries(entries);
+  const fresh = uniqueFreshPages(scoped.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends')));
+  const lines = [`أداء الترجمة — ${s.complete} مكتملة، ${s.partial} جزئية، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
   if (Object.keys(s.errorCodes).length) lines.push(`الأخطاء: ${Object.entries(s.errorCodes).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
-  const modelPages = entries.filter((e) => !e.error && e.from === 'model' && !e.textless);
-  const serverCachedPages = entries.filter((e) => !e.error && e.from === 'friends' && !e.textless);
+  const modelPages = fresh.filter((e) => e.from === 'model' && !e.textless);
+  const serverCachedPages = fresh.filter((e) => e.from === 'friends' && !e.textless);
   if (serverCachedPages.length && modelPages.length === 0) {
     lines.push(`اللغة في هذه الجولة: ${serverCachedPages.length} صفحة من كاش الخادم؛ لا يوجد نداء Luna جديد في السجل.`);
   } else if (serverCachedPages.length || modelPages.length) {
@@ -176,7 +200,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
-  const analyzed = entries.filter((e) => e.native?.analyze?.counts && !e.textless);
+  const analyzed = fresh.filter((e) => e.native?.analyze?.counts && !e.textless);
   const fastPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'fast').length;
   const mixedPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'mixed').length;
   const heavyPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'heavy').length;
@@ -186,7 +210,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
   if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
 
-  const rendered = entries.filter((e) => e.native?.render?.counts);
+  const rendered = fresh.filter((e) => e.native?.render?.counts);
   const sumRender = (k) => rendered.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
   const eraseMask = sumRender('eraseMaskPixels');
   const eraseChanged = sumRender('eraseChangedPixels');
@@ -198,13 +222,13 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   }
   // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
   for (const via of ['reader', 'job']) {
-    const mine = entries.filter((e) => e.via === via && e.native?.render);
+    const mine = fresh.filter((e) => e.via === via && e.native?.render);
     if (!mine.length) continue;
     const sum = (k) => mine.reduce((a, e) => a + (e.native.render.counts?.[k] ?? 0), 0);
     lines.push(`${via === 'job' ? 'المقدّمة' : 'القارئ'}: ${mine.length} صفحة · مرسوم ${sum('translated')} · لم يدخل ${sum('noFit')} · لم يظهر ${sum('invisible')} · فقاعة أُبقيت ${sum('bubbleKept')} · لون قُلب ${sum('inkFlipped')}`);
   }
   // المعالج مشغول فعلًا أم الصفحات تنتظر بعضها؟ من آخر صفحة قاسها الجهاز
-  const last = [...entries].reverse().find((e) => e.native?.render?.laneBusy || e.native?.analyze?.laneBusy || Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
+  const last = [...scoped].reverse().find((e) => e.native?.render?.laneBusy || e.native?.analyze?.laneBusy || Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
   const lanes = last?.native?.render?.laneBusy ?? last?.native?.analyze?.laneBusy;
   if (lanes) lines.push(`إشغال المسارات: كشف ${lanes.detect}% · تحليل ${lanes.analyze}% · رسم ${lanes.render}% (ليس نسبة CPU للنظام)`);
   else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
@@ -214,7 +238,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   }
   // آخر الصفحات واحدةً واحدة: الملخّص السابق كان يخفي فرق «الأولى لا تظهر والثانية تظهر».
   // هذا السطر يجعل الدور والعمل والشبكة مرئية لكل صفحة بدل وسيط واحد.
-  const recentText = entries.filter((e) => !e.error && (e.from === 'model' || e.from === 'friends') && !e.textless).slice(-12);
+  const recentText = fresh.filter((e) => !e.textless).slice(-12);
   if (recentText.length) {
     lines.push('', 'آخر صفحات الحوار (كل صفحة وحدها):');
     for (const e of recentText) {
@@ -225,7 +249,15 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const queue = (a.queue ?? 0) + (r.queue ?? 0) + (probe.queue ?? 0);
       const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
       const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
+      const telemetry = [
+        Number.isFinite(ac.detectTiles) ? `detectTiles ${ac.detectTiles}` : null,
+        Number.isFinite(ac.heavyRoiCrops) ? `ROI ${ac.heavyRoiCrops}` : null,
+        Number.isFinite(ac.glyphTiles) ? `CTDtiles ${ac.glyphTiles}` : null,
+        Number.isFinite(ac.bubbleTiles) ? `BubbleTiles ${ac.bubbleTiles}` : null,
+        Number.isFinite(e.native?.analyze?.thermal) ? `حرارة ${e.native.analyze.thermal}` : null,
+        Number.isFinite(e.native?.analyze?.heapMb) ? `heap ${e.native.analyze.heapMb}MB` : null,
+      ].filter(Boolean).join(' · ');
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${telemetry ? ` · ${telemetry}` : ''}`);
     }
   }
 
