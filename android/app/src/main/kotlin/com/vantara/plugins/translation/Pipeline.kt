@@ -229,7 +229,10 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     if(MissingTextSweep.confirmed(text,confidence)) {extra.add(Detection(b,confidence,"text_free"));perf.count("missingConfirmed")}
                 }}
             }
-            (detected+extra).also {detections[hash]=it}
+            val seeded=detected+extra
+            val fallback=MissingTextSweep.holderFallbacks(seeded)
+            perf.count("holderFallbacks",fallback.size)
+            (seeded+fallback).also {detections[hash]=it}
         }
         return Routed(hash,img.width,img.height,dets)
     }
@@ -272,12 +275,15 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 // Rebuild every snapshot owned by that holder so a missed second line
                 // cannot survive beside a freshly re-analysed first line.
                 val targets=cached.regions.filter { (it.bubbleBox ?: it.box)==box }
-                val promoted=if(targets.isNotEmpty()) {
-                    finish(hash,img,ResidualRescue.detections(targets),perf,false,forceHeavy=true)
-                } else null
-                if (promoted!=null && promoted.regions.isNotEmpty()) {
+                // A global residual may have had no detector-owned region at all.
+                // Known holders rebuild the whole holder; free leftovers get their own
+                // conservative heavy OCR candidate instead of disappearing forever.
+                val rescueDetections=if(targets.isNotEmpty()) ResidualRescue.detections(targets)
+                    else listOf(Detection(box,.95f,"text_free"))
+                val promoted=finish(hash,img,rescueDetections,perf,false,forceHeavy=true)
+                if (promoted.regions.isNotEmpty()) {
                     val ids=targets.map {it.id}.toSet()
-                    repaired.removeAll {it.id in ids}
+                    if(ids.isNotEmpty()) repaired.removeAll {it.id in ids}
                     repaired.addAll(thaw(promoted))
                     perf.count("residualPromoted")
                 } else {unresolved.add(box);perf.count("residualRescueFailed")}
@@ -349,7 +355,29 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         perf.count("bubbles",bubbleList.size)
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
-        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, texts + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
+        // CTD is independent evidence. If it sees a line inside a holder that
+        // RT-DETR/MissingSweep did not own, promote it to a synthetic detection;
+        // OCR still vetoes unreadable/art-like candidates before Luna or erasure.
+        val glyphRescue=perf.time("glyphCoverage") { Regions.unclaimedGlyphDetections(img,glyphFull,texts,heavyBubbles) }
+        perf.count("glyphRescueDetections",glyphRescue.size)
+        var regionDetections=texts + glyphRescue
+        var regions = perf.time("regions") { Regions.assemble(img, gray, hash, regionDetections + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
+        // Coverage audit before Luna: one bounded second pass. If CTD still owns
+        // glyphs inside a speech holder that no Region claims, promote them now.
+        val coverageExtra=perf.time("coverageAudit") {
+            val claimed=regions.map { Detection(it.box,maxOf(it.score,Regions.MIN_SCORE),"text_bubble") }
+            Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
+        }
+        if(coverageExtra.isNotEmpty()) {
+            perf.count("coverageSecondPass",coverageExtra.size)
+            regionDetections=regionDetections+coverageExtra
+            regions=perf.time("coverageReassemble") { Regions.assemble(img,gray,hash,regionDetections+dets.filter {it.label=="bubble"},heavyBubbles,glyphFull) }
+        }
+        val unresolvedCoverage=perf.time("coverageVerify") {
+            val claimed=regions.map { Detection(it.box,maxOf(it.score,Regions.MIN_SCORE),"text_bubble") }
+            Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
+        }
+        perf.count("coverageUnknown",unresolvedCoverage.size)
         perf.count("regions", regions.size + fast.size)
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
@@ -610,11 +638,31 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 } else perf.count("residualRepaired")
             }
         }
-        if (residual.isNotEmpty()) {
+        // Second audit is page-wide and runs before Arabic is drawn. It catches
+        // dialogue that never became a Region at all; known SFX/credit/sign boxes
+        // are explicitly ignored. OCR confirmation keeps line art out of rescue.
+        val globalResidual=ArrayList<Box>()
+        perf.time("residualGlobal") {
+            val ignored=regions.filter { it.id in leave }.map { Detection(ResidualLatin.inspectionBox(it),1f,"text_free") }
+            val candidates=MissingTextSweep.candidates(img,ignored,48)
+            perf.count("residualCandidates",candidates.size)
+            if(candidates.isNotEmpty()) {
+                val reader=ocr(perf)
+                for(box in candidates) {
+                    val (text,confidence)=reader.recognize(img.crop(box.x1,box.y1,box.x2,box.y2))
+                    if(MissingTextSweep.confirmed(text,confidence)) {
+                        globalResidual.add(ResidualLatin.rescueScope(box,regions))
+                        perf.count("residualUnknown")
+                    }
+                }
+            }
+        }
+        val rescueBoxes=(analysis.rescue + ResidualLatin.rescueBoxes(residual) + globalResidual).distinct()
+        if (rescueBoxes.isNotEmpty()) {
             // Metadata handoff only: the next analysis retry owns CTD/BubbleSeg.
             // Loading duplicate heavy sessions into the renderer would inflate memory and delay ready pages.
             analyses[hash]=Analysis(hash,analysis.width,analysis.height,analysis.regions,analysis.bubbles,
-                rescue=ResidualLatin.rescueBoxes(residual),revision=analysis.revision+1)
+                rescue=rescueBoxes,revision=analysis.revision+1)
             perf.count("residualRescueQueued")
             // A failed check preserves source pixels; it cannot count as a completed translation.
         }

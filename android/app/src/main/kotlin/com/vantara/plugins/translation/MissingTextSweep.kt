@@ -2,7 +2,7 @@ package com.vantara.plugins.translation
 import kotlin.math.abs
 /** Cheap proposal only. No region may be erased until OCR confirms and normal mask gates pass. */
 object MissingTextSweep {
- fun candidates(img:RgbImage,known:List<Detection>,limit:Int=12):List<Box> {
+ fun candidates(img:RgbImage,known:List<Detection>,limit:Int=48):List<Box> {
   val scale=minOf(1f,768f/img.width,2048f/img.height)
   val small=if(scale<1) img.resize(maxOf(1,(img.width*scale).toInt()),maxOf(1,(img.height*scale).toInt())) else img
   val gray=small.gray();val proposals=ArrayList<Box>()
@@ -14,7 +14,7 @@ object MissingTextSweep {
    }
    val parts=ink.components().second.filter {
     val w=it.x1-it.x0;val h=it.y1-it.y0
-    w in 2..48 && h in 4..48 && it.area>=4 && it.area<.85*w*h && w.toFloat()/h in .1f..3.2f
+    w in 2..72 && h in 4..64 && it.area>=4 && it.area<.88*w*h && w.toFloat()/h in .08f..5.5f
    }.sortedWith(compareBy({it.y0},{it.x0}))
    val lines=ArrayList<MutableList<ByteMask.Component>>()
    for(c in parts) {
@@ -23,11 +23,22 @@ object MissingTextSweep {
    }
    for(row in lines.filter {it.size>=2}) {
     val b=Box(maxOf(0,((row.minOf{it.x0}-4)/scale).toInt()),maxOf(0,((row.minOf{it.y0}-4)/scale).toInt()),minOf(img.width,((row.maxOf{it.x1}+4)/scale).toInt()),minOf(img.height,((row.maxOf{it.y1}+4)/scale).toInt()))
-    if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE && it.box.contains(b)>.4f} || proposals.any{it.iou(b)>.5f}) continue
+    if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE && (it.box.contains(b)>.85f || it.box.iou(b)>.72f)} || proposals.any{it.iou(b)>.62f}) continue
     proposals.add(b)
    }
   }
   return proposals.sortedWith(compareBy({it.y1},{it.x1})).take(limit)
+ }
+ /**
+  * A bubble is itself evidence that text may exist even when RT-DETR missed the
+  * text class. Only used when no confirmed text seed exists; CTD + OCR still
+  * decide whether a real Region survives.
+  */
+ fun holderFallbacks(known:List<Detection>):List<Detection> {
+  if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE}) return emptyList()
+  return known.filter {it.label=="bubble" && it.score>=.30f}
+   .sortedByDescending {it.score}
+   .map {Detection(it.box,maxOf(Regions.MIN_SCORE,it.score),"text_bubble")}
  }
  fun confirmed(text:String,confidence:Float)= confidence>=.80f && Regex("[A-Za-z]{2,}").containsMatchIn(text)
 }

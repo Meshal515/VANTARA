@@ -358,6 +358,44 @@ object Regions {
         }
     }
 
+    /**
+     * CTD is a second source of text evidence, not merely a mask for RT-DETR boxes.
+     * Promote meaningful glyphs left unclaimed inside a speech holder into a
+     * conservative synthetic text detection. OCR still has final veto before Luna/erase.
+     */
+    fun unclaimedGlyphDetections(img: RgbImage, glyphFull: ByteMask, dets: List<Detection>, bubbles: List<Bubble>): List<Detection> {
+        if (bubbles.isEmpty() || glyphFull.count() < MIN_GLYPH_PIXELS) return emptyList()
+        val claimed=ByteMask(img.width,img.height)
+        for (d in mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }) {
+            val pad=maxOf(4,minOf(12,d.box.h/5))
+            claimed.fillRect(d.box.x1-pad,d.box.y1-pad,d.box.x2+pad,d.box.y2+pad)
+        }
+        val out=ArrayList<Detection>()
+        for (bubble in bubbles) {
+            val inner=Cleaner.innerOf(bubble.mask,2)
+            val stray=ByteMask(img.width,img.height)
+            val b=bubble.box
+            for(y in maxOf(0,b.y1) until minOf(img.height,b.y2)) for(x in maxOf(0,b.x1) until minOf(img.width,b.x2)) {
+                val i=y*img.width+x
+                if(glyphFull.data[i].toInt()!=0 && inner.data[i].toInt()!=0 && claimed.data[i].toInt()==0) stray.data[i]=1
+            }
+            val (_,components)=stray.components(true)
+            val useful=components.filter { comp ->
+                val w=comp.x1-comp.x0; val h=comp.y1-comp.y0
+                comp.area>=10 && w>=2 && h>=3 && w<=b.w && h<=maxOf(64,b.h/2)
+            }
+            if(useful.isEmpty()) continue
+            val box=Box(
+                maxOf(0,useful.minOf {it.x0}-4),maxOf(0,useful.minOf {it.y0}-4),
+                minOf(img.width,useful.maxOf {it.x1}+4),minOf(img.height,useful.maxOf {it.y1}+4),
+            )
+            if(box.area<=0) continue
+            if(dets.any {it.label.startsWith("text") && it.score>=MIN_SCORE && (it.box.contains(box)>.85f || it.box.iou(box)>.72f)}) continue
+            out.add(Detection(box,.81f,"text_bubble"))
+        }
+        return out.distinctBy { listOf(it.box.x1/4,it.box.y1/4,it.box.x2/4,it.box.y2/4) }
+    }
+
     fun assemble(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, bubbles: List<Bubble>, glyphFull: ByteMask): List<Region> {
         val bubbleBoxes = dets.filter { it.label == "bubble" }
         val out = ArrayList<Region>()

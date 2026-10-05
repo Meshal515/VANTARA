@@ -36,7 +36,6 @@ class PriorityGate {
     private var busyNanos = 0L
     private var firstUse = 0L
     @Volatile private var focus: Page? = null
-    @Volatile private var lastIndex: Int? = null
 
     /**
      * صفحة أكملت Analyze وتنتظر Luna ثم Render. ما دام هذا الحجز قائمًا لا نبدأ
@@ -48,15 +47,13 @@ class PriorityGate {
     fun focus(page: Page?, pageCount: Int? = null) {
         val next = synchronized(this) {
             focus = page
-            lastIndex = pageCount?.takeIf { it > 0 }?.minus(1)
             if (awaitingRender != page) awaitingRender = null
             if (!busy) grantNextLocked() else null
         }
         next?.go?.complete(Unit)
     }
 
-    private fun anchor(page: Page?): Boolean = page != null && page.chapter == focus?.chapter &&
-        (page == focus || (lastIndex != null && (page.index == 0 || page.index == lastIndex)))
+    private fun focused(page: Page?): Boolean = page != null && page == focus
 
     fun expectRender(page: Page?) {
         if (page == null) return
@@ -83,9 +80,11 @@ class PriorityGate {
         if (p == null) return 0
         if (p.chapter != f.chapter) return 100_000 + p.index
         if (p == f) return 0
-        if (anchor(p)) return if (p.index == 0) 1 else 2
         val d = p.index - f.index
-        return 3 + if (d >= 0) d else 10_000 - d
+        if (d == 0) return 0
+        if (d > 0 && d <= 3) return d
+        if (d < 0) return 10 + (-d)
+        return 100 + d
     }
 
     /**
@@ -96,13 +95,13 @@ class PriorityGate {
     private fun priorityClass(w: Waiter): Int {
         if (w.rank == DETECT) {
             val f = focus
-            return if (f == null || w.page == null || anchor(w.page)) 0 else 2
+            return if (f == null || w.page == null || focused(w.page)) 0 else 2
         }
         return when (w.rank) {
             RENDER_READER -> 1
-            RENDER_JOB -> if (anchor(w.page)) 1 else 4
+            RENDER_JOB -> if (focused(w.page)) 1 else 4
             ANALYZE_READER -> 3
-            ANALYZE_JOB -> if (anchor(w.page)) 3 else 5
+            ANALYZE_JOB -> if (focused(w.page)) 3 else 5
             else -> 6
         }
     }
@@ -113,7 +112,10 @@ class PriorityGate {
     private fun better(a: Waiter, b: Waiter): Boolean {
         val ca = priorityClass(a); val cb = priorityClass(b)
         if (ca != cb) return ca < cb
-        if (ca <= 3) {
+        // Reader and prefetch work inside the same class still follows distance.
+        // Otherwise ANALYZE_JOB reverts to FIFO and a far future page can beat
+        // the page the reader just reached.
+        if (ca <= 5) {
             val da = distance(a.page); val db = distance(b.page)
             if (da != db) return da < db
         }

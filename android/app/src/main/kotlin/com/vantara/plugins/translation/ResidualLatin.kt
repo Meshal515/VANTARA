@@ -45,6 +45,16 @@ object ResidualLatin {
     /** Rescue the visible holder. Free text has no holder, so its own text box remains the scope. */
     fun rescueBoxes(regions: List<Region>): List<Box> = regions.map { inspectionBox(it) }.distinct()
 
+    /** A globally found leftover inherits a known speech/narration holder when it sits inside it. */
+    fun rescueScope(leftover: Box, regions: List<Region>): Box {
+        val cx=(leftover.x1+leftover.x2)/2
+        val cy=(leftover.y1+leftover.y2)/2
+        val holder=regions.asSequence().mapNotNull { r -> (r.bubbleBox ?: r.bubble?.box)?.let { it to r } }
+            .filter { (box,_) -> cx in box.x1 until box.x2 && cy in box.y1 until box.y2 }
+            .minByOrNull { (box,_) -> box.area }
+        return holder?.first ?: leftover
+    }
+
     fun readable(text: String, confidence: Float, kind: String): Boolean =
         kind !in setOf("sfx","credit") && confidence >= 0.80f && Regex("(?<![A-Za-z])[A-Za-z]{2,}(?![A-Za-z])").containsMatchIn(text)
 

@@ -24,11 +24,13 @@ object Ort {
      */
     data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true, val nnapi: Boolean = false)
 
-    val CURRENT = Engine("current", 4, 4)
+    // XNNPACK owns the heavy intra-op pool. A second 4-thread ORT pool on the
+    // same session multiplied runnable workers and amplified S23 contention.
+    val CURRENT = Engine("current", 1, 4, spin = false)
     private val lanes = InferenceLanes()
 
     fun open(file: File, threads: Int = 4, engine: Engine? = null): OrtSession {
-        val e = engine ?: Engine("default", threads, threads)
+        val e = engine ?: if (threads >= 4) CURRENT else Engine("default", threads, threads, spin = false)
         return OrtSession.SessionOptions().use { opts ->
         opts.setIntraOpNumThreads(e.ortThreads)
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)

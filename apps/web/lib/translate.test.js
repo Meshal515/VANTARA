@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, createQueue, resultOf, staleEngine, unansweredIds, uploadPlan } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -40,14 +40,14 @@ describe('worker reply → what the reader keeps', () => {
   });
 });
 
-describe('queue: a fixed order, forward from your page, never leaving a page behind', () => {
+describe('queue: current + short lookahead, then the pages you just passed', () => {
   const job = (chapterKey, index) => ({ key: `${chapterKey}#${index}`, chapterKey, index, run: () => new Promise(() => {}) });
-  it('every page ahead in order, then the pages you passed (nearest first), then the next chapter', () => {
+  it('does not let a far future page starve pages you already passed', () => {
     const q = createQueue({ concurrency: 0 });
     for (const i of [0, 5, 10]) q.add(job('c2', i));
     for (const i of [0, 12, 30, 95]) q.add(job('c1', i));
     q.focus('c1', 30, { c1: 0, c2: 1 });
-    expect(q.order()).toEqual(['c1#30', 'c1#95', 'c1#12', 'c1#0', 'c2#0', 'c2#5', 'c2#10']);
+    expect(q.order()).toEqual(['c1#30', 'c1#12', 'c1#0', 'c1#95', 'c2#0', 'c2#5', 'c2#10']);
   });
 
   it('moving ahead re-prioritises instantly: you reached 30, so 30–33 go before 95', () => {
@@ -56,7 +56,7 @@ describe('queue: a fixed order, forward from your page, never leaving a page beh
     q.focus('c1', 0, { c1: 0 });
     expect(q.order()[0]).toBe('c1#30');
     q.focus('c1', 33, { c1: 0 });
-    expect(q.order()).toEqual(['c1#33', 'c1#95', 'c1#31', 'c1#30']);
+    expect(q.order()).toEqual(['c1#33', 'c1#31', 'c1#30', 'c1#95']);
   });
 
   it('the same page is queued once', async () => {
@@ -137,5 +137,44 @@ describe('queue reports how long a page waited', () => {
     let seen = null;
     await q.add({ key: 'c1#0', chapterKey: 'c1', index: 0, run: async (ctx) => (seen = ctx) });
     expect(seen.waitedMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+
+describe('reader scheduling under fast scrolling', () => {
+  it('runs current and next three, then the nearest missed page behind, before far future pages', () => {
+    const q = createQueue({ concurrency: 0 });
+    const add = index => q.add({ key: `c#${index}`, chapterKey: 'c', index, run: async () => index });
+    for (const index of [95, 28, 29, 33, 32, 31, 30]) add(index);
+    q.focus('c', 30, { c: 0 }, { pageCount: 100 });
+    expect(q.order()).toEqual(['c#30', 'c#31', 'c#32', 'c#33', 'c#29', 'c#28', 'c#95']);
+  });
+});
+
+describe('reader exception classification', () => {
+  it('does not label every thrown exception as offline', () => {
+    expect(classifyTranslationError(new Error('image'))).toBe('image_fetch_failed');
+    expect(classifyTranslationError(new DOMException('cancelled', 'AbortError'))).toBe('aborted');
+    expect(classifyTranslationError(new Error('bridge exploded'))).toBe('native_bridge_failed');
+    expect(classifyTranslationError(new TypeError('Failed to fetch'))).toBe('network_failed');
+    expect(classifyTranslationError(new Error('Network request failed'))).toBe('network_failed');
+    expect(classifyTranslationError(new Error('unexpected'))).toBe('reader_exception');
+    expect(classifyTranslationError(new Error('anything'), false)).toBe('offline');
+  });
+});
+
+
+describe('local translation cache revision', () => {
+  it('refreshes outputs produced before the coverage/residual pipeline revision', () => {
+    expect(staleLocalPipeline({ translated: 3 })).toBe(true);
+    expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1 })).toBe(true);
+    expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION })).toBe(false);
+  });
+
+  it('does not mark old pixels current merely because a refresh attempt started', () => {
+    const old = { translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1, at: 10, tries: 0 };
+    const marked = repairAttemptValue(old, 1, 99);
+    expect(marked).toMatchObject({ pipelineVersion: LOCAL_PIPELINE_VERSION - 1, at: 99, tries: 1 });
+    expect(staleLocalPipeline(marked)).toBe(true);
   });
 });
