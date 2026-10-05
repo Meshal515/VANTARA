@@ -133,8 +133,12 @@ export function createQueue({ concurrency = 3 } = {}) {
       job.started = true;
       running += 1;
       const waitedMs = Date.now() - job.addedAt;
+      // Interactive is a dispatch-time fact, not a permanent property of every
+      // reader job. Only the page currently in front of the reader gets the
+      // low-latency direct Luna/native lane; ahead pages are prefetch work.
+      const interactive = job.chapterKey === focusKey && job.index === focusIndex;
       Promise.resolve()
-        .then(() => job.run({ waitedMs }))
+        .then(() => job.run({ waitedMs, interactive }))
         .then(
           (value) => job.resolve(value),
           (error) => job.reject(error),
@@ -425,7 +429,13 @@ async function repairInBackground(deps, src, hash, meta, local) {
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low' : 'high');
+const priorityOf = (deps) => {
+  if (deps.via === 'job' || deps.via === 'repair') return 'low';
+  // Backwards compatibility: direct reader calls that predate the queue
+  // classification remain interactive unless they explicitly say otherwise.
+  if (deps.via === 'reader' && deps.interactive === false) return 'low';
+  return 'high';
+};
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
