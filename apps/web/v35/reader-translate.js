@@ -15,7 +15,7 @@
  */
 
 import { isFiller } from './works.js';
-import { TRANSLATE_ERRORS, createQueue, forgetPage, translatePage, prepareTranslation } from '../lib/translate.js';
+import { TRANSLATE_ERRORS, classifyTranslationError, createQueue, forgetPage, translatePage, prepareTranslation } from '../lib/translate.js';
 import { onTranslateSettings, readTranslateSettings, setTranslationLocked } from '../lib/translate-settings.js';
 import { supports } from '../lib/capabilities.js';
 import { readJobs } from '../lib/translate-jobs.js';
@@ -54,7 +54,7 @@ const store = {
 
 // أربع صفحات في الطريق معًا: صفحتك وثلاث أمامها. على الجوال المعالج لصفحة واحدة في كل
 // مرة، والدور للأقرب من صفحتك الآن (`focusPage`)، وLuna تترجم الباقي في الوقت نفسه
-const queue = createQueue({ concurrency: 8, prepareConcurrency: 1, maxPrepared: 24 });
+const queue = createQueue({ concurrency: 4, prepareConcurrency: 1, maxPrepared: 8 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -134,6 +134,7 @@ export function smallerThanOriginal(img) {
  */
 export function createReaderTranslation(deps) {
   const { api, sync, ref, title, root, toast, getImage, keyOf, rows, pagesOf, imageOf } = deps;
+  const runId = globalThis.crypto?.randomUUID?.() ?? `reader-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let lessonStarted = false;
   let stopped = false;
   let disabledReason = null;
@@ -186,7 +187,7 @@ export function createReaderTranslation(deps) {
   function enqueuePage(seg, index) {
     if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
-    const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
+    const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
     const prepare=async()=> { if(stopped || disabledReason || !isOn()) return null; return prepareTranslation(await getImage(seg,index),meta); };
     const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
@@ -199,7 +200,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',prepareMs,route:prepared?.route,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,route:prepared?.route,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
@@ -207,6 +208,7 @@ export function createReaderTranslation(deps) {
         chapterNumber: Number.isFinite(seg.row.number) && seg.row.number >= 0 ? seg.row.number : null,
         pageIndex: index,
         sourceLang: seg.row.lang ?? 'en',
+        runId,
         ...(speedOf(ref) === 'fast' ? { speed: 'fast' } : {}),
       });
     };
@@ -220,7 +222,7 @@ export function createReaderTranslation(deps) {
         paint(seg, index);
         updateGate();
       })
-      .catch(() => failed(seg, index, 'offline'));
+      .catch((error) => failed(seg, index, classifyTranslationError(error)));
   }
 
   function failed(seg, index, code) {
