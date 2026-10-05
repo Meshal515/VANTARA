@@ -85,19 +85,31 @@ describe('the runner', () => {
   });
 
   it('publishes each accepted page immediately instead of waiting for chapter completion', async () => {
-    const { deps } = fakeDeps({ pagesPer: 3 });
+    let release;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const { deps } = fakeDeps({
+      pagesPer: 3,
+      translate: async (_src, meta) => meta.pageIndex === 0
+        ? { translated: 1, from: 'model' }
+        : (await blocked, { translated: 1, from: 'model' }),
+    });
     const published = [];
     deps.onPageSaved = (page) => published.push(page);
     const runner = createJobRunner(deps);
     runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(7)], keyOf }));
     await until(() => published.length === 1);
-    expect(runner.jobs()[0]?.status).toBe('running');
-    expect(published[0]).toMatchObject({
-      ref: 'ext:x',
-      chapterKey: keyOf(row(7)),
-      pageIndex: expect.any(Number),
-      result: { translated: 1, from: 'model' },
-    });
+    try {
+      expect(published).toHaveLength(1);
+      expect(runner.jobs()[0]?.status).toBe('running');
+      expect(published[0]).toMatchObject({
+        ref: 'ext:x',
+        chapterKey: keyOf(row(7)),
+        pageIndex: 0,
+        result: { translated: 1, from: 'model' },
+      });
+    } finally {
+      release();
+    }
     await until(() => runner.jobs()[0]?.status === 'done');
     expect(published).toHaveLength(3);
   });
