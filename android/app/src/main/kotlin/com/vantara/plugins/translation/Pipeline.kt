@@ -265,18 +265,23 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         val cached=analyses[hash]
         val a = if(cached!=null && cached.rescue.isNotEmpty()) {
             val img=image(bytes,hash,perf,true).img
-            val target=cached.regions.firstOrNull {it.box==cached.rescue.first()}
-            val promoted=target?.let {
-                val dets=listOf(Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")) +
-                    listOfNotNull(it.bubbleBox?.let {b->Detection(b,.95f,"bubble")})
-                finish(hash,img,dets,perf,false,forceHeavy=true)
+            val original=thaw(cached)
+            val targets=original.filter {r->cached.rescue.any {it==r.box}}
+            val textDets=ResidualLatin.rescuePlan(targets)
+            val bubbleDets=targets.mapNotNull {it.bubbleBox}.distinct().map {Detection(it,.95f,"bubble")}
+            val promoted=if(textDets.isNotEmpty()) finish(hash,img,textDets+bubbleDets,perf,false,forceHeavy=true) else null
+            val fresh=promoted?.let {thaw(it)} ?: emptyList()
+            val resolved=targets.filter {target->
+                fresh.any {p->p.box.iou(target.box)>.10f || p.box.contains(target.box)>.55f || target.box.contains(p.box)>.55f}
             }
-            val updated=if(target!=null && promoted!=null && promoted.regions.isNotEmpty()) {
-                val retained=thaw(cached).filter {it.id!=target.id}
-                perf.count("residualPromoted")
-                freeze(hash,img.width,img.height,retained+thaw(promoted))
-            } else {perf.count("residualRescueFailed");cached}
-            Analysis(hash,updated.width,updated.height,updated.regions,updated.bubbles,revision=cached.revision+1).also {analyses[hash]=it}
+            val resolvedIds=resolved.mapTo(HashSet()) {it.id}
+            val retained=original.filter {it.id !in resolvedIds}
+            val merged=if(fresh.isNotEmpty()) freeze(hash,img.width,img.height,(retained+fresh).distinctBy {it.id}) else cached
+            val remaining=targets.filter {it.id !in resolvedIds}.map {it.box}
+            if(resolved.isNotEmpty()) perf.count("residualPromoted",resolved.size)
+            if(remaining.isNotEmpty()) perf.count("residualRescueFailed",remaining.size)
+            Analysis(hash,merged.width,merged.height,merged.regions,merged.bubbles,
+                rescue=remaining,revision=cached.revision+1).also {analyses[hash]=it}
         } else cached ?: run {
             val img = image(bytes, hash, perf, true).img
             val dets = routed?.takeIf {it.pageHash==hash}?.detections ?: detections.remove(hash) ?: detect(img, perf)
@@ -593,12 +598,32 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
-        // Cheap colour gate first. OCR sees only known text lines before Arabic is drawn.
+        // Cheap colour gate first. Crucially, residual OCR proposals come from the
+        // cleaned pixels themselves; the original glyph mask is only an extra hint.
         val residual = ArrayList<Region>()
+        var residualReader: LatinOcr? = null
+        fun readResidual(r: Region): OcrResult {
+            val reader=residualReader ?: ocr(perf).also {residualReader=it}
+            val boxes=ArrayList<Box>()
+            boxes.addAll(ResidualLatin.probeBoxes(img,r))
+            for(b in reader.splitLines(r.glyph,r.box)) if(boxes.none {it.iou(b)>.65f}) boxes.add(b)
+            val lines=ArrayList<OcrLine>()
+            for(b in boxes.take(10)) {
+                val pad=4
+                val crop=img.crop(maxOf(0,b.x1-pad),maxOf(0,b.y1-pad),minOf(img.width,b.x2+pad),minOf(img.height,b.y2+pad))
+                val (text,confidence)=reader.recognize(crop)
+                if(text.isNotEmpty()) lines.add(OcrLine(b,text,confidence))
+            }
+            return OcrResult(
+                lines.joinToString(" ") {it.text},
+                if(lines.isEmpty()) 0f else lines.map {it.confidence}.average().toFloat(),
+                lines
+            )
+        }
         perf.time("residual") {
             for (r in regions) {
                 if (r.status != "translated" || !ResidualLatin.candidate(img,r)) continue
-                var result = ocr(perf).read(img,r.glyph,r.box)
+                var result = readResidual(r)
                 if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) continue
                 val baseMask = r.eraseMask
                 var cleared = false
@@ -611,7 +636,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     // Base erasure changed pixels; a repair no-op alone does not revoke that evidence.
                     r.status = "translated"
                     if (!ResidualLatin.candidate(img,r)) { cleared = true; break }
-                    result = ocr(perf).read(img,r.glyph,r.box)
+                    result = readResidual(r)
                     if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) break
                 }
                 if (!cleared && ResidualLatin.readable(result.text,result.confidence,r.kind)) {
@@ -622,10 +647,10 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         if (residual.isNotEmpty()) {
             // Metadata handoff only: the next analysis retry owns CTD/BubbleSeg.
-            // Loading duplicate heavy sessions into the renderer would inflate memory and delay ready pages.
+            // Queue every failed region together; never repair one region per revisit.
             analyses[hash]=Analysis(hash,analysis.width,analysis.height,analysis.regions,analysis.bubbles,
-                rescue=listOf(residual.first().box),revision=analysis.revision+1)
-            perf.count("residualRescueQueued")
+                rescue=residual.map {it.box}.distinct(),revision=analysis.revision+1)
+            perf.count("residualRescueQueued",residual.size)
             // A failed check preserves source pixels; it cannot count as a completed translation.
         }
         keepWholeBubbles(regions,sibs,leave,perf)
