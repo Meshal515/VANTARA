@@ -60,7 +60,7 @@ jobs:
           pkg='system-images;android-30;default;x86_64'
           log="$RUNNER_TEMP/sdkmanager-system-image.log"
           for attempt in 1 2 3; do
-            if yes | sdkmanager --install "$pkg" >"$log" 2>&1; then
+            if sdkmanager --install "$pkg" >"$log" 2>&1; then
               exit 0
             fi
             echo "::warning::sdkmanager failed on attempt $attempt"

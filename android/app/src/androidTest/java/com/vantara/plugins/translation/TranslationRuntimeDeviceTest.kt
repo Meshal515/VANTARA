@@ -2,6 +2,9 @@ package com.vantara.plugins.translation
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
@@ -85,6 +88,48 @@ class TranslationRuntimeDeviceTest {
         try {
             val perf=Perf();assertTrue(pipeline.route(fixture("source-textless.png"),perf).textless)
             assertFalse(perf.nanos.keys.any {it in setOf("glyphs","bubbles","load:ctd","load:bubbleseg","load:lama")})
+        } finally {pipeline.unload()}
+    }
+
+    @Test fun residualRescueReadsFarLineInOversizedHolder() {
+        // Deliberately stale analysis: only the upper line was detected. The lower
+        // line is >800px away, and the holder exceeds a single CTD tile.
+        val dir=File(context.filesDir,"translation-runtime-evidence").apply {mkdirs()}
+        val source=File(dir,"source-rescue.png")
+        val bitmap=Bitmap.createBitmap(720,1450,Bitmap.Config.ARGB_8888)
+        val canvas=Canvas(bitmap)
+        canvas.drawColor(Color.rgb(220,220,220))
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color=Color.WHITE;canvas.drawRect(80f,100f,640f,1350f,paint)
+        paint.color=Color.BLACK;paint.textSize=38f;paint.textAlign=Paint.Align.CENTER
+        canvas.drawText("MY KING KNOWS",360f,270f,paint)
+        canvas.drawText("DO NOT GO",360f,1150f,paint)
+        source.outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+        bitmap.recycle()
+        val store=ModelStore(context);store.requireInstalled()
+        val pipeline=Pipeline(context,store)
+        try {
+            val route=pipeline.route(source,Perf())
+            val holder=Box(80,100,640,1350)
+            val stale=Box(170,225,550,285)
+            val glyph=ByteMask(720,1450).apply {fillRect(stale.x1,stale.y1,stale.x2,stale.y2)}
+            val bubble=ByteMask(720,1450).apply {fillRect(holder.x1,holder.y1,holder.x2,holder.y2)}
+            val snapshot=Pipeline.Snapshot("stale",stale,.95f,"speech",0,holder,PackedMask.of(glyph),glyph.count(),false,null,"MY KING KNOWS","pending")
+            pipeline.acceptAnalysis(Pipeline.Analysis(route.pageHash,720,1450,listOf(snapshot),listOf(Pipeline.BubbleSnapshot(holder,.95f,PackedMask.of(bubble))),rescue=listOf(holder)))
+            val perf=Perf()
+            val (repaired,_)=pipeline.finishForLuna(source,perf)
+            assertTrue("missed far line must enter actual OCR",repaired.regions.any {it.source.contains("GO",true)})
+            assertTrue("upper line must also survive holder reanalysis",repaired.regions.any {it.source.contains("KING",true)})
+            assertTrue("repair must own glyphs beyond the stale box",repaired.regions.any {it.glyph.unpack().bounds()?.get(3)?.let {bottom->bottom>1100} == true})
+            val render=Pipeline(context,store,renderOnly=true)
+            try {
+                render.acceptAnalysis(repaired)
+                val (output,count)=render.render(source,repaired.regions.filter {it.source.isNotBlank()}.associate {it.id to "حاكمنا يعرف الحقيقة فلا تذهب"},dir,Perf())
+                assertTrue("complete repaired holder must render",count>0)
+                val result=BitmapFactory.decodeFile(output.absolutePath)!!
+                File(dir,"rendered-rescue.png").outputStream().use {result.compress(Bitmap.CompressFormat.PNG,100,it)}
+                result.recycle()
+            } finally {render.unload()}
         } finally {pipeline.unload()}
     }
 }

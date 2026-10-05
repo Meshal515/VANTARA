@@ -13,7 +13,7 @@ adb shell run-as com.vantara.app.debug sh -c '"cp /data/local/tmp/vantara-transl
 adb shell am instrument -w -r -e package com.vantara.plugins.translation \
   com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$evidence/instrumentation.txt"
 adb logcat -d > "$evidence/logcat.txt"
-for filename in rendered-flat.png rendered-real-magician.png evidence.json; do
+for filename in rendered-flat.png rendered-real-magician.png source-rescue.png rendered-rescue.png evidence.json; do
   adb exec-out run-as com.vantara.app.debug cat "files/translation-runtime-evidence/$filename" > "$evidence/$filename"
 done
 cp android/app/src/androidTest/assets/source-flat.png "$evidence/"

@@ -273,11 +273,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 // cannot survive beside a freshly re-analysed first line.
                 val targets=cached.regions.filter { (it.bubbleBox ?: it.box)==box }
                 val promoted=if(targets.isNotEmpty()) {
-                    val textDets=targets.map {
-                        Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")
-                    }
-                    val holders=targets.mapNotNull {it.bubbleBox}.distinct().map {Detection(it,.95f,"bubble")}
-                    finish(hash,img,textDets+holders,perf,false,forceHeavy=true)
+                    finish(hash,img,ResidualRescue.detections(targets),perf,false,forceHeavy=true)
                 } else null
                 if (promoted!=null && promoted.regions.isNotEmpty()) {
                     val ids=targets.map {it.id}.toSet()
