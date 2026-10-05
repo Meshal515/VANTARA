@@ -238,43 +238,48 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
-        // ── المسار السريع: RT-DETR + استخراج لون/حبر محلي ──
-        // لا CTD ولا BubbleSeg ولا LaMa هنا. إن لم تكن الصفحة «سهلة وواضحة» تمامًا
-        // أو كانت ثقة OCR أقل من الحد المحافظ، نسقط فورًا للمسار الثقيل القديم.
-        val fast = perf.time("fastFlat") { Regions.fastFlatRegions(img, gray, hash, dets) }
-        if (fast != null && fast.isNotEmpty()) {
+        // ── المسار السريع على مستوى المنطقة لا الصفحة ──
+        // صفحة فيها 8 فقاعات سهلة وسرد واحد فوق الرسم: 8 لا تدفع ثمن CTD/YOLO.
+        val partition = perf.time("fastFlat") { Regions.fastFlatPartition(img, gray, hash, dets) }
+        val fastRegions = ArrayList<Region>()
+        val remainingText = partition.remaining.toMutableList()
+        if (partition.candidates.isNotEmpty()) {
             val reader = ocr(perf)
-            var safe = true
             perf.time("fastOcr") {
-                for (r in fast) {
+                for (candidate in partition.candidates) {
+                    val r = candidate.region
                     val res = reader.read(img, r.glyph, r.box)
                     perf.count("ocrLines", res.lines.size)
                     r.ocr = res
                     r.source = res.text
-                    // المسار السريع أعلى تحفظًا من الثقيل: أي شك يعيد CTD/BubbleSeg.
+                    // لو القراءة مو موثوقة، هذه الفقاعة وحدها ترجع للثقيل.
                     if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
-                        safe = false
-                        r.status = "skipped:unreadable"
+                        remainingText.addAll(candidate.texts)
+                        perf.count("fastFlatOcrFallback")
+                    } else {
+                        fastRegions.add(r)
                     }
                 }
             }
-            if (safe) {
-                perf.count("fastFlatHit")
-                perf.count("fastFlatRegions", fast.size)
-                perf.count("regions", fast.size)
-                val analysis = perf.time("pack") { freeze(hash, img.width, img.height, fast) }
-                if (useCache) analyses[hash] = analysis
-                return analysis
-            }
-            perf.count("fastFlatOcrFallback")
-        } else {
-            perf.count("fastFlatFallback")
+        }
+        if (fastRegions.isNotEmpty()) {
+            perf.count("fastFlatHit")
+            perf.count("fastFlatRegions", fastRegions.size)
         }
 
-        // ── المسار الثقيل الموثوق لكل ما ليس فقاعة مسطحة واضحة ──
-        val texts = dets.filter { it.label.startsWith("text") }
-        val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
-        val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
+        if (remainingText.isEmpty()) {
+            perf.count("regions", fastRegions.size)
+            val sorted = fastRegions.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
+            val analysis = perf.time("pack") { freeze(hash, img.width, img.height, sorted) }
+            if (useCache) analyses[hash] = analysis
+            return analysis
+        }
+
+        // ── الثقيل فقط لما بقي صعبًا ──
+        // احتفظ بصناديق الفقاعات من RT-DETR لأن assemble يستعملها كاحتياط،
+        // لكن CTD وBubbleSeg لا يريان النصوص التي حُسمت سريعًا.
+        val heavyDets = dets.filter { it.label == "bubble" } + remainingText
+        val glyphRows = remainingText.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
         val gs = glyphs(perf)
         val prob = perf.time("glyphs") { gs.probabilities(img, glyphRows) }
         perf.count("glyphTiles", gs.tiles)
@@ -283,15 +288,29 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             for (i in prob.indices) if (prob[i] > 0.3f) m.data[i] = 1
             m
         }
-        val bs = bubbles(perf)
-        val bubbleList = perf.time("bubbles") { bs.segment(img, bubbleRows) }
-        perf.count("bubbleTiles", bs.tiles)
-        perf.count("bubbles", bubbleList.size)
-        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
-        perf.count("regions", regions.size)
-        val reader = if (regions.isNotEmpty()) ocr(perf) else null
+
+        // سرد حر فوق الرسم لا يحتاج نموذج فقاعات أصلًا. لا نتخطاه إذا RT-DETR
+        // رأى فقاعة تحتوي النص: وقتها قد يكون text_free مجرد تصنيف غير مثالي.
+        val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
+        val needsBubbleModel = remainingText.any { d ->
+            d.label == "text_bubble" || holders.any { h -> h.box.contains(d.box) >= 0.88f && h.box.area >= d.box.area * 1.18f }
+        }
+        val bubbleList = if (needsBubbleModel) {
+            val bubbleRows = remainingText.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
+            val bs = bubbles(perf)
+            perf.time("bubbles") { bs.segment(img, bubbleRows) }.also {
+                perf.count("bubbleTiles", bs.tiles)
+                perf.count("bubbles", it.size)
+            }
+        } else {
+            perf.count("bubbleModelSkipped")
+            emptyList()
+        }
+
+        val heavyRegions = perf.time("regions") { Regions.assemble(img, gray, hash, heavyDets, bubbleList, glyphFull) }
+        val reader = if (heavyRegions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
-            for (r in regions) {
+            for (r in heavyRegions) {
                 val res = reader!!.read(img, r.glyph, r.box)
                 perf.count("ocrLines", res.lines.size)
                 r.ocr = res
@@ -299,7 +318,9 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 if (res.text.isEmpty() || res.confidence < Regions.MIN_OCR_CONF) r.status = "skipped:unreadable"
             }
         }
-        val analysis = perf.time("pack") { freeze(hash, img.width, img.height, regions) }
+        val all = (fastRegions + heavyRegions).sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
+        perf.count("regions", all.size)
+        val analysis = perf.time("pack") { freeze(hash, img.width, img.height, all) }
         if (useCache) analyses[hash] = analysis
         return analysis
     }
