@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { createQueue } from './translate.js';
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+// Reader focus may borrow at most two burst slots; chapter edges are never anchors.
 
 it('admits only the current page behind full running and prepared prefetch slots', async () => {
   let release;
