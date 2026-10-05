@@ -3,8 +3,10 @@ package com.vantara.plugins.translation
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.providers.NNAPIFlags
 import java.io.File
 import java.nio.FloatBuffer
+import java.util.EnumSet
 
 /**
  * جلسات ONNX Runtime: واحدة لكل نموذج، تُفتح عند أول استعمال وتبقى.
@@ -20,7 +22,14 @@ object Ort {
      * إعداد المحرك: خيوط ONNX Runtime، وخيوط XNNPACK (0 = بلاه)، وهل تدور الخيوط
      * الفارغة. «قِس إعدادات المحرك» يقارنها على الجوال نفسه (الزمن والناتج).
      */
-    data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true)
+    data class Engine(
+        val name: String,
+        val ortThreads: Int,
+        val xnnThreads: Int,
+        val spin: Boolean = true,
+        val nnapi: Boolean = false,
+        val nnapiFp16: Boolean = false,
+    )
 
     val CURRENT = Engine("current", 4, 4)
 
@@ -30,7 +39,13 @@ object Ort {
         opts.setIntraOpNumThreads(e.ortThreads)
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         if (!e.spin) opts.addConfigEntry("session.intra_op.allow_spinning", "0")
-        if (e.xnnThreads > 0) runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to e.xnnThreads.toString())) }
+        if (e.nnapi) {
+            val flags = EnumSet.noneOf(NNAPIFlags::class.java)
+            if (e.nnapiFp16) flags.add(NNAPIFlags.USE_FP16)
+            opts.addNnapi(flags)
+        } else if (e.xnnThreads > 0) {
+            runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to e.xnnThreads.toString())) }
+        }
         return env.createSession(file.absolutePath, opts)
     }
 
