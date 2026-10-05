@@ -50,6 +50,27 @@ jobs:
       - run: python3 tools/translation-download-models.py "$RUNNER_TEMP/translation-models"
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
+      # android-emulator-runner occasionally hits a corrupted CDN/system-image archive
+      # ("Error on ZipFile unknown archive"). Pre-install the exact image with bounded
+      # retries so one bad SDK download does not make the native-model gate flaky.
+      - name: Preinstall emulator image with retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg='system-images;android-30;default;x86_64'
+          log="$RUNNER_TEMP/sdkmanager-system-image.log"
+          for attempt in 1 2 3; do
+            if yes | sdkmanager --install "$pkg" >"$log" 2>&1; then
+              exit 0
+            fi
+            echo "::warning::sdkmanager failed on attempt $attempt"
+            cat "$log"
+            rm -rf "$ANDROID_SDK_ROOT/system-images/android-30/default/x86_64" || true
+            find "$ANDROID_SDK_ROOT" -type d -name '.installer' -prune -exec rm -rf {} + 2>/dev/null || true
+            sleep $((attempt * 5))
+          done
+          cat "$log"
+          exit 1
       - name: Run original models, actual Android fonts/pixels, save and reopen
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
