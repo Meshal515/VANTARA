@@ -84,6 +84,24 @@ describe('the runner', () => {
     expect(notes.at(-1)).toEqual(['stop']);
   });
 
+  it('publishes each accepted page immediately instead of waiting for chapter completion', async () => {
+    const { deps } = fakeDeps({ pagesPer: 3 });
+    const published = [];
+    deps.onPageSaved = (page) => published.push(page);
+    const runner = createJobRunner(deps);
+    runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(7)], keyOf }));
+    await until(() => published.length === 1);
+    expect(runner.jobs()[0]?.status).toBe('running');
+    expect(published[0]).toMatchObject({
+      ref: 'ext:x',
+      chapterKey: keyOf(row(7)),
+      pageIndex: expect.any(Number),
+      result: { translated: 1, from: 'model' },
+    });
+    await until(() => runner.jobs()[0]?.status === 'done');
+    expect(published).toHaveLength(3);
+  });
+
   it('a quality job never asks for the fast engine', async () => {
     const { deps, calls } = fakeDeps({ pagesPer: 1 });
     const runner = createJobRunner(deps);
