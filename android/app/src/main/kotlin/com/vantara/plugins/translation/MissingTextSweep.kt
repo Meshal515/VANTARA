@@ -37,7 +37,7 @@ object MissingTextSweep {
  fun holderFallbacks(known:List<Detection>):List<Detection> {
   if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE}) return emptyList()
   return known.filter {it.label=="bubble" && it.score>=.30f}
-   .sortedByDescending {it.score}.take(8)
+   .sortedByDescending {it.score}
    .map {Detection(it.box,maxOf(Regions.MIN_SCORE,it.score),"text_bubble")}
  }
  fun confirmed(text:String,confidence:Float)= confidence>=.80f && Regex("[A-Za-z]{2,}").containsMatchIn(text)
