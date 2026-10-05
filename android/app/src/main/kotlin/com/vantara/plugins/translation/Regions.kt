@@ -24,6 +24,7 @@ class Region(
     val glyphPixels: Int,
     val inkLight: Boolean,
 ) {
+    var lettering: LetteringStyle = LetteringStyle()
     var ocr: OcrResult? = null
     var source: String = ""
     var arabic: String? = null
@@ -116,53 +117,47 @@ object Regions {
      *
      * null = غير متأكد 100%؛ ارجع للمسار الثقيل بلا أي مخاطرة بالجودة.
      */
-    fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
+    data class FastFlatPlan(val fast: List<Region>, val heavy: List<Detection>, val sources: Map<String, List<Detection>>)
+
+    /** Partition independently by holder; retain the exact conservative flat-mask tests. */
+    fun fastFlatPlan(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): FastFlatPlan {
         val texts = mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }
-        if (texts.isEmpty()) return emptyList()
         val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
-        if (holders.isEmpty()) return null
-
-        // فقاعة واحدة قد يكون RT-DETR قسم نصها صندوقين: اجمعهما قبل OCR/Luna.
         val grouped = LinkedHashMap<Detection, MutableList<Detection>>()
+        val heavy = ArrayList<Detection>()
         for (d in texts) {
-            val holder = holders
-                .filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
+            val holder = holders.filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
                 .maxByOrNull { it.box.contains(d.box) * 2f + it.score }
-                ?: return null
-            grouped.getOrPut(holder) { ArrayList() }.add(d)
+            if (holder == null) heavy.add(d) else grouped.getOrPut(holder) { ArrayList() }.add(d)
         }
-
-        val out = ArrayList<Region>(grouped.size)
+        val out = ArrayList<Region>()
+        val sources = LinkedHashMap<String, List<Detection>>()
         for ((holder, group) in grouped) {
+            // Free text within a holder can be an SFX/art overlap: do not partially erase that holder.
+            if (group.any { it.label == "text_free" }) { heavy.addAll(group); continue }
             val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
-            val flat = fastBubbleMask(img, holder.box, textBox) ?: return null
-            val glyph = fastGlyphMask(img, flat.first, textBox, flat.second) ?: return null
-            val n = glyph.count()
-            if (n < MIN_GLYPH_PIXELS) return null
-            val gb = glyph.bounds() ?: return null
-            val box = textBox.union(Box(gb[0], gb[1], gb[2], gb[3]))
-            val light = fastInkLight(img, glyph, flat.second)
-            val bubble = Bubble(holder.box, holder.score, flat.first)
-            out.add(
-                Region(
-                    stableId(pageHash, textBox, img.width, img.height),
-                    box,
-                    group.maxOf { it.score },
-                    "speech",
-                    bubble,
-                    holder.box,
-                    glyph,
-                    n,
-                    light,
-                ),
-            )
+            val flat = fastBubbleMask(img, holder.box, textBox)
+            val glyph = flat?.let { fastGlyphMask(img, it.first, textBox, it.second) }
+            val n = glyph?.count() ?: 0
+            val gb = glyph?.bounds()
+            if (flat == null || glyph == null || n < MIN_GLYPH_PIXELS || gb == null) { heavy.addAll(group); continue }
+            val id = stableId(pageHash, textBox, img.width, img.height)
+            out.add(Region(id, textBox.union(Box(gb[0], gb[1], gb[2], gb[3])), group.maxOf { it.score }, "speech",
+                Bubble(holder.box, holder.score, flat.first), holder.box, glyph, n, fastInkLight(img, glyph, flat.second)))
+            sources[id] = group
         }
-        return out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))
+        return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources)
+    }
+
+    /** Legacy all-or-nothing view for existing diagnostics; production consumes the partition. */
+    fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
+        val plan = fastFlatPlan(img, gray, pageHash, dets)
+        return plan.fast.takeIf { plan.heavy.isEmpty() }
     }
 
     /**
      * قناع فقاعة من لونها نفسه. يرجع القناع + لون الخلفية إن كانت مسطحة حقًا.
-     * الشروط متعمدة المحافظة: فشل واحد فقط يعيد الصفحة لـCTD/BubbleSeg.
+     * الشروط متعمدة المحافظة: فشل يعيد فقاعة واحدة فقط لـCTD/BubbleSeg.
      */
     internal fun fastBubbleMask(img: RgbImage, bubbleBox: Box, textBox: Box): Pair<ByteMask, IntArray>? {
         val x0 = maxOf(0, bubbleBox.x1); val y0 = maxOf(0, bubbleBox.y1)
@@ -325,6 +320,21 @@ object Regions {
             if (labels[i] == best) comp.data[i] = 1
         }
         return comp.filledHoles()
+    }
+
+    /** Accepted fast holders own their pixels; heavy unification cannot reclaim their text or layout space. */
+    fun excludeFastOwnership(fast: List<Region>, glyph: ByteMask, bubbles: List<Bubble>): List<Bubble> {
+        if (fast.isEmpty()) return bubbles
+        val boxes = fast.map { it.bubbleBox ?: it.box }
+        for (box in boxes) glyph.fillRect(box.x1,box.y1,box.x2,box.y2,0)
+        return bubbles.mapNotNull { bubble ->
+            if (boxes.none { it.iou(bubble.box) > 0f }) bubble else {
+                val mask = bubble.mask.copy()
+                for (box in boxes) mask.fillRect(box.x1,box.y1,box.x2,box.y2,0)
+                val bounds = mask.bounds()
+                bounds?.let { Bubble(Box(it[0],it[1],it[2],it[3]),bubble.score,mask) }
+            }
+        }
     }
 
     fun assemble(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, bubbles: List<Bubble>, glyphFull: ByteMask): List<Region> {

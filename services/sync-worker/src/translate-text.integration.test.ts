@@ -102,7 +102,7 @@ describe('translate by region id (vision pipeline)', () => {
     expect(prompt).toContain('"ONLY OUR MAGICIAN KNOWS THE TRUTH."');
     expect(prompt).toContain('box=172,613,513,763');
     const format = (call.body.text as { format: { schema: { properties: { regions: { items: { required: string[] } } } } } }).format;
-    expect(format.schema.properties.regions.items.required).toEqual(['id', 'source', 'kind', 'arabic', 'speaker']);
+    expect(format.schema.properties.regions.items.required).toEqual(['id', 'source', 'kind', 'arabic', 'speaker', 'lettering']);
   });
 
   it('caches by page hash for every account and feeds the glossary', async () => {
@@ -189,8 +189,8 @@ describe('region cleaning', () => {
       new Set(['a', 'b']),
     );
     expect(out).toEqual([
-      { id: 'a', source: 's', kind: 'credit', arabic: null, speaker: null },
-      { id: 'b', source: 's', kind: 'speech', arabic: 'ok', speaker: 'Kim' },
+      { id: 'a', source: 's', kind: 'credit', arabic: null, speaker: null, lettering: { role: 'neutral', ink: 'auto', intensity: 'normal', emphasis: [] } },
+      { id: 'b', source: 's', kind: 'speech', arabic: 'ok', speaker: 'Kim', lettering: { role: 'neutral', ink: 'auto', intensity: 'normal', emphasis: [] } },
     ]);
   });
 });
@@ -379,3 +379,30 @@ describe('translation is open only to its owner while it is being built', () => 
   });
 });
 
+
+describe('strict God correction is page-scoped and charged once per page', () => {
+  it('retries invalid wording once then stores safe fallback, keeping neighbouring results', async () => {
+    const { env } = testEnv();
+    const gpt = fakeGpt(() => ({ ...answer, regions: [
+      { id: 'r1a2b3c4d', source: 'Gods have returned.', kind: 'speech', arabic: 'الآلهة عادوا.', speaker: null },
+      answer.regions[1],
+    ] }));
+    const response = await handleTranslateText(req({ regions: [{ ...regionsIn[0], source: 'Gods have returned.' }, regionsIn[1]] }),env,A,Date.UTC(2026,8,24),{ fetch: gpt.fetch });
+    const result = await response.json() as { regions: Array<{ arabic: string | null }> };
+    expect(gpt.calls).toHaveLength(2);
+    expect(promptOf(gpt.calls[1]!)).toContain('CORRECTION REQUIRED');
+    expect(promptOf(gpt.calls[1]!)).not.toContain('rdeadbeef');
+    expect(result.regions[0]?.arabic).toBe('الملوك عادوا.');
+    expect(result.regions[1]?.arabic).toBeNull();
+    const usage = await env.DB.prepare('SELECT pages FROM translation_usage WHERE user_id = ?').bind(A).first<{ pages: number }>();
+    expect(usage?.pages).toBe(1);
+  });
+  it('accepts a correct directed retry without deterministic substitution', async () => {
+    const { env } = testEnv();
+    let count = 0;
+    const gpt = fakeGpt(() => ({ ...answer, regions: [{ id: 'r1a2b3c4d', source: 'God', kind: 'speech', arabic: ++count === 1 ? 'إله' : 'الملك العظيم', speaker: null }] }));
+    const response = await handleTranslateText(req({ regions: [{ ...regionsIn[0], source: 'God' }] }),env,A,Date.UTC(2026,8,24),{ fetch: gpt.fetch });
+    expect((await response.json() as { regions: Array<{ arabic: string }> }).regions[0]?.arabic).toBe('الملك العظيم');
+    expect(count).toBe(2);
+  });
+});

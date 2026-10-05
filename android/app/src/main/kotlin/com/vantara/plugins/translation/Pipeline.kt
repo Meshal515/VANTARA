@@ -35,6 +35,7 @@ private const val THUMB_PIXELS = 3_200_000.0
 private const val MAX_EDGE = 4096
 
 class Pipeline(private val context: Context, private val store: ModelStore) {
+    private val fonts = FontCatalog(context.assets)
     private var detector: Detector? = null
     private var glyphs: GlyphSegmenter? = null
     private var bubbles: BubbleSegmenter? = null
@@ -108,7 +109,12 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val waiting = System.nanoTime()
         return synchronized(lamaLock) {
             perf.add("lamaLockWait", System.nanoTime() - waiting)
-            inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) }.also { inpainter = it }
+            inpainter ?: load(perf, "lama") { Inpainter(store.file("lama")) {
+                val info = android.app.ActivityManager.MemoryInfo()
+                (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(info)
+                val thermal = if (android.os.Build.VERSION.SDK_INT >= 29) (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).currentThermalStatus else 0
+                InpaintPolicy.maxEdge(info.availMem,info.lowMemory,thermal,Runtime.getRuntime().maxMemory())
+            } }.also { inpainter = it }
         }
     }
     private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict")) }.also { ocr = it }
@@ -238,41 +244,34 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
-        // ── المسار السريع: RT-DETR + استخراج لون/حبر محلي ──
-        // لا CTD ولا BubbleSeg ولا LaMa هنا. إن لم تكن الصفحة «سهلة وواضحة» تمامًا
-        // أو كانت ثقة OCR أقل من الحد المحافظ، نسقط فورًا للمسار الثقيل القديم.
-        val fast = perf.time("fastFlat") { Regions.fastFlatRegions(img, gray, hash, dets) }
-        if (fast != null && fast.isNotEmpty()) {
+        // Independent fast regions survive heavy neighbours and failed OCR.
+        val plan = perf.time("fastFlat") { Regions.fastFlatPlan(img, gray, hash, dets) }
+        val fast = ArrayList<Region>()
+        val texts = ArrayList(plan.heavy)
+        if (plan.fast.isNotEmpty()) {
             val reader = ocr(perf)
-            var safe = true
             perf.time("fastOcr") {
-                for (r in fast) {
+                for (r in plan.fast) {
                     val res = reader.read(img, r.glyph, r.box)
                     perf.count("ocrLines", res.lines.size)
-                    r.ocr = res
-                    r.source = res.text
-                    // المسار السريع أعلى تحفظًا من الثقيل: أي شك يعيد CTD/BubbleSeg.
+                    r.ocr = res; r.source = res.text
                     if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
-                        safe = false
-                        r.status = "skipped:unreadable"
-                    }
+                        texts.addAll(plan.sources.getValue(r.id))
+                        perf.count("fastFlatOcrFallback")
+                    } else fast.add(r)
                 }
             }
-            if (safe) {
-                perf.count("fastFlatHit")
-                perf.count("fastFlatRegions", fast.size)
-                perf.count("regions", fast.size)
-                val analysis = perf.time("pack") { freeze(hash, img.width, img.height, fast) }
-                if (useCache) analyses[hash] = analysis
-                return analysis
-            }
-            perf.count("fastFlatOcrFallback")
-        } else {
-            perf.count("fastFlatFallback")
         }
-
-        // ── المسار الثقيل الموثوق لكل ما ليس فقاعة مسطحة واضحة ──
-        val texts = dets.filter { it.label.startsWith("text") }
+        perf.count("fastFlatRegions", fast.size)
+        perf.count("heavyRegions", texts.size)
+        if (fast.isNotEmpty()) perf.count("fastFlatHit")
+        if (texts.isEmpty()) {
+            perf.count("regions", fast.size)
+            val analysis = perf.time("pack") { freeze(hash, img.width, img.height, fast) }
+            if (useCache) analyses[hash] = analysis
+            return analysis
+        }
+        // Keep the models' tile context; select only heavy rows and assemble only their detections.
         val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
         val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
         val gs = glyphs(perf)
@@ -287,8 +286,9 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val bubbleList = perf.time("bubbles") { bs.segment(img, bubbleRows) }
         perf.count("bubbleTiles", bs.tiles)
         perf.count("bubbles", bubbleList.size)
-        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, dets, bubbleList, glyphFull) }
-        perf.count("regions", regions.size)
+        val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
+        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, texts + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
+        perf.count("regions", regions.size + fast.size)
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
             for (r in regions) {
@@ -299,7 +299,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 if (res.text.isEmpty() || res.confidence < Regions.MIN_OCR_CONF) r.status = "skipped:unreadable"
             }
         }
-        val analysis = perf.time("pack") { freeze(hash, img.width, img.height, regions) }
+        val analysis = perf.time("pack") { freeze(hash, img.width, img.height, (fast + regions).distinctBy { it.id }.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 }))) }
         if (useCache) analyses[hash] = analysis
         return analysis
     }
@@ -357,8 +357,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
      * منطقة بلا عربي تبقى كما هي؛ عربي لا يدخل بحجم مقروء لا يُمسح أصله.
      */
     @Synchronized
-    fun render(file: File, arabicById: Map<String, String>, outDir: File, perf: Perf = Perf(), leave: Set<String> = emptySet()): Pair<File, Int> {
-        val (encoded, hash, translated) = renderImpl(file, arabicById, perf, useCache = true, leave)
+    fun render(file: File, arabicById: Map<String, String>, outDir: File, perf: Perf = Perf(), leave: Set<String> = emptySet(), refinement: Boolean = false, lettering: Map<String, LetteringStyle> = emptyMap()): Pair<File, Int> {
+        val (encoded, hash, translated) = renderImpl(file, arabicById, perf, useCache = true, leave, refinement, lettering)
         val out = perf.time("write") { publish(outDir, hash, encoded) }
         return out to translated
     }
@@ -498,7 +498,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     }
 
     /** يرجع (WebP، بصمة الصفحة، عدد المرسوم). */
-    private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean, leave: Set<String> = emptySet()): Triple<ByteArray, String, Int> {
+    private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean, leave: Set<String> = emptySet(), refinement: Boolean = true, lettering: Map<String, LetteringStyle> = emptyMap()): Triple<ByteArray, String, Int> {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
         val analysis = (if (useCache) analyses[hash] else null) ?: analyzeImpl(file, perf, useCache)
@@ -511,6 +511,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             val ar = arabicById[r.id]?.trim()
             if (r.status != "pending" && r.status != "translated") continue
             if (ar.isNullOrEmpty()) { r.status = "skipped:untranslated"; continue }
+            r.lettering = lettering[r.id] ?: LetteringStyle()
             r.arabic = ar
             r.status = "translated"
         }
@@ -518,7 +519,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.time("layout") {
             for (r in regions) {
                 if (r.status != "translated") continue
-                val l = layout.layoutRegion(img, r, r.arabic!!, sibs[r.id])
+                val l = fonts.layout(r.lettering).layoutRegion(img, r, r.arabic!!, sibs[r.id])
                 if (l == null) { r.status = "skipped:no_fit"; perf.count("noFit"); continue }
                 r.layout = l
             }
@@ -536,6 +537,32 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
+        // Cheap colour gate first. OCR sees only known text lines before Arabic is drawn.
+        val residual = ArrayList<Region>()
+        perf.time("residual") {
+            for (r in regions) {
+                if (r.status != "translated" || !ResidualLatin.candidate(img,r)) continue
+                val result = ocr(perf).read(img,r.glyph,r.box)
+                if (ResidualLatin.readable(result.text,result.confidence,r.kind)) {
+                    r.status = "skipped:residual"
+                    residual.add(r); perf.count("residualLatin")
+                }
+            }
+        }
+        if (residual.isNotEmpty()) {
+            // One local heavy pass, retaining unrelated fast snapshots. Updated OCR is translated next retry.
+            val target = residual.first()
+            val dets = listOf(Detection(target.box,target.score,"text_free")) +
+                listOfNotNull(target.bubbleBox?.let { Detection(it,.95f,"bubble") })
+            val promoted = finish(hash,original,dets,perf,useCache=false)
+            if (promoted.regions.isNotEmpty()) {
+                val retained = thaw(analysis).filter { it.id != target.id }
+                analyses[hash] = freeze(hash,img.width,img.height,retained + thaw(promoted))
+                perf.count("residualPromoted")
+            }
+            // A failed check preserves source pixels; it cannot count as a completed translation.
+            keepWholeBubbles(regions,sibs,leave,perf)
+        }
         // ٣. الرسم: بلون الحبر الأصلي، إلا إن كان سيختفي في خلفيته بعد المسح
         val inks = HashMap<String, Boolean>()
         val bmp = perf.time("draw") {
@@ -547,13 +574,13 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 val light = Visibility.inkLight(img, l, r.inkLight)
                 if (light != r.inkLight) perf.count("inkFlipped")
                 inks[r.id] = light
-                layout.draw(canvas, l, light, r.bubble == null && r.bubbleBox == null)
+                fonts.layout(r.lettering).draw(canvas, l, light, r.bubble == null && r.bubbleBox == null, r.lettering)
             }
             b
         }
         // ٣ب. لا مسح بلا عربي ظاهر: منطقة لم يظهر عربيّها فعلًا (خط بلا حروف، لون مطابق)
         // تعود لأصلها بالكامل بدل فقاعة مبيّضة فارغة
-        val drawn = perf.time("visible") { ArabicLayout.rgbOf(bmp) }
+        val drawn = perf.time("visible") { try { ArabicLayout.rgbOf(bmp) } finally { bmp.recycle() } }
         perf.time("visible") {
             for (r in regions) {
                 if (r.status != "translated") continue
@@ -588,7 +615,9 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         // بلا فقد: ما خارج المسح والعربي يبقى بكسلات الأصل نفسها في الملف المحفوظ
         // صفحة حُلِّلت مصغّرة (أطول من MAX_EDGE): المسح والعربي يُعادان على الملف بمقاسه، فلا
         // تُحفظ الصفحة أصغر من أصلها (كانت تُمطّ على الشاشة فتظهر مبكسلة)
-        val out = if (decoded.fullW == img.width && decoded.fullH == img.height) {
+        val needsFullRes = decoded.fullW != img.width || decoded.fullH != img.height
+        if (needsFullRes && !refinement) perf.count("refinementPending")
+        val out = if (!needsFullRes || !refinement) {
             ArabicLayout.bitmapOf(final)
         } else {
             perf.count("fullRes")
@@ -616,6 +645,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private fun fullRes(bytes: ByteArray, sw: Int, sh: Int, regions: List<Region>, inks: Map<String, Boolean>, lama: Inpainter?): Bitmap {
         val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
         val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: error("not an image")
+        Ort.checkBudget()
         val big = ArabicLayout.rgbOf(src)
         src.recycle()
         val kx = big.width.toFloat() / sw
@@ -634,6 +664,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             if (r.cleanMode == "fill") {
                 val color = r.fillColor ?: continue
                 for (y in y0 until y1) {
+                    Ort.checkBudget()
                     val my = minOf(sh - 1, (y / ky).toInt())
                     for (x in x0 until x1) {
                         val mx = minOf(sw - 1, (x / kx).toInt())
@@ -645,6 +676,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             } else if (lama != null) {
                 val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
                 for (y in y0 until y1) {
+                    Ort.checkBudget()
                     val my = minOf(sh - 1, (y / ky).toInt())
                     for (x in x0 until x1) mask[x, y] = m[minOf(sw - 1, (x / kx).toInt()), my]
                 }
@@ -657,14 +689,14 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         canvas.scale(kx, ky)
         for (r in regions) {
             if (r.status != "translated") continue
-            layout.draw(canvas, r.layout!!, inks[r.id] ?: r.inkLight, r.bubble == null && r.bubbleBox == null)
+            fonts.layout(r.lettering).draw(canvas, r.layout!!, inks[r.id] ?: r.inkLight, r.bubble == null && r.bubbleBox == null, r.lettering)
         }
         return out
     }
 
     /** منطقة مقروءة بقيت بلا عربي ظاهر في فقاعة فيها عربي: الفقاعة كلها تبقى أصلها. */
     private fun keepWholeBubbles(regions: List<Region>, sibs: Map<String, List<Region>>, leave: Set<String>, perf: Perf) {
-        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible")
+        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible", "skipped:residual")
         for (r in regions) {
             if (r.status != "translated") continue
             val gap = sibs[r.id]?.any { it.status in missing && it.id !in leave } == true
@@ -683,7 +715,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     class Benchmark(val legacy: Perf, val current: Perf, val identical: Boolean)
 
-    class EngineResult(val name: String, val loadMs: Long, val glyphsMs: Long, val bubblesMs: Long, val glyphDiff: Int, val glyphPixels: Int, val bubblesSame: Boolean, val bubbles: Int)
+    class EngineResult(val name: String, val loadMs: Long, val glyphsMs: Long, val bubblesMs: Long, val glyphDiff: Int, val glyphPixels: Int, val bubblesSame: Boolean, val bubbles: Int, val error: String? = null)
 
     /**
      * قناع الحروف والفقاعات على صفحة واحدة بكل إعداد للمحرك: زمن كلٍّ منهما، وكم بكسلًا
@@ -706,6 +738,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             Ort.Engine("split-$wide", 1, wide, spin = false),
             Ort.Engine("cpu-4", 4, 0, spin = false),
             Ort.Engine("cpu-$wide", wide, 0, spin = false),
+            Ort.Engine("nnapi-candidate", 1, 0, spin = false, nnapi = true),
             Ort.CURRENT.copy(name = "current-again"),
         )
         var baseMask: ByteArray? = null
@@ -713,10 +746,12 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         val out = ArrayList<EngineResult>()
         for (e in engines) {
             val t0 = System.nanoTime()
-            val gs = GlyphSegmenter(store.file("ctd"), e)
-            val bs = BubbleSegmenter(store.file("bubbleseg"), e)
-            val t1 = System.nanoTime()
+            var gs: GlyphSegmenter? = null
+            var bs: BubbleSegmenter? = null
             try {
+                gs = GlyphSegmenter(store.file("ctd"), e)
+                bs = BubbleSegmenter(store.file("bubbleseg"), e)
+                val t1 = System.nanoTime()
                 val prob = gs.probabilities(img, glyphRows)
                 val t2 = System.nanoTime()
                 val bl = bs.segment(img, bubbleRows)
@@ -728,8 +763,34 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
                 for (i in mask.indices) if (mask[i] != ref[i]) diff++
                 val same = bl.size == refB.size && bl.zip(refB).all { (a, b) -> a.box == b.box && a.mask.data.contentEquals(b.mask.data) }
                 out.add(EngineResult(e.name, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000, (t3 - t2) / 1_000_000, diff, mask.count { it.toInt() != 0 }, same, bl.size))
+            } catch (error: Exception) {
+                out.add(EngineResult(e.name,0,0,0,-1,0,false,0,error.javaClass.simpleName))
             } finally {
-                gs.close(); bs.close()
+                gs?.close(); bs?.close()
+            }
+        }
+        // Tight crops are benchmark candidates only; changing model context is gated on the real corpus.
+        val plan=Regions.fastFlatPlan(img,img.gray(),hash,detect(img,Perf()))
+        val crops=HeavyRoi.plan(img.width,img.height,plan.heavy,detect(img,Perf()).filter { it.label=="bubble" })
+        if(crops.isNotEmpty()) {
+            val t0=System.nanoTime()
+            GlyphSegmenter(store.file("ctd")).use { gs ->
+                BubbleSegmenter(store.file("bubbleseg")).use { bs ->
+                    val t1=System.nanoTime();val full=gs.probabilities(img);val refB=bs.segment(img)
+                    val t2=System.nanoTime();val roi=gs.probabilitiesRoi(img,crops);val t3=System.nanoTime();val roiB=bs.segmentRoi(img,crops);val t4=System.nanoTime()
+                    var diff=0;var pixels=0
+                    for(d in plan.heavy) for(y in maxOf(0,d.box.y1-Regions.GLYPH_MARGIN) until minOf(img.height,d.box.y2+Regions.GLYPH_MARGIN)) for(x in maxOf(0,d.box.x1-Regions.GLYPH_MARGIN) until minOf(img.width,d.box.x2+Regions.GLYPH_MARGIN)) {
+                        val i=y*img.width+x
+                        if((full[i]>.3f)!=(roi[i]>.3f)) diff++
+                        if(roi[i]>.3f) pixels++
+                    }
+                    val same=plan.heavy.all { d ->
+                        val a=refB.filter { it.box.contains(d.box)>.85f }.maxByOrNull { it.score }
+                        val b=roiB.filter { it.box.contains(d.box)>.85f }.maxByOrNull { it.score }
+                        a!=null && b!=null && a.mask.data.contentEquals(b.mask.data)
+                    }
+                    out.add(EngineResult("roi-candidate",(t1-t0)/1_000_000,(t3-t2)/1_000_000,(t4-t3)/1_000_000,diff,pixels,same,roiB.size))
+                }
             }
         }
         return out

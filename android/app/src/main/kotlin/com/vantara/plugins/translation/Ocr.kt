@@ -64,7 +64,7 @@ class LatinOcr(model: File, dict: File) {
         val input = Ort.tensor(x, 1, 3, height.toLong(), w.toLong())
         val sb = StringBuilder()
         val confs = ArrayList<Float>()
-        session.run(mapOf(inputName to input)).use { res ->
+        Ort.run(session, mapOf(inputName to input)).use { res ->
             @Suppress("UNCHECKED_CAST")
             val logits = (res[0].value as Array<Array<FloatArray>>)[0] // T × C
             val c = logits[0].size
@@ -84,7 +84,7 @@ class LatinOcr(model: File, dict: File) {
                 last = best
             }
         }
-        input.close()
+
         return sb.toString().trim() to (if (confs.isEmpty()) 0f else confs.average().toFloat())
     }
 

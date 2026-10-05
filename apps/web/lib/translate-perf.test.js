@@ -86,3 +86,35 @@ describe('engine settings measured on the phone', () => {
     expect(engineLines(null)).toEqual([]);
   });
 });
+
+describe('whole chapter acceptance', () => {
+  const run = (overrides = {}) => ({
+    startedAt: 1000, endedAt: 91000, expectedPages: 100,
+    device: { model: 'Galaxy S23 Ultra', physical: true },
+    environment: { evidence: 'device', models: 'warm', translationCache: 'fresh', images: 'network' },
+    pageResults: Array.from({ length: 100 }, (_, pageIndex) => ({ pageIndex, hash: `h${pageIndex}`, accepted: true, saved: true, from: 'model', at: 2000 + pageIndex * 890, stages: { luna: 1000 } })),
+    ...overrides,
+  });
+  it('measures the complete saved set from request to last save, not overlapping work sum', async () => {
+    const { chapterBenchmark } = await import('./translate-perf.js');
+    const result = chapterBenchmark(run());
+    expect(result).toMatchObject({ completed: 100, failed: 0, wallMs: 90000, target: 'met', stages: { luna: { p50: 1000, p95: 1000 } } });
+    expect(chapterBenchmark(run({ pageResults: run().pageResults.reverse() }))).toEqual(result);
+  });
+  it('does not accept failed, duplicate, out of range or unsaved pages', async () => {
+    const { chapterBenchmark } = await import('./translate-perf.js');
+    const pages = run().pageResults;
+    pages[99] = { ...pages[99], accepted: false, error: 'offline' };
+    expect(chapterBenchmark(run({ pageResults: pages }))).toMatchObject({ completed: 99, failed: 1, target: 'incomplete' });
+    expect(chapterBenchmark(run({ pageResults: [...pages.slice(0, 99), pages[0], { ...pages[99], pageIndex: 100 }] }))).toMatchObject({ completed: 99, target: 'incomplete' });
+    expect(chapterBenchmark(run({ pageResults: pages.map(p => ({ ...p, saved: false })) })).completed).toBe(0);
+  });
+  it('keeps simulation, cache and absent device evidence out of speed claims', async () => {
+    const { chapterBenchmark } = await import('./translate-perf.js');
+    expect(chapterBenchmark(run({ device: null })).target).toBe('UNVERIFIED');
+    expect(chapterBenchmark(run({ environment: { evidence: 'simulation' } })).target).toBe('UNVERIFIED');
+    expect(chapterBenchmark(run({ pageResults: run().pageResults.map(p => ({ ...p, from: 'cache' })) })).target).toBe('cache-only');
+    expect(chapterBenchmark(run({ endedAt: 150000 })).target).toBe('not-met');
+    expect(chapterBenchmark(run({ endedAt: 90000, pageResults: run().pageResults.map(p => ({ ...p, at: 200000 })) })).target).toBe('UNVERIFIED');
+  });
+});

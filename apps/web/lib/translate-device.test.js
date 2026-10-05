@@ -148,3 +148,14 @@ describe('weak network: nothing is uploaded that is not needed', () => {
     expect(quiet).toBe(true);
   });
 });
+
+it('a background page cannot count as saved when IndexedDB is unavailable', async () => {
+  device({ drawn: 1 });
+  const previous=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(new Uint8Array([92,93,94]));
+  try {
+    const result=await translatePage({ ...deps(),via:'job' },'file:///storage-failure.jpg',{ chapterKey:'storage-failure',pageIndex:0 });
+    expect(result.saved).toBe(false);
+    expect(result.error).toBe('storage_failed');
+  } finally { delete globalThis.Capacitor; globalThis.fetch=previous; }
+});

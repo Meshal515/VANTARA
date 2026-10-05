@@ -1,3 +1,4 @@
+import { handleTranslateTextBatch } from './translation-batch.ts';
 /**
  * VANTARA sync worker.
  *
@@ -3129,6 +3130,9 @@ export default {
         response = await handleTranslatePage(request, env as TranslationEnv, userId, now);
       }
       // خط الرؤية: عامل جهاز البيت يرسل النصوص بمعرّفاتها، وLuna تردّ بالمعرّف
+      else if (path === '/v1/translate/text-batch' && request.method === 'POST') {
+        response = await handleTranslateTextBatch(request, env as TranslationEnv, userId, now);
+      }
       else if (path === '/v1/translate/text' && request.method === 'POST') {
         response = await handleTranslateText(request, env as TranslationEnv, userId, now);
       }

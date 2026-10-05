@@ -52,7 +52,7 @@ class Detector(file: File) {
         val input = Ort.tensor(small.toChw(), 1, 3, 640, 640)
         val sizes = Ort.tensor(longArrayOf(img.width.toLong(), img.height.toLong()), 1, 2)
         val out = ArrayList<Detection>()
-        session.run(mapOf("images" to input, "orig_target_sizes" to sizes)).use { res ->
+        Ort.run(session, mapOf("images" to input, "orig_target_sizes" to sizes)).use { res ->
             @Suppress("UNCHECKED_CAST")
             val lab = (res[0].value as Array<LongArray>)[0]
             @Suppress("UNCHECKED_CAST")
@@ -70,7 +70,7 @@ class Detector(file: File) {
                 out.add(Detection(Box(x1, y1, x2, y2), scores[i], labels[lab[i]] ?: "text_free"))
             }
         }
-        input.close(); sizes.close()
+
         return out
     }
 

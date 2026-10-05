@@ -14,6 +14,7 @@
  * بلا مفتاح يرجع 503 `translation_not_configured` والقارئ يقول ذلك بهدوء.
  */
 
+import { LETTERING_SCHEMA, normalizeLettering, validateGodTranslation, safeGodTranslation, type LetteringStyle } from './translation-lettering.ts';
 import type { D1Database, D1PreparedStatement, Env } from './types.ts';
 
 /** يُرفع حين تتغير التعليمات تغييرًا يستحق ترجمة جديدة. */
@@ -68,6 +69,7 @@ export interface TranslateDeps {
   fetch?: typeof fetch;
   /** للاختبار: انتظار بديل (طلب متزامن ينتظر صفحة يترجمها غيره). */
   sleep?: (ms: number) => Promise<void>;
+  deferMemory?: (pageIndex: number, statements: D1PreparedStatement[]) => void;
 }
 
 /** تكلفة ردّ واحد بالدولار من توكناته الفعلية. */
@@ -117,7 +119,8 @@ export const RESERVE_USD = 0.02;
  */
 export interface Admission {
   settle(usd: number): D1PreparedStatement[];
-  refund(): Promise<void>;
+  committed(): void;
+  refund(incurredUsd?: number): Promise<void>;
 }
 
 /**
@@ -171,14 +174,14 @@ export async function admit(env: TranslationEnv, userId: string, now: number, ch
   }
   let settled = false;
   return {
+    committed: () => { settled = true; },
     settle: (usd: number) => {
-      settled = true;
       return [env.DB.prepare('UPDATE translation_spend SET usd = usd + ?, reserved = MAX(0, reserved - ?), updated_at = ? WHERE month = ?').bind(usd, RESERVE_USD, now, month)];
     },
-    refund: async () => {
+    refund: async (incurredUsd = 0) => {
       if (settled) return;
       settled = true;
-      await env.DB.batch([...(countPage ? unpage() : []), release()]);
+      await env.DB.batch([...(countPage ? unpage() : []), release(), ...(incurredUsd > 0 ? [env.DB.prepare('UPDATE translation_spend SET usd = usd + ?, updated_at = ? WHERE month = ?').bind(incurredUsd,now,month)] : [])]);
     },
   };
 }
@@ -548,6 +551,7 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
         );
       }
       await env.DB.batch(statements);
+      ticket.committed();
 
       return reply({ engine, cached: false, width, height, regions, summary, model: payload.model ?? model });
     })();
@@ -567,7 +571,7 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 // يرتفع مع كل تغيير في معنى التعليمات: المحفوظ بإصدار أقدم لا يُعرض كأنه الحالي.
 // 2: أمثلة الفريق، سؤال الإعادة، السرد بلا فقاعة واللافتات، و«نص حر بثقة منخفضة» يُرسل
 //    بتلميح sfx لتقرر Luna (لا يُسقط قبلها). يطابق TEXT_PROMPT_VERSION في apps/web/lib/translate.js.
-export const TEXT_PROMPT_VERSION = 2;
+export const TEXT_PROMPT_VERSION = 3;
 export const textEngineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:t${TEXT_PROMPT_VERSION}`;
 const MAX_TEXT_REGIONS = 60;
 const REGION_ID = /^[a-z0-9_-]{1,32}$/;
@@ -619,6 +623,10 @@ Reference translations from the team's style sheet. Match this register, rhythm 
 - "We meet again, Jin. It's been ten years." → «نلتقي مجددًا يا جين. مرّت عشر سنوات.»
 - "Just try it. I dare you." → «جرّب فحسب. أتحداك.»
 - "If you enjoyed the show, even the smallest coin helps." → «إن أعجبكم العرض، فحتى أصغر قطعة نقدية تُعيننا.»
+God rule: Whenever the source contains the English word God (any case or possessive), translate it ONLY as حاكم or ملك. Gods ONLY as حكام or ملوك. Never use إله, الإله, رب, الرب, آلهة, الآلهة or possessive forms for these words. Do not apply this to Godfather, good or unrelated text.
+
+Lettering: return a lettering object per region: role, ink, intensity, and up to three emphasis strings that are exact whole words/phrases in your Arabic. Follow the source image's actual typography first: its font character, weight, size changes and ink colour. Choose from the declared enums only. Neutral/auto/normal with no emphasis is the default. Blood/crimson and imposing roles are rare, deliberate choices for a key moment; never decorate every line. Do not invent style to compensate for uncertain OCR. Geometry, fit and Arabic shaping are handled by the native renderer.
+
 Do not copy these sentences; copy their voice: short, natural فصحى, Arabic word order, emotion carried by rhythm and punctuation rather than by extra words.`;
 
 export const TEXT_OUTPUT_SCHEMA = {
@@ -631,13 +639,14 @@ export const TEXT_OUTPUT_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'source', 'kind', 'arabic', 'speaker'],
+        required: ['id', 'source', 'kind', 'arabic', 'speaker', 'lettering'],
         properties: {
           id: { type: 'string' },
           source: { type: 'string' },
           kind: { type: 'string', enum: [...KINDS] },
           arabic: { type: ['string', 'null'] },
           speaker: { type: ['string', 'null'] },
+          lettering: LETTERING_SCHEMA,
         },
       },
     },
@@ -659,6 +668,7 @@ export interface TextRegionOut {
   kind: (typeof KINDS)[number];
   arabic: string | null;
   speaker: string | null;
+  lettering?: LetteringStyle;
 }
 
 /** مناطق الطلب: معرّف صالح، نص، صندوق داخل الصورة. ما لا يصلح يُهمل. */
@@ -688,7 +698,7 @@ export function cleanTextRegionsOut(raw: unknown, known: Set<string>): TextRegio
     seen.add(id);
     const kind = KINDS.includes(r.kind as Region['kind']) ? (r.kind as Region['kind']) : 'speech';
     const arabic = kind === 'sfx' || kind === 'credit' ? null : typeof r.arabic === 'string' && r.arabic.trim() ? r.arabic.trim() : null;
-    out.push({ id, source: typeof r.source === 'string' ? r.source.trim() : '', kind, arabic, speaker: typeof r.speaker === 'string' && r.speaker.trim() ? r.speaker.trim() : null });
+    out.push({ id, source: typeof r.source === 'string' ? r.source.trim() : '', kind, arabic, speaker: typeof r.speaker === 'string' && r.speaker.trim() ? r.speaker.trim() : null, lettering: normalizeLettering(r.lettering, arabic) });
   }
   return out;
 }
@@ -777,12 +787,14 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
     // حجز ذرّي قبل النداء (سقف الشهر دائمًا، وحصة الأسبوع لصفحة جديدة)، يُرجع إن لم يُصرف
     const ticket = await admit(env, userId, now, chapterKey, !repairing);
     if (ticket instanceof Response) return ticket;
+    let incurredUsd = 0;
     try {
       return await (async (): Promise<Response> => {
 
         const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
         const ask = (regions: TextRegionIn[], retry = false) =>
           askText(env, deps, {
+            onCost: amount => { incurredUsd += amount; },
             effort: fast ? 'none' : undefined,
             mediaType,
             data,
@@ -794,7 +806,6 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
         let summary = cached?.summary ?? null;
         let parsed: { new_terms?: unknown; characters?: unknown } = {};
         let modelName: string | null = null;
-        let usd = 0;
         if (!repairing) {
           const first = await ask(regionsIn);
           if (first instanceof Response) return first;
@@ -802,14 +813,12 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
           summary = first.summary;
           parsed = first.parsed;
           modelName = first.model;
-          usd += first.usd;
         }
         // مرة واحدة فقط: ما سقط من الرد (أو كلام بلا عربي) يُسأل عنه وحده
         const missing = unanswered(regionsIn, merged);
         if (missing.length) {
           const retry = await ask(missing, true);
           if (!(retry instanceof Response)) {
-            usd += retry.usd;
             const fixed = new Map(retry.regions.map((r) => [r.id, r]));
             merged = regionsIn.map((r) => fixed.get(r.id) ?? merged.find((m) => m.id === r.id)).filter((r): r is TextRegionOut => Boolean(r));
             summary ??= retry.summary;
@@ -819,6 +828,27 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
           }
         }
 
+        const invalidGod = regionsIn.filter(r => {
+          const hit = merged.find(m => m.id === r.id);
+          return hit && (!validateGodTranslation(r.source,hit.arabic) || !validateGodTranslation(hit.source,hit.arabic));
+        });
+        if (invalidGod.length) {
+          const correction = await askText(env, deps, {
+            onCost: amount => { incurredUsd += amount; },
+            effort: fast ? 'none' : undefined, mediaType, data,
+            context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions: invalidGod }) + '\nCORRECTION REQUIRED: God = حاكم or ملك ONLY; Gods = حكام or ملوك ONLY. The previous translation violated this. Correct these regions only, retain their meaning, return the same IDs.',
+            known: new Set(invalidGod.map(r => r.id)),
+          });
+          for (const input of invalidGod) {
+            const index = merged.findIndex(r => r.id === input.id);
+            const old = merged[index]!;
+            const corrected = correction instanceof Response ? undefined : correction.regions.find(r => r.id === input.id);
+            const hit = corrected ?? old;
+            const source = input.source + '\n' + old.source;
+            const arabic = safeGodTranslation(source, hit.arabic);
+            merged[index] = { ...hit, arabic, lettering: normalizeLettering(hit.lettering,arabic) };
+          }
+        }
         const statements = [
           env.DB.prepare(
             `INSERT INTO translation_pages (page_hash, engine, series_ref, chapter_key, page_index, source_lang, width, height, regions_json, summary, created_by, created_at)
@@ -826,14 +856,16 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
              ON CONFLICT (page_hash, engine) DO UPDATE SET regions_json = excluded.regions_json, summary = COALESCE(translation_pages.summary, excluded.summary)`,
           ).bind(pageHash, engine, seriesRef, chapterKey, pageIndex, sourceLang, width, height, JSON.stringify(merged), summary, userId, now),
           // الإصلاح لا يُحسب صفحة (لم يُحجز منها)، لكن تكلفته تُسجَّل في سقف الشهر
-          ...ticket.settle(usd),
-          ...(repairing ? [] : memoryStatements(env.DB, seriesRef, parsed, now)),
+          ...ticket.settle(incurredUsd),
+          ...(repairing || deps.deferMemory ? [] : memoryStatements(env.DB, seriesRef, parsed, now, chapterKey, pageIndex)),
         ];
         await env.DB.batch(statements);
+        ticket.committed();
+        if (!repairing && deps.deferMemory) deps.deferMemory(pageIndex,memoryStatements(env.DB,seriesRef,parsed,now,chapterKey,pageIndex));
         return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
       })();
     } finally {
-      await ticket.refund();
+      await ticket.refund(incurredUsd);
     }
   } finally {
     await releasePage(env, pageHash, engine).run();
@@ -899,7 +931,7 @@ export function unanswered(asked: TextRegionIn[], got: TextRegionOut[]): TextReg
 async function askText(
   env: TranslationEnv,
   deps: TranslateDeps,
-  input: { effort?: 'none' | undefined; mediaType: string; data: string; context: string; known: Set<string> },
+  input: { onCost?: (usd: number) => void; effort?: 'none' | undefined; mediaType: string; data: string; context: string; known: Set<string> },
 ): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null; usd: number }> {
   const effort = input.effort ?? (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
@@ -939,6 +971,7 @@ async function askText(
     if (res.status === 400) return reply({ error: 'rejected' }, 422);
     if (!res.ok) return reply({ error: 'upstream' }, 502);
     payload = (await res.json()) as OpenAIResponse;
+    input.onCost?.(costOf(payload.usage));
   } catch {
     return reply({ error: 'upstream' }, 502);
   }
@@ -963,7 +996,7 @@ async function askText(
 }
 
 /** المصطلحات والشخصيات الجديدة من ردّ النموذج → ذاكرة العمل (أول قرار يثبت). */
-function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms?: unknown; characters?: unknown }, now: number) {
+function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms?: unknown; characters?: unknown }, now: number, chapterKey: string | null = null, pageIndex: number | null = null) {
   const statements = [];
   for (const t of Array.isArray(parsed.new_terms) ? (parsed.new_terms as Array<Record<string, unknown>>).slice(0, 40) : []) {
     const term = typeof t?.term === 'string' ? t.term.trim().slice(0, 120) : '';
@@ -972,10 +1005,11 @@ function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms
     statements.push(
       db
         .prepare(
-          `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at) VALUES (?, ?, ?, ?, ?, 'model', ?)
-           ON CONFLICT (series_ref, term) DO NOTHING`,
+          `INSERT INTO translation_terms (series_ref, term, arabic, kind, note, origin, updated_at, origin_chapter_key, origin_page_index) VALUES (?, ?, ?, ?, ?, 'model', ?, ?, ?)
+           ON CONFLICT (series_ref, term) DO UPDATE SET arabic=excluded.arabic, kind=excluded.kind, note=excluded.note, origin_page_index=excluded.origin_page_index
+           WHERE translation_terms.origin='model' AND translation_terms.origin_chapter_key=excluded.origin_chapter_key AND excluded.origin_page_index < translation_terms.origin_page_index`,
         )
-        .bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now),
+        .bind(seriesRef, term, arabic, typeof t.kind === 'string' ? t.kind : null, typeof t.note === 'string' ? t.note.slice(0, 200) : null, now, chapterKey, pageIndex),
     );
   }
   for (const c of Array.isArray(parsed.characters) ? (parsed.characters as Array<Record<string, unknown>>).slice(0, 20) : []) {
@@ -985,11 +1019,13 @@ function memoryStatements(db: D1Database, seriesRef: string, parsed: { new_terms
     statements.push(
       db
         .prepare(
-          `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+          `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at, origin_chapter_key, origin_page_index) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
            ON CONFLICT (series_ref, name) DO UPDATE SET
-             gender = CASE WHEN translation_characters.gender IS NULL OR translation_characters.gender = 'unknown' THEN excluded.gender ELSE translation_characters.gender END`,
+             arabic = CASE WHEN translation_characters.origin_chapter_key=excluded.origin_chapter_key AND excluded.origin_page_index < translation_characters.origin_page_index THEN excluded.arabic ELSE translation_characters.arabic END,
+             gender = CASE WHEN translation_characters.gender IS NULL OR translation_characters.gender = 'unknown' OR (translation_characters.origin_chapter_key=excluded.origin_chapter_key AND excluded.origin_page_index < translation_characters.origin_page_index AND excluded.gender IS NOT NULL) THEN excluded.gender ELSE translation_characters.gender END,
+             origin_page_index = CASE WHEN translation_characters.origin_chapter_key=excluded.origin_chapter_key AND excluded.origin_page_index < translation_characters.origin_page_index THEN excluded.origin_page_index ELSE translation_characters.origin_page_index END`,
         )
-        .bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
+        .bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now, chapterKey, pageIndex),
     );
   }
   return statements;
@@ -1145,13 +1181,15 @@ export async function handleTranslateLearn(request: Request, env: TranslationEnv
         statements.push(
           env.DB.prepare(
             `INSERT INTO translation_characters (series_ref, name, arabic, gender, voice, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
-             ON CONFLICT (series_ref, name) DO UPDATE SET arabic = excluded.arabic,
+             ON CONFLICT (series_ref, name) DO UPDATE SET
+               origin_chapter_key = NULL, origin_page_index = NULL, arabic = excluded.arabic,
                gender = CASE WHEN excluded.gender IS NULL OR excluded.gender = 'unknown' THEN translation_characters.gender ELSE excluded.gender END,
                updated_at = excluded.updated_at`,
           ).bind(seriesRef, name, arabic, typeof c.gender === 'string' ? c.gender : null, now),
         );
       }
       await env.DB.batch(statements);
+      ticket.committed();
       return reply({ learned: true, cached: false, learnedFrom, terms: statements.length - 2, styleLines: style ? style.split('\n').length : 0 });
     })();
   } finally {

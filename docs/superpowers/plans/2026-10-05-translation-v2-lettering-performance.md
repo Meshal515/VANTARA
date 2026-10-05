@@ -131,4 +131,4 @@ Each task has a RED → GREEN cycle and a focused commit. Read the current class
 
 ## Current state
 
-Only the specification goal and this implementation plan have changed. Runtime code, worker APIs and pipeline behavior are not yet modified. The connected-device benchmark and 100-page timing remain **UNVERIFIED**.
+Runtime candidate implemented and independently reviewed. See [validation and release gates](../../translation-v2/VALIDATION.md) for actual tests and remaining evidence. Checklist items combine implementation with device/corpus acceptance; unchecked device-dependent items are not claims of completion. The connected-device benchmark and 100-page timing remain **UNVERIFIED**. Owner requested branch publication without merging.

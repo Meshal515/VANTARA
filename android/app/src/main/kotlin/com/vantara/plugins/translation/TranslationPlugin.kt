@@ -38,6 +38,47 @@ import java.util.concurrent.TimeUnit
 class TranslationPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val gate = PriorityGate()
+    private data class Refinement(val path: String, val byId: Map<String, String>, val leave: Set<String>, val page: PriorityGate.Page?, val output: File, val version: Long, val lettering: Map<String, LetteringStyle>)
+    private val pendingRefinement = java.util.concurrent.atomic.AtomicReference<Refinement?>()
+    private val renderVersion = java.util.concurrent.atomic.AtomicLong()
+    private val activeRefinement = java.util.concurrent.atomic.AtomicReference<InferenceBudget?>()
+    private val refinementRunning = java.util.concurrent.atomic.AtomicBoolean()
+
+    /** At most one active + one pending request; never retain 100 decoded pages or publish stale work. */
+    private fun refine(request: Refinement) {
+        pendingRefinement.set(request)
+        if (!refinementRunning.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                while (true) {
+                    val next = pendingRefinement.getAndSet(null) ?: break
+                    val budget = InferenceBudget(2000)
+                    activeRefinement.set(budget)
+                    try {
+                        val perf = Perf()
+                        gate.run(PriorityGate.BACKGROUND, perf, next.page) {
+                            if (renderVersion.get() != next.version) return@run
+                            Ort.withBudget(budget) {
+                                val tempDir = File(context.cacheDir, "translation-refinement")
+                                val (refined, count) = pipeline.render(File(next.path), next.byId, tempDir, perf, next.leave, refinement = true, lettering = next.lettering)
+                                budget.check()
+                                if (count == next.byId.size && renderVersion.get() == next.version) {
+                                    // Same filesystem, atomic replacement; failure never downgrades the accepted preview.
+                                    val destination=File(outDir,refined.name)
+                                    java.nio.file.Files.move(refined.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+                                    notifyListeners("refinementReady", JSObject().put("path", destination.absolutePath).put("previewPath",next.output.absolutePath).put("perf", perfJs(perf, 0)))
+                                } else refined.delete()
+                            }
+                        }
+                    } catch (_: Throwable) { /* The visible accepted page remains. */ }
+                    finally { activeRefinement.compareAndSet(budget, null) }
+                }
+            } finally {
+                refinementRunning.set(false)
+                pendingRefinement.getAndSet(null)?.let { refine(it) }
+            }
+        }
+    }
 
     /** «high»: الصفحة أمام القارئ. غيرها (الترجمة المقدّمة، الإكمال) بعدها. */
     private fun high(call: PluginCall) = call.getString("priority", "high") != "low"
@@ -54,6 +95,7 @@ class TranslationPlugin : Plugin() {
     fun focusPage(call: PluginCall) {
         val chapter = call.getString("chapterKey")
         val index = call.getInt("pageIndex")
+        activeRefinement.get()?.cancel()
         gate.focus(if (chapter != null && index != null) PriorityGate.Page(chapter, index) else null)
         call.resolve()
     }
@@ -121,6 +163,7 @@ class TranslationPlugin : Plugin() {
 
     @PluginMethod
     fun analyzePage(call: PluginCall) {
+        if (high(call)) activeRefinement.get()?.cancel()
         val path = call.getString("path") ?: return call.reject("path required")
         scope.launch {
             try {
@@ -186,14 +229,23 @@ class TranslationPlugin : Plugin() {
     fun renderPage(call: PluginCall) {
         val path = call.getString("path") ?: return call.reject("path required")
         val regions = call.getArray("regions") ?: return call.reject("regions required")
+        val version = renderVersion.incrementAndGet()
+        activeRefinement.get()?.cancel()
         scope.launch {
             try {
                 val byId = HashMap<String, String>()
+                val lettering = HashMap<String, LetteringStyle>()
                 for (i in 0 until regions.length()) {
                     val o = regions.getJSONObject(i)
                     val id = o.optString("id", "")
                     val ar = o.optString("arabic", "")
-                    if (id.isNotEmpty() && ar.isNotEmpty()) byId[id] = ar
+                    if (id.isNotEmpty() && ar.isNotEmpty()) {
+                        byId[id] = ar
+                        val style = o.optJSONObject("lettering")
+                        val spans = style?.optJSONArray("emphasis")
+                        lettering[id] = LetteringStyle.normalize(style?.optString("role"),style?.optString("ink"),style?.optString("intensity"),
+                            if (spans == null) emptyList() else (0 until minOf(3,spans.length())).map { spans.optString(it) },ar)
+                    }
                 }
                 // ما قالت Luna إنه مؤثر أو حقوق أو لافتة: يبقى أصله عمدًا، وليس نقصًا في فقاعته
                 val leave = HashSet<String>()
@@ -201,9 +253,10 @@ class TranslationPlugin : Plugin() {
                 val perf = Perf()
                 val thermalWait = coolDown(perf)
                 val (out, translated) = gate.run(if (high(call)) PriorityGate.RENDER_READER else PriorityGate.RENDER_JOB, perf, pageOf(call)) {
-                    pipeline.render(File(path), byId, outDir, perf, leave)
+                    pipeline.render(File(path), byId, outDir, perf, leave, lettering = lettering)
                 }
                 call.resolve(JSObject().put("path", out.absolutePath).put("translated", translated).put("perf", perfJs(perf, thermalWait)))
+                if ((perf.counts["refinementPending"] ?: 0) > 0) refine(Refinement(path, byId.toMap(), leave.toSet(), pageOf(call), out, version, lettering.toMap()))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "render failed", t.javaClass.simpleName)
             }
@@ -292,7 +345,7 @@ class TranslationPlugin : Plugin() {
                 for (r in results) {
                     arr.put(
                         JSObject().put("name", r.name).put("loadMs", r.loadMs).put("glyphsMs", r.glyphsMs).put("bubblesMs", r.bubblesMs)
-                            .put("glyphDiff", r.glyphDiff).put("glyphPixels", r.glyphPixels).put("bubblesSame", r.bubblesSame).put("bubbles", r.bubbles),
+                            .put("glyphDiff", r.glyphDiff).put("glyphPixels", r.glyphPixels).put("bubblesSame", r.bubblesSame).put("bubbles", r.bubbles).put("error", r.error),
                     )
                 }
                 call.resolve(JSObject().put("engines", arr).put("cores", Runtime.getRuntime().availableProcessors()).put("thermal", thermal()))

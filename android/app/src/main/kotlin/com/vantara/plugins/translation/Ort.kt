@@ -3,6 +3,8 @@ package com.vantara.plugins.translation
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.io.File
 import java.nio.FloatBuffer
 
@@ -20,18 +22,52 @@ object Ort {
      * إعداد المحرك: خيوط ONNX Runtime، وخيوط XNNPACK (0 = بلاه)، وهل تدور الخيوط
      * الفارغة. «قِس إعدادات المحرك» يقارنها على الجوال نفسه (الزمن والناتج).
      */
-    data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true)
+    data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true, val nnapi: Boolean = false)
 
     val CURRENT = Engine("current", 4, 4)
 
     fun open(file: File, threads: Int = 4, engine: Engine? = null): OrtSession {
         val e = engine ?: Engine("default", threads, threads)
-        val opts = OrtSession.SessionOptions()
+        return OrtSession.SessionOptions().use { opts ->
         opts.setIntraOpNumThreads(e.ortThreads)
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         if (!e.spin) opts.addConfigEntry("session.intra_op.allow_spinning", "0")
-        if (e.xnnThreads > 0) runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to e.xnnThreads.toString())) }
-        return env.createSession(file.absolutePath, opts)
+        if (e.nnapi) opts.addNnapi()
+        if (!e.nnapi && e.xnnThreads > 0) runCatching { opts.addXnnpack(mapOf("intra_op_num_threads" to e.xnnThreads.toString())) }
+        env.createSession(file.absolutePath, opts)
+        }
+    }
+
+    private val budget = ThreadLocal<InferenceBudget?>()
+    private val deadlines = Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "translation-deadline").apply { isDaemon = true } }
+
+    fun checkBudget() { budget.get()?.check() }
+    fun <T> withBudget(owner: InferenceBudget, block: () -> T): T {
+        val previous = budget.get()
+        budget.set(owner)
+        try { owner.check(); return block() } finally { budget.set(previous) }
+    }
+
+    /** Own input tensors even on run failure; Result remains owned by the caller's use block. */
+    fun run(session: OrtSession, inputs: Map<String, OnnxTensor>): OrtSession.Result {
+        var options: OrtSession.RunOptions? = null
+        var registration: AutoCloseable? = null
+        var timer: java.util.concurrent.ScheduledFuture<*>? = null
+        try {
+            checkBudget()
+            val active = OrtSession.RunOptions().also { options = it }
+            val owner = budget.get()
+            if (owner != null) {
+                registration = owner.attach { active.setTerminate(true) }
+                timer = deadlines.schedule({ owner.cancel() }, owner.remainingMs(), TimeUnit.MILLISECONDS)
+            }
+            return session.run(inputs, active)
+        } finally {
+            timer?.cancel(false)
+            registration?.close()
+            options?.close()
+            inputs.values.distinct().forEach { it.close() }
+        }
     }
 
     /** مصفوفة NCHW عائمة → موتّر. */

@@ -171,3 +171,14 @@ describe('the runner', () => {
     expect(notes.some(([k]) => k === 'stop')).toBe(true);
   });
 });
+
+it('partial pages never announce complete and retries preserve successful pages', async () => {
+  const { deps, notes, calls } = fakeDeps({ pagesPer: 2, translate: (_src, meta) => ({ translated: 1, incomplete: meta.pageIndex === 1, from: 'model', hash: `h${meta.pageIndex}` }) });
+  const runner = createJobRunner(deps);
+  runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(1)], keyOf }));
+  await until(() => runner.jobs()[0]?.status === 'done');
+  expect(progressOf(runner.jobs()[0])).toMatchObject({ done: 1, failed: 1, chaptersDone: 0 });
+  expect(calls.filter(c => c.meta.pageIndex === 0)).toHaveLength(1);
+  expect(notes.find(([kind]) => kind === 'finished')[1].title).toContain('بنقص');
+  expect(runner.jobs()[0].chapters[0].benchmark.target).toBe('incomplete');
+});
