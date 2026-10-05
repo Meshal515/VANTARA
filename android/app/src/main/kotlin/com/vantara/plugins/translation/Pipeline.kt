@@ -229,7 +229,10 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     if(MissingTextSweep.confirmed(text,confidence)) {extra.add(Detection(b,confidence,"text_free"));perf.count("missingConfirmed")}
                 }}
             }
-            (detected+extra).also {detections[hash]=it}
+            val seeded=detected+extra
+            val fallback=MissingTextSweep.holderFallbacks(seeded)
+            perf.count("holderFallbacks",fallback.size)
+            (seeded+fallback).also {detections[hash]=it}
         }
         return Routed(hash,img.width,img.height,dets)
     }
