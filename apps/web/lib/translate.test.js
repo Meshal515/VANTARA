@@ -40,14 +40,14 @@ describe('worker reply → what the reader keeps', () => {
   });
 });
 
-describe('queue: a fixed order, forward from your page, never leaving a page behind', () => {
+describe('queue: current + short lookahead, then the pages you just passed', () => {
   const job = (chapterKey, index) => ({ key: `${chapterKey}#${index}`, chapterKey, index, run: () => new Promise(() => {}) });
-  it('every page ahead in order, then the pages you passed (nearest first), then the next chapter', () => {
+  it('does not let a far future page starve pages you already passed', () => {
     const q = createQueue({ concurrency: 0 });
     for (const i of [0, 5, 10]) q.add(job('c2', i));
     for (const i of [0, 12, 30, 95]) q.add(job('c1', i));
     q.focus('c1', 30, { c1: 0, c2: 1 });
-    expect(q.order()).toEqual(['c1#30', 'c1#95', 'c1#12', 'c1#0', 'c2#0', 'c2#5', 'c2#10']);
+    expect(q.order()).toEqual(['c1#30', 'c1#12', 'c1#0', 'c1#95', 'c2#0', 'c2#5', 'c2#10']);
   });
 
   it('moving ahead re-prioritises instantly: you reached 30, so 30–33 go before 95', () => {
@@ -56,7 +56,7 @@ describe('queue: a fixed order, forward from your page, never leaving a page beh
     q.focus('c1', 0, { c1: 0 });
     expect(q.order()[0]).toBe('c1#30');
     q.focus('c1', 33, { c1: 0 });
-    expect(q.order()).toEqual(['c1#33', 'c1#95', 'c1#31', 'c1#30']);
+    expect(q.order()).toEqual(['c1#33', 'c1#31', 'c1#30', 'c1#95']);
   });
 
   it('the same page is queued once', async () => {
