@@ -704,7 +704,17 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
 
     class Benchmark(val legacy: Perf, val current: Perf, val identical: Boolean)
 
-    class EngineResult(val name: String, val loadMs: Long, val glyphsMs: Long, val bubblesMs: Long, val glyphDiff: Int, val glyphPixels: Int, val bubblesSame: Boolean, val bubbles: Int)
+    class EngineResult(
+        val name: String,
+        val loadMs: Long,
+        val glyphsMs: Long,
+        val bubblesMs: Long,
+        val glyphDiff: Int,
+        val glyphPixels: Int,
+        val bubblesSame: Boolean,
+        val bubbles: Int,
+        val error: String? = null,
+    )
 
     /**
      * قناع الحروف والفقاعات على صفحة واحدة بكل إعداد للمحرك: زمن كلٍّ منهما، وكم بكسلًا
@@ -721,23 +731,32 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
         val cores = Runtime.getRuntime().availableProcessors()
         val wide = maxOf(4, minOf(6, cores - 2))
-        val engines = listOf(
-            Ort.CURRENT,
-            Ort.Engine("split", 1, 4, spin = false),
-            Ort.Engine("split-$wide", 1, wide, spin = false),
-            Ort.Engine("cpu-4", 4, 0, spin = false),
-            Ort.Engine("cpu-$wide", wide, 0, spin = false),
-            Ort.CURRENT.copy(name = "current-again"),
+
+        data class Candidate(val name: String, val engine: Ort.Engine, val bubbleSize: Int = 1024)
+        val candidates = listOf(
+            Candidate("current", Ort.CURRENT),
+            Candidate("bubble-640", Ort.CURRENT.copy(name = "bubble-640"), 640),
+            Candidate("split", Ort.Engine("split", 1, 4, spin = false)),
+            Candidate("split-" + wide, Ort.Engine("split-" + wide, 1, wide, spin = false)),
+            Candidate("cpu-4", Ort.Engine("cpu-4", 4, 0, spin = false)),
+            Candidate("cpu-" + wide, Ort.Engine("cpu-" + wide, wide, 0, spin = false)),
+            // لا نعتمد NNAPI إنتاجيًا قبل قياس هذا الجهاز: هنا فقط سرعة + فرق البكسلات.
+            Candidate("nnapi", Ort.Engine("nnapi", 1, 0, spin = false, nnapi = true)),
+            Candidate("nnapi-fp16", Ort.Engine("nnapi-fp16", 1, 0, spin = false, nnapi = true, nnapiFp16 = true)),
+            Candidate("current-again", Ort.CURRENT.copy(name = "current-again")),
         )
         var baseMask: ByteArray? = null
         var baseBubbles: List<Bubble>? = null
         val out = ArrayList<EngineResult>()
-        for (e in engines) {
+        for (candidate in candidates) {
+            val e = candidate.engine
             val t0 = System.nanoTime()
-            val gs = GlyphSegmenter(store.file("ctd"), e)
-            val bs = BubbleSegmenter(store.file("bubbleseg"), e)
-            val t1 = System.nanoTime()
+            var gs: GlyphSegmenter? = null
+            var bs: BubbleSegmenter? = null
             try {
+                gs = GlyphSegmenter(store.file("ctd"), e)
+                bs = BubbleSegmenter(store.file("bubbleseg"), e, candidate.bubbleSize)
+                val t1 = System.nanoTime()
                 val prob = gs.probabilities(img, glyphRows)
                 val t2 = System.nanoTime()
                 val bl = bs.segment(img, bubbleRows)
@@ -748,9 +767,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 var diff = 0
                 for (i in mask.indices) if (mask[i] != ref[i]) diff++
                 val same = bl.size == refB.size && bl.zip(refB).all { (a, b) -> a.box == b.box && a.mask.data.contentEquals(b.mask.data) }
-                out.add(EngineResult(e.name, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000, (t3 - t2) / 1_000_000, diff, mask.count { it.toInt() != 0 }, same, bl.size))
+                out.add(EngineResult(candidate.name, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000, (t3 - t2) / 1_000_000, diff, mask.count { it.toInt() != 0 }, same, bl.size))
+            } catch (t: Throwable) {
+                val elapsed = (System.nanoTime() - t0) / 1_000_000
+                val msg = t.javaClass.simpleName + ": " + (t.message ?: "unsupported")
+                out.add(EngineResult(candidate.name, elapsed, 0, 0, -1, 0, false, 0, msg))
             } finally {
-                gs.close(); bs.close()
+                gs?.close()
+                bs?.close()
             }
         }
         return out
