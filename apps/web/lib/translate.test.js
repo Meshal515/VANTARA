@@ -156,6 +156,8 @@ describe('reader exception classification', () => {
     expect(classifyTranslationError(new Error('image'))).toBe('image_fetch_failed');
     expect(classifyTranslationError(new DOMException('cancelled', 'AbortError'))).toBe('aborted');
     expect(classifyTranslationError(new Error('bridge exploded'))).toBe('native_bridge_failed');
+    expect(classifyTranslationError(new TypeError('Failed to fetch'))).toBe('network_failed');
+    expect(classifyTranslationError(new Error('Network request failed'))).toBe('network_failed');
     expect(classifyTranslationError(new Error('unexpected'))).toBe('reader_exception');
     expect(classifyTranslationError(new Error('anything'), false)).toBe('offline');
   });
