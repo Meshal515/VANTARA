@@ -357,7 +357,24 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // OCR still vetoes unreadable/art-like candidates before Luna or erasure.
         val glyphRescue=perf.time("glyphCoverage") { Regions.unclaimedGlyphDetections(img,glyphFull,texts,heavyBubbles) }
         perf.count("glyphRescueDetections",glyphRescue.size)
-        val regions = perf.time("regions") { Regions.assemble(img, gray, hash, texts + glyphRescue + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
+        var regionDetections=texts + glyphRescue
+        var regions = perf.time("regions") { Regions.assemble(img, gray, hash, regionDetections + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
+        // Coverage audit before Luna: one bounded second pass. If CTD still owns
+        // glyphs inside a speech holder that no Region claims, promote them now.
+        val coverageExtra=perf.time("coverageAudit") {
+            val claimed=regions.map { Detection(it.box,maxOf(it.score,Regions.MIN_SCORE),"text_bubble") }
+            Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
+        }
+        if(coverageExtra.isNotEmpty()) {
+            perf.count("coverageSecondPass",coverageExtra.size)
+            regionDetections=regionDetections+coverageExtra
+            regions=perf.time("coverageReassemble") { Regions.assemble(img,gray,hash,regionDetections+dets.filter {it.label=="bubble"},heavyBubbles,glyphFull) }
+        }
+        val unresolvedCoverage=perf.time("coverageVerify") {
+            val claimed=regions.map { Detection(it.box,maxOf(it.score,Regions.MIN_SCORE),"text_bubble") }
+            Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
+        }
+        perf.count("coverageUnknown",unresolvedCoverage.size)
         perf.count("regions", regions.size + fast.size)
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
