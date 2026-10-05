@@ -172,3 +172,20 @@ it('reports detector work and each independent lane without calling one gate CPU
 
 
 });
+
+
+it('reports only the latest run, dedupes retries, and never calls partial pages successful', () => {
+  const entries = [
+    { at: 1000, runId: 'old-run', chapterKey: 'c', pageIndex: 0, from: 'model', incomplete: false, textless: false, total: 100, stages: {} },
+    { at: 5000, runId: 'new-run', chapterKey: 'c', pageIndex: 0, from: 'model', incomplete: true, textless: false, total: 500, stages: {} },
+    { at: 6000, runId: 'new-run', chapterKey: 'c', pageIndex: 0, from: 'model', incomplete: false, textless: false, total: 100, stages: {} },
+    { at: 7000, runId: 'new-run', chapterKey: 'c', pageIndex: 1, from: 'model', incomplete: true, textless: false, total: 200, stages: {} },
+  ];
+  const s = summarize(entries);
+  expect(s).toMatchObject({ pages: 2, complete: 1, partial: 1 });
+  expect(s.chapters).toEqual([{ chapterKey: 'c', pages: 2, wallMs: 1100, workMs: 300 }]);
+  const report = formatReport(entries);
+  expect(report).toContain('1 مكتملة');
+  expect(report).toContain('1 جزئية');
+  expect(report).not.toContain('2 صفحة جديدة ناجحة');
+});
