@@ -78,7 +78,7 @@ const MAX_REPAIRS = 3;
  * `services/sync-worker/src/translate.ts` (اختبار يتحقق). ترجمة محفوظة بإصدار
  * أقدم تُعرض فورًا وتُجدَّد في الخلفية حين تزور صفحتها.
  */
-export const TEXT_PROMPT_VERSION = 3;
+export const TEXT_PROMPT_VERSION = 4;
 
 /** محرّك أقدم من التعليمات الحالية؟ (`model:t1`، `model:t1:fast`؛ 'device' = لا نص، لا يُجدَّد). */
 export function staleEngine(engine) {
@@ -114,15 +114,19 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   let focusedBurstRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
+  let lastIndex = null;
   const ranks = new Map();
   const listeners = new Set();
+  const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
+  const isAnchor = job => job.chapterKey === focusKey && (job.index === focusIndex || (lastIndex !== null && (job.index === 0 || job.index === lastIndex)));
 
   // ترتيب ثابت لا يتبع سرعتك: من صفحتك للأمام بالترتيب، ثم ما خلفك (الأقرب أولًا)،
   // فلا تُترك صفحة عبرتها بسرعة. الفصل الحالي، ثم التالي، ثم السابق.
   const priority = (job) => {
     const rank = ranks.get(job.chapterKey) ?? 3;
     const d = job.chapterKey === focusKey ? job.index - focusIndex : job.index;
-    return rank * 100_000 + (d >= 0 ? d : 50_000 - d);
+    const anchor = isFocused(job) ? 0 : isAnchor(job) ? (job.index === 0 ? 1 : 2) : 3;
+    return rank * 1_000_000 + anchor * 100_000 + (isAnchor(job) ? 0 : d >= 0 ? d : 50_000 - d);
   };
   const next = (predicate) => {
     let best = null;
@@ -137,10 +141,10 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   const start = (job, bypass = false, focusedBurst = false) => {
     job.started = true;
     if (bypass) bypassRunning++;
-    else if (focusedBurst) focusedBurstRunning++;
+    else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
     else running++;
     Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
-      prepared: job.prepared, interactive: job.chapterKey === focusKey && job.index === focusIndex }))
+      prepared: job.prepared, interactive: isFocused(job), isInteractive: () => isFocused(job) }))
       .then(job.resolve, job.reject).finally(() => {
         if (bypass) bypassRunning--;
         else if (focusedBurst) focusedBurstRunning--;
@@ -157,16 +161,25 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     while (true) {
       const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
       if (!job) break;
-      const focused = job.chapterKey === focusKey && job.index === focusIndex;
       const normalSlot = running < concurrency;
-      const burstSlot = concurrency > 0 && focused && focusedBurstRunning === 0;
+      // Former focus work may still await Luna. Count live anchor ownership,
+      // while keeping a hard cap on all outstanding runs during rapid scrolling.
+      const activeAnchors = [...jobs.values()].filter(j => j.started && j.burst && isAnchor(j)).length;
+      const burstSlot = concurrency > 0 && isAnchor(job) && activeAnchors < (lastIndex === null ? 1 : 3) &&
+        running + focusedBurstRunning < concurrency + maxPrepared + 3;
       if (!normalSlot && !burstSlot) break;
       start(job, false, !normalSlot);
     }
     const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
-    while (preparing < prepareConcurrency && readyCount() + preparing < maxPrepared) {
+    while (true) {
       const job = next(j => j.prepare && !j.ready && !j.preparing);
       if (!job) break;
+      // Three chapter anchors have reserved metadata admission. One extra
+      // preparation call may queue for the native detector, which remains serial.
+      const anchor = isAnchor(job);
+      const preparingAnchors = [...jobs.values()].filter(j => j.preparing && isAnchor(j)).length;
+      if ((anchor ? preparingAnchors >= 3 || preparing >= prepareConcurrency + 3 : preparing >= prepareConcurrency) ||
+          readyCount() + preparing >= maxPrepared + (anchor ? 3 : 0)) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
       Promise.resolve().then(() => job.prepare()).then(prepared => {
@@ -196,9 +209,10 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       queueMicrotask(pump);
       return promise;
     },
-    focus(chapterKey, index, chapterRanks = null) {
+    focus(chapterKey, index, chapterRanks = null, { pageCount = null } = {}) {
       focusKey = chapterKey;
       focusIndex = index;
+      lastIndex = Number.isInteger(pageCount) && pageCount > 0 ? pageCount - 1 : null;
       if (chapterRanks) {
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
@@ -460,11 +474,12 @@ async function repairInBackground(deps, src, hash, meta, local) {
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low' : 'high');
+const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.isInteractive?.() ?? deps.interactive ?? true;
+const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:800,maxInFlight:6,adaptive:true}));
+  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
   return textBatchers.get(sync);
 }
 
@@ -502,7 +517,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
       regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     });
     const ask = data => data
-      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: deps.interactive ?? priorityOf(deps) === 'high', signal: deps.signal })
+      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
       : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {

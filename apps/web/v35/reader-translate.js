@@ -188,7 +188,7 @@ export function createReaderTranslation(deps) {
     const chapterKey = keyOf(seg.row);
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
     const prepare=async()=> { if(stopped || disabledReason || !isOn()) return null; return prepareTranslation(await getImage(seg,index),meta); };
-    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false } = {}) => {
+    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -199,7 +199,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',prepareMs,route:prepared?.route,interactive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',prepareMs,route:prepared?.route,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
@@ -255,8 +255,8 @@ export function createReaderTranslation(deps) {
     if (segs[i + 1]) ranks[keyOf(segs[i + 1].row)] = 1;
     if (segs[i - 1]) ranks[keyOf(segs[i - 1].row)] = 2;
     ranks[keyOf(seg.row)] = 0;
-    queue.focus(keyOf(seg.row), index, ranks);
-    focusPage(keyOf(seg.row), index);
+    queue.focus(keyOf(seg.row), index, ranks, { pageCount: seg.slots.length });
+    focusPage(keyOf(seg.row), index, seg.slots.length);
     if (!isOn()) return;
     if (!ensureModelsOrOffer()) return;
     startLesson();

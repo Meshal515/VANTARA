@@ -265,18 +265,22 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         val cached=analyses[hash]
         val a = if(cached!=null && cached.rescue.isNotEmpty()) {
             val img=image(bytes,hash,perf,true).img
-            val target=cached.regions.firstOrNull {it.box==cached.rescue.first()}
-            val promoted=target?.let {
-                val dets=listOf(Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")) +
-                    listOfNotNull(it.bubbleBox?.let {b->Detection(b,.95f,"bubble")})
-                finish(hash,img,dets,perf,false,forceHeavy=true)
+            val repaired = thaw(cached).toMutableList()
+            val unresolved = ArrayList<Box>()
+            for (box in cached.rescue.distinct()) {
+                val target=cached.regions.firstOrNull {it.box==box}
+                val promoted=target?.let {
+                    val dets=listOf(Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")) +
+                        listOfNotNull(it.bubbleBox?.let {b->Detection(b,.95f,"bubble")})
+                    finish(hash,img,dets,perf,false,forceHeavy=true)
+                }
+                if (target!=null && promoted!=null && promoted.regions.isNotEmpty()) {
+                    repaired.removeAll {it.id==target.id};repaired.addAll(thaw(promoted))
+                    perf.count("residualPromoted")
+                } else {unresolved.add(box);perf.count("residualRescueFailed")}
             }
-            val updated=if(target!=null && promoted!=null && promoted.regions.isNotEmpty()) {
-                val retained=thaw(cached).filter {it.id!=target.id}
-                perf.count("residualPromoted")
-                freeze(hash,img.width,img.height,retained+thaw(promoted))
-            } else {perf.count("residualRescueFailed");cached}
-            Analysis(hash,updated.width,updated.height,updated.regions,updated.bubbles,revision=cached.revision+1).also {analyses[hash]=it}
+            val updated=freeze(hash,img.width,img.height,repaired.distinctBy {it.id})
+            Analysis(hash,updated.width,updated.height,updated.regions,updated.bubbles,rescue=unresolved,revision=cached.revision+1).also {analyses[hash]=it}
         } else cached ?: run {
             val img = image(bytes, hash, perf, true).img
             val dets = routed?.takeIf {it.pageHash==hash}?.detections ?: detections.remove(hash) ?: detect(img, perf)
@@ -510,46 +514,31 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         )
     }
 
-    /**
-     * نشر الصورة المترجمة: اسم جديد لكل محتوى (`<بصمة الصفحة>-<بصمة الناتج>.webp`)
-     * فالقارئ يرى الإكمال فورًا (الرابط تغيّر) ولا يُكتب فوق ملف معروض. والكتابة
-     * ذرّية: ملف مؤقت يُكتب ويُزامَن ثم يُعاد تسميته؛ انقطاع في المنتصف لا يترك
-     * ملفًا نهائيًّا ناقصًا أبدًا. النسخ الأقدم للصفحة نفسها تُحذف بعده.
-     */
+    /** Immutable candidate publication; acceptance happens later in the reader. */
     private fun publish(outDir: File, hash: String, encoded: ByteArray): File {
-        outDir.mkdirs()
-        val name = "$hash-${ModelStore.sha256Hex(encoded).substring(0, 12)}.webp"
-        val out = File(outDir, name)
-        if (!(out.exists() && out.length() == encoded.size.toLong())) {
-            val tmp = File(outDir, "$name.part")
-            java.io.FileOutputStream(tmp).use { s ->
-                s.write(encoded)
-                s.fd.sync()
-            }
-            if (!tmp.renameTo(out)) {
-                tmp.delete()
-                error("cannot publish translated page")
-            }
-        }
-        outDir.listFiles()?.forEach { f ->
-            if (f.name != name && f.name.startsWith(hash) && (f.name.endsWith(".webp") || f.name.endsWith(".part"))) f.delete()
-        }
-        if (++published % 25 == 0) prune(outDir)
+        val out=PagePublisher.publish(outDir,hash,encoded)
+        if (++published % 25 == 0) prune(outDir,hash)
         return out
     }
 
     private var published = 0
 
     /** الصفحات المترجمة فوق ٢٫٥ جيجا: الأقدم كتابةً يُحذف حتى ٢ جيجا (يُترجم من جديد إن عدت له). */
-    private fun prune(outDir: File) {
+    private fun prune(outDir: File, protectedHash:String) {
         val files = outDir.listFiles { f -> f.name.endsWith(".webp") }?.sortedBy { it.lastModified() } ?: return
         var total = files.sumOf { it.length() }
         if (total <= OUT_CAP) return
         for (f in files) {
             if (total <= OUT_KEEP) break
-            total -= f.length()
-            f.delete()
+            if(f.name.startsWith("$protectedHash-")) continue
+            if(f.delete()) total -= f.length()
         }
+    }
+
+    private fun readResidual(img:RgbImage,r:Region,perf:Perf):OcrResult {
+        val crop=img.crop(r.box.x1,r.box.y1,r.box.x2,r.box.y2)
+        val mask=ResidualLatin.inspectionMask(img,r)
+        return ocr(perf).read(crop,mask,Box(0,0,crop.width,crop.height))
     }
 
     /** يرجع (WebP، بصمة الصفحة، عدد المرسوم). */
@@ -598,20 +587,24 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.time("residual") {
             for (r in regions) {
                 if (r.status != "translated" || !ResidualLatin.candidate(img,r)) continue
-                var result = ocr(perf).read(img,r.glyph,r.box)
+                var result = readResidual(img,r,perf)
                 if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) continue
                 val baseMask = r.eraseMask
+                var cumulativeMask=baseMask
                 var cleared = false
                 // At most two local retries; never dilate the previous retry's already expanded mask.
                 for (pixels in 1..2) {
                     r.eraseMask = baseMask
                     r.eraseMask = WhiteningRepair.mask(r,pixels)
+                    val retryMask=r.eraseMask!!
                     recordErase(perf, Cleaner.applyErase(img,listOf(r),lama))
+                    cumulativeMask=RenderSafety.cumulative(cumulativeMask,retryMask)
+                    r.eraseMask=cumulativeMask
                     perf.count("residualRepairAttempts")
                     // Base erasure changed pixels; a repair no-op alone does not revoke that evidence.
                     r.status = "translated"
                     if (!ResidualLatin.candidate(img,r)) { cleared = true; break }
-                    result = ocr(perf).read(img,r.glyph,r.box)
+                    result = readResidual(img,r,perf)
                     if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) break
                 }
                 if (!cleared && ResidualLatin.readable(result.text,result.confidence,r.kind)) {
@@ -624,7 +617,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             // Metadata handoff only: the next analysis retry owns CTD/BubbleSeg.
             // Loading duplicate heavy sessions into the renderer would inflate memory and delay ready pages.
             analyses[hash]=Analysis(hash,analysis.width,analysis.height,analysis.regions,analysis.bubbles,
-                rescue=listOf(residual.first().box),revision=analysis.revision+1)
+                rescue=ResidualLatin.rescueBoxes(residual),revision=analysis.revision+1)
             perf.count("residualRescueQueued")
             // A failed check preserves source pixels; it cannot count as a completed translation.
         }
@@ -658,6 +651,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             // وشقيقاتها في الفقاعة نفسها تعود لأصلها معها
             keepWholeBubbles(regions, sibs, leave, perf)
         }
+        keepWholeBubbles(regions,sibs,leave,perf)
         // ٤. التحقق: لا بكسل خارج (قناع المسح ∪ حدود العربي) يتغير
         val final = perf.time("verify") {
             val allowed = ByteMask(img.width, img.height)
@@ -762,15 +756,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
 
     /** منطقة مقروءة بقيت بلا عربي ظاهر في فقاعة فيها عربي: الفقاعة كلها تبقى أصلها. */
     private fun keepWholeBubbles(regions: List<Region>, sibs: Map<String, List<Region>>, leave: Set<String>, perf: Perf) {
-        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible", "skipped:residual", "skipped:no_erase")
-        for (r in regions) {
-            if (r.status != "translated") continue
-            val gap = sibs[r.id]?.any { it.status in missing && it.id !in leave } == true
-            if (gap) {
-                r.status = "skipped:sibling"
-                perf.count("bubbleKept")
-            }
-        }
+        RenderSafety.enforce(regions,sibs,leave,perf)
     }
 
     /** بكسلات آخر صفحة رُسمت (لمقارنة القديم بالجديد وحدها، أثناءها فقط). */

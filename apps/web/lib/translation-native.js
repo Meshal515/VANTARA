@@ -100,10 +100,10 @@ const where = (chapterKey, pageIndex) => (chapterKey && Number.isInteger(pageInd
  * القارئ على هذه الصفحة الآن: على الجهاز، الصفحة التي أمامك ثم التي بعدها تأخذ
  * المعالج قبل غيرها (والحساب لحظة تسليم الدور). APK أقدم بلا الدالة: لا شيء.
  */
-export function focusPage(chapterKey, pageIndex) {
+export function focusPage(chapterKey, pageIndex, pageCount = null) {
   const p = plugin();
   if (!p?.focusPage) return;
-  void Promise.resolve(p.focusPage(where(chapterKey, pageIndex))).catch(() => {});
+  void Promise.resolve(p.focusPage({ ...where(chapterKey, pageIndex), ...(Number.isInteger(pageCount) && pageCount > 0 ? { pageCount } : {}) })).catch(() => {});
 }
 
 /**

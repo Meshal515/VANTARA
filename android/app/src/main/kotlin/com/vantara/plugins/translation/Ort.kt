@@ -62,7 +62,7 @@ object Ort {
                 registration = owner.attach { active.setTerminate(true) }
                 timer = deadlines.schedule({ owner.cancel() }, owner.remainingMs(), TimeUnit.MILLISECONDS)
             }
-            return lanes.run(work) { checkBudget(); session.run(inputs, active) }
+            return lanes.run(work,owner) { checkBudget(); session.run(inputs, active) }
         } finally {
             timer?.cancel(false)
             registration?.close()

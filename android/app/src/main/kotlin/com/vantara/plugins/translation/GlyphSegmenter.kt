@@ -61,16 +61,16 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
 
     /** Experimental ROI input; not the same context as full-width tiles, so never silently selected. */
     fun probabilitiesRoi(img: RgbImage, crops: List<Box>): FloatArray {
-        val out=FloatArray(img.width*img.height)
+        val blended=RoiProbabilities(img.width,img.height)
         var totalTiles=0
         for(box in crops) {
             val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
             val prob=probabilities(crop,singleTile=true)
             totalTiles+=tiles
-            for(y in 0 until crop.height) for(x in 0 until crop.width) out[(box.y1+y)*img.width+box.x1+x]=prob[y*crop.width+x]
+            blended.add(box,prob)
         }
         tiles=totalTiles
-        return out
+        return blended.finish()
     }
 
     override fun close() = session.close()

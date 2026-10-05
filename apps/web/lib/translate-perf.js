@@ -257,7 +257,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
 export const totalOf = (perf) => Object.entries(perf?.stages ?? {}).reduce((a, [k, v]) => (k === 'load' ? a : a + v), 0);
 
 /** Complete chapter evidence: accepted output persisted, never just analysis or summed overlapping work. */
-export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResults = [], device = null, environment = {} }) {
+export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResults = [], device = null, environment = {}, quality = null, profile = null }) {
   const count = Number.isInteger(expectedPages) && expectedPages > 0 ? expectedPages : 0;
   const pages = new Map();
   for (const page of pageResults) {
@@ -266,11 +266,11 @@ export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResult
     // A retry failure must not erase already accepted, saved output.
     if (!previous || !(previous.accepted && previous.saved && !previous.error)) pages.set(page.pageIndex, page);
   }
-  const accepted = [...pages.values()].filter(p => p.accepted === true && p.saved === true && !p.error && typeof p.hash === 'string' && p.hash.length);
+  const accepted = [...pages.values()].filter(p => p.accepted === true && p.saved === true && !p.error && typeof p.hash === 'string' && /^[a-f0-9]{64}$/.test(p.hash));
   const completed = accepted.length;
   const wallMs = Number.isFinite(endedAt - startedAt) ? Math.round(endedAt - startedAt) : null;
   const cachePages = accepted.filter(p => ['cache', 'device', 'friends'].includes(p.from)).length;
-  const timingValid = Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt && accepted.every(p => Number.isFinite(p.at) && p.at >= startedAt && p.at <= endedAt);
+  const timingValid = Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt && accepted.every(p => ['model', 'textless'].includes(p.from) && Number.isFinite(p.at) && p.at >= startedAt && p.at <= endedAt);
   const proven = timingValid && device?.physical === true && Boolean(device.model) && environment.evidence === 'device' && ['warm', 'cold'].includes(environment.models) && environment.translationCache === 'fresh' && Boolean(environment.images);
   const stages = {};
   const values = {};
@@ -282,6 +282,20 @@ export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResult
     xs.sort((a, b) => a - b);
     stages[name] = { p50: percentile(xs, 0.5), p95: percentile(xs, 0.95) };
   }
-  const target = !count || completed !== count ? 'incomplete' : cachePages === count ? 'cache-only' : !proven || cachePages > 0 ? 'UNVERIFIED' : count !== 100 ? 'not-target-chapter' : wallMs <= 100000 ? 'met' : 'not-met';
-  return { expectedPages: count, completed, failed: count - completed, wallMs, cachePages, stages, target, device, environment };
+  const budgets = { light: 30000, mixed: 120000, heavy: 300000 };
+  const budgetMs = profile === null ? 100000 : Object.hasOwn(budgets, profile) ? budgets[profile] : null;
+  const timingTarget = !count || completed !== count ? 'incomplete' : cachePages === count ? 'cache-only' : !proven || cachePages > 0 || !budgetMs ? 'UNVERIFIED' : (profile === null || profile === 'mixed') && count !== 100 ? 'not-target-chapter' : wallMs <= budgetMs ? 'met' : 'not-met';
+  const checks = [
+    ['detectionRecall', value => value >= .99 && value <= 1],
+    ['untranslatedEnglishRate', value => value >= 0 && value <= .01],
+    ...['mixedArabicEnglish', 'noOpWhitening', 'outsideMaskCorruptions'].map(name => [name, value => value === 0]),
+  ];
+  const annotations = new Map((Array.isArray(quality?.pages) ? quality.pages : []).filter(p => p && Number.isInteger(p.pageIndex) && typeof p.hash === 'string').map(p => [p.pageIndex, p]));
+  const qualityProven = quality?.evidence === 'annotated-corpus' && annotations.size === count && quality.pages.length === count &&
+    typeof quality.buildSha === 'string' && /^[a-f0-9]{40}$/.test(quality.buildSha) && quality.runId === environment.runId && Boolean(environment.runId) && quality.buildSha === environment.buildSha &&
+    accepted.every(p => {const a=annotations.get(p.pageIndex);return a?.hash === p.hash && /^[a-f0-9]{64}$/.test(p.outputHash ?? '') && a.outputHash === p.outputHash;}) && checks.every(([name]) => Number.isFinite(quality[name]));
+  const failures = qualityProven ? checks.filter(([name, check]) => !check(quality[name])).map(([name]) => name) : [];
+  const qualityStatus = !qualityProven ? 'UNVERIFIED' : failures.length ? 'failed' : 'passed';
+  const target = timingTarget !== 'met' ? timingTarget : qualityStatus === 'passed' ? 'met' : qualityStatus === 'failed' ? 'quality-failed' : 'UNVERIFIED';
+  return { expectedPages: count, completed, failed: count - completed, wallMs, cachePages, stages, target, timingTarget, budgetMs: budgetMs ?? null, profile, qualityStatus, qualityFailures: failures, device, environment };
 }

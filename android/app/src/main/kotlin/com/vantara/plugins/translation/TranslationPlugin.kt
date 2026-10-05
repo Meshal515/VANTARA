@@ -102,7 +102,8 @@ class TranslationPlugin : Plugin() {
         val index = call.getInt("pageIndex")
         activeRefinement.get()?.cancel()
         val page=if (chapter != null && index != null) PriorityGate.Page(chapter,index) else null
-        gate.focus(page); detectGate.focus(page); renderGate.focus(page)
+        val count = call.getInt("pageCount")
+        gate.focus(page,count); detectGate.focus(page,count); renderGate.focus(page,count)
         call.resolve()
     }
 

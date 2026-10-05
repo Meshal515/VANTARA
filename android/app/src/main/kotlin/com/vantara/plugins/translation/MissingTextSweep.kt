@@ -10,7 +10,7 @@ object MissingTextSweep {
    val ink=ByteMask(small.width,small.height)
    for(y in 1 until small.height-1) for(x in 1 until small.width-1) {
     val v=gray[y*small.width+x].toInt() and 255
-    if(if(light) v>210 else v<90) ink[x,y]=1
+    if(if(light) v>180 else v<180) ink[x,y]=1
    }
    val parts=ink.components().second.filter {
     val w=it.x1-it.x0;val h=it.y1-it.y0
@@ -21,7 +21,7 @@ object MissingTextSweep {
     val line=lines.lastOrNull {row->val last=row.last();abs((last.y0+last.y1)-(c.y0+c.y1))<maxOf(last.y1-last.y0,c.y1-c.y0) && c.x0-last.x1 in -2..maxOf(12,3*(c.y1-c.y0))}
     if(line==null) lines.add(arrayListOf(c)) else line.add(c)
    }
-   for(row in lines.filter {it.size>=3}) {
+   for(row in lines.filter {it.size>=2}) {
     val b=Box(maxOf(0,((row.minOf{it.x0}-4)/scale).toInt()),maxOf(0,((row.minOf{it.y0}-4)/scale).toInt()),minOf(img.width,((row.maxOf{it.x1}+4)/scale).toInt()),minOf(img.height,((row.maxOf{it.y1}+4)/scale).toInt()))
     if(known.any {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE && it.box.contains(b)>.4f} || proposals.any{it.iou(b)>.5f}) continue
     proposals.add(b)

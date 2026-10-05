@@ -312,12 +312,12 @@ interface WorkMemory {
 async function workMemory(db: D1Database, engine: string, seriesRef: string, chapterKey: string | null, pageIndex: number): Promise<WorkMemory> {
   const [terms, characters, pages, style] = await Promise.all([
     db
-      .prepare('SELECT term, arabic, kind, note FROM translation_terms WHERE series_ref = ? ORDER BY updated_at LIMIT 300')
-      .bind(seriesRef)
+      .prepare('SELECT term, arabic, kind, note FROM translation_terms WHERE series_ref = ? AND (? IS NULL OR origin_chapter_key IS NULL OR origin_chapter_key != ? OR origin_page_index IS NULL OR origin_page_index < ?) ORDER BY updated_at LIMIT 300')
+      .bind(seriesRef, chapterKey, chapterKey, pageIndex)
       .all<WorkMemory['terms'][number]>(),
     db
-      .prepare('SELECT name, arabic, gender, voice FROM translation_characters WHERE series_ref = ? ORDER BY updated_at LIMIT 80')
-      .bind(seriesRef)
+      .prepare('SELECT name, arabic, gender, voice FROM translation_characters WHERE series_ref = ? AND (? IS NULL OR origin_chapter_key IS NULL OR origin_chapter_key != ? OR origin_page_index IS NULL OR origin_page_index < ?) ORDER BY updated_at LIMIT 80')
+      .bind(seriesRef, chapterKey, chapterKey, pageIndex)
       .all<WorkMemory['characters'][number]>(),
     // الصفحات السابقة من هذا الفصل: ملخصها وآخر جملها، لتكمل الترجمة القصة لا جملة معزولة
     chapterKey
@@ -571,7 +571,7 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 // يرتفع مع كل تغيير في معنى التعليمات: المحفوظ بإصدار أقدم لا يُعرض كأنه الحالي.
 // 2: أمثلة الفريق، سؤال الإعادة، السرد بلا فقاعة واللافتات، و«نص حر بثقة منخفضة» يُرسل
 //    بتلميح sfx لتقرر Luna (لا يُسقط قبلها). يطابق TEXT_PROMPT_VERSION في apps/web/lib/translate.js.
-export const TEXT_PROMPT_VERSION = 3;
+export const TEXT_PROMPT_VERSION = 4;
 export const textEngineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:t${TEXT_PROMPT_VERSION}`;
 const MAX_TEXT_REGIONS = 60;
 const REGION_ID = /^[a-z0-9_-]{1,32}$/;
