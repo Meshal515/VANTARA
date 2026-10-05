@@ -4,21 +4,19 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 
 /**
- * صفحة واحدة على المعالج في كل مرة (النماذج تستعمل كل الأنوية)، بترتيب ثابت لا
- * بسباق، والدور يُسلَّم مباشرة لمن بعده.
+ * بوابة واحدة للمسار المحلي الثقيل. الهدف ليس فقط أعلى throughput؛ الأهم أن
+ * الصفحة التي انتهت من التحليل لا تبقى إنجليزية بينما صفحة لاحقة تبدأ CTD/LaMa.
  *
- * صفحات القارئ بالمسافة من صفحتك **الآن** ([focus]): الصفحة التي أمامك أولًا، ثم
- * التالية، وهكذا؛ والمسافة تُحسب لحظة تسليم الدور لا لحظة الوصول، فقفزة للأمام
- * تقدّم صفحتك الجديدة على صفحات طلبتها قبلها. داخل المسافة نفسها: الرتبة ثم
- * الأسبق. المقدّمة والإكمال بعد كل صفحات القارئ.
- * زمن الانتظار يُسجَّل «queue» منفصلًا عن العمل، وزمن الانشغال يُجمع لنسبة
- * «المعالج مشغول» في التقرير.
+ * السياسة:
+ *  - كشف RT-DETR للصفحة الحالية فقط يستطيع القفز أولًا.
+ *  - Render القارئ يسبق أي كشف استباقي أو Analyze ثقيل آخر.
+ *  - بعد Analyze يحتاج Luna، نحجز الدور للـRender المتوقع: بقية الـAnalyze/
+ *    jobs/refinement لا تبدأ حتى يأتي Render أو يلغي JavaScript الحجز.
+ *  - الكشف الخفيف يبقى مسموحًا أثناء انتظار Luna حتى نعرف إن الصفحة بلا نص.
  */
 class PriorityGate {
     companion object {
-        /** الكشف وحده (جزء من الثانية): صفحة بلا نص تنتهي ولا تنتظر الثقيل. */
         const val DETECT = 0
-        /** إكمال صفحة بدأت (Luna ردّت): أقرب شيء لظهور العربي. */
         const val RENDER_READER = 1
         const val ANALYZE_READER = 2
         const val RENDER_JOB = 3
@@ -26,7 +24,6 @@ class PriorityGate {
         const val BACKGROUND = 5
     }
 
-    /** صفحة في فصل: موضعها من موضع القارئ يحدد دورها. */
     data class Page(val chapter: String, val index: Int)
 
     private class Waiter(val rank: Int, val seq: Long, val page: Page?) {
@@ -40,10 +37,35 @@ class PriorityGate {
     private var firstUse = 0L
     @Volatile private var focus: Page? = null
 
-    /** موضع القارئ الآن (الفصل والصفحة). */
+    /**
+     * صفحة أكملت Analyze وتنتظر Luna ثم Render. ما دام هذا الحجز قائمًا لا نبدأ
+     * Analyze ثقيلًا لصفحة أخرى؛ وإلا Luna تعود خلال ~ثوانٍ لكن Render ينتظر
+     * CTD/BubbleSeg الجاري عشرات الثواني.
+     */
+    private var awaitingRender: Page? = null
+
     fun focus(page: Page?) { focus = page }
 
-    /** بُعد الصفحة عن موضع القارئ: أمامه بالترتيب، ثم خلفه، ثم فصول أخرى. */
+    fun expectRender(page: Page?) {
+        if (page == null) return
+        synchronized(this) {
+            // بوابة واحدة تعني أن تحليلين ثقيلين لا ينتهيان معًا. لا نستبدل
+            // حجز صفحة أقدم بحجز أحدث لو وصل استدعاء غير متوقع.
+            if (awaitingRender == null || awaitingRender == page) awaitingRender = page
+        }
+    }
+
+    /** Luna فشلت/لم تُرجع عربيًا؛ لا نترك بقية الفصل محجوزة للأبد. */
+    fun cancelExpectedRender(page: Page?) {
+        if (page == null) return
+        val next = synchronized(this) {
+            if (awaitingRender != page) return@synchronized null
+            awaitingRender = null
+            if (!busy) grantNextLocked() else null
+        }
+        next?.go?.complete(Unit)
+    }
+
     private fun distance(p: Page?): Int {
         val f = focus ?: return 0
         if (p == null) return 0
@@ -53,27 +75,32 @@ class PriorityGate {
     }
 
     /**
-     * صفحة القارئ التي انتهى تحليلها ووصل رد Luna لا نترك رسمها عالقًا فقط لأن
-     * المستخدم مرّ للصفحة التالية. قبل هذا كان الانتقال صفحة واحدة يجعل الصفحة
-     * السابقة «خلفك» بمسافة 10000، فتبدأ الصفحة الجديدة تحليل CTD/Bubble (عشرات
-     * الثواني) قبل أن تُكمل السابقة؛ وهذا ظهر فعليًا كـ render.queue ≈ 31.5ث.
-     *
-     * نمنح Render للصفحة السابقة مباشرة مسافة الصفر: الكشف الخفيف للحالية يبقى
-     * قبله بالرتبة، ثم نكمل الصفحة السابقة، ثم ندخل التحليل الثقيل للحالية.
+     * أولوية تجربة القراءة:
+     * current detect -> any ready reader render -> other detect -> heavy reader analyze
+     * -> foreground job render/analyze -> background refinement.
      */
-    private fun readerDistance(w: Waiter): Int {
-        val f = focus
-        val p = w.page
-        if (w.rank == RENDER_READER && f != null && p != null && p.chapter == f.chapter && f.index - p.index == 1) return 0
-        return distance(p)
+    private fun priorityClass(w: Waiter): Int {
+        if (w.rank == DETECT) {
+            val f = focus
+            return if (f == null || w.page == null || w.page == f) 0 else 2
+        }
+        return when (w.rank) {
+            RENDER_READER -> 1
+            ANALYZE_READER -> 3
+            RENDER_JOB -> 4
+            ANALYZE_JOB -> 5
+            else -> 6
+        }
     }
 
+    private fun blockedByExpectedRender(w: Waiter): Boolean =
+        awaitingRender != null && w.rank >= ANALYZE_READER
+
     private fun better(a: Waiter, b: Waiter): Boolean {
-        val ga = if (a.rank <= ANALYZE_READER) 0 else 1
-        val gb = if (b.rank <= ANALYZE_READER) 0 else 1
-        if (ga != gb) return ga < gb
-        if (ga == 0) {
-            val da = readerDistance(a); val db = readerDistance(b)
+        val ca = priorityClass(a); val cb = priorityClass(b)
+        if (ca != cb) return ca < cb
+        if (ca <= 3) {
+            val da = distance(a.page); val db = distance(b.page)
             if (da != db) return da < db
         }
         if (a.rank != b.rank) return a.rank < b.rank
@@ -82,10 +109,25 @@ class PriorityGate {
 
     suspend fun <T> run(rank: Int, perf: Perf, page: Page? = null, block: () -> T): T {
         val started = System.nanoTime()
+        var barrier = false
         val waiter = synchronized(this) {
             if (firstUse == 0L) firstUse = started
-            if (!busy) { busy = true; null } else Waiter(rank, seq++, page).also { queue.add(it) }
+
+            // وصول Render لنفس الصفحة يستهلك الحجز. إن كانت البوابة مشغولة
+            // سيبقى Render في الطابور لكنه يتقدم على أي Analyze ثقيل.
+            if (rank == RENDER_READER && page != null && awaitingRender == page) awaitingRender = null
+
+            val candidate = Waiter(rank, seq++, page)
+            barrier = blockedByExpectedRender(candidate)
+            if (!busy && !barrier) {
+                busy = true
+                null
+            } else {
+                queue.add(candidate)
+                candidate
+            }
         }
+        if (barrier) perf.count("renderBarrierWait")
         if (waiter != null) {
             try {
                 waiter.go.await()
@@ -105,20 +147,29 @@ class PriorityGate {
         }
     }
 
+    /** يختار أول عمل مسموح به حاليًا؛ المحجوب يبقى في الطابور. */
+    private fun grantNextLocked(): Waiter? {
+        var best: Waiter? = null
+        for (w in queue) {
+            if (blockedByExpectedRender(w)) continue
+            if (best == null || better(w, best)) best = w
+        }
+        if (best == null) return null
+        queue.remove(best)
+        busy = true
+        return best
+    }
+
     private fun release() {
         val next = synchronized(this) {
-            var best: Waiter? = null
-            for (w in queue) if (best == null || better(w, best)) best = w
-            if (best == null) busy = false else queue.remove(best)
-            best
+            busy = false
+            grantNextLocked()
         }
         next?.go?.complete(Unit)
     }
 
-    /** هل المسار الثقيل يشغل الأنوية الآن؟ يستعمله كشف الصفحة الحالية فقط. */
     fun isBusy(): Boolean = synchronized(this) { busy }
 
-    /** نسبة الوقت الذي كان فيه المعالج يعمل منذ أول صفحة (0–100). */
     fun busyPercent(): Int = synchronized(this) {
         val wall = System.nanoTime() - firstUse
         if (firstUse == 0L || wall <= 0) 0 else (100 * busyNanos / wall).toInt()
