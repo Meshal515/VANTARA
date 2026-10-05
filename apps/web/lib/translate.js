@@ -42,6 +42,9 @@ const OLD_CACHE_PREFIX = 'tl3:';
  */
 const PAGE_CACHE_PREFIX = 'tl-page-v1:';
 export const PAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Local vision/whitening contract; bump when a prior image can be visually incomplete. */
+export const LOCAL_PIPELINE_VERSION = 2;
+export const staleLocalPipeline = value => Number(value?.pipelineVersion ?? 0) < LOCAL_PIPELINE_VERSION;
 
 export function pageCacheKey(meta) {
   const index = Number(meta?.pageIndex);
@@ -65,7 +68,7 @@ async function readPageCache(hash, meta) {
 
 function writePageCache(hash, meta, value) {
   const cacheKey = pageCacheKey(meta);
-  const stored = { ...value, sourceHash: hash };
+  const stored = { ...value, sourceHash: hash, pipelineVersion: LOCAL_PIPELINE_VERSION };
   const writes = [writeKv(CACHE_PREFIX + hash, stored)];
   if (cacheKey) writes.push(writeKv(cacheKey, stored));
   return { cacheKey, stored, written: Promise.all(writes) };
@@ -369,7 +372,9 @@ async function translatePageNow(deps, src, meta) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
-    const due = (local.incomplete || staleEngine(local.engine)) && (local.tries ?? 0) < MAX_REPAIRS && Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS;
+    const oldPipeline=staleLocalPipeline(local);
+    const due = (local.incomplete || staleEngine(local.engine) || oldPipeline) && (local.tries ?? 0) < MAX_REPAIRS &&
+      (oldPipeline || Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS);
     if (due) void repairInBackground(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
       from: 'cache',
