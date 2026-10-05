@@ -139,3 +139,39 @@ describe('queue reports how long a page waited', () => {
     expect(seen.waitedMs).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('reader scheduling under rapid scrolling', () => {
+  it('does current + next three, then nearest missed-behind pages before far future pages', () => {
+    const q=createQueue({concurrency:0});
+    const add=i=>q.add({key:`c#${i}`,chapterKey:'c',index:i,run:async()=>i});
+    [95,34,33,32,31,30,29,28].forEach(add);
+    q.focus('c',30,{c:0},{pageCount:100});
+    expect(q.order()).toEqual(['c#30','c#31','c#32','c#33','c#29','c#28','c#34','c#95']);
+  });
+
+  it('only the actually focused page may burst past occupied dialogue slots', async () => {
+    let releaseOld,releaseCurrent;
+    const holdOld=new Promise(r=>{releaseOld=r});
+    const holdCurrent=new Promise(r=>{releaseCurrent=r});
+    const q=createQueue({concurrency:1,prepareConcurrency:1,maxPrepared:24});
+    const events=[];
+    const old=q.add({key:'old',chapterKey:'c',index:40,run:async()=>{events.push('old');await holdOld}});
+    await new Promise(r=>setTimeout(r,0));
+    q.focus('c',50,{c:0},{pageCount:100});
+    const first=q.add({key:'first',chapterKey:'c',index:0,run:async()=>{events.push('first')}});
+    const last=q.add({key:'last',chapterKey:'c',index:99,run:async()=>{events.push('last')}});
+    const current=q.add({key:'current',chapterKey:'c',index:50,run:async()=>{events.push('current');await holdCurrent}});
+    await new Promise(r=>setTimeout(r,0));await new Promise(r=>setTimeout(r,0));
+    expect(events).toEqual(['old','current']);
+    releaseCurrent();releaseOld();
+    await Promise.all([old,first,last,current]);
+  });
+
+  it('classifies bridge and abort failures separately from real network-offline failures', async () => {
+    const mod=await import('./translate.js');
+    expect(typeof mod.classifyTranslateError).toBe('function');
+    expect(mod.classifyTranslateError(new Error('native bridge exploded'),'native')).toBe('native_bridge_failed');
+    expect(mod.classifyTranslateError(new DOMException('aborted','AbortError'),'network')).toBe('aborted');
+    expect(mod.classifyTranslateError(new TypeError('Failed to fetch'),'network')).toBe('network_offline');
+  });
+});
