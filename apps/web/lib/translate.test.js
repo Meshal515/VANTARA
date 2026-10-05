@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -169,5 +169,12 @@ describe('local translation cache revision', () => {
     expect(staleLocalPipeline({ translated: 3 })).toBe(true);
     expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1 })).toBe(true);
     expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION })).toBe(false);
+  });
+
+  it('does not mark old pixels current merely because a refresh attempt started', () => {
+    const old = { translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1, at: 10, tries: 0 };
+    const marked = repairAttemptValue(old, 1, 99);
+    expect(marked).toMatchObject({ pipelineVersion: LOCAL_PIPELINE_VERSION - 1, at: 99, tries: 1 });
+    expect(staleLocalPipeline(marked)).toBe(true);
   });
 });
