@@ -134,3 +134,16 @@ describe('whole chapter acceptance', () => {
     expect(chapterBenchmark(run({ endedAt: 90000, pageResults: run().pageResults.map(p => ({ ...p, at: 200000 })) })).target).toBe('UNVERIFIED');
   });
 });
+
+it('uses the independent 100-second target without counting a 110-second chapter as met',async()=> {
+ const {chapterBenchmark}=await import('./translate-perf.js');
+ const results=Array.from({length:100},(_,pageIndex)=>({pageIndex,hash:`new${pageIndex}`,accepted:true,saved:true,from:'model',at:110000}));
+ expect(chapterBenchmark({startedAt:0,endedAt:110000,expectedPages:100,pageResults:results,device:{physical:true,model:'S23 Ultra'},environment:{evidence:'device',models:'warm',translationCache:'fresh',images:'local'}}).target).toBe('not-met');
+});
+it('reports detector work and each independent lane without calling one gate CPU utilization',()=> {
+ const entry={at:1000,from:'model',textless:false,total:1000,pageIndex:0,stages:{prepare:750},native:{route:{stages:{detect:700,queue:50}},analyze:{stages:{fastFlat:40},counts:{fastFlatRegions:1}},render:{stages:{erase:20},laneBusy:{detect:40,analyze:60,render:20}}}};
+ expect(summarize([entry]).text.stages['route.detect']).toBe(700);
+ const report=formatReport([entry]);
+ expect(report).toContain('RT-DETR 0.70 ث');
+ expect(report).toContain('كشف 40% · تحليل 60% · رسم 20%');
+});

@@ -120,18 +120,28 @@ object Regions {
     data class FastFlatPlan(val fast: List<Region>, val heavy: List<Detection>, val sources: Map<String, List<Detection>>)
 
     /** Partition independently by holder; retain the exact conservative flat-mask tests. */
-    fun fastFlatPlan(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): FastFlatPlan {
+    fun fastFlatPlan(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, allowFlatFree:Boolean=false): FastFlatPlan {
         val texts = mergeTextBoxes(dets).filter { it.score >= MIN_SCORE }
         val holders = dets.filter { it.label == "bubble" && it.score >= 0.30f }
         val grouped = LinkedHashMap<Detection, MutableList<Detection>>()
         val heavy = ArrayList<Detection>()
+        val out = ArrayList<Region>()
+        val sources = LinkedHashMap<String, List<Detection>>()
         for (d in texts) {
             val holder = holders.filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
                 .maxByOrNull { it.box.contains(d.box) * 2f + it.score }
-            if (holder == null) heavy.add(d) else grouped.getOrPut(holder) { ArrayList() }.add(d)
+            if(holder==null) {
+                val context=Box(maxOf(0,d.box.x1-12),maxOf(0,d.box.y1-12),minOf(img.width,d.box.x2+12),minOf(img.height,d.box.y2+12))
+                val flat=if(allowFlatFree && d.label=="text_free") fastBubbleMask(img,context,d.box) else null
+                val glyph=flat?.let {fastGlyphMask(img,it.first,d.box,it.second)}
+                val n=glyph?.count() ?: 0
+                if(flat!=null && glyph!=null && n>=MIN_GLYPH_PIXELS) {
+                    val id=stableId(pageHash,d.box,img.width,img.height)
+                    out.add(Region(id,d.box,d.score,"free",Bubble(context,d.score,flat.first),context,glyph,n,fastInkLight(img,glyph,flat.second)))
+                    sources[id]=listOf(d)
+                } else heavy.add(d)
+            } else grouped.getOrPut(holder) { ArrayList() }.add(d)
         }
-        val out = ArrayList<Region>()
-        val sources = LinkedHashMap<String, List<Detection>>()
         for ((holder, group) in grouped) {
             // Free text within a holder can be an SFX/art overlap: do not partially erase that holder.
             if (group.any { it.label == "text_free" }) { heavy.addAll(group); continue }
@@ -147,6 +157,17 @@ object Regions {
             sources[id] = group
         }
         return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources)
+    }
+
+    /** BubbleSeg may be skipped only for the same conservative validated local mask. */
+    fun trustedHolderMasks(img:RgbImage,texts:List<Detection>,holders:List<Detection>):List<Bubble> {
+        return holders.mapNotNull {h->
+            val owned=texts.filter {h.box.contains(it.box)>=.88f}
+            if(owned.isEmpty()) null else {
+                val textBox=owned.map {it.box}.reduce {a,b->a.union(b)}
+                fastBubbleMask(img,h.box,textBox)?.let {Bubble(h.box,h.score,it.first)}
+            }
+        }
     }
 
     /** Legacy all-or-nothing view for existing diagnostics; production consumes the partition. */

@@ -62,10 +62,18 @@ export async function removeModels() {
 }
 
 /** الهندسة وOCR على الجهاز. `path` مسار ملف الصفحة كما أعطته الإضافة `ExtensionEngine.image`. */
-export async function analyzePage({ path, sourceLang = 'auto', priority = 'high', chapterKey = null, pageIndex = null }) {
+/** Lightweight router has a separate native owner and never waits for Luna/render. */
+export async function routePage({path, chapterKey=null, pageIndex=null}) {
+  const p=plugin();
+  if (!p || typeof p.routePage !== 'function') return null;
+  try { return await p.routePage({path,...where(chapterKey,pageIndex)}); }
+  catch { return null; } // Older APK: preserve its working analyze path.
+}
+
+export async function analyzePage({ path, sourceLang = 'auto', priority = 'high', chapterKey = null, pageIndex = null, routeHash = null }) {
   const p = plugin();
   if (!p) throw new Error('native_unavailable');
-  return p.analyzePage({ path, sourceLang, priority, ...where(chapterKey, pageIndex) });
+  return p.analyzePage({ path, sourceLang, priority, routeHash, ...where(chapterKey, pageIndex) });
 }
 
 /**

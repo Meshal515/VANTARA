@@ -34,7 +34,7 @@ private const val THUMB_PIXELS = 3_200_000.0
 /** أطول ضلع للتحليل (النماذج والأقنعة). الرسم النهائي بمقاس الملف دائمًا. */
 private const val MAX_EDGE = 4096
 
-class Pipeline(private val context: Context, private val store: ModelStore) {
+class Pipeline(private val context: Context, private val store: ModelStore, private val ocrWork:InferenceWork=InferenceWork.HEAVY, private val renderOnly:Boolean=false) {
     private val fonts = FontCatalog(context.assets)
     private var detector: Detector? = null
     private var glyphs: GlyphSegmenter? = null
@@ -44,7 +44,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private val typeface: Typeface by lazy { Typeface.createFromAsset(context.assets, "fonts/BalooBhaijaan2.ttf") }
     private val layout by lazy { ArabicLayout(typeface) }
     private val analyses = lru<Analysis>(24)
-    private val images = lru<Decoded>(5)
+    private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
@@ -65,7 +65,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     class BubbleSnapshot(val box: Box, val score: Float, val mask: PackedMask)
 
-    class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>)
+    class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>, val rescue:List<Box> = emptyList(),val revision:Int=0)
 
     /** صورة بعد التبييض وقبل العربي، من المحرك المحلي نفسه. */
     class CleaningProbe(
@@ -117,7 +117,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             } }.also { inpainter = it }
         }
     }
-    private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict")) }.also { ocr = it }
+    private fun ocr(perf: Perf) = ocr ?: load(perf, "ppocr") { LatinOcr(store.file("ppocr_en_rec"), store.file("ppocr_en_dict"),ocrWork) }.also { ocr = it }
 
     /** ملف قناع الحروف المستعمل: `seg` (الرأس وحده) أو `full` (الأصل، إلى أن يصل تحديث الملفات). */
     fun ctdVariant(): String = if (store.file("ctd").name.contains("-seg")) "seg" else "full"
@@ -208,6 +208,36 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         return Analysis(hash, img.width, img.height, emptyList(), emptyList()).also { if (useCache) analyses[hash] = it }
     }
 
+    data class Routed(val pageHash:String,val width:Int,val height:Int,val detections:List<Detection>) {
+        val textless get()=detections.none {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE}
+    }
+    @Synchronized
+    fun route(file:File,perf:Perf):Routed {
+        store.requireInstalled()
+        val (bytes,hash)=read(file,perf)
+        // Probe pixels are transient; only bounded detection metadata survives this stage.
+        val img=image(bytes,hash,perf,false).img
+        val dets=detections[hash] ?: run {
+            val detected=detect(img,perf)
+            val candidates=perf.time("missingSweep") {MissingTextSweep.candidates(img,detected)}
+            perf.count("missingCandidates",candidates.size)
+            val extra=ArrayList<Detection>()
+            if(candidates.isNotEmpty()) {
+                val reader=ocr(perf)
+                perf.time("missingOcr") {for(b in candidates) {
+                    val (text,confidence)=reader.recognize(img.crop(b.x1,b.y1,b.x2,b.y2))
+                    if(MissingTextSweep.confirmed(text,confidence)) {extra.add(Detection(b,confidence,"text_free"));perf.count("missingConfirmed")}
+                }}
+            }
+            (detected+extra).also {detections[hash]=it}
+        }
+        return Routed(hash,img.width,img.height,dets)
+    }
+    @Synchronized
+    fun acceptAnalysis(a:Analysis) { if((analyses[a.pageHash]?.revision ?: -1)<=a.revision) analyses[a.pageHash]=a }
+    @Synchronized
+    fun analysisSnapshot(hash:String):Analysis? = analyses[hash]
+
     /** المرحلة الخفيفة وحدها (قراءة، فك، كشف): صفحة بلا نص تنتهي هنا. */
     @Synchronized
     fun detectStage(file: File, perf: Perf): Analysis? {
@@ -230,22 +260,37 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     /** المرحلة الثقيلة بعد [detectStage] (الحروف، الفقاعات، OCR) ومصغّرة Luna بالقفل نفسه. */
     @Synchronized
-    fun finishForLuna(file: File, perf: Perf): Pair<Analysis, String> {
+    fun finishForLuna(file: File, perf: Perf, routed:Routed?=null): Pair<Analysis, String> {
         val (bytes, hash) = read(file, perf)
-        val a = analyses[hash] ?: run {
+        val cached=analyses[hash]
+        val a = if(cached!=null && cached.rescue.isNotEmpty()) {
+            val img=image(bytes,hash,perf,true).img
+            val target=cached.regions.firstOrNull {it.box==cached.rescue.first()}
+            val promoted=target?.let {
+                val dets=listOf(Detection(it.box,it.score,if(it.bubbleBox==null) "text_free" else "text_bubble")) +
+                    listOfNotNull(it.bubbleBox?.let {b->Detection(b,.95f,"bubble")})
+                finish(hash,img,dets,perf,false,forceHeavy=true)
+            }
+            val updated=if(target!=null && promoted!=null && promoted.regions.isNotEmpty()) {
+                val retained=thaw(cached).filter {it.id!=target.id}
+                perf.count("residualPromoted")
+                freeze(hash,img.width,img.height,retained+thaw(promoted))
+            } else {perf.count("residualRescueFailed");cached}
+            Analysis(hash,updated.width,updated.height,updated.regions,updated.bubbles,revision=cached.revision+1).also {analyses[hash]=it}
+        } else cached ?: run {
             val img = image(bytes, hash, perf, true).img
-            val dets = detections.remove(hash) ?: detect(img, perf)
+            val dets = routed?.takeIf {it.pageHash==hash}?.detections ?: detections.remove(hash) ?: detect(img, perf)
             textless(hash, img, dets, perf, true) ?: finish(hash, img, dets, perf, true)
         }
         val asks = needsLuna(a)
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
-    private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean): Analysis {
+    private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean, forceHeavy:Boolean=false): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
         // Independent fast regions survive heavy neighbours and failed OCR.
-        val plan = perf.time("fastFlat") { Regions.fastFlatPlan(img, gray, hash, dets) }
+        val plan = perf.time("fastFlat") { if(forceHeavy) Regions.FastFlatPlan(emptyList(),dets.filter {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE},emptyMap()) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true) }
         val fast = ArrayList<Region>()
         val texts = ArrayList(plan.heavy)
         if (plan.fast.isNotEmpty()) {
@@ -271,21 +316,31 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
             if (useCache) analyses[hash] = analysis
             return analysis
         }
-        // Keep the models' tile context; select only heavy rows and assemble only their detections.
-        val glyphRows = texts.map { (it.box.y1 - Regions.GLYPH_MARGIN)..(it.box.y2 + Regions.GLYPH_MARGIN) }
-        val bubbleRows = texts.map { (it.box.y1 - img.width)..(it.box.y2 + img.width) }
-        val gs = glyphs(perf)
-        val prob = perf.time("glyphs") { gs.probabilities(img, glyphRows) }
-        perf.count("glyphTiles", gs.tiles)
-        val glyphFull = perf.time("glyphMask") {
-            val m = ByteMask(img.width, img.height)
-            for (i in prob.indices) if (prob[i] > 0.3f) m.data[i] = 1
+        // No production full-width fallback in this independent experiment.
+        val holders=dets.filter {it.label=="bubble"}
+        val crops=HeavyRoi.plan(img.width,img.height,texts,holders)
+        perf.count("heavyRoiCrops",crops.size)
+        perf.count("heavyRoiPixels",crops.sumOf {it.area})
+        val gs=glyphs(perf)
+        val prob=perf.time("glyphs") {gs.probabilitiesRoi(img,crops)}
+        perf.count("glyphTiles",gs.tiles)
+        val glyphFull=perf.time("glyphMask") {
+            val m=ByteMask(img.width,img.height)
+            for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
             m
         }
-        val bs = bubbles(perf)
-        val bubbleList = perf.time("bubbles") { bs.segment(img, bubbleRows) }
-        perf.count("bubbleTiles", bs.tiles)
-        perf.count("bubbles", bubbleList.size)
+        val trusted=perf.time("localBubbles") {Regions.trustedHolderMasks(img,texts,holders)}
+        val uncertain=HeavyRoi.bubbleNeeded(texts,trusted)
+        val bubbleList=if(uncertain.isEmpty()) {
+            perf.count("bubbleModelSkipped")
+            trusted
+        } else {
+            val bs=bubbles(perf)
+            val neural=perf.time("bubbles") {bs.segmentRoi(img,HeavyRoi.plan(img.width,img.height,uncertain,holders))}
+            perf.count("bubbleTiles",bs.tiles)
+            trusted+neural.filter {b->trusted.none {it.box.iou(b.box)>.5f}}
+        }
+        perf.count("bubbles",bubbleList.size)
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
         val regions = perf.time("regions") { Regions.assemble(img, gray, hash, texts + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
         perf.count("regions", regions.size + fast.size)
@@ -501,7 +556,8 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
     private fun renderImpl(file: File, arabicById: Map<String, String>, perf: Perf, useCache: Boolean, leave: Set<String> = emptySet(), refinement: Boolean = true, lettering: Map<String, LetteringStyle> = emptyMap()): Triple<ByteArray, String, Int> {
         store.requireInstalled()
         val (bytes, hash) = read(file, perf)
-        val analysis = (if (useCache) analyses[hash] else null) ?: analyzeImpl(file, perf, useCache)
+        val analysis = (if (useCache) analyses[hash] else null) ?:
+            if(renderOnly) error("analysis handoff missing") else analyzeImpl(file, perf, useCache)
         val regions = perf.time("unpack") { thaw(analysis) }
         // الصورة المحفوظة تبقى نظيفة: المسح على نسخة
         val decoded = image(bytes, hash, perf, useCache)
@@ -542,27 +598,37 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         perf.time("residual") {
             for (r in regions) {
                 if (r.status != "translated" || !ResidualLatin.candidate(img,r)) continue
-                val result = ocr(perf).read(img,r.glyph,r.box)
-                if (ResidualLatin.readable(result.text,result.confidence,r.kind)) {
+                var result = ocr(perf).read(img,r.glyph,r.box)
+                if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) continue
+                val baseMask = r.eraseMask
+                var cleared = false
+                // At most two local retries; never dilate the previous retry's already expanded mask.
+                for (pixels in 1..2) {
+                    r.eraseMask = baseMask
+                    r.eraseMask = WhiteningRepair.mask(r,pixels)
+                    recordErase(perf, Cleaner.applyErase(img,listOf(r),lama))
+                    perf.count("residualRepairAttempts")
+                    // Base erasure changed pixels; a repair no-op alone does not revoke that evidence.
+                    r.status = "translated"
+                    if (!ResidualLatin.candidate(img,r)) { cleared = true; break }
+                    result = ocr(perf).read(img,r.glyph,r.box)
+                    if (!ResidualLatin.readable(result.text,result.confidence,r.kind)) break
+                }
+                if (!cleared && ResidualLatin.readable(result.text,result.confidence,r.kind)) {
                     r.status = "skipped:residual"
                     residual.add(r); perf.count("residualLatin")
-                }
+                } else perf.count("residualRepaired")
             }
         }
         if (residual.isNotEmpty()) {
-            // One local heavy pass, retaining unrelated fast snapshots. Updated OCR is translated next retry.
-            val target = residual.first()
-            val dets = listOf(Detection(target.box,target.score,"text_free")) +
-                listOfNotNull(target.bubbleBox?.let { Detection(it,.95f,"bubble") })
-            val promoted = finish(hash,original,dets,perf,useCache=false)
-            if (promoted.regions.isNotEmpty()) {
-                val retained = thaw(analysis).filter { it.id != target.id }
-                analyses[hash] = freeze(hash,img.width,img.height,retained + thaw(promoted))
-                perf.count("residualPromoted")
-            }
+            // Metadata handoff only: the next analysis retry owns CTD/BubbleSeg.
+            // Loading duplicate heavy sessions into the renderer would inflate memory and delay ready pages.
+            analyses[hash]=Analysis(hash,analysis.width,analysis.height,analysis.regions,analysis.bubbles,
+                rescue=listOf(residual.first().box),revision=analysis.revision+1)
+            perf.count("residualRescueQueued")
             // A failed check preserves source pixels; it cannot count as a completed translation.
-            keepWholeBubbles(regions,sibs,leave,perf)
         }
+        keepWholeBubbles(regions,sibs,leave,perf)
         // ٣. الرسم: بلون الحبر الأصلي، إلا إن كان سيختفي في خلفيته بعد المسح
         val inks = HashMap<String, Boolean>()
         val bmp = perf.time("draw") {
@@ -696,7 +762,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
 
     /** منطقة مقروءة بقيت بلا عربي ظاهر في فقاعة فيها عربي: الفقاعة كلها تبقى أصلها. */
     private fun keepWholeBubbles(regions: List<Region>, sibs: Map<String, List<Region>>, leave: Set<String>, perf: Perf) {
-        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible", "skipped:residual")
+        val missing = setOf("skipped:untranslated", "skipped:no_fit", "skipped:invisible", "skipped:residual", "skipped:no_erase")
         for (r in regions) {
             if (r.status != "translated") continue
             val gap = sibs[r.id]?.any { it.status in missing && it.id !in leave } == true

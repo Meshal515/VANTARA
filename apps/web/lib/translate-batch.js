@@ -1,7 +1,9 @@
 /** Bounded metadata/thumbnail queue; decoded page images stay in the native pipeline. */
-export function createTextBatcher(request, { waitMs = 200, maxInFlight = 2 } = {}) {
+export function createTextBatcher(request, { waitMs = 200, maxInFlight = 2, adaptive = false } = {}) {
   const pending = [];
   let active = 0, timer = null;
+  let window = adaptive ? Math.min(3,maxInFlight) : maxInFlight;
+  let cooldownUntil = 0, good = 0, throttles = 0;
   const abortError = () => Object.assign(new Error('Translation cancelled'), { name: 'AbortError' });
   const identity = page => JSON.stringify([page.seriesRef, page.chapterKey, page.sourceLang ?? 'en', page.speed ?? 'quality']);
   const finish = (entry, result, error = null) => {
@@ -11,8 +13,15 @@ export function createTextBatcher(request, { waitMs = 200, maxInFlight = 2 } = {
   };
   async function send(group) {
     active++;
+    const began=Date.now();
     try {
       const result = await request('/v1/translate/text-batch', { pages: group.map(e => e.page) });
+      if(adaptive && (result.status===429 || result.body?.pages?.some(p=>p.status===429))) {
+        window=Math.max(1,Math.floor(window/2));good=0;throttles++;
+        cooldownUntil=Date.now()+Math.min(30000,Math.max(1000,Number(result.body?.retryAfterMs)||1000*2**Math.min(4,throttles-1)));
+      } else if(adaptive && result.status===200 && Date.now()-began<15000 && ++good>=3) {
+        window=Math.min(maxInFlight,window+1);good=0;throttles=0;
+      }
       // Only an unavailable endpoint can safely fall back without risking duplicate paid work.
       if (result.status === 404 || result.status === 405) {
         for (const entry of group) if (!entry.cancelled) finish(entry, await request('/v1/translate/text', entry.page));
@@ -29,7 +38,8 @@ export function createTextBatcher(request, { waitMs = 200, maxInFlight = 2 } = {
   }
   function pump(flush = false) {
     if (timer) clearTimeout(timer); timer = null;
-    while (active < maxInFlight && pending.length && (flush || pending.length >= 4)) {
+    if(Date.now()<cooldownUntil) { if(pending.length) timer=setTimeout(()=>pump(true),cooldownUntil-Date.now()); return; }
+    while (active < window && pending.length && (flush || pending.length >= 4)) {
       const first = pending.shift(); const group = [first];
       let regions = first.page.regions?.length ?? 0;
       let bytes = JSON.stringify(first.page).length;
@@ -39,7 +49,7 @@ export function createTextBatcher(request, { waitMs = 200, maxInFlight = 2 } = {
       }
       void send(group);
     }
-    if (pending.length && active < maxInFlight) timer = setTimeout(() => pump(true), Math.min(200, Math.max(0, waitMs)));
+    if (pending.length && active < window) timer = setTimeout(() => pump(true), Math.min(1000, Math.max(0, waitMs)));
   }
   return {
     enqueueTextPage(page, { interactive = false, signal } = {}) {

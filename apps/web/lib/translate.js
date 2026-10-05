@@ -20,7 +20,7 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage } from './translation-native.js';
+import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
 
@@ -106,9 +106,11 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
   const jobs = new Map();
   let running = 0;
+  let preparing = 0;
+  let bypassRunning = 0;
   let focusKey = null;
   let focusIndex = 0;
   const ranks = new Map();
@@ -121,39 +123,55 @@ export function createQueue({ concurrency = 3 } = {}) {
     const d = job.chapterKey === focusKey ? job.index - focusIndex : job.index;
     return rank * 100_000 + (d >= 0 ? d : 50_000 - d);
   };
-  const next = () => {
+  const next = (predicate) => {
     let best = null;
-    for (const job of jobs.values()) if (!job.started && (!best || priority(job) < priority(best))) best = job;
+    for (const job of jobs.values()) if (!job.started && predicate(job) && (!best || priority(job) < priority(best))) best = job;
     return best;
   };
+  const finish = (job) => {
+    jobs.delete(job.key);
+    for (const fn of listeners) fn(job);
+    pump();
+  };
+  const start = (job, bypass = false) => {
+    job.started = true;
+    if (bypass) bypassRunning++; else running++;
+    Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
+      prepared: job.prepared, interactive: job.chapterKey === focusKey && job.index === focusIndex }))
+      .then(job.resolve, job.reject).finally(() => { if (bypass) bypassRunning--; else running--; finish(job); });
+  };
   const pump = () => {
+    while (bypassRunning < bypassConcurrency) {
+      const job = next(j => j.ready && j.prepared?.bypass);
+      if (!job) break;
+      start(job,true);
+    }
     while (running < concurrency) {
-      const job = next();
-      if (!job) return;
-      job.started = true;
-      running += 1;
-      const waitedMs = Date.now() - job.addedAt;
-      Promise.resolve()
-        .then(() => job.run({ waitedMs }))
-        .then(
-          (value) => job.resolve(value),
-          (error) => job.reject(error),
-        )
-        .finally(() => {
-          running -= 1;
-          jobs.delete(job.key);
-          for (const fn of listeners) fn(job);
-          pump();
-        });
+      const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
+      if (!job) break;
+      start(job);
+    }
+    const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
+    while (preparing < prepareConcurrency && readyCount() + preparing < maxPrepared) {
+      const job = next(j => j.prepare && !j.ready && !j.preparing);
+      if (!job) break;
+      job.preparing = true; preparing++;
+      const preparedAt=Date.now();
+      Promise.resolve().then(() => job.prepare()).then(prepared => {
+        if (jobs.get(job.key) !== job) return;
+        job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
+        if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
+      }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
+        .finally(() => { preparing--; job.preparing = false; pump(); });
     }
   };
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
-    add({ key, chapterKey, index, run }) {
+    add({ key, chapterKey, index, run, prepare }) {
       const existing = jobs.get(key);
       if (existing) {
         // مهمة لم تبدأ من جلسة قارئ سابقة: يأخذها صاحبها الجديد، فلا يرث وعدًا ميتًا
-        if (!existing.started) existing.run = run;
+        if (!existing.started) { existing.run = run; if (!existing.preparing && !existing.ready) existing.prepare = prepare; }
         return existing.promise;
       }
       let resolve;
@@ -162,7 +180,7 @@ export function createQueue({ concurrency = 3 } = {}) {
         resolve = a;
         reject = b;
       });
-      jobs.set(key, { key, chapterKey, index, run, resolve, reject, promise, started: false, addedAt: Date.now() });
+      jobs.set(key, { key, chapterKey, index, run, prepare, resolve, reject, promise, started: false, addedAt: Date.now() });
       queueMicrotask(pump);
       return promise;
     },
@@ -182,7 +200,7 @@ export function createQueue({ concurrency = 3 } = {}) {
       return () => listeners.delete(fn);
     },
     drop(chapterKey) {
-      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) jobs.delete(job.key);
+      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) { jobs.delete(job.key); job.resolve(null); }
     },
   };
 }
@@ -296,8 +314,10 @@ async function translatePageNow(deps, src, meta) {
   // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
   // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
-  const runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  if(deps.prepareMs) clock.stages.prepare=deps.prepareMs;
   const hash = await clock.time('hash', () => pageHashOf(src));
+  if(runDeps.route && runDeps.route.pageHash!==hash) runDeps={...runDeps,route:null};
   const found = await clock.time('cacheRead', () => readPageCache(hash, meta));
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
@@ -429,18 +449,28 @@ const priorityOf = (deps) => (deps.via === 'job' || deps.via === 'repair' ? 'low
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body})));
+  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:800,maxInFlight:6,adaptive:true}));
   return textBatchers.get(sync);
+}
+
+export async function prepareTranslation(src, meta) {
+  const path=filePathFromSrc(src);
+  if (!path || !nativeTranslationAvailable()) return {src};
+  const hash=await pageHashOf(src);
+  const cached=(await readPageCache(hash,meta)).value;
+  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) return {src,bypass:true};
+  const route=await routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex});
+  return {src,route,bypass:Boolean(route?.textless)};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
-  const native = { analyze: analysis.perf ?? null };
+  const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const textless = !(analysis.regions ?? []).length;
   if (!readable.length) return { incomplete: !textless, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
@@ -457,7 +487,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
       regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     });
     const ask = data => data
-      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: priorityOf(deps) === 'high', signal: deps.signal })
+      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: deps.interactive ?? priorityOf(deps) === 'high', signal: deps.signal })
       : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {

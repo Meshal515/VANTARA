@@ -115,8 +115,8 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
         val out=ArrayList<Bubble>();var totalTiles=0
         for(box in crops) {
             val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
-            val found=segment(crop)
-            totalTiles+=tiles
+            val found=infer(crop)
+            totalTiles++
             for(b in found) {
                 val mask=ByteMask(img.width,img.height)
                 for(y in 0 until crop.height) System.arraycopy(b.mask.data,y*crop.width,mask.data,(box.y1+y)*img.width+box.x1,crop.width)

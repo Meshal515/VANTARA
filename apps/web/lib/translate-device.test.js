@@ -173,3 +173,12 @@ it('a background page cannot count as saved when IndexedDB is unavailable', asyn
     expect(result.error).toBe('storage_failed');
   } finally { delete globalThis.Capacitor; globalThis.fetch=previous; }
 });
+
+it('a stale textless routing result cannot suppress new dialogue in changed bytes',async()=> {
+ const calls=device({drawn:1});const real=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(new Uint8Array([81,82,83]));globalThis.localStorage=memory();
+ try {
+  const result=await translatePage({...deps(),route:{pageHash:'old-bytes',textless:true,regions:[],width:800,height:1200}},'http://localhost/_capacitor_file_/cache/pages/changed.jpg',{chapterKey:'changed',pageIndex:0});
+  expect(calls.render).toBe(1);expect(result.translated).toBe(1);
+ } finally {delete globalThis.Capacitor;globalThis.fetch=real;delete globalThis.localStorage;}
+});

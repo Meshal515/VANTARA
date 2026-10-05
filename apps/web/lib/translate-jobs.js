@@ -10,6 +10,7 @@
  * جاهزًا. خدمة أندرويد الأمامية تُبقي التطبيق حيًّا والشاشة مطفأة وتعرض التقدّم.
  */
 
+import {createQueue,prepareTranslation} from './translate.js';
 import { chapterBenchmark } from './translate-perf.js';
 
 const JOBS_KEY = 'vantara.translate.jobs';
@@ -191,6 +192,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export function createJobRunner(deps) {
   const { sync, engine, translatePage, native } = deps;
+  const concurrency=Math.min(24,Math.max(1,deps.concurrency ?? JOB_CONCURRENCY));
+  const lookahead=Math.min(48,Math.max(concurrency,deps.lookahead ?? concurrency));
+  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:24});
+  const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
   const readerQuiet = deps.readerQuiet ?? (async () => {});
   const storage = deps.storage ?? globalThis.localStorage;
@@ -239,21 +244,19 @@ export function createJobRunner(deps) {
     const started = now();
     ch.startedAt ??= started;
     const list = await pagesOf(job, c);
-    const image = await engine.pageImage(ch.row.sourceId, list[p]);
-    const result = await translatePage(
-      { sync, imagePath: image.path, fetchMs: now() - started, via: 'job' },
-      image.src,
-      {
-        seriesRef: job.ref,
-        seriesTitle: job.title,
-        sourceId: ch.row.sourceId,
-        chapterKey: ch.key,
-        chapterNumber: Number.isFinite(ch.number) && ch.number >= 0 ? ch.number : null,
-        pageIndex: p,
-        sourceLang: ch.row.lang ?? 'en',
-        ...(job.mode === 'fast' ? { speed: 'fast' } : {}),
+    const meta={seriesRef:job.ref,seriesTitle:job.title,sourceId:ch.row.sourceId,chapterKey:ch.key,
+      chapterNumber:Number.isFinite(ch.number) && ch.number>=0?ch.number:null,pageIndex:p,sourceLang:ch.row.lang ?? 'en',...(job.mode==='fast'?{speed:'fast'}:{})};
+    const result=await lanes.add({key:`${job.id}:${c}:${p}`,chapterKey:ch.key,index:p,
+      prepare:async()=> {
+        if(job.status!=='running') return {bypass:true,paused:true};
+        const image=await engine.pageImage(ch.row.sourceId,list[p]);
+        return {...await preparePage(image.src,meta),image};
       },
-    );
+      run:async({prepared,waitedMs,prepareMs})=> {
+        if(prepared?.paused || job.status!=='running') return {error:'paused'};
+        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,route:prepared.route,via:'job'},prepared.image.src,meta);
+      },
+    });
     if (result?.error) return result.error;
     if (!result || result.incomplete) return 'incomplete';
     if (result.saved === false) return 'storage_failed';
@@ -316,6 +319,7 @@ export function createJobRunner(deps) {
               code = 'offline';
             }
             busy.delete(tag);
+            if(code==='paused' && job.status!=='running') return;
             if (!code) {
               job.updatedAt = now();
               save();
@@ -337,7 +341,7 @@ export function createJobRunner(deps) {
             save();
           }
         };
-        await Promise.all(Array.from({ length: JOB_CONCURRENCY }, worker));
+        await Promise.all(Array.from({ length: lookahead }, worker));
 
         if (blocked) {
           job.status = 'paused';

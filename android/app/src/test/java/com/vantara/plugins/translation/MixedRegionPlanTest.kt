@@ -63,4 +63,14 @@ class MixedRegionPlanTest {
         }
         assertTrue(fast.single().glyph.count()>0)
     }
+ @Test fun `uniform free dialogue can skip CTD but textured art cannot`() {
+  val img=RgbImage(220,150,ByteArray(220*150*3){250.toByte()})
+  for(i in 0..4) for(y in 55..75) for(x in 60+i*15..65+i*15) for(c in 0..2) img.data[(y*220+x)*3+c]=20
+  val text=Detection(Box(54,49,135,83),.95f,"text_free")
+  val fast=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(text),allowFlatFree=true)
+  assertEquals(1,fast.fast.size);assertTrue(fast.heavy.isEmpty())
+  for(y in 35..100) for(x in 35..155) if((x+y)%4==0) for(c in 0..2) img.data[(y*220+x)*3+c]=110
+  val hard=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(text),allowFlatFree=true)
+  assertTrue(hard.fast.isEmpty());assertEquals(1,hard.heavy.size)
+ }
 }

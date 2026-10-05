@@ -2,7 +2,7 @@ package com.vantara.plugins.translation
 /** Known translated regions only. Credits/SFX and low-confidence art-like OCR never trigger retry. */
 object ResidualLatin {
     fun readable(text: String, confidence: Float, kind: String): Boolean =
-        kind !in setOf("sfx","credit") && confidence >= 0.80f && Regex("(?<![A-Za-z])[A-Za-z]{3,}(?![A-Za-z])").containsMatchIn(text)
+        kind !in setOf("sfx","credit") && confidence >= 0.80f && Regex("(?<![A-Za-z])[A-Za-z]{2,}(?![A-Za-z])").containsMatchIn(text)
     fun candidate(img: RgbImage, region: Region): Boolean {
         val color = region.fillColor ?: return region.cleanMode != "fill"
         var contrast = 0

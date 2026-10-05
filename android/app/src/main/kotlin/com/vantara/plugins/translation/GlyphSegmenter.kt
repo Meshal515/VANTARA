@@ -21,12 +21,12 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
      * `rows`: صفوف النص (من الكاشف موسّعة). قطعة لا تمسّ أي صف لا تُشغَّل: كل بكسل في
      * تلك الصفوف يأخذ القطع نفسها التي كان يأخذها، فقيمته هي نفسها بتًّا بتًّا.
      */
-    fun probabilities(img: RgbImage, rows: List<IntRange>? = null): FloatArray {
+    fun probabilities(img: RgbImage, rows: List<IntRange>? = null, singleTile:Boolean=false): FloatArray {
         val acc = FloatArray(img.width * img.height)
         val cnt = FloatArray(img.width * img.height)
         val tileH = img.width
         val overlap = (img.width * 0.12).toInt()
-        val spans = verticalTiles(img.height, tileH, overlap)
+        val spans = if(singleTile) listOf(0 to img.height) else verticalTiles(img.height, tileH, overlap)
         val needed = if (rows == null) spans else spans.filter { (y0, y1) -> rows.any { it.first < y1 && it.last >= y0 } }
         tiles = needed.size
         for ((y0, y1) in needed) {
@@ -65,7 +65,7 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
         var totalTiles=0
         for(box in crops) {
             val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
-            val prob=probabilities(crop)
+            val prob=probabilities(crop,singleTile=true)
             totalTiles+=tiles
             for(y in 0 until crop.height) for(x in 0 until crop.width) out[(box.y1+y)*img.width+box.x1+x]=prob[y*crop.width+x]
         }

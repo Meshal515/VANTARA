@@ -43,7 +43,7 @@ fun nms(boxes: List<Box>, scores: FloatArray, iouThr: Float): List<Int> {
  * بنسبة ≤ 2.2 مع تداخل، لأن النموذج يرى 640×640 مشوَّهة.
  */
 class Detector(file: File) {
-    private val session: OrtSession = Ort.open(file)
+    private val session: OrtSession = Ort.open(file, engine=Ort.Engine("detector-lane",2,2,spin=false))
     private val labels = mapOf(0L to "bubble", 1L to "text_bubble", 2L to "text_free")
     var conf = 0.3f
 
@@ -52,7 +52,7 @@ class Detector(file: File) {
         val input = Ort.tensor(small.toChw(), 1, 3, 640, 640)
         val sizes = Ort.tensor(longArrayOf(img.width.toLong(), img.height.toLong()), 1, 2)
         val out = ArrayList<Detection>()
-        Ort.run(session, mapOf("images" to input, "orig_target_sizes" to sizes)).use { res ->
+        Ort.run(session, mapOf("images" to input, "orig_target_sizes" to sizes), heavy=false).use { res ->
             @Suppress("UNCHECKED_CAST")
             val lab = (res[0].value as Array<LongArray>)[0]
             @Suppress("UNCHECKED_CAST")

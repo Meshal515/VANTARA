@@ -90,6 +90,7 @@ function stageMeans(entries) {
   };
   for (const e of entries) {
     add('', e.stages);
+    add('route.', e.native?.route?.stages);
     add('analyze.', e.native?.analyze?.stages);
     add('render.', e.native?.render?.stages);
   }
@@ -203,8 +204,10 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     lines.push(`${via === 'job' ? 'المقدّمة' : 'القارئ'}: ${mine.length} صفحة · مرسوم ${sum('translated')} · لم يدخل ${sum('noFit')} · لم يظهر ${sum('invisible')} · فقاعة أُبقيت ${sum('bubbleKept')} · لون قُلب ${sum('inkFlipped')}`);
   }
   // المعالج مشغول فعلًا أم الصفحات تنتظر بعضها؟ من آخر صفحة قاسها الجهاز
-  const last = [...entries].reverse().find((e) => Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
-  if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
+  const last = [...entries].reverse().find((e) => e.native?.render?.laneBusy || e.native?.analyze?.laneBusy || Number.isFinite(e.native?.render?.busyPct ?? e.native?.analyze?.busyPct));
+  const lanes = last?.native?.render?.laneBusy ?? last?.native?.analyze?.laneBusy;
+  if (lanes) lines.push(`إشغال المسارات: كشف ${lanes.detect}% · تحليل ${lanes.analyze}% · رسم ${lanes.render}% (ليس نسبة CPU للنظام)`);
+  else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
   for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
@@ -218,10 +221,11 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const a = e.native?.analyze?.stages ?? {};
       const ac = e.native?.analyze?.counts ?? {};
       const r = e.native?.render?.stages ?? {};
-      const queue = (a.queue ?? 0) + (r.queue ?? 0);
+      const probe = e.native?.route?.stages ?? {};
+      const queue = (a.queue ?? 0) + (r.queue ?? 0) + (probe.queue ?? 0);
       const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
       const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}`);
     }
   }
 
@@ -278,6 +282,6 @@ export function chapterBenchmark({ startedAt, endedAt, expectedPages, pageResult
     xs.sort((a, b) => a - b);
     stages[name] = { p50: percentile(xs, 0.5), p95: percentile(xs, 0.95) };
   }
-  const target = !count || completed !== count ? 'incomplete' : cachePages === count ? 'cache-only' : !proven || cachePages > 0 ? 'UNVERIFIED' : count !== 100 ? 'not-target-chapter' : wallMs <= 120000 ? 'met' : 'not-met';
+  const target = !count || completed !== count ? 'incomplete' : cachePages === count ? 'cache-only' : !proven || cachePages > 0 ? 'UNVERIFIED' : count !== 100 ? 'not-target-chapter' : wallMs <= 100000 ? 'met' : 'not-met';
   return { expectedPages: count, completed, failed: count - completed, wallMs, cachePages, stages, target, device, environment };
 }

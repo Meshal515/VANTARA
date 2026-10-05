@@ -25,6 +25,7 @@ object Ort {
     data class Engine(val name: String, val ortThreads: Int, val xnnThreads: Int, val spin: Boolean = true, val nnapi: Boolean = false)
 
     val CURRENT = Engine("current", 4, 4)
+    private val lanes = InferenceLanes()
 
     fun open(file: File, threads: Int = 4, engine: Engine? = null): OrtSession {
         val e = engine ?: Engine("default", threads, threads)
@@ -49,7 +50,7 @@ object Ort {
     }
 
     /** Own input tensors even on run failure; Result remains owned by the caller's use block. */
-    fun run(session: OrtSession, inputs: Map<String, OnnxTensor>): OrtSession.Result {
+    fun run(session: OrtSession, inputs: Map<String, OnnxTensor>, heavy: Boolean = true, work:InferenceWork = if(heavy) InferenceWork.HEAVY else InferenceWork.DETECT): OrtSession.Result {
         var options: OrtSession.RunOptions? = null
         var registration: AutoCloseable? = null
         var timer: java.util.concurrent.ScheduledFuture<*>? = null
@@ -61,7 +62,7 @@ object Ort {
                 registration = owner.attach { active.setTerminate(true) }
                 timer = deadlines.schedule({ owner.cancel() }, owner.remainingMs(), TimeUnit.MILLISECONDS)
             }
-            return session.run(inputs, active)
+            return lanes.run(work) { checkBudget(); session.run(inputs, active) }
         } finally {
             timer?.cancel(false)
             registration?.close()
