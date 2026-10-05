@@ -565,9 +565,9 @@ export async function handleTranslatePage(request: Request, env: TranslationEnv,
 
 /** يُرفع حين تتغير تعليمات الترجمة النصية تغييرًا يستحق ترجمة جديدة. */
 // يرتفع مع كل تغيير في معنى التعليمات: المحفوظ بإصدار أقدم لا يُعرض كأنه الحالي.
-// 2: أمثلة الفريق، سؤال الإعادة، السرد بلا فقاعة واللافتات، و«نص حر بثقة منخفضة» يُرسل
-//    بتلميح sfx لتقرر Luna (لا يُسقط قبلها). يطابق TEXT_PROMPT_VERSION في apps/web/lib/translate.js.
-export const TEXT_PROMPT_VERSION = 2;
+// 3: تثبيت السرد الطويل فوق الرسم، وعدم تحويل ألقاب fantasy God/Deity تلقائيًا إلى «إله».
+//    كما أن prose طويلًا لا يُقبل null لمجرد أن التصنيف أخطأ sign/sfx.
+export const TEXT_PROMPT_VERSION = 3;
 export const textEngineOf = (env: TranslationEnv) => `${env.TRANSLATE_MODEL || DEFAULT_MODEL}:t${TEXT_PROMPT_VERSION}`;
 const MAX_TEXT_REGIONS = 60;
 const REGION_ID = /^[a-z0-9_-]{1,32}$/;
@@ -581,6 +581,7 @@ How you translate:
 - Keep it short enough to fit the original bubble: Arabic is often longer, so tighten wording rather than pad it.
 - Get Arabic grammar right for the speaker and addressee: gender and number agreement. Use the character list for genders; when unknown, infer from the art and context.
 - Names and terms: use the glossary exactly as given, every time. For a new proper noun or term, choose one rendering as a careful team would (transliterate personal names; translate techniques, skills, titles and organisations when the meaning matters) and report it in new_terms so it stays fixed. Report every newly identified character in characters.
+- Fantasy rank/title rule: do NOT translate “God” or “Deity” mechanically as «إله/إلهة». First decide whether it is a system rank, epithet, office or literal worshipped deity from the page, story memory and glossary. For ranks/titles use the contextually correct Arabic such as «سيد»، «حاكم»، «ملك» or «كيان سماوي» only when that meaning is actually present. Use «إله/إلهة» only for an actual deity or when the established glossary explicitly requires it. Never invent a scope such as «حاكم كوكب» unless the source/context actually says the character rules a planet.
 - Honorifics: drop or adapt them naturally.
 - Arabic punctuation (، ؛ ؟) with ! and … kept where they carry emotion. No diacritics except to prevent a real misreading. Western digits stay as they are.
 
@@ -588,6 +589,7 @@ What you receive: the page image, and a list of text regions the detector found,
 - id: the region id.
 - source: the original text exactly as written on the page (fix the OCR draft by reading the image).
 - kind: speech, thought, narration (caption boxes, and also box-less captions lettered over the art or a black background, like "FROM THE WORTHLESS SCOUNDRELS" or "THERE'S A RULE IN THE UNDERWORLD": the narrator's voice is always narration), sign (only text that physically exists inside the scene: shop signs, papers, screens), sfx (sound effects and onomatopoeia drawn into the art: BOOM, CLANG, 쾅, ドン), credit (scanlator credits, watermarks, site names, page numbers, ads).
+  Long sentence-like English prose lettered directly over artwork is narration, not a sign and never an sfx. If a region contains several ordinary words forming a sentence, translate it even when it has no bubble.
 - arabic: the translation. null for sfx and credit: the art keeps its sound effects. Signs are translated only when the reader needs them to follow the story; otherwise null.
 - speaker: the character speaking, by the name used in the character list, or null when unclear.
 
@@ -846,7 +848,7 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
  */
 export const RETRY_NOTE = `
 
-These regions came back without Arabic in the first pass. Each one is its own bubble on the page and the reader sees it on its own, so each needs its own Arabic even if a neighbouring bubble says something related. Do not return null for speech, thought or narration: translate exactly the text of each region.`;
+These regions came back without Arabic in the first pass. Each one is independently visible to the reader, so each needs its own Arabic even if a neighbouring region says something related. Do not return null for speech, thought or narration. Long sentence-like prose over artwork is narration, NOT sfx/sign; translate it. True sound effects such as BOOM/CLANG and actual credits may remain null.`;
 
 /**
  * `GET /v1/translate/usage`: كم صفحة ترجمتَ هذا الأسبوع ومن كم، ومتى يتجدد.
@@ -885,13 +887,24 @@ export async function handleTranslateUsage(env: TranslationEnv, userId: string, 
 }
 
 /** مناطق طُلبت ولم تأخذ جوابًا: غائبة من الرد، أو كلام بلا عربي. اللافتة والمؤثر والحقوق بلا عربي جواب صحيح. */
+export function looksLikeProse(source: string): boolean {
+  // أربع كلمات لاتينية حقيقية كافية لتمييز السرد/الجملة عن EXIT أو BOOM/CLANG.
+  // لا نعتمد التصنيف الذي أعاده Luna وحده، لأنه قد يسمّي السرد فوق الرسم sign/sfx.
+  const words = source.match(/[A-Za-z][A-Za-z'’\-]*/g) ?? [];
+  return words.filter((w) => w.replace(/['’\-]/g, '').length >= 2).length >= 4;
+}
+
 export function unanswered(asked: TextRegionIn[], got: TextRegionOut[]): TextRegionIn[] {
   const byId = new Map(got.map((r) => [r.id, r]));
   return asked.filter((r) => {
     if (!r.source.trim()) return false;
     const hit = byId.get(r.id);
     if (!hit) return true;
-    return hit.arabic === null && !['sfx', 'credit', 'sign'].includes(hit.kind);
+    if (hit.arabic !== null) return false;
+    if (hit.kind === 'credit') return false;
+    // prose طويل لا يُقبل كـnull حتى لو أخطأ النموذج وسمّاه sign/sfx.
+    if (looksLikeProse(r.source)) return true;
+    return !['sfx', 'sign'].includes(hit.kind);
   });
 }
 
