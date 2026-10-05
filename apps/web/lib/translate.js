@@ -490,11 +490,21 @@ async function repairInBackground(deps, src, hash, meta, local) {
   const clock = stopwatch();
   const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock)
     .catch(error => ({ error: classifyTranslationError(error) }));
-  logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, { from: 'repair', error: result.error ?? null, incomplete: Boolean(result.incomplete), translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native });
-  if (!canAcceptTranslationRepair(local, result)) return;
+  const admissible=canAcceptTranslationRepair(local, result);
+  if (!admissible) {
+    logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, {
+      from: 'repair', accepted: false, error: result.error ?? null, incomplete: Boolean(result.incomplete),
+      translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native,
+    });
+    return;
+  }
   const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries };
   const saved = writePageCache(hash, meta, value);
   const persisted=(await saved.written).every(key => typeof key === 'string');
+  logPage({ ...deps, waitMs: 0, fetchMs: 0 }, meta, hash, clock, {
+    from: 'repair', accepted: persisted, error: persisted ? null : 'storage_failed', incomplete: Boolean(result.incomplete),
+    translated: result.translated ?? 0, regions: (result.regions ?? []).length, native: result.native,
+  });
   if (!persisted) return;
   registerRefinement(deps,hash,meta,result,saved,persisted);
   deps.onRepaired?.({ ...saved.stored, hash, cacheKey: saved.cacheKey, from: 'model' });
