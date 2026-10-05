@@ -72,4 +72,20 @@ class FastFlatRegionsTest {
         val dets = listOf(Detection(Box(64, 62, 132, 126), 0.95f, "text_free"))
         assertNull(Regions.fastFlatRegions(img, img.gray(), "hash", dets))
     }
+    @Test
+    fun `mixed page keeps easy bubble fast and sends only free text to heavy path`() {
+        val img = image()
+        val dets = listOf(
+            Detection(Box(35, 30, 185, 145), 0.96f, "bubble"),
+            Detection(Box(64, 62, 132, 126), 0.95f, "text_bubble"),
+            Detection(Box(8, 150, 150, 176), 0.92f, "text_free"),
+        )
+        val p = Regions.fastFlatPartition(img, img.gray(), "hash", dets)
+        assertEquals(1, p.candidates.size)
+        assertEquals(1, p.remaining.size)
+        assertEquals("text_free", p.remaining[0].label)
+        // API القديم يبقى محافظًا: الصفحة المختلطة ليست «كلها fast».
+        assertNull(Regions.fastFlatRegions(img, img.gray(), "hash", dets))
+    }
+
 }
