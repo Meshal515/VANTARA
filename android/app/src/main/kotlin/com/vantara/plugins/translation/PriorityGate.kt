@@ -112,7 +112,10 @@ class PriorityGate {
     private fun better(a: Waiter, b: Waiter): Boolean {
         val ca = priorityClass(a); val cb = priorityClass(b)
         if (ca != cb) return ca < cb
-        if (ca <= 3) {
+        // Reader and prefetch work inside the same class still follows distance.
+        // Otherwise ANALYZE_JOB reverts to FIFO and a far future page can beat
+        // the page the reader just reached.
+        if (ca <= 5) {
             val da = distance(a.page); val db = distance(b.page)
             if (da != db) return da < db
         }
