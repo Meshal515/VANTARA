@@ -131,6 +131,40 @@ describe('translations saved with an older prompt are refreshed, not served as c
   });
 });
 
+describe('queue: a newly focused page never waits behind stale end-to-end slots', () => {
+  it('admits one bounded focused burst while normal slots are occupied', async () => {
+    const q = createQueue({ concurrency: 2 });
+    let releaseA, releaseB;
+    const holdA = new Promise((r) => (releaseA = r));
+    const holdB = new Promise((r) => (releaseB = r));
+    let focusedStarted = false;
+    const a = q.add({ key: 'c1#1', chapterKey: 'c1', index: 1, run: async () => holdA });
+    const b = q.add({ key: 'c1#2', chapterKey: 'c1', index: 2, run: async () => holdB });
+    await new Promise((r) => setTimeout(r, 10));
+    q.focus('c1', 99, { c1: 0 });
+    const focused = q.add({ key: 'c1#99', chapterKey: 'c1', index: 99, run: async ({ interactive }) => {
+      focusedStarted = interactive;
+      return 'focused';
+    } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(focusedStarted).toBe(true);
+    expect(await focused).toBe('focused');
+
+    // The burst is singular: another non-focused page cannot exceed the normal
+    // slots while both original jobs are still held.
+    let extraStarted = false;
+    const extra = q.add({ key: 'c1#100', chapterKey: 'c1', index: 100, run: async () => {
+      extraStarted = true;
+      return 'extra';
+    } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(extraStarted).toBe(false);
+
+    releaseA(); releaseB();
+    await Promise.all([a, b, extra]);
+  });
+});
+
 describe('reader queue dispatch classifies only the focused page as interactive', () => {
   it('marks the focused page interactive and the next page prefetch at dispatch time', async () => {
     const q = createQueue({ concurrency: 1 });
