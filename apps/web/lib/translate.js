@@ -341,6 +341,8 @@ export function classifyTranslationError(error, online = globalThis.navigator?.o
   if (message === 'image' || message.includes('image fetch') || message.includes('image load')) return 'image_fetch_failed';
   if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
   if (message.includes('bridge') || message.includes('capacitor') || message.includes('native')) return 'native_bridge_failed';
+  if (message.includes('failed to fetch') || message.includes('network request') || message.includes('networkerror') ||
+      message.includes('connection reset') || message.includes('connection refused') || message.includes('enotfound')) return 'network_failed';
   return 'reader_exception';
 }
 
@@ -682,6 +684,7 @@ export const TRANSLATE_ERRORS = {
   no_credit: 'خلص رصيد الترجمة — الفصول المترجمة قبل تشتغل',
   busy: 'الترجمة مشغولة الحين، نحاول بعد شوي',
   offline: 'ما فيه اتصال — الصفحات المترجمة قبل تشتغل',
+  network_failed: 'الشبكة تعثّرت أثناء الترجمة — بنحاول الصفحة مرة ثانية',
   image_fetch_failed: 'صورة الصفحة ما وصلت للمترجم — بنحاولها مرة ثانية',
   aborted: 'توقفت محاولة الترجمة لأن الصفحة تغيّرت — بنعيدها عند الحاجة',
   timeout: 'الترجمة أخذت وقتًا أطول من الحد — بنحاولها مرة ثانية',
