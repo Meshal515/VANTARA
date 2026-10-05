@@ -34,7 +34,7 @@ private const val THUMB_PIXELS = 3_200_000.0
 /** أطول ضلع للتحليل (النماذج والأقنعة). الرسم النهائي بمقاس الملف دائمًا. */
 private const val MAX_EDGE = 4096
 
-class Pipeline(private val context: Context, private val store: ModelStore) {
+class Pipeline(private val context: Context, private val store: ModelStore, private val detectorEngine: Ort.Engine? = null) {
     private var detector: Detector? = null
     private var glyphs: GlyphSegmenter? = null
     private var bubbles: BubbleSegmenter? = null
@@ -100,7 +100,7 @@ class Pipeline(private val context: Context, private val store: ModelStore) {
         }
     }
 
-    private fun detector(perf: Perf) = detector ?: load(perf, "rtdetr") { Detector(store.file("rtdetr")) }.also { detector = it }
+    private fun detector(perf: Perf) = detector ?: load(perf, "rtdetr") { Detector(store.file("rtdetr"), detectorEngine) }.also { detector = it }
     private fun glyphs(perf: Perf) = glyphs ?: load(perf, "ctd") { GlyphSegmenter(store.file("ctd")) }.also { glyphs = it }
     private fun bubbles(perf: Perf) = bubbles ?: load(perf, "bubbleseg") { BubbleSegmenter(store.file("bubbleseg")) }.also { bubbles = it }
     private val lamaLock = Any()
