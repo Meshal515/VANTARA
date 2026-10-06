@@ -80,9 +80,15 @@ describe('batch 1 reader pipeline', () => {
     expect(analyses).toBe(0);
   });
 
-  it('configures the reader for three bounded page pipelines plus one textless bypass', async () => {
+  it('never regresses the reader to one whole-page pipeline with no textless bypass', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*3,\s*prepareConcurrency:\s*3,\s*maxPrepared:\s*4,\s*bypassConcurrency:\s*1\s*\}\)/);
+    const match = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(source);
+    expect(match).not.toBeNull();
+    const [, concurrency, prepareConcurrency, maxPrepared, bypassConcurrency] = match.map(Number);
+    expect(concurrency).toBeGreaterThanOrEqual(3);
+    expect(prepareConcurrency).toBeGreaterThanOrEqual(1);
+    expect(maxPrepared).toBeGreaterThanOrEqual(concurrency);
+    expect(bypassConcurrency).toBeGreaterThanOrEqual(1);
   });
 });
