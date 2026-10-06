@@ -413,6 +413,10 @@ class TranslationPlugin : Plugin() {
         for ((k, v) in perf.counts) counts.put(k, v)
         val mem = android.app.ActivityManager.MemoryInfo()
         (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.getMemoryInfo(mem)
+        val gcCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() }.getOrNull() else null
+        val gcTimeMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.gc-time")?.toLongOrNull() }.getOrNull() else null
+        val blockingGcCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.blocking-gc-count")?.toLongOrNull() }.getOrNull() else null
+        val blockingGcTimeMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.blocking-gc-time")?.toLongOrNull() }.getOrNull() else null
         return JSObject()
             .put("stages", stages)
             .put("counts", counts)
@@ -422,7 +426,16 @@ class TranslationPlugin : Plugin() {
             .put("busyPct", gate.busyPercent())
             .put("laneBusy",JSObject().put("detect",detectGate.busyPercent()).put("analyze",gate.busyPercent()).put("render",renderGate.busyPercent()))
             .put("lowMemory", mem.lowMemory)
+            .put("availMemMb", mem.availMem / (1024 * 1024))
+            .put("totalMemMb", mem.totalMem / (1024 * 1024))
+            .put("lowMemoryThresholdMb", mem.threshold / (1024 * 1024))
             .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
+            .put("heapLimitMb", Runtime.getRuntime().maxMemory() / (1024 * 1024))
+            .put("nativeHeapMb", android.os.Debug.getNativeHeapAllocatedSize() / (1024 * 1024))
+            .put("gcCount", gcCount)
+            .put("gcTimeMs", gcTimeMs)
+            .put("blockingGcCount", blockingGcCount)
+            .put("blockingGcTimeMs", blockingGcTimeMs)
     }
 
     /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */
