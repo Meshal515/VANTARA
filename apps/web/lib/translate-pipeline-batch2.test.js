@@ -149,6 +149,27 @@ describe('batch 2 staged translation pipeline', () => {
     }));
   });
 
+  it('keeps repair and jobs behind ready and ahead reader stages', async () => {
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    const order = [];
+    const holder = withNativeTranslationStage(async () => {
+      order.push('holder');
+      await hold;
+    }, { priority: 'analyze' });
+    await tick();
+
+    const background = withNativeTranslationStage(async () => order.push('background'), { priority: 'background' });
+    const aheadAnalyze = withNativeTranslationStage(async () => order.push('ahead-analyze'), { priority: 'aheadAnalyze' });
+    const aheadRender = withNativeTranslationStage(async () => order.push('ahead-render'), { priority: 'aheadRender' });
+    const visibleRender = withNativeTranslationStage(async () => order.push('visible-render'), { priority: 'render' });
+    await tick();
+
+    release();
+    await Promise.all([holder, background, aheadAnalyze, aheadRender, visibleRender]);
+    expect(order).toEqual(['holder', 'visible-render', 'ahead-render', 'ahead-analyze', 'background']);
+  });
+
   it('exposes native admission wait separately from actual analyze/render duration', async () => {
     let release;
     const hold = new Promise(resolve => { release = resolve; });
