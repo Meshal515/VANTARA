@@ -529,7 +529,9 @@ async function repairInBackground(deps, src, hash, meta, local) {
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.isInteractive?.() ?? deps.interactive ?? true;
+// القارئ كله مسار أمامي ما دام صار متسلسلًا من أول الصفحة؛ لا نخفض
+// الصفحات 2+ إلى background لمجرد أن المستخدم مرّر بعيدًا عنها.
+const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.via === 'reader' ? true : deps.isInteractive?.() ?? deps.interactive ?? true;
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 
 /**
