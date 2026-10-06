@@ -32,6 +32,7 @@ class Region(
     var eraseMask: ByteMask? = null
     var cleanMode: String? = null
     var fillColor: IntArray? = null
+    var reconstruction: Cleaner.Reconstruction? = null
     var layout: TextLayout? = null
 }
 
