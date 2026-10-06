@@ -227,9 +227,12 @@ object Regions {
         val hx0=maxOf(0,holder.x1);val hy0=maxOf(0,holder.y1)
         val hx1=minOf(img.width,holder.x2);val hy1=minOf(img.height,holder.y2)
         if(hx1-hx0<24 || hy1-hy0<24 || holder.contains(textBox)<.84f) return null
-        val pad=maxOf(6,minOf(18,textBox.h/3))
-        val sx0=maxOf(hx0,textBox.x1-pad);val sy0=maxOf(hy0,textBox.y1-pad)
-        val sx1=minOf(hx1,textBox.x2+pad);val sy1=minOf(hy1,textBox.y2+pad)
+        // Sample paper from the detector-owned text extent only. Expanding this
+        // seed window can cross the speech-bubble outline on a tight/low bubble
+        // and make safe flat paper look textured. CTD-excluded ink leaves enough
+        // actual paper here; if it does not, we conservatively fall back to neural rescue.
+        val sx0=maxOf(hx0,textBox.x1);val sy0=maxOf(hy0,textBox.y1)
+        val sx1=minOf(hx1,textBox.x2);val sy1=minOf(hy1,textBox.y2)
         if(sx1<=sx0 || sy1<=sy0) return null
 
         val blocked=glyphFull.dilate(2)
