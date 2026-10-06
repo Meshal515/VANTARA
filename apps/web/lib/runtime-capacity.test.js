@@ -83,6 +83,19 @@ describe('runtime capacity controller', () => {
     expect(c.telemetry().reason).toContain('analyze-wait');
   });
 
+  it('decays native wait pressure after the backlog clears', () => {
+    let now = 0;
+    const c = createRuntimeCapacityController({ now: () => now });
+    c.observeStages({ 'nativeWait.analyze': 6_000 });
+    expect(c.telemetry().grade).toBe(1);
+    for (let i = 0; i < 3; i++) {
+      now += 2_000;
+      c.observeStages({ 'nativeWait.analyze': 0, 'nativeWait.render': 0 });
+    }
+    expect(c.telemetry().analyzeWaitMs).toBeLessThan(5_000);
+    expect(c.telemetry().grade).toBe(0);
+  });
+
   it('bounds a deterministic 100-page pressure simulation', () => {
     let now = 0;
     const c = createRuntimeCapacityController({ now: () => now });
