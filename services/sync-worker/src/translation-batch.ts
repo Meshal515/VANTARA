@@ -102,7 +102,7 @@ export async function handleTranslateTextBatch(request: Request, env: Translatio
     ]);
     body.input=[{role:'user',content}];
     body.text={format:{type:'json_schema',name:'chapter_page_translations',strict:true,schema:{type:'object',additionalProperties:false,required:['pages'],properties:{pages:{type:'array',items:{type:'object',additionalProperties:false,required:['pageKey','translation'],properties:{pageKey:{type:'string',enum:keys},translation:TEXT_OUTPUT_SCHEMA}}}}}}};
-    body.max_output_tokens=Math.min(24000,Math.max(8000,group.length*6000));
+    body.max_output_tokens=24000;
 
     const providerStarted=Date.now();
     try {
