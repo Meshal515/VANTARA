@@ -43,11 +43,12 @@ class CtdRoiCacheTest {
         assertNotNull(cache.get("page",c))
     }
 
-    @Test fun `cache refuses a plan whose enclosing mask could retain too many page pixels`() {
+    @Test fun `wide disjoint plan avoids a large combined cache entry but keeps safe crop reuse`() {
         val cache=CtdRoiCache(maxEntries=8,maxEnclosingPixels=120_000)
         val far=listOf(Box(0,0,100,100),Box(900,900,1000,1000))
-        assertFalse(cache.put("page",far,mask(1000,1000)))
-        assertNull(cache.get("page",far))
+        assertTrue(cache.put("page",far,mask(1000,1000)))
+        assertNull("do not retain the million-pixel enclosing rectangle",cache.get("page",far))
+        assertNotNull("exact singleton crop remains safely reusable",cache.get("page",listOf(far.first())))
     }
 
     @Test fun `demand metrics distinguish source pixels from overlap and unique coverage`() {
