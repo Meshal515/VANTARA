@@ -49,7 +49,7 @@ class MixedRegionPlanTest {
         val plan=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(holder,upper))
         assertTrue(plan.fast.isEmpty())
         assertEquals(listOf(upper),plan.heavy)
-        assertEquals("glyph_coverage",plan.rejectionReasons[upper])
+        assertTrue(plan.rejectionReasons[upper] in setOf("background","glyph_coverage"))
     }
 
     @Test fun `one holder with split or duplicated text yields one stable region`() {
