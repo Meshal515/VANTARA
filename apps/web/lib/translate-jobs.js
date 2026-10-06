@@ -192,8 +192,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export function createJobRunner(deps) {
   const { sync, engine, translatePage, native } = deps;
-  const concurrency=Math.min(4,Math.max(1,deps.concurrency ?? JOB_CONCURRENCY));
-  const lookahead=Math.min(4,Math.max(1,deps.lookahead ?? concurrency));
+  // ثابت عمدًا: كل عمل يترجم صفحة واحدة ثم التي بعدها. لا override يعيد
+  // convoy القديم (عدة CTD/BubbleSeg تنتظر نفس CPU).
+  const concurrency=JOB_CONCURRENCY;
+  const lookahead=1;
   const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0});
   const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
