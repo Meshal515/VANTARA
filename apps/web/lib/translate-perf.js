@@ -216,6 +216,20 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   } else if (serverCachedPages.length || modelPages.length) {
     lines.push(`اللغة في هذه الجولة: Luna جديد ${modelPages.length} · كاش الخادم ${serverCachedPages.length}.`);
   }
+  const lunaMeasured=modelPages.filter(e => Number.isFinite(e.native?.luna?.pagesPerBatch));
+  if (lunaMeasured.length) {
+    const m=(key) => median(lunaMeasured.map(e => Number(e.native.luna[key])).filter(Number.isFinite));
+    const effective=lunaMeasured.map(e => {
+      const pages=Math.max(1,Number(e.native.luna.pagesPerBatch)||1);
+      const provider=Number.isFinite(e.native.luna.providerNetworkMs)
+        ? Number(e.native.luna.providerNetworkMs)
+        : Number(e.stages?.['luna.provider/network']);
+      return Number.isFinite(provider) ? provider/pages : null;
+    }).filter(Number.isFinite);
+    lines.push(
+      `Luna batching: effective provider/page ${sec(median(effective))} · pages/batch ${m('pagesPerBatch') ?? '—'} · regions/batch ${m('regionsPerBatch') ?? '—'} · chars/batch ${m('charsPerBatch') ?? '—'} · tokens/batch ${m('tokensPerBatch') ?? '—'} · inFlight ${m('inFlight') ?? '—'}.`,
+    );
+  }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
   const analyzed = fresh.filter((e) => e.native?.analyze?.counts && !e.textless);
@@ -265,7 +279,20 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const r = e.native?.render?.stages ?? {};
       const probe = e.native?.route?.stages ?? {};
       const queue = (a.queue ?? 0) + (r.queue ?? 0) + (probe.queue ?? 0);
-      const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
+      const splitLuna=['luna.batchWait','luna.request','luna.provider/network'].some(k=>Number.isFinite(e.stages?.[k]));
+      const luna=e.native?.luna ?? {};
+      const packing=[
+        Number.isFinite(luna.pagesPerBatch) ? `pages/batch ${luna.pagesPerBatch}` : null,
+        Number.isFinite(luna.regionsPerBatch) ? `regions/batch ${luna.regionsPerBatch}` : null,
+        Number.isFinite(luna.charsPerBatch) ? `chars/batch ${luna.charsPerBatch}` : null,
+        Number.isFinite(luna.tokensPerBatch) ? `tokens/batch ${luna.tokensPerBatch}` : null,
+        Number.isFinite(luna.inFlight) ? `inFlight ${luna.inFlight}` : null,
+      ].filter(Boolean).join(' · ');
+      const network = splitLuna
+        ? `Luna batchWait ${sec(e.stages?.['luna.batchWait'] ?? 0)} · request ${sec(e.stages?.['luna.request'] ?? 0)} · provider/network ${sec(e.stages?.['luna.provider/network'] ?? 0)}${packing ? ` · ${packing}` : ''}`
+        : e.stages?.luna != null
+          ? `Luna ${sec(e.stages.luna)}`
+          : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
       const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
       const telemetry = [
         Number.isFinite(ac.detectTiles) ? `detectTiles ${ac.detectTiles}` : null,
