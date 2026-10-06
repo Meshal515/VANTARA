@@ -10,9 +10,8 @@ import kotlinx.coroutines.CompletableDeferred
  * السياسة:
  *  - كشف RT-DETR للصفحة الحالية فقط يستطيع القفز أولًا.
  *  - Render القارئ يسبق أي كشف استباقي أو Analyze ثقيل آخر.
- *  - بعد Analyze يحتاج Luna، نحجز الدور للـRender المتوقع: بقية الـAnalyze/
- *    jobs/refinement لا تبدأ حتى يأتي Render أو يلغي JavaScript الحجز.
- *  - الكشف الخفيف يبقى مسموحًا أثناء انتظار Luna حتى نعرف إن الصفحة بلا نص.
+ *  - ملكية Native تنتهي بانتهاء النداء نفسه. Luna لا تملك ولا تحجز هذه البوابة.
+ *  - ترتيب Render/Detect/Analyze يطبق فقط عند handoff بين نداءات Native الجاهزة.
  */
 class PriorityGate {
     companion object {
@@ -37,17 +36,9 @@ class PriorityGate {
     private var firstUse = 0L
     @Volatile private var focus: Page? = null
 
-    /**
-     * صفحة أكملت Analyze وتنتظر Luna ثم Render. ما دام هذا الحجز قائمًا لا نبدأ
-     * Analyze ثقيلًا لصفحة أخرى؛ وإلا Luna تعود خلال ~ثوانٍ لكن Render ينتظر
-     * CTD/BubbleSeg الجاري عشرات الثواني.
-     */
-    private var awaitingRender: Page? = null
-
     fun focus(page: Page?, pageCount: Int? = null) {
         val next = synchronized(this) {
             focus = page
-            if (awaitingRender != page) awaitingRender = null
             if (!busy) grantNextLocked() else null
         }
         next?.go?.complete(Unit)
@@ -55,25 +46,12 @@ class PriorityGate {
 
     private fun focused(page: Page?): Boolean = page != null && page == focus
 
-    fun expectRender(page: Page?) {
-        if (page == null) return
-        synchronized(this) {
-            // بوابة واحدة تعني أن تحليلين ثقيلين لا ينتهيان معًا. لا نستبدل
-            // حجز صفحة أقدم بحجز أحدث لو وصل استدعاء غير متوقع.
-            if (awaitingRender == null || awaitingRender == page) awaitingRender = page
-        }
-    }
-
-    /** Luna فشلت/لم تُرجع عربيًا؛ لا نترك بقية الفصل محجوزة للأبد. */
-    fun cancelExpectedRender(page: Page?) {
-        if (page == null) return
-        val next = synchronized(this) {
-            if (awaitingRender != page) return@synchronized null
-            awaitingRender = null
-            if (!busy) grantNextLocked() else null
-        }
-        next?.go?.complete(Unit)
-    }
+    /**
+     * Compatibility hooks for older bridge code. Stage-separated translation
+     * deliberately keeps no Native reservation while Luna/network is pending.
+     */
+    fun expectRender(@Suppress("UNUSED_PARAMETER") page: Page?) = Unit
+    fun cancelExpectedRender(@Suppress("UNUSED_PARAMETER") page: Page?) = Unit
 
     private fun distance(p: Page?): Int {
         val f = focus ?: return 0
@@ -106,9 +84,6 @@ class PriorityGate {
         }
     }
 
-    private fun blockedByExpectedRender(w: Waiter): Boolean =
-        awaitingRender != null && w.rank >= ANALYZE_READER
-
     private fun better(a: Waiter, b: Waiter): Boolean {
         val ca = priorityClass(a); val cb = priorityClass(b)
         if (ca != cb) return ca < cb
@@ -125,17 +100,10 @@ class PriorityGate {
 
     suspend fun <T> run(rank: Int, perf: Perf, page: Page? = null, block: () -> T): T {
         val started = System.nanoTime()
-        var barrier = false
         val waiter = synchronized(this) {
             if (firstUse == 0L) firstUse = started
-
-            // وصول Render لنفس الصفحة يستهلك الحجز. إن كانت البوابة مشغولة
-            // سيبقى Render في الطابور لكنه يتقدم على أي Analyze ثقيل.
-            if (rank == RENDER_READER && page != null && awaitingRender == page) awaitingRender = null
-
             val candidate = Waiter(rank, seq++, page)
-            barrier = blockedByExpectedRender(candidate)
-            if (!busy && !barrier) {
+            if (!busy) {
                 busy = true
                 null
             } else {
@@ -143,7 +111,6 @@ class PriorityGate {
                 candidate
             }
         }
-        if (barrier) perf.count("renderBarrierWait")
         if (waiter != null) {
             try {
                 waiter.go.await()
@@ -167,7 +134,6 @@ class PriorityGate {
     private fun grantNextLocked(): Waiter? {
         var best: Waiter? = null
         for (w in queue) {
-            if (blockedByExpectedRender(w)) continue
             if (best == null || better(w, best)) best = w
         }
         if (best == null) return null

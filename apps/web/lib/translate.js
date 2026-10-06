@@ -198,7 +198,7 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       if (prepBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
-      Promise.resolve().then(() => job.prepare()).then(prepared => {
+      Promise.resolve().then(() => job.prepare({ interactive: isFocused(job), isInteractive: () => isFocused(job) })).then(prepared => {
         if (jobs.get(job.key) !== job) return;
         job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
         if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
@@ -557,7 +557,9 @@ const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 const nativeStagePriorityOf = (deps, foreground) => {
   if (deps.via === 'job' || deps.via === 'repair') return 'background';
   if (interactiveOf(deps)) return foreground;
-  return foreground === 'render' ? 'aheadRender' : 'aheadAnalyze';
+  if (foreground === 'render') return 'aheadRender';
+  if (foreground === 'route') return 'aheadRoute';
+  return 'aheadAnalyze';
 };
 
 /**
@@ -567,20 +569,24 @@ const nativeStagePriorityOf = (deps, foreground) => {
  * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
  */
 const NATIVE_STAGE_RANK = Object.freeze({
-  // A ready visible page draws first. Then classify new pages cheaply before
-  // committing the single inference owner to another CTD/BubbleSeg pass.
+  // Visible work stays latency-sensitive. Once a non-visible page already has
+  // Luna's answer, finish it before speculative Route/Analyze so it releases a
+  // reader slot instead of starving behind a deep prepare buffer.
   render: 0,
   route: 1,
   analyze: 2,
   aheadRender: 3,
-  aheadAnalyze: 4,
-  background: 5,
+  aheadRoute: 4,
+  aheadAnalyze: 5,
+  background: 6,
 });
 let nativeStageRunning = false;
 let nativeStageSeq = 0;
 const nativeStageQueue = [];
 
 const nativeStageNow = () => globalThis.performance?.now?.() ?? Date.now();
+const nativeStagePriorityName = job => typeof job.priority === 'function' ? job.priority() : job.priority;
+const nativeStageRank = job => NATIVE_STAGE_RANK[nativeStagePriorityName(job)] ?? NATIVE_STAGE_RANK.analyze;
 
 function pumpNativeTranslationStage() {
   if (nativeStageRunning || !nativeStageQueue.length) return;
@@ -588,7 +594,9 @@ function pumpNativeTranslationStage() {
   for (let i = 1; i < nativeStageQueue.length; i += 1) {
     const a = nativeStageQueue[i];
     const b = nativeStageQueue[best];
-    if (a.rank < b.rank || (a.rank === b.rank && a.seq < b.seq)) best = i;
+    const ar = nativeStageRank(a);
+    const br = nativeStageRank(b);
+    if (ar < br || (ar === br && a.seq < b.seq)) best = i;
   }
   const [job] = nativeStageQueue.splice(best, 1);
   nativeStageRunning = true;
@@ -603,9 +611,10 @@ function pumpNativeTranslationStage() {
 }
 
 export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = null } = {}) {
-  const rank = NATIVE_STAGE_RANK[priority] ?? NATIVE_STAGE_RANK.analyze;
   return new Promise((resolve, reject) => {
-    nativeStageQueue.push({ fn, resolve, reject, rank, seq: nativeStageSeq++, queuedAt: nativeStageNow(), onWait });
+    // priority may be a function. Re-evaluate it only when the owner is handed
+    // over so a page scrolled into focus is promoted without cancelling work.
+    nativeStageQueue.push({ fn, resolve, reject, priority, seq: nativeStageSeq++, queuedAt: nativeStageNow(), onWait });
     queueMicrotask(pumpNativeTranslationStage);
   });
 }
@@ -627,14 +636,18 @@ export async function prepareTranslation(src, meta, options = {}) {
     return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
   }
 
-  // Route and Heavy share one JS admission owner again. Batch 2 let Route run
-  // concurrently with CTD/BubbleSeg and device telemetry showed RT-DETR inflate
-  // from ~0.25s to multi-second work. Route has a higher queue rank instead:
-  // it can jump queued analysis, but never overlaps the active inference call.
+  const prepDeps={
+    via: options.via ?? 'reader',
+    interactive: Boolean(options.interactive),
+    isInteractive: options.isInteractive,
+  };
+
+  // Route and Heavy share one JS admission owner again. Its rank is live: a
+  // queued page promoted into focus jumps speculative work at the next handoff.
   const route=await withNativeTranslationStage(
     () => prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex})),
     {
-      priority:'route',
+      priority:() => nativeStagePriorityOf(prepDeps,'route'),
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
@@ -645,22 +658,17 @@ export async function prepareTranslation(src, meta, options = {}) {
   // Stage separation: expensive local analysis finishes in preparation, before
   // this page consumes a reader run slot. Luna may then wait/batch without
   // holding the single CTD/BubbleSeg owner.
-  const prepDeps={
-    via: options.via ?? 'reader',
-    interactive: Boolean(options.interactive),
-    isInteractive: options.isInteractive,
-  };
   const analysis=await withNativeTranslationStage(
     () => prep.time('prepare.analyze', () => analyzePage({
       path,
       sourceLang:meta.sourceLang ?? 'auto',
-      priority:'low',
+      priority:priorityOf(prepDeps),
       chapterKey:meta.chapterKey,
       pageIndex:meta.pageIndex,
       routeHash:route?.pageHash,
     })),
     {
-      priority:nativeStagePriorityOf(prepDeps,'analyze'),
+      priority:() => nativeStagePriorityOf(prepDeps,'analyze'),
       onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
     },
   );
@@ -686,8 +694,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
   const textless = !(analysis.regions ?? []).length && coverageUnknown === 0;
   if (!readable.length) return { incomplete: !textless || coverageUnknown > 0, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
-  // analyzePage في القارئ يحجز المسار الثقيل لهذه الصفحة حتى يعود Luna ثم يبدأ
-  // Render. إذا لم نصل إلى Render لأي سبب يجب تحرير الحجز في finally.
+  // Current APK releases Native as soon as Analyze returns. Keep the legacy
+  // release hook only so an older installed APK cannot retain its Luna-era reservation.
   let renderCompleted = false;
   try {
     // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
@@ -743,8 +751,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
       native,
     };
   } finally {
-    // Render نفسه يستهلك الحجز ذريًا داخل PriorityGate. هذا النداء مهم فقط
-    // لمسارات Luna error / no-plan / exception حتى لا تتوقف بقية الصفحات.
+    // Compatibility only: current PriorityGate reserves nothing across Luna.
+    // Older APKs still need this on error / no-plan / exception paths.
     if (!renderCompleted && priorityOf(deps) === 'high') {
       try { await releasePageReservation(meta.chapterKey, meta.pageIndex); } catch { /* APK قديم أو إغلاق الصفحة */ }
     }

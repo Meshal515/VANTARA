@@ -20,7 +20,7 @@ class AnchorGateTest {
         assertEquals(listOf(50, 51), order)
     }
 
-    @Test fun `moving focus releases stale network reservation`() = runBlocking {
+    @Test fun `moving focus does not depend on a Luna reservation`() = runBlocking {
         val gate = PriorityGate()
         val old = PriorityGate.Page("c", 0)
         val current = PriorityGate.Page("c", 50)
