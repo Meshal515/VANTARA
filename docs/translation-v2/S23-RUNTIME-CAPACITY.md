@@ -42,8 +42,8 @@ Visible reader work is never reduced to zero. A visible Luna request may borrow 
 
 When Android exposes max heap:
 
-- soft mark = 55% of max heap, clamped to 144-192 MB.
-- hard mark = 72% of max heap, clamped to 184-256 MB.
+- soft mark = 55% of max heap, with a 144 MB floor.
+- hard mark = 72% of max heap, with a 184 MB floor.
 
 Fallbacks when max heap is unavailable are 160 MB soft and 220 MB hard.
 
