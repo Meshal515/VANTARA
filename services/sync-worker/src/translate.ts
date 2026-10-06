@@ -788,19 +788,29 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
     const ticket = await admit(env, userId, now, chapterKey, !repairing);
     if (ticket instanceof Response) return ticket;
     let incurredUsd = 0;
+    let providerNetworkMs = 0;
+    let providerBatchWaitMs = 0;
+    const captureAsk = async (work: ReturnType<typeof askText>) => {
+      const result = await work;
+      if (!(result instanceof Response)) {
+        providerNetworkMs += Math.max(0, result.providerNetworkMs);
+        providerBatchWaitMs += Math.max(0, result.batchWaitMs);
+      }
+      return result;
+    };
     try {
       return await (async (): Promise<Response> => {
 
         const memory = await workMemory(env.DB, qualityEngine, seriesRef, chapterKey, pageIndex);
         const ask = (regions: TextRegionIn[], retry = false) =>
-          askText(env, deps, {
+          captureAsk(askText(env, deps, {
             onCost: amount => { incurredUsd += amount; },
             effort: fast ? 'none' : undefined,
             mediaType,
             data,
             context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions }) + (retry ? RETRY_NOTE : ''),
             known: new Set(regions.map((r) => r.id)),
-          });
+          }));
 
         let merged = saved;
         let summary = cached?.summary ?? null;
@@ -833,12 +843,12 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
           return hit && (!validateGodTranslation(r.source,hit.arabic) || !validateGodTranslation(hit.source,hit.arabic));
         });
         if (invalidGod.length) {
-          const correction = await askText(env, deps, {
+          const correction = await captureAsk(askText(env, deps, {
             onCost: amount => { incurredUsd += amount; },
             effort: fast ? 'none' : undefined, mediaType, data,
             context: textContext({ seriesTitle, chapterNumber, pageIndex, sourceLang, memory, regions: invalidGod }) + '\nCORRECTION REQUIRED: God = حاكم or ملك ONLY; Gods = حكام or ملوك ONLY. The previous translation violated this. Correct these regions only, retain their meaning, return the same IDs.',
             known: new Set(invalidGod.map(r => r.id)),
-          });
+          }));
           for (const input of invalidGod) {
             const index = merged.findIndex(r => r.id === input.id);
             const old = merged[index]!;
@@ -862,7 +872,17 @@ export async function handleTranslateText(request: Request, env: TranslationEnv,
         await env.DB.batch(statements);
         ticket.committed();
         if (!repairing && deps.deferMemory) deps.deferMemory(pageIndex,memoryStatements(env.DB,seriesRef,parsed,now,chapterKey,pageIndex));
-        return reply({ engine, cached: false, regions: merged, summary, model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL });
+        return reply({
+          engine,
+          cached: false,
+          regions: merged,
+          summary,
+          model: modelName ?? env.TRANSLATE_MODEL ?? DEFAULT_MODEL,
+          perf: {
+            providerNetworkMs: Math.round(providerNetworkMs),
+            batchWaitMs: Math.round(providerBatchWaitMs),
+          },
+        });
       })();
     } finally {
       await ticket.refund(incurredUsd);
@@ -932,11 +952,14 @@ async function askText(
   env: TranslationEnv,
   deps: TranslateDeps,
   input: { onCost?: (usd: number) => void; effort?: 'none' | undefined; mediaType: string; data: string; context: string; known: Set<string> },
-): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null; usd: number }> {
+): Promise<Response | { regions: TextRegionOut[]; summary: string | null; parsed: { new_terms?: unknown; characters?: unknown }; model: string | null; usd: number; providerNetworkMs: number; batchWaitMs: number }> {
   const effort = input.effort ?? (['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === env.TRANSLATE_EFFORT) ?? 'low';
   const model = env.TRANSLATE_MODEL || DEFAULT_MODEL;
   let payload: OpenAIResponse;
+  let providerNetworkMs = 0;
+  let batchWaitMs = 0;
   try {
+    const providerStarted = Date.now();
     const res = await (deps.fetch ?? fetch)(OPENAI_RESPONSES, {
       method: 'POST',
       headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
@@ -959,6 +982,15 @@ async function askText(
         store: false,
       }),
     });
+    const measuredProviderMs = Math.max(0, Date.now() - providerStarted);
+    const taggedProvider = res.headers.get('x-vantara-luna-provider-ms');
+    const taggedBatchWait = res.headers.get('x-vantara-luna-batch-wait-ms');
+    providerNetworkMs = taggedProvider !== null && Number.isFinite(Number(taggedProvider))
+      ? Math.max(0, Number(taggedProvider))
+      : measuredProviderMs;
+    batchWaitMs = taggedBatchWait !== null && Number.isFinite(Number(taggedBatchWait))
+      ? Math.max(0, Number(taggedBatchWait))
+      : 0;
     if (res.status === 429) {
       const code = await res
         .json()
@@ -992,6 +1024,8 @@ async function askText(
     parsed,
     model: payload.model ?? null,
     usd: costOf(payload.usage),
+    providerNetworkMs,
+    batchWaitMs,
   };
 }
 
