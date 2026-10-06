@@ -80,6 +80,28 @@ describe('translation performance log (on the phone)', () => {
   });
 });
 
+
+it('reports split Luna latency, packing budgets and amortized provider demand', () => {
+  const entry={
+    at:10000,chapterKey:'c1',pageIndex:0,from:'model',textless:false,total:9000,
+    stages:{'luna.batchWait':40,'luna.request':310,'luna.provider/network':8000},
+    native:{
+      analyze:{counts:{fastFlatRegions:1}},
+      luna:{pagesPerBatch:4,regionsPerBatch:12,charsPerBatch:800,tokensPerBatch:220,inFlight:3},
+    },
+  };
+  const report=formatReport([entry]);
+  expect(report).toContain('luna.batchWait: 0.04 ث');
+  expect(report).toContain('luna.request: 0.31 ث');
+  expect(report).toContain('luna.provider/network: 8.00 ث');
+  expect(report).toContain('effective provider/page 2.00 ث');
+  expect(report).toContain('regions/batch 12');
+  expect(report).toContain('chars/batch 800');
+  expect(report).toContain('tokens/batch 220');
+  expect(report).toContain('inFlight 3');
+  expect(report).toContain('Luna batchWait 0.04 ث · request 0.31 ث · provider/network 8.00 ث');
+});
+
 describe('engine settings measured on the phone', () => {
   it('lists each setting with its times and whether the output matches the current one', async () => {
     const { engineLines, formatReport } = await import('./translate-perf.js');
