@@ -563,13 +563,17 @@ async function translatePageNow(deps, src, meta) {
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
   const oldPipeline = staleLocalPipeline(local);
-  // A stale visual pipeline may contain mixed Arabic/English output. Never show
-  // it while a repair runs in the background; rebuild before publication.
-  if (local && typeof local.translated === 'number' && !downgraded && !oldPipeline && !(deps.via === 'job' && local.incomplete)) {
+  const unsafeStable124 = Number(local?.pipelineVersion) === 2;
+  // stable-124 visual output is known-bad on device and incomplete pages may mix
+  // Arabic with source text. Block those exact cases. Older complete cache stays
+  // visible and may refresh in background, preserving the fast reopen path.
+  const visibleCache = local && typeof local.translated === 'number' &&
+    !downgraded && !unsafeStable124 && !local.incomplete;
+  if (visibleCache) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
-    const due = (local.incomplete || staleEngine(local.engine)) && (local.tries ?? 0) < MAX_REPAIRS &&
+    const due = (staleEngine(local.engine) || oldPipeline) && (local.tries ?? 0) < MAX_REPAIRS &&
       (oldPipeline || Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS);
     if (due) void repairInBackground(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
