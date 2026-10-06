@@ -49,7 +49,7 @@ describe('translation performance log (on the phone)', () => {
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {
     const entries = [
       { at: 1000, chapterKey: 'c1', from: 'model', textless: true, total: 400, stages: { analyze: 380 }, native: { analyze: { stages: { detect: 300 } } } },
-      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { encode: 200 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 40, fillChangedPixels: 30, inpaintChangedPixels: 10 } } } },
+      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { erase: 12, encode: 200 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 40, fillChangedPixels: 20, reconstructChangedPixels: 10, inpaintMaskPixels: 20, inpaintChangedPixels: 10, eraseRegions: 3, lamaInvocations: 1, eraseE0: 0, eraseE1: 1, eraseE2: 1, eraseE3: 1, outsideMaskChanges: 0 } } } },
       { at: 11000, chapterKey: 'c1', from: 'cache', total: 5 },
       { at: 12000, chapterKey: 'c1', from: 'error', error: 'offline', total: 60000, stages: { analyze: 1000, cacheProbe: 59000 } },
       { at: 13000, chapterKey: 'c1', from: 'repair', error: 'busy', total: 45000, stages: { luna: 45000 } },
@@ -70,11 +70,16 @@ describe('translation performance log (on the phone)', () => {
       entries,
       [{ page: 'p1', identical: true, legacy: { stages: { glyphs: 2000 } }, current: { stages: { glyphs: 1000 } } }],
       null,
-      { cleanedRegions: 1, perf: { stages: { erase: 12, 'load:lama': 50 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 45, fillChangedPixels: 35, inpaintChangedPixels: 10 } } },
+      { cleanedRegions: 1, perf: { stages: { erase: 12, 'load:lama': 50 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 45, fillChangedPixels: 25, reconstructChangedPixels: 10, inpaintMaskPixels: 20, inpaintChangedPixels: 10, outsideMaskChanges: 0 } } },
     );
     expect(report).toContain('بلا نص');
     expect(report).toContain('متطابق');
     expect(report).toContain('التبييض الفعلي');
+    expect(report).toContain('E2 إعادة بناء 10');
+    expect(report).toContain('E3 LaMa 10 (20 بكسل / 20% من القناع)');
+    expect(report).toContain('LaMa calls 1');
+    expect(report).toContain('erase/ROI 0.00 ث');
+    expect(report).toContain('تغيّر خارج القناع 0');
     expect(report).toContain('اختبار التبييض المحلي');
     expect(report).toContain('offline×1');
   });
