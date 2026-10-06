@@ -1,4 +1,5 @@
 /** Bounded metadata/thumbnail queue; decoded page images stay in the native pipeline. */
+export const MAX_TEXT_BATCH_WAIT_MS = 40;
 export const DEFAULT_TEXT_BATCH_LIMITS = Object.freeze({
   maxPages: 6,
   maxRegions: 48,
@@ -79,7 +80,7 @@ export function createTextBatcher(request, {
     maxSourceTokens: finite(configuredLimits.maxSourceTokens, DEFAULT_TEXT_BATCH_LIMITS.maxSourceTokens),
     maxPayloadBytes: finite(configuredLimits.maxPayloadBytes, DEFAULT_TEXT_BATCH_LIMITS.maxPayloadBytes),
   };
-  const assemblyMs = Math.max(0, Number(waitMs) || 0);
+  const assemblyMs = Math.max(0, Math.min(MAX_TEXT_BATCH_WAIT_MS, Number(waitMs) || 0));
   const pending = [];
   let active = 0;
   let directActive = 0;
