@@ -35,6 +35,15 @@ class MissingTextCoverageTest {
         val partial = Detection(Box(35,55,70,85), .95f, "text_bubble")
         assertFalse(MissingTextSweep.candidates(img, listOf(partial)).isEmpty())
     }
+
+    @Test fun `route defers missing sweep only after confident text already proves non-textless`() {
+        val text = listOf(Detection(Box(20,20,120,60), .91f, "text_bubble"))
+        val bubbleOnly = listOf(Detection(Box(10,10,180,100), .91f, "bubble"))
+        assertTrue(RouteCoveragePolicy.deferSweep(text))
+        assertFalse(RouteCoveragePolicy.deferSweep(bubbleOnly))
+        assertFalse(RouteCoveragePolicy.deferSweep(emptyList()))
+    }
+
     @Test fun `every bubble holder keeps a page out of false textless when text boxes are missed`() {
         val holders=(0 until 12).map { i ->
             Detection(Box(20,20+i*12,260,30+i*12),.91f,"bubble")
