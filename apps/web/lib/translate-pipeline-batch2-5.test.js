@@ -172,8 +172,10 @@ describe('batch 2.5 stage pipeline', () => {
 
   it('re-evaluates queued native priority so focus promotion is live', async () => {
     let releaseHolder;
+    let releaseCandidate;
     let releaseRoute;
     const holderWait = new Promise(resolve => { releaseHolder = resolve; });
+    const candidateWait = new Promise(resolve => { releaseCandidate = resolve; });
     const routeWait = new Promise(resolve => { releaseRoute = resolve; });
     const order = [];
     let focused = false;
@@ -184,7 +186,7 @@ describe('batch 2.5 stage pipeline', () => {
 
     const holder = task('holder', 'analyze', holderWait);
     await tick();
-    const candidate = task('candidate', () => focused ? 'render' : 'aheadAnalyze');
+    const candidate = task('candidate', () => focused ? 'render' : 'aheadAnalyze', candidateWait);
     const route = task('route', 'route', routeWait);
     await tick();
 
@@ -192,6 +194,9 @@ describe('batch 2.5 stage pipeline', () => {
     releaseHolder();
     await tick();
     expect(order).toEqual(['holder', 'candidate']);
+    releaseCandidate();
+    await tick();
+    expect(order).toEqual(['holder', 'candidate', 'route']);
     releaseRoute();
     await Promise.all([holder, candidate, route]);
     expect(order).toEqual(['holder', 'candidate', 'route']);
