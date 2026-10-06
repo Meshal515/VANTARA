@@ -426,8 +426,10 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("bubbles",bubbleList.size)
         perf.count("bubbleMaskPixels",bubbleList.sumOf {it.mask.count()})
         for(d in speechCandidates) {
+            val coverage=bubbleCoveragePermille(bubbleList,d.box)
             perf.count("bubbleCoverageSamples")
-            perf.count("bubbleCoveragePermilleSum",bubbleCoveragePermille(bubbleList,d.box))
+            perf.count("bubbleCoveragePermilleSum",coverage)
+            if(coverage<850) perf.count("bubbleCoverageBelow850")
         }
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
         // CTD is independent evidence. If it sees a line inside a holder that
