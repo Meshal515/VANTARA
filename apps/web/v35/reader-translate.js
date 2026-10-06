@@ -52,11 +52,11 @@ const store = {
   },
 };
 
-// خمس صفحات end-to-end كحد أقصى: الحالية latency-sensitive، والأربع التالية
-// تستطيع الوصول إلى Luna batch بينما Heavy Native يبقى واحدًا فقط. Route/Detect
-// له بوابة Kotlin مستقلة، لذلك نسمح بتحضير أوسع لاكتشاف textless مبكرًا.
-// prepared هنا metadata/paths فقط؛ 12 حد backpressure وليس 12 صورة مفكوكة.
-const queue = createQueue({ concurrency: 5, prepareConcurrency: 4, maxPrepared: 12, bypassConcurrency: 2 });
+// هذه الأرقام backpressure وليست «خمسة pipelines كاملة»: Native يملك مراحل
+// Detect/Analyze/Render منفصلة، وOrt يمنع تداخل DETECT/HEAVY. ثمانية طلبات نشطة
+// تكفي لإبقاء Luna/Render مشغولين، و16 prepared تجعل النافذة كلها 24 بالضبط —
+// نفس سعة routedPages الأصلية، فلا نطرد route ونضطر لكشف الصفحة مرة ثانية.
+const queue = createQueue({ concurrency: 8, prepareConcurrency: 4, maxPrepared: 16, bypassConcurrency: 4 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
