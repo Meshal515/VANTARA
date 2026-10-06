@@ -163,6 +163,7 @@ export function createQueue({
     Promise.resolve().then(() => job.run({
       waitedMs: Math.max(0, Date.now() - job.addedAt - (job.prepareMs ?? 0)),
       prepareMs: job.prepareMs ?? 0,
+      queuedAt: job.addedAt,
       prepared: job.prepared,
       interactive: isFocused(job),
       isInteractive: () => isFocused(job),
@@ -581,14 +582,20 @@ async function translateOnce(deps, src, hash, meta, clock) {
   registerRefinement(deps,hash,meta,result,saved,persisted);
   // Derived end-to-end latency for textless classification. This is deliberately
   // NOT a stage: logPage must not add it to total on top of prepare.route/wait.
-  const routeToDoneMs = result.textless && Number.isFinite(deps.routeStartedAt)
-    ? Math.max(0, Date.now() - deps.routeStartedAt)
+  const routeDoneAt = Date.now();
+  const routeToDoneStart = Number.isFinite(deps.routeQueuedAt) ? deps.routeQueuedAt : deps.routeStartedAt;
+  const routeToDoneMs = result.textless && Number.isFinite(routeToDoneStart)
+    ? Math.max(0, routeDoneAt - routeToDoneStart)
+    : null;
+  const routeDispatchToDoneMs = result.textless && Number.isFinite(deps.routeStartedAt)
+    ? Math.max(0, routeDoneAt - deps.routeStartedAt)
     : null;
   logPage(deps, meta, hash, clock, {
     from: result.cached ? 'friends' : 'model',
     cacheKey: saved.cacheKey,
     textless: Boolean(result.textless),
     routeToDoneMs,
+    routeDispatchToDoneMs,
     regions: (result.regions ?? []).length,
     translated: result.translated,
     incomplete: Boolean(result.incomplete),
