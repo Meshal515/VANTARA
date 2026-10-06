@@ -56,7 +56,7 @@ internal object RoiMaskComposer {
             val bw=bounds.w
             val bh=bounds.h
             val sum=FloatArray(bw*bh)
-            val count=ByteArray(bw*bh)
+            val count=IntArray(bw*bh)
             for(i in component) {
                 val b=crops[i]
                 val p=probabilities[i]
@@ -65,13 +65,13 @@ internal object RoiMaskComposer {
                 for(y in b.y1 until b.y2) for(x in b.x1 until b.x2) {
                     val local=(y-bounds.y1)*bw+(x-bounds.x1)
                     sum[local]+=p[k++]
-                    count[local]=(count[local].toInt()+1).toByte()
+                    count[local]++
                 }
             }
             for(y in bounds.y1 until bounds.y2) for(x in bounds.x1 until bounds.x2) {
                 if(x !in 0 until width || y !in 0 until height) continue
                 val local=(y-bounds.y1)*bw+(x-bounds.x1)
-                val n=count[local].toInt() and 0xff
+                val n=count[local]
                 if(n>0 && sum[local]/n>threshold) out[x,y]=1
             }
         }
