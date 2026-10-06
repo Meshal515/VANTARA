@@ -308,7 +308,7 @@ object Regions {
         glyphFull:ByteMask?=null,
     ):TrustedHolderPlan {
         val bubbles=ArrayList<Bubble>()
-        val blockedGlyph=glyphFull?.dilate(2)
+        val blockedGlyph by lazy {glyphFull?.dilate(2)}
         var fastColor=0;var flatBox=0;var seeded=0
         for(h in holders) {
             val owned=texts.filter {h.box.contains(it.box)>=.88f}
