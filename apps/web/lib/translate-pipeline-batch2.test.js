@@ -48,7 +48,7 @@ describe('batch 2 staged translation pipeline', () => {
     vi.useRealTimers();
   });
 
-  it('lightweight route/textless detection is not blocked behind a heavy native stage', async () => {
+  it('textless route waits for the active inference owner instead of contending with Heavy', async () => {
     installDevice();
     globalThis.localStorage = memory();
     globalThis.fetch = async () => new Response(new Uint8Array([1, 2, 3]));
@@ -72,10 +72,11 @@ describe('batch 2 staged translation pipeline', () => {
     await tick();
     await tick();
 
-    expect(routed).toBe(true);
+    expect(routed).toBe(false);
     releaseHeavy();
     await heavy;
     const prepared = await preparing;
+    expect(routed).toBe(true);
     expect(prepared.bypass).toBe(true);
   });
 
@@ -191,9 +192,9 @@ describe('batch 2 staged translation pipeline', () => {
     expect(waited).toBeGreaterThanOrEqual(0);
   });
 
-  it('keeps five bounded page pipelines, scans farther ahead, and gives textless pages two bypass slots', async () => {
+  it('keeps the reader bounded while allowing a deeper staged buffer', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*5,\s*prepareConcurrency:\s*4,\s*maxPrepared:\s*12,\s*bypassConcurrency:\s*2\s*\}\)/);
+    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
   });
 });
