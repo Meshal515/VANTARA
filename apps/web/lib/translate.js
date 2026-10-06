@@ -612,7 +612,15 @@ export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = 
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
+  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher(
+    (path,body) => sync.translation(path,{method:'POST',body}),
+    {
+      waitMs:40,
+      maxInFlight:6,
+      adaptive:true,
+      limits:{maxPages:6,maxRegions:48,maxSourceChars:7000,maxSourceTokens:2600},
+    },
+  ));
   return textBatchers.get(sync);
 }
 
@@ -702,7 +710,14 @@ async function translateOnDevice(deps, hash, meta, clock) {
       : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
-      res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
+      const began=globalThis.performance?.now?.() ?? Date.now();
+      res = await ask(analysis.thumbnail ?? '');
+      const observed=Math.max(0,Math.round((globalThis.performance?.now?.() ?? Date.now())-began));
+      const perf=res.lunaPerf ?? {batchWaitMs:0,requestMs:observed,providerNetworkMs:0,roundTripMs:observed,pagesPerBatch:1,regionsPerBatch:readable.length,charsPerBatch:readable.reduce((n,r)=>n+String(r.source ?? '').length,0),tokensPerBatch:0,inFlight:1};
+      clock.stages['luna.batchWait']=Math.max(0,Math.round(Number(perf.batchWaitMs)||0));
+      clock.stages['luna.request']=Math.max(0,Math.round(Number(perf.requestMs)||0));
+      clock.stages['luna.provider/network']=Math.max(0,Math.round(Number(perf.providerNetworkMs)||0));
+      native.luna=perf;
     }
     if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
     const plan = renderPlan(analysis, res.body);
