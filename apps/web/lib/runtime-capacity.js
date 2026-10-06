@@ -1,6 +1,7 @@
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Number(n) || 0));
 const ewma = (prev, next, alpha = 0.22) => next > 0 ? (prev > 0 ? prev * (1 - alpha) + next * alpha : next) : prev;
 const ewmaObserved = (prev, next, alpha = 0.22) => prev > 0 ? prev * (1 - alpha) + Math.max(0, next) * alpha : Math.max(0, next);
+const hasNumber = value => value !== null && value !== undefined && Number.isFinite(Number(value));
 
 export const S23_SAFE_OPERATING_ENVELOPE = Object.freeze({
   thermal: Object.freeze({ coolMax: 1, warm: 2, severe: 3, critical: 4 }),
@@ -115,18 +116,18 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
 
   function observePerf(perf, stage = 'native') {
     if (!perf || typeof perf !== 'object') return;
-    if (Number.isFinite(Number(perf.thermal))) state.thermal = Number(perf.thermal);
-    if (Number.isFinite(Number(perf.heapMb))) state.heapMb = Number(perf.heapMb);
-    if (Number.isFinite(Number(perf.heapLimitMb))) state.heapLimitMb = Number(perf.heapLimitMb);
-    if (Number.isFinite(Number(perf.nativeHeapMb))) state.nativeHeapMb = Number(perf.nativeHeapMb);
-    if (Number.isFinite(Number(perf.availMemMb))) state.availMemMb = Number(perf.availMemMb);
-    if (Number.isFinite(Number(perf.totalMemMb))) state.totalMemMb = Number(perf.totalMemMb);
-    if (Number.isFinite(Number(perf.lowMemoryThresholdMb))) state.lowMemoryThresholdMb = Number(perf.lowMemoryThresholdMb);
-    state.lowMemory = Boolean(perf.lowMemory);
-    const nextGcCount = Number(perf.gcCount);
-    const nextGcTime = Number(perf.gcTimeMs);
-    const nextBlockingCount = Number(perf.blockingGcCount);
-    const nextBlockingTime = Number(perf.blockingGcTimeMs);
+    if (hasNumber(perf.thermal)) state.thermal = Number(perf.thermal);
+    if (hasNumber(perf.heapMb)) state.heapMb = Number(perf.heapMb);
+    if (hasNumber(perf.heapLimitMb)) state.heapLimitMb = Number(perf.heapLimitMb);
+    if (hasNumber(perf.nativeHeapMb)) state.nativeHeapMb = Number(perf.nativeHeapMb);
+    if (hasNumber(perf.availMemMb)) state.availMemMb = Number(perf.availMemMb);
+    if (hasNumber(perf.totalMemMb)) state.totalMemMb = Number(perf.totalMemMb);
+    if (hasNumber(perf.lowMemoryThresholdMb)) state.lowMemoryThresholdMb = Number(perf.lowMemoryThresholdMb);
+    if (typeof perf.lowMemory === 'boolean') state.lowMemory = perf.lowMemory;
+    const nextGcCount = hasNumber(perf.gcCount) ? Number(perf.gcCount) : NaN;
+    const nextGcTime = hasNumber(perf.gcTimeMs) ? Number(perf.gcTimeMs) : NaN;
+    const nextBlockingCount = hasNumber(perf.blockingGcCount) ? Number(perf.blockingGcCount) : NaN;
+    const nextBlockingTime = hasNumber(perf.blockingGcTimeMs) ? Number(perf.blockingGcTimeMs) : NaN;
     state.blockingGcDelta = Number.isFinite(nextBlockingCount) && state.blockingGcCount > 0 ? Math.max(0, nextBlockingCount - state.blockingGcCount) : 0;
     state.blockingGcTimeDeltaMs = Number.isFinite(nextBlockingTime) && state.blockingGcTimeMs > 0 ? Math.max(0, nextBlockingTime - state.blockingGcTimeMs) : 0;
     if (Number.isFinite(nextGcCount)) state.gcCount = nextGcCount;
