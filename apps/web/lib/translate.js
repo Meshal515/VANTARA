@@ -628,6 +628,19 @@ function registerRefinement(deps,hash,meta,result,saved,persisted) {
   }
 }
 
+export function publicationValue(result, at = Date.now()) {
+  const incomplete = Boolean(result?.incomplete);
+  return {
+    image: incomplete ? null : result?.image ?? null,
+    regions: result?.regions ?? [],
+    translated: incomplete ? 0 : (result?.translated ?? 0),
+    engine: result?.engine ?? null,
+    incomplete,
+    at,
+    tries: 0,
+  };
+}
+
 async function translateOnce(deps, src, hash, meta, clock) {
   const result = await translateFresh(deps, src, hash, meta, clock);
   if (result.error) {
@@ -637,15 +650,7 @@ async function translateOnce(deps, src, hash, meta, clock) {
   // Never publish a mixed Arabic/English candidate. Incomplete output is kept
   // only as repair metadata; the reader stays on the original page until a
   // complete repair is accepted.
-  const value = {
-    image: result.incomplete ? null : result.image,
-    regions: result.regions,
-    translated: result.incomplete ? 0 : result.translated,
-    engine: result.engine,
-    incomplete: Boolean(result.incomplete),
-    at: Date.now(),
-    tries: 0,
-  };
+  const value = publicationValue(result);
   const saved = writePageCache(hash, meta, value);
   const persisted = (await saved.written).every(key => typeof key === 'string');
   registerRefinement(deps,hash,meta,result,saved,persisted);
