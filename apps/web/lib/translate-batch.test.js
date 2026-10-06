@@ -60,17 +60,57 @@ describe('adaptive background Luna assembly',()=> {
     await Promise.all([a,b]);vi.useRealTimers();
   });
 
-  it('does not mix works/modes and only falls back on missing endpoint',async()=> {
-    vi.useFakeTimers();const calls=[];
-    const batch=createTextBatcher(async(path,body)=> {
-      calls.push({path,body});
-      return path.endsWith('text-batch')?{status:404}:{status:200,body:{pageHash:body.pageHash,perf:{providerNetworkMs:0,batchWaitMs:0}}};
+  it('does not mix works or modes, and only falls back when the batch endpoint is missing',async()=> {
+    vi.useFakeTimers();
+
+    // Different semantic modes are separate groups. Each singleton goes through
+    // the direct endpoint after the bounded assembly window; they are never
+    // forced into a fake one-page batch.
+    const separateCalls=[];
+    const separate=createTextBatcher(async(path,body)=> {
+      separateCalls.push({path,body});
+      return {status:200,body:{pageHash:body.pageHash,perf:{providerNetworkMs:0,batchWaitMs:0}}};
     },{waitMs:40});
-    const a=batch.enqueueTextPage(page(0)),b=batch.enqueueTextPage(page(1,{speed:'fast'}));
-    await vi.advanceTimersByTimeAsync(40);expect((await a).status).toBe(200);expect((await b).status).toBe(200);
-    expect(calls.filter(c=>c.path.endsWith('text-batch'))).toHaveLength(2);
-    const failed=createTextBatcher(async()=>({status:429,body:{error:'busy'}}),{waitMs:40});
-    const blocked=failed.enqueueTextPage(page(3));await vi.advanceTimersByTimeAsync(40);expect((await blocked).status).toBe(429);
+    const quality=separate.enqueueTextPage(page(0));
+    const fast=separate.enqueueTextPage(page(1,{speed:'fast'}));
+    await vi.advanceTimersByTimeAsync(40);
+    expect((await quality).status).toBe(200);
+    expect((await fast).status).toBe(200);
+    expect(separateCalls.filter(c=>c.path.endsWith('/text'))).toHaveLength(2);
+    expect(separateCalls.filter(c=>c.path.endsWith('text-batch'))).toHaveLength(0);
+
+    // A real compatible multi-page batch may fall back to direct requests only
+    // when the endpoint itself is unavailable.
+    const fallbackCalls=[];
+    const fallback=createTextBatcher(async(path,body)=> {
+      fallbackCalls.push({path,body});
+      return path.endsWith('text-batch')
+        ? {status:404,body:{error:'missing'}}
+        : {status:200,body:{pageHash:body.pageHash,perf:{providerNetworkMs:0,batchWaitMs:0}}};
+    },{waitMs:40,limits:{maxPages:2}});
+    const fa=fallback.enqueueTextPage(page(2));
+    const fb=fallback.enqueueTextPage(page(3));
+    await Promise.resolve();await Promise.resolve();
+    expect((await fa).status).toBe(200);
+    expect((await fb).status).toBe(200);
+    expect(fallbackCalls.filter(c=>c.path.endsWith('text-batch'))).toHaveLength(1);
+    expect(fallbackCalls.filter(c=>c.path.endsWith('/text'))).toHaveLength(2);
+
+    // Provider/admission failures are returned as-is; retrying them here could
+    // duplicate paid work.
+    const failedCalls=[];
+    const failed=createTextBatcher(async(path,body)=>{
+      failedCalls.push({path,body});
+      return {status:429,body:{error:'busy'}};
+    },{waitMs:40,limits:{maxPages:2}});
+    const ba=failed.enqueueTextPage(page(4));
+    const bb=failed.enqueueTextPage(page(5));
+    await Promise.resolve();await Promise.resolve();
+    expect((await ba).status).toBe(429);
+    expect((await bb).status).toBe(429);
+    expect(failedCalls).toHaveLength(1);
+    expect(failedCalls[0].path).toMatch(/text-batch$/);
+
     vi.useRealTimers();
   });
 
