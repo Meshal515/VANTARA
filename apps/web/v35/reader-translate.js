@@ -191,9 +191,9 @@ export function createReaderTranslation(deps) {
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
     const prepare=async({interactive=false,isInteractive}={})=> {
       if(stopped || disabledReason || !isOn()) return null;
-      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,via:'reader',interactive,isInteractive});
+      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive});
     };
-    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
+    const run = async ({ waitedMs = 0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -204,7 +204,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
