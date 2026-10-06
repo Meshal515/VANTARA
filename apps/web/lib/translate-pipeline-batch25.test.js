@@ -193,7 +193,7 @@ describe('batch 2.5 stage ownership', () => {
     const reader = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
     const plugin = await import('node:fs').then(({ readFileSync }) =>
-      readFileSync(new URL('../../android/app/src/main/kotlin/com/vantara/plugins/translation/TranslationPlugin.kt', import.meta.url), 'utf8'));
+      readFileSync(new URL('../../../android/app/src/main/kotlin/com/vantara/plugins/translation/TranslationPlugin.kt', import.meta.url), 'utf8'));
 
     const q = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(reader);
     const nativeCap = /routedPages[^\n]*size>(\d+)/.exec(plugin);
