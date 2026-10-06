@@ -86,9 +86,11 @@ object Cleaner {
         val rr = DoubleArray(3)
         val gg = DoubleArray(3)
         val bb = DoubleArray(3)
-        var n = 0
+        var trained = 0
         for (y in w[1] until w[3] step stride) for (x in w[0] until w[2] step stride) {
             if (inner[x, y].toInt() == 0 || exclude[x, y].toInt() != 0) continue
+            // Deterministic spatial hold-out: validation pixels never influence the fit.
+            if (((x - w[0]) / stride + (y - w[1]) / stride) % 3 == 0) continue
             val f = doubleArrayOf(1.0, (x - cx) / scale, (y - cy) / scale)
             for (i in 0..2) {
                 for (j in 0..2) normal[i * 3 + j] += f[i] * f[j]
@@ -96,9 +98,9 @@ object Cleaner {
                 gg[i] += f[i] * img.g(x, y)
                 bb[i] += f[i] * img.b(x, y)
             }
-            n++
+            trained++
         }
-        if (n < 80) return null
+        if (trained < 60) return null
         val rc = solve3(normal, rr) ?: return null
         val gc = solve3(normal, gg) ?: return null
         val bc = solve3(normal, bb) ?: return null
@@ -108,13 +110,14 @@ object Cleaner {
         var outliers = 0
         for (y in w[1] until w[3] step stride) for (x in w[0] until w[2] step stride) {
             if (inner[x, y].toInt() == 0 || exclude[x, y].toInt() != 0) continue
+            if (((x - w[0]) / stride + (y - w[1]) / stride) % 3 != 0) continue
             val p = model.colorAt(x.toDouble(), y.toDouble())
             val e = (Math.abs(img.r(x, y) - p[0]) + Math.abs(img.g(x, y) - p[1]) + Math.abs(img.b(x, y) - p[2])) / 3.0
             error += e
             if (e > 12.0) outliers++
             checked++
         }
-        if (checked < 80) return null
+        if (checked < 30) return null
         val mae = error / checked
         if (mae > 4.75 || outliers > maxOf(2, checked / 20)) return null
         return Reconstruction(cx, cy, scale, rc, gc, bc, mae)
