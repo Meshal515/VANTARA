@@ -19,6 +19,12 @@ class CtdRoiCacheTest {
         val packed=cache.get("page-a",crops.reversed())
         assertNotNull(packed)
         assertArrayEquals(source.data,packed!!.unpack().data)
+
+        // Disjoint ROI are independent CTD forwards. A later rescue of just one
+        // crop must reuse that exact crop instead of repeating the model call.
+        val first=cache.get("page-a",listOf(crops.first()))
+        assertNotNull(first)
+        assertArrayEquals(source.clipped(crops.first().x1,crops.first().y1,crops.first().x2,crops.first().y2).data,first!!.unpack().data)
         assertNull("page identity must be part of the CTD cache key",cache.get("page-b",crops))
     }
 
