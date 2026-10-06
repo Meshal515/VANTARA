@@ -6,7 +6,7 @@ package com.vantara.plugins.translation
  * The key includes the page content hash and the exact canonical crop geometry.
  * We cache the thresholded mask that downstream code actually consumes, never a
  * guessed/downsized approximation. Large sparse plans are deliberately not
- * retained because PackedMask stores the enclosing rectangle.
+ * retained because a packed snapshot still owns its enclosing rectangle.
  */
 internal class CtdRoiCache(
     private val maxEntries:Int=8,
@@ -35,10 +35,6 @@ internal class CtdRoiCache(
         val valid=crops.filter {it.area>0}
         if(valid.isEmpty()) return false
         var stored=false
-        if(CtdRoiDemand.enclosingPixels(valid)<=maxEnclosingPixels) {
-            items[key(pageHash,valid)]=CtdMaskSnapshot.of(mask,CtdRoiDemand.enclosingBox(valid)!!)
-            stored=true
-        }
         // Non-overlapping ROI are independent forward passes. Retain each exact
         // thresholded slice so a later one-holder rescue can reuse it even when
         // the original page had multiple heavy ROI.
@@ -48,6 +44,12 @@ internal class CtdRoiCache(
                 items[key(pageHash,listOf(box))]=CtdMaskSnapshot.of(mask,box)
                 stored=true
             }
+        }
+        // Store/touch the complete plan last so singleton aliases cannot evict
+        // the most valuable whole-plan entry when the LRU is near capacity.
+        if(CtdRoiDemand.enclosingPixels(valid)<=maxEnclosingPixels) {
+            items[key(pageHash,valid)]=CtdMaskSnapshot.of(mask,CtdRoiDemand.enclosingBox(valid)!!)
+            stored=true
         }
         return stored
     }
