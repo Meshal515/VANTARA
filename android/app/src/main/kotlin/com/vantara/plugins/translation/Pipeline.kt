@@ -458,8 +458,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("eraseChangedPixels", s.changedPixels)
         perf.count("fillMaskPixels", s.fillMaskPixels)
         perf.count("fillChangedPixels", s.fillChangedPixels)
+        perf.count("reconstructMaskPixels", s.reconstructMaskPixels)
+        perf.count("reconstructChangedPixels", s.reconstructChangedPixels)
         perf.count("inpaintMaskPixels", s.inpaintMaskPixels)
         perf.count("inpaintChangedPixels", s.inpaintChangedPixels)
+        perf.count("eraseRegions", s.fillRegions + s.reconstructRegions + s.inpaintRegions)
+        perf.count("fillRegions", s.fillRegions)
+        perf.count("reconstructRegions", s.reconstructRegions)
+        perf.count("lamaInvocations", s.inpaintRegions)
         perf.count("eraseNoOpRegions", s.noOpRegions)
         perf.count("inpaintScaledRegions", s.scaledInpaintRegions)
     }
@@ -502,7 +508,12 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         keepWholeBubbles(regions, sibs, leave, perf)
         perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
+        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
+        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
@@ -604,7 +615,12 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         val original = decoded.img
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
+        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
+        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
         // Cheap colour gate first. OCR sees only known text lines before Arabic is drawn.
@@ -622,7 +638,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     r.eraseMask = baseMask
                     r.eraseMask = WhiteningRepair.mask(r,pixels)
                     val retryMask=r.eraseMask!!
-                    recordErase(perf, Cleaner.applyErase(img,listOf(r),lama))
+                    val repairStats = perf.time("eraseRepair") { Cleaner.applyErase(img,listOf(r),lama) }
+                    recordErase(perf, repairStats)
                     cumulativeMask=RenderSafety.cumulative(cumulativeMask,retryMask)
                     r.eraseMask=cumulativeMask
                     perf.count("residualRepairAttempts")
@@ -718,9 +735,13 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 r.layout?.let { l -> val p = (l.size / 2).toInt(); allowed.fillRect(l.bounds.x1 - p, l.bounds.y1 - p, l.bounds.x2 + p, l.bounds.y2 + p) }
             }
             val f = drawn
+            var outsideChanges = 0
             for (i in allowed.data.indices) if (allowed.data[i].toInt() == 0) {
-                f.data[i * 3] = original.data[i * 3]; f.data[i * 3 + 1] = original.data[i * 3 + 1]; f.data[i * 3 + 2] = original.data[i * 3 + 2]
+                val p = i * 3
+                if (f.data[p] != original.data[p] || f.data[p + 1] != original.data[p + 1] || f.data[p + 2] != original.data[p + 2]) outsideChanges++
+                f.data[p] = original.data[p]; f.data[p + 1] = original.data[p + 1]; f.data[p + 2] = original.data[p + 2]
             }
+            perf.count("outsideMaskChanges", outsideChanges)
             f
         }
         // بلا فقد: ما خارج المسح والعربي يبقى بكسلات الأصل نفسها في الملف المحفوظ
@@ -784,7 +805,20 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                         big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
                     }
                 }
-            } else if (lama != null) {
+            } else if (r.cleanMode == "reconstruct") {
+                val model = r.reconstruction ?: continue
+                for (y in y0 until y1) {
+                    Ort.checkBudget()
+                    val sy = minOf(sh - 1, (y / ky).toInt())
+                    for (x in x0 until x1) {
+                        val sx = minOf(sw - 1, (x / kx).toInt())
+                        if (m[sx, sy].toInt() == 0) continue
+                        val color = model.colorAt(x / kx.toDouble(), y / ky.toDouble())
+                        val i = (y * big.width + x) * 3
+                        big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
+                    }
+                }
+            } else if (r.cleanMode == "lama" && lama != null) {
                 val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
                 for (y in y0 until y1) {
                     Ort.checkBudget()
