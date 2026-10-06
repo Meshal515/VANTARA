@@ -42,8 +42,9 @@ class TranslationPlugin : Plugin() {
     private val renderGate = PriorityGate()
     private val routedPages = object:LinkedHashMap<String,Pipeline.Routed>(32,.75f,true) { override fun removeEldestEntry(e:MutableMap.MutableEntry<String,Pipeline.Routed>?)=size>24 }
     private val snapshots = AnalysisHandoff<Pipeline.Analysis>(24) {it.revision}
-    // Render OCR is confirmation only; it must not queue behind CTD/BubbleSeg.
-    // JS admission already prevents two foreground native stages from overlapping.
+    // Render OCR is confirmation only. Detect/Analyze/Render have independent stage
+    // owners here; expensive ONNX DETECT/HEAVY calls still share Ort's global compute
+    // lane, so removing the redundant JS gate does not oversubscribe the S23 CPU.
     private val renderPipeline by lazy {Pipeline(context,store,InferenceWork.CONFIRM,renderOnly=true)}
     private data class Refinement(val path: String, val byId: Map<String, String>, val leave: Set<String>, val page: PriorityGate.Page?, val output: File, val version: Long, val lettering: Map<String, LetteringStyle>)
     private val pendingRefinement = java.util.concurrent.atomic.AtomicReference<Refinement?>()

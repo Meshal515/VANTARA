@@ -546,24 +546,23 @@ async function repairInBackground(deps, src, hash, meta, local) {
   deps.onRepaired?.({ ...saved.stored, hash, cacheKey: saved.cacheKey, from: 'model' });
 }
 
-/** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-// الصفحة التي أمام القارئ فقط latency-sensitive. الصفحات القادمة تستفيد من
-// batching وتبقى أقل أولوية في Native؛ job/repair دائمًا background.
+/** الشبكة والـNative لهما أولويتان مختلفتان عمدًا.
+ * الصفحة المرئية فقط تتجاوز Luna batching، لكن كل صفحات القارئ تظل Reader
+ * أمام repair/job داخل بوابات أندرويد. هذا يمنع إصلاحًا خلفيًا من سرقة CTD
+ * من الصفحة التالية لمجرد أنها non-interactive على الشبكة.
+ */
 const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair'
   ? false
   : deps.isInteractive?.() ?? deps.interactive ?? true;
-const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
-const nativeStagePriorityOf = (deps, foreground) => {
-  if (deps.via === 'job' || deps.via === 'repair') return 'background';
-  if (interactiveOf(deps)) return foreground;
-  return foreground === 'render' ? 'aheadRender' : 'aheadAnalyze';
-};
+const nativePriorityOf = deps => deps.via === 'reader'
+  ? 'high'
+  : (interactiveOf(deps) ? 'high' : 'low');
 
 /**
- * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
- * الشبكة/Luna تبقى خارجها. لا يتداخل استدعاءان Native، لكن إذا صار Render
- * جاهزًا وهو ينتظر الدور يتقدم على Analyze/Route المعلّقة حتى تظهر الصفحة
- * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
+ * بوابة Promise عامة باقية لاختبارات الترتيب/التوافق وللمستدعين المعزولين.
+ * مسار الإنتاج على أندرويد لا يضع Analyze وRender هنا: TranslationPlugin يملك
+ * detectGate/analyze gate/renderGate مستقلة، وOrt يسلْسل DETECT/HEAVY عالميًا.
+ * إعادة جمعها هنا كانت head-of-line blocking وتخفي عشرات الثواني كـnativeWait.
  */
 const NATIVE_STAGE_RANK = Object.freeze({
   render: 0,
@@ -631,13 +630,16 @@ export async function prepareTranslation(src, meta) {
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await withNativeTranslationStage(
-      () => clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })),
-      {
-        priority: nativeStagePriorityOf(deps, 'analyze'),
-        onWait: ms => { clock.stages['nativeWait.analyze'] = Math.round((clock.stages['nativeWait.analyze'] ?? 0) + ms); },
-      },
-    );
+    analysis = deps.route?.textless
+      ? {...deps.route,regions:[],thumbnail:''}
+      : await clock.time('analyze', () => analyzePage({
+          path: deps.imagePath,
+          sourceLang: meta.sourceLang ?? 'auto',
+          priority: nativePriorityOf(deps),
+          chapterKey: meta.chapterKey,
+          pageIndex: meta.pageIndex,
+          routeHash: deps.route?.pageHash,
+        }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -671,13 +673,14 @@ async function translateOnDevice(deps, hash, meta, clock) {
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
     try {
-      rendered = await withNativeTranslationStage(
-        () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
-        {
-          priority: nativeStagePriorityOf(deps, 'render'),
-          onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
-        },
-      );
+      rendered = await clock.time('render', () => renderPage({
+        path: deps.imagePath,
+        regions: plan,
+        leave: leftAsIs(res.body),
+        priority: nativePriorityOf(deps),
+        chapterKey: meta.chapterKey,
+        pageIndex: meta.pageIndex,
+      }));
       renderCompleted = true;
     } catch {
       return { error: 'device_failed', native };
@@ -706,7 +709,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   } finally {
     // Render نفسه يستهلك الحجز ذريًا داخل PriorityGate. هذا النداء مهم فقط
     // لمسارات Luna error / no-plan / exception حتى لا تتوقف بقية الصفحات.
-    if (!renderCompleted && priorityOf(deps) === 'high') {
+    if (!renderCompleted && nativePriorityOf(deps) === 'high') {
       try { await releasePageReservation(meta.chapterKey, meta.pageIndex); } catch { /* APK قديم أو إغلاق الصفحة */ }
     }
   }
