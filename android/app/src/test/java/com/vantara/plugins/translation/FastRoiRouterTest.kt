@@ -49,13 +49,12 @@ class FastRoiRouterTest {
         assertTrue(speech.rejectionReasons.contains("background"))
     }
 
-    @Test fun `majority overlap is a conservative rescue not a page-wide promotion`() {
-        val features = listOf(safe(), safe(overlap = .55f), safe(), safe())
-        val lanes = FastRoiRouter.classifyAll(features).map { it.lane }
-        assertEquals(
-            listOf(FastRoiRouter.Lane.FAST, FastRoiRouter.Lane.RESCUE, FastRoiRouter.Lane.FAST, FastRoiRouter.Lane.FAST),
-            lanes,
-        )
+    @Test fun `uncalibrated overlap and edge signals reduce confidence but do not invent a hard gate`() {
+        val clean = FastRoiRouter.classify(safe())
+        val ambiguous = FastRoiRouter.classify(safe(overlap = .70f, edges = .70f))
+        assertEquals(FastRoiRouter.Lane.FAST, clean.lane)
+        assertEquals(FastRoiRouter.Lane.FAST, ambiguous.lane)
+        assertTrue(ambiguous.confidence < clean.confidence)
     }
 
     @Test fun `legacy production safety floors remain hard gates`() {
@@ -69,7 +68,7 @@ class FastRoiRouterTest {
         val fast = FastRoiRouter.classify(safe()).estimatedServiceMs
         val ctd = FastRoiRouter.classify(safe(ocr = .50f)).estimatedServiceMs
         val bubble = FastRoiRouter.classify(safe(spread = 12f)).estimatedServiceMs
-        val rescue = FastRoiRouter.classify(safe(overlap = .70f)).estimatedServiceMs
+        val rescue = FastRoiRouter.classify(safe(detector = Regions.MIN_SCORE - .01f)).estimatedServiceMs
         assertTrue(fast < ctd)
         assertTrue(ctd < bubble)
         assertTrue(bubble <= rescue)
