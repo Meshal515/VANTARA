@@ -662,7 +662,7 @@ export async function prepareTranslation(src, meta, options = {}) {
     () => prep.time('prepare.analyze', () => analyzePage({
       path,
       sourceLang:meta.sourceLang ?? 'auto',
-      priority:'low',
+      priority:priorityOf(prepDeps),
       chapterKey:meta.chapterKey,
       pageIndex:meta.pageIndex,
       routeHash:route?.pageHash,
