@@ -122,14 +122,18 @@ describe('batch 2.5 stage ownership', () => {
     );
     await p2AnalyzeStarted;
 
-    releaseP1Network();
-    await tick();
-    await tick();
+    let renderedBeforeAnalyzeReleased = false;
+    try {
+      releaseP1Network();
+      await tick();
+      await tick();
+      renderedBeforeAnalyzeReleased = renderEvents.includes('p1');
+    } finally {
+      releaseP2Analyze();
+      await Promise.allSettled([p1, p2]);
+    }
 
-    expect(renderEvents).toContain('p1');
-
-    releaseP2Analyze();
-    await Promise.all([p1, p2]);
+    expect(renderedBeforeAnalyzeReleased).toBe(true);
   });
 
   it('keeps ahead reader pages on native reader priority while Luna remains non-interactive', async () => {
