@@ -58,10 +58,12 @@ describe('adaptive multi-page Luna requests', () => {
 
   it('rejects cross-work, cross-chapter, cross-mode and oversized batches before billing', async () => {
     const { env } = setup();
-    for (const field of ['seriesRef','chapterKey','speed']) {
+    for (const field of ['seriesRef','chapterKey']) {
       const response=await handleTranslateTextBatch(req([page(0),{...page(1),[field]:'different'}]),env,user,Date.now());
       expect(response.status).toBe(400);
     }
+    expect((await handleTranslateTextBatch(req([page(0),{...page(1),speed:'fast'}]),env,user,Date.now())).status).toBe(400);
+    expect((await handleTranslateTextBatch(req([page(0),{...page(1),sourceLang:'ko'}]),env,user,Date.now())).status).toBe(400);
     expect((await handleTranslateTextBatch(req(Array.from({length:7},(_,i)=>page(i))),env,user,Date.now())).status).toBe(400);
     expect((await handleTranslateTextBatch(req([page(0),page(0)]),env,user,Date.now())).status).toBe(400);
     expect(await env.DB.prepare('SELECT 1 FROM translation_spend').first()).toBeNull();
