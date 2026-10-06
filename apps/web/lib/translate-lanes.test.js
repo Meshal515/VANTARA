@@ -36,7 +36,7 @@ it('textless bypass also has a finite active budget',async()=> {
 
 it('releases a route preparation slot before deferred heavy continuation so textless can exit',async()=> {
  let release;const hold=new Promise(r=>{release=r});const events=[];
- const q=createQueue({concurrency:1,prepareConcurrency:1,maxPrepared:4,bypassConcurrency:2,continueConcurrency:1,maxRouteAhead:2});
+ const q=createQueue({concurrency:1,prepareConcurrency:1,maxPrepared:4,bypassConcurrency:2,continueConcurrency:1});
  const text=q.add({
   key:'text',chapterKey:'c',index:0,
   prepare:async()=>{events.push('route-text');return {bypass:false,continuePrepare:async()=>{events.push('heavy-start');await hold;events.push('heavy-done');return {bypass:false};}};},
