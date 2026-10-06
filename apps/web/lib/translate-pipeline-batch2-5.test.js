@@ -9,6 +9,7 @@ const memory = () => {
 
 function installDevice({ textless = false } = {}) {
   let analyses = 0;
+  const analyzePriorities = [];
   globalThis.Capacitor = {
     convertFileSrc: p => `http://localhost/_capacitor_file_${p}`,
     Plugins: {
@@ -20,8 +21,9 @@ function installDevice({ textless = false } = {}) {
           textless,
           perf: { stages: { detect: 4 }, counts: {} },
         }),
-        analyzePage: async () => {
+        analyzePage: async (args = {}) => {
           analyses += 1;
+          analyzePriorities.push(args.priority);
           return {
             pageHash: '75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322',
             width: 800,
@@ -40,7 +42,7 @@ function installDevice({ textless = false } = {}) {
       },
     },
   };
-  return { analyses: () => analyses };
+  return { analyses: () => analyses, analyzePriorities: () => [...analyzePriorities] };
 }
 
 describe('batch 2.5 stage pipeline', () => {
@@ -200,6 +202,26 @@ describe('batch 2.5 stage pipeline', () => {
     releaseRoute();
     await Promise.all([holder, candidate, route]);
     expect(order).toEqual(['holder', 'candidate', 'route']);
+  });
+
+
+  it('promotes focused preparation all the way into Kotlin analyze priority', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    const device = installDevice();
+    let focused = false;
+    const src = 'http://localhost/_capacitor_file_/cache/pages/focus-priority.jpg';
+    const meta = { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:7, sourceLang:'en' };
+
+    const prepared = await prepareTranslation(src, meta, {
+      preAnalyze:true,
+      via:'reader',
+      interactive:false,
+      isInteractive:() => focused = true,
+    });
+
+    expect(prepared.analysis?.regions?.length).toBe(1);
+    expect(device.analyzePriorities()).toEqual(['high']);
   });
 
 });
