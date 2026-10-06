@@ -24,6 +24,7 @@ import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePag
 import { createTextBatcher } from './translate-batch.js';
 import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
+import { runtimeCapacity } from './runtime-capacity.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
 export const MAX_UPLOAD_EDGE = 4096;
@@ -110,7 +111,7 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2, capacity = null, lane = 'generic' } = {}) {
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
@@ -121,6 +122,23 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   const ranks = new Map();
   const listeners = new Set();
   const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
+  const dynamicLimits = () => {
+    const ready = [...jobs.values()].filter(j => j.ready && !j.started).length;
+    const queued = [...jobs.values()].filter(j => !j.started).length;
+    const focusedWaiting = [...jobs.values()].some(j => !j.started && isFocused(j));
+    const requested = capacity?.queueLimits?.({
+      lane, running, preparing, bypassRunning, focusedBurstRunning, ready, queued, focusedWaiting,
+    }) ?? {};
+    const cap = (value, base) => Number.isFinite(Number(value))
+      ? Math.max(0, Math.min(base, Math.floor(Number(value))))
+      : base;
+    return {
+      concurrency: cap(requested.concurrency, concurrency),
+      prepareConcurrency: cap(requested.prepareConcurrency, prepareConcurrency),
+      maxPrepared: cap(requested.maxPrepared, maxPrepared),
+      bypassConcurrency: cap(requested.bypassConcurrency, bypassConcurrency),
+    };
+  };
   const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + 3;
 
   // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
@@ -159,23 +177,24 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       });
   };
   const pump = () => {
-    while (bypassRunning < bypassConcurrency) {
+    const caps = dynamicLimits();
+    while (bypassRunning < caps.bypassConcurrency) {
       const job = next(j => j.ready && j.prepared?.bypass);
       if (!job) break;
       start(job,true);
     }
     while (true) {
-      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || bypassConcurrency === 0)));
+      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || caps.bypassConcurrency === 0)));
       if (!job) break;
-      const normalSlot = running < concurrency;
+      const normalSlot = running < caps.concurrency;
       // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
       // بتحويل 8 slots إلى عشرات الأعمال المعلقة في Luna/Native.
       const activeFocusedBurst = [...jobs.values()].filter(j => j.started && j.burst && isFocused(j)).length;
       // If focus moves while the previous visible page is still waiting on Luna,
       // the new visible page may take one more bounded burst slot. Hard cap:
       // normal concurrency + two focus bursts, never unbounded scroll backlog.
-      const burstSlot = concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
-        running + focusedBurstRunning < concurrency + 2;
+      const burstSlot = caps.concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
+        running + focusedBurstRunning < caps.concurrency + 2;
       if (!normalSlot && !burstSlot) break;
       start(job, false, !normalSlot);
     }
@@ -189,23 +208,27 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       const near = isNearForward(job);
       const preparingFocused = [...jobs.values()].filter(j => j.preparing && isFocused(j)).length;
       const preparingNear = [...jobs.values()].filter(j => j.preparing && isNearForward(j)).length;
-      const prepBlocked = focused
-        ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
-        : near
-          ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
-          : preparing >= prepareConcurrency;
-      const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
+      const prepBlocked = capacity
+        ? preparing >= caps.prepareConcurrency
+        : focused
+          ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
+          : near
+            ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
+            : preparing >= prepareConcurrency;
+      const preparedCap = capacity ? caps.maxPrepared : maxPrepared + (focused ? 2 : near ? 1 : 0);
       if (prepBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
       Promise.resolve().then(() => job.prepare()).then(prepared => {
         if (jobs.get(job.key) !== job) return;
         job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
-        if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
+        const currentCaps = dynamicLimits();
+        if (prepared?.bypass && bypassRunning < currentCaps.bypassConcurrency) start(job, true);
       }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
         .finally(() => { preparing--; job.preparing = false; pump(); });
     }
   };
+  capacity?.subscribe?.(() => queueMicrotask(pump));
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
     add({ key, chapterKey, index, run, prepare }) {
