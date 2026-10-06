@@ -81,8 +81,8 @@ describe('existing repair behavior', () => {
   it('preserves admission for equal counts even without coverage metadata', () => {
     expect(canAcceptTranslationRepair({ translated: 2 }, { translated: 2 })).toBe(true);
   });
-  it('preserves admission for greater counts even with incomplete output', () => {
-    expect(canAcceptTranslationRepair({ translated: 2 }, { translated: 3, incomplete: true })).toBe(true);
+  it('rejects greater counts when the replacement is still incomplete', () => {
+    expect(canAcceptTranslationRepair({ translated: 2 }, { translated: 3, incomplete: true })).toBe(false);
   });
   it('preserves the legacy default of zero previous translations', () => {
     expect(canAcceptTranslationRepair({}, { translated: 0 })).toBe(true);
