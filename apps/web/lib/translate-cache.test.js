@@ -60,8 +60,8 @@ describe('pages saved before the cache rename come back without translating agai
     const hash = await pageHashOf('file://p');
     kv.set(`tl4:${hash}`, { value: { ...saved(), incomplete: true, at: 0, tries: 3 }, at: 1 });
     const res = await translatePage(noTranslate, 'file://p', {});
-    expect(res.error).toBe('device_only');
-    expect(res.image).toBeUndefined();
+    expect(res).toMatchObject({ from:'device', translated:0, incomplete:true });
+    expect(res.image).toBeNull();
     expect(kv.get(`tl4:${hash}`)?.value.tries).toBe(3);
   });
 
@@ -80,8 +80,8 @@ it('quarantines stable-124 pipelineVersion 2 while preserving older complete cac
   const hash = await pageHashOf('file://p');
   kv.set(`tl4:${hash}`, { value: saved({ pipelineVersion: 2 }), at: 1 });
   const bad = await translatePage(noTranslate, 'file://p', {});
-  expect(bad.error).toBe('device_only');
-  expect(bad.image).toBeUndefined();
+  expect(bad).toMatchObject({ from:'device', translated:0, incomplete:true });
+  expect(bad.image).toBeNull();
 
   kv.set(`tl4:${hash}`, { value: saved({ pipelineVersion: 1 }), at: 1 });
   const oldButComplete = await translatePage(noTranslate, 'file://p', {});
