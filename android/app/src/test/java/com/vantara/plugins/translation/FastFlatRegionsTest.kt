@@ -51,6 +51,20 @@ class FastFlatRegionsTest {
     }
 
     @Test
+    fun `tight detector holder can pass when pixel evidence proves it safe`() {
+        val img = image()
+        val holder = Detection(Box(35, 30, 185, 145), 0.96f, "bubble")
+        // 150x115 holder / 141x106 text box = ~1.15x. The old geometric
+        // 1.18x area gate rejected this before inspecting the actual flat paper.
+        val text = Detection(Box(40, 35, 181, 141), 0.95f, "text_bubble")
+        assertTrue(holder.box.area < text.box.area * 1.18f)
+        val plan = Regions.fastFlatPlan(img, img.gray(), "hash", listOf(holder, text))
+        assertEquals(1, plan.fast.size)
+        assertTrue(plan.heavy.isEmpty())
+        assertEquals("speech", plan.fast.single().kind)
+    }
+
+    @Test
     fun `textured bubble refuses fast path instead of sacrificing quality`() {
         val img = image()
         // حوّل الفقاعة إلى checkerboard قوي: ليست خلفية قابلة للتعبئة الآمنة.
