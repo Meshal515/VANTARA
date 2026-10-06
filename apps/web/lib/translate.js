@@ -372,11 +372,18 @@ async function translatePageNow(deps, src, meta) {
   // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
   // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  const expectedCacheKey = pageCacheKey(meta);
+  const candidate = deps.prepared;
+  // prepared مملوك لنفس طلب الصفحة فقط: لا نعيد قراءة/تجزئة البايتات التي
+  // جهزناها قبل لحظات. ربطه بعنوان الصفحة يمنع تمرير cache alias لصفحة أخرى.
+  const prepared = candidate?.src === src && candidate?.hash &&
+    candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
   if(deps.prepareMs) clock.stages.prepare=deps.prepareMs;
-  const hash = await clock.time('hash', () => pageHashOf(src));
+  const hash = prepared?.hash ?? await clock.time('hash', () => pageHashOf(src));
   if(runDeps.route && runDeps.route.pageHash!==hash) runDeps={...runDeps,route:null};
-  const found = await clock.time('cacheRead', () => readPageCache(hash, meta));
+  const found = prepared?.cacheLookup ?? await clock.time('cacheRead', () => readPageCache(hash, meta));
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
@@ -536,21 +543,40 @@ const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 
 /**
  * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
- * الشبكة/Luna تبقى خارجها؛ الهدف منع RT-DETR وCTD وBubbleSeg/Render من التزاحم
- * على نفس CPU ثم احتساب دقائق الانتظار داخل زمن النموذج نفسه.
+ * الشبكة/Luna تبقى خارجها. لا يتداخل استدعاءان Native، لكن إذا صار Render
+ * جاهزًا وهو ينتظر الدور يتقدم على Analyze/Route المعلّقة حتى تظهر الصفحة
+ * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
  */
-let nativeStageTail = Promise.resolve();
-export async function withNativeTranslationStage(fn) {
-  let release;
-  const mine = new Promise((resolve) => { release = resolve; });
-  const previous = nativeStageTail;
-  nativeStageTail = mine;
-  await previous.catch(() => {});
-  try {
-    return await fn();
-  } finally {
-    release();
+const NATIVE_STAGE_RANK = Object.freeze({ render: 0, analyze: 1, route: 2, background: 3 });
+let nativeStageRunning = false;
+let nativeStageSeq = 0;
+const nativeStageQueue = [];
+
+function pumpNativeTranslationStage() {
+  if (nativeStageRunning || !nativeStageQueue.length) return;
+  let best = 0;
+  for (let i = 1; i < nativeStageQueue.length; i += 1) {
+    const a = nativeStageQueue[i];
+    const b = nativeStageQueue[best];
+    if (a.rank < b.rank || (a.rank === b.rank && a.seq < b.seq)) best = i;
   }
+  const [job] = nativeStageQueue.splice(best, 1);
+  nativeStageRunning = true;
+  Promise.resolve()
+    .then(job.fn)
+    .then(job.resolve, job.reject)
+    .finally(() => {
+      nativeStageRunning = false;
+      pumpNativeTranslationStage();
+    });
+}
+
+export function withNativeTranslationStage(fn, { priority = 'analyze' } = {}) {
+  const rank = NATIVE_STAGE_RANK[priority] ?? NATIVE_STAGE_RANK.analyze;
+  return new Promise((resolve, reject) => {
+    nativeStageQueue.push({ fn, resolve, reject, rank, seq: nativeStageSeq++ });
+    queueMicrotask(pumpNativeTranslationStage);
+  });
 }
 
 const textBatchers = new WeakMap();
@@ -563,16 +589,19 @@ export async function prepareTranslation(src, meta) {
   const path=filePathFromSrc(src);
   if (!path || !nativeTranslationAvailable()) return {src};
   const hash=await pageHashOf(src);
-  const cached=(await readPageCache(hash,meta)).value;
-  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) return {src,bypass:true};
-  const route=await withNativeTranslationStage(() => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}));
-  return {src,route,bypass:Boolean(route?.textless)};
+  const cacheLookup=await readPageCache(hash,meta);
+  const cached=cacheLookup.value;
+  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {
+    return {src,hash,cacheLookup,bypass:true};
+  }
+  const route=await withNativeTranslationStage(() => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}), { priority: 'route' });
+  return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless)};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => withNativeTranslationStage(() => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })));
+    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => withNativeTranslationStage(() => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash }), { priority: 'analyze' }));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -606,7 +635,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
     try {
-      rendered = await clock.time('render', () => withNativeTranslationStage(() => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })));
+      rendered = await clock.time('render', () => withNativeTranslationStage(() => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }), { priority: 'render' }));
       renderCompleted = true;
     } catch {
       return { error: 'device_failed', native };

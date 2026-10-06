@@ -6,9 +6,9 @@
  *   ويستمر للعمل إلى أن تخرج من بطاقته.
  * - أول تفعيل بلا نماذج على الجهاز: بطاقة «تحميل ملفات الترجمة» بالحجم، مرة
  *   واحدة، ثم تعمل محليًّا.
- * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من صفحتك للأمام بالترتيب، أربع
- *   صفحات معًا (صفحتك وثلاث أمامها)، ثم ما عبرته خلفك، ثم الفصل التالي. على
- *   الجهاز الصفحة التي أمامك تسبق غيرها في المعالج. صفحة تفشل لسبب عابر تُعاد.
+ * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من أول الصفحة للأمام. حتى ثلاث
+ *   صفحات تكون في مراحل مختلفة معًا كي لا يبقى الجهاز عاطلًا أثناء Luna؛ أمّا
+ *   Native الثقيل نفسه فمُسلسل عالميًّا ولا يتداخل. صفحة تفشل لسبب عابر تُعاد.
  * - «نجهّز الفصل بالعربي» حتى تجهز أول ثلاث صفحات، ثم تقرأ والباقي يكمل
  *   أمامك. «اقرأ الآن» يتخطى الانتظار.
  * - الصفحة المترجمة **صورة** جاهزة؛ القارئ يبدّل `<img src>` ويحتفظ بالأصل.
@@ -52,9 +52,12 @@ const store = {
   },
 };
 
-// مسار واحد واضح: يبدأ من أول صفحة في الفصل ويتقدم بالترتيب.
-// هذا يمنع 4 صفحات قارئ من التزاحم على نماذج CTD/BubbleSeg في الوقت نفسه.
-const queue = createQueue({ concurrency: 1, prepareConcurrency: 1, maxPrepared: 2, bypassConcurrency: 0 });
+// ثلاث صفحات end-to-end كحد أقصى: إذا انتظرت صفحة Luna تستطيع التالية
+// دخول Route/Analyze. بوابة Native في translate.js تبقي RT-DETR/CTD/BubbleSeg/
+// Render واحدًا فقط في اللحظة نفسها، لذلك هذا تداخل مراحل لا تداخل نماذج.
+// bypass واحد يسمح لصفحة بلا نص/محفوظة أن تنتهي بلا الوقوف خلف طلبات Luna.
+// أربع prepared فقط تحصر الذاكرة والـbackpressure.
+const queue = createQueue({ concurrency: 3, prepareConcurrency: 3, maxPrepared: 4, bypassConcurrency: 1 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -200,7 +203,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,route:prepared?.route,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
