@@ -571,10 +571,16 @@ async function translateOnce(deps, src, hash, meta, clock) {
   const saved = writePageCache(hash, meta, value);
   const persisted = (await saved.written).every(key => typeof key === 'string');
   registerRefinement(deps,hash,meta,result,saved,persisted);
+  // Derived end-to-end latency for textless classification. This is deliberately
+  // NOT a stage: logPage must not add it to total on top of prepare.route/wait.
+  const routeToDoneMs = result.textless && Number.isFinite(deps.routeStartedAt)
+    ? Math.max(0, Date.now() - deps.routeStartedAt)
+    : null;
   logPage(deps, meta, hash, clock, {
     from: result.cached ? 'friends' : 'model',
     cacheKey: saved.cacheKey,
     textless: Boolean(result.textless),
+    routeToDoneMs,
     regions: (result.regions ?? []).length,
     translated: result.translated,
     incomplete: Boolean(result.incomplete),
