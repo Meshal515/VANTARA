@@ -372,11 +372,18 @@ async function translatePageNow(deps, src, meta) {
   // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
   // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
   const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  const expectedCacheKey = pageCacheKey(meta);
+  const candidate = deps.prepared;
+  // prepared مملوك لنفس طلب الصفحة فقط: لا نعيد قراءة/تجزئة البايتات التي
+  // جهزناها قبل لحظات. ربطه بعنوان الصفحة يمنع تمرير cache alias لصفحة أخرى.
+  const prepared = candidate?.src === src && candidate?.hash &&
+    candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
+  if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
   if(deps.prepareMs) clock.stages.prepare=deps.prepareMs;
-  const hash = await clock.time('hash', () => pageHashOf(src));
+  const hash = prepared?.hash ?? await clock.time('hash', () => pageHashOf(src));
   if(runDeps.route && runDeps.route.pageHash!==hash) runDeps={...runDeps,route:null};
-  const found = await clock.time('cacheRead', () => readPageCache(hash, meta));
+  const found = prepared?.cacheLookup ?? await clock.time('cacheRead', () => readPageCache(hash, meta));
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
@@ -582,10 +589,13 @@ export async function prepareTranslation(src, meta) {
   const path=filePathFromSrc(src);
   if (!path || !nativeTranslationAvailable()) return {src};
   const hash=await pageHashOf(src);
-  const cached=(await readPageCache(hash,meta)).value;
-  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) return {src,bypass:true};
+  const cacheLookup=await readPageCache(hash,meta);
+  const cached=cacheLookup.value;
+  if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {
+    return {src,hash,cacheLookup,bypass:true};
+  }
   const route=await withNativeTranslationStage(() => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}), { priority: 'route' });
-  return {src,route,bypass:Boolean(route?.textless)};
+  return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless)};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
