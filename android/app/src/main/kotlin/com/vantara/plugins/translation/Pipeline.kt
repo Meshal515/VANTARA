@@ -46,9 +46,9 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private val analyses = lru<Analysis>(24)
     private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
-    // Exact page-hash + crop reuse only. Packed masks keep retry/residual reuse
-    // bounded without changing model output or accepting approximate matches.
-    private val bubbleRois = lru<List<BubbleSnapshot>>(48)
+    // Exact page-hash + crop reuse only. Cached masks are clipped to each
+    // bubble box, so retry/residual reuse does not retain full-page ByteMasks.
+    private val bubbleRois = lru<List<CachedBubble>>(48)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
     class Snapshot(
@@ -67,6 +67,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     )
 
     class BubbleSnapshot(val box: Box, val score: Float, val mask: PackedMask)
+
+    private class CachedBubble(
+        val box:Box,
+        val score:Float,
+        val pageWidth:Int,
+        val pageHeight:Int,
+        val data:ByteArray,
+    )
 
     class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>, val rescue:List<Box> = emptyList(),val revision:Int=0)
 
@@ -303,6 +311,22 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
+    private fun cacheBubble(b:Bubble):CachedBubble {
+        val x0=maxOf(0,b.box.x1);val y0=maxOf(0,b.box.y1)
+        val x1=minOf(b.mask.width,b.box.x2);val y1=minOf(b.mask.height,b.box.y2)
+        val w=maxOf(0,x1-x0);val h=maxOf(0,y1-y0)
+        val data=ByteArray(w*h)
+        for(y in 0 until h) System.arraycopy(b.mask.data,(y0+y)*b.mask.width+x0,data,y*w,w)
+        return CachedBubble(Box(x0,y0,x1,y1),b.score,b.mask.width,b.mask.height,data)
+    }
+
+    private fun thawBubble(c:CachedBubble):Bubble {
+        val mask=ByteMask(c.pageWidth,c.pageHeight)
+        val w=c.box.w;val h=c.box.h
+        for(y in 0 until h) System.arraycopy(c.data,y*w,mask.data,(c.box.y1+y)*c.pageWidth+c.box.x1,w)
+        return Bubble(c.box,c.score,mask)
+    }
+
     private fun bubbleRoiKey(hash:String,box:Box):String =
         "$hash:${box.x1},${box.y1},${box.x2},${box.y2}"
 
@@ -321,14 +345,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             val cached=bubbleRois[key]
             if(cached!=null) {
                 hits++
-                out.addAll(cached.map {Bubble(it.box,it.score,it.mask.unpack())})
+                out.addAll(cached.map {thawBubble(it)})
                 continue
             }
             val bs=segmenter ?: bubbles(perf).also {segmenter=it}
             val found=perf.time("bubbles") {bs.segmentRoi(img,listOf(box))}
             invocations += bs.tiles
             inferenceRoiPixels += box.area
-            bubbleRois[key]=found.map {BubbleSnapshot(it.box,it.score,PackedMask.of(it.mask))}
+            bubbleRois[key]=found.map {cacheBubble(it)}
             out.addAll(found)
         }
         perf.count("bubbleInvocations",invocations)
