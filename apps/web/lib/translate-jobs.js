@@ -254,9 +254,9 @@ export function createJobRunner(deps) {
         const image=await engine.pageImage(ch.row.sourceId,list[p]);
         return {...await preparePage(image.src,meta,{via:'job',interactive:false}),image};
       },
-      run:async({prepared,waitedMs,prepareMs})=> {
+      run:async({prepared,waitedMs,prepareMs,queuedAt})=> {
         if(prepared?.paused || job.status!=='running') return {error:'paused'};
-        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,prepared,route:prepared.route,via:'job'},prepared.image.src,meta);
+        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,prepared,route:prepared.route,routeQueuedAt:queuedAt,via:'job'},prepared.image.src,meta);
       },
     });
     if (result?.error) return result.error;
