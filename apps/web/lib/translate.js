@@ -520,7 +520,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -661,7 +661,9 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
+  runtimeCapacity.observePerf(route?.perf, 'route');
   if (route?.textless || !options.preAnalyze) {
+    runtimeCapacity.observeStages(prep.stages);
     return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
   }
 
@@ -687,6 +689,8 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
     },
   );
+  runtimeCapacity.observePerf(analysis?.perf, 'analyze');
+  runtimeCapacity.observeStages(prep.stages);
   return {src,hash,cacheLookup,route,analysis,bypass:false,prepareStages:prep.stages};
 }
 
@@ -703,6 +707,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
+  if (!deps.analysis) runtimeCapacity.observePerf(analysis?.perf, 'analyze');
   const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const coverageUnknown = Number(analysis.coverageUnknown ?? analysis.perf?.counts?.coverageUnknown ?? 0);
@@ -720,9 +725,12 @@ async function translateOnDevice(deps, hash, meta, clock) {
       image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
       regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     });
-    const ask = data => data
-      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
-      : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
+    const ask = data => runtimeCapacity.withNetworkAdmission(
+      () => data
+        ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
+        : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
+      { interactive: interactiveOf(deps), kind: data ? 'luna' : 'probe' },
+    );
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
       res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
@@ -732,18 +740,25 @@ async function translateOnDevice(deps, hash, meta, clock) {
     let incomplete = coverageUnknown > 0 || unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
+    runtimeCapacity.renderReady(1);
     try {
-      rendered = await withNativeTranslationStage(
-        () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
-        {
-          priority: nativeStagePriorityOf(deps, 'render'),
-          onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
-        },
-      );
-      renderCompleted = true;
-    } catch {
-      return { error: 'device_failed', native };
+      try {
+        rendered = await withNativeTranslationStage(
+          () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
+          {
+            priority: nativeStagePriorityOf(deps, 'render'),
+            onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
+          },
+        );
+        renderCompleted = true;
+      } catch {
+        return { error: 'device_failed', native };
+      }
+    } finally {
+      runtimeCapacity.renderReady(-1);
+      runtimeCapacity.observeStages(clock.stages);
     }
+    runtimeCapacity.observePerf(rendered?.perf, 'render');
     native.render = rendered.perf ?? null;
     // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
     // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
