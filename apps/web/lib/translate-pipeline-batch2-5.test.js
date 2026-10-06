@@ -78,6 +78,25 @@ describe('batch 2.5 stage pipeline', () => {
     expect(device.analyses()).toBe(1);
   });
 
+
+  it('can return heavy pre-analysis as a bounded continuation after Route completes', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    const device = installDevice();
+    const src = 'http://localhost/_capacitor_file_/cache/pages/deferred.jpg';
+    const meta = { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:0, sourceLang:'en' };
+
+    const routed = await prepareTranslation(src, meta, { preAnalyze:true, deferAnalyze:true, via:'reader', interactive:false });
+    expect(device.analyses()).toBe(0);
+    expect(routed.bypass).toBe(false);
+    expect(routed.continuePrepare).toEqual(expect.any(Function));
+
+    const prepared = await routed.continuePrepare();
+    expect(device.analyses()).toBe(1);
+    expect(prepared.analysis?.regions?.[0]?.source).toBe('HELLO');
+    expect(prepared.continuePrepare).toBeUndefined();
+  });
+
   it('finishes textless preparation after route without invoking heavy analyze', async () => {
     globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
     globalThis.localStorage = memory();
