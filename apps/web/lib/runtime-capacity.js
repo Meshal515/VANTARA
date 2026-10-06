@@ -1,5 +1,6 @@
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Number(n) || 0));
 const ewma = (prev, next, alpha = 0.22) => next > 0 ? (prev > 0 ? prev * (1 - alpha) + next * alpha : next) : prev;
+const ewmaObserved = (prev, next, alpha = 0.22) => prev > 0 ? prev * (1 - alpha) + Math.max(0, next) * alpha : Math.max(0, next);
 
 export const S23_SAFE_OPERATING_ENVELOPE = Object.freeze({
   thermal: Object.freeze({ coolMax: 1, warm: 2, severe: 3, critical: 4 }),
@@ -138,11 +139,11 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   function observeStages(stages = {}) {
     if (Object.prototype.hasOwnProperty.call(stages, 'nativeWait.analyze')) {
       const a = Number(stages['nativeWait.analyze']);
-      if (a >= 0) state.analyzeWaitMs = ewma(state.analyzeWaitMs, a, 0.28);
+      if (a >= 0) state.analyzeWaitMs = ewmaObserved(state.analyzeWaitMs, a, 0.28);
     }
     if (Object.prototype.hasOwnProperty.call(stages, 'nativeWait.render')) {
       const r = Number(stages['nativeWait.render']);
-      if (r >= 0) state.renderWaitMs = ewma(state.renderWaitMs, r, 0.28);
+      if (r >= 0) state.renderWaitMs = ewmaObserved(state.renderWaitMs, r, 0.28);
     }
     updateGrade({ healthyObservation: true });
   }
