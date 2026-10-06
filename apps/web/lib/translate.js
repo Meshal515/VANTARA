@@ -477,6 +477,7 @@ async function translatePageNow(deps, src, meta) {
     candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
   if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
+  if (!runDeps.routeStartedAt && prepared?.routeStartedAt) runDeps = { ...runDeps, routeStartedAt: prepared.routeStartedAt };
   if (prepared?.analysis) runDeps = { ...runDeps, analysis: prepared.analysis };
   if (prepared?.prepareStages) {
     let detailed = 0;
@@ -728,6 +729,7 @@ export async function prepareTranslation(src, meta, options = {}) {
   // concurrently with CTD/BubbleSeg and device telemetry showed RT-DETR inflate
   // from ~0.25s to multi-second work. Route has a higher queue rank instead:
   // it can jump queued analysis, but never overlaps the active inference call.
+  const routeStartedAt=Date.now();
   const route=await withNativeTranslationStage(
     () => prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex})),
     {
@@ -735,33 +737,36 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
-  if (route?.textless || !options.preAnalyze) {
-    return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
-  }
+  const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages};
+  if (route?.textless || !options.preAnalyze) return routed;
 
-  // Stage separation: expensive local analysis finishes in preparation, before
-  // this page consumes a reader run slot. Luna may then wait/batch without
-  // holding the single CTD/BubbleSeg owner.
+  // Heavy pre-analysis is optionally returned as a continuation. The queue can
+  // then classify a bounded Route window first, but the actual native calls are
+  // still serialized by withNativeTranslationStage.
   const prepDeps={
     via: options.via ?? 'reader',
     interactive: Boolean(options.interactive),
     isInteractive: options.isInteractive,
   };
-  const analysis=await withNativeTranslationStage(
-    () => prep.time('prepare.analyze', () => analyzePage({
-      path,
-      sourceLang:meta.sourceLang ?? 'auto',
-      priority:'low',
-      chapterKey:meta.chapterKey,
-      pageIndex:meta.pageIndex,
-      routeHash:route?.pageHash,
-    })),
-    {
-      priority:nativeStagePriorityOf(prepDeps,'analyze'),
-      onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
-    },
-  );
-  return {src,hash,cacheLookup,route,analysis,bypass:false,prepareStages:prep.stages};
+  const finishAnalysis=async()=> {
+    const analysis=await withNativeTranslationStage(
+      () => prep.time('prepare.analyze', () => analyzePage({
+        path,
+        sourceLang:meta.sourceLang ?? 'auto',
+        priority:'low',
+        chapterKey:meta.chapterKey,
+        pageIndex:meta.pageIndex,
+        routeHash:route?.pageHash,
+      })),
+      {
+        priority:nativeStagePriorityOf(prepDeps,'analyze'),
+        onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
+      },
+    );
+    return {...routed,analysis,bypass:false,prepareStages:prep.stages};
+  };
+  if(options.deferAnalyze) return {...routed,bypass:false,continuePrepare:finishAnalysis};
+  return finishAnalysis();
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
