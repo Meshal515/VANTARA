@@ -132,6 +132,50 @@ describe('batch 2.5 stage ownership', () => {
     await Promise.all([p1, p2]);
   });
 
+  it('keeps ahead reader pages on native reader priority while Luna remains non-interactive', async () => {
+    globalThis.localStorage = memory();
+    globalThis.fetch = async () => new Response(new Uint8Array([41, 42, 43]));
+
+    let nativePriority = null;
+    installDevice({
+      analyzePage: async ({ priority }) => {
+        nativePriority = priority;
+        return {
+          pageHash: 'c'.repeat(64),
+          width: 800,
+          height: 1200,
+          thumbnail: '',
+          regions: [],
+          perf: { stages: {}, counts: {} },
+        };
+      },
+      renderPage: async () => {
+        throw new Error('textless analysis must not render');
+      },
+    });
+
+    const result = await translatePage(
+      {
+        via: 'reader',
+        interactive: false,
+        sync: { translation: async () => { throw new Error('textless analysis must not call Luna'); } },
+      },
+      'http://localhost/_capacitor_file_/cache/ahead.jpg',
+      {
+        seriesRef: 'ext:test',
+        seriesTitle: 'Test',
+        sourceId: 'src',
+        chapterKey: 'c1',
+        chapterNumber: 1,
+        pageIndex: 4,
+        sourceLang: 'en',
+      },
+    );
+
+    expect(result.translated).toBe(0);
+    expect(nativePriority).toBe('high');
+  });
+
   it('uses page concurrency only as backpressure, sized to the native 24-route handoff instead of a five-page pipeline', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
