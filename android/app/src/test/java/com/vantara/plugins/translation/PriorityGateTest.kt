@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -91,39 +92,33 @@ class PriorityGateTest {
     }
 
     @Test
-    fun `heavy analysis waits for Luna render but light detect may continue`() = runBlocking {
+    fun `completed analysis never reserves native ownership across Luna wait`() = runBlocking {
         val gate = PriorityGate()
-        val order = Collections.synchronizedList(ArrayList<String>())
         val p0 = PriorityGate.Page("c", 0)
         val p1 = PriorityGate.Page("c", 1)
         gate.focus(p0)
+
+        // Compatibility hook may still be called by older bridge code, but staged
+        // preparation must never keep Native idle while Luna owns the page.
         gate.expectRender(p0)
+        val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { "p1-heavy" } }
 
-        val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { order.add("p1-heavy") } }
-        delay(30)
-        assertFalse(heavy.isCompleted)
-
-        val detect = async { gate.run(PriorityGate.DETECT, Perf(), p1) { order.add("p1-detect") } }
-        detect.await()
-        assertFalse(heavy.isCompleted)
-
-        val render = async { gate.run(PriorityGate.RENDER_READER, Perf(), p0) { order.add("p0-render") } }
-        render.await()
-        heavy.await()
-        assertEquals(listOf("p1-detect", "p0-render", "p1-heavy"), order)
+        assertEquals("p1-heavy", withTimeout(300) { heavy.await() })
     }
 
     @Test
-    fun `failed Luna releases reserved reader slot`() = runBlocking {
+    fun `legacy Luna release hook is harmless because no native slot is reserved`() = runBlocking {
         val gate = PriorityGate()
         val p0 = PriorityGate.Page("c", 0)
         val p1 = PriorityGate.Page("c", 1)
         gate.expectRender(p0)
+
         val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { "done" } }
-        delay(30)
-        assertFalse(heavy.isCompleted)
+        assertEquals("done", withTimeout(300) { heavy.await() })
+
+        // Older JavaScript may still call this after an error/no-plan path.
         gate.cancelExpectedRender(p0)
-        assertEquals("done", heavy.await())
+        assertFalse(gate.isBusy())
     }
 
     @Test

@@ -46,6 +46,10 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private val analyses = lru<Analysis>(24)
     private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
+    private val ctdMasks = CtdRoiCache()
+    // Exact page-hash + crop reuse only. Cached masks are clipped to each
+    // bubble box, so retry/residual reuse does not retain full-page ByteMasks.
+    private val bubbleRois = lru<List<CachedBubble>>(48)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
     class Snapshot(
@@ -64,6 +68,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     )
 
     class BubbleSnapshot(val box: Box, val score: Float, val mask: PackedMask)
+
+    private class CachedBubble(
+        val box:Box,
+        val score:Float,
+        val pageWidth:Int,
+        val pageHeight:Int,
+        val data:ByteArray,
+    )
 
     class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>, val rescue:List<Box> = emptyList(),val revision:Int=0)
 
@@ -128,6 +140,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         synchronized(lamaLock) { inpainter?.close(); inpainter = null }
         detector = null; glyphs = null; bubbles = null; ocr = null
         detections.clear()
+        ctdMasks.clear()
+        bubbleRois.clear()
         analyses.clear()
         images.clear()
     }
@@ -299,11 +313,96 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
+    private fun cacheBubble(b:Bubble):CachedBubble {
+        val x0=maxOf(0,b.box.x1);val y0=maxOf(0,b.box.y1)
+        val x1=minOf(b.mask.width,b.box.x2);val y1=minOf(b.mask.height,b.box.y2)
+        val w=maxOf(0,x1-x0);val h=maxOf(0,y1-y0)
+        val data=ByteArray(w*h)
+        for(y in 0 until h) System.arraycopy(b.mask.data,(y0+y)*b.mask.width+x0,data,y*w,w)
+        return CachedBubble(Box(x0,y0,x1,y1),b.score,b.mask.width,b.mask.height,data)
+    }
+
+    private fun thawBubble(c:CachedBubble):Bubble {
+        val mask=ByteMask(c.pageWidth,c.pageHeight)
+        val w=c.box.w;val h=c.box.h
+        for(y in 0 until h) System.arraycopy(c.data,y*w,mask.data,(c.box.y1+y)*c.pageWidth+c.box.x1,w)
+        return Bubble(c.box,c.score,mask)
+    }
+
+    private fun bubbleRoiKey(hash:String,box:Box):String =
+        "$hash:${box.x1},${box.y1},${box.x2},${box.y2}"
+
+    /**
+     * Exact BubbleSeg ROI reuse. Cache hits never load the 109 MB model and never
+     * alter masks: the same packed output is thawed at the same page coordinates.
+     */
+    private fun segmentBubbleRescue(hash:String,img:RgbImage,crops:List<Box>,perf:Perf):List<Bubble> {
+        val out=ArrayList<Bubble>()
+        var segmenter:BubbleSegmenter?=null
+        var invocations=0
+        var hits=0
+        var inferenceRoiPixels=0
+        for(box in crops) {
+            val key=bubbleRoiKey(hash,box)
+            val cached=bubbleRois[key]
+            if(cached!=null) {
+                hits++
+                out.addAll(cached.map {thawBubble(it)})
+                continue
+            }
+            val bs=segmenter ?: bubbles(perf).also {segmenter=it}
+            val found=perf.time("bubbles") {bs.segmentRoi(img,listOf(box))}
+            invocations += bs.tiles
+            inferenceRoiPixels += box.area
+            bubbleRois[key]=found.map {cacheBubble(it)}
+            out.addAll(found)
+        }
+        perf.count("bubbleInvocations",invocations)
+        perf.count("bubbleCacheHits",hits)
+        perf.count("bubbleInferenceRoiPixels",inferenceRoiPixels)
+        perf.count("bubbleInputPixels",invocations*BubbleSegmenter.INPUT_SIZE*BubbleSegmenter.INPUT_SIZE)
+        if(invocations>0) perf.count("bubblePagesInvoked")
+        if(invocations==0 && hits>0) perf.count("bubbleCacheOnly")
+        return out
+    }
+
+    private fun bubbleMaskPixels(bubble:Bubble):Int {
+        val x0=maxOf(0,bubble.box.x1);val y0=maxOf(0,bubble.box.y1)
+        val x1=minOf(bubble.mask.width,bubble.box.x2);val y1=minOf(bubble.mask.height,bubble.box.y2)
+        var n=0
+        for(y in y0 until y1) for(x in x0 until x1) if(bubble.mask[x,y].toInt()!=0) n++
+        return n
+    }
+
+    /** No ground truth at runtime: text-box mask coverage is a stable quality proxy. */
+    private fun bubbleCoveragePermille(bubbles:List<Bubble>,box:Box):Int {
+        var best=0
+        for(b in bubbles) {
+            var inside=0;var total=0
+            for(y in maxOf(0,box.y1) until minOf(b.mask.height,box.y2))
+                for(x in maxOf(0,box.x1) until minOf(b.mask.width,box.x2)) {
+                    total++
+                    if(b.mask[x,y].toInt()!=0) inside++
+                }
+            if(total>0) best=maxOf(best,(inside*1000L/total).toInt())
+        }
+        return best
+    }
+
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean, forceHeavy:Boolean=false): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
-        // Independent fast regions survive heavy neighbours and failed OCR.
-        val plan = perf.time("fastFlat") { if(forceHeavy) Regions.FastFlatPlan(emptyList(),dets.filter {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE},emptyMap()) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true) }
+        // Independent ROI routing: cheap pixel evidence proposes Fast, then real
+        // PP-OCR is the final veto. A rejected ROI is promoted alone; accepted
+        // neighbours keep their masks and never enter CTD/BubbleSeg.
+        val plan = perf.time("fastFlat") {
+            if(forceHeavy) Regions.FastFlatPlan(
+                emptyList(),
+                dets.filter {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE},
+                emptyMap(),
+            ) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true)
+        }
+        for (reason in plan.rejectionReasons.values) perf.count("fastReject:$reason")
         val fast = ArrayList<Region>()
         val texts = ArrayList(plan.heavy)
         if (plan.fast.isNotEmpty()) {
@@ -313,15 +412,27 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     val res = reader.read(img, r.glyph, r.box)
                     perf.count("ocrLines", res.lines.size)
                     r.ocr = res; r.source = res.text
-                    if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
+                    val features = plan.features[r.id]
+                    val verdict = features?.let {
+                        FastRoiRouter.classify(it.copy(ocrConfidence=res.confidence))
+                    }
+                    if (res.text.isEmpty() || verdict == null || verdict.lane != FastRoiRouter.Lane.FAST) {
                         texts.addAll(plan.sources.getValue(r.id))
                         perf.count("fastFlatOcrFallback")
-                    } else fast.add(r)
+                        if (res.text.isEmpty()) perf.count("fastReject:ocr_empty")
+                        else verdict!!.rejectionReasons.forEach { perf.count("fastReject:$it") }
+                    } else {
+                        fast.add(r)
+                        perf.count("fastServiceMs", verdict.estimatedServiceMs)
+                    }
                 }
             }
         }
         perf.count("fastFlatRegions", fast.size)
+        perf.count("fastRoi", fast.size)
         perf.count("heavyRegions", texts.size)
+        perf.count("ctdRoi", texts.size)
+        if(forceHeavy && texts.isNotEmpty()) perf.count("rescueRoi",texts.size)
         if (fast.isNotEmpty()) perf.count("fastFlatHit")
         if (texts.isEmpty()) {
             perf.count("regions", fast.size)
@@ -332,34 +443,79 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // No production full-width fallback in this independent experiment.
         val holders=dets.filter {it.label=="bubble"}
         val crops=HeavyRoi.plan(img.width,img.height,texts,holders)
+        val ctdSourcePixels=CtdRoiDemand.sourcePixels(crops)
+        val ctdUniquePixels=CtdRoiDemand.uniquePixels(crops)
         perf.count("heavyRoiCrops",crops.size)
-        perf.count("heavyRoiPixels",crops.sumOf {it.area})
-        val gs=glyphs(perf)
-        val prob=perf.time("glyphs") {gs.probabilitiesRoi(img,crops)}
-        perf.count("glyphTiles",gs.tiles)
-        val glyphFull=perf.time("glyphMask") {
-            val m=ByteMask(img.width,img.height)
-            for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
-            m
+        perf.count("heavyRoiPixels",ctdSourcePixels)
+        perf.count("ctdRois",crops.size)
+        perf.count("ctdSourcePixels",ctdSourcePixels)
+        perf.count("ctdUniqueSourcePixels",ctdUniquePixels)
+        perf.count("ctdOverlapPixels",maxOf(0,ctdSourcePixels-ctdUniquePixels))
+        val cachedGlyph=ctdMasks.get(hash,crops)
+        val glyphFull=if(cachedGlyph!=null) {
+            // Same page bytes + exact same ROI geometry => same thresholded CTD
+            // evidence. Reusing it avoids deterministic heavy re-analysis on retries.
+            perf.count("ctdCacheHit")
+            perf.count("ctdCalls",0)
+            perf.count("glyphTiles",0)
+            perf.count("ctdTensorPixels",0)
+            cachedGlyph.unpack()
+        } else {
+            val gs=glyphs(perf)
+            val before=perf.nanos["glyphs"] ?: 0L
+            val mask=perf.time("glyphs") {gs.maskRoi(img,crops,.3f)}
+            val elapsed=(perf.nanos["glyphs"] ?: 0L)-before
+            perf.count("glyphTiles",gs.tiles)
+            perf.count("ctdCalls",gs.tiles)
+            perf.count("ctdTensorPixels",gs.tiles*gs.inputPixelsPerTile)
+            if(crops.isNotEmpty()) perf.add("ctdPerRoi",elapsed/crops.size)
+            if(gs.tiles>0) perf.add("ctdPerCall",elapsed/gs.tiles)
+            mask.also {
+                if(ctdMasks.put(hash,crops,it)) perf.count("ctdCacheStored")
+                else perf.count("ctdCacheBypass")
+            }
         }
-        val trusted=perf.time("localBubbles") {Regions.trustedHolderMasks(img,texts,holders)}
+        val speechCandidates=texts.filter {it.label=="text_bubble"}
+        perf.count("bubbleCandidateRegions",speechCandidates.size)
+        val trustedPlan=perf.time("localBubbles") {Regions.trustedHolderPlan(img,texts,holders,glyphFull)}
+        val trusted=trustedPlan.bubbles
+        perf.count("bubbleTrustedFast",trustedPlan.fastColor)
+        perf.count("bubbleTrustedBox",trustedPlan.flatBox)
+        perf.count("bubbleTrustedSeeded",trustedPlan.seeded)
         val uncertain=HeavyRoi.bubbleNeeded(texts,trusted)
+        perf.count("bubbleRoi",uncertain.size)
+        perf.count("bubbleRescueRegions",uncertain.size)
+        perf.count("bubbleBypassRegions",maxOf(0,speechCandidates.size-uncertain.size))
         val bubbleList=if(uncertain.isEmpty()) {
             perf.count("bubbleModelSkipped")
+            perf.count("bubbleInvocations",0)
             trusted
         } else {
-            val bs=bubbles(perf)
-            val neural=perf.time("bubbles") {bs.segmentRoi(img,HeavyRoi.plan(img.width,img.height,uncertain,holders))}
-            perf.count("bubbleTiles",bs.tiles)
+            val bubbleCrops=HeavyRoi.plan(img.width,img.height,uncertain,holders)
+            perf.count("bubbleRoiCrops",bubbleCrops.size)
+            perf.count("bubbleRoiPixels",bubbleCrops.sumOf {it.area})
+            val beforeInvocations=perf.counts["bubbleInvocations"] ?: 0
+            val neural=segmentBubbleRescue(hash,img,bubbleCrops,perf)
+            val calls=(perf.counts["bubbleInvocations"] ?: 0)-beforeInvocations
+            perf.count("bubbleTiles",calls)
+            perf.count("bubbleNeuralMaskPixels",neural.sumOf {bubbleMaskPixels(it)})
             trusted+neural.filter {b->trusted.none {it.box.iou(b.box)>.5f}}
         }
         perf.count("bubbles",bubbleList.size)
+        perf.count("bubbleMaskPixels",bubbleList.sumOf {bubbleMaskPixels(it)})
+        for(d in speechCandidates) {
+            val coverage=bubbleCoveragePermille(bubbleList,d.box)
+            perf.count("bubbleCoverageSamples")
+            perf.count("bubbleCoveragePermilleSum",coverage)
+            if(coverage<850) perf.count("bubbleCoverageBelow850")
+        }
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
         // CTD is independent evidence. If it sees a line inside a holder that
         // RT-DETR/MissingSweep did not own, promote it to a synthetic detection;
         // OCR still vetoes unreadable/art-like candidates before Luna or erasure.
         val glyphRescue=perf.time("glyphCoverage") { Regions.unclaimedGlyphDetections(img,glyphFull,texts,heavyBubbles) }
         perf.count("glyphRescueDetections",glyphRescue.size)
+        perf.count("rescueRoi",glyphRescue.size)
         var regionDetections=texts + glyphRescue
         var regions = perf.time("regions") { Regions.assemble(img, gray, hash, regionDetections + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
         // Coverage audit before Luna: one bounded second pass. If CTD still owns
@@ -370,6 +526,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         if(coverageExtra.isNotEmpty()) {
             perf.count("coverageSecondPass",coverageExtra.size)
+            perf.count("rescueRoi",coverageExtra.size)
             regionDetections=regionDetections+coverageExtra
             regions=perf.time("coverageReassemble") { Regions.assemble(img,gray,hash,regionDetections+dets.filter {it.label=="bubble"},heavyBubbles,glyphFull) }
         }
@@ -378,6 +535,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
         }
         perf.count("coverageUnknown",unresolvedCoverage.size)
+        perf.count("ctdCoverageFailures",unresolvedCoverage.size)
         perf.count("regions", regions.size + fast.size)
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
@@ -458,8 +616,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("eraseChangedPixels", s.changedPixels)
         perf.count("fillMaskPixels", s.fillMaskPixels)
         perf.count("fillChangedPixels", s.fillChangedPixels)
+        perf.count("reconstructMaskPixels", s.reconstructMaskPixels)
+        perf.count("reconstructChangedPixels", s.reconstructChangedPixels)
         perf.count("inpaintMaskPixels", s.inpaintMaskPixels)
         perf.count("inpaintChangedPixels", s.inpaintChangedPixels)
+        perf.count("eraseRegions", s.fillRegions + s.reconstructRegions + s.inpaintRegions)
+        perf.count("fillRegions", s.fillRegions)
+        perf.count("reconstructRegions", s.reconstructRegions)
+        perf.count("lamaInvocations", s.inpaintRegions)
         perf.count("eraseNoOpRegions", s.noOpRegions)
         perf.count("inpaintScaledRegions", s.scaledInpaintRegions)
     }
@@ -502,7 +666,12 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         keepWholeBubbles(regions, sibs, leave, perf)
         perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
+        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
+        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
@@ -604,7 +773,12 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         val original = decoded.img
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true })
+        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
+        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
+        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
+        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
+        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
         // Cheap colour gate first. OCR sees only known text lines before Arabic is drawn.
@@ -622,7 +796,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     r.eraseMask = baseMask
                     r.eraseMask = WhiteningRepair.mask(r,pixels)
                     val retryMask=r.eraseMask!!
-                    recordErase(perf, Cleaner.applyErase(img,listOf(r),lama))
+                    val repairStats = perf.time("eraseRepair") { Cleaner.applyErase(img,listOf(r),lama) }
+                    recordErase(perf, repairStats)
                     cumulativeMask=RenderSafety.cumulative(cumulativeMask,retryMask)
                     r.eraseMask=cumulativeMask
                     perf.count("residualRepairAttempts")
@@ -718,9 +893,13 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 r.layout?.let { l -> val p = (l.size / 2).toInt(); allowed.fillRect(l.bounds.x1 - p, l.bounds.y1 - p, l.bounds.x2 + p, l.bounds.y2 + p) }
             }
             val f = drawn
+            var outsideChanges = 0
             for (i in allowed.data.indices) if (allowed.data[i].toInt() == 0) {
-                f.data[i * 3] = original.data[i * 3]; f.data[i * 3 + 1] = original.data[i * 3 + 1]; f.data[i * 3 + 2] = original.data[i * 3 + 2]
+                val p = i * 3
+                if (f.data[p] != original.data[p] || f.data[p + 1] != original.data[p + 1] || f.data[p + 2] != original.data[p + 2]) outsideChanges++
+                f.data[p] = original.data[p]; f.data[p + 1] = original.data[p + 1]; f.data[p + 2] = original.data[p + 2]
             }
+            perf.count("outsideMaskChanges", outsideChanges)
             f
         }
         // بلا فقد: ما خارج المسح والعربي يبقى بكسلات الأصل نفسها في الملف المحفوظ
@@ -784,7 +963,20 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                         big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
                     }
                 }
-            } else if (lama != null) {
+            } else if (r.cleanMode == "reconstruct") {
+                val model = r.reconstruction ?: continue
+                for (y in y0 until y1) {
+                    Ort.checkBudget()
+                    val sy = minOf(sh - 1, (y / ky).toInt())
+                    for (x in x0 until x1) {
+                        val sx = minOf(sw - 1, (x / kx).toInt())
+                        if (m[sx, sy].toInt() == 0) continue
+                        val color = model.colorAt(x / kx.toDouble(), y / ky.toDouble())
+                        val i = (y * big.width + x) * 3
+                        big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
+                    }
+                }
+            } else if (r.cleanMode == "lama" && lama != null) {
                 val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
                 for (y in y0 until y1) {
                     Ort.checkBudget()

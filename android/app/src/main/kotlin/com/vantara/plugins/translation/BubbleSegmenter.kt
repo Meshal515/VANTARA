@@ -15,7 +15,13 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
     private val session: OrtSession = Ort.open(file, engine = engine)
     var conf = 0.35f
     var iouThr = 0.5f
-    private val size = 1024
+    private val size = INPUT_SIZE
+
+    companion object {
+        // Keep the validated model tensor unchanged; service-demand wins come
+        // from skipping/reusing inference, not from an unvalidated resize.
+        const val INPUT_SIZE = 1024
+    }
 
     private fun infer(img: RgbImage): List<Bubble> {
         val (chw, r) = img.toChwPadded(size, 114)

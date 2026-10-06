@@ -97,6 +97,18 @@ function stageMeans(entries) {
   return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, mean(v)]));
 }
 
+/** Canonical `wait` is already in stages. These are non-additive diagnostics only. */
+function queueWaitMeans(entries) {
+  const admission = entries.map(e => e.queueWait?.admission).filter(Number.isFinite);
+  const continuation = entries.map(e => e.queueWait?.continuation).filter(Number.isFinite);
+  const prepared = entries.map(e => e.queueWait?.prepared).filter(Number.isFinite);
+  return {
+    admission: mean(admission),
+    continuation: mean(continuation),
+    prepared: mean(prepared),
+  };
+}
+
 function latestRunEntries(entries) {
   const last=[...entries].reverse().find(e => typeof e?.runId === 'string' && e.runId);
   return last ? entries.filter(e => e.runId === last.runId) : entries;
@@ -170,13 +182,67 @@ export function summarize(entries) {
     repairs: repairs.length,
     repairErrors: repairs.filter((e) => e.error).length,
     errorCodes,
-    textless: { pages: textless.length, median: median(textless.map((e) => e.total)), stages: stageMeans(textless) },
+    textless: {
+      pages: textless.length,
+      median: median(textless.map((e) => e.total)),
+      routeToDoneMedian: median(textless.map((e) => e.routeToDoneMs).filter(Number.isFinite)),
+      routeDispatchToDoneMedian: median(textless.map((e) => e.routeDispatchToDoneMs).filter(Number.isFinite)),
+      stages: stageMeans(textless),
+    },
     text: { pages: text.length, median: median(text.map((e) => e.total)), stages: stageMeans(text) },
     chapters: [...chapters.values()].map((ch) => ({ chapterKey: ch.chapterKey, pages: ch.pages, wallMs: Math.round(ch.last - ch.first), workMs: ch.work })),
   };
 }
 
 const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
+
+export function roiRouting(entries = []) {
+  const totals = { fastRoi: 0, ctdRoi: 0, bubbleRoi: 0, rescueRoi: 0 };
+  const rejectionReasons = {};
+  for (const e of entries) {
+    const counts = e?.native?.analyze?.counts;
+    if (!counts) continue;
+    for (const k of Object.keys(totals)) totals[k] += Number(counts[k] ?? 0) || 0;
+    for (const [k, v] of Object.entries(counts)) {
+      if (!k.startsWith('fastReject:')) continue;
+      const reason = k.slice('fastReject:'.length) || 'unknown';
+      rejectionReasons[reason] = (rejectionReasons[reason] ?? 0) + (Number(v) || 0);
+    }
+  }
+  const primaryRois = totals.fastRoi + totals.ctdRoi;
+  const pct = (n) => primaryRois ? Math.round(100 * n / primaryRois) : 0;
+  return {
+    primaryRois,
+    ...totals,
+    fastPct: pct(totals.fastRoi),
+    ctdPct: pct(totals.ctdRoi),
+    bubblePct: pct(totals.bubbleRoi),
+    rescuePct: pct(totals.rescueRoi),
+    rejectionReasons,
+  };
+}
+
+/**
+ * S23 Ultra local service-demand model from the current measured ranges:
+ * Fast 0.13s; CTD midpoint 2.75s; BubbleSeg midpoint 7.95s additional.
+ * Rescue does not add another heavy inference here: coverage rescue reuses the
+ * CTD/Bubble outputs already paid for. This estimates model demand, not wall time.
+ */
+export function roiServiceDemand(routing, costs = { fastMs: 130, ctdMs: 2750, bubbleExtraMs: 7950 }) {
+  const primary = routing?.primaryRois ?? 0;
+  if (!primary) return { totalServiceMs: 0, meanPrimaryRoiMs: 0, heavyEquivalentMs: 0, savedVsHeavyPct: 0 };
+  const totalServiceMs =
+    (routing.fastRoi ?? 0) * costs.fastMs +
+    (routing.ctdRoi ?? 0) * costs.ctdMs +
+    (routing.bubbleRoi ?? 0) * costs.bubbleExtraMs;
+  const heavyEquivalentMs = primary * (costs.ctdMs + costs.bubbleExtraMs);
+  return {
+    totalServiceMs: Math.round(totalServiceMs),
+    meanPrimaryRoiMs: Math.round(totalServiceMs / primary),
+    heavyEquivalentMs: Math.round(heavyEquivalentMs),
+    savedVsHeavyPct: heavyEquivalentMs ? Math.round(100 * (1 - totalServiceMs / heavyEquivalentMs)) : 0,
+  };
+}
 
 /** لا نسمي الصفحة «سريعة» لمجرد أن فيها Region سريع إذا شغلت CTD/BubbleSeg أيضًا. */
 export function localRoute(counts = {}) {
@@ -216,6 +282,20 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   } else if (serverCachedPages.length || modelPages.length) {
     lines.push(`اللغة في هذه الجولة: Luna جديد ${modelPages.length} · كاش الخادم ${serverCachedPages.length}.`);
   }
+  const lunaMeasured=modelPages.filter(e => Number.isFinite(e.native?.luna?.pagesPerBatch));
+  if (lunaMeasured.length) {
+    const m=(key) => median(lunaMeasured.map(e => Number(e.native.luna[key])).filter(Number.isFinite));
+    const effective=lunaMeasured.map(e => {
+      const pages=Math.max(1,Number(e.native.luna.pagesPerBatch)||1);
+      const provider=Number.isFinite(e.native.luna.providerNetworkMs)
+        ? Number(e.native.luna.providerNetworkMs)
+        : Number(e.stages?.['luna.provider/network']);
+      return Number.isFinite(provider) ? provider/pages : null;
+    }).filter(Number.isFinite);
+    lines.push(
+      `Luna batching: effective provider/page ${sec(median(effective))} · pages/batch ${m('pagesPerBatch') ?? '—'} · regions/batch ${m('regionsPerBatch') ?? '—'} · chars/batch ${m('charsPerBatch') ?? '—'} · tokens/batch ${m('tokensPerBatch') ?? '—'} · inFlight ${m('inFlight') ?? '—'}.`,
+    );
+  }
 
   // الدليل الأهم للتبييض: هل قناع المسح غيّر بكسلات فعلًا؟
   const analyzed = fresh.filter((e) => e.native?.analyze?.counts && !e.textless);
@@ -224,6 +304,14 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const heavyPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'heavy').length;
   if (fastPages || mixedPages || heavyPages) {
     lines.push(`المسار المحلي: سريع بالكامل ${fastPages} صفحة · مختلط ${mixedPages} صفحة · ثقيل بالكامل ${heavyPages} صفحة.`);
+  }
+  const roi = roiRouting(fresh);
+  if (roi.primaryRois > 0) {
+    lines.push(`ROI routing: FastROI ${roi.fastPct}% (${roi.fastRoi}/${roi.primaryRois}) · CTDROI ${roi.ctdPct}% (${roi.ctdRoi}/${roi.primaryRois}) · BubbleROI ${roi.bubblePct}% (${roi.bubbleRoi}/${roi.primaryRois}) · RescueROI ${roi.rescuePct}% (${roi.rescueRoi}/${roi.primaryRois}).`);
+    const rejects = Object.entries(roi.rejectionReasons).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+    if (rejects.length) lines.push(`رفض Fast: ${rejects.map(([k,v]) => `${k}×${v}`).join(' · ')}`);
+    const demand = roiServiceDemand(roi);
+    lines.push(`طلب الخدمة المحلي التقديري ${(demand.meanPrimaryRoiMs / 1000).toFixed(2)} ث/ROI · أقل ${demand.savedVsHeavyPct}% من افتراض CTD+Bubble لكل ROI (نموذج تكلفة S23، وليس wall time).`);
   }
   const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
   if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
@@ -234,8 +322,16 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const eraseChanged = sumRender('eraseChangedPixels');
   if (eraseMask > 0) {
     const pct = Math.round((eraseChanged / eraseMask) * 100);
-    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · تعبئة ${sumRender('fillChangedPixels')} · LaMa ${sumRender('inpaintChangedPixels')} · no-op ${sumRender('eraseNoOpRegions')}`);
+    const lamaPixels = sumRender('inpaintMaskPixels');
+    const lamaPct = Math.round((lamaPixels / eraseMask) * 100);
+    const eraseRegions = sumRender('eraseRegions');
+    const eraseMs = rendered.reduce((a, e) => a + (e.native.render.stages?.erase ?? 0) + (e.native.render.stages?.eraseRepair ?? 0), 0);
+    const msPerRoi = eraseRegions > 0 ? eraseMs / eraseRegions : null;
+    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · E1 تعبئة ${sumRender('fillChangedPixels')} · E2 إعادة بناء ${sumRender('reconstructChangedPixels')} · E3 LaMa ${sumRender('inpaintChangedPixels')} (${lamaPixels} بكسل / ${lamaPct}% من القناع) · no-op ${sumRender('eraseNoOpRegions')}`);
+    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E3 ${sumRender('eraseE3')} · LaMa calls ${sumRender('lamaInvocations')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
+    if (sumRender('outsideMaskChanges') > 0) lines.push('⚠️ رُصد تغيّر قبل الاستعادة خارج قناع المسح/حدود العربي؛ الناتج النهائي أُعيد للأصل هناك لكن يلزم التحقيق.');
     if (sumRender('inpaint') > 0 && sumRender('inpaintChangedPixels') === 0) lines.push('⚠️ LaMa استُدعي لكن لم يغيّر أي بكسل في السجل.');
+    if (sumRender('reconstruct') > 0 && sumRender('reconstructChangedPixels') === 0) lines.push('⚠️ E2 استُدعي لكنه لم يغيّر أي بكسل.');
     if (sumRender('fill') > 0 && sumRender('fillChangedPixels') === 0) lines.push('⚠️ مسار التعبئة استُدعي لكن لم يغيّر أي بكسل في السجل.');
   }
   // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
@@ -250,9 +346,21 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const lanes = last?.native?.render?.laneBusy ?? last?.native?.analyze?.laneBusy;
   if (lanes) lines.push(`إشغال المسارات: كشف ${lanes.detect}% · تحليل ${lanes.analyze}% · رسم ${lanes.render}% (ليس نسبة CPU للنظام)`);
   else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
-  for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
-    lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
+  for (const [label, g, groupEntries] of [
+    ['بلا نص', s.textless, fresh.filter(e => e.textless)],
+    ['بنص', s.text, fresh.filter(e => !e.textless)],
+  ]) {
+    const routeDone = label === 'بلا نص' && g.routeToDoneMedian != null ? ` · route→done ${sec(g.routeToDoneMedian)}` : '';
+    const dispatchDone = label === 'بلا نص' && g.routeDispatchToDoneMedian != null ? ` · dispatch→done ${sec(g.routeDispatchToDoneMedian)}` : '';
+    lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}${routeDone}${dispatchDone}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
+    const q = queueWaitMeans(groupEntries);
+    if (q.admission !== null || q.continuation !== null || q.prepared !== null) {
+      lines.push(`  تفصيل wait (تشخيصي؛ لا يُجمع مرة ثانية): admission ${sec(q.admission)} · route→analyze ${sec(q.continuation)} · prepared→run ${sec(q.prepared)}`);
+    }
+  }
+  if (fresh.some(e => e.native?.route?.stages || e.native?.analyze?.stages)) {
+    lines.push('  ملاحظة القياس: route.* و analyze.* تفاصيل داخل النداءات الأصلية؛ تُعرض للتشخيص ولا تُضاف مرة ثانية إلى total.');
   }
   // آخر الصفحات واحدةً واحدة: الملخّص السابق كان يخفي فرق «الأولى لا تظهر والثانية تظهر».
   // هذا السطر يجعل الدور والعمل والشبكة مرئية لكل صفحة بدل وسيط واحد.
@@ -265,17 +373,40 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const r = e.native?.render?.stages ?? {};
       const probe = e.native?.route?.stages ?? {};
       const queue = (a.queue ?? 0) + (r.queue ?? 0) + (probe.queue ?? 0);
-      const network = e.stages?.luna != null ? `Luna ${sec(e.stages.luna)}` : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
+      const splitLuna=['luna.batchWait','luna.request','luna.provider/network'].some(k=>Number.isFinite(e.stages?.[k]));
+      const luna=e.native?.luna ?? {};
+      const packing=[
+        Number.isFinite(luna.pagesPerBatch) ? `pages/batch ${luna.pagesPerBatch}` : null,
+        Number.isFinite(luna.regionsPerBatch) ? `regions/batch ${luna.regionsPerBatch}` : null,
+        Number.isFinite(luna.charsPerBatch) ? `chars/batch ${luna.charsPerBatch}` : null,
+        Number.isFinite(luna.tokensPerBatch) ? `tokens/batch ${luna.tokensPerBatch}` : null,
+        Number.isFinite(luna.inFlight) ? `inFlight ${luna.inFlight}` : null,
+      ].filter(Boolean).join(' · ');
+      const network = splitLuna
+        ? `Luna batchWait ${sec(e.stages?.['luna.batchWait'] ?? 0)} · request ${sec(e.stages?.['luna.request'] ?? 0)} · provider/network ${sec(e.stages?.['luna.provider/network'] ?? 0)}${packing ? ` · ${packing}` : ''}`
+        : e.stages?.luna != null
+          ? `Luna ${sec(e.stages.luna)}`
+          : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
       const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
       const telemetry = [
         Number.isFinite(ac.detectTiles) ? `detectTiles ${ac.detectTiles}` : null,
         Number.isFinite(ac.heavyRoiCrops) ? `ROI ${ac.heavyRoiCrops}` : null,
         Number.isFinite(ac.glyphTiles) ? `CTDtiles ${ac.glyphTiles}` : null,
+        Number.isFinite(ac.ctdCalls) ? `CTDcalls ${ac.ctdCalls}` : null,
+        Number.isFinite(ac.ctdTensorPixels) ? `CTDpx ${(ac.ctdTensorPixels / 1e6).toFixed(2)}M` : null,
+        Number.isFinite(ac.ctdSourcePixels) ? `CTDsrc ${Math.round(ac.ctdSourcePixels / 1000)}k` : null,
+        Number.isFinite(ac.ctdOverlapPixels) && ac.ctdOverlapPixels > 0 ? `CTDoverlap ${Math.round(ac.ctdOverlapPixels / 1000)}k` : null,
+        Number.isFinite(a.ctdPerRoi) ? `CTD/ROI ${sec(a.ctdPerRoi)}` : null,
+        Number.isFinite(ac.ctdCacheHit) && ac.ctdCacheHit > 0 ? `CTDcache ${ac.ctdCacheHit}` : null,
+        Number.isFinite(ac.ctdCoverageFailures) ? `CTDcovFail ${ac.ctdCoverageFailures}` : null,
         Number.isFinite(ac.bubbleTiles) ? `BubbleTiles ${ac.bubbleTiles}` : null,
         Number.isFinite(e.native?.analyze?.thermal) ? `حرارة ${e.native.analyze.thermal}` : null,
         Number.isFinite(e.native?.analyze?.heapMb) ? `heap ${e.native.analyze.heapMb}MB` : null,
       ].filter(Boolean).join(' · ');
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${telemetry ? ` · ${telemetry}` : ''}`);
+      const outer = e.queueWait
+        ? ` · outer admission ${sec(e.queueWait.admission)} · route→analyze ${sec(e.queueWait.continuation)} · prepared→run ${sec(e.queueWait.prepared)}`
+        : '';
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${outer}${telemetry ? ` · ${telemetry}` : ''}`);
     }
   }
 
@@ -296,7 +427,9 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     const stages = cleaning.perf.stages ?? {};
     const mask = counts.eraseMaskPixels ?? 0;
     const changed = counts.eraseChangedPixels ?? 0;
-    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · fill ${counts.fillChangedPixels ?? 0} · LaMa ${counts.inpaintChangedPixels ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0} · SHA النماذج: مجتاز`);
+    const lamaMask = counts.inpaintMaskPixels ?? 0;
+    const lamaPct = mask ? Math.round((lamaMask / mask) * 100) : 0;
+    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · E1 ${counts.fillChangedPixels ?? 0} · E2 ${counts.reconstructChangedPixels ?? 0} · E3 LaMa ${counts.inpaintChangedPixels ?? 0} (${lamaMask}/${lamaPct}%) · خارج القناع ${counts.outsideMaskChanges ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0} · SHA النماذج: مجتاز`);
     for (const k of ['detect', 'glyphs', 'bubbles', 'ocr', 'plan', 'lamaLockWait', 'load:lama', 'erase', 'encode', 'write']) {
       if (typeof stages[k] === 'number') lines.push(`  probe.${k}: ${sec(stages[k])}`);
     }
