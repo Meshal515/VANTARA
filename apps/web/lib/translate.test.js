@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan, withNativeTranslationStage } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -176,5 +176,32 @@ describe('local translation cache revision', () => {
     const marked = repairAttemptValue(old, 1, 99);
     expect(marked).toMatchObject({ pipelineVersion: LOCAL_PIPELINE_VERSION - 1, at: 99, tries: 1 });
     expect(staleLocalPipeline(marked)).toBe(true);
+  });
+});
+
+
+describe('native translation admission', () => {
+  it('never overlaps two native model stages from reader/jobs', async () => {
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    let active = 0;
+    let maxActive = 0;
+    const order = [];
+    const first = withNativeTranslationStage(async () => {
+      active += 1; maxActive = Math.max(maxActive, active); order.push('first');
+      await firstGate;
+      active -= 1;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = withNativeTranslationStage(async () => {
+      active += 1; maxActive = Math.max(maxActive, active); order.push('second');
+      active -= 1;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual(['first']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first', 'second']);
+    expect(maxActive).toBe(1);
   });
 });
