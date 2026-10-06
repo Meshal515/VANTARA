@@ -256,7 +256,7 @@ export function createJobRunner(deps) {
       },
       run:async({prepared,waitedMs,prepareMs})=> {
         if(prepared?.paused || job.status!=='running') return {error:'paused'};
-        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,route:prepared.route,via:'job'},prepared.image.src,meta);
+        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,prepared,route:prepared.route,via:'job'},prepared.image.src,meta);
       },
     });
     if (result?.error) return result.error;
