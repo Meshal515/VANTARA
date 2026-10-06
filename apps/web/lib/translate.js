@@ -186,7 +186,9 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       start(job, false, !normalSlot);
     }
     const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
-    const canPrepare = job => {
+    while (true) {
+      const job = next(j => j.prepare && !j.ready && !j.preparing);
+      if (!job) break;
       // لا نحجز أول/آخر الفصل. فقط الحالية والثلاث أمامها لها admission
       // إضافي محدود، حتى لا يتكدس detector أثناء فصل ثقيل.
       const focused = isFocused(job);
@@ -204,22 +206,10 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       // do not, so they are intentionally excluded.
       const resident = running + focusedBurstRunning + readyCount() + preparing;
       const residentBlocked = Number.isFinite(maxInFlight) && resident >= maxInFlight;
-      return !prepBlocked && !residentBlocked && readyCount() + preparing < preparedCap;
-    };
-    const nextPreparation = () => {
-      let best = null;
-      for (const job of jobs.values()) {
-        if (job.started || !job.prepare || job.ready || job.preparing || !canPrepare(job)) continue;
-        if (!best || priority(job) < priority(best)) best = job;
-      }
-      return best;
-    };
-    while (true) {
-      // A quota-blocked near page must not head-of-line block unrelated free
-      // preparation capacity. Pick the best *admissible* job, not the best job
-      // and then break the entire pump when that one is temporarily blocked.
-      const job = nextPreparation();
-      if (!job) break;
+      // Do not skip a quota-blocked high-priority page just to fill Heavy farther
+      // ahead: that only moves outer wait into nativeWait without increasing
+      // serialized inference throughput.
+      if (prepBlocked || residentBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
       job.prepareStartedAt = Date.now();
       const prepareStartedAt = job.prepareStartedAt;
