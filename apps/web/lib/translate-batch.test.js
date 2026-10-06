@@ -106,6 +106,53 @@ describe('adaptive background Luna assembly',()=> {
     pending.splice(0).forEach(f=>f());await Promise.all(work);
   });
 
+  it('benchmark: batching may reduce requests only when simulated chapter wall does not rise',async()=> {
+    vi.useFakeTimers();
+    const makeProvider=()=>{
+      let active=0,maxActive=0,calls=0;
+      const queued=[];
+      const pump=()=>{
+        while(active<2 && queued.length){
+          const job=queued.shift();active++;maxActive=Math.max(maxActive,active);
+          setTimeout(()=>{
+            active--;
+            const result=job.path.endsWith('text-batch')
+              ? batchReply(job.body)
+              : {status:200,body:{regions:job.body.regions,perf:{providerNetworkMs:100,batchWaitMs:0}}};
+            job.resolve(result);pump();
+          },100);
+        }
+      };
+      return {
+        request:(path,body)=>new Promise(resolve=>{calls++;queued.push({path,body,resolve});pump();}),
+        stats:()=>({calls,maxActive}),
+      };
+    };
+
+    const pages=Array.from({length:12},(_,i)=>page(i));
+
+    const direct=makeProvider();
+    const directStart=Date.now();
+    const directWork=pages.map(p=>direct.request('/v1/translate/text',p));
+    await vi.runAllTimersAsync();await Promise.all(directWork);
+    const directWall=Date.now()-directStart;
+
+    const batched=makeProvider();
+    const scheduler=createTextBatcher(batched.request,{
+      waitMs:40,maxInFlight:2,
+      limits:{maxPages:6,maxRegions:48,maxSourceChars:7000,maxSourceTokens:2600},
+    });
+    const batchStart=Date.now();
+    const batchWork=pages.map(p=>scheduler.enqueueTextPage(p));
+    await vi.runAllTimersAsync();await Promise.all(batchWork);
+    const batchWall=Date.now()-batchStart;
+
+    expect(direct.stats()).toMatchObject({calls:12,maxActive:2});
+    expect(batched.stats()).toMatchObject({calls:2,maxActive:2});
+    expect(batchWall).toBeLessThanOrEqual(directWall);
+    vi.useRealTimers();
+  });
+
   it('backs off after 429 and never dispatches queued work during cooldown',async()=> {
     vi.useFakeTimers();const calls=[];
     const batch=createTextBatcher(async(path,body)=>{calls.push(body.pages);return {status:429,body:{error:'busy',retryAfterMs:1000}};},{waitMs:40,maxInFlight:1,adaptive:true});
