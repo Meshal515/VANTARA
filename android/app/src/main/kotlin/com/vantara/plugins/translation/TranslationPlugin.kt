@@ -118,7 +118,7 @@ class TranslationPlugin : Plugin() {
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
-    /** Detector owner is independent; at most one detector request executes at once. */
+    /** Separate probe pipeline/session; ORT DETECT still shares the global compute lane with HEAVY. */
     private val probePipeline by lazy { Pipeline(context, store,InferenceWork.CONFIRM) }
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
