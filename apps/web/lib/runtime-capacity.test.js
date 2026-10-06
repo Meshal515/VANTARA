@@ -83,6 +83,26 @@ describe('runtime capacity controller', () => {
     expect(c.telemetry().reason).toContain('analyze-wait');
   });
 
+  it('uses Android low-memory threshold before lowMemory flips true', () => {
+    let now = 0;
+    const c = createRuntimeCapacityController({ now: () => now });
+    c.observePerf({
+      thermal:1, heapMb:90, heapLimitMb:512, nativeHeapMb:140,
+      availMemMb:1000, totalMemMb:12000, lowMemoryThresholdMb:800, lowMemory:false,
+      stages:{work:3000},
+    }, 'analyze');
+    expect(c.telemetry().grade).toBe(1);
+    expect(c.telemetry().reason).toContain('ram-threshold:1.25x');
+    expect(c.telemetry().nativeHeapMb).toBe(140);
+    now += 100;
+    c.observePerf({
+      thermal:1, heapMb:90, heapLimitMb:512,
+      availMemMb:850, totalMemMb:12000, lowMemoryThresholdMb:800, lowMemory:false,
+      stages:{work:3000},
+    }, 'analyze');
+    expect(c.telemetry().grade).toBe(2);
+  });
+
   it('decays native wait pressure after the backlog clears', () => {
     let now = 0;
     const c = createRuntimeCapacityController({ now: () => now });
