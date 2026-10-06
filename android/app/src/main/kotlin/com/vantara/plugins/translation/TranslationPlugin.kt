@@ -175,6 +175,7 @@ class TranslationPlugin : Plugin() {
 
     @PluginMethod
     fun routePage(call:PluginCall) {
+        activeRefinement.get()?.cancel()
         val path=call.getString("path") ?: return call.reject("path required")
         scope.launch {
             try {
@@ -188,7 +189,9 @@ class TranslationPlugin : Plugin() {
 
     @PluginMethod
     fun analyzePage(call: PluginCall) {
-        if (high(call)) activeRefinement.get()?.cancel()
+        // Refinement is optional background quality work. Any new translation
+        // stage owns the compute budget first, including staged low-priority pages.
+        activeRefinement.get()?.cancel()
         val path = call.getString("path") ?: return call.reject("path required")
         scope.launch {
             try {
@@ -225,11 +228,9 @@ class TranslationPlugin : Plugin() {
                             .put("inkLight", r.inkLight),
                     )
                 }
-                // صفحة فيها ما يُسأل عنه: نموذج التبييض يُحمَّل الآن في الخلفية (دور منخفض) فيجهز
-                // قبل أن يعود رد Luna، لا حين تنتظره الصفحة
-                if (thumb.isNotEmpty() && !renderPipeline.inpainterReady()) {
-                    scope.launch(Dispatchers.IO) { runCatching { renderPipeline.warmInpainter(Perf()) } }
-                }
+                // Batch 2.5 keeps preparing later pages while Luna waits. Do not
+                // warm LaMa here: model loading would overlap the next RT-DETR/
+                // CTD stage outside JS admission and can erase the scheduler win.
                 call.resolve(
                     JSObject()
                         .put("pageHash", a.pageHash)
