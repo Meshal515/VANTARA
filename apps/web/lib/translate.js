@@ -694,8 +694,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
   const textless = !(analysis.regions ?? []).length && coverageUnknown === 0;
   if (!readable.length) return { incomplete: !textless || coverageUnknown > 0, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
 
-  // analyzePage في القارئ يحجز المسار الثقيل لهذه الصفحة حتى يعود Luna ثم يبدأ
-  // Render. إذا لم نصل إلى Render لأي سبب يجب تحرير الحجز في finally.
+  // Current APK releases Native as soon as Analyze returns. Keep the legacy
+  // release hook only so an older installed APK cannot retain its Luna-era reservation.
   let renderCompleted = false;
   try {
     // أولًا بلا صورة: صفحة ترجمتَها قبل (أو صديق) ترجع بلا رفع — على نت ضعيف هذا الفرق كله.
@@ -751,8 +751,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
       native,
     };
   } finally {
-    // Render نفسه يستهلك الحجز ذريًا داخل PriorityGate. هذا النداء مهم فقط
-    // لمسارات Luna error / no-plan / exception حتى لا تتوقف بقية الصفحات.
+    // Compatibility only: current PriorityGate reserves nothing across Luna.
+    // Older APKs still need this on error / no-plan / exception paths.
     if (!renderCompleted && priorityOf(deps) === 'high') {
       try { await releasePageReservation(meta.chapterKey, meta.pageIndex); } catch { /* APK قديم أو إغلاق الصفحة */ }
     }
