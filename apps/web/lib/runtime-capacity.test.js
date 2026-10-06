@@ -55,11 +55,12 @@ describe('runtime capacity controller', () => {
     c.observePerf({ thermal: 3, heapMb: 100, heapLimitMb: 512, availMemMb: 3000, totalMemMb: 12000, lowMemory: false, stages: { work: 3000 } }, 'analyze');
     expect(c.networkLimit()).toBe(3);
     let active = 0, maxActive = 0;
-    const releases = [];
+    let releaseAll;
+    const hold = new Promise(resolve => { releaseAll = resolve; });
     const task = (interactive = false) => c.withNetworkAdmission(async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
-      await new Promise(resolve => releases.push(resolve));
+      await hold;
       active -= 1;
       return { status: 200 };
     }, { interactive, kind: 'luna' });
@@ -68,7 +69,7 @@ describe('runtime capacity controller', () => {
     await Promise.resolve();
     expect(maxActive).toBeLessThanOrEqual(4);
     expect(active).toBe(4);
-    while (releases.length) releases.shift()();
+    releaseAll();
     await Promise.all(work);
   });
 
