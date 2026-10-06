@@ -532,6 +532,25 @@ async function repairInBackground(deps, src, hash, meta, local) {
 const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.isInteractive?.() ?? deps.interactive ?? true;
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 
+/**
+ * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
+ * الشبكة/Luna تبقى خارجها؛ الهدف منع RT-DETR وCTD وBubbleSeg/Render من التزاحم
+ * على نفس CPU ثم احتساب دقائق الانتظار داخل زمن النموذج نفسه.
+ */
+let nativeStageTail = Promise.resolve();
+export async function withNativeTranslationStage(fn) {
+  let release;
+  const mine = new Promise((resolve) => { release = resolve; });
+  const previous = nativeStageTail;
+  nativeStageTail = mine;
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
   if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
@@ -544,14 +563,14 @@ export async function prepareTranslation(src, meta) {
   const hash=await pageHashOf(src);
   const cached=(await readPageCache(hash,meta)).value;
   if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) return {src,bypass:true};
-  const route=await routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex});
+  const route=await withNativeTranslationStage(() => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}));
   return {src,route,bypass:Boolean(route?.textless)};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash }));
+    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => withNativeTranslationStage(() => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -585,7 +604,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
     try {
-      rendered = await clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }));
+      rendered = await clock.time('render', () => withNativeTranslationStage(() => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })));
       renderCompleted = true;
     } catch {
       return { error: 'device_failed', native };
