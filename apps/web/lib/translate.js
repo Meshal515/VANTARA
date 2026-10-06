@@ -110,7 +110,7 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2, maxInFlight = Infinity } = {}) {
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
@@ -199,7 +199,12 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
           ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
           : preparing >= prepareConcurrency;
       const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
-      return !prepBlocked && readyCount() + preparing < preparedCap;
+      // Hard resident bound is separate from policy ceilings. Normal/focus run
+      // pages still own their analyzed handoff; bypass pages (cache/textless)
+      // do not, so they are intentionally excluded.
+      const resident = running + focusedBurstRunning + readyCount() + preparing;
+      const residentBlocked = Number.isFinite(maxInFlight) && resident >= maxInFlight;
+      return !prepBlocked && !residentBlocked && readyCount() + preparing < preparedCap;
     };
     const nextPreparation = () => {
       let best = null;
