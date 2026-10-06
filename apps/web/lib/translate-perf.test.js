@@ -240,4 +240,3 @@ it('reports only the latest run, dedupes retries, and never calls partial pages 
     });
     expect(report).toContain('طلب الخدمة المحلي التقديري 2.11 ث/ROI');
   });
-});
