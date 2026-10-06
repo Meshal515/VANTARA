@@ -234,8 +234,16 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const eraseChanged = sumRender('eraseChangedPixels');
   if (eraseMask > 0) {
     const pct = Math.round((eraseChanged / eraseMask) * 100);
-    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · تعبئة ${sumRender('fillChangedPixels')} · LaMa ${sumRender('inpaintChangedPixels')} · no-op ${sumRender('eraseNoOpRegions')}`);
+    const lamaPixels = sumRender('inpaintMaskPixels');
+    const lamaPct = Math.round((lamaPixels / eraseMask) * 100);
+    const eraseRegions = sumRender('eraseRegions');
+    const eraseMs = rendered.reduce((a, e) => a + (e.native.render.stages?.erase ?? 0), 0);
+    const msPerRoi = eraseRegions > 0 ? eraseMs / eraseRegions : null;
+    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · E1 تعبئة ${sumRender('fillChangedPixels')} · E2 إعادة بناء ${sumRender('reconstructChangedPixels')} · E3 LaMa ${sumRender('inpaintChangedPixels')} (${lamaPixels} بكسل / ${lamaPct}% من القناع) · no-op ${sumRender('eraseNoOpRegions')}`);
+    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E3 ${sumRender('eraseE3')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
+    if (sumRender('outsideMaskChanges') > 0) lines.push('⚠️ رُصد تغيّر قبل الاستعادة خارج قناع المسح/حدود العربي؛ الناتج النهائي أُعيد للأصل هناك لكن يلزم التحقيق.');
     if (sumRender('inpaint') > 0 && sumRender('inpaintChangedPixels') === 0) lines.push('⚠️ LaMa استُدعي لكن لم يغيّر أي بكسل في السجل.');
+    if (sumRender('reconstruct') > 0 && sumRender('reconstructChangedPixels') === 0) lines.push('⚠️ E2 استُدعي لكنه لم يغيّر أي بكسل.');
     if (sumRender('fill') > 0 && sumRender('fillChangedPixels') === 0) lines.push('⚠️ مسار التعبئة استُدعي لكن لم يغيّر أي بكسل في السجل.');
   }
   // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
@@ -296,7 +304,9 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     const stages = cleaning.perf.stages ?? {};
     const mask = counts.eraseMaskPixels ?? 0;
     const changed = counts.eraseChangedPixels ?? 0;
-    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · fill ${counts.fillChangedPixels ?? 0} · LaMa ${counts.inpaintChangedPixels ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0} · SHA النماذج: مجتاز`);
+    const lamaMask = counts.inpaintMaskPixels ?? 0;
+    const lamaPct = mask ? Math.round((lamaMask / mask) * 100) : 0;
+    lines.push('', `اختبار التبييض المحلي: ${cleaning.cleanedRegions ?? 0} منطقة · قناع ${mask} · تغيّر ${changed} · E1 ${counts.fillChangedPixels ?? 0} · E2 ${counts.reconstructChangedPixels ?? 0} · E3 LaMa ${counts.inpaintChangedPixels ?? 0} (${lamaMask}/${lamaPct}%) · خارج القناع ${counts.outsideMaskChanges ?? 0} · no-op ${counts.eraseNoOpRegions ?? 0} · SHA النماذج: مجتاز`);
     for (const k of ['detect', 'glyphs', 'bubbles', 'ocr', 'plan', 'lamaLockWait', 'load:lama', 'erase', 'encode', 'write']) {
       if (typeof stages[k] === 'number') lines.push(`  probe.${k}: ${sec(stages[k])}`);
     }
