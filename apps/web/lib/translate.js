@@ -116,6 +116,7 @@ export function createQueue({
   prepareConcurrency = 1,
   maxPrepared = 24,
   bypassConcurrency = 2,
+  maxInFlight = Infinity,
   capacity = null,
   lane = 'generic',
   continueConcurrency = 1,
@@ -180,8 +181,20 @@ export function createQueue({
     if (bypass) bypassRunning++;
     else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
     else running++;
+    const runAt = Date.now();
+    const admissionWaitMs = job.prepare
+      ? Math.max(0, (job.prepareStartedAt ?? runAt) - job.addedAt)
+      : Math.max(0, runAt - job.addedAt);
+    const continuationWaitMs = Math.max(0, Number(job.continuationWaitMs) || 0);
+    const preparedWaitMs = job.preparedAt == null ? 0 : Math.max(0, runAt - job.preparedAt);
+    const waitedMs = job.prepare
+      ? admissionWaitMs + continuationWaitMs + preparedWaitMs
+      : admissionWaitMs;
     Promise.resolve().then(() => job.run({
-      waitedMs: Math.max(0, Date.now() - job.addedAt - (job.prepareMs ?? 0)),
+      waitedMs,
+      admissionWaitMs,
+      continuationWaitMs,
+      preparedWaitMs,
       prepareMs: job.prepareMs ?? 0,
       queuedAt: job.addedAt,
       prepared: job.prepared,
@@ -202,18 +215,27 @@ export function createQueue({
   const continuationBuffered = () => [...jobs.values()].filter(j =>
     !j.started && (j.needsContinue || j.continuing)).length;
   const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
+  const analysisResidentCount = () => {
+    const readyAnalyzed = [...jobs.values()].filter(j =>
+      !j.started && j.ready && !j.prepared?.bypass && Boolean(j.prepared?.analysis)).length;
+    return running + focusedBurstRunning + continuing + readyAnalyzed;
+  };
 
   const beginPrepare = (job) => {
     job.preparing = true;
     preparing++;
-    const preparedAt = Date.now();
+    job.prepareStartedAt ??= Date.now();
+    const phaseStartedAt = Date.now();
     Promise.resolve().then(() => job.prepare({ interactive: isFocused(job), isInteractive: () => isFocused(job) })).then(prepared => {
       if (jobs.get(job.key) !== job) return;
-      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, Date.now() - preparedAt);
+      const phaseDoneAt = Date.now();
+      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, phaseDoneAt - phaseStartedAt);
+      job.routePreparedAt = phaseDoneAt;
       job.prepared = prepared;
       if (prepared?.bypass) {
         job.ready = true;
         job.needsContinue = false;
+        job.preparedAt = phaseDoneAt;
         if (bypassRunning < dynamicLimits().bypassConcurrency) startJob(job, true);
       } else if (typeof prepared?.continuePrepare === 'function') {
         // Route انتهى؛ حرّر slot التصنيف فورًا. الـHeavy continuation تبقى
@@ -223,6 +245,7 @@ export function createQueue({
       } else {
         job.ready = true;
         job.needsContinue = false;
+        job.preparedAt = phaseDoneAt;
       }
     }, error => {
       if (jobs.get(job.key) === job) {
@@ -247,13 +270,17 @@ export function createQueue({
     job.continuing = true;
     continuing++;
     const continuedAt = Date.now();
+    job.continuationWaitMs = (job.continuationWaitMs ?? 0) +
+      Math.max(0, continuedAt - (job.routePreparedAt ?? continuedAt));
     Promise.resolve().then(() => continuation()).then(prepared => {
       if (jobs.get(job.key) !== job) return;
-      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, Date.now() - continuedAt);
+      const continuedDoneAt = Date.now();
+      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, continuedDoneAt - continuedAt);
       job.prepared = prepared;
       if (prepared?.bypass) {
         job.ready = true;
         job.needsContinue = false;
+        job.preparedAt = continuedDoneAt;
         if (bypassRunning < dynamicLimits().bypassConcurrency) startJob(job, true);
       } else if (typeof prepared?.continuePrepare === 'function') {
         job.needsContinue = true;
@@ -261,6 +288,7 @@ export function createQueue({
       } else {
         job.ready = true;
         job.needsContinue = false;
+        job.preparedAt = continuedDoneAt;
       }
     }, error => {
       if (jobs.get(job.key) === job) {
@@ -321,6 +349,8 @@ export function createQueue({
     if (preparing === 0) {
       const continuationCap = capacity ? Math.min(continueConcurrency, caps.prepareConcurrency) : continueConcurrency;
       while (continuing < continuationCap) {
+        const residentBlocked = Number.isFinite(maxInFlight) && analysisResidentCount() >= maxInFlight;
+        if (residentBlocked) break;
         const job = next(j => j.needsContinue && !j.continuing);
         if (!job) break;
         beginContinuation(job);
@@ -350,6 +380,7 @@ export function createQueue({
       jobs.set(key, {
         key, chapterKey, index, run, prepare, resolve, reject, promise,
         started: false, addedAt: Date.now(), prepareMs: 0,
+        prepareStartedAt: null, routePreparedAt: null, continuationWaitMs: 0, preparedAt: null,
         preparing: false, continuing: false, needsContinue: false, ready: false,
       });
       queueMicrotask(pump);
