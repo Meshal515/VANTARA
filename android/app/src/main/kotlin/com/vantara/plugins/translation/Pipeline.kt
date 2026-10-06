@@ -354,19 +354,15 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         } else {
             val gs=glyphs(perf)
             val before=perf.nanos["glyphs"] ?: 0L
-            val prob=perf.time("glyphs") {gs.probabilitiesRoi(img,crops)}
+            val mask=perf.time("glyphs") {gs.maskRoi(img,crops,.3f)}
             val elapsed=(perf.nanos["glyphs"] ?: 0L)-before
             perf.count("glyphTiles",gs.tiles)
             perf.count("ctdCalls",gs.tiles)
             perf.count("ctdTensorPixels",gs.tiles*gs.inputPixelsPerTile)
             if(crops.isNotEmpty()) perf.add("ctdPerRoi",elapsed/crops.size)
             if(gs.tiles>0) perf.add("ctdPerCall",elapsed/gs.tiles)
-            perf.time("glyphMask") {
-                val m=ByteMask(img.width,img.height)
-                for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
-                m
-            }.also { mask ->
-                if(ctdMasks.put(hash,crops,mask)) perf.count("ctdCacheStored")
+            mask.also {
+                if(ctdMasks.put(hash,crops,it)) perf.count("ctdCacheStored")
                 else perf.count("ctdCacheBypass")
             }
         }
