@@ -11,7 +11,7 @@ function deferred() {
 }
 
 describe('wait/queue admission invariants', () => {
-  it('does not let a blocked near-forward quota head-of-line block free prepare slots', async () => {
+  it('does not hide outer wait by spilling far Heavy preparation into the native queue', async () => {
     const q = createQueue({ concurrency: 4, prepareConcurrency: 4, maxPrepared: 8, bypassConcurrency: 0 });
     const holds = Array.from({ length: 6 }, () => deferred());
     const started = [];
@@ -35,10 +35,9 @@ describe('wait/queue admission invariants', () => {
     await tick();
     await tick();
 
-    // 0 + one near-forward slot are admitted first. Pages 2/3 are temporarily
-    // quota-blocked, but that must not waste the remaining global prepare slots:
-    // farther work can route/hash/cache while preserving the near quota.
-    expect(started).toEqual([0, 1, 4, 5]);
+    // Current + one near page are enough to keep a serialized Heavy owner fed.
+    // Starting 4/5 here would only relabel their time as nativeWait.
+    expect(started).toEqual([0, 1]);
 
     for (const hold of holds) hold.resolve();
     await Promise.all(runs);
