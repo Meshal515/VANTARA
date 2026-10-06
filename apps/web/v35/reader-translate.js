@@ -21,6 +21,7 @@ import { supports } from '../lib/capabilities.js';
 import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, focusPage, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
+import { runtimeCapacity } from '../lib/runtime-capacity.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
 const ENTRY_PAGES = 3;
@@ -55,7 +56,7 @@ const store = {
 // Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
 // Run slots therefore cover Luna + Render only; a slow Luna response no longer
 // blocks CTD/BubbleSeg from preparing later pages. Caps stay finite for RAM/network.
-const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8 });
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24, capacity: runtimeCapacity, lane: 'reader' });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -189,11 +190,11 @@ export function createReaderTranslation(deps) {
     if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
-    const prepare=async()=> {
+    const prepare=async({interactive=false,isInteractive}={})=> {
       if(stopped || disabledReason || !isOn()) return null;
-      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,via:'reader',interactive:false});
+      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive});
     };
-    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
+    const run = async ({ waitedMs = 0,admissionWaitMs=0,continuationWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -204,7 +205,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,continuation:continuationWaitMs,prepared:preparedWaitMs}, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,

@@ -83,12 +83,20 @@ describe('batch 1 reader pipeline', () => {
   it('never regresses the reader to one whole-page pipeline with no textless bypass', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
-    const match = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(source);
+    const match = /createQueue\(\{([^}]*)\}\)/.exec(source);
     expect(match).not.toBeNull();
-    const [, concurrency, prepareConcurrency, maxPrepared, bypassConcurrency] = match.map(Number);
+    const body = match[1];
+    const numberOf = name => Number(new RegExp(`\\b${name}:\\s*(\\d+)`).exec(body)?.[1]);
+    const concurrency = numberOf('concurrency');
+    const prepareConcurrency = numberOf('prepareConcurrency');
+    const maxPrepared = numberOf('maxPrepared');
+    const bypassConcurrency = numberOf('bypassConcurrency');
     expect(concurrency).toBeGreaterThanOrEqual(3);
     expect(prepareConcurrency).toBeGreaterThanOrEqual(1);
     expect(maxPrepared).toBeGreaterThanOrEqual(concurrency);
     expect(bypassConcurrency).toBeGreaterThanOrEqual(1);
+    expect(body).toMatch(/capacity:\s*runtimeCapacity/);
+    expect(body).toMatch(/lane:\s*['"]reader['"]/);
+    expect(numberOf('maxInFlight')).toBe(24);
   });
 });

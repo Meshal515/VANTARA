@@ -84,6 +84,20 @@ describe('the runner', () => {
     expect(notes.at(-1)).toEqual(['stop']);
   });
 
+  it('marks preparation as job work so native route never borrows reader priority', async () => {
+    const { deps } = fakeDeps({ pagesPer: 1 });
+    const seen = [];
+    deps.prepareTranslation = async (src, meta, options) => {
+      seen.push(options);
+      return { src };
+    };
+    const runner = createJobRunner(deps);
+    runner.add(createJob({ ref: 'ext:x', sourceId: 'weeb', rows: [row(1)], keyOf }));
+    await until(() => runner.jobs()[0]?.status === 'done');
+
+    expect(seen).toEqual([{ via: 'job', interactive: false }]);
+  });
+
   it('a quality job never asks for the fast engine', async () => {
     const { deps, calls } = fakeDeps({ pagesPer: 1 });
     const runner = createJobRunner(deps);

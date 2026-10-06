@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareTranslation, translatePage, withNativeTranslationStage } from './translate.js';
+import { createQueue, prepareTranslation, translatePage, withNativeTranslationStage } from './translate.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const memory = () => {
@@ -9,6 +9,7 @@ const memory = () => {
 
 function installDevice({ textless = false } = {}) {
   let analyses = 0;
+  const analyzePriorities = [];
   globalThis.Capacitor = {
     convertFileSrc: p => `http://localhost/_capacitor_file_${p}`,
     Plugins: {
@@ -20,8 +21,9 @@ function installDevice({ textless = false } = {}) {
           textless,
           perf: { stages: { detect: 4 }, counts: {} },
         }),
-        analyzePage: async () => {
+        analyzePage: async (args = {}) => {
           analyses += 1;
+          analyzePriorities.push(args.priority);
           return {
             pageHash: '75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322',
             width: 800,
@@ -40,7 +42,7 @@ function installDevice({ textless = false } = {}) {
       },
     },
   };
-  return { analyses: () => analyses };
+  return { analyses: () => analyses, analyzePriorities: () => [...analyzePriorities] };
 }
 
 describe('batch 2.5 stage pipeline', () => {
@@ -74,6 +76,25 @@ describe('batch 2.5 stage pipeline', () => {
 
     expect(result.translated).toBe(1);
     expect(device.analyses()).toBe(1);
+  });
+
+
+  it('can return heavy pre-analysis as a bounded continuation after Route completes', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    const device = installDevice();
+    const src = 'http://localhost/_capacitor_file_/cache/pages/deferred.jpg';
+    const meta = { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:0, sourceLang:'en' };
+
+    const routed = await prepareTranslation(src, meta, { preAnalyze:true, deferAnalyze:true, via:'reader', interactive:false });
+    expect(device.analyses()).toBe(0);
+    expect(routed.bypass).toBe(false);
+    expect(routed.continuePrepare).toEqual(expect.any(Function));
+
+    const prepared = await routed.continuePrepare();
+    expect(device.analyses()).toBe(1);
+    expect(prepared.analysis?.regions?.[0]?.source).toBe('HELLO');
+    expect(prepared.continuePrepare).toBeUndefined();
   });
 
   it('finishes textless preparation after route without invoking heavy analyze', async () => {
@@ -143,10 +164,110 @@ describe('batch 2.5 stage pipeline', () => {
     expect(maxActive).toBe(1);
   });
 
+  it('capacity contract pauses and resumes queue admission without dropping work', async () => {
+    let changed;
+    let allow = false;
+    let prepared = 0;
+    let ran = 0;
+    const capacity = {
+      queueLimits: () => allow
+        ? { concurrency: 1, prepareConcurrency: 1, maxPrepared: 1, bypassConcurrency: 0 }
+        : { concurrency: 0, prepareConcurrency: 0, maxPrepared: 0, bypassConcurrency: 0 },
+      subscribe: fn => { changed = fn; return () => {}; },
+    };
+    const q = createQueue({ concurrency:1, prepareConcurrency:1, maxPrepared:1, bypassConcurrency:0, capacity, lane:'test' });
+    const result = q.add({
+      key:'c#0', chapterKey:'c', index:0,
+      prepare:async()=> { prepared += 1; return { bypass:false }; },
+      run:async()=> { ran += 1; return 'done'; },
+    });
+    await tick();
+    expect(prepared).toBe(0);
+    expect(ran).toBe(0);
+    allow = true;
+    changed();
+    await expect(result).resolves.toBe('done');
+    expect(prepared).toBe(1);
+    expect(ran).toBe(1);
+  });
+
   it('reader keeps a deep staged buffer instead of five end-to-end slots', async () => {
     const source = await import('node:fs').then(({readFileSync}) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url),'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
+    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8,\s*maxInFlight:\s*24,\s*capacity:\s*runtimeCapacity,\s*lane:\s*'reader'\s*\}\)/);
     expect(source).toMatch(/prepareTranslation\([^;]+\{\s*preAnalyze:\s*true,/s);
   });
+
+  it('lets a ready render beat speculative ahead route work', async () => {
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    const order = [];
+    const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
+      order.push(name);
+      if (wait) await wait;
+    }, { priority });
+
+    const holder = task('holder', 'analyze', hold);
+    await tick();
+    const speculativeRoute = task('ahead-route', () => 'aheadRoute');
+    const readyRender = task('ready-render', 'aheadRender');
+    await tick();
+    release();
+    await Promise.all([holder, speculativeRoute, readyRender]);
+
+    expect(order).toEqual(['holder', 'ready-render', 'ahead-route']);
+  });
+
+  it('re-evaluates queued native priority so focus promotion is live', async () => {
+    let releaseHolder;
+    let releaseCandidate;
+    let releaseRoute;
+    const holderWait = new Promise(resolve => { releaseHolder = resolve; });
+    const candidateWait = new Promise(resolve => { releaseCandidate = resolve; });
+    const routeWait = new Promise(resolve => { releaseRoute = resolve; });
+    const order = [];
+    let focused = false;
+    const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
+      order.push(name);
+      if (wait) await wait;
+    }, { priority });
+
+    const holder = task('holder', 'analyze', holderWait);
+    await tick();
+    const candidate = task('candidate', () => focused ? 'render' : 'aheadAnalyze', candidateWait);
+    const route = task('route', 'route', routeWait);
+    await tick();
+
+    focused = true;
+    releaseHolder();
+    await tick();
+    expect(order).toEqual(['holder', 'candidate']);
+    releaseCandidate();
+    await tick();
+    expect(order).toEqual(['holder', 'candidate', 'route']);
+    releaseRoute();
+    await Promise.all([holder, candidate, route]);
+    expect(order).toEqual(['holder', 'candidate', 'route']);
+  });
+
+
+  it('promotes focused preparation all the way into Kotlin analyze priority', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    const device = installDevice();
+    let focused = false;
+    const src = 'http://localhost/_capacitor_file_/cache/pages/focus-priority.jpg';
+    const meta = { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:7, sourceLang:'en' };
+
+    const prepared = await prepareTranslation(src, meta, {
+      preAnalyze:true,
+      via:'reader',
+      interactive:false,
+      isInteractive:() => focused = true,
+    });
+
+    expect(prepared.analysis?.regions?.length).toBe(1);
+    expect(device.analyzePriorities()).toEqual(['high']);
+  });
+
 });

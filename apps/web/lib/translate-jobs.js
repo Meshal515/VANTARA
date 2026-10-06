@@ -12,6 +12,7 @@
 
 import {createQueue,prepareTranslation} from './translate.js';
 import { chapterBenchmark } from './translate-perf.js';
+import { runtimeCapacity } from './runtime-capacity.js';
 
 const JOBS_KEY = 'vantara.translate.jobs';
 const PACE_KEY = 'vantara.translate.pace';
@@ -196,7 +197,7 @@ export function createJobRunner(deps) {
   // convoy القديم (عدة CTD/BubbleSeg تنتظر نفس CPU).
   const concurrency=JOB_CONCURRENCY;
   const lookahead=1;
-  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0});
+  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0,capacity:deps.capacity ?? runtimeCapacity,lane:'job'});
   const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
   const readerQuiet = deps.readerQuiet ?? (async () => {});
@@ -252,11 +253,11 @@ export function createJobRunner(deps) {
       prepare:async()=> {
         if(job.status!=='running') return {bypass:true,paused:true};
         const image=await engine.pageImage(ch.row.sourceId,list[p]);
-        return {...await preparePage(image.src,meta),image};
+        return {...await preparePage(image.src,meta,{via:'job',interactive:false}),image};
       },
-      run:async({prepared,waitedMs,prepareMs})=> {
+      run:async({prepared,waitedMs,prepareMs,queuedAt})=> {
         if(prepared?.paused || job.status!=='running') return {error:'paused'};
-        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,prepared,route:prepared.route,via:'job'},prepared.image.src,meta);
+        return translatePage({sync,imagePath:prepared.image.path,prepareMs,waitMs:waitedMs,prepared,route:prepared.route,routeQueuedAt:queuedAt,via:'job'},prepared.image.src,meta);
       },
     });
     if (result?.error) return result.error;

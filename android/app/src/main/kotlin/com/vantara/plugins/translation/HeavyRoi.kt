@@ -2,10 +2,12 @@ package com.vantara.plugins.translation
 
 /** Bounded-context crops for the independent ROI-only experiment. */
 object HeavyRoi {
+    const val DEFAULT_PAD = 64
+
     fun bubbleNeeded(texts:List<Detection>,trusted:List<Bubble>):List<Detection> =
         texts.filter {it.label=="text_bubble" && trusted.none {b->b.box.contains(it.box)>=.85f}}
 
-    fun plan(width: Int, height: Int, detections: List<Detection>, holders: List<Detection>, pad: Int = 64): List<Box> {
+    fun plan(width: Int, height: Int, detections: List<Detection>, holders: List<Detection>, pad: Int = DEFAULT_PAD): List<Box> {
         val boxes = ArrayList<Box>()
         for (d in detections) {
             val holder=holders.filter { it.box.contains(d.box)>=0.85f && it.box.w+pad*2<=1024 && it.box.h+pad*2<=1024 }.minByOrNull { it.box.area }

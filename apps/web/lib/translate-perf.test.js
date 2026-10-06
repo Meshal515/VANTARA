@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, stopwatch, summarize } from './translate-perf.js';
+import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, roiRouting, roiServiceDemand, stopwatch, summarize } from './translate-perf.js';
 
 const memory = () => {
   const m = new Map();
@@ -49,7 +49,7 @@ describe('translation performance log (on the phone)', () => {
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {
     const entries = [
       { at: 1000, chapterKey: 'c1', from: 'model', textless: true, total: 400, stages: { analyze: 380 }, native: { analyze: { stages: { detect: 300 } } } },
-      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { encode: 200 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 40, fillChangedPixels: 30, inpaintChangedPixels: 10 } } } },
+      { at: 10000, chapterKey: 'c1', from: 'model', textless: false, total: 9000, stages: { analyze: 5000, luna: 3000 }, native: { render: { stages: { erase: 12, encode: 200 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 40, fillChangedPixels: 20, reconstructChangedPixels: 10, inpaintMaskPixels: 20, inpaintChangedPixels: 10, eraseRegions: 3, lamaInvocations: 1, eraseE0: 0, eraseE1: 1, eraseE2: 1, eraseE3: 1, outsideMaskChanges: 0 } } } },
       { at: 11000, chapterKey: 'c1', from: 'cache', total: 5 },
       { at: 12000, chapterKey: 'c1', from: 'error', error: 'offline', total: 60000, stages: { analyze: 1000, cacheProbe: 59000 } },
       { at: 13000, chapterKey: 'c1', from: 'repair', error: 'busy', total: 45000, stages: { luna: 45000 } },
@@ -70,14 +70,58 @@ describe('translation performance log (on the phone)', () => {
       entries,
       [{ page: 'p1', identical: true, legacy: { stages: { glyphs: 2000 } }, current: { stages: { glyphs: 1000 } } }],
       null,
-      { cleanedRegions: 1, perf: { stages: { erase: 12, 'load:lama': 50 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 45, fillChangedPixels: 35, inpaintChangedPixels: 10 } } },
+      { cleanedRegions: 1, perf: { stages: { erase: 12, 'load:lama': 50 }, counts: { eraseMaskPixels: 100, eraseChangedPixels: 45, fillChangedPixels: 25, reconstructChangedPixels: 10, inpaintMaskPixels: 20, inpaintChangedPixels: 10, outsideMaskChanges: 0 } } },
     );
     expect(report).toContain('بلا نص');
     expect(report).toContain('متطابق');
     expect(report).toContain('التبييض الفعلي');
+    expect(report).toContain('E2 إعادة بناء 10');
+    expect(report).toContain('E3 LaMa 10 (20 بكسل / 20% من القناع)');
+    expect(report).toContain('LaMa calls 1');
+    expect(report).toContain('erase/ROI 0.00 ث');
+    expect(report).toContain('تغيّر خارج القناع 0');
     expect(report).toContain('اختبار التبييض المحلي');
     expect(report).toContain('offline×1');
   });
+
+  it('reports textless route-to-done as a derived latency without adding it to page total', () => {
+    const entry = {
+      at: 1000, chapterKey: 'c', pageIndex: 0, from: 'model', textless: true,
+      total: 420, routeToDoneMs: 330, routeDispatchToDoneMs: 120,
+      stages: { wait: 40, 'prepare.hash': 20, 'prepare.cacheRead': 10, 'prepare.route': 350 },
+      native: { route: { stages: { queue: 15, detect: 250, missingSweep: 60 } } },
+    };
+    const s = summarize([entry]);
+    expect(s.textless.routeToDoneMedian).toBe(330);
+    expect(s.textless.routeDispatchToDoneMedian).toBe(120);
+    expect(s.textless.median).toBe(420);
+    const report = formatReport([entry]);
+    expect(report).toContain('route→done 0.33 ث');
+    expect(report).toContain('dispatch→done 0.12 ث');
+  });
+
+});
+
+
+it('reports split Luna latency, packing budgets and amortized provider demand', () => {
+  const entry={
+    at:10000,chapterKey:'c1',pageIndex:0,from:'model',textless:false,total:9000,
+    stages:{'luna.batchWait':40,'luna.request':310,'luna.provider/network':8000},
+    native:{
+      analyze:{counts:{fastFlatRegions:1}},
+      luna:{pagesPerBatch:4,regionsPerBatch:12,charsPerBatch:800,tokensPerBatch:220,inFlight:3},
+    },
+  };
+  const report=formatReport([entry]);
+  expect(report).toContain('luna.batchWait: 0.04 ث');
+  expect(report).toContain('luna.request: 0.31 ث');
+  expect(report).toContain('luna.provider/network: 8.00 ث');
+  expect(report).toContain('effective provider/page 2.00 ث');
+  expect(report).toContain('regions/batch 12');
+  expect(report).toContain('chars/batch 800');
+  expect(report).toContain('tokens/batch 220');
+  expect(report).toContain('inFlight 3');
+  expect(report).toContain('Luna batchWait 0.04 ث · request 0.31 ث · provider/network 8.00 ث');
 });
 
 describe('engine settings measured on the phone', () => {
@@ -191,4 +235,30 @@ it('reports only the latest run, dedupes retries, and never calls partial pages 
   expect(report).toContain('2 مكتملة');
   expect(report).toContain('0 جزئية');
   expect(report).not.toContain('2 صفحة جديدة ناجحة');
-});
+  });
+
+  it('reports ROI routing percentages and fast rejection reasons with one primary denominator', () => {
+    const entries = [
+      { at: 1000, pageIndex: 0, from: 'model', textless: false, total: 1000, stages: {}, native: { analyze: { counts: { fastRoi: 3, ctdRoi: 1, bubbleRoi: 1, rescueRoi: 0, 'fastReject:background': 1 } } } },
+      { at: 2000, pageIndex: 1, from: 'model', textless: false, total: 1000, stages: {}, native: { analyze: { counts: { fastRoi: 2, ctdRoi: 2, bubbleRoi: 0, rescueRoi: 1, 'fastReject:ocr': 2 } } } },
+    ];
+    expect(roiRouting(entries)).toEqual({
+      primaryRois: 8,
+      fastRoi: 5, ctdRoi: 3, bubbleRoi: 1, rescueRoi: 1,
+      fastPct: 63, ctdPct: 38, bubblePct: 13, rescuePct: 13,
+      rejectionReasons: { background: 1, ocr: 2 },
+    });
+    const report = formatReport(entries);
+    expect(report).toContain('FastROI 63% (5/8)');
+    expect(report).toContain('CTDROI 38% (3/8)');
+    expect(report).toContain('BubbleROI 13% (1/8)');
+    expect(report).toContain('RescueROI 13% (1/8)');
+    expect(report).toContain('رفض Fast: ocr×2 · background×1');
+    expect(roiServiceDemand(roiRouting(entries))).toEqual({
+      totalServiceMs: 16850,
+      meanPrimaryRoiMs: 2106,
+      heavyEquivalentMs: 85600,
+      savedVsHeavyPct: 80,
+    });
+    expect(report).toContain('طلب الخدمة المحلي التقديري 2.11 ث/ROI');
+  });

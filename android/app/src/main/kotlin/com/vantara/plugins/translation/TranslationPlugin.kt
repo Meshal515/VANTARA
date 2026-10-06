@@ -118,7 +118,7 @@ class TranslationPlugin : Plugin() {
     private val http by lazy { OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build() }
     private val store by lazy { ModelStore(context) }
     private val pipeline by lazy { Pipeline(context, store) }
-    /** Detector owner is independent; at most one detector request executes at once. */
+    /** Separate probe pipeline/session; ORT DETECT still shares the global compute lane with HEAVY. */
     private val probePipeline by lazy { Pipeline(context, store,InferenceWork.CONFIRM) }
     // في مجلد الملفات لا الكاش: «تحسين الجهاز» في سامسونج يفرغ الكاش، فتعود الصفحات إنجليزية
     // وتُترجم من جديد. الحجم مسقوف في [Pipeline.publish]
@@ -175,6 +175,7 @@ class TranslationPlugin : Plugin() {
 
     @PluginMethod
     fun routePage(call:PluginCall) {
+        activeRefinement.get()?.cancel()
         val path=call.getString("path") ?: return call.reject("path required")
         scope.launch {
             try {
@@ -188,7 +189,9 @@ class TranslationPlugin : Plugin() {
 
     @PluginMethod
     fun analyzePage(call: PluginCall) {
-        if (high(call)) activeRefinement.get()?.cancel()
+        // Refinement is optional background quality work. Any new translation
+        // stage owns the compute budget first, including staged low-priority pages.
+        activeRefinement.get()?.cancel()
         val path = call.getString("path") ?: return call.reject("path required")
         scope.launch {
             try {
@@ -225,11 +228,9 @@ class TranslationPlugin : Plugin() {
                             .put("inkLight", r.inkLight),
                     )
                 }
-                // صفحة فيها ما يُسأل عنه: نموذج التبييض يُحمَّل الآن في الخلفية (دور منخفض) فيجهز
-                // قبل أن يعود رد Luna، لا حين تنتظره الصفحة
-                if (thumb.isNotEmpty() && !renderPipeline.inpainterReady()) {
-                    scope.launch(Dispatchers.IO) { runCatching { renderPipeline.warmInpainter(Perf()) } }
-                }
+                // Batch 2.5 keeps preparing later pages while Luna waits. Do not
+                // warm LaMa here: model loading would overlap the next RT-DETR/
+                // CTD stage outside JS admission and can erase the scheduler win.
                 call.resolve(
                     JSObject()
                         .put("pageHash", a.pageHash)
@@ -413,6 +414,10 @@ class TranslationPlugin : Plugin() {
         for ((k, v) in perf.counts) counts.put(k, v)
         val mem = android.app.ActivityManager.MemoryInfo()
         (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.getMemoryInfo(mem)
+        val gcCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() }.getOrNull() else null
+        val gcTimeMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.gc-time")?.toLongOrNull() }.getOrNull() else null
+        val blockingGcCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.blocking-gc-count")?.toLongOrNull() }.getOrNull() else null
+        val blockingGcTimeMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) runCatching { android.os.Debug.getRuntimeStat("art.gc.blocking-gc-time")?.toLongOrNull() }.getOrNull() else null
         return JSObject()
             .put("stages", stages)
             .put("counts", counts)
@@ -422,7 +427,16 @@ class TranslationPlugin : Plugin() {
             .put("busyPct", gate.busyPercent())
             .put("laneBusy",JSObject().put("detect",detectGate.busyPercent()).put("analyze",gate.busyPercent()).put("render",renderGate.busyPercent()))
             .put("lowMemory", mem.lowMemory)
+            .put("availMemMb", mem.availMem / (1024 * 1024))
+            .put("totalMemMb", mem.totalMem / (1024 * 1024))
+            .put("lowMemoryThresholdMb", mem.threshold / (1024 * 1024))
             .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
+            .put("heapLimitMb", Runtime.getRuntime().maxMemory() / (1024 * 1024))
+            .put("nativeHeapMb", android.os.Debug.getNativeHeapAllocatedSize() / (1024 * 1024))
+            .put("gcCount", gcCount)
+            .put("gcTimeMs", gcTimeMs)
+            .put("blockingGcCount", blockingGcCount)
+            .put("blockingGcTimeMs", blockingGcTimeMs)
     }
 
     /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */
