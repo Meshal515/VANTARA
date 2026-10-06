@@ -673,7 +673,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, capacity: runtimeCapacity.compactTelemetry(), ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
