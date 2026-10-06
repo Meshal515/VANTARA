@@ -16,10 +16,10 @@ import { chapterBenchmark } from './translate-perf.js';
 const JOBS_KEY = 'vantara.translate.jobs';
 const PACE_KEY = 'vantara.translate.pace';
 /**
- * صفحات تُترجم معًا: الرؤية على الجوال واحدة تلو الأخرى، وLuna (~١٣ ث) تتداخل معها؛
- * أربع تُبقي المعالج مشغولًا بتحليل التالية ما دامت السابقات تنتظر Luna.
+ * صفحة واحدة فقط لكل عمل. تشغيل 4 صفحات معًا كان يكدّس CTD/BubbleSeg خلف
+ * نفس قفل ONNX ويحوّل ثواني الاستدلال إلى دقائق انتظار.
  */
-export const JOB_CONCURRENCY = 4;
+export const JOB_CONCURRENCY = 1;
 /** أخطاء لا تُحل بالانتظار: توقف الطابور وتنتظرك. */
 export const BLOCKING = new Set(['translation_locked', 'models_missing', 'device_only', 'translation_not_configured', 'weekly_limit', 'monthly_budget', 'no_credit', 'storage_failed']);
 /** أخطاء عابرة: تُعاد بعد مهلة. */
@@ -192,9 +192,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export function createJobRunner(deps) {
   const { sync, engine, translatePage, native } = deps;
-  const concurrency=Math.min(24,Math.max(1,deps.concurrency ?? JOB_CONCURRENCY));
-  const lookahead=Math.min(48,Math.max(concurrency,deps.lookahead ?? concurrency));
-  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:24});
+  // ثابت عمدًا: كل عمل يترجم صفحة واحدة ثم التي بعدها. لا override يعيد
+  // convoy القديم (عدة CTD/BubbleSeg تنتظر نفس CPU).
+  const concurrency=JOB_CONCURRENCY;
+  const lookahead=1;
+  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0});
   const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
   const readerQuiet = deps.readerQuiet ?? (async () => {});

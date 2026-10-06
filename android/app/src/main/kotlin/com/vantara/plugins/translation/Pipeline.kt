@@ -643,8 +643,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // are explicitly ignored. OCR confirmation keeps line art out of rescue.
         val globalResidual=ArrayList<Box>()
         perf.time("residualGlobal") {
-            val ignored=regions.filter { it.id in leave }.map { Detection(ResidualLatin.inspectionBox(it),1f,"text_free") }
-            val candidates=MissingTextSweep.candidates(img,ignored,48)
+            // لا تعِد OCR على النص الذي صار Region معروفًا أصلًا. نبحث فقط عن
+            // سطر خارج الصناديق المعروفة؛ التداخل الجزئي يبقى مرشحًا في MissingTextSweep.
+            val known = regions.map { r ->
+                Detection(r.box, 1f, if (r.kind == "free") "text_free" else "text_bubble")
+            } + regions.filter { it.id in leave }.map {
+                Detection(ResidualLatin.inspectionBox(it), 1f, "text_free")
+            }
+            val candidates=MissingTextSweep.candidates(img,known,48)
             perf.count("residualCandidates",candidates.size)
             if(candidates.isNotEmpty()) {
                 val reader=ocr(perf)

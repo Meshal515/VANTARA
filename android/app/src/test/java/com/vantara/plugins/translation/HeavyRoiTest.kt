@@ -13,6 +13,16 @@ class HeavyRoiTest {
         val dets=listOf(Detection(Box(0,0,50,50),.9f,"text_free"),Detection(Box(60,60,110,110),.9f,"text_free"))
         assertEquals(listOf(Box(0,0,174,174)),HeavyRoi.plan(200,200,dets,emptyList()))
     }
+    @Test fun `nearby fixed-size ROIs coalesce to avoid duplicate 1024 inference`() {
+        val dets=listOf(
+            Detection(Box(100,100,140,140),.9f,"text_free"),
+            Detection(Box(310,100,350,140),.9f,"text_free"),
+        )
+        val plan=HeavyRoi.plan(600,400,dets,emptyList())
+        assertEquals(1,plan.size)
+        assertTrue(plan.single().contains(dets[0].box)>.99f)
+        assertTrue(plan.single().contains(dets[1].box)>.99f)
+    }
     @Test fun `free art text needs no bubble inference but unresolved speech does`() {
         val free=Detection(Box(50,60,100,80),.9f,"text_free")
         val speech=free.copy(label="text_bubble")

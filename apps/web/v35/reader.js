@@ -395,7 +395,8 @@ export function openSmartReader(deps, ctx) {
     seg.furthest = start;
     enterSegment(seg);
     // فصلٌ يحتاج ترجمة: ننتظر أقل جاهز يكفي، أو «اقرأ الآن»
-    tl.openGate(seg, start);
+    // الترجمة ثابتة من أول صفحة حتى لو دخل القارئ في المنتصف.
+    tl.openGate(seg, 0);
     if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);

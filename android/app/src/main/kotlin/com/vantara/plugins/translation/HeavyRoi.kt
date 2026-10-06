@@ -12,11 +12,18 @@ object HeavyRoi {
             val b=(holder?.box ?: d.box).union(d.box)
             var crop=Box(maxOf(0,b.x1-pad),maxOf(0,b.y1-pad),minOf(width,b.x2+pad),minOf(height,b.y2+pad))
             if(crop.w<=0 || crop.h<=0) continue
-            // Coalesce intersecting context crops instead of running the same pixels repeatedly.
+            // Coalesce intersecting *or nearby* context crops. Both heavy models resize
+            // every ROI to 1024² anyway, so two small crops 40px apart cost two full
+            // inferences for almost the same context. Merging is quality-safe: it only
+            // adds context and never drops a detection.
             var i=0
             while(i<boxes.size) {
-                val union=boxes[i].union(crop)
-                if(boxes[i].iou(crop)>0f && union.w<=1024 && union.h<=1024) { crop=union;boxes.removeAt(i);i=0 } else i++
+                val existing=boxes[i]
+                val union=existing.union(crop)
+                val dx=maxOf(0,maxOf(existing.x1,crop.x1)-minOf(existing.x2,crop.x2))
+                val dy=maxOf(0,maxOf(existing.y1,crop.y1)-minOf(existing.y2,crop.y2))
+                val near=dx<=96 && dy<=96
+                if(near && union.w<=1024 && union.h<=1024) { crop=union;boxes.removeAt(i);i=0 } else i++
             }
             boxes.add(crop)
         }

@@ -52,9 +52,9 @@ const store = {
   },
 };
 
-// أربع صفحات في الطريق معًا: صفحتك وثلاث أمامها. على الجوال المعالج لصفحة واحدة في كل
-// مرة، والدور للأقرب من صفحتك الآن (`focusPage`)، وLuna تترجم الباقي في الوقت نفسه
-const queue = createQueue({ concurrency: 4, prepareConcurrency: 1, maxPrepared: 8 });
+// مسار واحد واضح: يبدأ من أول صفحة في الفصل ويتقدم بالترتيب.
+// هذا يمنع 4 صفحات قارئ من التزاحم على نماذج CTD/BubbleSeg في الوقت نفسه.
+const queue = createQueue({ concurrency: 1, prepareConcurrency: 1, maxPrepared: 2, bypassConcurrency: 0 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -248,7 +248,7 @@ export function createReaderTranslation(deps) {
     updateGate();
   }
 
-  /** موضعك: يعيد ترتيب الطابور (الحالي 0، التالي 1، السابق 2). */
+  /** موضعك لا يغيّر ترتيب صفحات الفصل: دائمًا 1 ثم 2 ثم 3... */
   function focus(seg, index, segs) {
     currentSegs = segs;
     currentSeg = seg;
@@ -257,8 +257,9 @@ export function createReaderTranslation(deps) {
     if (segs[i + 1]) ranks[keyOf(segs[i + 1].row)] = 1;
     if (segs[i - 1]) ranks[keyOf(segs[i - 1].row)] = 2;
     ranks[keyOf(seg.row)] = 0;
-    queue.focus(keyOf(seg.row), index, ranks, { pageCount: seg.slots.length });
-    focusPage(keyOf(seg.row), index, seg.slots.length);
+    // ثبّت focus native/JS على أول صفحة: ترتيب التنفيذ لا يقفز مع التمرير.
+    queue.focus(keyOf(seg.row), 0, ranks, { pageCount: seg.slots.length });
+    focusPage(keyOf(seg.row), 0, seg.slots.length);
     if (!isOn()) return;
     if (!ensureModelsOrOffer()) return;
     startLesson();
@@ -412,7 +413,7 @@ export function createReaderTranslation(deps) {
       disabledReason = null;
       for (const s of currentSegs) if (s.tl) s.tl.queued = false;
       focus(currentSeg, currentSeg.current ?? 0, currentSegs);
-      openGate(currentSeg, currentSeg.current ?? 0);
+      openGate(currentSeg, 0);
     } else {
       closeGate();
     }
