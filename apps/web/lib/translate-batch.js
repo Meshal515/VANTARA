@@ -88,7 +88,10 @@ export function createTextBatcher(request, {
   let cooldownUntil = 0, good = 0, throttles = 0;
 
   const abortError = () => Object.assign(new Error('Translation cancelled'), { name: 'AbortError' });
-  const identity = page => JSON.stringify([page.seriesRef, page.chapterKey, page.sourceLang ?? 'en', page.speed ?? 'quality']);
+  const SOURCE_LANGS = new Set(['en','ja','ko','zh','auto']);
+  const semanticLang = page => SOURCE_LANGS.has(page?.sourceLang) ? page.sourceLang : 'auto';
+  const semanticMode = page => page?.speed === 'fast' ? 'fast' : 'quality';
+  const identity = page => JSON.stringify([page.seriesRef, page.chapterKey, semanticLang(page), semanticMode(page)]);
   const finish = (entry, result, error = null) => {
     entry.signal?.removeEventListener('abort', entry.abort);
     if (entry.cancelled) return;
