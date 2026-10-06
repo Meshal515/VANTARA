@@ -55,10 +55,9 @@ const store = {
 // Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
 // Run slots therefore cover Luna + Render only; a slow Luna response no longer
 // blocks CTD/BubbleSeg from preparing later pages. Android retains 24 immutable
-// analysis snapshots. createQueue may grant the focused page +2 preparation
-// headroom, so 12 run + (10 prepared + 2 focus burst) = 24 at the hard handoff
-// capacity. Render must never re-analyze a page evicted by JS over-admission.
-const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 10, bypassConcurrency: 8 });
+// analysis snapshots. maxPrepared stays a policy ceiling; maxInFlight is the
+// independent hard handoff bound across running + ready/preparing analyzed pages.
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
