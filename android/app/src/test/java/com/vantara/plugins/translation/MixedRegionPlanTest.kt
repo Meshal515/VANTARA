@@ -40,6 +40,18 @@ class MixedRegionPlanTest {
         val plan = Regions.fastFlatPlan(img,img.gray(),"hash",texts)
         assertTrue(plan.fast.isEmpty()); assertEquals(texts,plan.heavy)
     }
+    @Test fun `missed second line inside flat holder rejects fast before residual repair is needed`() {
+        val (img,dets) = fixture()
+        // The pixels still contain both lines, but RT-DETR owns only the upper line.
+        // Fast must not accept a partial holder and rely on a later residual repair.
+        val holder=dets[0]
+        val upper=Detection(Box(64,62,132,93),.95f,"text_bubble")
+        val plan=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(holder,upper))
+        assertTrue(plan.fast.isEmpty())
+        assertEquals(listOf(upper),plan.heavy)
+        assertEquals("glyph_coverage",plan.rejectionReasons[upper])
+    }
+
     @Test fun `one holder with split or duplicated text yields one stable region`() {
         val (img,dets) = fixture()
         val split = listOf(dets[0],Detection(Box(64,62,132,93),.95f,"text_bubble"),Detection(Box(64,98,132,126),.95f,"text_bubble"))
