@@ -553,7 +553,11 @@ const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair'
   ? false
   : deps.isInteractive?.() ?? deps.interactive ?? true;
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
-const nativeStagePriorityOf = (deps, foreground) => interactiveOf(deps) ? foreground : 'background';
+const nativeStagePriorityOf = (deps, foreground) => {
+  if (deps.via === 'job' || deps.via === 'repair') return 'background';
+  if (interactiveOf(deps)) return foreground;
+  return foreground === 'render' ? 'aheadRender' : 'aheadAnalyze';
+};
 
 /**
  * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
@@ -561,7 +565,13 @@ const nativeStagePriorityOf = (deps, foreground) => interactiveOf(deps) ? foregr
  * جاهزًا وهو ينتظر الدور يتقدم على Analyze/Route المعلّقة حتى تظهر الصفحة
  * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
  */
-const NATIVE_STAGE_RANK = Object.freeze({ render: 0, analyze: 1, route: 2, background: 3 });
+const NATIVE_STAGE_RANK = Object.freeze({
+  render: 0,
+  analyze: 1,
+  aheadRender: 2,
+  aheadAnalyze: 3,
+  background: 4,
+});
 let nativeStageRunning = false;
 let nativeStageSeq = 0;
 const nativeStageQueue = [];
