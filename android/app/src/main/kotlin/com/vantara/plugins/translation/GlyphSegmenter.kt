@@ -12,6 +12,10 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
     private val session: OrtSession = Ort.open(file, engine = engine)
     private val size = 1024
 
+    /** Actual model tensor demand per CTD forward pass. */
+    val inputPixelsPerTile: Int
+        get() = size * size
+
     /** عدد المربعات في آخر صفحة (للقياس). */
     var tiles = 0
         private set
