@@ -97,5 +97,6 @@ describe('batch 1 reader pipeline', () => {
     expect(bypassConcurrency).toBeGreaterThanOrEqual(1);
     expect(body).toMatch(/capacity:\s*runtimeCapacity/);
     expect(body).toMatch(/lane:\s*['"]reader['"]/);
+    expect(numberOf('maxInFlight')).toBe(24);
   });
 });
