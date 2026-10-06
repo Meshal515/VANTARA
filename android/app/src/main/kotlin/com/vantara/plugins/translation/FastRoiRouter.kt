@@ -36,8 +36,6 @@ object FastRoiRouter {
     const val BACKGROUND_SPREAD_MAX = 7.5f
     const val MASK_CONFIDENCE_MIN = 0.84f
     const val GLYPH_COVERAGE_MIN = 0.25f // same retention floor used by refineGlyph
-    const val MAJORITY_OVERLAP = 0.50f
-    const val MAJORITY_EDGE_DENSITY = 0.50f
 
     // S23 Ultra observed service-demand midpoints: Fast ~0.13s, CTD 1.7–3.8s,
     // BubbleSeg 5.2–10.7s. Bubble/Rescue include upstream CTD work; coverage rescue
@@ -56,14 +54,12 @@ object FastRoiRouter {
         if (f.glyphCoverage < GLYPH_COVERAGE_MIN) reasons += "glyph_coverage"
         if (f.backgroundSpread > BACKGROUND_SPREAD_MAX) reasons += "background"
         if (f.maskConfidence < MASK_CONFIDENCE_MIN) reasons += "mask"
-        if (f.edgeDensity >= MAJORITY_EDGE_DENSITY) reasons += "edges"
         if (f.speechLike && f.holderContainment < HOLDER_CONTAINMENT_MIN) reasons += "holder"
-        if (f.overlap >= MAJORITY_OVERLAP) reasons += "overlap"
 
         val lane = when {
-            "detector" in reasons || "overlap" in reasons -> Lane.RESCUE
+            "detector" in reasons -> Lane.RESCUE
             reasons.isEmpty() -> Lane.FAST
-            f.speechLike && reasons.any { it == "holder" || it == "background" || it == "mask" || it == "edges" } -> Lane.BUBBLE
+            f.speechLike && reasons.any { it == "holder" || it == "background" || it == "mask" } -> Lane.BUBBLE
             else -> Lane.CTD
         }
         val cost = when (lane) {
@@ -92,7 +88,7 @@ object FastRoiRouter {
             down(f.backgroundSpread, BACKGROUND_SPREAD_MAX),
             (1f - f.edgeDensity).coerceIn(0f, 1f),
             up(f.maskConfidence, MASK_CONFIDENCE_MIN),
-            down(f.overlap, MAJORITY_OVERLAP),
+            (1f - f.overlap).coerceIn(0f, 1f),
             up(f.glyphCoverage, GLYPH_COVERAGE_MIN),
         )
         return (terms.sum() / terms.size).coerceIn(0f, 1f)
