@@ -80,7 +80,6 @@ describe('batch 2 staged translation pipeline', () => {
   });
 
   it('ahead reader pages batch Luna instead of paying one direct model request each', async () => {
-    vi.useFakeTimers();
     installDevice();
     globalThis.localStorage = memory();
     globalThis.fetch = async src => {
@@ -124,7 +123,9 @@ describe('batch 2 staged translation pipeline', () => {
       meta(2),
     );
 
-    await vi.advanceTimersByTimeAsync(250);
+    await vi.waitFor(() => {
+      expect(calls.filter(c => c.path === '/v1/translate/text')).toHaveLength(2);
+    }, { timeout: 1_000, interval: 10 });
     await Promise.all([one, two]);
 
     const modelDirect = calls.filter(c => c.path === '/v1/translate/text' && c.body.image?.data);
