@@ -340,6 +340,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         return out
     }
 
+    private fun bubbleMaskPixels(bubble:Bubble):Int {
+        val x0=maxOf(0,bubble.box.x1);val y0=maxOf(0,bubble.box.y1)
+        val x1=minOf(bubble.mask.width,bubble.box.x2);val y1=minOf(bubble.mask.height,bubble.box.y2)
+        var n=0
+        for(y in y0 until y1) for(x in x0 until x1) if(bubble.mask[x,y].toInt()!=0) n++
+        return n
+    }
+
     /** No ground truth at runtime: text-box mask coverage is a stable quality proxy. */
     private fun bubbleCoveragePermille(bubbles:List<Bubble>,box:Box):Int {
         var best=0
@@ -420,11 +428,11 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             val neural=segmentBubbleRescue(hash,img,bubbleCrops,perf)
             val calls=(perf.counts["bubbleInvocations"] ?: 0)-beforeInvocations
             perf.count("bubbleTiles",calls)
-            perf.count("bubbleNeuralMaskPixels",neural.sumOf {it.mask.count()})
+            perf.count("bubbleNeuralMaskPixels",neural.sumOf {bubbleMaskPixels(it)})
             trusted+neural.filter {b->trusted.none {it.box.iou(b.box)>.5f}}
         }
         perf.count("bubbles",bubbleList.size)
-        perf.count("bubbleMaskPixels",bubbleList.sumOf {it.mask.count()})
+        perf.count("bubbleMaskPixels",bubbleList.sumOf {bubbleMaskPixels(it)})
         for(d in speechCandidates) {
             val coverage=bubbleCoveragePermille(bubbleList,d.box)
             perf.count("bubbleCoverageSamples")
