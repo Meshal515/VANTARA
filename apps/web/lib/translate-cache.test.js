@@ -52,8 +52,8 @@ describe('pages saved before the cache rename come back without translating agai
     const res = await translatePage(noTranslate, 'file://p', {});
     // No device/server in this test, so the only acceptable fallback is the
     // original page path rather than the mixed cached rendering.
-    expect(res.error).toBe('device_only');
-    expect(res.image).toBeUndefined();
+    expect(res).toMatchObject({ from:'device', translated:0, incomplete:true });
+    expect(res.image).toBeNull();
   });
 
   it('never exposes an incomplete cached rendering even after its retry budget is exhausted', async () => {
