@@ -12,7 +12,8 @@ Hold the highest sustainable pipeline throughput for a full chapter without ther
 
 - Android thermal status.
 - Java heap used / max heap.
-- Android `MemoryInfo.lowMemory`, available RAM, and total RAM.
+- Android `MemoryInfo.lowMemory`, available/total RAM, and the OS low-memory threshold.
+- Java heap plus native-heap telemetry (native heap is observed, not given an uncalibrated hard cap).
 - ART GC cumulative counters and blocking-GC deltas.
 - Luna latency EWMA and network in-flight count.
 - Native analyze wait EWMA.
@@ -46,7 +47,7 @@ When Android exposes max heap:
 
 Fallbacks when max heap is unavailable are 160 MB soft and 220 MB hard.
 
-Heap is not interpreted alone. The controller also reacts to `lowMemory`, RAM headroom, heap slope and blocking-GC churn. There is intentionally no forced `System.gc()`.
+Heap is not interpreted alone. The controller also reacts before `lowMemory` flips: available RAM at <=1.5x Android's own low-memory threshold enters Warm, and <=1.15x enters Hot. Total-RAM percentages are only a fallback when the OS threshold is unavailable. Native heap is recorded so the physical S23 run can expose ONNX/model/tensor spikes without inventing an unsafe universal cap. There is intentionally no forced `System.gc()`.
 
 ### Slow Luna policy
 
