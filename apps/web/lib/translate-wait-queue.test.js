@@ -89,13 +89,12 @@ describe('wait/queue admission invariants', () => {
     const plugin = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../../../android/app/src/main/kotlin/com/vantara/plugins/translation/TranslationPlugin.kt', import.meta.url), 'utf8'));
 
-    const q = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(reader);
+    const q = /createQueue\(\{[^}]*maxInFlight:\s*(\d+)[^}]*\}\)/.exec(reader);
     const nativeCap = /snapshots\s*=\s*AnalysisHandoff<Pipeline\.Analysis>\((\d+)\)/.exec(plugin);
 
     expect(q).not.toBeNull();
     expect(nativeCap).not.toBeNull();
-    // createQueue allows at most +2 focused preparation headroom.
-    expect(Number(q[1]) + Number(q[3]) + 2).toBeLessThanOrEqual(Number(nativeCap[1]));
+    expect(Number(q[1])).toBeLessThanOrEqual(Number(nativeCap[1]));
   });
 
   it('prints outer wait phases without adding them to page totals a second time', () => {
