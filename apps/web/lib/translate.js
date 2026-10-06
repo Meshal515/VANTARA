@@ -24,6 +24,7 @@ import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePag
 import { createTextBatcher } from './translate-batch.js';
 import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
+import { runtimeCapacity } from './runtime-capacity.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
 export const MAX_UPLOAD_EDGE = 4096;
@@ -110,7 +111,7 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2, capacity = null, lane = 'generic' } = {}) {
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
@@ -121,6 +122,23 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
   const ranks = new Map();
   const listeners = new Set();
   const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
+  const dynamicLimits = () => {
+    const ready = [...jobs.values()].filter(j => j.ready && !j.started).length;
+    const queued = [...jobs.values()].filter(j => !j.started).length;
+    const focusedWaiting = [...jobs.values()].some(j => !j.started && isFocused(j));
+    const requested = capacity?.queueLimits?.({
+      lane, running, preparing, bypassRunning, focusedBurstRunning, ready, queued, focusedWaiting,
+    }) ?? {};
+    const cap = (value, base) => Number.isFinite(Number(value))
+      ? Math.max(0, Math.min(base, Math.floor(Number(value))))
+      : base;
+    return {
+      concurrency: cap(requested.concurrency, concurrency),
+      prepareConcurrency: cap(requested.prepareConcurrency, prepareConcurrency),
+      maxPrepared: cap(requested.maxPrepared, maxPrepared),
+      bypassConcurrency: cap(requested.bypassConcurrency, bypassConcurrency),
+    };
+  };
   const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + 3;
 
   // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
@@ -159,23 +177,24 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       });
   };
   const pump = () => {
-    while (bypassRunning < bypassConcurrency) {
+    const caps = dynamicLimits();
+    while (bypassRunning < caps.bypassConcurrency) {
       const job = next(j => j.ready && j.prepared?.bypass);
       if (!job) break;
       start(job,true);
     }
     while (true) {
-      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || bypassConcurrency === 0)));
+      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || caps.bypassConcurrency === 0)));
       if (!job) break;
-      const normalSlot = running < concurrency;
+      const normalSlot = running < caps.concurrency;
       // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
       // بتحويل 8 slots إلى عشرات الأعمال المعلقة في Luna/Native.
       const activeFocusedBurst = [...jobs.values()].filter(j => j.started && j.burst && isFocused(j)).length;
       // If focus moves while the previous visible page is still waiting on Luna,
       // the new visible page may take one more bounded burst slot. Hard cap:
       // normal concurrency + two focus bursts, never unbounded scroll backlog.
-      const burstSlot = concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
-        running + focusedBurstRunning < concurrency + 2;
+      const burstSlot = caps.concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
+        running + focusedBurstRunning < caps.concurrency + 2;
       if (!normalSlot && !burstSlot) break;
       start(job, false, !normalSlot);
     }
@@ -189,23 +208,27 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       const near = isNearForward(job);
       const preparingFocused = [...jobs.values()].filter(j => j.preparing && isFocused(j)).length;
       const preparingNear = [...jobs.values()].filter(j => j.preparing && isNearForward(j)).length;
-      const prepBlocked = focused
-        ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
-        : near
-          ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
-          : preparing >= prepareConcurrency;
-      const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
+      const prepBlocked = capacity
+        ? preparing >= caps.prepareConcurrency
+        : focused
+          ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
+          : near
+            ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
+            : preparing >= prepareConcurrency;
+      const preparedCap = capacity ? caps.maxPrepared : maxPrepared + (focused ? 2 : near ? 1 : 0);
       if (prepBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
       const preparedAt=Date.now();
       Promise.resolve().then(() => job.prepare()).then(prepared => {
         if (jobs.get(job.key) !== job) return;
         job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
-        if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
+        const currentCaps = dynamicLimits();
+        if (prepared?.bypass && bypassRunning < currentCaps.bypassConcurrency) start(job, true);
       }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
         .finally(() => { preparing--; job.preparing = false; pump(); });
     }
   };
+  capacity?.subscribe?.(() => queueMicrotask(pump));
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
     add({ key, chapterKey, index, run, prepare }) {
@@ -497,7 +520,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -612,7 +635,16 @@ export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = 
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
+  if (!textBatchers.has(sync)) {
+    // Admission is around the actual HTTP request, not around each page waiting
+    // inside the batcher. Six network slots therefore mean six batches/requests,
+    // preserving the Luna owner's page/region packing and assembly behavior.
+    const request = (path, body) => runtimeCapacity.withNetworkAdmission(
+      () => sync.translation(path,{method:'POST',body}),
+      { interactive: !Array.isArray(body?.pages), kind:'luna' },
+    );
+    textBatchers.set(sync, createTextBatcher(request,{waitMs:200,maxInFlight:6,adaptive:true}));
+  }
   return textBatchers.get(sync);
 }
 
@@ -638,7 +670,9 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
+  runtimeCapacity.observePerf(route?.perf, 'route');
   if (route?.textless || !options.preAnalyze) {
+    runtimeCapacity.observeStages(prep.stages);
     return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
   }
 
@@ -664,6 +698,8 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
     },
   );
+  runtimeCapacity.observePerf(analysis?.perf, 'analyze');
+  runtimeCapacity.observeStages(prep.stages);
   return {src,hash,cacheLookup,route,analysis,bypass:false,prepareStages:prep.stages};
 }
 
@@ -680,6 +716,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
+  if (!deps.analysis) runtimeCapacity.observePerf(analysis?.perf, 'analyze');
   const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const coverageUnknown = Number(analysis.coverageUnknown ?? analysis.perf?.counts?.coverageUnknown ?? 0);
@@ -699,7 +736,10 @@ async function translateOnDevice(deps, hash, meta, clock) {
     });
     const ask = data => data
       ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
-      : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
+      : runtimeCapacity.withNetworkAdmission(
+          () => deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
+          { interactive: interactiveOf(deps), kind:'probe' },
+        );
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
       res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
@@ -709,18 +749,25 @@ async function translateOnDevice(deps, hash, meta, clock) {
     let incomplete = coverageUnknown > 0 || unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
+    runtimeCapacity.renderReady(1);
     try {
-      rendered = await withNativeTranslationStage(
-        () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
-        {
-          priority: nativeStagePriorityOf(deps, 'render'),
-          onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
-        },
-      );
-      renderCompleted = true;
-    } catch {
-      return { error: 'device_failed', native };
+      try {
+        rendered = await withNativeTranslationStage(
+          () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
+          {
+            priority: nativeStagePriorityOf(deps, 'render'),
+            onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
+          },
+        );
+        renderCompleted = true;
+      } catch {
+        return { error: 'device_failed', native };
+      }
+    } finally {
+      runtimeCapacity.renderReady(-1);
+      runtimeCapacity.observeStages(clock.stages);
     }
+    runtimeCapacity.observePerf(rendered?.perf, 'render');
     native.render = rendered.perf ?? null;
     // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
     // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
