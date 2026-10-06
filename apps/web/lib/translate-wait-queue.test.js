@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createQueue } from './translate.js';
+import { formatReport, summarize } from './translate-perf.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -93,6 +94,28 @@ describe('wait/queue admission invariants', () => {
 
     expect(q).not.toBeNull();
     expect(nativeCap).not.toBeNull();
-    expect(Number(q[1]) + Number(q[3])).toBeLessThanOrEqual(Number(nativeCap[1]));
+    // createQueue allows at most +2 focused preparation headroom.
+    expect(Number(q[1]) + Number(q[3]) + 2).toBeLessThanOrEqual(Number(nativeCap[1]));
+  });
+
+  it('prints outer wait phases without adding them to page totals a second time', () => {
+    const entry = {
+      at: 1_000,
+      runId: 'wait-telemetry',
+      via: 'reader',
+      chapterKey: 'c',
+      pageIndex: 0,
+      hash: 'a'.repeat(64),
+      from: 'model',
+      translated: 1,
+      incomplete: false,
+      textless: false,
+      total: 100,
+      stages: { wait: 90, luna: 10 },
+      queueWait: { admission: 70, prepared: 20 },
+    };
+    expect(summarize([entry]).text.median).toBe(100);
+    const report = formatReport([entry]);
+    expect(report).toContain('تفصيل wait (لا يُجمع مرة ثانية): admission 0.07 ث · prepared→run 0.02 ث');
   });
 });
