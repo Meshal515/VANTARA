@@ -174,6 +174,7 @@ export function summarize(entries) {
       pages: textless.length,
       median: median(textless.map((e) => e.total)),
       routeToDoneMedian: median(textless.map((e) => e.routeToDoneMs).filter(Number.isFinite)),
+      routeDispatchToDoneMedian: median(textless.map((e) => e.routeDispatchToDoneMs).filter(Number.isFinite)),
       stages: stageMeans(textless),
     },
     text: { pages: text.length, median: median(text.map((e) => e.total)), stages: stageMeans(text) },
@@ -257,7 +258,8 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
   for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
     const routeDone = label === 'بلا نص' && g.routeToDoneMedian != null ? ` · route→done ${sec(g.routeToDoneMedian)}` : '';
-    lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}${routeDone}`);
+    const dispatchDone = label === 'بلا نص' && g.routeDispatchToDoneMedian != null ? ` · dispatch→done ${sec(g.routeDispatchToDoneMedian)}` : '';
+    lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}${routeDone}${dispatchDone}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
   }
   if (fresh.some(e => e.native?.route?.stages || e.native?.analyze?.stages)) {
