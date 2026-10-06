@@ -52,14 +52,23 @@ class FastFlatRegionsTest {
 
     @Test
     fun `tight detector holder can pass when pixel evidence proves it safe`() {
-        val img = image()
-        val holder = Detection(Box(35, 30, 185, 145), 0.96f, "bubble")
-        // 150x115 holder / 141x106 text box = ~1.15x. The old geometric
-        // 1.18x area gate rejected this before inspecting the actual flat paper.
-        val text = Detection(Box(40, 35, 181, 141), 0.95f, "text_bubble")
+        val w=700; val h=700
+        val data=ByteArray(w*h*3){90.toByte()}
+        fun paint(x0:Int,y0:Int,x1:Int,y1:Int,v:Int) {
+            for(y in y0 until y1) for(x in x0 until x1) for(c in 0..2) data[(y*w+x)*3+c]=v.toByte()
+        }
+        paint(50,50,650,650,246)
+        for(x in listOf(270,290,312,336,362)) paint(x,300,x+9,338,20)
+        for(x in listOf(282,308,338)) paint(x,365,x+11,403,25)
+        val img=RgbImage(w,h,data)
+        val holder = Detection(Box(50,50,650,650), 0.96f, "bubble")
+        // 600² / 560² = ~1.148x. The old geometric 1.18x area gate rejected
+        // this before inspecting the actual flat paper. Large margins preserve
+        // enough independent background samples for the real safety gate.
+        val text = Detection(Box(70,70,630,630), 0.95f, "text_bubble")
         assertTrue(holder.box.area < text.box.area * 1.18f)
         val plan = Regions.fastFlatPlan(img, img.gray(), "hash", listOf(holder, text))
-        assertEquals(1, plan.fast.size)
+        assertEquals(plan.rejectionReasons.toString(),1, plan.fast.size)
         assertTrue(plan.heavy.isEmpty())
         assertEquals("speech", plan.fast.single().kind)
     }
