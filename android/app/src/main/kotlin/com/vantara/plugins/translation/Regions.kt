@@ -161,10 +161,19 @@ object Regions {
 
             if (holder == null) {
                 if (allowFlatFree && d.label == "text_free") {
-                    val context=Box(maxOf(0,d.box.x1-12),maxOf(0,d.box.y1-12),minOf(img.width,d.box.x2+12),minOf(img.height,d.box.y2+12))
+                    // Use the same 64px context budget as HeavyRoi. Fast is only
+                    // accepted when that whole cheap context contains no meaningful
+                    // unclaimed ink; otherwise CTD owns this ROI.
+                    val pad=HeavyRoi.DEFAULT_PAD
+                    val context=Box(maxOf(0,d.box.x1-pad),maxOf(0,d.box.y1-pad),minOf(img.width,d.box.x2+pad),minOf(img.height,d.box.y2+pad))
                     val flat=fastBubbleEvidence(img,context,d.box)
                     val glyph=flat?.let {fastGlyphEvidence(img,it.mask,d.box,it.color)}
                     if(flat!=null && glyph!=null && glyph.mask.count()>=MIN_GLYPH_PIXELS) {
+                        val coverage=fastHolderGlyphCoverage(img,flat.mask,context,glyph.mask,flat.color)
+                        if(coverage.hasUnclaimed) {
+                            reject(listOf(d),"glyph_coverage")
+                            continue
+                        }
                         val id=stableId(pageHash,d.box,img.width,img.height)
                         val overlap=texts.filter {it != d}.maxOfOrNull {it.box.iou(d.box)} ?: 0f
                         val f=FastRoiRouter.Features(
@@ -175,7 +184,7 @@ object Regions {
                             edgeDensity=flat.edgeDensity,
                             maskConfidence=flat.maskConfidence,
                             overlap=overlap,
-                            glyphCoverage=glyph.coverage,
+                            glyphCoverage=coverage.coverage,
                             speechLike=false,
                         )
                         val verdict=FastRoiRouter.classify(f)
