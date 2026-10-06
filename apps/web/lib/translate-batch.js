@@ -82,6 +82,7 @@ export function createTextBatcher(request, {
   const assemblyMs = Math.max(0, Number(waitMs) || 0);
   const pending = [];
   let active = 0;
+  let directActive = 0;
   let timer = null;
   let window = adaptive ? Math.min(3, maxInFlight) : maxInFlight;
   let cooldownUntil = 0, good = 0, throttles = 0;
@@ -146,7 +147,7 @@ export function createTextBatcher(request, {
 
   async function send(group, budget) {
     active++;
-    const inFlight = active;
+    const inFlight = active + directActive;
     const dispatchedAt = Date.now();
     const began = dispatchedAt;
     try {
@@ -302,7 +303,9 @@ export function createTextBatcher(request, {
             reject(abortError());
           };
           signal?.addEventListener('abort', entry.abort, { once: true });
-          void direct(entry, pageBudget(page), Math.max(1, active + 1), entry.queuedAt);
+          directActive++;
+          void direct(entry, pageBudget(page), active + directActive, entry.queuedAt)
+            .finally(() => { directActive--; });
         });
       }
 
