@@ -208,7 +208,9 @@ object Regions {
     }
 
     private fun trustedLocalMask(img:RgbImage,holder:Box,owned:List<Detection>,mask:ByteMask):Boolean {
-        if(owned.any {maskCoverage(mask,it.box)<.84f}) return false
+        // Downstream assemble requires >= .85 actual mask coverage. Keep a
+        // margin above that gate so a bypass can never become narration later.
+        if(owned.any {maskCoverage(mask,it.box)<.86f}) return false
         val b=mask.bounds() ?: return false
         val hx0=maxOf(0,holder.x1);val hy0=maxOf(0,holder.y1)
         val hx1=minOf(img.width,holder.x2);val hy1=minOf(img.height,holder.y2)
@@ -235,7 +237,7 @@ object Regions {
         val sx1=minOf(hx1,textBox.x2);val sy1=minOf(hy1,textBox.y2)
         if(sx1<=sx0 || sy1<=sy0) return null
 
-        val blocked=glyphFull.dilate(2)
+        val blocked=glyphFull
         val rs=ArrayList<Int>();val gs=ArrayList<Int>();val bs=ArrayList<Int>()
         val stride=maxOf(1,minOf(sx1-sx0,sy1-sy0)/64)
         for(y in sy0 until sy1 step stride) for(x in sx0 until sx1 step stride) {
@@ -283,7 +285,7 @@ object Regions {
         if(b[0]<=hx0+1 || b[1]<=hy0+1 || b[2]>=hx1-1 || b[3]>=hy1-1) return null
         if((b[2]-b[0])<textBox.w || (b[3]-b[1])<textBox.h) return null
         if(filled.count()<textBox.area*1.15) return null
-        if(maskCoverage(filled,textBox)<.84f) return null
+        if(maskCoverage(filled,textBox)<.86f) return null
 
         // Final paper-uniformity check over the accepted component itself.
         var dev=0.0;var n=0
@@ -306,6 +308,7 @@ object Regions {
         glyphFull:ByteMask?=null,
     ):TrustedHolderPlan {
         val bubbles=ArrayList<Bubble>()
+        val blockedGlyph=glyphFull?.dilate(2)
         var fastColor=0;var flatBox=0;var seeded=0
         for(h in holders) {
             val owned=texts.filter {h.box.contains(it.box)>=.88f}
@@ -318,7 +321,7 @@ object Regions {
                 source=2
             }
             if(mask==null || !trustedLocalMask(img,h.box,owned,mask)) {
-                mask=glyphFull?.let {seededBubbleMask(img,h.box,textBox,it)}
+                mask=blockedGlyph?.let {seededBubbleMask(img,h.box,textBox,it)}
                 source=3
             }
             if(mask==null || !trustedLocalMask(img,h.box,owned,mask)) continue
