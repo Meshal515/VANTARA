@@ -118,7 +118,24 @@ object Regions {
      *
      * null = غير متأكد 100%؛ ارجع للمسار الثقيل بلا أي مخاطرة بالجودة.
      */
-    data class FastFlatPlan(val fast: List<Region>, val heavy: List<Detection>, val sources: Map<String, List<Detection>>)
+    data class FastFlatPlan(
+        val fast: List<Region>,
+        val heavy: List<Detection>,
+        val sources: Map<String, List<Detection>>,
+        val features: Map<String, FastRoiRouter.Features> = emptyMap(),
+        val rejectionReasons: Map<Detection, String> = emptyMap(),
+    )
+
+    internal data class FastBubbleEvidence(
+        val mask: ByteMask,
+        val color: IntArray,
+        val backgroundSpread: Float,
+        val edgeDensity: Float,
+        val maskConfidence: Float,
+    )
+
+    internal data class FastGlyphEvidence(val mask: ByteMask, val coverage: Float)
+    private data class HolderGlyphCoverage(val coverage: Float, val hasUnclaimed: Boolean)
 
     /** Partition independently by holder; retain the exact conservative flat-mask tests. */
     fun fastFlatPlan(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, allowFlatFree:Boolean=false): FastFlatPlan {
@@ -128,36 +145,100 @@ object Regions {
         val heavy = ArrayList<Detection>()
         val out = ArrayList<Region>()
         val sources = LinkedHashMap<String, List<Detection>>()
+        val features = LinkedHashMap<String, FastRoiRouter.Features>()
+        val rejections = LinkedHashMap<Detection, String>()
+
+        fun reject(ds: List<Detection>, reason: String) {
+            heavy.addAll(ds)
+            for (d in ds) rejections.putIfAbsent(d, reason)
+        }
+
         for (d in texts) {
-            val holder = holders.filter { it.box.contains(d.box) >= 0.88f && it.box.area >= d.box.area * 1.18f }
+            // Geometry is only a proposal. The old 1.18x holder-area gate rejected
+            // valid tight RT-DETR boxes before pixel evidence could prove them safe.
+            val holder = holders
+                .filter { it.box.contains(d.box) >= FastRoiRouter.HOLDER_CONTAINMENT_MIN }
                 .maxByOrNull { it.box.contains(d.box) * 2f + it.score }
-            if(holder==null) {
-                val context=Box(maxOf(0,d.box.x1-12),maxOf(0,d.box.y1-12),minOf(img.width,d.box.x2+12),minOf(img.height,d.box.y2+12))
-                val flat=if(allowFlatFree && d.label=="text_free") fastBubbleMask(img,context,d.box) else null
-                val glyph=flat?.let {fastGlyphMask(img,it.first,d.box,it.second)}
-                val n=glyph?.count() ?: 0
-                if(flat!=null && glyph!=null && n>=MIN_GLYPH_PIXELS) {
-                    val id=stableId(pageHash,d.box,img.width,img.height)
-                    out.add(Region(id,d.box,d.score,"free",Bubble(context,d.score,flat.first),context,glyph,n,fastInkLight(img,glyph,flat.second)))
-                    sources[id]=listOf(d)
-                } else heavy.add(d)
+
+            if (holder == null) {
+                if (allowFlatFree && d.label == "text_free") {
+                    // Use the same 64px context budget as HeavyRoi. Fast is only
+                    // accepted when that whole cheap context contains no meaningful
+                    // unclaimed ink; otherwise CTD owns this ROI.
+                    val pad=HeavyRoi.DEFAULT_PAD
+                    val context=Box(maxOf(0,d.box.x1-pad),maxOf(0,d.box.y1-pad),minOf(img.width,d.box.x2+pad),minOf(img.height,d.box.y2+pad))
+                    val flat=fastBubbleEvidence(img,context,d.box)
+                    val glyph=flat?.let {fastGlyphEvidence(img,it.mask,d.box,it.color)}
+                    if(flat!=null && glyph!=null && glyph.mask.count()>=MIN_GLYPH_PIXELS) {
+                        val coverage=fastHolderGlyphCoverage(img,flat.mask,context,glyph.mask,flat.color)
+                        if(coverage.hasUnclaimed) {
+                            reject(listOf(d),"glyph_coverage")
+                            continue
+                        }
+                        val id=stableId(pageHash,d.box,img.width,img.height)
+                        val overlap=texts.filter {it != d}.maxOfOrNull {it.box.iou(d.box)} ?: 0f
+                        val f=FastRoiRouter.Features(
+                            detectorConfidence=d.score,
+                            ocrConfidence=1f,
+                            holderContainment=1f,
+                            backgroundSpread=flat.backgroundSpread,
+                            edgeDensity=flat.edgeDensity,
+                            maskConfidence=flat.maskConfidence,
+                            overlap=overlap,
+                            glyphCoverage=coverage.coverage,
+                            speechLike=false,
+                        )
+                        val verdict=FastRoiRouter.classify(f)
+                        if(verdict.lane==FastRoiRouter.Lane.FAST) {
+                            out.add(Region(id,d.box,d.score,"free",Bubble(context,d.score,flat.mask),context,glyph.mask,glyph.mask.count(),fastInkLight(img,glyph.mask,flat.color)))
+                            sources[id]=listOf(d)
+                            features[id]=f
+                        } else reject(listOf(d),verdict.rejectionReasons.firstOrNull() ?: "router")
+                    } else reject(listOf(d),if(flat==null) "background" else "glyph_mask")
+                } else reject(listOf(d),if(d.label=="text_bubble") "holder" else "free_not_enabled")
             } else grouped.getOrPut(holder) { ArrayList() }.add(d)
         }
+
         for ((holder, group) in grouped) {
-            // Free text within a holder can be an SFX/art overlap: do not partially erase that holder.
-            if (group.any { it.label == "text_free" }) { heavy.addAll(group); continue }
+            // Mixed semantic ownership remains conservative: never partially erase
+            // a holder when RT-DETR says another item inside may be free/SFX art.
+            if (group.any { it.label == "text_free" }) { reject(group,"mixed_holder_label"); continue }
             val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
-            val flat = fastBubbleMask(img, holder.box, textBox)
-            val glyph = flat?.let { fastGlyphMask(img, it.first, textBox, it.second) }
-            val n = glyph?.count() ?: 0
-            val gb = glyph?.bounds()
-            if (flat == null || glyph == null || n < MIN_GLYPH_PIXELS || gb == null) { heavy.addAll(group); continue }
+            val flat = fastBubbleEvidence(img, holder.box, textBox)
+            if(flat==null) {reject(group,"background");continue}
+            val glyph = fastGlyphEvidence(img, flat.mask, textBox, flat.color)
+            if(glyph==null || glyph.mask.count()<MIN_GLYPH_PIXELS) {reject(group,"glyph_mask");continue}
+            // Cheap whole-holder audit: Fast cannot rely on post-render residual
+            // repair for a line that RT-DETR omitted. The component definition is
+            // the same conservative one used by unclaimedGlyphDetections below.
+            val holderCoverage=fastHolderGlyphCoverage(img,flat.mask,holder.box,glyph.mask,flat.color)
+            if(holderCoverage.hasUnclaimed) {reject(group,"glyph_coverage");continue}
+
+            val containment=group.minOf {holder.box.contains(it.box)}
+            val overlap=holders.filter {it != holder}.maxOfOrNull {holder.box.iou(it.box)} ?: 0f
+            val f=FastRoiRouter.Features(
+                detectorConfidence=group.minOf {it.score},
+                ocrConfidence=1f,
+                holderContainment=containment,
+                backgroundSpread=flat.backgroundSpread,
+                edgeDensity=flat.edgeDensity,
+                maskConfidence=flat.maskConfidence,
+                overlap=overlap,
+                glyphCoverage=holderCoverage.coverage,
+                speechLike=true,
+            )
+            val verdict=FastRoiRouter.classify(f)
+            if(verdict.lane!=FastRoiRouter.Lane.FAST) {reject(group,verdict.rejectionReasons.firstOrNull() ?: "router");continue}
+
+            val gb = glyph.mask.bounds()
+            if (gb == null) { reject(group,"glyph_mask"); continue }
             val id = stableId(pageHash, textBox, img.width, img.height)
             out.add(Region(id, textBox.union(Box(gb[0], gb[1], gb[2], gb[3])), group.maxOf { it.score }, "speech",
-                Bubble(holder.box, holder.score, flat.first), holder.box, glyph, n, fastInkLight(img, glyph, flat.second)))
+                Bubble(holder.box, holder.score, flat.mask), holder.box, glyph.mask, glyph.mask.count(), fastInkLight(img, glyph.mask, flat.color)))
             sources[id] = group
+            features[id] = f
         }
-        return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources)
+        return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources, features, rejections)
     }
 
     data class TrustedHolderPlan(
@@ -346,16 +427,17 @@ object Regions {
      * قناع فقاعة من لونها نفسه. يرجع القناع + لون الخلفية إن كانت مسطحة حقًا.
      * الشروط متعمدة المحافظة: فشل يعيد فقاعة واحدة فقط لـCTD/BubbleSeg.
      */
-    internal fun fastBubbleMask(img: RgbImage, bubbleBox: Box, textBox: Box): Pair<ByteMask, IntArray>? {
+    internal fun fastBubbleMask(img: RgbImage, bubbleBox: Box, textBox: Box): Pair<ByteMask, IntArray>? =
+        fastBubbleEvidence(img,bubbleBox,textBox)?.let {it.mask to it.color}
+
+    private fun fastBubbleEvidence(img: RgbImage, bubbleBox: Box, textBox: Box): FastBubbleEvidence? {
         val x0 = maxOf(0, bubbleBox.x1); val y0 = maxOf(0, bubbleBox.y1)
         val x1 = minOf(img.width, bubbleBox.x2); val y1 = minOf(img.height, bubbleBox.y2)
         if (x1 - x0 < 24 || y1 - y0 < 24) return null
 
-        // وسيط كامل الصندوق مقاوم للنص الأسود والإطار؛ داخل فقاعة حقيقية الورق هو الأغلبية.
         val rs = ArrayList<Int>(); val gs = ArrayList<Int>(); val bs = ArrayList<Int>()
         val stride = maxOf(1, minOf(x1 - x0, y1 - y0) / 96)
         for (y in y0 until y1 step stride) for (x in x0 until x1 step stride) {
-            // لا نأخذ مركز النص حتى لا يلوّث اللون إذا كان الخط ضخمًا.
             if (x in (textBox.x1 - 3)..(textBox.x2 + 3) && y in (textBox.y1 - 3)..(textBox.y2 + 3)) continue
             rs.add(img.r(x, y)); gs.add(img.g(x, y)); bs.add(img.b(x, y))
         }
@@ -375,24 +457,25 @@ object Regions {
             )
             if (d <= 20) { close[x, y] = 1; closeN++ }
         }
-        // اللون الواحد يجب أن يكوّن جزءًا كبيرًا من الصندوق؛ أقل من ذلك = رسم/تدرج.
         if (closeN < total * 0.42) return null
 
         val paper = close.close(1).largestComponent().filledHoles()
         val pb = paper.bounds() ?: return null
         if (pb[2] - pb[0] < textBox.w || pb[3] - pb[1] < textBox.h) return null
 
-        // صندوق النص نفسه يجب أن يقع داخل الورق تقريبًا كله.
         var inside = 0; var tn = 0
         for (y in maxOf(0, textBox.y1) until minOf(img.height, textBox.y2)) for (x in maxOf(0, textBox.x1) until minOf(img.width, textBox.x2)) {
             tn++
             if (paper[x, y].toInt() != 0) inside++
         }
-        if (tn == 0 || inside < tn * 0.84) return null
+        if (tn == 0) return null
+        val maskConfidence=inside.toFloat()/tn
+        if (maskConfidence < FastRoiRouter.MASK_CONFIDENCE_MIN) return null
 
-        // تحقق تجانس حقيقي بعيدًا عن النص؛ ليس مجرد نسبة مساحة.
         var spread = 0.0; var sn = 0
+        var edge = 0.0; var en = 0
         val pw = paper.scanWindow() ?: return null
+        fun luma(x:Int,y:Int)= (299*img.r(x,y)+587*img.g(x,y)+114*img.b(x,y))/1000
         for (y in pw[1] until pw[3] step 2) for (x in pw[0] until pw[2] step 2) {
             if (paper[x, y].toInt() == 0) continue
             if (x in (textBox.x1 - 8)..(textBox.x2 + 8) && y in (textBox.y1 - 8)..(textBox.y2 + 8)) continue
@@ -402,13 +485,22 @@ object Regions {
                     Math.abs(img.b(x, y) - color[2])
                 ) / 3.0
             sn++
+            val here=luma(x,y)
+            if(x+1<pw[2] && paper[x+1,y].toInt()!=0) {edge+=Math.abs(luma(x+1,y)-here)/255.0;en++}
+            if(y+1<pw[3] && paper[x,y+1].toInt()!=0) {edge+=Math.abs(luma(x,y+1)-here)/255.0;en++}
         }
-        if (sn < 40 || spread / sn > 7.5) return null
-        return paper to color
+        if (sn < 40) return null
+        val backgroundSpread=(spread/sn).toFloat()
+        if (backgroundSpread > FastRoiRouter.BACKGROUND_SPREAD_MAX) return null
+        val edgeDensity=if(en==0) 1f else (edge/en).toFloat()
+        return FastBubbleEvidence(paper,color,backgroundSpread,edgeDensity,maskConfidence)
     }
 
     /** حبر النص داخل الفقاعة المسطحة، بلا شبكة عصبية. */
-    internal fun fastGlyphMask(img: RgbImage, bubble: ByteMask, box: Box, bg: IntArray): ByteMask? {
+    internal fun fastGlyphMask(img: RgbImage, bubble: ByteMask, box: Box, bg: IntArray): ByteMask? =
+        fastGlyphEvidence(img,bubble,box,bg)?.mask
+
+    private fun fastGlyphEvidence(img: RgbImage, bubble: ByteMask, box: Box, bg: IntArray): FastGlyphEvidence? {
         val inner = bubble.erode(2)
         val pad = maxOf(5, minOf(14, box.h / 5))
         val x0 = maxOf(0, box.x1 - pad); val y0 = maxOf(0, box.y1 - pad)
@@ -422,16 +514,13 @@ object Regions {
                 Math.abs(img.g(x, y) - bg[1]),
                 Math.abs(img.b(x, y) - bg[2]),
             )
-            // 18 يمسك anti-aliasing لكنه لا يأكل ضجيج JPEG الخفيف.
             if (d >= 18) { ink[x, y] = 1; candidate++ }
         }
         if (candidate < MIN_GLYPH_PIXELS) return null
 
-        // ارفض إن كان «الحبر» يملأ أغلب الصندوق: هذا رسم داخل الفقاعة لا نص بسيط.
         val area = maxOf(1, (x1 - x0) * (y1 - y0))
         if (candidate > area * 0.38) return null
 
-        // نقاط JPEG الصغيرة ليست حروفًا. أبق المكوّنات ذات حجم حقيقي.
         val (labels, comps) = ink.components(true)
         val keep = ByteMask(img.width, img.height)
         var kept = 0
@@ -445,7 +534,42 @@ object Regions {
             }
         }
         if (kept < MIN_GLYPH_PIXELS) return null
-        return keep.close(1)
+        return FastGlyphEvidence(keep.close(1), kept.toFloat()/candidate)
+    }
+
+    private fun fastHolderGlyphCoverage(
+        img: RgbImage,
+        bubble: ByteMask,
+        holder: Box,
+        claimed: ByteMask,
+        bg: IntArray,
+    ): HolderGlyphCoverage {
+        val inner=bubble.erode(2)
+        val owned=claimed.dilate(2)
+        val stray=ByteMask(img.width,img.height)
+        var candidate=0
+        var covered=0
+        for(y in maxOf(0,holder.y1) until minOf(img.height,holder.y2)) {
+            for(x in maxOf(0,holder.x1) until minOf(img.width,holder.x2)) {
+                if(inner[x,y].toInt()==0) continue
+                val d=maxOf(
+                    Math.abs(img.r(x,y)-bg[0]),
+                    Math.abs(img.g(x,y)-bg[1]),
+                    Math.abs(img.b(x,y)-bg[2]),
+                )
+                if(d<18) continue
+                candidate++
+                if(owned[x,y].toInt()!=0) covered++ else stray[x,y]=1
+            }
+        }
+        val (_,components)=stray.components(true)
+        val meaningful=components.any { comp ->
+            val w=comp.x1-comp.x0
+            val h=comp.y1-comp.y0
+            comp.area>=10 && w>=2 && h>=3 && w<=holder.w && h<=maxOf(64,holder.h/2)
+        }
+        val coverage=if(candidate==0) 1f else covered.toFloat()/candidate
+        return HolderGlyphCoverage(coverage,meaningful)
     }
 
     private fun fastInkLight(img: RgbImage, glyph: ByteMask, bg: IntArray): Boolean {
