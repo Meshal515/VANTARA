@@ -52,12 +52,11 @@ const store = {
   },
 };
 
-// ثلاث صفحات end-to-end كحد أقصى: إذا انتظرت صفحة Luna تستطيع التالية
-// دخول Route/Analyze. بوابة Native في translate.js تبقي RT-DETR/CTD/BubbleSeg/
-// Render واحدًا فقط في اللحظة نفسها، لذلك هذا تداخل مراحل لا تداخل نماذج.
-// bypass واحد يسمح لصفحة بلا نص/محفوظة أن تنتهي بلا الوقوف خلف طلبات Luna.
-// أربع prepared فقط تحصر الذاكرة والـbackpressure.
-const queue = createQueue({ concurrency: 3, prepareConcurrency: 3, maxPrepared: 4, bypassConcurrency: 1 });
+// خمس صفحات end-to-end كحد أقصى: الحالية latency-sensitive، والأربع التالية
+// تستطيع الوصول إلى Luna batch بينما Heavy Native يبقى واحدًا فقط. Route/Detect
+// له بوابة Kotlin مستقلة، لذلك نسمح بتحضير أوسع لاكتشاف textless مبكرًا.
+// prepared هنا metadata/paths فقط؛ 12 حد backpressure وليس 12 صورة مفكوكة.
+const queue = createQueue({ concurrency: 5, prepareConcurrency: 4, maxPrepared: 12, bypassConcurrency: 2 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
