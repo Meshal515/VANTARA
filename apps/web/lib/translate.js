@@ -635,7 +635,16 @@ export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = 
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher((path,body) => sync.translation(path,{method:'POST',body}),{waitMs:200,maxInFlight:6,adaptive:true}));
+  if (!textBatchers.has(sync)) {
+    // Admission is around the actual HTTP request, not around each page waiting
+    // inside the batcher. Six network slots therefore mean six batches/requests,
+    // preserving the Luna owner's page/region packing and assembly behavior.
+    const request = (path, body) => runtimeCapacity.withNetworkAdmission(
+      () => sync.translation(path,{method:'POST',body}),
+      { interactive: !Array.isArray(body?.pages), kind:'luna' },
+    );
+    textBatchers.set(sync, createTextBatcher(request,{waitMs:200,maxInFlight:6,adaptive:true}));
+  }
   return textBatchers.get(sync);
 }
 
@@ -725,12 +734,12 @@ async function translateOnDevice(deps, hash, meta, clock) {
       image: { mediaType: 'image/jpeg', data, width: analysis.width, height: analysis.height },
       regions: readable.map(r => ({ id: r.id, source: r.source, kind: r.kind, box: r.box })),
     });
-    const ask = data => runtimeCapacity.withNetworkAdmission(
-      () => data
-        ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
-        : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
-      { interactive: interactiveOf(deps), kind: data ? 'luna' : 'probe' },
-    );
+    const ask = data => data
+      ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
+      : runtimeCapacity.withNetworkAdmission(
+          () => deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
+          { interactive: interactiveOf(deps), kind:'probe' },
+        );
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
       res = await clock.time('luna', () => ask(analysis.thumbnail ?? ''));
