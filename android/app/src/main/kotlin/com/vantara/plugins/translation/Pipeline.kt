@@ -46,6 +46,9 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private val analyses = lru<Analysis>(24)
     private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
+    // Exact page-hash + crop reuse only. Cached masks are clipped to each
+    // bubble box, so retry/residual reuse does not retain full-page ByteMasks.
+    private val bubbleRois = lru<List<CachedBubble>>(48)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
     class Snapshot(
@@ -64,6 +67,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     )
 
     class BubbleSnapshot(val box: Box, val score: Float, val mask: PackedMask)
+
+    private class CachedBubble(
+        val box:Box,
+        val score:Float,
+        val pageWidth:Int,
+        val pageHeight:Int,
+        val data:ByteArray,
+    )
 
     class Analysis(val pageHash: String, val width: Int, val height: Int, val regions: List<Snapshot>, val bubbles: List<BubbleSnapshot>, val rescue:List<Box> = emptyList(),val revision:Int=0)
 
@@ -128,6 +139,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         synchronized(lamaLock) { inpainter?.close(); inpainter = null }
         detector = null; glyphs = null; bubbles = null; ocr = null
         detections.clear()
+        bubbleRois.clear()
         analyses.clear()
         images.clear()
     }
@@ -299,6 +311,82 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
+    private fun cacheBubble(b:Bubble):CachedBubble {
+        val x0=maxOf(0,b.box.x1);val y0=maxOf(0,b.box.y1)
+        val x1=minOf(b.mask.width,b.box.x2);val y1=minOf(b.mask.height,b.box.y2)
+        val w=maxOf(0,x1-x0);val h=maxOf(0,y1-y0)
+        val data=ByteArray(w*h)
+        for(y in 0 until h) System.arraycopy(b.mask.data,(y0+y)*b.mask.width+x0,data,y*w,w)
+        return CachedBubble(Box(x0,y0,x1,y1),b.score,b.mask.width,b.mask.height,data)
+    }
+
+    private fun thawBubble(c:CachedBubble):Bubble {
+        val mask=ByteMask(c.pageWidth,c.pageHeight)
+        val w=c.box.w;val h=c.box.h
+        for(y in 0 until h) System.arraycopy(c.data,y*w,mask.data,(c.box.y1+y)*c.pageWidth+c.box.x1,w)
+        return Bubble(c.box,c.score,mask)
+    }
+
+    private fun bubbleRoiKey(hash:String,box:Box):String =
+        "$hash:${box.x1},${box.y1},${box.x2},${box.y2}"
+
+    /**
+     * Exact BubbleSeg ROI reuse. Cache hits never load the 109 MB model and never
+     * alter masks: the same packed output is thawed at the same page coordinates.
+     */
+    private fun segmentBubbleRescue(hash:String,img:RgbImage,crops:List<Box>,perf:Perf):List<Bubble> {
+        val out=ArrayList<Bubble>()
+        var segmenter:BubbleSegmenter?=null
+        var invocations=0
+        var hits=0
+        var inferenceRoiPixels=0
+        for(box in crops) {
+            val key=bubbleRoiKey(hash,box)
+            val cached=bubbleRois[key]
+            if(cached!=null) {
+                hits++
+                out.addAll(cached.map {thawBubble(it)})
+                continue
+            }
+            val bs=segmenter ?: bubbles(perf).also {segmenter=it}
+            val found=perf.time("bubbles") {bs.segmentRoi(img,listOf(box))}
+            invocations += bs.tiles
+            inferenceRoiPixels += box.area
+            bubbleRois[key]=found.map {cacheBubble(it)}
+            out.addAll(found)
+        }
+        perf.count("bubbleInvocations",invocations)
+        perf.count("bubbleCacheHits",hits)
+        perf.count("bubbleInferenceRoiPixels",inferenceRoiPixels)
+        perf.count("bubbleInputPixels",invocations*BubbleSegmenter.INPUT_SIZE*BubbleSegmenter.INPUT_SIZE)
+        if(invocations>0) perf.count("bubblePagesInvoked")
+        if(invocations==0 && hits>0) perf.count("bubbleCacheOnly")
+        return out
+    }
+
+    private fun bubbleMaskPixels(bubble:Bubble):Int {
+        val x0=maxOf(0,bubble.box.x1);val y0=maxOf(0,bubble.box.y1)
+        val x1=minOf(bubble.mask.width,bubble.box.x2);val y1=minOf(bubble.mask.height,bubble.box.y2)
+        var n=0
+        for(y in y0 until y1) for(x in x0 until x1) if(bubble.mask[x,y].toInt()!=0) n++
+        return n
+    }
+
+    /** No ground truth at runtime: text-box mask coverage is a stable quality proxy. */
+    private fun bubbleCoveragePermille(bubbles:List<Bubble>,box:Box):Int {
+        var best=0
+        for(b in bubbles) {
+            var inside=0;var total=0
+            for(y in maxOf(0,box.y1) until minOf(b.mask.height,box.y2))
+                for(x in maxOf(0,box.x1) until minOf(b.mask.width,box.x2)) {
+                    total++
+                    if(b.mask[x,y].toInt()!=0) inside++
+                }
+            if(total>0) best=maxOf(best,(inside*1000L/total).toInt())
+        }
+        return best
+    }
+
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean, forceHeavy:Boolean=false): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
@@ -342,18 +430,39 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
             m
         }
-        val trusted=perf.time("localBubbles") {Regions.trustedHolderMasks(img,texts,holders)}
+        val speechCandidates=texts.filter {it.label=="text_bubble"}
+        perf.count("bubbleCandidateRegions",speechCandidates.size)
+        val trustedPlan=perf.time("localBubbles") {Regions.trustedHolderPlan(img,texts,holders,glyphFull)}
+        val trusted=trustedPlan.bubbles
+        perf.count("bubbleTrustedFast",trustedPlan.fastColor)
+        perf.count("bubbleTrustedBox",trustedPlan.flatBox)
+        perf.count("bubbleTrustedSeeded",trustedPlan.seeded)
         val uncertain=HeavyRoi.bubbleNeeded(texts,trusted)
+        perf.count("bubbleRescueRegions",uncertain.size)
+        perf.count("bubbleBypassRegions",maxOf(0,speechCandidates.size-uncertain.size))
         val bubbleList=if(uncertain.isEmpty()) {
             perf.count("bubbleModelSkipped")
+            perf.count("bubbleInvocations",0)
             trusted
         } else {
-            val bs=bubbles(perf)
-            val neural=perf.time("bubbles") {bs.segmentRoi(img,HeavyRoi.plan(img.width,img.height,uncertain,holders))}
-            perf.count("bubbleTiles",bs.tiles)
+            val bubbleCrops=HeavyRoi.plan(img.width,img.height,uncertain,holders)
+            perf.count("bubbleRoiCrops",bubbleCrops.size)
+            perf.count("bubbleRoiPixels",bubbleCrops.sumOf {it.area})
+            val beforeInvocations=perf.counts["bubbleInvocations"] ?: 0
+            val neural=segmentBubbleRescue(hash,img,bubbleCrops,perf)
+            val calls=(perf.counts["bubbleInvocations"] ?: 0)-beforeInvocations
+            perf.count("bubbleTiles",calls)
+            perf.count("bubbleNeuralMaskPixels",neural.sumOf {bubbleMaskPixels(it)})
             trusted+neural.filter {b->trusted.none {it.box.iou(b.box)>.5f}}
         }
         perf.count("bubbles",bubbleList.size)
+        perf.count("bubbleMaskPixels",bubbleList.sumOf {bubbleMaskPixels(it)})
+        for(d in speechCandidates) {
+            val coverage=bubbleCoveragePermille(bubbleList,d.box)
+            perf.count("bubbleCoverageSamples")
+            perf.count("bubbleCoveragePermilleSum",coverage)
+            if(coverage<850) perf.count("bubbleCoverageBelow850")
+        }
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
         // CTD is independent evidence. If it sees a line inside a holder that
         // RT-DETR/MissingSweep did not own, promote it to a synthetic detection;

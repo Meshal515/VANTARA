@@ -160,18 +160,181 @@ object Regions {
         return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources)
     }
 
-    /** BubbleSeg may be skipped when a conservative local holder mask is proven. */
-    fun trustedHolderMasks(img:RgbImage,texts:List<Detection>,holders:List<Detection>):List<Bubble> {
-        return holders.mapNotNull {h->
-            val owned=texts.filter {h.box.contains(it.box)>=.88f}
-            if(owned.isEmpty()) null else {
-                val textBox=owned.map {it.box}.reduce {a,b->a.union(b)}
-                val mask = fastBubbleMask(img,h.box,textBox)?.first
-                    ?: flatBoxMask(img,h.box,textBox)
-                mask?.let {Bubble(h.box,h.score,it)}
-            }
+    data class TrustedHolderPlan(
+        val bubbles: List<Bubble>,
+        val fastColor: Int,
+        val flatBox: Int,
+        val seeded: Int,
+    )
+
+    private fun maskCoverage(mask:ByteMask,box:Box):Float {
+        var inside=0;var total=0
+        for(y in maxOf(0,box.y1) until minOf(mask.height,box.y2)) for(x in maxOf(0,box.x1) until minOf(mask.width,box.x2)) {
+            total++
+            if(mask[x,y].toInt()!=0) inside++
         }
+        return if(total==0) 0f else inside.toFloat()/total
     }
+
+    /**
+     * A mask that reaches the detector holder edge is only trusted if the holder
+     * itself has visible boundary evidence. This rejects a false "bubble" box cut
+     * out of an otherwise identical page background.
+     */
+    private fun holderBoundaryVisible(img:RgbImage,holder:Box):Boolean {
+        val x0=maxOf(0,holder.x1);val y0=maxOf(0,holder.y1)
+        val x1=minOf(img.width,holder.x2);val y1=minOf(img.height,holder.y2)
+        if(x1-x0<12 || y1-y0<12) return false
+        var samples=0;var strong=0
+        fun compare(ax:Int,ay:Int,bx:Int,by:Int) {
+            if(ax !in 0 until img.width || ay !in 0 until img.height || bx !in 0 until img.width || by !in 0 until img.height) return
+            samples++
+            val d=maxOf(
+                Math.abs(img.r(ax,ay)-img.r(bx,by)),
+                Math.abs(img.g(ax,ay)-img.g(bx,by)),
+                Math.abs(img.b(ax,ay)-img.b(bx,by)),
+            )
+            if(d>=12) strong++
+        }
+        val sx=maxOf(2,(x1-x0)/48);val sy=maxOf(2,(y1-y0)/48)
+        for(x in x0 until x1 step sx) {
+            compare(x,y0+1,x,y0-2)
+            compare(x,y1-2,x,y1+1)
+        }
+        for(y in y0 until y1 step sy) {
+            compare(x0+1,y,x0-2,y)
+            compare(x1-2,y,x1+1,y)
+        }
+        return samples>=16 && strong*4>=samples
+    }
+
+    private fun trustedLocalMask(img:RgbImage,holder:Box,owned:List<Detection>,mask:ByteMask):Boolean {
+        // Downstream assemble requires >= .85 actual mask coverage. Keep a
+        // margin above that gate so a bypass can never become narration later.
+        if(owned.any {maskCoverage(mask,it.box)<.86f}) return false
+        val b=mask.bounds() ?: return false
+        val hx0=maxOf(0,holder.x1);val hy0=maxOf(0,holder.y1)
+        val hx1=minOf(img.width,holder.x2);val hy1=minOf(img.height,holder.y2)
+        val touches=b[0]<=hx0+1 || b[1]<=hy0+1 || b[2]>=hx1-1 || b[3]>=hy1-1
+        return !touches || holderBoundaryVisible(img,holder)
+    }
+
+    /**
+     * Conservative deterministic rescue for a loose RT-DETR holder.
+     *
+     * CTD supplies only an exclusion mask for ink while paper color is sampled;
+     * it never decides the holder boundary. A candidate paper component must stay
+     * closed inside the detector holder and cover every detected speech line.
+     */
+    internal fun seededBubbleMask(img:RgbImage,holder:Box,textBox:Box,glyphFull:ByteMask):ByteMask? {
+        val hx0=maxOf(0,holder.x1);val hy0=maxOf(0,holder.y1)
+        val hx1=minOf(img.width,holder.x2);val hy1=minOf(img.height,holder.y2)
+        if(hx1-hx0<24 || hy1-hy0<24 || holder.contains(textBox)<.84f) return null
+        // Sample paper from the detector-owned text extent only. Expanding this
+        // seed window can cross the speech-bubble outline on a tight/low bubble
+        // and make safe flat paper look textured. CTD-excluded ink leaves enough
+        // actual paper here; if it does not, we conservatively fall back to neural rescue.
+        val sx0=maxOf(hx0,textBox.x1);val sy0=maxOf(hy0,textBox.y1)
+        val sx1=minOf(hx1,textBox.x2);val sy1=minOf(hy1,textBox.y2)
+        if(sx1<=sx0 || sy1<=sy0) return null
+
+        val blocked=glyphFull
+        val rs=ArrayList<Int>();val gs=ArrayList<Int>();val bs=ArrayList<Int>()
+        val stride=maxOf(1,minOf(sx1-sx0,sy1-sy0)/64)
+        for(y in sy0 until sy1 step stride) for(x in sx0 until sx1 step stride) {
+            if(blocked[x,y].toInt()!=0) continue
+            rs.add(img.r(x,y));gs.add(img.g(x,y));bs.add(img.b(x,y))
+        }
+        if(rs.size<80) return null
+        rs.sort();gs.sort();bs.sort()
+        val color=intArrayOf(rs[rs.size/2],gs[gs.size/2],bs[bs.size/2])
+        var spread=0.0
+        for(i in rs.indices) spread += (
+            Math.abs(rs[i]-color[0])+Math.abs(gs[i]-color[1])+Math.abs(bs[i]-color[2])
+        )/3.0
+        if(spread/rs.size>8.0) return null
+
+        val close=ByteMask(img.width,img.height)
+        for(y in hy0 until hy1) for(x in hx0 until hx1) {
+            val d=maxOf(
+                Math.abs(img.r(x,y)-color[0]),
+                Math.abs(img.g(x,y)-color[1]),
+                Math.abs(img.b(x,y)-color[2]),
+            )
+            if(d<=20) close[x,y]=1
+        }
+        val closed=close.close(1)
+        val (labels,comps)=closed.components(false)
+        if(comps.isEmpty()) return null
+
+        var bestLabel=0;var bestOverlap=0
+        for(c in comps) {
+            var overlap=0
+            for(y in maxOf(c.y0,textBox.y1) until minOf(c.y1,textBox.y2))
+                for(x in maxOf(c.x0,textBox.x1) until minOf(c.x1,textBox.x2))
+                    if(labels[y*img.width+x]==c.label) overlap++
+            if(overlap>bestOverlap) {bestOverlap=overlap;bestLabel=c.label}
+        }
+        if(bestLabel==0) return null
+        val c=comps.first {it.label==bestLabel}
+        val paper=ByteMask(img.width,img.height)
+        for(y in c.y0 until c.y1) for(x in c.x0 until c.x1) {
+            if(labels[y*img.width+x]==bestLabel) paper[x,y]=1
+        }
+        val filled=paper.filledHoles()
+        val b=filled.bounds() ?: return null
+        if(b[0]<=hx0+1 || b[1]<=hy0+1 || b[2]>=hx1-1 || b[3]>=hy1-1) return null
+        if((b[2]-b[0])<textBox.w || (b[3]-b[1])<textBox.h) return null
+        if(filled.count()<textBox.area*1.15) return null
+        if(maskCoverage(filled,textBox)<.86f) return null
+
+        // Final paper-uniformity check over the accepted component itself.
+        var dev=0.0;var n=0
+        for(y in b[1] until b[3] step 2) for(x in b[0] until b[2] step 2) {
+            if(filled[x,y].toInt()==0 || blocked[x,y].toInt()!=0) continue
+            dev += (
+                Math.abs(img.r(x,y)-color[0])+Math.abs(img.g(x,y)-color[1])+Math.abs(img.b(x,y)-color[2])
+            )/3.0
+            n++
+        }
+        if(n<40 || dev/n>7.5) return null
+        return filled
+    }
+
+    /** BubbleSeg is rescue-only when a conservative local holder mask is proven. */
+    fun trustedHolderPlan(
+        img:RgbImage,
+        texts:List<Detection>,
+        holders:List<Detection>,
+        glyphFull:ByteMask?=null,
+    ):TrustedHolderPlan {
+        val bubbles=ArrayList<Bubble>()
+        val blockedGlyph by lazy {glyphFull?.dilate(2)}
+        var fastColor=0;var flatBox=0;var seeded=0
+        for(h in holders) {
+            val owned=texts.filter {h.box.contains(it.box)>=.88f}
+            if(owned.isEmpty()) continue
+            val textBox=owned.map {it.box}.reduce {a,b->a.union(b)}
+            var mask=fastBubbleMask(img,h.box,textBox)?.first
+            var source=1
+            if(mask==null || !trustedLocalMask(img,h.box,owned,mask)) {
+                mask=flatBoxMask(img,h.box,textBox)
+                source=2
+            }
+            if(mask==null || !trustedLocalMask(img,h.box,owned,mask)) {
+                mask=blockedGlyph?.let {seededBubbleMask(img,h.box,textBox,it)}
+                source=3
+            }
+            if(mask==null || !trustedLocalMask(img,h.box,owned,mask)) continue
+            when(source) {1->fastColor++;2->flatBox++;else->seeded++}
+            bubbles.add(Bubble(h.box,h.score,mask))
+        }
+        return TrustedHolderPlan(bubbles,fastColor,flatBox,seeded)
+    }
+
+    /** Legacy view for callers that only need the masks. */
+    fun trustedHolderMasks(img:RgbImage,texts:List<Detection>,holders:List<Detection>):List<Bubble> =
+        trustedHolderPlan(img,texts,holders).bubbles
 
     /** Legacy all-or-nothing view for existing diagnostics; production consumes the partition. */
     fun fastFlatRegions(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>): List<Region>? {
