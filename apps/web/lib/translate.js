@@ -116,7 +116,10 @@ export function createQueue({
   maxPrepared = 24,
   bypassConcurrency = 2,
   continueConcurrency = 1,
-  maxRouteAhead = Math.max(1, prepareConcurrency),
+  // Keep a second bounded Route window ahead of Heavy. This is what breaks the
+  // old "prepare slots filled with Analyze" convoy without routing the whole
+  // chapter up front.
+  maxRouteAhead = Math.max(1, Math.min(maxPrepared, prepareConcurrency * 2)),
 } = {}) {
   const jobs = new Map();
   let running = 0;
