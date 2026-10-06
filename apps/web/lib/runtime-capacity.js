@@ -29,8 +29,8 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
 
   const heapThresholds = () => {
     const limit = Number(state.heapLimitMb) || 0;
-    const soft = limit > 0 ? clamp(limit * envelope.heap.softRatio, 144, 192) : envelope.heap.softFallbackMb;
-    const hard = limit > 0 ? clamp(limit * envelope.heap.hardRatio, 184, 256) : envelope.heap.hardFallbackMb;
+    const soft = limit > 0 ? Math.max(144, limit * envelope.heap.softRatio) : envelope.heap.softFallbackMb;
+    const hard = limit > 0 ? Math.max(184, limit * envelope.heap.hardRatio) : envelope.heap.hardFallbackMb;
     return { soft, hard };
   };
 
