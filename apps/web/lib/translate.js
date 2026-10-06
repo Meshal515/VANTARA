@@ -380,7 +380,18 @@ async function translatePageNow(deps, src, meta) {
     candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
   if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
-  if(deps.prepareMs) clock.stages.prepare=deps.prepareMs;
+  if (prepared?.prepareStages) {
+    let detailed = 0;
+    for (const [name, value] of Object.entries(prepared.prepareStages)) {
+      if (typeof value !== 'number') continue;
+      clock.stages[name] = value;
+      detailed += value;
+    }
+    const overhead = Math.max(0, (Number(deps.prepareMs) || 0) - detailed);
+    if (overhead > 0) clock.stages['prepare.overhead'] = Math.round(overhead);
+  } else if (deps.prepareMs) {
+    clock.stages.prepare = deps.prepareMs;
+  }
   const hash = prepared?.hash ?? await clock.time('hash', () => pageHashOf(src));
   if(runDeps.route && runDeps.route.pageHash!==hash) runDeps={...runDeps,route:null};
   const found = prepared?.cacheLookup ?? await clock.time('cacheRead', () => readPageCache(hash, meta));
@@ -536,10 +547,17 @@ async function repairInBackground(deps, src, hash, meta, local) {
 }
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
-// القارئ كله مسار أمامي ما دام صار متسلسلًا من أول الصفحة؛ لا نخفض
-// الصفحات 2+ إلى background لمجرد أن المستخدم مرّر بعيدًا عنها.
-const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair' ? false : deps.via === 'reader' ? true : deps.isInteractive?.() ?? deps.interactive ?? true;
+// الصفحة التي أمام القارئ فقط latency-sensitive. الصفحات القادمة تستفيد من
+// batching وتبقى أقل أولوية في Native؛ job/repair دائمًا background.
+const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair'
+  ? false
+  : deps.isInteractive?.() ?? deps.interactive ?? true;
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
+const nativeStagePriorityOf = (deps, foreground) => {
+  if (deps.via === 'job' || deps.via === 'repair') return 'background';
+  if (interactiveOf(deps)) return foreground;
+  return foreground === 'render' ? 'aheadRender' : 'aheadAnalyze';
+};
 
 /**
  * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
@@ -547,10 +565,18 @@ const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
  * جاهزًا وهو ينتظر الدور يتقدم على Analyze/Route المعلّقة حتى تظهر الصفحة
  * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
  */
-const NATIVE_STAGE_RANK = Object.freeze({ render: 0, analyze: 1, route: 2, background: 3 });
+const NATIVE_STAGE_RANK = Object.freeze({
+  render: 0,
+  analyze: 1,
+  aheadRender: 2,
+  aheadAnalyze: 3,
+  background: 4,
+});
 let nativeStageRunning = false;
 let nativeStageSeq = 0;
 const nativeStageQueue = [];
+
+const nativeStageNow = () => globalThis.performance?.now?.() ?? Date.now();
 
 function pumpNativeTranslationStage() {
   if (nativeStageRunning || !nativeStageQueue.length) return;
@@ -562,6 +588,7 @@ function pumpNativeTranslationStage() {
   }
   const [job] = nativeStageQueue.splice(best, 1);
   nativeStageRunning = true;
+  try { job.onWait?.(Math.max(0, Math.round(nativeStageNow() - job.queuedAt))); } catch { /* telemetry only */ }
   Promise.resolve()
     .then(job.fn)
     .then(job.resolve, job.reject)
@@ -571,10 +598,10 @@ function pumpNativeTranslationStage() {
     });
 }
 
-export function withNativeTranslationStage(fn, { priority = 'analyze' } = {}) {
+export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = null } = {}) {
   const rank = NATIVE_STAGE_RANK[priority] ?? NATIVE_STAGE_RANK.analyze;
   return new Promise((resolve, reject) => {
-    nativeStageQueue.push({ fn, resolve, reject, rank, seq: nativeStageSeq++ });
+    nativeStageQueue.push({ fn, resolve, reject, rank, seq: nativeStageSeq++, queuedAt: nativeStageNow(), onWait });
     queueMicrotask(pumpNativeTranslationStage);
   });
 }
@@ -588,20 +615,29 @@ function textBatcher(sync) {
 export async function prepareTranslation(src, meta) {
   const path=filePathFromSrc(src);
   if (!path || !nativeTranslationAvailable()) return {src};
-  const hash=await pageHashOf(src);
-  const cacheLookup=await readPageCache(hash,meta);
+  const prep=stopwatch();
+  const hash=await prep.time('prepare.hash', () => pageHashOf(src));
+  const cacheLookup=await prep.time('prepare.cacheRead', () => readPageCache(hash,meta));
   const cached=cacheLookup.value;
   if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {
-    return {src,hash,cacheLookup,bypass:true};
+    return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
   }
-  const route=await withNativeTranslationStage(() => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}), { priority: 'route' });
-  return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless)};
+  // Kotlin owns a dedicated detectGate. Do not put the 200–300ms route behind
+  // CTD/BubbleSeg/Render in the JS heavy lane; this is the textless express path.
+  const route=await prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}));
+  return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await clock.time('analyze', () => withNativeTranslationStage(() => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash }), { priority: 'analyze' }));
+    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await withNativeTranslationStage(
+      () => clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })),
+      {
+        priority: nativeStagePriorityOf(deps, 'analyze'),
+        onWait: ms => { clock.stages['nativeWait.analyze'] = Math.round((clock.stages['nativeWait.analyze'] ?? 0) + ms); },
+      },
+    );
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
@@ -635,7 +671,13 @@ async function translateOnDevice(deps, hash, meta, clock) {
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
     try {
-      rendered = await clock.time('render', () => withNativeTranslationStage(() => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex }), { priority: 'render' }));
+      rendered = await withNativeTranslationStage(
+        () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
+        {
+          priority: nativeStagePriorityOf(deps, 'render'),
+          onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
+        },
+      );
       renderCompleted = true;
     } catch {
       return { error: 'device_failed', native };
