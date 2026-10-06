@@ -133,13 +133,29 @@ export function createTextBatcher(request, {
     };
   };
 
+  const observeResult = (result, roundTripMs) => {
+    if (!adaptive) return;
+    if (result?.status === 429 || result?.body?.pages?.some(p => p.status === 429)) {
+      window = Math.max(1, Math.floor(window / 2));
+      good = 0;
+      throttles++;
+      cooldownUntil = Date.now() + Math.min(30000, Math.max(1000, Number(result?.body?.retryAfterMs) || 1000 * 2 ** Math.min(4, throttles - 1)));
+    } else if (result?.status === 200 && roundTripMs < 15000 && ++good >= 3) {
+      window = Math.min(maxInFlight, window + 1);
+      good = 0;
+      throttles = 0;
+    }
+  };
+
   async function direct(entry, budget, inFlight, dispatchedAt = Date.now()) {
     const began = Date.now();
     try {
       const result = await request('/v1/translate/text', entry.page);
+      const roundTripMs = Date.now() - began;
+      observeResult(result, roundTripMs);
       finish(entry, withLunaPerf(entry, result, {
         dispatchedAt,
-        requestRoundTripMs: Date.now() - began,
+        requestRoundTripMs: roundTripMs,
         budget,
         inFlight,
         pagesPerBatch: 1,
@@ -162,16 +178,7 @@ export function createTextBatcher(request, {
 
       const result = await request('/v1/translate/text-batch', { pages: group.map(e => e.page) });
       const roundTripMs = Date.now() - began;
-      if (adaptive && (result.status === 429 || result.body?.pages?.some(p => p.status === 429))) {
-        window = Math.max(1, Math.floor(window / 2));
-        good = 0;
-        throttles++;
-        cooldownUntil = Date.now() + Math.min(30000, Math.max(1000, Number(result.body?.retryAfterMs) || 1000 * 2 ** Math.min(4, throttles - 1)));
-      } else if (adaptive && result.status === 200 && roundTripMs < 15000 && ++good >= 3) {
-        window = Math.min(maxInFlight, window + 1);
-        good = 0;
-        throttles = 0;
-      }
+      observeResult(result, roundTripMs);
 
       // Only an unavailable endpoint can safely fall back without risking
       // duplicate paid work. Fallback requests run concurrently rather than
@@ -182,9 +189,11 @@ export function createTextBatcher(request, {
           const oneBegan = Date.now();
           try {
             const one = await request('/v1/translate/text', entry.page);
+            const oneRoundTripMs = Date.now() - oneBegan;
+            observeResult(one, oneRoundTripMs);
             finish(entry, withLunaPerf(entry, one, {
               dispatchedAt,
-              requestRoundTripMs: Date.now() - oneBegan,
+              requestRoundTripMs: oneRoundTripMs,
               budget: oneBudget,
               inFlight,
               pagesPerBatch: 1,
