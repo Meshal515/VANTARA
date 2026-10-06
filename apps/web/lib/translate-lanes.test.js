@@ -58,6 +58,21 @@ it('releases a route preparation slot before deferred heavy continuation so text
 });
 
 
+it('preserves queue admission time through a deferred route continuation', async()=> {
+ const before=Date.now();let queuedAt=null;
+ const q=createQueue({concurrency:1,prepareConcurrency:1,maxPrepared:4});
+ const task=q.add({
+  key:'timed',chapterKey:'c',index:0,
+  prepare:async()=>({bypass:false,continuePrepare:async()=>({bypass:false})}),
+  run:async ctx=>{queuedAt=ctx.queuedAt;return 'ok';},
+ });
+ await expect(task).resolves.toBe('ok');
+ expect(Number.isFinite(queuedAt)).toBe(true);
+ expect(queuedAt).toBeGreaterThanOrEqual(before);
+ expect(queuedAt).toBeLessThanOrEqual(Date.now());
+});
+
+
 it('the newly focused reader page can start before stale full dialogue slots finish',async()=> {
  let releaseA,releaseB;
  const holdA=new Promise(r=>{releaseA=r});
