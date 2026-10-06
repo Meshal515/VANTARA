@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan, withNativeTranslationStage } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, publicationValue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan, withNativeTranslationStage } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -163,6 +163,40 @@ describe('reader exception classification', () => {
   });
 });
 
+
+
+describe('partial publication safety', () => {
+  it('never exposes an incomplete rendered candidate', () => {
+    const value=publicationValue({
+      image:'broken.webp',
+      regions:[{id:'r1'}],
+      translated:3,
+      engine:'gpt-6-luna:t4',
+      incomplete:true,
+    },123);
+    expect(value).toEqual({
+      image:null,
+      regions:[{id:'r1'}],
+      translated:0,
+      engine:'gpt-6-luna:t4',
+      incomplete:true,
+      at:123,
+      tries:0,
+    });
+  });
+  it('publishes a complete rendered candidate unchanged', () => {
+    const value=publicationValue({
+      image:'good.webp',
+      regions:[{id:'r1'}],
+      translated:1,
+      engine:'gpt-6-luna:t4',
+      incomplete:false,
+    },456);
+    expect(value.image).toBe('good.webp');
+    expect(value.translated).toBe(1);
+    expect(value.incomplete).toBe(false);
+  });
+});
 
 describe('local translation cache revision', () => {
   it('refreshes outputs produced before the coverage/residual pipeline revision', () => {
