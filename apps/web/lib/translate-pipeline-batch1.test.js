@@ -57,7 +57,7 @@ describe('batch 1 reader pipeline', () => {
       convertFileSrc: p => `http://localhost/_capacitor_file_${p}`,
       Plugins: {
         Translation: {
-          routePage: async () => ({ pageHash: 'native-hash', width: 800, height: 1200, textless: true, perf: { stages: { detect: 10 }, counts: {} } }),
+          routePage: async () => ({ pageHash: '75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322', width: 800, height: 1200, textless: true, perf: { stages: { detect: 10 }, counts: {} } }),
           analyzePage: async () => {
             analyses += 1;
             return { pageHash: 'native-hash', width: 800, height: 1200, thumbnail: '', regions: [], perf: { stages: {}, counts: {} } };
