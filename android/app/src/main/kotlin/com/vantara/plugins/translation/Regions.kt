@@ -159,13 +159,15 @@ object Regions {
         return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources)
     }
 
-    /** BubbleSeg may be skipped only for the same conservative validated local mask. */
+    /** BubbleSeg may be skipped when a conservative local holder mask is proven. */
     fun trustedHolderMasks(img:RgbImage,texts:List<Detection>,holders:List<Detection>):List<Bubble> {
         return holders.mapNotNull {h->
             val owned=texts.filter {h.box.contains(it.box)>=.88f}
             if(owned.isEmpty()) null else {
                 val textBox=owned.map {it.box}.reduce {a,b->a.union(b)}
-                fastBubbleMask(img,h.box,textBox)?.let {Bubble(h.box,h.score,it.first)}
+                val mask = fastBubbleMask(img,h.box,textBox)?.first
+                    ?: flatBoxMask(img,h.box,textBox)
+                mask?.let {Bubble(h.box,h.score,it)}
             }
         }
     }
