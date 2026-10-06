@@ -68,7 +68,7 @@ describe('adaptive background Luna assembly',()=> {
       {name:'pages',limits:{maxPages:2,maxRegions:99,maxSourceChars:9999,maxSourceTokens:9999},pages:[page(0),page(1)]},
       {name:'regions',limits:{maxPages:6,maxRegions:4,maxSourceChars:9999,maxSourceTokens:9999},pages:[page(0,{regionCount:2}),page(1,{regionCount:2})]},
       {name:'chars',limits:{maxPages:6,maxRegions:99,maxSourceChars:10,maxSourceTokens:9999},pages:[page(0,{source:'12345'}),page(1,{source:'67890'})]},
-      {name:'tokens',limits:{maxPages:6,maxRegions:99,maxSourceChars:9999,maxSourceTokens:4},pages:[page(0,{source:'日本'}),page(1,{source:'語文'})]},
+      {name:'tokens',limits:{maxPages:6,maxRegions:99,maxSourceChars:9999,maxSourceTokens:4},pages:[page(0,{source:'12345678'}),page(1,{source:'ABCDEFGH'})]},
     ];
     for(const test of cases){
       const calls=[];
