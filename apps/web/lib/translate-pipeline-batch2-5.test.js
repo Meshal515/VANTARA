@@ -88,6 +88,37 @@ describe('batch 2.5 stage pipeline', () => {
     expect(device.analyses()).toBe(0);
   });
 
+  it('does not run Route concurrently with an active Heavy native stage', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    installDevice({ textless:true });
+
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    const heavy = withNativeTranslationStage(() => hold, { priority:'analyze' });
+    await tick();
+
+    let routed = false;
+    const original = globalThis.Capacitor.Plugins.Translation.routePage;
+    globalThis.Capacitor.Plugins.Translation.routePage = async args => {
+      routed = true;
+      return original(args);
+    };
+    const preparing = prepareTranslation(
+      'http://localhost/_capacitor_file_/cache/pages/serialized-route.jpg',
+      { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:2, sourceLang:'en' },
+      { preAnalyze:true, via:'reader', interactive:false },
+    );
+    await tick();
+    await tick();
+    expect(routed).toBe(false);
+    release();
+    await heavy;
+    const prepared = await preparing;
+    expect(routed).toBe(true);
+    expect(prepared.bypass).toBe(true);
+  });
+
   it('routes jump ahead of queued ahead-analysis while all native inference remains serialized', async () => {
     let release;
     const hold = new Promise(resolve => { release = resolve; });
