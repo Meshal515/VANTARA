@@ -32,7 +32,7 @@ object FastRoiRouter {
 
     // Existing production safety floors, centralized so tests pin them.
     const val OCR_MIN = 0.62f
-    const val HOLDER_CONTAINMENT_MIN = 0.84f // same pixel-containment floor used by fastBubbleMask
+    const val HOLDER_CONTAINMENT_MIN = 0.88f // existing production holder-containment gate
     const val BACKGROUND_SPREAD_MAX = 7.5f
     const val MASK_CONFIDENCE_MIN = 0.84f
     const val GLYPH_COVERAGE_MIN = 0.25f // same retention floor used by refineGlyph
@@ -40,11 +40,12 @@ object FastRoiRouter {
     const val MAJORITY_EDGE_DENSITY = 0.50f
 
     // S23 Ultra observed service-demand midpoints: Fast ~0.13s, CTD 1.7–3.8s,
-    // BubbleSeg 5.2–10.7s. Bubble/Rescue include upstream CTD work.
+    // BubbleSeg 5.2–10.7s. Bubble/Rescue include upstream CTD work; coverage rescue
+    // must not invent another model call when it reuses already-computed masks.
     private const val FAST_COST_MS = 130
     private const val CTD_COST_MS = 2_750
     private const val BUBBLE_COST_MS = 10_700
-    private const val RESCUE_COST_MS = 13_450
+    private const val RESCUE_COST_MS = 10_700
 
     fun classifyAll(features: List<Features>): List<Verdict> = features.map(::classify)
 
