@@ -11,7 +11,7 @@
  *   cancelDownload()
  *   removeModels()        → { installed: false }
  *   analyzePage({ path, sourceLang, priority })          → { pageHash, width, height, thumbnail, regions: [...], perf }   (كشف + حروف + فقاعات + OCR)
- *   releasePageReservation({ chapterKey, pageIndex })    → يحرر حجز Analyze إن لم يصل Render بعد Luna
+ *   releasePageReservation({ chapterKey, pageIndex })    → توافق مع APK أقدم كان يحجز Native عبر Luna؛ الحالي no-op
  *   renderPage({ path, regions: [{id, arabic}], leave: [id] }) → { path, translated, perf }  (تبييض + عربي؛ ملف WebP بلا فقد باسم جديد)
  *   benchmarkPage({ path, regions }) → { legacy, current, identical }  (القديم مقابل الجديد)
  *   diagnoseCleaning({ path, regions, leave }) → صورة بعد التبييض وقبل العربي + قياس البكسلات
@@ -62,7 +62,7 @@ export async function removeModels() {
 }
 
 /** الهندسة وOCR على الجهاز. `path` مسار ملف الصفحة كما أعطته الإضافة `ExtensionEngine.image`. */
-/** Lightweight router has a separate native owner and never waits for Luna/render. */
+/** Router is lightweight; Batch 2.5 JS admission still serializes it with Heavy to protect RT-DETR. */
 export async function routePage({path, chapterKey=null, pageIndex=null}) {
   const p=plugin();
   if (!p || typeof p.routePage !== 'function') return null;
@@ -77,8 +77,8 @@ export async function analyzePage({ path, sourceLang = 'auto', priority = 'high'
 }
 
 /**
- * إذا انتهى Analyze لكن Luna فشلت أو لم تُنتج نصًا للرسم، نحرر الحجز الأصلي.
- * APK أقدم لا يملك الدالة: تمر بصمت.
+ * توافق رجعي فقط: الـAPK الحالي لا يحتفظ بملكية Native أثناء Luna.
+ * APK أقدم قد يحتاج تحرير حجزه على error/no-plan؛ وإن لم يملك الدالة تمر بصمت.
  */
 export async function releasePageReservation(chapterKey, pageIndex) {
   const p = plugin();
