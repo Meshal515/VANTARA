@@ -134,6 +134,7 @@ object Regions {
     )
 
     internal data class FastGlyphEvidence(val mask: ByteMask, val coverage: Float)
+    private data class HolderGlyphCoverage(val coverage: Float, val hasUnclaimed: Boolean)
 
     /** Partition independently by holder; retain the exact conservative flat-mask tests. */
     fun fastFlatPlan(img: RgbImage, gray: ByteArray, pageHash: String, dets: List<Detection>, allowFlatFree:Boolean=false): FastFlatPlan {
@@ -197,6 +198,11 @@ object Regions {
             if(flat==null) {reject(group,"background");continue}
             val glyph = fastGlyphEvidence(img, flat.mask, textBox, flat.color)
             if(glyph==null || glyph.mask.count()<MIN_GLYPH_PIXELS) {reject(group,"glyph_mask");continue}
+            // Cheap whole-holder audit: Fast cannot rely on post-render residual
+            // repair for a line that RT-DETR omitted. The component definition is
+            // the same conservative one used by unclaimedGlyphDetections below.
+            val holderCoverage=fastHolderGlyphCoverage(img,flat.mask,holder.box,glyph.mask,flat.color)
+            if(holderCoverage.hasUnclaimed) {reject(group,"glyph_coverage");continue}
 
             val containment=group.minOf {holder.box.contains(it.box)}
             val overlap=holders.filter {it != holder}.maxOfOrNull {holder.box.iou(it.box)} ?: 0f
@@ -208,7 +214,7 @@ object Regions {
                 edgeDensity=flat.edgeDensity,
                 maskConfidence=flat.maskConfidence,
                 overlap=overlap,
-                glyphCoverage=glyph.coverage,
+                glyphCoverage=holderCoverage.coverage,
                 speechLike=true,
             )
             val verdict=FastRoiRouter.classify(f)
@@ -356,6 +362,41 @@ object Regions {
         }
         if (kept < MIN_GLYPH_PIXELS) return null
         return FastGlyphEvidence(keep.close(1), kept.toFloat()/candidate)
+    }
+
+    private fun fastHolderGlyphCoverage(
+        img: RgbImage,
+        bubble: ByteMask,
+        holder: Box,
+        claimed: ByteMask,
+        bg: IntArray,
+    ): HolderGlyphCoverage {
+        val inner=bubble.erode(2)
+        val owned=claimed.dilate(2)
+        val stray=ByteMask(img.width,img.height)
+        var candidate=0
+        var covered=0
+        for(y in maxOf(0,holder.y1) until minOf(img.height,holder.y2)) {
+            for(x in maxOf(0,holder.x1) until minOf(img.width,holder.x2)) {
+                if(inner[x,y].toInt()==0) continue
+                val d=maxOf(
+                    Math.abs(img.r(x,y)-bg[0]),
+                    Math.abs(img.g(x,y)-bg[1]),
+                    Math.abs(img.b(x,y)-bg[2]),
+                )
+                if(d<18) continue
+                candidate++
+                if(owned[x,y].toInt()!=0) covered++ else stray[x,y]=1
+            }
+        }
+        val (_,components)=stray.components(true)
+        val meaningful=components.any { comp ->
+            val w=comp.x1-comp.x0
+            val h=comp.y1-comp.y0
+            comp.area>=10 && w>=2 && h>=3 && w<=holder.w && h<=maxOf(64,holder.h/2)
+        }
+        val coverage=if(candidate==0) 1f else covered.toFloat()/candidate
+        return HolderGlyphCoverage(coverage,meaningful)
     }
 
     private fun fastInkLight(img: RgbImage, glyph: ByteMask, bg: IntArray): Boolean {
