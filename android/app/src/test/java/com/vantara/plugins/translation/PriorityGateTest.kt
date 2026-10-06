@@ -107,16 +107,18 @@ class PriorityGateTest {
     }
 
     @Test
-    fun `failed Luna releases reserved reader slot`() = runBlocking {
+    fun `legacy Luna release hook is harmless because no native slot is reserved`() = runBlocking {
         val gate = PriorityGate()
         val p0 = PriorityGate.Page("c", 0)
         val p1 = PriorityGate.Page("c", 1)
         gate.expectRender(p0)
+
         val heavy = async { gate.run(PriorityGate.ANALYZE_READER, Perf(), p1) { "done" } }
-        delay(30)
-        assertFalse(heavy.isCompleted)
+        assertEquals("done", withTimeout(300) { heavy.await() })
+
+        // Older JavaScript may still call this after an error/no-plan path.
         gate.cancelExpectedRender(p0)
-        assertEquals("done", heavy.await())
+        assertFalse(gate.isBusy())
     }
 
     @Test
