@@ -48,6 +48,40 @@ describe('runtime capacity controller', () => {
     expect(c.telemetry().grade).toBe(before - 1);
   });
 
+
+  it('caps network in-flight work without starving a visible request', async () => {
+    let now = 0;
+    const c = createRuntimeCapacityController({ now: () => now });
+    c.observePerf({ thermal: 3, heapMb: 100, heapLimitMb: 512, availMemMb: 3000, totalMemMb: 12000, lowMemory: false, stages: { work: 3000 } }, 'analyze');
+    expect(c.networkLimit()).toBe(3);
+    let active = 0, maxActive = 0;
+    const releases = [];
+    const task = (interactive = false) => c.withNetworkAdmission(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => releases.push(resolve));
+      active -= 1;
+      return { status: 200 };
+    }, { interactive, kind: 'luna' });
+    const work = [task(), task(), task(), task(), task(), task(true)];
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(maxActive).toBeLessThanOrEqual(4);
+    expect(active).toBe(4);
+    while (releases.length) releases.shift()();
+    await Promise.all(work);
+  });
+
+  it('treats sustained native analyze wait as backlog pressure, not Luna latency alone', () => {
+    let now = 0;
+    const c = createRuntimeCapacityController({ now: () => now });
+    c.observeLuna({ latencyMs: 24_000, status: 200 });
+    expect(c.telemetry().grade).toBe(0);
+    c.observeStages({ 'nativeWait.analyze': 6_000 });
+    expect(c.telemetry().grade).toBe(1);
+    expect(c.telemetry().reason).toContain('analyze-wait');
+  });
+
   it('bounds a deterministic 100-page pressure simulation', () => {
     let now = 0;
     const c = createRuntimeCapacityController({ now: () => now });
