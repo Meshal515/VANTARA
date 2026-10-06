@@ -209,6 +209,28 @@ export function roiRouting(entries = []) {
   };
 }
 
+/**
+ * S23 Ultra local service-demand model from the current measured ranges:
+ * Fast 0.13s; CTD midpoint 2.75s; BubbleSeg midpoint 7.95s additional.
+ * Rescue does not add another heavy inference here: coverage rescue reuses the
+ * CTD/Bubble outputs already paid for. This estimates model demand, not wall time.
+ */
+export function roiServiceDemand(routing, costs = { fastMs: 130, ctdMs: 2750, bubbleExtraMs: 7950 }) {
+  const primary = routing?.primaryRois ?? 0;
+  if (!primary) return { totalServiceMs: 0, meanPrimaryRoiMs: 0, heavyEquivalentMs: 0, savedVsHeavyPct: 0 };
+  const totalServiceMs =
+    (routing.fastRoi ?? 0) * costs.fastMs +
+    (routing.ctdRoi ?? 0) * costs.ctdMs +
+    (routing.bubbleRoi ?? 0) * costs.bubbleExtraMs;
+  const heavyEquivalentMs = primary * (costs.ctdMs + costs.bubbleExtraMs);
+  return {
+    totalServiceMs: Math.round(totalServiceMs),
+    meanPrimaryRoiMs: Math.round(totalServiceMs / primary),
+    heavyEquivalentMs: Math.round(heavyEquivalentMs),
+    savedVsHeavyPct: heavyEquivalentMs ? Math.round(100 * (1 - totalServiceMs / heavyEquivalentMs)) : 0,
+  };
+}
+
 /** لا نسمي الصفحة «سريعة» لمجرد أن فيها Region سريع إذا شغلت CTD/BubbleSeg أيضًا. */
 export function localRoute(counts = {}) {
   const fast = (counts.fastFlatRegions ?? 0) > 0 || (counts.fastFlatHit ?? 0) > 0;
@@ -261,6 +283,8 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     lines.push(`ROI routing: FastROI ${roi.fastPct}% (${roi.fastRoi}/${roi.primaryRois}) · CTDROI ${roi.ctdPct}% (${roi.ctdRoi}/${roi.primaryRois}) · BubbleROI ${roi.bubblePct}% (${roi.bubbleRoi}/${roi.primaryRois}) · RescueROI ${roi.rescuePct}% (${roi.rescueRoi}/${roi.primaryRois}).`);
     const rejects = Object.entries(roi.rejectionReasons).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
     if (rejects.length) lines.push(`رفض Fast: ${rejects.map(([k,v]) => `${k}×${v}`).join(' · ')}`);
+    const demand = roiServiceDemand(roi);
+    lines.push(`طلب الخدمة المحلي التقديري ${(demand.meanPrimaryRoiMs / 1000).toFixed(2)} ث/ROI · أقل ${demand.savedVsHeavyPct}% من افتراض CTD+Bubble لكل ROI (نموذج تكلفة S23، وليس wall time).`);
   }
   const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
   if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
