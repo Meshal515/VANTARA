@@ -422,7 +422,10 @@ class TranslationPlugin : Plugin() {
             .put("busyPct", gate.busyPercent())
             .put("laneBusy",JSObject().put("detect",detectGate.busyPercent()).put("analyze",gate.busyPercent()).put("render",renderGate.busyPercent()))
             .put("lowMemory", mem.lowMemory)
+            .put("availMemMb", mem.availMem / (1024 * 1024))
+            .put("totalMemMb", mem.totalMem / (1024 * 1024))
             .put("heapMb", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024))
+            .put("heapLimitMb", Runtime.getRuntime().maxMemory() / (1024 * 1024))
     }
 
     /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */
