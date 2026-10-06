@@ -36,7 +36,7 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   function rawGrade() {
     const { soft, hard } = heapThresholds();
     let grade = 0;
-    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000) grade = 1;
+    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000) grade = 1;
     if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000) grade = 2;
     if (state.thermal >= envelope.thermal.critical || state.lowMemory || state.heapMb >= hard) grade = 3;
     if (heapSlope() >= 6 && state.heapMb >= soft * 0.8) grade = Math.max(grade, 1);
@@ -53,6 +53,7 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     if (heapSlope() >= 6) reasons.push(`heap-rise:${heapSlope().toFixed(1)}MB/sample`);
     if (state.renderReady >= envelope.renderReadySoft) reasons.push(`render-ready:${state.renderReady}`);
     if (state.renderWaitMs >= 2_000) reasons.push(`render-wait:${Math.round(state.renderWaitMs)}ms`);
+    if (state.analyzeWaitMs >= 5_000) reasons.push(`analyze-wait:${Math.round(state.analyzeWaitMs)}ms`);
     if (!reasons.length && state.lunaMs >= 15_000) reasons.push(`luna-slow:${Math.round(state.lunaMs)}ms`);
     return reasons.length ? reasons.join(',') : (grade ? `pressure:${grade}` : 'green');
   }
@@ -224,9 +225,23 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     };
   }
 
+  function compactTelemetry() {
+    const t = telemetry();
+    return {
+      sequence: t.sequence, grade: t.grade, reason: t.reason,
+      thermal: t.thermal, heapMb: t.heapMb, heapLimitMb: t.heapLimitMb,
+      heapSoftMb: t.heapSoftMb, heapHardMb: t.heapHardMb, heapSlopeMb: t.heapSlopeMb,
+      lowMemory: t.lowMemory, availMemMb: t.availMemMb,
+      lunaMs: t.lunaMs, analyzeMs: t.analyzeMs, renderMs: t.renderMs,
+      analyzeWaitMs: t.analyzeWaitMs, renderWaitMs: t.renderWaitMs,
+      renderReady: t.renderReady, networkActive: t.networkActive, networkPending: t.networkPending,
+      limits: t.limits,
+    };
+  }
+
   function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
   emitDecision(true);
-  return { queueLimits, observeQueue, observePerf, observeStages, observeLuna, renderReady, withNetworkAdmission, networkLimit, telemetry, subscribe };
+  return { queueLimits, observeQueue, observePerf, observeStages, observeLuna, renderReady, withNetworkAdmission, networkLimit, telemetry, compactTelemetry, subscribe };
 }
 
 export const runtimeCapacity = createRuntimeCapacityController();
