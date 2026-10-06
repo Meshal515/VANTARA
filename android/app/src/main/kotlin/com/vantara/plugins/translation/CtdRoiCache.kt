@@ -32,9 +32,24 @@ internal class CtdRoiCache(
 
     @Synchronized
     fun put(pageHash:String,crops:List<Box>,mask:ByteMask):Boolean {
-        if(crops.isEmpty() || CtdRoiDemand.enclosingPixels(crops)>maxEnclosingPixels) return false
-        items[key(pageHash,crops)]=PackedMask.of(mask)
-        return true
+        val valid=crops.filter {it.area>0}
+        if(valid.isEmpty()) return false
+        var stored=false
+        if(CtdRoiDemand.enclosingPixels(valid)<=maxEnclosingPixels) {
+            items[key(pageHash,valid)]=PackedMask.of(mask)
+            stored=true
+        }
+        // Non-overlapping ROI are independent forward passes. Retain each exact
+        // thresholded slice so a later one-holder rescue can reuse it even when
+        // the original page had multiple heavy ROI.
+        if(valid.size>1 && CtdRoiDemand.pairwiseDisjoint(valid)) {
+            for(box in valid) {
+                if(box.area>maxEnclosingPixels) continue
+                items[key(pageHash,listOf(box))]=PackedMask.of(mask.clipped(box.x1,box.y1,box.x2,box.y2))
+                stored=true
+            }
+        }
+        return stored
     }
 
     @Synchronized
@@ -87,4 +102,13 @@ internal object CtdRoiDemand {
 
     fun overlapPixels(crops:List<Box>):Int =
         maxOf(0,sourcePixels(crops)-uniquePixels(crops))
+
+    fun pairwiseDisjoint(crops:List<Box>):Boolean {
+        for(i in crops.indices) for(j in i+1 until crops.size) {
+            val a=crops[i];val b=crops[j]
+            if(maxOf(a.x1,b.x1)<minOf(a.x2,b.x2) && maxOf(a.y1,b.y1)<minOf(a.y2,b.y2))
+                return false
+        }
+        return true
+    }
 }
