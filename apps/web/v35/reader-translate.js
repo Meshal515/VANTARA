@@ -52,11 +52,10 @@ const store = {
   },
 };
 
-// خمس صفحات end-to-end كحد أقصى: الحالية latency-sensitive، والأربع التالية
-// تستطيع الوصول إلى Luna batch بينما Heavy Native يبقى واحدًا فقط. Route/Detect
-// له بوابة Kotlin مستقلة، لذلك نسمح بتحضير أوسع لاكتشاف textless مبكرًا.
-// prepared هنا metadata/paths فقط؛ 12 حد backpressure وليس 12 صورة مفكوكة.
-const queue = createQueue({ concurrency: 5, prepareConcurrency: 4, maxPrepared: 12, bypassConcurrency: 2 });
+// Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
+// Run slots therefore cover Luna + Render only; a slow Luna response no longer
+// blocks CTD/BubbleSeg from preparing later pages. Caps stay finite for RAM/network.
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -190,7 +189,10 @@ export function createReaderTranslation(deps) {
     if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
     const chapterKey = keyOf(seg.row);
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
-    const prepare=async()=> { if(stopped || disabledReason || !isOn()) return null; return prepareTranslation(await getImage(seg,index),meta); };
+    const prepare=async()=> {
+      if(stopped || disabledReason || !isOn()) return null;
+      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,via:'reader',interactive:false});
+    };
     const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();

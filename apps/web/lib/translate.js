@@ -380,6 +380,7 @@ async function translatePageNow(deps, src, meta) {
     candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
   if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
+  if (prepared?.analysis) runDeps = { ...runDeps, analysis: prepared.analysis };
   if (prepared?.prepareStages) {
     let detailed = 0;
     for (const [name, value] of Object.entries(prepared.prepareStages)) {
@@ -566,11 +567,14 @@ const nativeStagePriorityOf = (deps, foreground) => {
  * العربية بأسرع ما يمكن بدل أن تعلق خلف عمل استباقي.
  */
 const NATIVE_STAGE_RANK = Object.freeze({
+  // A ready visible page draws first. Then classify new pages cheaply before
+  // committing the single inference owner to another CTD/BubbleSeg pass.
   render: 0,
-  analyze: 1,
-  aheadRender: 2,
-  aheadAnalyze: 3,
-  background: 4,
+  route: 1,
+  analyze: 2,
+  aheadRender: 3,
+  aheadAnalyze: 4,
+  background: 5,
 });
 let nativeStageRunning = false;
 let nativeStageSeq = 0;
@@ -612,7 +616,7 @@ function textBatcher(sync) {
   return textBatchers.get(sync);
 }
 
-export async function prepareTranslation(src, meta) {
+export async function prepareTranslation(src, meta, options = {}) {
   const path=filePathFromSrc(src);
   if (!path || !nativeTranslationAvailable()) return {src};
   const prep=stopwatch();
@@ -622,22 +626,57 @@ export async function prepareTranslation(src, meta) {
   if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {
     return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
   }
-  // Kotlin owns a dedicated detectGate. Do not put the 200–300ms route behind
-  // CTD/BubbleSeg/Render in the JS heavy lane; this is the textless express path.
-  const route=await prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex}));
-  return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
+
+  // Route and Heavy share one JS admission owner again. Batch 2 let Route run
+  // concurrently with CTD/BubbleSeg and device telemetry showed RT-DETR inflate
+  // from ~0.25s to multi-second work. Route has a higher queue rank instead:
+  // it can jump queued analysis, but never overlaps the active inference call.
+  const route=await withNativeTranslationStage(
+    () => prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex})),
+    {
+      priority:'route',
+      onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
+    },
+  );
+  if (route?.textless || !options.preAnalyze) {
+    return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
+  }
+
+  // Stage separation: expensive local analysis finishes in preparation, before
+  // this page consumes a reader run slot. Luna may then wait/batch without
+  // holding the single CTD/BubbleSeg owner.
+  const prepDeps={
+    via: options.via ?? 'reader',
+    interactive: Boolean(options.interactive),
+    isInteractive: options.isInteractive,
+  };
+  const analysis=await withNativeTranslationStage(
+    () => prep.time('prepare.analyze', () => analyzePage({
+      path,
+      sourceLang:meta.sourceLang ?? 'auto',
+      priority:'low',
+      chapterKey:meta.chapterKey,
+      pageIndex:meta.pageIndex,
+      routeHash:route?.pageHash,
+    })),
+    {
+      priority:nativeStagePriorityOf(prepDeps,'analyze'),
+      onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
+    },
+  );
+  return {src,hash,cacheLookup,route,analysis,bypass:false,prepareStages:prep.stages};
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
   let analysis;
   try {
-    analysis = deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await withNativeTranslationStage(
+    analysis = deps.analysis ?? (deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await withNativeTranslationStage(
       () => clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })),
       {
         priority: nativeStagePriorityOf(deps, 'analyze'),
         onWait: ms => { clock.stages['nativeWait.analyze'] = Math.round((clock.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
-    );
+    ));
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
