@@ -35,7 +35,6 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
             val plane=(seg as Array<Array<Array<FloatArray>>>)[0][0]
             return CtdSegMapper.map(plane,nw,nh,crop.width,crop.height)
         }
-        return mapped
     }
 
     /** يرجع احتمال «حرف» لكل بكسل. */
