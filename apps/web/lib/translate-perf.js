@@ -280,23 +280,25 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
       const probe = e.native?.route?.stages ?? {};
       const queue = (a.queue ?? 0) + (r.queue ?? 0) + (probe.queue ?? 0);
       const splitLuna=['luna.batchWait','luna.request','luna.provider/network'].some(k=>Number.isFinite(e.stages?.[k]));
-      const network = splitLuna
-        ? `Luna batchWait ${sec(e.stages?.['luna.batchWait'] ?? 0)} · request ${sec(e.stages?.['luna.request'] ?? 0)} · provider/network ${sec(e.stages?.['luna.provider/network'] ?? 0)}`
-        : e.stages?.luna != null
-          ? `Luna ${sec(e.stages.luna)}`
-          : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
-      const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
       const luna=e.native?.luna ?? {};
-      const telemetry = [
-        Number.isFinite(ac.detectTiles) ? `detectTiles ${ac.detectTiles}` : null,
-        Number.isFinite(ac.heavyRoiCrops) ? `ROI ${ac.heavyRoiCrops}` : null,
-        Number.isFinite(ac.glyphTiles) ? `CTDtiles ${ac.glyphTiles}` : null,
-        Number.isFinite(ac.bubbleTiles) ? `BubbleTiles ${ac.bubbleTiles}` : null,
+      const packing=[
         Number.isFinite(luna.pagesPerBatch) ? `pages/batch ${luna.pagesPerBatch}` : null,
         Number.isFinite(luna.regionsPerBatch) ? `regions/batch ${luna.regionsPerBatch}` : null,
         Number.isFinite(luna.charsPerBatch) ? `chars/batch ${luna.charsPerBatch}` : null,
         Number.isFinite(luna.tokensPerBatch) ? `tokens/batch ${luna.tokensPerBatch}` : null,
         Number.isFinite(luna.inFlight) ? `inFlight ${luna.inFlight}` : null,
+      ].filter(Boolean).join(' · ');
+      const network = splitLuna
+        ? `Luna batchWait ${sec(e.stages?.['luna.batchWait'] ?? 0)} · request ${sec(e.stages?.['luna.request'] ?? 0)} · provider/network ${sec(e.stages?.['luna.provider/network'] ?? 0)}${packing ? ` · ${packing}` : ''}`
+        : e.stages?.luna != null
+          ? `Luna ${sec(e.stages.luna)}`
+          : e.stages?.cacheProbe != null ? `كاش الخادم ${sec(e.stages.cacheProbe)}` : 'بلا نداء لغة';
+      const route = ({ fast: 'سريع بالكامل', mixed: 'مختلط', heavy: 'ثقيل بالكامل', light: 'خفيف' })[localRoute(ac)];
+      const telemetry = [
+        Number.isFinite(ac.detectTiles) ? `detectTiles ${ac.detectTiles}` : null,
+        Number.isFinite(ac.heavyRoiCrops) ? `ROI ${ac.heavyRoiCrops}` : null,
+        Number.isFinite(ac.glyphTiles) ? `CTDtiles ${ac.glyphTiles}` : null,
+        Number.isFinite(ac.bubbleTiles) ? `BubbleTiles ${ac.bubbleTiles}` : null,
         Number.isFinite(e.native?.analyze?.thermal) ? `حرارة ${e.native.analyze.thermal}` : null,
         Number.isFinite(e.native?.analyze?.heapMb) ? `heap ${e.native.analyze.heapMb}MB` : null,
       ].filter(Boolean).join(' · ');
