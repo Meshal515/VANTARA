@@ -302,8 +302,17 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean, forceHeavy:Boolean=false): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
-        // Independent fast regions survive heavy neighbours and failed OCR.
-        val plan = perf.time("fastFlat") { if(forceHeavy) Regions.FastFlatPlan(emptyList(),dets.filter {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE},emptyMap()) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true) }
+        // Independent ROI routing: cheap pixel evidence proposes Fast, then real
+        // PP-OCR is the final veto. A rejected ROI is promoted alone; accepted
+        // neighbours keep their masks and never enter CTD/BubbleSeg.
+        val plan = perf.time("fastFlat") {
+            if(forceHeavy) Regions.FastFlatPlan(
+                emptyList(),
+                dets.filter {it.label.startsWith("text") && it.score>=Regions.MIN_SCORE},
+                emptyMap(),
+            ) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true)
+        }
+        for (reason in plan.rejectionReasons.values) perf.count("fastReject:$reason")
         val fast = ArrayList<Region>()
         val texts = ArrayList(plan.heavy)
         if (plan.fast.isNotEmpty()) {
@@ -313,15 +322,27 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     val res = reader.read(img, r.glyph, r.box)
                     perf.count("ocrLines", res.lines.size)
                     r.ocr = res; r.source = res.text
-                    if (res.text.isEmpty() || res.confidence < maxOf(Regions.MIN_OCR_CONF, 0.62f)) {
+                    val features = plan.features[r.id]
+                    val verdict = features?.let {
+                        FastRoiRouter.classify(it.copy(ocrConfidence=res.confidence))
+                    }
+                    if (res.text.isEmpty() || verdict == null || verdict.lane != FastRoiRouter.Lane.FAST) {
                         texts.addAll(plan.sources.getValue(r.id))
                         perf.count("fastFlatOcrFallback")
-                    } else fast.add(r)
+                        if (res.text.isEmpty()) perf.count("fastReject:ocr_empty")
+                        else verdict!!.rejectionReasons.forEach { perf.count("fastReject:$it") }
+                    } else {
+                        fast.add(r)
+                        perf.count("fastServiceMs", verdict.estimatedServiceMs)
+                    }
                 }
             }
         }
         perf.count("fastFlatRegions", fast.size)
+        perf.count("fastRoi", fast.size)
         perf.count("heavyRegions", texts.size)
+        perf.count("ctdRoi", texts.size)
+        if(forceHeavy && texts.isNotEmpty()) perf.count("rescueRoi",texts.size)
         if (fast.isNotEmpty()) perf.count("fastFlatHit")
         if (texts.isEmpty()) {
             perf.count("regions", fast.size)
@@ -344,6 +365,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         val trusted=perf.time("localBubbles") {Regions.trustedHolderMasks(img,texts,holders)}
         val uncertain=HeavyRoi.bubbleNeeded(texts,trusted)
+        perf.count("bubbleRoi",uncertain.size)
         val bubbleList=if(uncertain.isEmpty()) {
             perf.count("bubbleModelSkipped")
             trusted
@@ -360,6 +382,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // OCR still vetoes unreadable/art-like candidates before Luna or erasure.
         val glyphRescue=perf.time("glyphCoverage") { Regions.unclaimedGlyphDetections(img,glyphFull,texts,heavyBubbles) }
         perf.count("glyphRescueDetections",glyphRescue.size)
+        perf.count("rescueRoi",glyphRescue.size)
         var regionDetections=texts + glyphRescue
         var regions = perf.time("regions") { Regions.assemble(img, gray, hash, regionDetections + dets.filter { it.label == "bubble" }, heavyBubbles, glyphFull) }
         // Coverage audit before Luna: one bounded second pass. If CTD still owns
@@ -370,6 +393,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         if(coverageExtra.isNotEmpty()) {
             perf.count("coverageSecondPass",coverageExtra.size)
+            perf.count("rescueRoi",coverageExtra.size)
             regionDetections=regionDetections+coverageExtra
             regions=perf.time("coverageReassemble") { Regions.assemble(img,gray,hash,regionDetections+dets.filter {it.label=="bubble"},heavyBubbles,glyphFull) }
         }

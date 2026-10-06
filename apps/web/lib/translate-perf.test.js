@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, stopwatch, summarize } from './translate-perf.js';
+import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, roiRouting, roiServiceDemand, stopwatch, summarize } from './translate-perf.js';
 
 const memory = () => {
   const m = new Map();
@@ -44,6 +44,32 @@ describe('translation performance log (on the phone)', () => {
     expect(report).toContain('سريع بالكامل 1 صفحة · مختلط 1 صفحة · ثقيل بالكامل 1 صفحة');
     expect(report).toContain('مسار مختلط');
     expect(report).toContain('أولوية العرض: 1 صفحة');
+  });
+
+  it('reports ROI routing percentages and fast rejection reasons with one primary denominator', () => {
+    const entries = [
+      { at: 1000, pageIndex: 0, from: 'model', textless: false, total: 1000, stages: {}, native: { analyze: { counts: { fastRoi: 3, ctdRoi: 1, bubbleRoi: 1, rescueRoi: 0, 'fastReject:background': 1 } } } },
+      { at: 2000, pageIndex: 1, from: 'model', textless: false, total: 1000, stages: {}, native: { analyze: { counts: { fastRoi: 2, ctdRoi: 2, bubbleRoi: 0, rescueRoi: 1, 'fastReject:ocr': 2 } } } },
+    ];
+    expect(roiRouting(entries)).toEqual({
+      primaryRois: 8,
+      fastRoi: 5, ctdRoi: 3, bubbleRoi: 1, rescueRoi: 1,
+      fastPct: 63, ctdPct: 38, bubblePct: 13, rescuePct: 13,
+      rejectionReasons: { background: 1, ocr: 2 },
+    });
+    const report = formatReport(entries);
+    expect(report).toContain('FastROI 63% (5/8)');
+    expect(report).toContain('CTDROI 38% (3/8)');
+    expect(report).toContain('BubbleROI 13% (1/8)');
+    expect(report).toContain('RescueROI 13% (1/8)');
+    expect(report).toContain('رفض Fast: ocr×2 · background×1');
+    expect(roiServiceDemand(roiRouting(entries))).toEqual({
+      totalServiceMs: 16850,
+      meanPrimaryRoiMs: 2106,
+      heavyEquivalentMs: 85600,
+      savedVsHeavyPct: 80,
+    });
+    expect(report).toContain('طلب الخدمة المحلي التقديري 2.11 ث/ROI');
   });
 
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {

@@ -178,6 +178,59 @@ export function summarize(entries) {
 
 const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
 
+/**
+ * ROI-level routing telemetry. Fast/CTD share the primary detected-ROI
+ * denominator. Bubble is a subset of CTD; Rescue is additional bounded recovery,
+ * therefore the four percentages intentionally do not have to sum to 100.
+ */
+export function roiRouting(entries = []) {
+  const totals = { fastRoi: 0, ctdRoi: 0, bubbleRoi: 0, rescueRoi: 0 };
+  const rejectionReasons = {};
+  for (const e of entries) {
+    const counts = e?.native?.analyze?.counts;
+    if (!counts) continue;
+    for (const k of Object.keys(totals)) totals[k] += Number(counts[k] ?? 0) || 0;
+    for (const [k, v] of Object.entries(counts)) {
+      if (!k.startsWith('fastReject:')) continue;
+      const reason = k.slice('fastReject:'.length) || 'unknown';
+      rejectionReasons[reason] = (rejectionReasons[reason] ?? 0) + (Number(v) || 0);
+    }
+  }
+  const primaryRois = totals.fastRoi + totals.ctdRoi;
+  const pct = (n) => primaryRois ? Math.round(100 * n / primaryRois) : 0;
+  return {
+    primaryRois,
+    ...totals,
+    fastPct: pct(totals.fastRoi),
+    ctdPct: pct(totals.ctdRoi),
+    bubblePct: pct(totals.bubbleRoi),
+    rescuePct: pct(totals.rescueRoi),
+    rejectionReasons,
+  };
+}
+
+/**
+ * S23 Ultra local service-demand model from the current measured ranges:
+ * Fast 0.13s; CTD midpoint 2.75s; BubbleSeg midpoint 7.95s additional.
+ * Rescue does not add another heavy inference here: coverage rescue reuses the
+ * CTD/Bubble outputs already paid for. This estimates model demand, not wall time.
+ */
+export function roiServiceDemand(routing, costs = { fastMs: 130, ctdMs: 2750, bubbleExtraMs: 7950 }) {
+  const primary = routing?.primaryRois ?? 0;
+  if (!primary) return { totalServiceMs: 0, meanPrimaryRoiMs: 0, heavyEquivalentMs: 0, savedVsHeavyPct: 0 };
+  const totalServiceMs =
+    (routing.fastRoi ?? 0) * costs.fastMs +
+    (routing.ctdRoi ?? 0) * costs.ctdMs +
+    (routing.bubbleRoi ?? 0) * costs.bubbleExtraMs;
+  const heavyEquivalentMs = primary * (costs.ctdMs + costs.bubbleExtraMs);
+  return {
+    totalServiceMs: Math.round(totalServiceMs),
+    meanPrimaryRoiMs: Math.round(totalServiceMs / primary),
+    heavyEquivalentMs: Math.round(heavyEquivalentMs),
+    savedVsHeavyPct: heavyEquivalentMs ? Math.round(100 * (1 - totalServiceMs / heavyEquivalentMs)) : 0,
+  };
+}
+
 /** لا نسمي الصفحة «سريعة» لمجرد أن فيها Region سريع إذا شغلت CTD/BubbleSeg أيضًا. */
 export function localRoute(counts = {}) {
   const fast = (counts.fastFlatRegions ?? 0) > 0 || (counts.fastFlatHit ?? 0) > 0;
@@ -224,6 +277,14 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const heavyPages = analyzed.filter((e) => localRoute(e.native.analyze.counts) === 'heavy').length;
   if (fastPages || mixedPages || heavyPages) {
     lines.push(`المسار المحلي: سريع بالكامل ${fastPages} صفحة · مختلط ${mixedPages} صفحة · ثقيل بالكامل ${heavyPages} صفحة.`);
+  }
+  const roi = roiRouting(fresh);
+  if (roi.primaryRois > 0) {
+    lines.push(`ROI routing: FastROI ${roi.fastPct}% (${roi.fastRoi}/${roi.primaryRois}) · CTDROI ${roi.ctdPct}% (${roi.ctdRoi}/${roi.primaryRois}) · BubbleROI ${roi.bubblePct}% (${roi.bubbleRoi}/${roi.primaryRois}) · RescueROI ${roi.rescuePct}% (${roi.rescueRoi}/${roi.primaryRois}).`);
+    const rejects = Object.entries(roi.rejectionReasons).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+    if (rejects.length) lines.push(`رفض Fast: ${rejects.map(([k,v]) => `${k}×${v}`).join(' · ')}`);
+    const demand = roiServiceDemand(roi);
+    lines.push(`طلب الخدمة المحلي التقديري ${(demand.meanPrimaryRoiMs / 1000).toFixed(2)} ث/ROI · أقل ${demand.savedVsHeavyPct}% من افتراض CTD+Bubble لكل ROI (نموذج تكلفة S23، وليس wall time).`);
   }
   const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
   if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
