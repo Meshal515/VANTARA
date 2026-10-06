@@ -146,7 +146,7 @@ describe('batch 2.5 stage pipeline', () => {
   it('reader keeps a deep staged buffer instead of five end-to-end slots', async () => {
     const source = await import('node:fs').then(({readFileSync}) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url),'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
+    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8,\s*capacity:\s*runtimeCapacity,\s*lane:\s*'reader'\s*\}\)/);
     expect(source).toMatch(/prepareTranslation\([^;]+\{\s*preAnalyze:\s*true,/s);
   });
 });
