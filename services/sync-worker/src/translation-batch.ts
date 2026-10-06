@@ -4,6 +4,9 @@ import type { D1PreparedStatement } from './types.ts';
 const response = (body: unknown, status=200) => Response.json(body,{status});
 type Raw = Record<string, unknown>;
 const object = (v: unknown): v is Raw => Boolean(v && typeof v==='object' && !Array.isArray(v));
+const SOURCE_LANGS = new Set(['en','ja','ko','zh','auto']);
+const semanticLang = (page: Raw) => typeof page.sourceLang==='string' && SOURCE_LANGS.has(page.sourceLang) ? page.sourceLang : 'auto';
+const semanticMode = (page: Raw) => page.speed==='fast' ? 'fast' : 'quality';
 
 export const LUNA_BATCH_LIMITS = Object.freeze({
   maxPages: 6,
@@ -49,7 +52,7 @@ export async function handleTranslateTextBatch(request: Request, env: Translatio
   let regions=0, sourceChars=0, sourceTokens=0;
   for (const p of pages) {
     if (typeof p.pageHash!=='string' || !/^[a-f0-9]{64}$/.test(p.pageHash) || hashes.has(p.pageHash) || !Number.isInteger(p.pageIndex) || Number(p.pageIndex)<0 || indices.has(Number(p.pageIndex)) || !Array.isArray(p.regions) || !object(p.image)) return response({error:'bad_batch'},400);
-    if (['seriesRef','chapterKey','sourceLang','speed'].some(key=>p[key]!==first[key]) || !first.seriesRef || !first.chapterKey) return response({error:'mixed_batch_identity'},400);
+    if (p.seriesRef!==first.seriesRef || p.chapterKey!==first.chapterKey || semanticLang(p)!==semanticLang(first) || semanticMode(p)!==semanticMode(first) || !first.seriesRef || !first.chapterKey) return response({error:'mixed_batch_identity'},400);
     hashes.add(p.pageHash);
     indices.add(Number(p.pageIndex));
     regions+=p.regions.length;
