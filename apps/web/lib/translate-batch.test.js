@@ -49,6 +49,17 @@ describe('adaptive background Luna assembly',()=> {
     await expect(promise).rejects.toMatchObject({name:'AbortError'});expect(calls).toHaveLength(1);
   });
 
+  it('coalesces semantically equivalent default and smart quality metadata',async()=> {
+    vi.useFakeTimers();const calls=[];
+    const batch=createTextBatcher(async(path,body)=>{calls.push({path,body});return batchReply(body);},{waitMs:40,limits:{maxPages:2}});
+    const a=batch.enqueueTextPage(page(0));
+    const b=batch.enqueueTextPage({...page(1),speed:'smart',sourceLang:'auto'});
+    await Promise.resolve();await Promise.resolve();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body.pages).toHaveLength(2);
+    await Promise.all([a,b]);vi.useRealTimers();
+  });
+
   it('does not mix works/modes and only falls back on missing endpoint',async()=> {
     vi.useFakeTimers();const calls=[];
     const batch=createTextBatcher(async(path,body)=> {
