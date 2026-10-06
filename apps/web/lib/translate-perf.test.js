@@ -213,6 +213,7 @@ it('reports only the latest run, dedupes retries, and never calls partial pages 
   expect(report).toContain('2 مكتملة');
   expect(report).toContain('0 جزئية');
   expect(report).not.toContain('2 صفحة جديدة ناجحة');
+  });
 
   it('reports ROI routing percentages and fast rejection reasons with one primary denominator', () => {
     const entries = [
