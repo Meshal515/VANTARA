@@ -214,7 +214,8 @@ object Regions {
             val verdict=FastRoiRouter.classify(f)
             if(verdict.lane!=FastRoiRouter.Lane.FAST) {reject(group,verdict.rejectionReasons.firstOrNull() ?: "router");continue}
 
-            val gb = glyph.mask.bounds() ?: run {reject(group,"glyph_mask");continue}
+            val gb = glyph.mask.bounds()
+            if (gb == null) { reject(group,"glyph_mask"); continue }
             val id = stableId(pageHash, textBox, img.width, img.height)
             out.add(Region(id, textBox.union(Box(gb[0], gb[1], gb[2], gb[3])), group.maxOf { it.score }, "speech",
                 Bubble(holder.box, holder.score, flat.mask), holder.box, glyph.mask, glyph.mask.count(), fastInkLight(img, glyph.mask, flat.color)))
