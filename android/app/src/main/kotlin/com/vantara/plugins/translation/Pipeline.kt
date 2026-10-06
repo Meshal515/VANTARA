@@ -463,7 +463,9 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("inpaintMaskPixels", s.inpaintMaskPixels)
         perf.count("inpaintChangedPixels", s.inpaintChangedPixels)
         perf.count("eraseRegions", s.fillRegions + s.reconstructRegions + s.inpaintRegions)
+        perf.count("fillRegions", s.fillRegions)
         perf.count("reconstructRegions", s.reconstructRegions)
+        perf.count("lamaInvocations", s.inpaintRegions)
         perf.count("eraseNoOpRegions", s.noOpRegions)
         perf.count("inpaintScaledRegions", s.scaledInpaintRegions)
     }
@@ -636,7 +638,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                     r.eraseMask = baseMask
                     r.eraseMask = WhiteningRepair.mask(r,pixels)
                     val retryMask=r.eraseMask!!
-                    recordErase(perf, Cleaner.applyErase(img,listOf(r),lama))
+                    val repairStats = perf.time("eraseRepair") { Cleaner.applyErase(img,listOf(r),lama) }
+                    recordErase(perf, repairStats)
                     cumulativeMask=RenderSafety.cumulative(cumulativeMask,retryMask)
                     r.eraseMask=cumulativeMask
                     perf.count("residualRepairAttempts")
