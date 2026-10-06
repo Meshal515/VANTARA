@@ -14,13 +14,111 @@ object Cleaner {
         var changedPixels: Int = 0,
         var fillMaskPixels: Int = 0,
         var fillChangedPixels: Int = 0,
+        var reconstructMaskPixels: Int = 0,
+        var reconstructChangedPixels: Int = 0,
         var inpaintMaskPixels: Int = 0,
         var inpaintChangedPixels: Int = 0,
         var fillRegions: Int = 0,
+        var reconstructRegions: Int = 0,
         var inpaintRegions: Int = 0,
         var noOpRegions: Int = 0,
         var scaledInpaintRegions: Int = 0,
     )
+
+    /**
+     * E2 reconstruction model. Coordinates are normalized around the sampled holder so
+     * the least-squares fit stays numerically stable even on very tall webtoon pages.
+     */
+    data class Reconstruction(
+        val cx: Double,
+        val cy: Double,
+        val scale: Double,
+        val r: DoubleArray,
+        val g: DoubleArray,
+        val b: DoubleArray,
+        val mae: Double,
+    ) {
+        fun colorAt(x: Double, y: Double): IntArray {
+            val nx = (x - cx) / scale
+            val ny = (y - cy) / scale
+            fun channel(c: DoubleArray): Int = Math.round(c[0] + c[1] * nx + c[2] * ny).toInt().coerceIn(0, 255)
+            return intArrayOf(channel(r), channel(g), channel(b))
+        }
+    }
+
+    private fun solve3(m: DoubleArray, rhs: DoubleArray): DoubleArray? {
+        val a = Array(3) { row -> DoubleArray(4) { col -> if (col < 3) m[row * 3 + col] else rhs[row] } }
+        for (col in 0..2) {
+            var pivot = col
+            for (row in col + 1..2) if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row
+            if (Math.abs(a[pivot][col]) < 1e-7) return null
+            if (pivot != col) {
+                val tmp = a[pivot]
+                a[pivot] = a[col]
+                a[col] = tmp
+            }
+            val div = a[col][col]
+            for (j in col..3) a[col][j] /= div
+            for (row in 0..2) {
+                if (row == col) continue
+                val f = a[row][col]
+                for (j in col..3) a[row][j] -= f * a[col][j]
+            }
+        }
+        return doubleArrayOf(a[0][3], a[1][3], a[2][3])
+    }
+
+    /**
+     * Conservative E2 admission. It does not synthesize arbitrary art: only a locally
+     * smooth RGB plane that predicts safe holder pixels with low error is accepted.
+     * Anything more complex remains E3 LaMa.
+     */
+    private fun fitReconstruction(img: RgbImage, inner: ByteMask, exclude: ByteMask): Reconstruction? {
+        val w = inner.scanWindow() ?: return null
+        val ww = w[2] - w[0]
+        val hh = w[3] - w[1]
+        if (ww < 12 || hh < 12) return null
+        val stride = maxOf(1, maxOf(ww, hh) / 72)
+        val cx = (w[0] + w[2] - 1) / 2.0
+        val cy = (w[1] + w[3] - 1) / 2.0
+        val scale = maxOf(ww, hh).toDouble().coerceAtLeast(1.0)
+        val normal = DoubleArray(9)
+        val rr = DoubleArray(3)
+        val gg = DoubleArray(3)
+        val bb = DoubleArray(3)
+        var n = 0
+        for (y in w[1] until w[3] step stride) for (x in w[0] until w[2] step stride) {
+            if (inner[x, y].toInt() == 0 || exclude[x, y].toInt() != 0) continue
+            val f = doubleArrayOf(1.0, (x - cx) / scale, (y - cy) / scale)
+            for (i in 0..2) {
+                for (j in 0..2) normal[i * 3 + j] += f[i] * f[j]
+                rr[i] += f[i] * img.r(x, y)
+                gg[i] += f[i] * img.g(x, y)
+                bb[i] += f[i] * img.b(x, y)
+            }
+            n++
+        }
+        if (n < 80) return null
+        val rc = solve3(normal, rr) ?: return null
+        val gc = solve3(normal, gg) ?: return null
+        val bc = solve3(normal, bb) ?: return null
+        val model = Reconstruction(cx, cy, scale, rc, gc, bc, 0.0)
+        var error = 0.0
+        var checked = 0
+        var outliers = 0
+        for (y in w[1] until w[3] step stride) for (x in w[0] until w[2] step stride) {
+            if (inner[x, y].toInt() == 0 || exclude[x, y].toInt() != 0) continue
+            val p = model.colorAt(x.toDouble(), y.toDouble())
+            val e = (Math.abs(img.r(x, y) - p[0]) + Math.abs(img.g(x, y) - p[1]) + Math.abs(img.b(x, y) - p[2])) / 3.0
+            error += e
+            if (e > 12.0) outliers++
+            checked++
+        }
+        if (checked < 80) return null
+        val mae = error / checked
+        if (mae > 4.75 || outliers > maxOf(2, checked / 20)) return null
+        return Reconstruction(cx, cy, scale, rc, gc, bc, mae)
+    }
 
     fun glyphHeight(glyph: ByteMask, box: Box): Int {
         val runs = ArrayList<Int>()
@@ -190,10 +288,20 @@ object Cleaner {
                 region.eraseMask = mask.open(1).or(near.and(inner)).or(box.and(inner)).or(enclosedInk(img, color, bubbleMask, near.and(inner), region.box, gh, others))
                 region.cleanMode = "fill"
                 region.fillColor = color
+                region.reconstruction = null
                 return
             }
-            region.eraseMask = near.and(inner)
-            region.cleanMode = "inpaint"
+            val localMask = near.and(inner)
+            val reconstruction = fitReconstruction(img, inner, core.or(others).dilate(grow * 2))
+            if (reconstruction != null && localMask.any()) {
+                region.eraseMask = localMask
+                region.cleanMode = "reconstruct"
+                region.reconstruction = reconstruction
+                return
+            }
+            region.eraseMask = localMask
+            region.cleanMode = "lama"
+            region.reconstruction = null
             return
         }
         val grow = maxOf(9, (gh * 0.5).toInt())
@@ -201,12 +309,13 @@ object Cleaner {
         val m = grow + 4
         allow.fillRect(region.box.x1 - m, region.box.y1 - m, region.box.x2 + m, region.box.y2 + m)
         region.eraseMask = core.dilate(grow).and(allow)
-        region.cleanMode = "inpaint"
+        region.cleanMode = "lama"
+        region.reconstruction = null
     }
 
-    /** هل تحتاج الصفحة LaMa؟ (يُحمَّل النموذج حينها فقط.) */
+    /** E3 only: LaMa is a rescue engine, never the default for an unknown mode. */
     fun needsInpaint(regions: List<Region>): Boolean =
-        regions.any { it.status == "translated" && it.cleanMode != "fill" && it.eraseMask?.any() == true }
+        regions.any { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true }
 
     /**
      * ينفّذ المسح المخطَّط على `img` في مكانها. `inpainter` لازم متى [needsInpaint].
@@ -236,7 +345,28 @@ object Cleaner {
                     img.data[i] = color[0].toByte(); img.data[i + 1] = color[1].toByte(); img.data[i + 2] = color[2].toByte()
                 }
                 if (regionChanged == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
-            } else {
+            } else if (r.cleanMode == "reconstruct") {
+                val model = r.reconstruction
+                if (model == null) { r.status = "skipped:no_erase"; stats.noOpRegions++; continue }
+                val w = mask.scanWindow() ?: continue
+                stats.reconstructRegions++
+                var regionChanged = 0
+                for (y in w[1] until w[3]) for (x in w[0] until w[2]) if (mask[x, y].toInt() != 0) {
+                    stats.maskPixels++
+                    stats.reconstructMaskPixels++
+                    val color = model.colorAt(x.toDouble(), y.toDouble())
+                    val i = (y * img.width + x) * 3
+                    if ((img.data[i].toInt() and 0xff) != color[0] || (img.data[i + 1].toInt() and 0xff) != color[1] || (img.data[i + 2].toInt() and 0xff) != color[2]) {
+                        stats.changedPixels++
+                        stats.reconstructChangedPixels++
+                        regionChanged++
+                    }
+                    img.data[i] = color[0].toByte()
+                    img.data[i + 1] = color[1].toByte()
+                    img.data[i + 2] = color[2].toByte()
+                }
+                if (regionChanged == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
+            } else if (r.cleanMode == "lama") {
                 val b = mask.bounds() ?: continue
                 stats.inpaintRegions++
                 val s = (inpainter ?: error("lama not loaded")).inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
@@ -246,6 +376,9 @@ object Cleaner {
                 stats.inpaintChangedPixels += s.changedPixels
                 if (s.changedPixels == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
                 if (s.scaled) stats.scaledInpaintRegions++
+            } else {
+                r.status = "skipped:no_erase"
+                stats.noOpRegions++
             }
         }
         return stats
