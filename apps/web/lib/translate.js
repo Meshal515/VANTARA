@@ -165,7 +165,7 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       start(job,true);
     }
     while (true) {
-      const job = next(j => !j.prepare || (j.ready && !j.prepared?.bypass));
+      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || bypassConcurrency === 0)));
       if (!job) break;
       const normalSlot = running < concurrency;
       // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
