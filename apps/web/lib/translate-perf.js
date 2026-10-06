@@ -237,10 +237,10 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     const lamaPixels = sumRender('inpaintMaskPixels');
     const lamaPct = Math.round((lamaPixels / eraseMask) * 100);
     const eraseRegions = sumRender('eraseRegions');
-    const eraseMs = rendered.reduce((a, e) => a + (e.native.render.stages?.erase ?? 0), 0);
+    const eraseMs = rendered.reduce((a, e) => a + (e.native.render.stages?.erase ?? 0) + (e.native.render.stages?.eraseRepair ?? 0), 0);
     const msPerRoi = eraseRegions > 0 ? eraseMs / eraseRegions : null;
     lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · E1 تعبئة ${sumRender('fillChangedPixels')} · E2 إعادة بناء ${sumRender('reconstructChangedPixels')} · E3 LaMa ${sumRender('inpaintChangedPixels')} (${lamaPixels} بكسل / ${lamaPct}% من القناع) · no-op ${sumRender('eraseNoOpRegions')}`);
-    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E3 ${sumRender('eraseE3')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
+    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E3 ${sumRender('eraseE3')} · LaMa calls ${sumRender('lamaInvocations')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
     if (sumRender('outsideMaskChanges') > 0) lines.push('⚠️ رُصد تغيّر قبل الاستعادة خارج قناع المسح/حدود العربي؛ الناتج النهائي أُعيد للأصل هناك لكن يلزم التحقيق.');
     if (sumRender('inpaint') > 0 && sumRender('inpaintChangedPixels') === 0) lines.push('⚠️ LaMa استُدعي لكن لم يغيّر أي بكسل في السجل.');
     if (sumRender('reconstruct') > 0 && sumRender('reconstructChangedPixels') === 0) lines.push('⚠️ E2 استُدعي لكنه لم يغيّر أي بكسل.');
