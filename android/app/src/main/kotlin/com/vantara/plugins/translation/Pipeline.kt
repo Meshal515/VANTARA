@@ -46,6 +46,9 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private val analyses = lru<Analysis>(24)
     private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
+    // Exact page-hash + crop reuse only. Packed masks keep retry/residual reuse
+    // bounded without changing model output or accepting approximate matches.
+    private val bubbleRois = lru<List<BubbleSnapshot>>(48)
 
     /** منطقة كما خرجت من التحليل، والأقنعة مضغوطة. */
     class Snapshot(
@@ -128,6 +131,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         synchronized(lamaLock) { inpainter?.close(); inpainter = null }
         detector = null; glyphs = null; bubbles = null; ocr = null
         detections.clear()
+        bubbleRois.clear()
         analyses.clear()
         images.clear()
     }
@@ -299,6 +303,58 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         return a to (if (asks) perf.time("thumbnail") { thumbnail(file, a.pageHash) } else "")
     }
 
+    private fun bubbleRoiKey(hash:String,box:Box):String =
+        "$hash:${box.x1},${box.y1},${box.x2},${box.y2}"
+
+    /**
+     * Exact BubbleSeg ROI reuse. Cache hits never load the 109 MB model and never
+     * alter masks: the same packed output is thawed at the same page coordinates.
+     */
+    private fun segmentBubbleRescue(hash:String,img:RgbImage,crops:List<Box>,perf:Perf):List<Bubble> {
+        val out=ArrayList<Bubble>()
+        var segmenter:BubbleSegmenter?=null
+        var invocations=0
+        var hits=0
+        var inferenceRoiPixels=0
+        for(box in crops) {
+            val key=bubbleRoiKey(hash,box)
+            val cached=bubbleRois[key]
+            if(cached!=null) {
+                hits++
+                out.addAll(cached.map {Bubble(it.box,it.score,it.mask.unpack())})
+                continue
+            }
+            val bs=segmenter ?: bubbles(perf).also {segmenter=it}
+            val found=perf.time("bubbles") {bs.segmentRoi(img,listOf(box))}
+            invocations += bs.tiles
+            inferenceRoiPixels += box.area
+            bubbleRois[key]=found.map {BubbleSnapshot(it.box,it.score,PackedMask.of(it.mask))}
+            out.addAll(found)
+        }
+        perf.count("bubbleInvocations",invocations)
+        perf.count("bubbleCacheHits",hits)
+        perf.count("bubbleInferenceRoiPixels",inferenceRoiPixels)
+        perf.count("bubbleInputPixels",invocations*BubbleSegmenter.INPUT_SIZE*BubbleSegmenter.INPUT_SIZE)
+        if(invocations>0) perf.count("bubblePagesInvoked")
+        if(invocations==0 && hits>0) perf.count("bubbleCacheOnly")
+        return out
+    }
+
+    /** No ground truth at runtime: text-box mask coverage is a stable quality proxy. */
+    private fun bubbleCoveragePermille(bubbles:List<Bubble>,box:Box):Int {
+        var best=0
+        for(b in bubbles) {
+            var inside=0;var total=0
+            for(y in maxOf(0,box.y1) until minOf(b.mask.height,box.y2))
+                for(x in maxOf(0,box.x1) until minOf(b.mask.width,box.x2)) {
+                    total++
+                    if(b.mask[x,y].toInt()!=0) inside++
+                }
+            if(total>0) best=maxOf(best,(inside*1000L/total).toInt())
+        }
+        return best
+    }
+
     private fun finish(hash: String, img: RgbImage, dets: List<Detection>, perf: Perf, useCache: Boolean, forceHeavy:Boolean=false): Analysis {
         val gray = perf.time("gray") { img.gray() }
 
@@ -342,18 +398,37 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
             m
         }
-        val trusted=perf.time("localBubbles") {Regions.trustedHolderMasks(img,texts,holders)}
+        val speechCandidates=texts.filter {it.label=="text_bubble"}
+        perf.count("bubbleCandidateRegions",speechCandidates.size)
+        val trustedPlan=perf.time("localBubbles") {Regions.trustedHolderPlan(img,texts,holders,glyphFull)}
+        val trusted=trustedPlan.bubbles
+        perf.count("bubbleTrustedFast",trustedPlan.fastColor)
+        perf.count("bubbleTrustedBox",trustedPlan.flatBox)
+        perf.count("bubbleTrustedSeeded",trustedPlan.seeded)
         val uncertain=HeavyRoi.bubbleNeeded(texts,trusted)
+        perf.count("bubbleRescueRegions",uncertain.size)
+        perf.count("bubbleBypassRegions",maxOf(0,speechCandidates.size-uncertain.size))
         val bubbleList=if(uncertain.isEmpty()) {
             perf.count("bubbleModelSkipped")
+            perf.count("bubbleInvocations",0)
             trusted
         } else {
-            val bs=bubbles(perf)
-            val neural=perf.time("bubbles") {bs.segmentRoi(img,HeavyRoi.plan(img.width,img.height,uncertain,holders))}
-            perf.count("bubbleTiles",bs.tiles)
+            val bubbleCrops=HeavyRoi.plan(img.width,img.height,uncertain,holders)
+            perf.count("bubbleRoiCrops",bubbleCrops.size)
+            perf.count("bubbleRoiPixels",bubbleCrops.sumOf {it.area})
+            val beforeInvocations=perf.counts["bubbleInvocations"] ?: 0
+            val neural=segmentBubbleRescue(hash,img,bubbleCrops,perf)
+            val calls=(perf.counts["bubbleInvocations"] ?: 0)-beforeInvocations
+            perf.count("bubbleTiles",calls)
+            perf.count("bubbleNeuralMaskPixels",neural.sumOf {it.mask.count()})
             trusted+neural.filter {b->trusted.none {it.box.iou(b.box)>.5f}}
         }
         perf.count("bubbles",bubbleList.size)
+        perf.count("bubbleMaskPixels",bubbleList.sumOf {it.mask.count()})
+        for(d in speechCandidates) {
+            perf.count("bubbleCoverageSamples")
+            perf.count("bubbleCoveragePermilleSum",bubbleCoveragePermille(bubbleList,d.box))
+        }
         val heavyBubbles = perf.time("ownership") { Regions.excludeFastOwnership(fast,glyphFull,bubbleList) }
         // CTD is independent evidence. If it sees a line inside a holder that
         // RT-DETR/MissingSweep did not own, promote it to a synthetic detection;
