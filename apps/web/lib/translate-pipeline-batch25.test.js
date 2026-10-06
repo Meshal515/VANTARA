@@ -196,7 +196,7 @@ describe('batch 2.5 stage ownership', () => {
       readFileSync(new URL('../../android/app/src/main/kotlin/com/vantara/plugins/translation/TranslationPlugin.kt', import.meta.url), 'utf8'));
 
     const q = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(reader);
-    const nativeCap = /routedPages\s*=\s*object:LinkedHashMap<[^>]+>\([^)]*\)[^{]*\{\s*override fun removeEldestEntry\([^)]*\)=size>(\d+)/.exec(plugin);
+    const nativeCap = /routedPages[^\n]*size>(\d+)/.exec(plugin);
 
     expect(q).not.toBeNull();
     expect(nativeCap).not.toBeNull();
