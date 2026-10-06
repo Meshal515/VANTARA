@@ -44,7 +44,7 @@ const OLD_CACHE_PREFIX = 'tl3:';
 const PAGE_CACHE_PREFIX = 'tl-page-v1:';
 export const PAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Local vision/whitening contract; bump when a prior image can be visually incomplete. */
-export const LOCAL_PIPELINE_VERSION = 2;
+export const LOCAL_PIPELINE_VERSION = 3;
 export const staleLocalPipeline = value => Number(value?.pipelineVersion ?? 0) < LOCAL_PIPELINE_VERSION;
 
 export function pageCacheKey(meta) {
@@ -562,12 +562,14 @@ async function translatePageNow(deps, src, meta) {
   const local = found.value;
   // طلبتَ «ذكية» والمحفوظ «سريعة»: يُترجم من جديد. والعكس يأخذ الذكية المحفوظة (أدق وبلا تكلفة)
   const downgraded = meta?.speed !== 'fast' && typeof local?.engine === 'string' && local.engine.endsWith(':fast');
-  if (local && typeof local.translated === 'number' && !downgraded && !(deps.via === 'job' && local.incomplete)) {
+  const oldPipeline = staleLocalPipeline(local);
+  // A stale visual pipeline may contain mixed Arabic/English output. Never show
+  // it while a repair runs in the background; rebuild before publication.
+  if (local && typeof local.translated === 'number' && !downgraded && !oldPipeline && !(deps.via === 'job' && local.incomplete)) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
-    const oldPipeline=staleLocalPipeline(local);
-    const due = (local.incomplete || staleEngine(local.engine) || oldPipeline) && (local.tries ?? 0) < MAX_REPAIRS &&
+    const due = (local.incomplete || staleEngine(local.engine)) && (local.tries ?? 0) < MAX_REPAIRS &&
       (oldPipeline || Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS);
     if (due) void repairInBackground(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
