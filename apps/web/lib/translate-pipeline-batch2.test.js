@@ -203,5 +203,6 @@ describe('batch 2 staged translation pipeline', () => {
     expect(match[1]).toMatch(/bypassConcurrency:\s*8/);
     expect(match[1]).toMatch(/capacity:\s*runtimeCapacity/);
     expect(match[1]).toMatch(/lane:\s*['"]reader['"]/);
+    expect(match[1]).toMatch(/maxInFlight:\s*24/);
   });
 });

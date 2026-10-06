@@ -97,6 +97,18 @@ function stageMeans(entries) {
   return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, mean(v)]));
 }
 
+/** Canonical `wait` is already in stages. These are non-additive diagnostics only. */
+function queueWaitMeans(entries) {
+  const admission = entries.map(e => e.queueWait?.admission).filter(Number.isFinite);
+  const continuation = entries.map(e => e.queueWait?.continuation).filter(Number.isFinite);
+  const prepared = entries.map(e => e.queueWait?.prepared).filter(Number.isFinite);
+  return {
+    admission: mean(admission),
+    continuation: mean(continuation),
+    prepared: mean(prepared),
+  };
+}
+
 function latestRunEntries(entries) {
   const last=[...entries].reverse().find(e => typeof e?.runId === 'string' && e.runId);
   return last ? entries.filter(e => e.runId === last.runId) : entries;
@@ -334,11 +346,18 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const lanes = last?.native?.render?.laneBusy ?? last?.native?.analyze?.laneBusy;
   if (lanes) lines.push(`إشغال المسارات: كشف ${lanes.detect}% · تحليل ${lanes.analyze}% · رسم ${lanes.render}% (ليس نسبة CPU للنظام)`);
   else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
-  for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
+  for (const [label, g, groupEntries] of [
+    ['بلا نص', s.textless, fresh.filter(e => e.textless)],
+    ['بنص', s.text, fresh.filter(e => !e.textless)],
+  ]) {
     const routeDone = label === 'بلا نص' && g.routeToDoneMedian != null ? ` · route→done ${sec(g.routeToDoneMedian)}` : '';
     const dispatchDone = label === 'بلا نص' && g.routeDispatchToDoneMedian != null ? ` · dispatch→done ${sec(g.routeDispatchToDoneMedian)}` : '';
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}${routeDone}${dispatchDone}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
+    const q = queueWaitMeans(groupEntries);
+    if (q.admission !== null || q.continuation !== null || q.prepared !== null) {
+      lines.push(`  تفصيل wait (تشخيصي؛ لا يُجمع مرة ثانية): admission ${sec(q.admission)} · route→analyze ${sec(q.continuation)} · prepared→run ${sec(q.prepared)}`);
+    }
   }
   if (fresh.some(e => e.native?.route?.stages || e.native?.analyze?.stages)) {
     lines.push('  ملاحظة القياس: route.* و analyze.* تفاصيل داخل النداءات الأصلية؛ تُعرض للتشخيص ولا تُضاف مرة ثانية إلى total.');
@@ -384,7 +403,10 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
         Number.isFinite(e.native?.analyze?.thermal) ? `حرارة ${e.native.analyze.thermal}` : null,
         Number.isFinite(e.native?.analyze?.heapMb) ? `heap ${e.native.analyze.heapMb}MB` : null,
       ].filter(Boolean).join(' · ');
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${telemetry ? ` · ${telemetry}` : ''}`);
+      const outer = e.queueWait
+        ? ` · outer admission ${sec(e.queueWait.admission)} · route→analyze ${sec(e.queueWait.continuation)} · prepared→run ${sec(e.queueWait.prepared)}`
+        : '';
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${outer}${telemetry ? ` · ${telemetry}` : ''}`);
     }
   }
 
