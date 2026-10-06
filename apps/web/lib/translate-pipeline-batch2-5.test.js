@@ -149,4 +149,52 @@ describe('batch 2.5 stage pipeline', () => {
     expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
     expect(source).toMatch(/prepareTranslation\([^;]+\{\s*preAnalyze:\s*true,/s);
   });
+
+  it('lets a ready render beat speculative ahead route work', async () => {
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    const order = [];
+    const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
+      order.push(name);
+      if (wait) await wait;
+    }, { priority });
+
+    const holder = task('holder', 'analyze', hold);
+    await tick();
+    const speculativeRoute = task('ahead-route', () => 'aheadRoute');
+    const readyRender = task('ready-render', 'aheadRender');
+    await tick();
+    release();
+    await Promise.all([holder, speculativeRoute, readyRender]);
+
+    expect(order).toEqual(['holder', 'ready-render', 'ahead-route']);
+  });
+
+  it('re-evaluates queued native priority so focus promotion is live', async () => {
+    let releaseHolder;
+    let releaseRoute;
+    const holderWait = new Promise(resolve => { releaseHolder = resolve; });
+    const routeWait = new Promise(resolve => { releaseRoute = resolve; });
+    const order = [];
+    let focused = false;
+    const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
+      order.push(name);
+      if (wait) await wait;
+    }, { priority });
+
+    const holder = task('holder', 'analyze', holderWait);
+    await tick();
+    const candidate = task('candidate', () => focused ? 'render' : 'aheadAnalyze');
+    const route = task('route', 'route', routeWait);
+    await tick();
+
+    focused = true;
+    releaseHolder();
+    await tick();
+    expect(order).toEqual(['holder', 'candidate']);
+    releaseRoute();
+    await Promise.all([holder, candidate, route]);
+    expect(order).toEqual(['holder', 'candidate', 'route']);
+  });
+
 });
