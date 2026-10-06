@@ -195,6 +195,13 @@ describe('batch 2 staged translation pipeline', () => {
   it('keeps the reader bounded while allowing a deeper staged buffer', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
+    const match=/createQueue\(\{([^}]*)\}\)/.exec(source);
+    expect(match).not.toBeNull();
+    expect(match[1]).toMatch(/concurrency:\s*12/);
+    expect(match[1]).toMatch(/prepareConcurrency:\s*8/);
+    expect(match[1]).toMatch(/maxPrepared:\s*24/);
+    expect(match[1]).toMatch(/bypassConcurrency:\s*8/);
+    expect(match[1]).toMatch(/capacity:\s*runtimeCapacity/);
+    expect(match[1]).toMatch(/lane:\s*['"]reader['"]/);
   });
 });

@@ -12,6 +12,7 @@
 
 import {createQueue,prepareTranslation} from './translate.js';
 import { chapterBenchmark } from './translate-perf.js';
+import { runtimeCapacity } from './runtime-capacity.js';
 
 const JOBS_KEY = 'vantara.translate.jobs';
 const PACE_KEY = 'vantara.translate.pace';
@@ -196,7 +197,7 @@ export function createJobRunner(deps) {
   // convoy القديم (عدة CTD/BubbleSeg تنتظر نفس CPU).
   const concurrency=JOB_CONCURRENCY;
   const lookahead=1;
-  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0});
+  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0,capacity:deps.capacity ?? runtimeCapacity,lane:'job'});
   const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
   const readerQuiet = deps.readerQuiet ?? (async () => {});

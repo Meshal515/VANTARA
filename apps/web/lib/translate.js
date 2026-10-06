@@ -24,6 +24,7 @@ import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePag
 import { createTextBatcher } from './translate-batch.js';
 import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
+import { runtimeCapacity } from './runtime-capacity.js';
 
 /** أطول ضلع يُرسل للخادم: العامل يقصّ أكبر من هذا أصلًا. */
 export const MAX_UPLOAD_EDGE = 4096;
@@ -115,6 +116,8 @@ export function createQueue({
   prepareConcurrency = 1,
   maxPrepared = 24,
   bypassConcurrency = 2,
+  capacity = null,
+  lane = 'generic',
   continueConcurrency = 1,
   // Keep a second bounded Route window ahead of Heavy. This is what breaks the
   // old "prepare slots filled with Analyze" convoy without routing the whole
@@ -132,6 +135,23 @@ export function createQueue({
   const ranks = new Map();
   const listeners = new Set();
   const isFocused = job => job.chapterKey === focusKey && job.index === focusIndex;
+  const dynamicLimits = () => {
+    const ready = [...jobs.values()].filter(j => j.ready && !j.started).length;
+    const queued = [...jobs.values()].filter(j => !j.started).length;
+    const focusedWaiting = [...jobs.values()].some(j => !j.started && isFocused(j));
+    const requested = capacity?.queueLimits?.({
+      lane, running, preparing, continuing, bypassRunning, focusedBurstRunning, ready, queued, focusedWaiting,
+    }) ?? {};
+    const cap = (value, base) => Number.isFinite(Number(value))
+      ? Math.max(0, Math.min(base, Math.floor(Number(value))))
+      : base;
+    return {
+      concurrency: cap(requested.concurrency, concurrency),
+      prepareConcurrency: cap(requested.prepareConcurrency, prepareConcurrency),
+      maxPrepared: cap(requested.maxPrepared, maxPrepared),
+      bypassConcurrency: cap(requested.bypassConcurrency, bypassConcurrency),
+    };
+  };
   const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + 3;
 
   // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
@@ -194,7 +214,7 @@ export function createQueue({
       if (prepared?.bypass) {
         job.ready = true;
         job.needsContinue = false;
-        if (bypassRunning < bypassConcurrency) startJob(job, true);
+        if (bypassRunning < dynamicLimits().bypassConcurrency) startJob(job, true);
       } else if (typeof prepared?.continuePrepare === 'function') {
         // Route انتهى؛ حرّر slot التصنيف فورًا. الـHeavy continuation تبقى
         // محدودة ولا تبدأ قبل تصريف دفعة Route الحالية.
@@ -234,7 +254,7 @@ export function createQueue({
       if (prepared?.bypass) {
         job.ready = true;
         job.needsContinue = false;
-        if (bypassRunning < bypassConcurrency) startJob(job, true);
+        if (bypassRunning < dynamicLimits().bypassConcurrency) startJob(job, true);
       } else if (typeof prepared?.continuePrepare === 'function') {
         job.needsContinue = true;
         job.ready = false;
@@ -255,18 +275,19 @@ export function createQueue({
   };
 
   const pump = () => {
-    while (bypassRunning < bypassConcurrency) {
+    const caps = dynamicLimits();
+    while (bypassRunning < caps.bypassConcurrency) {
       const job = next(j => j.ready && j.prepared?.bypass);
       if (!job) break;
       startJob(job, true);
     }
     while (true) {
-      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || bypassConcurrency === 0)));
+      const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || caps.bypassConcurrency === 0)));
       if (!job) break;
-      const normalSlot = running < concurrency;
+      const normalSlot = running < caps.concurrency;
       const activeFocusedBurst = [...jobs.values()].filter(j => j.started && j.burst && isFocused(j)).length;
-      const burstSlot = concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
-        running + focusedBurstRunning < concurrency + 2;
+      const burstSlot = caps.concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
+        running + focusedBurstRunning < caps.concurrency + 2;
       if (!normalSlot && !burstSlot) break;
       startJob(job, false, !normalSlot);
     }
@@ -281,12 +302,14 @@ export function createQueue({
       const near = isNearForward(job);
       const preparingFocused = [...jobs.values()].filter(j => j.preparing && isFocused(j)).length;
       const preparingNear = [...jobs.values()].filter(j => j.preparing && isNearForward(j)).length;
-      const prepBlocked = focused
-        ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
-        : near
-          ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
-          : preparing >= prepareConcurrency;
-      const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
+      const prepBlocked = capacity
+        ? preparing >= caps.prepareConcurrency
+        : focused
+          ? preparingFocused >= 1 || preparing >= prepareConcurrency + 2
+          : near
+            ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
+            : preparing >= prepareConcurrency;
+      const preparedCap = capacity ? caps.maxPrepared : maxPrepared + (focused ? 2 : near ? 1 : 0);
       if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap ||
         continuationBuffered() >= maxRouteAhead) break;
       beginPrepare(job);
@@ -296,13 +319,16 @@ export function createQueue({
     // in flight. Native inference itself remains serialized by
     // withNativeTranslationStage, so this cannot recreate RT-DETR/Heavy overlap.
     if (preparing === 0) {
-      while (continuing < continueConcurrency) {
+      const continuationCap = capacity ? Math.min(continueConcurrency, caps.prepareConcurrency) : continueConcurrency;
+      while (continuing < continuationCap) {
         const job = next(j => j.needsContinue && !j.continuing);
         if (!job) break;
         beginContinuation(job);
       }
     }
   };
+
+  capacity?.subscribe?.(() => queueMicrotask(pump));
 
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
@@ -616,7 +642,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -740,15 +766,23 @@ export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = 
 
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
-  if (!textBatchers.has(sync)) textBatchers.set(sync, createTextBatcher(
-    (path,body) => sync.translation(path,{method:'POST',body}),
-    {
-      waitMs:40,
-      maxInFlight:6,
-      adaptive:true,
-      limits:{maxPages:6,maxRegions:48,maxSourceChars:7000,maxSourceTokens:2600},
-    },
-  ));
+  if (!textBatchers.has(sync)) {
+    // Runtime limits actual HTTP requests, never logical pages waiting inside
+    // Luna's batch assembly. Packing/deadlines remain Luna-owned.
+    const request = (path,body) => runtimeCapacity.withNetworkAdmission(
+      () => sync.translation(path,{method:'POST',body}),
+      { interactive: !Array.isArray(body?.pages), kind:'luna' },
+    );
+    textBatchers.set(sync, createTextBatcher(
+      request,
+      {
+        waitMs:40,
+        maxInFlight:6,
+        adaptive:true,
+        limits:{maxPages:6,maxRegions:48,maxSourceChars:7000,maxSourceTokens:2600},
+      },
+    ));
+  }
   return textBatchers.get(sync);
 }
 
@@ -781,8 +815,12 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
+  runtimeCapacity.observePerf(route?.perf, 'route');
   const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages};
-  if (route?.textless || !options.preAnalyze) return routed;
+  if (route?.textless || !options.preAnalyze) {
+    runtimeCapacity.observeStages(prep.stages);
+    return routed;
+  }
 
   // Heavy pre-analysis is optionally returned as a continuation. The queue can
   // then classify a bounded Route window first, but the actual native calls are
@@ -802,6 +840,8 @@ export async function prepareTranslation(src, meta, options = {}) {
         onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
     );
+    runtimeCapacity.observePerf(analysis?.perf, 'analyze');
+    runtimeCapacity.observeStages(prep.stages);
     return {...routed,analysis,bypass:false,prepareStages:prep.stages};
   };
   if(options.deferAnalyze) return {...routed,bypass:false,continuePrepare:finishAnalysis};
@@ -821,6 +861,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
   } catch (error) {
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
+  if (!deps.analysis) runtimeCapacity.observePerf(analysis?.perf, 'analyze');
   const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const coverageUnknown = Number(analysis.coverageUnknown ?? analysis.perf?.counts?.coverageUnknown ?? 0);
@@ -840,7 +881,10 @@ async function translateOnDevice(deps, hash, meta, clock) {
     });
     const ask = data => data
       ? textBatcher(deps.sync).enqueueTextPage(bodyFor(data), { interactive: interactiveOf(deps), signal: deps.signal })
-      : deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') });
+      : runtimeCapacity.withNetworkAdmission(
+          () => deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
+          { interactive: interactiveOf(deps), kind:'probe' },
+        );
     let res = await clock.time('cacheProbe', () => ask(''));
     if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
       const began=globalThis.performance?.now?.() ?? Date.now();
@@ -857,18 +901,25 @@ async function translateOnDevice(deps, hash, meta, clock) {
     let incomplete = coverageUnknown > 0 || unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
     if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
     let rendered;
+    runtimeCapacity.renderReady(1);
     try {
-      rendered = await withNativeTranslationStage(
-        () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
-        {
-          priority: nativeStagePriorityOf(deps, 'render'),
-          onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
-        },
-      );
-      renderCompleted = true;
-    } catch {
-      return { error: 'device_failed', native };
+      try {
+        rendered = await withNativeTranslationStage(
+          () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
+          {
+            priority: nativeStagePriorityOf(deps, 'render'),
+            onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
+          },
+        );
+        renderCompleted = true;
+      } catch {
+        return { error: 'device_failed', native };
+      }
+    } finally {
+      runtimeCapacity.renderReady(-1);
+      runtimeCapacity.observeStages(clock.stages);
     }
+    runtimeCapacity.observePerf(rendered?.perf, 'render');
     native.render = rendered.perf ?? null;
     // المرسوم فعلًا كما يقوله الجهاز (عربي لم يدخل أو لم يظهر يبقى أصله): صفحة لم يُرسم
     // فيها شيء تبقى صورتها الأصلية، لا نسخة مبيّضة
