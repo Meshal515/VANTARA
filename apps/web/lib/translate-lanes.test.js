@@ -34,6 +34,30 @@ it('textless bypass also has a finite active budget',async()=> {
 });
 
 
+it('releases a route preparation slot before deferred heavy continuation so textless can exit',async()=> {
+ let release;const hold=new Promise(r=>{release=r});const events=[];
+ const q=createQueue({concurrency:1,prepareConcurrency:1,maxPrepared:4,bypassConcurrency:2,continueConcurrency:1});
+ const text=q.add({
+  key:'text',chapterKey:'c',index:0,
+  prepare:async()=>{events.push('route-text');return {bypass:false,continuePrepare:async()=>{events.push('heavy-start');await hold;events.push('heavy-done');return {bypass:false};}};},
+  run:async()=>{events.push('text-run');return 'translated';},
+ });
+ const textless=q.add({
+  key:'textless',chapterKey:'c',index:1,
+  prepare:async()=>{events.push('route-textless');return {bypass:true};},
+  run:async()=>{events.push('textless-done');return 'original';},
+ });
+ for(let i=0;i<6;i++) await tick();
+ expect(events).toContain('route-textless');
+ expect(events).toContain('textless-done');
+ expect(events.indexOf('textless-done')).toBeLessThan(events.indexOf('heavy-start'));
+ release();
+ await expect(textless).resolves.toBe('original');
+ await expect(text).resolves.toBe('translated');
+ expect(events).toEqual(['route-text','route-textless','textless-done','heavy-start','heavy-done','text-run']);
+});
+
+
 it('the newly focused reader page can start before stale full dialogue slots finish',async()=> {
  let releaseA,releaseB;
  const holdA=new Promise(r=>{releaseA=r});

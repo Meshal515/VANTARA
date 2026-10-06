@@ -110,10 +110,21 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
+export function createQueue({
+  concurrency = 3,
+  prepareConcurrency = 1,
+  maxPrepared = 24,
+  bypassConcurrency = 2,
+  continueConcurrency = 1,
+  // Keep a second bounded Route window ahead of Heavy. This is what breaks the
+  // old "prepare slots filled with Analyze" convoy without routing the whole
+  // chapter up front.
+  maxRouteAhead = Math.max(1, Math.min(maxPrepared, prepareConcurrency * 2)),
+} = {}) {
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
+  let continuing = 0;
   let bypassRunning = 0;
   let focusedBurstRunning = 0;
   let focusKey = null;
@@ -144,13 +155,18 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     for (const fn of listeners) fn(job);
     pump();
   };
-  const start = (job, bypass = false, focusedBurst = false) => {
+  const startJob = (job, bypass = false, focusedBurst = false) => {
     job.started = true;
     if (bypass) bypassRunning++;
     else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
     else running++;
-    Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
-      prepared: job.prepared, interactive: isFocused(job), isInteractive: () => isFocused(job) }))
+    Promise.resolve().then(() => job.run({
+      waitedMs: Math.max(0, Date.now() - job.addedAt - (job.prepareMs ?? 0)),
+      prepareMs: job.prepareMs ?? 0,
+      prepared: job.prepared,
+      interactive: isFocused(job),
+      isInteractive: () => isFocused(job),
+    }))
       .then(job.resolve, job.reject).finally(() => {
         if (bypass) bypassRunning--;
         else if (focusedBurst) focusedBurstRunning--;
@@ -158,33 +174,108 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
         finish(job);
       });
   };
+  // A route that already classified a text page is buffered until its Heavy
+  // continuation. In-flight preparations are governed separately by the
+  // original focused/near admission rules; counting them here would break the
+  // reader's bounded focus burst.
+  const continuationBuffered = () => [...jobs.values()].filter(j =>
+    !j.started && (j.needsContinue || j.continuing)).length;
+  const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
+
+  const beginPrepare = (job) => {
+    job.preparing = true;
+    preparing++;
+    const preparedAt = Date.now();
+    Promise.resolve().then(() => job.prepare()).then(prepared => {
+      if (jobs.get(job.key) !== job) return;
+      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, Date.now() - preparedAt);
+      job.prepared = prepared;
+      if (prepared?.bypass) {
+        job.ready = true;
+        job.needsContinue = false;
+        if (bypassRunning < bypassConcurrency) startJob(job, true);
+      } else if (typeof prepared?.continuePrepare === 'function') {
+        // Route انتهى؛ حرّر slot التصنيف فورًا. الـHeavy continuation تبقى
+        // محدودة ولا تبدأ قبل تصريف دفعة Route الحالية.
+        job.needsContinue = true;
+        job.ready = false;
+      } else {
+        job.ready = true;
+        job.needsContinue = false;
+      }
+    }, error => {
+      if (jobs.get(job.key) === job) {
+        job.reject(error);
+        jobs.delete(job.key);
+      }
+    }).finally(() => {
+      preparing--;
+      job.preparing = false;
+      pump();
+    });
+  };
+
+  const beginContinuation = (job) => {
+    const continuation = job.prepared?.continuePrepare;
+    if (typeof continuation !== 'function') {
+      job.needsContinue = false;
+      job.ready = true;
+      return;
+    }
+    job.needsContinue = false;
+    job.continuing = true;
+    continuing++;
+    const continuedAt = Date.now();
+    Promise.resolve().then(() => continuation()).then(prepared => {
+      if (jobs.get(job.key) !== job) return;
+      job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, Date.now() - continuedAt);
+      job.prepared = prepared;
+      if (prepared?.bypass) {
+        job.ready = true;
+        job.needsContinue = false;
+        if (bypassRunning < bypassConcurrency) startJob(job, true);
+      } else if (typeof prepared?.continuePrepare === 'function') {
+        job.needsContinue = true;
+        job.ready = false;
+      } else {
+        job.ready = true;
+        job.needsContinue = false;
+      }
+    }, error => {
+      if (jobs.get(job.key) === job) {
+        job.reject(error);
+        jobs.delete(job.key);
+      }
+    }).finally(() => {
+      continuing--;
+      job.continuing = false;
+      pump();
+    });
+  };
+
   const pump = () => {
     while (bypassRunning < bypassConcurrency) {
       const job = next(j => j.ready && j.prepared?.bypass);
       if (!job) break;
-      start(job,true);
+      startJob(job, true);
     }
     while (true) {
       const job = next(j => !j.prepare || (j.ready && (!j.prepared?.bypass || bypassConcurrency === 0)));
       if (!job) break;
       const normalSlot = running < concurrency;
-      // الصفحة المرئية تستطيع تجاوز slot واحد فقط. لا نسمح لتمرير سريع
-      // بتحويل 8 slots إلى عشرات الأعمال المعلقة في Luna/Native.
       const activeFocusedBurst = [...jobs.values()].filter(j => j.started && j.burst && isFocused(j)).length;
-      // If focus moves while the previous visible page is still waiting on Luna,
-      // the new visible page may take one more bounded burst slot. Hard cap:
-      // normal concurrency + two focus bursts, never unbounded scroll backlog.
       const burstSlot = concurrency > 0 && isFocused(job) && activeFocusedBurst < 1 &&
         running + focusedBurstRunning < concurrency + 2;
       if (!normalSlot && !burstSlot) break;
-      start(job, false, !normalSlot);
+      startJob(job, false, !normalSlot);
     }
-    const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
+
+    // Phase 1: Route/classification. Keep only a bounded number of routed text
+    // pages waiting for continuation. This lets textless pages behind dialogue
+    // reach DONE without ever overlapping RT-DETR with Heavy inference.
     while (true) {
-      const job = next(j => j.prepare && !j.ready && !j.preparing);
+      const job = next(j => j.prepare && !j.ready && !j.preparing && !j.needsContinue && !j.continuing);
       if (!job) break;
-      // لا نحجز أول/آخر الفصل. فقط الحالية والثلاث أمامها لها admission
-      // إضافي محدود، حتى لا يتكدس detector أثناء فصل ثقيل.
       const focused = isFocused(job);
       const near = isNearForward(job);
       const preparingFocused = [...jobs.values()].filter(j => j.preparing && isFocused(j)).length;
@@ -195,24 +286,32 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
           ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
           : preparing >= prepareConcurrency;
       const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
-      if (prepBlocked || readyCount() + preparing >= preparedCap) break;
-      job.preparing = true; preparing++;
-      const preparedAt=Date.now();
-      Promise.resolve().then(() => job.prepare()).then(prepared => {
-        if (jobs.get(job.key) !== job) return;
-        job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
-        if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
-      }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
-        .finally(() => { preparing--; job.preparing = false; pump(); });
+      if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap ||
+        continuationBuffered() >= maxRouteAhead) break;
+      beginPrepare(job);
+    }
+
+    // Phase 2: Heavy continuation. Never start it while a Route batch is still
+    // in flight. Native inference itself remains serialized by
+    // withNativeTranslationStage, so this cannot recreate RT-DETR/Heavy overlap.
+    if (preparing === 0) {
+      while (continuing < continueConcurrency) {
+        const job = next(j => j.needsContinue && !j.continuing);
+        if (!job) break;
+        beginContinuation(job);
+      }
     }
   };
+
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
     add({ key, chapterKey, index, run, prepare }) {
       const existing = jobs.get(key);
       if (existing) {
-        // مهمة لم تبدأ من جلسة قارئ سابقة: يأخذها صاحبها الجديد، فلا يرث وعدًا ميتًا
-        if (!existing.started) { existing.run = run; if (!existing.preparing && !existing.ready) existing.prepare = prepare; }
+        if (!existing.started) {
+          existing.run = run;
+          if (!existing.preparing && !existing.ready && !existing.needsContinue && !existing.continuing) existing.prepare = prepare;
+        }
         return existing.promise;
       }
       let resolve;
@@ -221,20 +320,22 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
         resolve = a;
         reject = b;
       });
-      jobs.set(key, { key, chapterKey, index, run, prepare, resolve, reject, promise, started: false, addedAt: Date.now() });
+      jobs.set(key, {
+        key, chapterKey, index, run, prepare, resolve, reject, promise,
+        started: false, addedAt: Date.now(), prepareMs: 0,
+        preparing: false, continuing: false, needsContinue: false, ready: false,
+      });
       queueMicrotask(pump);
       return promise;
     },
     focus(chapterKey, index, chapterRanks = null, { pageCount = null } = {}) {
       focusKey = chapterKey;
       focusIndex = index;
-      void pageCount; // kept in the public signature for reader compatibility
+      void pageCount;
       if (chapterRanks) {
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
       }
-      // A page can already be waiting when the user scrolls onto it. Re-run
-      // admission now so one bounded focused burst can bypass stale slots.
       queueMicrotask(pump);
     },
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
@@ -245,10 +346,14 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
       return () => listeners.delete(fn);
     },
     drop(chapterKey) {
-      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) { jobs.delete(job.key); job.resolve(null); }
+      for (const job of jobs.values()) if (!job.started && job.chapterKey === chapterKey) {
+        jobs.delete(job.key);
+        job.resolve(null);
+      }
     },
   };
 }
+
 
 // ───────────────────────── الصورة والشبكة ─────────────────────────
 
@@ -380,6 +485,7 @@ async function translatePageNow(deps, src, meta) {
     candidate?.cacheLookup?.cacheKey === expectedCacheKey ? candidate : null;
   let runDeps = imagePath && deps.imagePath !== imagePath ? { ...deps, imagePath } : deps;
   if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
+  if (!runDeps.routeStartedAt && prepared?.routeStartedAt) runDeps = { ...runDeps, routeStartedAt: prepared.routeStartedAt };
   if (prepared?.analysis) runDeps = { ...runDeps, analysis: prepared.analysis };
   if (prepared?.prepareStages) {
     let detailed = 0;
@@ -473,10 +579,16 @@ async function translateOnce(deps, src, hash, meta, clock) {
   const saved = writePageCache(hash, meta, value);
   const persisted = (await saved.written).every(key => typeof key === 'string');
   registerRefinement(deps,hash,meta,result,saved,persisted);
+  // Derived end-to-end latency for textless classification. This is deliberately
+  // NOT a stage: logPage must not add it to total on top of prepare.route/wait.
+  const routeToDoneMs = result.textless && Number.isFinite(deps.routeStartedAt)
+    ? Math.max(0, Date.now() - deps.routeStartedAt)
+    : null;
   logPage(deps, meta, hash, clock, {
     from: result.cached ? 'friends' : 'model',
     cacheKey: saved.cacheKey,
     textless: Boolean(result.textless),
+    routeToDoneMs,
     regions: (result.regions ?? []).length,
     translated: result.translated,
     incomplete: Boolean(result.incomplete),
@@ -631,6 +743,7 @@ export async function prepareTranslation(src, meta, options = {}) {
   // concurrently with CTD/BubbleSeg and device telemetry showed RT-DETR inflate
   // from ~0.25s to multi-second work. Route has a higher queue rank instead:
   // it can jump queued analysis, but never overlaps the active inference call.
+  const routeStartedAt=Date.now();
   const route=await withNativeTranslationStage(
     () => prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex})),
     {
@@ -638,33 +751,36 @@ export async function prepareTranslation(src, meta, options = {}) {
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
-  if (route?.textless || !options.preAnalyze) {
-    return {src,hash,cacheLookup,route,bypass:Boolean(route?.textless),prepareStages:prep.stages};
-  }
+  const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages};
+  if (route?.textless || !options.preAnalyze) return routed;
 
-  // Stage separation: expensive local analysis finishes in preparation, before
-  // this page consumes a reader run slot. Luna may then wait/batch without
-  // holding the single CTD/BubbleSeg owner.
+  // Heavy pre-analysis is optionally returned as a continuation. The queue can
+  // then classify a bounded Route window first, but the actual native calls are
+  // still serialized by withNativeTranslationStage.
   const prepDeps={
     via: options.via ?? 'reader',
     interactive: Boolean(options.interactive),
     isInteractive: options.isInteractive,
   };
-  const analysis=await withNativeTranslationStage(
-    () => prep.time('prepare.analyze', () => analyzePage({
-      path,
-      sourceLang:meta.sourceLang ?? 'auto',
-      priority:'low',
-      chapterKey:meta.chapterKey,
-      pageIndex:meta.pageIndex,
-      routeHash:route?.pageHash,
-    })),
-    {
-      priority:nativeStagePriorityOf(prepDeps,'analyze'),
-      onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
-    },
-  );
-  return {src,hash,cacheLookup,route,analysis,bypass:false,prepareStages:prep.stages};
+  const finishAnalysis=async()=> {
+    const analysis=await withNativeTranslationStage(
+      () => prep.time('prepare.analyze', () => analyzePage({
+        path,
+        sourceLang:meta.sourceLang ?? 'auto',
+        priority:'low',
+        chapterKey:meta.chapterKey,
+        pageIndex:meta.pageIndex,
+        routeHash:route?.pageHash,
+      })),
+      {
+        priority:nativeStagePriorityOf(prepDeps,'analyze'),
+        onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
+      },
+    );
+    return {...routed,analysis,bypass:false,prepareStages:prep.stages};
+  };
+  if(options.deferAnalyze) return {...routed,bypass:false,continuePrepare:finishAnalysis};
+  return finishAnalysis();
 }
 
 async function translateOnDevice(deps, hash, meta, clock) {
