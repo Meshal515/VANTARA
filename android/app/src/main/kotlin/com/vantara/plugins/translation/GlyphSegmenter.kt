@@ -29,7 +29,6 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
         val nw=Math.round(crop.width*r)
         val nh=Math.round(crop.height*r)
         val input=Ort.tensor(chw,1,3,size.toLong(),size.toLong())
-        val mapped=FloatArray(crop.width*crop.height)
         Ort.run(session,mapOf("images" to input)).use {res->
             val seg=res.get("seg").get().value
             @Suppress("UNCHECKED_CAST")
