@@ -171,8 +171,12 @@ export function createQueue({
         finish(job);
       });
   };
-  const routeBuffered = () => [...jobs.values()].filter(j =>
-    !j.started && (j.preparing || j.needsContinue || j.continuing)).length;
+  // A route that already classified a text page is buffered until its Heavy
+  // continuation. In-flight preparations are governed separately by the
+  // original focused/near admission rules; counting them here would break the
+  // reader's bounded focus burst.
+  const continuationBuffered = () => [...jobs.values()].filter(j =>
+    !j.started && (j.needsContinue || j.continuing)).length;
   const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
 
   const beginPrepare = (job) => {
@@ -279,7 +283,8 @@ export function createQueue({
           ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
           : preparing >= prepareConcurrency;
       const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
-      if (prepBlocked || readyCount() + routeBuffered() >= preparedCap || routeBuffered() >= maxRouteAhead) break;
+      if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap ||
+        continuationBuffered() >= maxRouteAhead) break;
       beginPrepare(job);
     }
 
