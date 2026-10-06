@@ -252,7 +252,7 @@ export function createJobRunner(deps) {
       prepare:async()=> {
         if(job.status!=='running') return {bypass:true,paused:true};
         const image=await engine.pageImage(ch.row.sourceId,list[p]);
-        return {...await preparePage(image.src,meta),image};
+        return {...await preparePage(image.src,meta,{via:'job',interactive:false}),image};
       },
       run:async({prepared,waitedMs,prepareMs})=> {
         if(prepared?.paused || job.status!=='running') return {error:'paused'};
