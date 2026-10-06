@@ -343,18 +343,17 @@ export function createQueue({
       beginPrepare(job);
     }
 
-    // Phase 2: Heavy continuation. Never start it while a Route batch is still
-    // in flight. Native inference itself remains serialized by
-    // withNativeTranslationStage, so this cannot recreate RT-DETR/Heavy overlap.
-    if (preparing === 0) {
-      const continuationCap = capacity ? Math.min(continueConcurrency, caps.prepareConcurrency) : continueConcurrency;
-      while (continuing < continuationCap) {
-        const residentBlocked = Number.isFinite(maxInFlight) && analysisResidentCount() >= maxInFlight;
-        if (residentBlocked) break;
-        const job = next(j => j.needsContinue && !j.continuing);
-        if (!job) break;
-        beginContinuation(job);
-      }
+    // Phase 2: Heavy continuation may be admitted while Route preparations are
+    // still pending. The native scheduler already serializes RT-DETR/Analyze and
+    // keeps Route above Analyze, so a queue-level `preparing === 0` barrier only
+    // starves Heavy behind a deep Route-ahead window (real-device: 40–83s).
+    const continuationCap = capacity ? Math.min(continueConcurrency, caps.prepareConcurrency) : continueConcurrency;
+    while (continuing < continuationCap) {
+      const residentBlocked = Number.isFinite(maxInFlight) && analysisResidentCount() >= maxInFlight;
+      if (residentBlocked) break;
+      const job = next(j => j.needsContinue && !j.continuing);
+      if (!job) break;
+      beginContinuation(job);
     }
   };
 
@@ -633,7 +632,18 @@ async function translateOnce(deps, src, hash, meta, clock) {
     logPage(deps, meta, hash, clock, { from: 'error', error: result.error, native: result.native });
     return result;
   }
-  const value = { image: result.image, regions: result.regions, translated: result.translated, engine: result.engine, incomplete: Boolean(result.incomplete), at: Date.now(), tries: 0 };
+  // Never publish a mixed Arabic/English candidate. Incomplete output is kept
+  // only as repair metadata; the reader stays on the original page until a
+  // complete repair is accepted.
+  const value = {
+    image: result.incomplete ? null : result.image,
+    regions: result.regions,
+    translated: result.incomplete ? 0 : result.translated,
+    engine: result.engine,
+    incomplete: Boolean(result.incomplete),
+    at: Date.now(),
+    tries: 0,
+  };
   const saved = writePageCache(hash, meta, value);
   const persisted = (await saved.written).every(key => typeof key === 'string');
   registerRefinement(deps,hash,meta,result,saved,persisted);
@@ -654,7 +664,8 @@ async function translateOnce(deps, src, hash, meta, clock) {
     routeToDoneMs,
     routeDispatchToDoneMs,
     regions: (result.regions ?? []).length,
-    translated: result.translated,
+    translated: result.incomplete ? 0 : result.translated,
+    candidateTranslated: result.incomplete ? (result.translated ?? 0) : null,
     incomplete: Boolean(result.incomplete),
     engine: result.engine ?? null,
     native: result.native,
