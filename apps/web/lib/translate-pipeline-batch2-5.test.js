@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareTranslation, translatePage, withNativeTranslationStage } from './translate.js';
+import { createQueue, prepareTranslation, translatePage, withNativeTranslationStage } from './translate.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const memory = () => {
@@ -143,10 +143,37 @@ describe('batch 2.5 stage pipeline', () => {
     expect(maxActive).toBe(1);
   });
 
+  it('capacity contract pauses and resumes queue admission without dropping work', async () => {
+    let changed;
+    let allow = false;
+    let prepared = 0;
+    let ran = 0;
+    const capacity = {
+      queueLimits: () => allow
+        ? { concurrency: 1, prepareConcurrency: 1, maxPrepared: 1, bypassConcurrency: 0 }
+        : { concurrency: 0, prepareConcurrency: 0, maxPrepared: 0, bypassConcurrency: 0 },
+      subscribe: fn => { changed = fn; return () => {}; },
+    };
+    const q = createQueue({ concurrency:1, prepareConcurrency:1, maxPrepared:1, bypassConcurrency:0, capacity, lane:'test' });
+    const result = q.add({
+      key:'c#0', chapterKey:'c', index:0,
+      prepare:async()=> { prepared += 1; return { bypass:false }; },
+      run:async()=> { ran += 1; return 'done'; },
+    });
+    await tick();
+    expect(prepared).toBe(0);
+    expect(ran).toBe(0);
+    allow = true;
+    changed();
+    await expect(result).resolves.toBe('done');
+    expect(prepared).toBe(1);
+    expect(ran).toBe(1);
+  });
+
   it('reader keeps a deep staged buffer instead of five end-to-end slots', async () => {
     const source = await import('node:fs').then(({readFileSync}) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url),'utf8'));
-    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8\s*\}\)/);
+    expect(source).toMatch(/createQueue\(\{\s*concurrency:\s*12,\s*prepareConcurrency:\s*8,\s*maxPrepared:\s*24,\s*bypassConcurrency:\s*8,\s*capacity:\s*runtimeCapacity,\s*lane:\s*'reader'\s*\}\)/);
     expect(source).toMatch(/prepareTranslation\([^;]+\{\s*preAnalyze:\s*true,/s);
   });
 });
