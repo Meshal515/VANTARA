@@ -17,7 +17,8 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   const heapSamples = [];
   const decisions = [];
   const state = {
-    thermal: 0, heapMb: 0, heapLimitMb: 0, availMemMb: 0, lowMemory: false,
+    thermal: 0, heapMb: 0, heapLimitMb: 0, availMemMb: 0, totalMemMb: 0, lowMemory: false,
+    gcCount: 0, gcTimeMs: 0, blockingGcCount: 0, blockingGcTimeMs: 0, blockingGcDelta: 0, blockingGcTimeDeltaMs: 0,
     lunaMs: 12_700, analyzeMs: 4_000, renderMs: 5_100, analyzeWaitMs: 0, renderWaitMs: 0,
     renderReady: 0, networkActive: 0, networkPending: 0,
     grade: 0, healthySamples: 0, lastGradeChange: now(), sequence: 0,
@@ -35,9 +36,10 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
 
   function rawGrade() {
     const { soft, hard } = heapThresholds();
+    const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
     let grade = 0;
-    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000) grade = 1;
-    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000) grade = 2;
+    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000 || ramRatio < 0.08 || state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) grade = 1;
+    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000 || ramRatio < 0.04) grade = 2;
     if (state.thermal >= envelope.thermal.critical || state.lowMemory || state.heapMb >= hard) grade = 3;
     if (heapSlope() >= 6 && state.heapMb >= soft * 0.8) grade = Math.max(grade, 1);
     return grade;
@@ -54,6 +56,9 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     if (state.renderReady >= envelope.renderReadySoft) reasons.push(`render-ready:${state.renderReady}`);
     if (state.renderWaitMs >= 2_000) reasons.push(`render-wait:${Math.round(state.renderWaitMs)}ms`);
     if (state.analyzeWaitMs >= 5_000) reasons.push(`analyze-wait:${Math.round(state.analyzeWaitMs)}ms`);
+    const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
+    if (ramRatio < 0.08) reasons.push(`ram-headroom:${Math.round(ramRatio * 100)}%`);
+    if (state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) reasons.push(`blocking-gc:+${state.blockingGcDelta}/${Math.round(state.blockingGcTimeDeltaMs)}ms`);
     if (!reasons.length && state.lunaMs >= 15_000) reasons.push(`luna-slow:${Math.round(state.lunaMs)}ms`);
     return reasons.length ? reasons.join(',') : (grade ? `pressure:${grade}` : 'green');
   }
@@ -110,7 +115,18 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     if (Number.isFinite(Number(perf.heapMb))) state.heapMb = Number(perf.heapMb);
     if (Number.isFinite(Number(perf.heapLimitMb))) state.heapLimitMb = Number(perf.heapLimitMb);
     if (Number.isFinite(Number(perf.availMemMb))) state.availMemMb = Number(perf.availMemMb);
+    if (Number.isFinite(Number(perf.totalMemMb))) state.totalMemMb = Number(perf.totalMemMb);
     state.lowMemory = Boolean(perf.lowMemory);
+    const nextGcCount = Number(perf.gcCount);
+    const nextGcTime = Number(perf.gcTimeMs);
+    const nextBlockingCount = Number(perf.blockingGcCount);
+    const nextBlockingTime = Number(perf.blockingGcTimeMs);
+    state.blockingGcDelta = Number.isFinite(nextBlockingCount) && state.blockingGcCount > 0 ? Math.max(0, nextBlockingCount - state.blockingGcCount) : 0;
+    state.blockingGcTimeDeltaMs = Number.isFinite(nextBlockingTime) && state.blockingGcTimeMs > 0 ? Math.max(0, nextBlockingTime - state.blockingGcTimeMs) : 0;
+    if (Number.isFinite(nextGcCount)) state.gcCount = nextGcCount;
+    if (Number.isFinite(nextGcTime)) state.gcTimeMs = nextGcTime;
+    if (Number.isFinite(nextBlockingCount)) state.blockingGcCount = nextBlockingCount;
+    if (Number.isFinite(nextBlockingTime)) state.blockingGcTimeMs = nextBlockingTime;
     if (state.heapMb > 0) { heapSamples.push(state.heapMb); if (heapSamples.length > 8) heapSamples.shift(); }
     const stages = perf.stages ?? {};
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
@@ -120,10 +136,14 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   }
 
   function observeStages(stages = {}) {
-    const a = Number(stages['nativeWait.analyze'] ?? 0);
-    const r = Number(stages['nativeWait.render'] ?? 0);
-    if (a >= 0) state.analyzeWaitMs = ewma(state.analyzeWaitMs, a, 0.28);
-    if (r >= 0) state.renderWaitMs = ewma(state.renderWaitMs, r, 0.28);
+    if (Object.prototype.hasOwnProperty.call(stages, 'nativeWait.analyze')) {
+      const a = Number(stages['nativeWait.analyze']);
+      if (a >= 0) state.analyzeWaitMs = ewma(state.analyzeWaitMs, a, 0.28);
+    }
+    if (Object.prototype.hasOwnProperty.call(stages, 'nativeWait.render')) {
+      const r = Number(stages['nativeWait.render']);
+      if (r >= 0) state.renderWaitMs = ewma(state.renderWaitMs, r, 0.28);
+    }
     updateGrade({ healthyObservation: true });
   }
 
@@ -211,6 +231,13 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
       heapSlopeMb: Math.round(heapSlope() * 10) / 10,
       lowMemory: state.lowMemory,
       availMemMb: Math.round(state.availMemMb),
+      totalMemMb: Math.round(state.totalMemMb),
+      gcCount: state.gcCount,
+      gcTimeMs: state.gcTimeMs,
+      blockingGcCount: state.blockingGcCount,
+      blockingGcTimeMs: state.blockingGcTimeMs,
+      blockingGcDelta: state.blockingGcDelta,
+      blockingGcTimeDeltaMs: Math.round(state.blockingGcTimeDeltaMs),
       lunaMs: Math.round(state.lunaMs),
       analyzeMs: Math.round(state.analyzeMs),
       renderMs: Math.round(state.renderMs),
@@ -231,7 +258,10 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
       sequence: t.sequence, grade: t.grade, reason: t.reason,
       thermal: t.thermal, heapMb: t.heapMb, heapLimitMb: t.heapLimitMb,
       heapSoftMb: t.heapSoftMb, heapHardMb: t.heapHardMb, heapSlopeMb: t.heapSlopeMb,
-      lowMemory: t.lowMemory, availMemMb: t.availMemMb,
+      lowMemory: t.lowMemory, availMemMb: t.availMemMb, totalMemMb: t.totalMemMb,
+      gcCount: t.gcCount, gcTimeMs: t.gcTimeMs,
+      blockingGcCount: t.blockingGcCount, blockingGcTimeMs: t.blockingGcTimeMs,
+      blockingGcDelta: t.blockingGcDelta, blockingGcTimeDeltaMs: t.blockingGcTimeDeltaMs,
       lunaMs: t.lunaMs, analyzeMs: t.analyzeMs, renderMs: t.renderMs,
       analyzeWaitMs: t.analyzeWaitMs, renderWaitMs: t.renderWaitMs,
       renderReady: t.renderReady, networkActive: t.networkActive, networkPending: t.networkPending,
