@@ -34,17 +34,7 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
             val seg=res.get("seg").get().value
             @Suppress("UNCHECKED_CAST")
             val plane=(seg as Array<Array<Array<FloatArray>>>)[0][0]
-            for(y in 0 until crop.height) {
-                val fy=((y+.5f)*nh/crop.height-.5f).coerceIn(0f,(nh-1).toFloat())
-                val ya=fy.toInt();val yb=minOf(nh-1,ya+1);val wy=fy-ya
-                for(x in 0 until crop.width) {
-                    val fx=((x+.5f)*nw/crop.width-.5f).coerceIn(0f,(nw-1).toFloat())
-                    val xa=fx.toInt();val xb=minOf(nw-1,xa+1);val wx=fx-xa
-                    mapped[y*crop.width+x]=
-                        (plane[ya][xa]*(1-wx)+plane[ya][xb]*wx)*(1-wy)+
-                        (plane[yb][xa]*(1-wx)+plane[yb][xb]*wx)*wy
-                }
-            }
+            return CtdSegMapper.map(plane,nw,nh,crop.width,crop.height)
         }
         return mapped
     }
