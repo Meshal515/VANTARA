@@ -86,6 +86,22 @@ class MixedRegionPlanTest {
   assertTrue(hard.fast.isEmpty());assertEquals(1,hard.heavy.size)
  }
 
+    @Test fun `free fast context rejects a nearby missed line instead of creating a partial`() {
+        val w=240; val h=180
+        val data=ByteArray(w*h*3){250.toByte()}
+        fun dark(x0:Int,y0:Int,x1:Int,y1:Int) {
+            for(y in y0 until y1) for(x in x0 until x1) for(ch in 0..2) data[(y*w+x)*3+ch]=20
+        }
+        for(i in 0..4) dark(60+i*14,55,66+i*14,76)
+        for(i in 0..3) dark(66+i*15,112,73+i*15,132)
+        val img=RgbImage(w,h,data)
+        val text=Detection(Box(54,49,135,83),.95f,"text_free")
+        val plan=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(text),allowFlatFree=true)
+        assertTrue(plan.fast.isEmpty())
+        assertEquals(listOf(text),plan.heavy)
+        assertEquals("glyph_coverage",plan.rejectionReasons[text])
+    }
+
     @Test fun `low confidence free dialogue stays translatable instead of becoming sfx`() {
         val w=180; val h=120
         val data=ByteArray(w*h*3){245.toByte()}
