@@ -54,7 +54,7 @@ const store = {
 
 // مسار واحد واضح: يبدأ من أول صفحة في الفصل ويتقدم بالترتيب.
 // هذا يمنع 4 صفحات قارئ من التزاحم على نماذج CTD/BubbleSeg في الوقت نفسه.
-const queue = createQueue({ concurrency: 1, prepareConcurrency: 1, maxPrepared: 2, bypassConcurrency: 1 });
+const queue = createQueue({ concurrency: 1, prepareConcurrency: 1, maxPrepared: 2, bypassConcurrency: 0 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
