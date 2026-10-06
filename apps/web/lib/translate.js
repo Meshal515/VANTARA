@@ -110,7 +110,7 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
  * ثم بُعد الصفحة عن موضعك: ما أمامك أولًا، وما خلفك بوزن أثقل.
  * `focus` يعيد الترتيب فورًا؛ الجاري لا يُقطع.
  */
-export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2 } = {}) {
+export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepared = 24, bypassConcurrency = 2, maxInFlight = Infinity } = {}) {
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
@@ -149,7 +149,13 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
     if (bypass) bypassRunning++;
     else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
     else running++;
-    Promise.resolve().then(() => job.run({ waitedMs: Math.max(0,Date.now() - job.addedAt-(job.prepareMs ?? 0)),prepareMs:job.prepareMs ?? 0,
+    const runAt = Date.now();
+    // Outer wait is two different queues. Keep them separate so reducing the
+    // headline `wait` cannot merely hide time inside preparation or Native.
+    const admissionWaitMs = Math.max(0, (job.prepareStartedAt ?? runAt) - job.addedAt);
+    const preparedWaitMs = job.preparedAt == null ? 0 : Math.max(0, runAt - job.preparedAt);
+    const waitedMs = job.prepare ? admissionWaitMs + preparedWaitMs : Math.max(0, runAt - job.addedAt);
+    Promise.resolve().then(() => job.run({ waitedMs, admissionWaitMs, preparedWaitMs, prepareMs:job.prepareMs ?? 0,
       prepared: job.prepared, interactive: isFocused(job), isInteractive: () => isFocused(job) }))
       .then(job.resolve, job.reject).finally(() => {
         if (bypass) bypassRunning--;
@@ -195,12 +201,22 @@ export function createQueue({ concurrency = 3, prepareConcurrency = 1, maxPrepar
           ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
           : preparing >= prepareConcurrency;
       const preparedCap = maxPrepared + (focused ? 2 : near ? 1 : 0);
-      if (prepBlocked || readyCount() + preparing >= preparedCap) break;
+      // Hard resident bound is separate from policy ceilings. Normal/focus run
+      // pages still own their analyzed handoff; bypass pages (cache/textless)
+      // do not, so they are intentionally excluded.
+      const resident = running + focusedBurstRunning + readyCount() + preparing;
+      const residentBlocked = Number.isFinite(maxInFlight) && resident >= maxInFlight;
+      // Do not skip a quota-blocked high-priority page just to fill Heavy farther
+      // ahead: that only moves outer wait into nativeWait without increasing
+      // serialized inference throughput.
+      if (prepBlocked || residentBlocked || readyCount() + preparing >= preparedCap) break;
       job.preparing = true; preparing++;
-      const preparedAt=Date.now();
+      job.prepareStartedAt = Date.now();
+      const prepareStartedAt = job.prepareStartedAt;
       Promise.resolve().then(() => job.prepare()).then(prepared => {
         if (jobs.get(job.key) !== job) return;
-        job.prepareMs=Date.now()-preparedAt; job.prepared = prepared; job.ready = true;
+        job.preparedAt = Date.now();
+        job.prepareMs=job.preparedAt-prepareStartedAt; job.prepared = prepared; job.ready = true;
         if (prepared?.bypass && bypassRunning < bypassConcurrency) start(job, true);
       }, error => { if (jobs.get(job.key) === job) { job.reject(error); jobs.delete(job.key); } })
         .finally(() => { preparing--; job.preparing = false; pump(); });
@@ -497,7 +513,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, ...extra });
+    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();

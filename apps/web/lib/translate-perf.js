@@ -97,6 +97,14 @@ function stageMeans(entries) {
   return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, mean(v)]));
 }
 
+/** `wait` stays the canonical non-overlapping stage. This breakdown is
+ * diagnostic metadata only, so it never inflates page total/chapter wall time. */
+function queueWaitMeans(entries) {
+  const admission = entries.map(e => e.queueWait?.admission).filter(Number.isFinite);
+  const prepared = entries.map(e => e.queueWait?.prepared).filter(Number.isFinite);
+  return { admission: mean(admission), prepared: mean(prepared) };
+}
+
 function latestRunEntries(entries) {
   const last=[...entries].reverse().find(e => typeof e?.runId === 'string' && e.runId);
   return last ? entries.filter(e => e.runId === last.runId) : entries;
@@ -250,9 +258,16 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const lanes = last?.native?.render?.laneBusy ?? last?.native?.analyze?.laneBusy;
   if (lanes) lines.push(`إشغال المسارات: كشف ${lanes.detect}% · تحليل ${lanes.analyze}% · رسم ${lanes.render}% (ليس نسبة CPU للنظام)`);
   else if (last) lines.push(`مسار النماذج المحلي كان مشغولًا ${last.native.render?.busyPct ?? last.native.analyze.busyPct}% من الوقت منذ أول صفحة (هذا إشغال بوابة الترجمة، وليس نسبة CPU للنظام)`);
-  for (const [label, g] of [['بلا نص', s.textless], ['بنص', s.text]]) {
+  for (const [label, g, groupEntries] of [
+    ['بلا نص', s.textless, fresh.filter(e => e.textless)],
+    ['بنص', s.text, fresh.filter(e => !e.textless)],
+  ]) {
     lines.push('', `${label}: ${g.pages} صفحة · الوسيط ${sec(g.median)}`);
     for (const [k, v] of Object.entries(g.stages).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))) lines.push(`  ${k}: ${sec(v)}`);
+    const q = queueWaitMeans(groupEntries);
+    if (q.admission !== null || q.prepared !== null) {
+      lines.push(`  تفصيل wait (لا يُجمع مرة ثانية): admission ${sec(q.admission)} · prepared→run ${sec(q.prepared)}`);
+    }
   }
   // آخر الصفحات واحدةً واحدة: الملخّص السابق كان يخفي فرق «الأولى لا تظهر والثانية تظهر».
   // هذا السطر يجعل الدور والعمل والشبكة مرئية لكل صفحة بدل وسيط واحد.
@@ -275,7 +290,10 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
         Number.isFinite(e.native?.analyze?.thermal) ? `حرارة ${e.native.analyze.thermal}` : null,
         Number.isFinite(e.native?.analyze?.heapMb) ? `heap ${e.native.analyze.heapMb}MB` : null,
       ].filter(Boolean).join(' · ');
-      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${telemetry ? ` · ${telemetry}` : ''}`);
+      const outer = e.queueWait
+        ? ` · outer admission ${sec(e.queueWait.admission)} · prepared→run ${sec(e.queueWait.prepared)}`
+        : '';
+      lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${outer}${telemetry ? ` · ${telemetry}` : ''}`);
     }
   }
 

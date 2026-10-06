@@ -83,12 +83,13 @@ describe('batch 1 reader pipeline', () => {
   it('never regresses the reader to one whole-page pipeline with no textless bypass', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync(new URL('../v35/reader-translate.js', import.meta.url), 'utf8'));
-    const match = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+)\s*\}\)/.exec(source);
+    const match = /createQueue\(\{\s*concurrency:\s*(\d+),\s*prepareConcurrency:\s*(\d+),\s*maxPrepared:\s*(\d+),\s*bypassConcurrency:\s*(\d+),\s*maxInFlight:\s*(\d+)\s*\}\)/.exec(source);
     expect(match).not.toBeNull();
-    const [, concurrency, prepareConcurrency, maxPrepared, bypassConcurrency] = match.map(Number);
+    const [, concurrency, prepareConcurrency, maxPrepared, bypassConcurrency, maxInFlight] = match.map(Number);
     expect(concurrency).toBeGreaterThanOrEqual(3);
     expect(prepareConcurrency).toBeGreaterThanOrEqual(1);
     expect(maxPrepared).toBeGreaterThanOrEqual(concurrency);
     expect(bypassConcurrency).toBeGreaterThanOrEqual(1);
+    expect(maxInFlight).toBeGreaterThanOrEqual(concurrency);
   });
 });

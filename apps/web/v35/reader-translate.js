@@ -54,8 +54,10 @@ const store = {
 
 // Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
 // Run slots therefore cover Luna + Render only; a slow Luna response no longer
-// blocks CTD/BubbleSeg from preparing later pages. Caps stay finite for RAM/network.
-const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8 });
+// blocks CTD/BubbleSeg from preparing later pages. Android retains 24 immutable
+// analysis snapshots. maxPrepared stays a policy ceiling; maxInFlight is the
+// independent hard handoff bound across running + ready/preparing analyzed pages.
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24 });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -193,7 +195,7 @@ export function createReaderTranslation(deps) {
       if(stopped || disabledReason || !isOn()) return null;
       return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,via:'reader',interactive:false});
     };
-    const run = async ({ waitedMs = 0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
+    const run = async ({ waitedMs = 0,admissionWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,interactive = false,isInteractive } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -204,7 +206,7 @@ export function createReaderTranslation(deps) {
         seg.tl.results.set(index, better);
         paint(seg, index);
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,prepared:preparedWaitMs}, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
