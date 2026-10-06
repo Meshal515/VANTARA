@@ -194,7 +194,7 @@ export function createJobRunner(deps) {
   const { sync, engine, translatePage, native } = deps;
   const concurrency=Math.min(4,Math.max(1,deps.concurrency ?? JOB_CONCURRENCY));
   const lookahead=Math.min(4,Math.max(1,deps.lookahead ?? concurrency));
-  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:24});
+  const lanes=createQueue({concurrency,prepareConcurrency:deps.prepareConcurrency ?? 1,maxPrepared:2,bypassConcurrency:0});
   const preparePage=deps.prepareTranslation ?? prepareTranslation;
   // الصفحة أمامك في القارئ أولًا على النت أيضًا: لا تبدأ المقدّمة صفحة جديدة وهو يترجم
   const readerQuiet = deps.readerQuiet ?? (async () => {});
