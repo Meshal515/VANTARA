@@ -206,6 +206,7 @@ object Regions {
             val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
             val flat = fastBubbleEvidence(img, holder.box, textBox)
             if(flat==null) {reject(group,"background");continue}
+            if(!fastSpeechEnvelopeSafe(flat.mask,holder.box)) {reject(group,"holder_mask");continue}
             val glyph = fastGlyphEvidence(img, flat.mask, textBox, flat.color)
             if(glyph==null || glyph.mask.count()<MIN_GLYPH_PIXELS) {reject(group,"glyph_mask");continue}
             // Cheap whole-holder audit: Fast cannot rely on post-render residual
@@ -255,6 +256,23 @@ object Regions {
             if(mask[x,y].toInt()!=0) inside++
         }
         return if(total==0) 0f else inside.toFloat()/total
+    }
+
+    /**
+     * Fast speech is allowed only when the paper component spans most of the
+     * detector holder. A local component around one line can look perfectly flat
+     * while leaving another English line untouched elsewhere in the same bubble.
+     * Falling back here costs CTD/BubbleSeg for this ROI only; it never risks a
+     * mixed Arabic/English publication.
+     */
+    private fun fastSpeechEnvelopeSafe(mask:ByteMask,holder:Box):Boolean {
+        val b=mask.bounds() ?: return false
+        val hw=maxOf(1,holder.w)
+        val hh=maxOf(1,holder.h)
+        val spanW=(b[2]-b[0]).toFloat()/hw
+        val spanH=(b[3]-b[1]).toFloat()/hh
+        val coverage=maskCoverage(mask,holder)
+        return spanW>=.72f && spanH>=.72f && coverage>=.50f
     }
 
     /**
