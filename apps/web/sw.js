@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '8dc62f7000a79693dfb6ea93b7b8050fed7400b660bf65f53958486488a04c51';
+const SHELL_DIGEST = '52dae1a6db62625030e248b03e51632b3c7d45fbeb8e4add7840f2f8a8cbd94b';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -340,7 +340,6 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const cache = await caches.open(VERSION);
         const cached = await cache.match('/');
-
         if (cached) return cached;
         const fromNetwork = fetch(request)
           .then((response) => {
@@ -348,8 +347,6 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch(() => undefined);
-
-        // أول زيارة في حياة الجهاز: لا قشرة مخزَّنة بعد، فالشبكة هي الطريق
         return (await fromNetwork) ?? Response.error();
       })(),
     );
@@ -363,7 +360,6 @@ self.addEventListener('fetch', (event) => {
     (async () => {
       const cache = await caches.open(VERSION);
       const cached = await cache.match(request);
-
       if (cached) return cached;
       const revalidate = fetch(request)
         .then((response) => {
@@ -371,7 +367,6 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => undefined);
-
       return (await revalidate) ?? Response.error();
     })(),
   );
