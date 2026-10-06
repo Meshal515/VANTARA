@@ -50,12 +50,13 @@ it('releases a route preparation slot before deferred heavy continuation so text
  });
  for(let i=0;i<6;i++) await tick();
  expect(events).toContain('route-textless');
+ expect(events).toContain('heavy-start');
+ expect(events.indexOf('route-textless')).toBeLessThan(events.indexOf('heavy-start'));
  expect(events).toContain('textless-done');
- expect(events.indexOf('textless-done')).toBeLessThan(events.indexOf('heavy-start'));
  release();
  await expect(textless).resolves.toBe('original');
  await expect(text).resolves.toBe('translated');
- expect(events).toEqual(['route-text','route-textless','textless-done','heavy-start','heavy-done','text-run']);
+ expect(events.indexOf('heavy-done')).toBeLessThan(events.indexOf('text-run'));
 });
 
 it('preserves queue admission time through a deferred route continuation', async()=> {
@@ -88,4 +89,25 @@ it('the newly focused reader page can start before stale full dialogue slots fin
  releaseA();releaseB();
  await Promise.all([a,b,focused]);
  expect(startedBeforeRelease).toBe(true);
+});
+
+it('admits Heavy continuation while another Route preparation is still pending', async()=> {
+ let releaseRoute;
+ const routeHold=new Promise(r=>{releaseRoute=r});
+ let heavyStarted=false;
+ const q=createQueue({concurrency:1,prepareConcurrency:2,maxPrepared:4,bypassConcurrency:0,continueConcurrency:1,maxRouteAhead:4});
+ const first=q.add({
+  key:'first',chapterKey:'c',index:0,
+  prepare:async()=>({bypass:false,continuePrepare:async()=>{heavyStarted=true;return {bypass:false};}}),
+  run:async()=>1,
+ });
+ const second=q.add({
+  key:'second',chapterKey:'c',index:1,
+  prepare:async()=>{await routeHold;return {bypass:true};},
+  run:async()=>2,
+ });
+ for(let i=0;i<5;i++) await tick();
+ expect(heavyStarted).toBe(true);
+ releaseRoute();
+ await Promise.all([first,second]);
 });
