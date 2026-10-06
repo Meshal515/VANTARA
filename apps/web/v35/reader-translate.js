@@ -21,6 +21,7 @@ import { supports } from '../lib/capabilities.js';
 import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, focusPage, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
+import { runtimeCapacity } from '../lib/runtime-capacity.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
 const ENTRY_PAGES = 3;
@@ -55,7 +56,7 @@ const store = {
 // Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
 // Run slots therefore cover Luna + Render only; a slow Luna response no longer
 // blocks CTD/BubbleSeg from preparing later pages. Caps stay finite for RAM/network.
-const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8 });
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, capacity: runtimeCapacity, lane: 'reader' });
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
