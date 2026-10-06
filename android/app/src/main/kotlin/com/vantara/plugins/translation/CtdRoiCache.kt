@@ -19,8 +19,8 @@ internal class CtdRoiCache(
         require(maxEnclosingPixels>0)
     }
 
-    private val items=object:LinkedHashMap<Key,PackedMask>(maxEntries+1,.75f,true) {
-        override fun removeEldestEntry(eldest:MutableMap.MutableEntry<Key,PackedMask>?):Boolean =
+    private val items=object:LinkedHashMap<Key,CtdMaskSnapshot>(maxEntries+1,.75f,true) {
+        override fun removeEldestEntry(eldest:MutableMap.MutableEntry<Key,CtdMaskSnapshot>?):Boolean =
             size>maxEntries
     }
 
@@ -28,7 +28,7 @@ internal class CtdRoiCache(
         Key(pageHash,crops.filter {it.area>0}.sortedWith(compareBy<Box>({it.y1},{it.x1},{it.y2},{it.x2})))
 
     @Synchronized
-    fun get(pageHash:String,crops:List<Box>):PackedMask? = items[key(pageHash,crops)]
+    fun get(pageHash:String,crops:List<Box>):CtdMaskSnapshot? = items[key(pageHash,crops)]
 
     @Synchronized
     fun put(pageHash:String,crops:List<Box>,mask:ByteMask):Boolean {
@@ -36,7 +36,7 @@ internal class CtdRoiCache(
         if(valid.isEmpty()) return false
         var stored=false
         if(CtdRoiDemand.enclosingPixels(valid)<=maxEnclosingPixels) {
-            items[key(pageHash,valid)]=PackedMask.of(mask)
+            items[key(pageHash,valid)]=CtdMaskSnapshot.of(mask,CtdRoiDemand.enclosingBox(valid)!!)
             stored=true
         }
         // Non-overlapping ROI are independent forward passes. Retain each exact
@@ -45,7 +45,7 @@ internal class CtdRoiCache(
         if(valid.size>1 && CtdRoiDemand.pairwiseDisjoint(valid)) {
             for(box in valid) {
                 if(box.area>maxEnclosingPixels) continue
-                items[key(pageHash,listOf(box))]=PackedMask.of(mask.clipped(box.x1,box.y1,box.x2,box.y2))
+                items[key(pageHash,listOf(box))]=CtdMaskSnapshot.of(mask,box)
                 stored=true
             }
         }
@@ -56,18 +56,51 @@ internal class CtdRoiCache(
     fun clear() = items.clear()
 }
 
+/**
+ * Cache representation packed from already-known ROI geometry. Unlike
+ * PackedMask.of(), this never scans the whole page to discover bounds.
+ */
+internal class CtdMaskSnapshot private constructor(
+    private val width:Int,
+    private val height:Int,
+    private val box:Box,
+    private val data:ByteArray,
+) {
+    fun unpack():ByteMask {
+        val out=ByteMask(width,height)
+        for(y in 0 until box.h)
+            System.arraycopy(data,y*box.w,out.data,(box.y1+y)*width+box.x1,box.w)
+        return out
+    }
+
+    companion object {
+        fun of(mask:ByteMask,box:Box):CtdMaskSnapshot {
+            require(box.x1>=0 && box.y1>=0 && box.x2<=mask.width && box.y2<=mask.height)
+            val data=ByteArray(box.area)
+            for(y in 0 until box.h)
+                System.arraycopy(mask.data,(box.y1+y)*mask.width+box.x1,data,y*box.w,box.w)
+            return CtdMaskSnapshot(mask.width,mask.height,box,data)
+        }
+    }
+}
+
 /** Geometry-only CTD demand accounting; no page-sized scratch bitmap is allocated. */
 internal object CtdRoiDemand {
     fun sourcePixels(crops:List<Box>):Int =
         crops.sumOf {it.area}
 
-    fun enclosingPixels(crops:List<Box>):Int {
+    fun enclosingBox(crops:List<Box>):Box? {
         val valid=crops.filter {it.area>0}
-        if(valid.isEmpty()) return 0
-        val x1=valid.minOf {it.x1};val y1=valid.minOf {it.y1}
-        val x2=valid.maxOf {it.x2};val y2=valid.maxOf {it.y2}
-        return maxOf(0,x2-x1)*maxOf(0,y2-y1)
+        if(valid.isEmpty()) return null
+        return Box(
+            valid.minOf {it.x1},
+            valid.minOf {it.y1},
+            valid.maxOf {it.x2},
+            valid.maxOf {it.y2},
+        )
     }
+
+    fun enclosingPixels(crops:List<Box>):Int = enclosingBox(crops)?.area ?: 0
 
     fun uniquePixels(crops:List<Box>):Int {
         val valid=crops.filter {it.area>0}
