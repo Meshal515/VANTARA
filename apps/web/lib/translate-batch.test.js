@@ -92,6 +92,19 @@ describe('adaptive background Luna assembly',()=> {
     }
   });
 
+  it('hard-caps ahead assembly at 40ms even if an outer scheduler passes legacy 200ms',async()=> {
+    vi.useFakeTimers();const calls=[];
+    const batch=createTextBatcher(async(path,body)=>{
+      calls.push({path,body});
+      return {status:200,body:{regions:body.regions ?? [],perf:{providerNetworkMs:0,batchWaitMs:0}}};
+    },{waitMs:200});
+    const work=batch.enqueueTextPage(page(0));
+    await vi.advanceTimersByTimeAsync(39);expect(calls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);expect(calls).toHaveLength(1);
+    expect(calls[0].path).toBe('/v1/translate/text');
+    await work;vi.useRealTimers();
+  });
+
   it('never extends the oldest page batch deadline when newer pages arrive',async()=> {
     vi.useFakeTimers();const calls=[];
     const batch=createTextBatcher(async(path,body)=>{calls.push({path,body});return batchReply(body);},{waitMs:40});
