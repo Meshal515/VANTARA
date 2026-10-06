@@ -18,7 +18,7 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   const heapSamples = [];
   const decisions = [];
   const state = {
-    thermal: 0, heapMb: 0, heapLimitMb: 0, availMemMb: 0, totalMemMb: 0, lowMemory: false,
+    thermal: 0, heapMb: 0, heapLimitMb: 0, nativeHeapMb: 0, availMemMb: 0, totalMemMb: 0, lowMemoryThresholdMb: 0, lowMemory: false,
     gcCount: 0, gcTimeMs: 0, blockingGcCount: 0, blockingGcTimeMs: 0, blockingGcDelta: 0, blockingGcTimeDeltaMs: 0,
     lunaMs: 12_700, analyzeMs: 4_000, renderMs: 5_100, analyzeWaitMs: 0, renderWaitMs: 0,
     renderReady: 0, networkActive: 0, networkPending: 0,
@@ -38,9 +38,10 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
   function rawGrade() {
     const { soft, hard } = heapThresholds();
     const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
+    const thresholdRatio = state.lowMemoryThresholdMb > 0 ? state.availMemMb / state.lowMemoryThresholdMb : Infinity;
     let grade = 0;
-    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000 || ramRatio < 0.08 || state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) grade = 1;
-    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000 || ramRatio < 0.04) grade = 2;
+    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000 || thresholdRatio <= 1.5 || ramRatio < 0.08 || state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) grade = 1;
+    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000 || thresholdRatio <= 1.15 || ramRatio < 0.04) grade = 2;
     if (state.thermal >= envelope.thermal.critical || state.lowMemory || state.heapMb >= hard) grade = 3;
     if (heapSlope() >= 6 && state.heapMb >= soft * 0.8) grade = Math.max(grade, 1);
     return grade;
@@ -58,7 +59,9 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     if (state.renderWaitMs >= 2_000) reasons.push(`render-wait:${Math.round(state.renderWaitMs)}ms`);
     if (state.analyzeWaitMs >= 5_000) reasons.push(`analyze-wait:${Math.round(state.analyzeWaitMs)}ms`);
     const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
-    if (ramRatio < 0.08) reasons.push(`ram-headroom:${Math.round(ramRatio * 100)}%`);
+    const thresholdRatio = state.lowMemoryThresholdMb > 0 ? state.availMemMb / state.lowMemoryThresholdMb : Infinity;
+    if (thresholdRatio <= 1.5) reasons.push(`ram-threshold:${thresholdRatio.toFixed(2)}x`);
+    else if (ramRatio < 0.08) reasons.push(`ram-headroom:${Math.round(ramRatio * 100)}%`);
     if (state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) reasons.push(`blocking-gc:+${state.blockingGcDelta}/${Math.round(state.blockingGcTimeDeltaMs)}ms`);
     if (!reasons.length && state.lunaMs >= 15_000) reasons.push(`luna-slow:${Math.round(state.lunaMs)}ms`);
     return reasons.length ? reasons.join(',') : (grade ? `pressure:${grade}` : 'green');
@@ -115,8 +118,10 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     if (Number.isFinite(Number(perf.thermal))) state.thermal = Number(perf.thermal);
     if (Number.isFinite(Number(perf.heapMb))) state.heapMb = Number(perf.heapMb);
     if (Number.isFinite(Number(perf.heapLimitMb))) state.heapLimitMb = Number(perf.heapLimitMb);
+    if (Number.isFinite(Number(perf.nativeHeapMb))) state.nativeHeapMb = Number(perf.nativeHeapMb);
     if (Number.isFinite(Number(perf.availMemMb))) state.availMemMb = Number(perf.availMemMb);
     if (Number.isFinite(Number(perf.totalMemMb))) state.totalMemMb = Number(perf.totalMemMb);
+    if (Number.isFinite(Number(perf.lowMemoryThresholdMb))) state.lowMemoryThresholdMb = Number(perf.lowMemoryThresholdMb);
     state.lowMemory = Boolean(perf.lowMemory);
     const nextGcCount = Number(perf.gcCount);
     const nextGcTime = Number(perf.gcTimeMs);
@@ -227,12 +232,14 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
       thermal: state.thermal,
       heapMb: Math.round(state.heapMb * 10) / 10,
       heapLimitMb: Math.round(state.heapLimitMb * 10) / 10,
+      nativeHeapMb: Math.round(state.nativeHeapMb * 10) / 10,
       heapSoftMb: Math.round(soft),
       heapHardMb: Math.round(hard),
       heapSlopeMb: Math.round(heapSlope() * 10) / 10,
       lowMemory: state.lowMemory,
       availMemMb: Math.round(state.availMemMb),
       totalMemMb: Math.round(state.totalMemMb),
+      lowMemoryThresholdMb: Math.round(state.lowMemoryThresholdMb),
       gcCount: state.gcCount,
       gcTimeMs: state.gcTimeMs,
       blockingGcCount: state.blockingGcCount,
@@ -257,9 +264,9 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     const t = telemetry();
     return {
       sequence: t.sequence, grade: t.grade, reason: t.reason,
-      thermal: t.thermal, heapMb: t.heapMb, heapLimitMb: t.heapLimitMb,
+      thermal: t.thermal, heapMb: t.heapMb, heapLimitMb: t.heapLimitMb, nativeHeapMb: t.nativeHeapMb,
       heapSoftMb: t.heapSoftMb, heapHardMb: t.heapHardMb, heapSlopeMb: t.heapSlopeMb,
-      lowMemory: t.lowMemory, availMemMb: t.availMemMb, totalMemMb: t.totalMemMb,
+      lowMemory: t.lowMemory, availMemMb: t.availMemMb, totalMemMb: t.totalMemMb, lowMemoryThresholdMb: t.lowMemoryThresholdMb,
       gcCount: t.gcCount, gcTimeMs: t.gcTimeMs,
       blockingGcCount: t.blockingGcCount, blockingGcTimeMs: t.blockingGcTimeMs,
       blockingGcDelta: t.blockingGcDelta, blockingGcTimeDeltaMs: t.blockingGcTimeDeltaMs,
