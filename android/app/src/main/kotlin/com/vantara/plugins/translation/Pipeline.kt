@@ -46,6 +46,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
     private val analyses = lru<Analysis>(24)
     private val images = PixelCache<Decoded>(2,16L*1024*1024) {it.img.data.size.toLong()}
     private val detections = lru<List<Detection>>(12)
+    private val ctdMasks = CtdRoiCache()
     // Exact page-hash + crop reuse only. Cached masks are clipped to each
     // bubble box, so retry/residual reuse does not retain full-page ByteMasks.
     private val bubbleRois = lru<List<CachedBubble>>(48)
@@ -139,6 +140,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         synchronized(lamaLock) { inpainter?.close(); inpainter = null }
         detector = null; glyphs = null; bubbles = null; ocr = null
         detections.clear()
+        ctdMasks.clear()
         bubbleRois.clear()
         analyses.clear()
         images.clear()
@@ -420,15 +422,37 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // No production full-width fallback in this independent experiment.
         val holders=dets.filter {it.label=="bubble"}
         val crops=HeavyRoi.plan(img.width,img.height,texts,holders)
+        val ctdSourcePixels=CtdRoiDemand.sourcePixels(crops)
+        val ctdUniquePixels=CtdRoiDemand.uniquePixels(crops)
         perf.count("heavyRoiCrops",crops.size)
-        perf.count("heavyRoiPixels",crops.sumOf {it.area})
-        val gs=glyphs(perf)
-        val prob=perf.time("glyphs") {gs.probabilitiesRoi(img,crops)}
-        perf.count("glyphTiles",gs.tiles)
-        val glyphFull=perf.time("glyphMask") {
-            val m=ByteMask(img.width,img.height)
-            for(i in prob.indices) if(prob[i]>.3f) m.data[i]=1
-            m
+        perf.count("heavyRoiPixels",ctdSourcePixels)
+        perf.count("ctdRois",crops.size)
+        perf.count("ctdSourcePixels",ctdSourcePixels)
+        perf.count("ctdUniqueSourcePixels",ctdUniquePixels)
+        perf.count("ctdOverlapPixels",maxOf(0,ctdSourcePixels-ctdUniquePixels))
+        val cachedGlyph=ctdMasks.get(hash,crops)
+        val glyphFull=if(cachedGlyph!=null) {
+            // Same page bytes + exact same ROI geometry => same thresholded CTD
+            // evidence. Reusing it avoids deterministic heavy re-analysis on retries.
+            perf.count("ctdCacheHit")
+            perf.count("ctdCalls",0)
+            perf.count("glyphTiles",0)
+            perf.count("ctdTensorPixels",0)
+            cachedGlyph.unpack()
+        } else {
+            val gs=glyphs(perf)
+            val before=perf.nanos["glyphs"] ?: 0L
+            val mask=perf.time("glyphs") {gs.maskRoi(img,crops,.3f)}
+            val elapsed=(perf.nanos["glyphs"] ?: 0L)-before
+            perf.count("glyphTiles",gs.tiles)
+            perf.count("ctdCalls",gs.tiles)
+            perf.count("ctdTensorPixels",gs.tiles*gs.inputPixelsPerTile)
+            if(crops.isNotEmpty()) perf.add("ctdPerRoi",elapsed/crops.size)
+            if(gs.tiles>0) perf.add("ctdPerCall",elapsed/gs.tiles)
+            mask.also {
+                if(ctdMasks.put(hash,crops,it)) perf.count("ctdCacheStored")
+                else perf.count("ctdCacheBypass")
+            }
         }
         val speechCandidates=texts.filter {it.label=="text_bubble"}
         perf.count("bubbleCandidateRegions",speechCandidates.size)
@@ -487,6 +511,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             Regions.unclaimedGlyphDetections(img,glyphFull,claimed,heavyBubbles)
         }
         perf.count("coverageUnknown",unresolvedCoverage.size)
+        perf.count("ctdCoverageFailures",unresolvedCoverage.size)
         perf.count("regions", regions.size + fast.size)
         val reader = if (regions.isNotEmpty()) ocr(perf) else null
         perf.time("ocr") {
