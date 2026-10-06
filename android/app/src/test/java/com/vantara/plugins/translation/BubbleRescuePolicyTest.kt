@@ -76,6 +76,26 @@ class BubbleRescuePolicyTest {
         assertTrue(mask[second.box.x1,second.box.y1].toInt()!=0)
     }
 
+    @Test fun `seeded bypass keeps whitening local and does not require LaMa`() {
+        val (img,text,holder)=looseFlatBubble()
+        val glyph=ByteMask(img.width,img.height)
+        for(y in 88 until 113) for(k in 0 until 5) for(x in 82+k*14 until 89+k*14) glyph[x,y]=1
+        val bubble=Regions.trustedHolderPlan(img,listOf(text),listOf(holder),glyph).bubbles.single()
+        val region=Region("seeded",text.box,.94f,"speech",bubble,holder.box,glyph,glyph.count(),false)
+        region.status="translated"
+
+        Cleaner.planErase(img,region,null)
+        assertEquals("fill",region.cleanMode)
+        assertNotNull(region.eraseMask)
+        assertEquals(0,region.eraseMask!![20,20].toInt())
+        val outsideBefore=img.r(20,20)
+        val stats=Cleaner.applyErase(img,listOf(region),null)
+
+        assertEquals(0,stats.inpaintMaskPixels)
+        assertTrue(stats.fillChangedPixels>0)
+        assertEquals(outsideBefore,img.r(20,20))
+    }
+
     @Test fun `free art text never becomes a BubbleSeg request`() {
         val free=Detection(Box(40,50,100,80),.9f,"text_free")
         assertTrue(HeavyRoi.bubbleNeeded(listOf(free),emptyList()).isEmpty())
