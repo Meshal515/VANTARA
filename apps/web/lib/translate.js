@@ -569,6 +569,41 @@ async function translatePageNow(deps, src, meta) {
   // visible and may refresh in background, preserving the fast reopen path.
   const visibleCache = local && typeof local.translated === 'number' &&
     !downgraded && !unsafeStable124 && !local.incomplete;
+
+  if (local && typeof local.translated === 'number' && !downgraded && (unsafeStable124 || local.incomplete)) {
+    // Do not occupy the foreground reader slot rebuilding a page we refuse to
+    // show anyway. Keep the original source visible and run one deduplicated
+    // repair in background; only a complete accepted result may notify/swap in.
+    if ((local.tries ?? 0) < MAX_REPAIRS && !backgroundRepairs.has(hash)) {
+      const repair = Promise.resolve()
+        .then(() => repairInBackground({ ...runDeps, via: 'repair' }, src, hash, meta, local))
+        .finally(() => backgroundRepairs.delete(hash));
+      backgroundRepairs.set(hash, repair);
+    }
+    logPage(runDeps, meta, hash, clock, {
+      from: 'cache',
+      cacheKind: found.kind,
+      cacheKey: found.cacheKey,
+      textless: false,
+      regions: (local.regions ?? []).length,
+      translated: 0,
+      candidateTranslated: local.translated,
+      incomplete: true,
+      quarantinedPipeline: unsafeStable124 ? Number(local.pipelineVersion) : null,
+      engine: local.engine ?? null,
+    });
+    return {
+      ...local,
+      image: null,
+      translated: 0,
+      incomplete: true,
+      hash,
+      cacheKey: found.cacheKey,
+      from: 'device',
+      saved: true,
+    };
+  }
+
   if (visibleCache) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
@@ -603,6 +638,8 @@ async function translatePageNow(deps, src, meta) {
 
 /** صفحات تُترجم الآن ببصمتها (للجهاز كله: القارئ والترجمة المقدّمة). */
 const inflight = new Map();
+/** إصلاح واحد فقط لكل بصمة ناقصة/محجورة؛ لا نكرر Native/Luna بسبب إعادة الرسم. */
+const backgroundRepairs = new Map();
 
 const refinementTargets = new Map();
 const earlyRefinements = new Map();
