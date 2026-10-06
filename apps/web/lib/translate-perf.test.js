@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, roiRouting, stopwatch, summarize } from './translate-perf.js';
+import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, roiRouting, roiServiceDemand, stopwatch, summarize } from './translate-perf.js';
 
 const memory = () => {
   const m = new Map();
@@ -63,6 +63,13 @@ describe('translation performance log (on the phone)', () => {
     expect(report).toContain('BubbleROI 13% (1/8)');
     expect(report).toContain('RescueROI 13% (1/8)');
     expect(report).toContain('رفض Fast: ocr×2 · background×1');
+    expect(roiServiceDemand(roiRouting(entries))).toEqual({
+      totalServiceMs: 16850,
+      meanPrimaryRoiMs: 2106,
+      heavyEquivalentMs: 85600,
+      savedVsHeavyPct: 80,
+    });
+    expect(report).toContain('طلب الخدمة المحلي التقديري 2.11 ث/ROI');
   });
 
   it('splits textless and text pages, per stage and per chapter, and leaves cached pages out', () => {
