@@ -78,6 +78,20 @@ describe('translation performance log (on the phone)', () => {
     expect(report).toContain('اختبار التبييض المحلي');
     expect(report).toContain('offline×1');
   });
+
+  it('reports textless route-to-done as a derived latency without adding it to page total', () => {
+    const entry = {
+      at: 1000, chapterKey: 'c', pageIndex: 0, from: 'model', textless: true,
+      total: 420, routeToDoneMs: 330,
+      stages: { wait: 40, 'prepare.hash': 20, 'prepare.cacheRead': 10, 'prepare.route': 350 },
+      native: { route: { stages: { queue: 15, detect: 250, missingSweep: 60 } } },
+    };
+    const s = summarize([entry]);
+    expect(s.textless.routeToDoneMedian).toBe(330);
+    expect(s.textless.median).toBe(420);
+    expect(formatReport([entry])).toContain('route→done 0.33 ث');
+  });
+
 });
 
 describe('engine settings measured on the phone', () => {
