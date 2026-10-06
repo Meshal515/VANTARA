@@ -95,4 +95,27 @@ class FastFlatRegionsTest {
         assertTrue(plan.heavy.isEmpty())
         assertEquals("speech", plan.fast.single().kind)
     }
+
+    @Test
+    fun `partial paper component across a speech holder refuses fast path`() {
+        val w=240; val h=180
+        val data=ByteArray(w*h*3){90.toByte()}
+        fun paint(x0:Int,y0:Int,x1:Int,y1:Int,v:Int) {
+            for(y in y0 until y1) for(x in x0 until x1) for(c in 0..2) data[(y*w+x)*3+c]=v.toByte()
+        }
+        // One detector holder, but the "paper" is split into two disconnected
+        // components. The left component contains the claimed OCR text and is
+        // locally flat; accepting it would leave possible English on the right.
+        paint(30,25,210,155,246)
+        paint(128,25,140,155,90)
+        for(x in listOf(55,70,86,103)) paint(x,70,x+7,98,20)
+        val img=RgbImage(w,h,data)
+        val holder=Detection(Box(30,25,210,155),.97f,"bubble")
+        val text=Detection(Box(48,62,118,106),.96f,"text_bubble")
+        val plan=Regions.fastFlatPlan(img,img.gray(),"hash",listOf(holder,text))
+        assertTrue(plan.fast.isEmpty())
+        assertEquals(listOf(text),plan.heavy)
+        assertEquals("holder_mask",plan.rejectionReasons[text])
+    }
+
 }
