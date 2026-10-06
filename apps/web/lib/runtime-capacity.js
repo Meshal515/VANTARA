@@ -266,7 +266,7 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
       lunaMs: t.lunaMs, analyzeMs: t.analyzeMs, renderMs: t.renderMs,
       analyzeWaitMs: t.analyzeWaitMs, renderWaitMs: t.renderWaitMs,
       renderReady: t.renderReady, networkActive: t.networkActive, networkPending: t.networkPending,
-      limits: t.limits,
+      limits: t.limits, queues: t.queues,
     };
   }
 
