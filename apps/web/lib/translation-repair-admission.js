@@ -7,7 +7,7 @@ const validRegion = region => nonempty(region?.arabic) && nonempty(region.source
 
 /** Keep legacy count admission; a merged holder additionally needs exhaustive old-text coverage. */
 export function canAcceptTranslationRepair(previous, next) {
-  if (!next || next.error) return false;
+  if (!next || next.error || next.incomplete) return false;
   const oldCount = previous?.translated ?? 0;
   if (next.translated >= oldCount) return true;
   if (!Number.isInteger(oldCount) || !Number.isInteger(next.translated) || next.translated <= 0 ||

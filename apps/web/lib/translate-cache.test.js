@@ -46,22 +46,22 @@ describe('pages saved before the cache rename come back without translating agai
     expect(kv.get(`tl4:${hash}`)?.value).toMatchObject({ translated: 2, incomplete: false });
   });
 
-  it('an old page with a bubble left in English stays shown while it is completed in the background', async () => {
+  it('an old page with a bubble left in English is never shown as translated', async () => {
     const hash = await pageHashOf('file://p');
     kv.set(`tl3:${hash}`, { value: saved({ regions: [{ id: 'r1', status: 'pending', source: 'HI', arabic: null }] }), at: 1 });
     const res = await translatePage(noTranslate, 'file://p', {});
-    expect(res).toMatchObject({ from: 'device', translated: 2, image: '/files/translated-pages/abc.webp' });
-    await new Promise((r) => setTimeout(r, 10));
-    // حاول الإكمال مرة (سُجّلت المحاولة) ولم يمسّ المعروض
-    expect(kv.get(`tl4:${hash}`)?.value).toMatchObject({ incomplete: true, tries: 1, image: '/files/translated-pages/abc.webp' });
+    // No device/server in this test, so the only acceptable fallback is the
+    // original page path rather than the mixed cached rendering.
+    expect(res).toMatchObject({ from:'device', translated:0, incomplete:true });
+    expect(res.image).toBeNull();
   });
 
-  it('never shows English while an incomplete page is retried, and gives up after three tries', async () => {
+  it('never exposes an incomplete cached rendering even after its retry budget is exhausted', async () => {
     const hash = await pageHashOf('file://p');
     kv.set(`tl4:${hash}`, { value: { ...saved(), incomplete: true, at: 0, tries: 3 }, at: 1 });
     const res = await translatePage(noTranslate, 'file://p', {});
-    expect(res.from).toBe('device');
-    await new Promise((r) => setTimeout(r, 10));
+    expect(res).toMatchObject({ from:'device', translated:0, incomplete:true });
+    expect(res.image).toBeNull();
     expect(kv.get(`tl4:${hash}`)?.value.tries).toBe(3);
   });
 
@@ -73,6 +73,19 @@ describe('pages saved before the cache rename come back without translating agai
     const res = await translatePage(noTranslate, 'file://p', {});
     expect(res.error).toBe('device_only');
   });
+});
+
+
+it('quarantines stable-124 pipelineVersion 2 while preserving older complete cache', async () => {
+  const hash = await pageHashOf('file://p');
+  kv.set(`tl4:${hash}`, { value: saved({ pipelineVersion: 2 }), at: 1 });
+  const bad = await translatePage(noTranslate, 'file://p', {});
+  expect(bad).toMatchObject({ from:'device', translated:0, incomplete:true });
+  expect(bad.image).toBeNull();
+
+  kv.set(`tl4:${hash}`, { value: saved({ pipelineVersion: 1 }), at: 1 });
+  const oldButComplete = await translatePage(noTranslate, 'file://p', {});
+  expect(oldButComplete).toMatchObject({ from:'device', translated:2, image:'/files/translated-pages/abc.webp' });
 });
 
 describe('smart and fast: a fast page is upgraded when you ask for smart, never the reverse', () => {

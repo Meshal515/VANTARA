@@ -41,8 +41,8 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
     const thresholdRatio = state.lowMemoryThresholdMb > 0 ? state.availMemMb / state.lowMemoryThresholdMb : Infinity;
     let grade = 0;
-    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || state.renderWaitMs >= 2_000 || state.analyzeWaitMs >= 5_000 || thresholdRatio <= 1.5 || ramRatio < 0.08 || state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) grade = 1;
-    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000 || thresholdRatio <= 1.15 || ramRatio < 0.04) grade = 2;
+    if (state.thermal >= envelope.thermal.warm || state.heapMb >= soft || state.renderReady >= envelope.renderReadySoft || thresholdRatio <= 1.5 || ramRatio < 0.08 || state.blockingGcDelta >= 2 || state.blockingGcTimeDeltaMs >= 100) grade = 1;
+    if (state.thermal >= envelope.thermal.severe || state.heapMb >= hard * 0.9 || state.renderReady >= envelope.renderReadyHard || thresholdRatio <= 1.15 || ramRatio < 0.04) grade = 2;
     if (state.thermal >= envelope.thermal.critical || state.lowMemory || state.heapMb >= hard) grade = 3;
     if (heapSlope() >= 6 && state.heapMb >= soft * 0.8) grade = Math.max(grade, 1);
     return grade;
@@ -57,8 +57,6 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
     else if (state.heapMb >= soft) reasons.push(`heap-soft:${Math.round(state.heapMb)}MB`);
     if (heapSlope() >= 6) reasons.push(`heap-rise:${heapSlope().toFixed(1)}MB/sample`);
     if (state.renderReady >= envelope.renderReadySoft) reasons.push(`render-ready:${state.renderReady}`);
-    if (state.renderWaitMs >= 2_000) reasons.push(`render-wait:${Math.round(state.renderWaitMs)}ms`);
-    if (state.analyzeWaitMs >= 5_000) reasons.push(`analyze-wait:${Math.round(state.analyzeWaitMs)}ms`);
     const ramRatio = state.totalMemMb > 0 ? state.availMemMb / state.totalMemMb : 1;
     const thresholdRatio = state.lowMemoryThresholdMb > 0 ? state.availMemMb / state.lowMemoryThresholdMb : Infinity;
     if (thresholdRatio <= 1.5) reasons.push(`ram-threshold:${thresholdRatio.toFixed(2)}x`);
@@ -78,7 +76,7 @@ export function createRuntimeCapacityController({ now = () => Date.now(), envelo
           ? { concurrency: 6, prepareConcurrency: 1, maxPrepared: 5, bypassConcurrency: 3, network: 3 }
           : { concurrency: 3, prepareConcurrency: 1, maxPrepared: 3, bypassConcurrency: 2, network: 2 };
     if (state.thermal >= 5) return { ...base, concurrency: 2, prepareConcurrency: 1, maxPrepared: 2, bypassConcurrency: 1, network: 1 };
-    if (state.renderReady >= envelope.renderReadyHard || state.renderWaitMs >= 5_000) {
+    if (state.renderReady >= envelope.renderReadyHard) {
       return { ...base, prepareConcurrency: Math.min(base.prepareConcurrency, 1), maxPrepared: Math.min(base.maxPrepared, 4), network: Math.min(base.network, 3) };
     }
     return base;

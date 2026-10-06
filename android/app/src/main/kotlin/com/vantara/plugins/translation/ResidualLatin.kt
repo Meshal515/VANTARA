@@ -8,14 +8,21 @@ object ResidualLatin {
     fun inspectionBox(region: Region): Box = region.bubbleBox ?: region.box
 
     private fun allowedInside(img: RgbImage, region: Region, scope: Box): ByteMask? {
-        val full = region.bubble?.mask
-            ?: region.bubbleBox?.let { Regions.flatBoxMask(img, it, region.box) }
-            ?: return null
+        val primary = region.bubble?.mask
+        // Fast evidence can be a valid local paper component yet still omit a
+        // disconnected part of the same detector holder. Residual OCR must audit
+        // the conservative holder paper too, otherwise missed English outside the
+        // Fast component is invisible to the safety check.
+        val holder = region.bubbleBox?.let { Regions.flatBoxMask(img, it, region.box) }
+        if (primary == null && holder == null) return null
         val out = ByteMask(scope.w, scope.h)
         for (y in 0 until scope.h) for (x in 0 until scope.w) {
             val px = scope.x1 + x
             val py = scope.y1 + y
-            if (px in 0 until full.width && py in 0 until full.height && full[px, py].toInt() != 0) out[x, y] = 1
+            val allowed =
+                (primary != null && px in 0 until primary.width && py in 0 until primary.height && primary[px, py].toInt() != 0) ||
+                (holder != null && px in 0 until holder.width && py in 0 until holder.height && holder[px, py].toInt() != 0)
+            if (allowed) out[x, y] = 1
         }
         return out
     }

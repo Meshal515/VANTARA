@@ -73,14 +73,16 @@ describe('runtime capacity controller', () => {
     await Promise.all(work);
   });
 
-  it('treats sustained native analyze wait as backlog pressure, not Luna latency alone', () => {
+  it('records native wait without shrinking capacity when thermal and memory are green', () => {
     let now = 0;
     const c = createRuntimeCapacityController({ now: () => now });
     c.observeLuna({ latencyMs: 24_000, status: 200 });
-    expect(c.telemetry().grade).toBe(0);
-    c.observeStages({ 'nativeWait.analyze': 6_000 });
-    expect(c.telemetry().grade).toBe(1);
-    expect(c.telemetry().reason).toContain('analyze-wait');
+    c.observeStages({ 'nativeWait.analyze': 6_000, 'nativeWait.render': 6_000 });
+    const t=c.telemetry();
+    expect(t.analyzeWaitMs).toBeGreaterThan(0);
+    expect(t.renderWaitMs).toBeGreaterThan(0);
+    expect(t.grade).toBe(0);
+    expect(t.limits.network).toBe(6);
   });
 
   it('uses Android low-memory threshold before lowMemory flips true', () => {
@@ -103,11 +105,11 @@ describe('runtime capacity controller', () => {
     expect(c.telemetry().grade).toBe(2);
   });
 
-  it('decays native wait pressure after the backlog clears', () => {
+  it('decays native wait telemetry after the backlog clears without changing grade', () => {
     let now = 0;
     const c = createRuntimeCapacityController({ now: () => now });
     c.observeStages({ 'nativeWait.analyze': 6_000 });
-    expect(c.telemetry().grade).toBe(1);
+    expect(c.telemetry().grade).toBe(0);
     for (let i = 0; i < 3; i++) {
       now += 2_000;
       c.observeStages({ 'nativeWait.analyze': 0, 'nativeWait.render': 0 });
