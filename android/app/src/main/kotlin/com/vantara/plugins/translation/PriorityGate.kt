@@ -50,8 +50,8 @@ class PriorityGate {
      * Compatibility hooks for older bridge code. Stage-separated translation
      * deliberately keeps no Native reservation while Luna/network is pending.
      */
-    fun expectRender(page: Page?) { @Suppress("UNUSED_VARIABLE") val ignored = page }
-    fun cancelExpectedRender(page: Page?) { @Suppress("UNUSED_VARIABLE") val ignored = page }
+    fun expectRender(@Suppress("UNUSED_PARAMETER") page: Page?) = Unit
+    fun cancelExpectedRender(@Suppress("UNUSED_PARAMETER") page: Page?) = Unit
 
     private fun distance(p: Page?): Int {
         val f = focus ?: return 0
