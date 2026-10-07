@@ -5,13 +5,17 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
 
 /**
- * Current live pipeline, kept intentionally small and stable:
+ * Stable live enhancement path.
  *
- * FAST      = safe Media3 Lanczos fallback.
- * BALANCED  = source restore -> adaptive Anime4K reconstruction/upscale.
- * STRONG    = same architecture, resolution-specific tuning uses more of the GPU budget.
+ * IMPORTANT:
+ * Hand-written GlEffect shaders are intentionally NOT used in the active player path. They were
+ * the source of ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED on the S23/Adreno path. Restoration and
+ * final polish now run through Media3's own SeparableConvolutionShaderProgram, while scaling uses
+ * Media3's LanczosResample.
  *
- * No export, no cached 1440p file, no temporal buffering. Everything remains frame-by-frame.
+ * FAST      = Lanczos 1440p only.
+ * BALANCED  = adaptive source restore -> Lanczos 1440p -> light final polish.
+ * STRONG    = stronger resolution-aware restore -> Lanczos 1440p -> stronger final polish.
  */
 @UnstableApi
 object AnimeEnhancePipeline {
@@ -22,18 +26,15 @@ object AnimeEnhancePipeline {
 
         Anime4kEffect.Mode.BALANCED,
         Anime4kEffect.Mode.STRONG -> listOf(
-            AnimeRestoreEffect(mode),
-            // PRIMARY keeps the full source-resolution tuning. For 720p/900p/1080p it reaches
-            // 1440p directly; FINAL then becomes a no-op. For 320p-576p it stops at <=2x so the
-            // second stage can refine to 1440p without one huge blurry jump.
-            Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY),
-            Anime4kEffect(mode, stage = Anime4kEffect.Stage.FINAL),
+            AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
+            LanczosResample.scaleToFit(2560, 1440),
+            AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
         )
     }
 
     fun description(mode: Anime4kEffect.Mode): String = when (mode) {
-        Anime4kEffect.Mode.FAST -> "Lanczos 1440p"
-        Anime4kEffect.Mode.BALANCED -> "Restore + edge reconstruction + 1440p"
-        Anime4kEffect.Mode.STRONG -> "Adaptive restore + line reconstruction + 1440p"
+        Anime4kEffect.Mode.FAST -> "Media3 Lanczos 1440p"
+        Anime4kEffect.Mode.BALANCED -> "Native restore + Lanczos + polish"
+        Anime4kEffect.Mode.STRONG -> "Adaptive native restore + Lanczos + polish"
     }
 }
