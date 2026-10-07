@@ -23,7 +23,11 @@ object AnimeEnhancePipeline {
         Anime4kEffect.Mode.BALANCED,
         Anime4kEffect.Mode.STRONG -> listOf(
             AnimeRestoreEffect(mode),
-            Anime4kEffect(mode),
+            // PRIMARY keeps the full source-resolution tuning. For 720p/900p/1080p it reaches
+            // 1440p directly; FINAL then becomes a no-op. For 320p-576p it stops at <=2x so the
+            // second stage can refine to 1440p without one huge blurry jump.
+            Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY),
+            Anime4kEffect(mode, stage = Anime4kEffect.Stage.FINAL),
         )
     }
 
