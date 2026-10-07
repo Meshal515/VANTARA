@@ -48,6 +48,8 @@ import com.vantara.addons.*
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import com.vantara.app.BuildConfig
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -318,6 +320,22 @@ class PlayerActivity : Activity() {
     private var resume: MutableMap<Int, Long> = mutableMapOf()
     private val settings by lazy { getSharedPreferences("vantara.player", MODE_PRIVATE) }
 
+    // ───────────── Anime4K: frame-by-frame فقط (نسخة Debug) ─────────────
+    private var animeEnhanceSetting = "auto"
+    private var animeEnhanceRuntime: Anime4kEffect.Mode? = null
+    private var animeEnhanceSuppressed = false
+    private var animeEnhanceLastDowngradeMs = 0L
+
+    private val enhanceAnalytics = object : AnalyticsListener {
+        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            if (!canAnimeEnhance() || animeEnhanceSetting != "auto" || animeEnhanceRuntime == null) return
+            if (droppedFrames < 3 || elapsedMs <= 0) return
+            val perSecond = droppedFrames * 1000f / elapsedMs
+            if (perSecond < 0.8f) return
+            main.post { downgradeAnimeEnhancement() }
+        }
+    }
+
     private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${STARTUP_TIMEOUT_MS / 1000} ثانية") }
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
@@ -417,6 +435,8 @@ class PlayerActivity : Activity() {
             .setSeekForwardIncrementMs(SEEK_MS)
             .build()
         player.addListener(listener)
+        player.addAnalyticsListener(enhanceAnalytics)
+        applyAnimeEnhancement(silent = true)
         buildUi()
         attach(sessionId)
 
@@ -525,7 +545,9 @@ class PlayerActivity : Activity() {
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
 
-        override fun onPlayerError(error: PlaybackException) = fail(error.errorCodeName)
+        override fun onPlayerError(error: PlaybackException) {
+            if (!recoverFromAnimeEnhanceError(error)) fail(error.errorCodeName)
+        }
 
         override fun onTracksChanged(tracks: Tracks) {
             updateQualityLabel()
@@ -1094,6 +1116,119 @@ class PlayerActivity : Activity() {
         if (controlsShown()) scheduleHide()
     }
 
+    private fun canAnimeEnhance() =
+        BuildConfig.DEBUG && ::launch.isInitialized && launch.section == "anime" && ::player.isInitialized
+
+    private fun animeEnhanceStored(): String =
+        settings.getString("anime4kMode", "auto")?.takeIf { it in setOf("auto", "fast", "balanced", "strong", "off") } ?: "auto"
+
+    private fun animeEnhanceMode(setting: String): Anime4kEffect.Mode? = when (setting) {
+        "fast" -> Anime4kEffect.Mode.FAST
+        "strong" -> Anime4kEffect.Mode.STRONG
+        "balanced" -> Anime4kEffect.Mode.BALANCED
+        "off" -> null
+        else -> Anime4kEffect.Mode.BALANCED // auto starts balanced, then protects FPS automatically
+    }
+
+    /**
+     * Applies the effect to ExoPlayer's live video graph. There is no export, cached 1440p copy,
+     * or waiting screen: decoded frame -> Anime4K GL -> display, for every frame.
+     */
+    private fun applyAnimeEnhancement(
+        silent: Boolean = false,
+        runtimeOverride: Anime4kEffect.Mode? = null,
+    ) {
+        if (!canAnimeEnhance()) return
+        animeEnhanceSetting = animeEnhanceStored()
+        val wanted = if (animeEnhanceSuppressed) null else runtimeOverride ?: animeEnhanceMode(animeEnhanceSetting)
+        val ok = runCatching {
+            player.setVideoEffects(wanted?.let { listOf(Anime4kEffect(it)) }.orEmpty())
+        }.isSuccess
+        if (!ok) {
+            animeEnhanceSuppressed = true
+            animeEnhanceRuntime = null
+            runCatching { player.setVideoEffects(emptyList()) }
+            if (!silent) message("تعذّر تشغيل تحسين Anime4K على هذا الجهاز")
+            return
+        }
+        animeEnhanceRuntime = wanted
+        if (!silent) {
+            message(
+                if (wanted == null) "تحسين الصورة متوقف"
+                else "Anime4K · فريم بفريم · حتى 1440p",
+            )
+        }
+    }
+
+    private fun setAnimeEnhanceSetting(value: String) {
+        settings.edit().putString("anime4kMode", value).apply()
+        animeEnhanceSuppressed = false
+        animeEnhanceLastDowngradeMs = 0L
+        applyAnimeEnhancement()
+        if (openSheet == SheetKind.MORE) sheet.refresh()
+    }
+
+    private fun downgradeAnimeEnhancement() {
+        if (!canAnimeEnhance() || animeEnhanceSetting != "auto") return
+        val now = SystemClock.elapsedRealtime()
+        if (now - animeEnhanceLastDowngradeMs < 8_000) return
+        animeEnhanceLastDowngradeMs = now
+        when (animeEnhanceRuntime) {
+            Anime4kEffect.Mode.STRONG, Anime4kEffect.Mode.BALANCED -> {
+                applyAnimeEnhancement(silent = true, runtimeOverride = Anime4kEffect.Mode.FAST)
+                message("خففنا Anime4K تلقائيًا للحفاظ على السلاسة")
+            }
+            Anime4kEffect.Mode.FAST -> {
+                animeEnhanceSuppressed = true
+                applyAnimeEnhancement(silent = true)
+                message("أوقفنا Anime4K مؤقتًا للحفاظ على الفريمات")
+            }
+            null -> Unit
+        }
+    }
+
+    private fun recoverFromAnimeEnhanceError(error: PlaybackException): Boolean {
+        if (!canAnimeEnhance() || animeEnhanceRuntime == null) return false
+        if (error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED &&
+            error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
+        ) return false
+
+        val at = position()
+        val wasPlaying = player.playWhenReady
+        animeEnhanceSuppressed = true
+        animeEnhanceRuntime = null
+        runCatching { player.setVideoEffects(emptyList()) }
+        message("تعطل تحسين الصورة؛ كملنا الحلقة بدونه")
+        // لا نرمي السيرفر الجيد بسبب عطل GPU/effect.
+        main.post {
+            runCatching {
+                player.prepare()
+                if (at > 0) player.seekTo(at)
+                player.playWhenReady = wasPlaying
+            }.onFailure { fail(error.errorCodeName) }
+        }
+        return true
+    }
+
+    private fun animeEnhanceStatus(): String {
+        if (!canAnimeEnhance()) return ""
+        val mode = animeEnhanceRuntime ?: return if (animeEnhanceSuppressed) "متوقف مؤقتًا لحماية السلاسة" else "متوقف"
+        val format = player.videoFormat
+        val target = if (format != null && format.width > 0 && format.height > 0)
+            Anime4kEffect.targetSize(format.width, format.height)
+        else null
+        val modeName = when (mode) {
+            Anime4kEffect.Mode.FAST -> "سريع"
+            Anime4kEffect.Mode.BALANCED -> "متوازن"
+            Anime4kEffect.Mode.STRONG -> "قوي"
+        }
+        return listOfNotNull(
+            "فريم بفريم",
+            target?.second?.let { "حتى ${it}p" } ?: "حتى 1440p",
+            modeName,
+        ).joinToString(" · ")
+    }
+
     private fun toggleFit() {
         fill = !fill
         settings.edit().putBoolean("fill", fill).apply()
@@ -1371,6 +1506,24 @@ class PlayerActivity : Activity() {
 
     private fun showMore() {
         open(SheetKind.MORE, "المزيد") { body ->
+            if (canAnimeEnhance()) {
+                body.addView(sectionLabel("تحسين الأنمي"))
+                body.addView(sheetRow("Anime4K تلقائي", animeEnhanceStatus(), trailing = if (animeEnhanceStored() == "auto") check() else null, selected = animeEnhanceStored() == "auto") {
+                    setAnimeEnhanceSetting("auto")
+                })
+                body.addView(sheetRow("قوي", "فريم بفريم · تفاصيل وحواف أقوى", trailing = if (animeEnhanceStored() == "strong") check() else null, selected = animeEnhanceStored() == "strong") {
+                    setAnimeEnhanceSetting("strong")
+                })
+                body.addView(sheetRow("متوازن", "فريم بفريم · Anime4K Original", trailing = if (animeEnhanceStored() == "balanced") check() else null, selected = animeEnhanceStored() == "balanced") {
+                    setAnimeEnhanceSetting("balanced")
+                })
+                body.addView(sheetRow("سريع", "فريم بفريم · حمل GPU أقل", trailing = if (animeEnhanceStored() == "fast") check() else null, selected = animeEnhanceStored() == "fast") {
+                    setAnimeEnhanceSetting("fast")
+                })
+                body.addView(sheetRow("إيقاف التحسين", "يعرض المصدر كما هو", trailing = if (animeEnhanceStored() == "off") check() else null, selected = animeEnhanceStored() == "off") {
+                    setAnimeEnhanceSetting("off")
+                })
+            }
             body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
@@ -1710,6 +1863,7 @@ class PlayerActivity : Activity() {
         scope.cancel()
         main.removeCallbacksAndMessages(null)
         report(final = true)
+        player.removeAnalyticsListener(enhanceAnalytics)
         player.release()
         engine.closeSession(sessionId)
         discardWarmup()
