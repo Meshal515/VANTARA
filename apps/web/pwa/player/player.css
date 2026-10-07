@@ -1,6 +1,6 @@
 /*
  * مشغّل الويب — نسخة من تصميم مشغّل الـAPK (PlayerActivity.kt + Ui.kt):
- * نفس الألوان (Tone)، ونفس المقاسات بالـdp، ونفس الترتيب. السينما بالأحمر.
+ * نفس الألوان (Tone)، ونفس المقاسات بالـdp، ونفس الترتيب. السينما بالبترولي.
  */
 .pwa-player {
   --bg: #05070d;
@@ -31,19 +31,19 @@
   user-select: none;
 }
 .pwa-player[data-tone='cinema'] {
-  --bg: #0a0707;
-  --surface: #141010;
-  --surface-2: #1b1515;
-  --surface-3: #251c1c;
-  --line: rgba(255, 200, 200, 0.12);
-  --text: #f7f2f2;
-  --text-2: #cbbdbd;
-  --text-3: #978787;
-  --text-4: #5e5252;
-  --accent: #c1121f;
-  --accent-text: #f26b6b;
-  --accent-soft: rgba(193, 18, 31, 0.16);
-  --accent-line: rgba(193, 18, 31, 0.45);
+  --bg: #050706;
+  --surface: #0d1110;
+  --surface-2: #151918;
+  --surface-3: #1b211f;
+  --line: rgba(53, 205, 184, 0.12);
+  --text: #f4f5f2;
+  --text-2: #929895;
+  --text-3: #6f7670;
+  --text-4: #4e554f;
+  --accent: #177e75;
+  --accent-text: #35cdb8;
+  --accent-soft: rgba(23, 126, 117, 0.16);
+  --accent-line: rgba(53, 205, 184, 0.40);
 }
 html.pwa-playing,
 html.pwa-playing body {
