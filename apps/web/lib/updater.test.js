@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideUpdate, dismissedRecently, isNewer } from './updater.js';
+import { DEBUG_MANIFEST_URL, DEBUG_UPDATE_CHANNEL, MANIFEST_URL, decideUpdate, dismissedRecently, isNewer, manifestUrlFor } from './updater.js';
 
 const manifest = (over = {}) => ({
   format: 2,
@@ -58,6 +58,22 @@ describe('decideUpdate', () => {
   it('a local debug build never updates itself; an old-format manifest is ignored', () => {
     expect(decideUpdate(manifest(), device({ native: 'dev' }))).toEqual({ web: null, apk: null });
     expect(decideUpdate({ versionName: '0.0.9', nativeApi: 2 }, device())).toEqual({ web: null, apk: null });
+  });
+});
+
+
+describe('update channel', () => {
+  it('routes debug to its private manifest and stable to the stable manifest', () => {
+    expect(manifestUrlFor({ channel: DEBUG_UPDATE_CHANNEL })).toBe(DEBUG_MANIFEST_URL);
+    expect(manifestUrlFor({ channel: 'stable' })).toBe(MANIFEST_URL);
+  });
+
+  it('never crosses a manifest into another channel', () => {
+    const out = decideUpdate(
+      manifest({ channel: DEBUG_UPDATE_CHANNEL }),
+      device({ channel: 'stable' }),
+    );
+    expect(out).toEqual({ web: null, apk: null });
   });
 });
 
