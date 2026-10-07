@@ -5,8 +5,9 @@ apply plugin: 'org.jetbrains.kotlin.plugin.serialization'
 
 // إصدار OkHttp في مكان واحد: التوحيد أدناه يقرأ منه، فلا يفترقان بالسهو.
 def okhttpVersion = '5.3.2'
-// Media3 1.5: آخر خط يقبل compileSdk 35 وminSdk 26 بلا ترقية AGP
-def media3Version = '1.5.1'
+// Debug enhancement path: 1.8.1 includes GL effect fixes absent from the old 1.5.1 line.
+// Keep this branch-only until the S23 playback/effect path is proven on-device.
+def media3Version = '1.8.1'
 
 // ───────────────────────────── التوقيع والإصدار ─────────────────────────────
 //
