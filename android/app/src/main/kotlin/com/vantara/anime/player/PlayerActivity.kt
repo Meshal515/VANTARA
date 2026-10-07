@@ -1302,12 +1302,29 @@ class PlayerActivity : Activity() {
         return true
     }
 
+    private fun enhancementCauseSummary(error: Throwable): String {
+        val parts = ArrayList<String>(4)
+        var t: Throwable? = error
+        var depth = 0
+        while (t != null && depth < 4) {
+            val name = t::class.java.simpleName.takeIf { it.isNotBlank() } ?: "Throwable"
+            val msg = t.message?.replace(Regex("\\s+"), " ")?.trim()?.take(120)
+            val piece = if (msg.isNullOrBlank()) name else "$name: $msg"
+            if (parts.lastOrNull() != piece) parts += piece
+            t = t.cause
+            depth++
+        }
+        return parts.joinToString(" <- ")
+    }
+
     private fun recoverFromAnimeEnhanceError(error: PlaybackException): Boolean {
         if (!canAnimeEnhance() || animeEnhanceRuntime == null) return false
         if (error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED &&
             error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
         ) return false
-        return recoverEnhancementStall(error.errorCodeName)
+        val pass = AnimeEnhanceTelemetry.lastPass
+        val cause = enhancementCauseSummary(error)
+        return recoverEnhancementStall("${error.errorCodeName} @ $pass | $cause")
     }
 
     private fun animeEnhanceStatus(): String {
