@@ -135,6 +135,7 @@ private class Anime4kShaderProgram(
     }
 
     override fun configure(inputWidth: Int, inputHeight: Int): Size {
+        AnimeEnhanceTelemetry.mark("anime4k.${stage.name.lowercase()}.configure")
         this.inputWidth = inputWidth.coerceAtLeast(1)
         this.inputHeight = inputHeight.coerceAtLeast(1)
         val base = AnimeQualityTuning.forSourceHeight(this.inputHeight, mode)
@@ -164,6 +165,7 @@ private class Anime4kShaderProgram(
 
     override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
         try {
+            AnimeEnhanceTelemetry.mark("anime4k.${stage.name.lowercase()}.draw")
             program.use()
             program.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
             program.setFloatsUniform(
