@@ -50,12 +50,12 @@ object Tone {
     const val BAD = 0xFFF87171.toInt()
     const val SCRIM = 0xB3000000.toInt()
 
-    /** لون القسم: نفس المشغّل بنفس تصميمه، والسينما بالأحمر الدموي (cinema.css). */
+    /** لون القسم: نفس المشغّل بنفس تصميمه، والسينما بالبترولي (cinema.css). */
     fun use(section: String) {
         if (section == "cinema") {
-            BG = 0xFF0A0707.toInt(); SURFACE = 0xFF141010.toInt(); SURFACE_2 = 0xFF1B1515.toInt(); SURFACE_3 = 0xFF251C1C.toInt()
-            LINE = 0x1FFFC8C8; TEXT = 0xFFF7F2F2.toInt(); TEXT_2 = 0xFFCBBDBD.toInt(); TEXT_3 = 0xFF978787.toInt(); TEXT_4 = 0xFF5E5252.toInt()
-            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F
+            BG = 0xFF050706.toInt(); SURFACE = 0xFF0D1110.toInt(); SURFACE_2 = 0xFF151918.toInt(); SURFACE_3 = 0xFF1B211F.toInt()
+            LINE = 0x1F35CDB8; TEXT = 0xFFF4F5F2.toInt(); TEXT_2 = 0xFF929895.toInt(); TEXT_3 = 0xFF6F7670.toInt(); TEXT_4 = 0xFF4E554F.toInt()
+            ACCENT = 0xFF177E75.toInt(); ACCENT_TEXT = 0xFF35CDB8.toInt(); ACCENT_SOFT = 0x29177E75; ACCENT_LINE = 0x7335CDB8
         } else {
             BG = 0xFF05070D.toInt(); SURFACE = 0xFF0D111B.toInt(); SURFACE_2 = 0xFF131826.toInt(); SURFACE_3 = 0xFF1B2233.toInt()
             LINE = 0x1FA0BEFF; TEXT = 0xFFF3F6FC.toInt(); TEXT_2 = 0xFFB4BDD0.toInt(); TEXT_3 = 0xFF7D879D.toInt(); TEXT_4 = 0xFF4E576B.toInt()
