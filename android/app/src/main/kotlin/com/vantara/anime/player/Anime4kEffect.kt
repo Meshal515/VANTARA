@@ -30,9 +30,12 @@ import kotlin.math.roundToInt
 @UnstableApi
 class Anime4kEffect(
     val mode: Mode,
+    private val stage: Stage = Stage.FINAL,
     private val maxWidth: Int = 2560,
     private val maxHeight: Int = 1440,
 ) : GlEffect {
+
+    enum class Stage { PRIMARY, FINAL }
 
     enum class Mode(val key: String) {
         FAST("fast"),
@@ -49,9 +52,13 @@ class Anime4kEffect(
     }
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
-        Anime4kShaderProgram(mode, maxWidth, maxHeight, useHdr)
+        Anime4kShaderProgram(mode, stage, maxWidth, maxHeight, useHdr)
 
-    override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean = false
+    override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean {
+        if (stage != Stage.FINAL) return false
+        val (w, h) = targetSize(inputWidth, inputHeight, maxWidth, maxHeight)
+        return w == inputWidth && h == inputHeight
+    }
 
     companion object {
         /** Fit every supported source into the S23 Ultra's 2560x1440 target, preserving aspect. */
@@ -70,12 +77,31 @@ class Anime4kEffect(
             val h = (((inputHeight * scale).roundToInt().coerceAtMost(maxHeight)) / 2) * 2
             return w.coerceAtLeast(2) to h.coerceAtLeast(2)
         }
+
+        /** First low-resolution stage: never jumps more than 2x in one reconstruction pass. */
+        fun primaryTargetSize(
+            inputWidth: Int,
+            inputHeight: Int,
+            maxWidth: Int = 2560,
+            maxHeight: Int = 1440,
+        ): Pair<Int, Int> {
+            if (inputWidth <= 0 || inputHeight <= 0) return inputWidth to inputHeight
+            val finalScale = min(
+                maxWidth.toFloat() / inputWidth.toFloat(),
+                maxHeight.toFloat() / inputHeight.toFloat(),
+            )
+            val scale = min(2f, finalScale)
+            val w = (((inputWidth * scale).roundToInt().coerceAtMost(maxWidth)) / 2) * 2
+            val h = (((inputHeight * scale).roundToInt().coerceAtMost(maxHeight)) / 2) * 2
+            return w.coerceAtLeast(2) to h.coerceAtLeast(2)
+        }
     }
 }
 
 @UnstableApi
 private class Anime4kShaderProgram(
     private val mode: Anime4kEffect.Mode,
+    private val stage: Anime4kEffect.Stage,
     private val maxWidth: Int,
     private val maxHeight: Int,
     useHdr: Boolean,
@@ -111,11 +137,28 @@ private class Anime4kShaderProgram(
     override fun configure(inputWidth: Int, inputHeight: Int): Size {
         this.inputWidth = inputWidth.coerceAtLeast(1)
         this.inputHeight = inputHeight.coerceAtLeast(1)
-        tuning = AnimeQualityTuning.forSourceHeight(this.inputHeight, mode)
-        val (w, h) = Anime4kEffect.targetSize(this.inputWidth, this.inputHeight, maxWidth, maxHeight)
+        val base = AnimeQualityTuning.forSourceHeight(this.inputHeight, mode)
+        tuning = if (stage == Anime4kEffect.Stage.FINAL) {
+            // A second low-res scale stage should refine, not sharpen the already reconstructed
+            // intermediate image a second time.
+            base.copy(
+                cleanup = base.cleanup * 0.45f,
+                deblur = base.deblur * 0.48f,
+                lineRestore = base.lineRestore * 0.58f,
+                antiAlias = base.antiAlias * 0.62f,
+                detail = base.detail * 0.38f,
+                dither = base.dither * 0.70f,
+                secondRing = base.secondRing * 0.48f,
+            )
+        } else base
+
+        val (w, h) = if (stage == Anime4kEffect.Stage.PRIMARY) {
+            Anime4kEffect.primaryTargetSize(this.inputWidth, this.inputHeight, maxWidth, maxHeight)
+        } else {
+            Anime4kEffect.targetSize(this.inputWidth, this.inputHeight, maxWidth, maxHeight)
+        }
         outputWidth = w
         outputHeight = h
-        AnimeEnhanceTelemetry.configureSource(this.inputWidth, this.inputHeight, w, h)
         return Size(w, h)
     }
 
@@ -143,7 +186,9 @@ private class Anime4kShaderProgram(
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GlUtil.checkGlError()
 
-            AnimeEnhanceTelemetry.endFrame(presentationTimeUs)
+            if (stage == Anime4kEffect.Stage.FINAL || outputHeight >= maxHeight) {
+                AnimeEnhanceTelemetry.endFrame(presentationTimeUs)
+            }
         } catch (e: Exception) {
             throw VideoFrameProcessingException(e, presentationTimeUs)
         }
