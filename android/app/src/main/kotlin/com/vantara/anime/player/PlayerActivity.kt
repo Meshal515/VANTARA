@@ -1168,17 +1168,33 @@ class PlayerActivity : Activity() {
         if (!silent) {
             message(
                 if (wanted == null) "تحسين الصورة متوقف"
-                else "تحسين 1440p واضح · فريم بفريم",
+                else "1440p لحظي · فريم بفريم",
             )
         }
     }
 
     private fun setAnimeEnhanceSetting(value: String) {
+        val c = current
+        val at = position()
+        val wasPlaying = player.playWhenReady
+
         settings.edit().putString("anime4kMode", value).apply()
         animeEnhanceSuppressed = false
         animeEnhanceLastDowngradeMs = 0L
         animeEnhanceRetryingSourceId = null
+
+        // Media3 can change effects dynamically, لكن على بعض الأجهزة تغيير video graph وهو
+        // يرسم frame فعليًا يعلق الـsurface. نوقف نفس المصدر لحظة، نبدل graph، ثم نعيد نفس
+        // السيرفر ونفس الثانية. لا نلمس ranking ولا session.failed.
+        if (c != null) player.stop()
         applyAnimeEnhancement()
+
+        if (c != null) {
+            main.post {
+                start(c, at)
+                player.playWhenReady = wasPlaying
+            }
+        }
         if (openSheet == SheetKind.MORE) sheet.refresh()
     }
 
@@ -1221,6 +1237,9 @@ class PlayerActivity : Activity() {
         animeEnhanceRuntime = null
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
+
+        // Flush the broken frame processor completely before restoring the same source.
+        runCatching { player.stop() }
         runCatching { player.setVideoEffects(emptyList()) }
 
         message("تعطل التحسين؛ نكمل نفس السيرفر بدونه")
@@ -1229,6 +1248,8 @@ class PlayerActivity : Activity() {
                 start(c, at)
                 player.playWhenReady = wasPlaying
             }.onFailure {
+                // Only now, after a clean no-effect retry of the SAME source failed, may the normal
+                // server failover policy run.
                 fail("$reason / enhancement fallback failed")
             }
         }
