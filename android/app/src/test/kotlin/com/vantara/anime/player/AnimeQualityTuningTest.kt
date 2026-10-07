@@ -20,9 +20,15 @@ class AnimeQualityTuningTest {
         )
         for ((w, h) in cases) {
             val (outW, outH) = Anime4kEffect.targetSize(w, h)
-            assertEquals("height for ${h}p", 1440, outH)
+            assertTrue("height must fit QHD for ${h}p", outH <= 1440)
             assertTrue("width must fit QHD", outW <= 2560)
             assertTrue("width must stay even", outW % 2 == 0)
+            assertTrue("height must stay even", outH % 2 == 0)
+            // Integer/even rounding may leave 1–2 output rows unused for non-exact aspect ratios.
+            val inputAspect = w.toFloat() / h.toFloat()
+            val outputAspect = outW.toFloat() / outH.toFloat()
+            assertTrue("aspect ratio must be preserved", kotlin.math.abs(inputAspect - outputAspect) < 0.003f)
+            assertTrue("one dimension should reach the 1440p/QHD boundary", outH >= 1436 || outW >= 2556)
         }
     }
 
