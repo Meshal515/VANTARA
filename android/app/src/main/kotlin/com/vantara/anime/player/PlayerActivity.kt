@@ -1142,7 +1142,7 @@ class PlayerActivity : Activity() {
         animeEnhanceSetting = animeEnhanceStored()
         val wanted = if (animeEnhanceSuppressed) null else runtimeOverride ?: animeEnhanceMode(animeEnhanceSetting)
         val ok = runCatching {
-            player.setVideoEffects(wanted?.let { listOf(Anime4kEffect(it)) }.orEmpty())
+            player.setVideoEffects(wanted?.let { AnimeEnhancePipeline.effects(it) }.orEmpty())
         }.isSuccess
         if (!ok) {
             animeEnhanceSuppressed = true
@@ -1155,7 +1155,7 @@ class PlayerActivity : Activity() {
         if (!silent) {
             message(
                 if (wanted == null) "تحسين الصورة متوقف"
-                else "Anime4K · فريم بفريم · حتى 1440p",
+                else "تحسين شامل · فريم بفريم · حتى 1440p",
             )
         }
     }
@@ -1226,6 +1226,7 @@ class PlayerActivity : Activity() {
             "فريم بفريم",
             target?.second?.let { "حتى ${it}p" } ?: "حتى 1440p",
             modeName,
+            AnimeEnhancePipeline.description(mode),
         ).joinToString(" · ")
     }
 
@@ -1507,17 +1508,17 @@ class PlayerActivity : Activity() {
     private fun showMore() {
         open(SheetKind.MORE, "المزيد") { body ->
             if (canAnimeEnhance()) {
-                body.addView(sectionLabel("تحسين الأنمي"))
-                body.addView(sheetRow("Anime4K تلقائي", animeEnhanceStatus(), trailing = if (animeEnhanceStored() == "auto") check() else null, selected = animeEnhanceStored() == "auto") {
+                body.addView(sectionLabel("تحسين جودة الأنمي"))
+                body.addView(sheetRow("تلقائي", animeEnhanceStatus(), trailing = if (animeEnhanceStored() == "auto") check() else null, selected = animeEnhanceStored() == "auto") {
                     setAnimeEnhanceSetting("auto")
                 })
-                body.addView(sheetRow("قوي", "فريم بفريم · تفاصيل وحواف أقوى", trailing = if (animeEnhanceStored() == "strong") check() else null, selected = animeEnhanceStored() == "strong") {
+                body.addView(sheetRow("قوي", "تنظيف ضغط + Deband + Deblur + Restore + 1440p", trailing = if (animeEnhanceStored() == "strong") check() else null, selected = animeEnhanceStored() == "strong") {
                     setAnimeEnhanceSetting("strong")
                 })
-                body.addView(sheetRow("متوازن", "فريم بفريم · Anime4K Original", trailing = if (animeEnhanceStored() == "balanced") check() else null, selected = animeEnhanceStored() == "balanced") {
+                body.addView(sheetRow("متوازن", "تنظيف + Deband + Restore + 1440p", trailing = if (animeEnhanceStored() == "balanced") check() else null, selected = animeEnhanceStored() == "balanced") {
                     setAnimeEnhanceSetting("balanced")
                 })
-                body.addView(sheetRow("سريع", "فريم بفريم · حمل GPU أقل", trailing = if (animeEnhanceStored() == "fast") check() else null, selected = animeEnhanceStored() == "fast") {
+                body.addView(sheetRow("سريع", "رفع + تنعيم حواف · حمل GPU أقل", trailing = if (animeEnhanceStored() == "fast") check() else null, selected = animeEnhanceStored() == "fast") {
                     setAnimeEnhanceSetting("fast")
                 })
                 body.addView(sheetRow("إيقاف التحسين", "يعرض المصدر كما هو", trailing = if (animeEnhanceStored() == "off") check() else null, selected = animeEnhanceStored() == "off") {
