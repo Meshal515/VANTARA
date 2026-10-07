@@ -1290,16 +1290,24 @@ class PlayerActivity : Activity() {
     private fun recoverEnhancementStall(reason: String): Boolean {
         if (!canAnimeEnhance() || animeEnhanceRuntime == null || animeEnhanceSuppressed) return false
         val c = current ?: return false
-        if (animeEnhanceRetryingSourceId == c.id) return false
 
-        animeEnhanceRetryingSourceId = c.id
-        runCatching {
-            rebuildPlayerForEnhancement(null, silent = true, suppress = true)
-            message("تعطل التحسين ($reason)؛ كملنا نفس السيرفر بدونه")
-        }.onFailure {
-            fail("$reason / enhancement fallback failed")
-        }
-        return true
+        return runCatching {
+            if (animeEnhanceRuntime != Anime4kEffect.Mode.FAST) {
+                animeEnhanceRetryingSourceId = null
+                rebuildPlayerForEnhancement(Anime4kEffect.Mode.FAST, silent = true)
+                message("خففنا التحسين للمسار الآمن وكملنا نفس السيرفر")
+            } else {
+                animeEnhanceRetryingSourceId = c.id
+                rebuildPlayerForEnhancement(null, silent = true, suppress = true)
+                message("أوقفنا التحسين فقط وكملنا نفس السيرفر")
+            }
+        }.fold(
+            onSuccess = { true },
+            onFailure = {
+                fail("$reason / enhancement fallback failed")
+                true
+            },
+        )
     }
 
     private fun enhancementCauseSummary(error: Throwable): String {
