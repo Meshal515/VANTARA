@@ -1164,8 +1164,8 @@ class PlayerActivity : Activity() {
     }
 
     /**
-     * Applies the effect to ExoPlayer's live video graph. There is no export, cached 1440p copy,
-     * or waiting screen: decoded frame -> Anime4K GL -> display, for every frame.
+     * Applies the live GPU enhancement graph. There is no export or cached 1440p copy:
+     * decoded frame -> resolution-aware restore/scaling passes -> display, for every frame.
      */
     private fun applyAnimeEnhancement(
         silent: Boolean = false,
@@ -1177,7 +1177,13 @@ class PlayerActivity : Activity() {
         val ok = runCatching {
             // لا ننادي setVideoEffects(emptyList()) عند الإيقاف؛ مجرد النداء يجعل Media3
             // ينشئ video graph حتى بلا مؤثرات. عند الإيقاف نعيد Player نظيفًا بدل ذلك.
-            if (wanted != null) player.setVideoEffects(AnimeEnhancePipeline.effects(wanted))
+            if (wanted != null) {
+                val sourceHeightHint =
+                    current?.quality?.takeIf { it > 0 }
+                        ?: player.videoFormat?.height?.takeIf { it > 0 }
+                        ?: launch.quality.takeIf { it > 0 }
+                player.setVideoEffects(AnimeEnhancePipeline.effects(wanted, sourceHeightHint))
+            }
         }.isSuccess
         if (!ok) {
             animeEnhanceSuppressed = true
