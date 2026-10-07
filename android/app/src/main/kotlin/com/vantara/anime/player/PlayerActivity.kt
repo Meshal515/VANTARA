@@ -325,6 +325,7 @@ class PlayerActivity : Activity() {
     private var animeEnhanceRuntime: Anime4kEffect.Mode? = null
     private var animeEnhanceSuppressed = false
     private var animeEnhanceLastDowngradeMs = 0L
+    private var animeEnhanceLastGpuSampleCount = 0
     /** يمنع أي خلل في الـGPU/effect من اتهام السيرفر وتدوير المصادر. */
     private var animeEnhanceRetryingSourceId: String? = null
 
@@ -399,6 +400,7 @@ class PlayerActivity : Activity() {
         override fun run() {
             updateTime()
             maybeLoadSkips()
+            maybeProtectEnhancementBudget()
             if (::skipButton.isInitialized) {
                 val segment = IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())
                 val visible = segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
@@ -1183,7 +1185,9 @@ class PlayerActivity : Activity() {
         settings.edit().putString("anime4kMode", value).apply()
         animeEnhanceSuppressed = false
         animeEnhanceLastDowngradeMs = 0L
+        animeEnhanceLastGpuSampleCount = 0
         animeEnhanceRetryingSourceId = null
+        AnimeEnhanceTelemetry.reset()
         rebuildPlayerForEnhancement(runtimeOverride = animeEnhanceMode(value), silent = false)
         if (openSheet == SheetKind.MORE) sheet.refresh()
     }
@@ -1237,6 +1241,24 @@ class PlayerActivity : Activity() {
                 },
             )
         }
+    }
+
+    /**
+     * 24fps gives 41.7ms/frame, but decoder/composition also need budget. Sparse GPU samples from
+     * the custom passes keep auto mode from sitting on a quality level that leaves no headroom.
+     */
+    private fun maybeProtectEnhancementBudget() {
+        if (!canAnimeEnhance() || animeEnhanceSetting != "auto") return
+        val count = AnimeEnhanceTelemetry.samples
+        if (count <= animeEnhanceLastGpuSampleCount) return
+        animeEnhanceLastGpuSampleCount = count
+        val ms = AnimeEnhanceTelemetry.gpuMs
+        val tooHeavy = when (animeEnhanceRuntime) {
+            Anime4kEffect.Mode.STRONG -> ms > 24.0f
+            Anime4kEffect.Mode.BALANCED -> ms > 30.0f
+            else -> false
+        }
+        if (tooHeavy) downgradeAnimeEnhancement()
     }
 
     private fun downgradeAnimeEnhancement() {
@@ -1299,11 +1321,16 @@ class PlayerActivity : Activity() {
             Anime4kEffect.Mode.BALANCED -> "متوازن"
             Anime4kEffect.Mode.STRONG -> "قوي"
         }
+        val telemetry = AnimeEnhanceTelemetry
+        val sourceText = telemetry.sourceHeight.takeIf { it > 0 }?.let { "${it}p → ${telemetry.outputHeight}p" }
+        val gpuText = telemetry.gpuMs.takeIf { telemetry.samples > 0 }?.let { "GPU≈%.1fms".format(java.util.Locale.US, it) }
+        val profileText = telemetry.profile.takeIf { it.isNotBlank() }
         return listOfNotNull(
             "فريم بفريم",
-            target?.second?.let { "حتى ${it}p" } ?: "حتى 1440p",
+            sourceText ?: target?.second?.let { "حتى ${it}p" } ?: "حتى 1440p",
             modeName,
-            AnimeEnhancePipeline.description(mode),
+            profileText,
+            gpuText,
         ).joinToString(" · ")
     }
 
