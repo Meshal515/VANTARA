@@ -28,7 +28,7 @@ class AnimeNativeDetailEffect(
     private val stage: Stage,
 ) : GlEffect {
 
-    enum class Stage { SOURCE_RESTORE, FINAL_POLISH }
+    enum class Stage { SOURCE_RESTORE, MID_RESTORE, FINAL_POLISH }
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
         SeparableConvolutionShaderProgram(context, useHdr, Provider(mode, stage))
@@ -47,31 +47,56 @@ class AnimeNativeDetailEffect(
         override fun getConvolution(presentationTimeUs: Long): ConvolutionFunction1D {
             val strength = when (stage) {
                 Stage.SOURCE_RESTORE -> sourceStrength(inputHeight, mode)
+                Stage.MID_RESTORE -> midStrength(inputHeight, mode)
                 Stage.FINAL_POLISH -> when (mode) {
                     Anime4kEffect.Mode.FAST -> 0f
-                    Anime4kEffect.Mode.BALANCED -> 0.055f
-                    Anime4kEffect.Mode.STRONG -> 0.090f
+                    Anime4kEffect.Mode.BALANCED -> 0.10f
+                    Anime4kEffect.Mode.STRONG -> 0.22f
                 }
             }
             return DogKernel(
                 strength = strength,
-                sharpSigma = if (stage == Stage.SOURCE_RESTORE) 0.42f else 0.48f,
-                blurSigma = if (stage == Stage.SOURCE_RESTORE) 0.92f else 0.88f,
+                sharpSigma = when (stage) {
+                    Stage.SOURCE_RESTORE -> 0.50f
+                    Stage.MID_RESTORE -> 0.48f
+                    Stage.FINAL_POLISH -> 0.52f
+                },
+                blurSigma = when (stage) {
+                    Stage.SOURCE_RESTORE -> 1.00f
+                    Stage.MID_RESTORE -> 0.96f
+                    Stage.FINAL_POLISH -> 0.90f
+                },
             )
         }
 
         private fun sourceStrength(height: Int, mode: Anime4kEffect.Mode): Float {
+            // Calibrated against the current/desired reference frames. The old 720p value (0.31)
+            // only moved ~2% of pixels visibly; this tier reaches a genuinely different image while
+            // the broad Gaussian lobe keeps the line response smooth rather than halo-like.
             val strong = when {
-                height <= 360 -> 0.54f
-                height <= 480 -> 0.46f
-                height <= 576 -> 0.39f
-                height <= 720 -> 0.31f
-                height <= 900 -> 0.23f
-                else -> 0.16f
+                height <= 360 -> 1.70f
+                height <= 480 -> 1.48f
+                height <= 576 -> 1.34f
+                height <= 720 -> 1.18f
+                height <= 900 -> 0.78f
+                else -> 0.46f
             }
             return when (mode) {
                 Anime4kEffect.Mode.FAST -> 0f
-                Anime4kEffect.Mode.BALANCED -> strong * 0.70f
+                Anime4kEffect.Mode.BALANCED -> strong * 0.58f
+                Anime4kEffect.Mode.STRONG -> strong
+            }
+        }
+
+        private fun midStrength(height: Int, mode: Anime4kEffect.Mode): Float {
+            val strong = when {
+                height <= 720 -> 0.46f
+                height <= 1080 -> 0.34f
+                else -> 0.20f
+            }
+            return when (mode) {
+                Anime4kEffect.Mode.FAST -> 0f
+                Anime4kEffect.Mode.BALANCED -> strong * 0.55f
                 Anime4kEffect.Mode.STRONG -> strong
             }
         }
