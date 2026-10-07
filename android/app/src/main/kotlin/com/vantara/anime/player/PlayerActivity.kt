@@ -830,13 +830,7 @@ class PlayerActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             layoutDirection = View.LAYOUT_DIRECTION_LTR
         }
-        video = PlayerView(this).apply {
-            player = this@PlayerActivity.player
-            useController = false
-            keepScreenOn = true
-            setShutterBackgroundColor(Color.BLACK)
-            resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
-        }
+        video = createVideoView()
         root.addView(video, match())
 
         val gestures = View(this)
@@ -902,6 +896,25 @@ class PlayerActivity : Activity() {
         }
         setContentView(root)
         setControls(true)
+    }
+
+    private fun createVideoView(): PlayerView =
+        (layoutInflater.inflate(com.vantara.app.R.layout.vantara_texture_player, root, false) as PlayerView).apply {
+            player = this@PlayerActivity.player
+            useController = false
+            keepScreenOn = true
+            setShutterBackgroundColor(Color.BLACK)
+            resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+
+    private fun replaceVideoViewForPlayer() {
+        if (!::root.isInitialized) return
+        val old = if (::video.isInitialized) video else null
+        val index = old?.let { root.indexOfChild(it) }?.takeIf { it >= 0 } ?: 0
+        old?.player = null
+        if (old != null) root.removeView(old)
+        video = createVideoView()
+        root.addView(video, index, match())
     }
 
     private fun buildTop() {
@@ -1224,7 +1237,9 @@ class PlayerActivity : Activity() {
             applyAnimeEnhancement(silent = true, runtimeOverride = runtimeOverride)
         }
 
-        if (::video.isInitialized) video.player = player
+        // Fresh TextureView/SurfaceTexture for every video-graph rebuild. Reusing the old
+        // Surface after a frame-processor failure was leaving the replacement player black.
+        if (::video.isInitialized) replaceVideoViewForPlayer()
 
         if (c != null) {
             start(c, at)
