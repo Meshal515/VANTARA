@@ -18,6 +18,12 @@
 import { appVersion } from './config.js';
 
 export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/latest/download/vantara-update.json';
+export const DEBUG_UPDATE_CHANNEL = 'debug-cinema-petrol-teal';
+export const DEBUG_MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/download/debug-cinema-petrol-teal/vantara-debug-update.json';
+
+export function manifestUrlFor(device) {
+  return device?.channel === DEBUG_UPDATE_CHANNEL ? DEBUG_MANIFEST_URL : MANIFEST_URL;
+}
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const LAST_CHECK_KEY = 'vantara.update.checkedAt';
 const DISMISS_KEY = 'vantara.update.dismissed';
@@ -54,7 +60,9 @@ export function isNewer(candidate, current) {
 export function decideUpdate(manifest, device) {
   const none = { web: null, apk: null };
   if (!manifest || typeof manifest !== 'object' || !manifest.native) return none;
-  // بناء محلي (debug): لا بصمة، ولا مفتاح رسمي يثبت فوقه تحديث
+  // قناة debug مستقلة تمامًا عن stable. البيان القديم المستقر بلا channel يبقى متوافقًا.
+  if (manifest.channel && device?.channel && manifest.channel !== device.channel) return none;
+  // بناء محلي بلا بصمة لا يدخل أي قناة تحديث.
   if (!device?.native || device.native === 'dev') return none;
   const version = String(manifest.versionName ?? '');
   const changelog = Array.isArray(manifest.changelog) ? manifest.changelog.map(String).slice(0, 6) : [];
@@ -109,9 +117,10 @@ export async function findUpdate({ force = false } = {}) {
   if (!native) return null;
   if (!force && Date.now() - Number(storage(LAST_CHECK_KEY) ?? '0') < CHECK_EVERY_MS) return null;
   try {
-    const [device, raw] = await Promise.all([deviceInfo(), native.manifest({ url: MANIFEST_URL })]);
-    storage(LAST_CHECK_KEY, String(Date.now()));
+    const device = await deviceInfo();
     if (!device) return null;
+    const raw = await native.manifest({ url: manifestUrlFor(device) });
+    storage(LAST_CHECK_KEY, String(Date.now()));
     return { ...decideUpdate(JSON.parse(raw.json), device), device };
   } catch {
     return null;
