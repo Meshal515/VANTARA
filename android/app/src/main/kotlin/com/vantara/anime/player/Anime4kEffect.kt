@@ -170,10 +170,6 @@ private class Anime4kShaderProgram(
                 "uTexel",
                 floatArrayOf(1f / inputWidth.toFloat(), 1f / inputHeight.toFloat()),
             )
-            program.setFloatsUniform(
-                "uOutputTexel",
-                floatArrayOf(1f / outputWidth.toFloat(), 1f / outputHeight.toFloat()),
-            )
             program.setFloatUniform("uScale", outputHeight.toFloat() / inputHeight.toFloat())
             program.setFloatUniform("uLineRestore", tuning.lineRestore)
             program.setFloatUniform("uAntiAlias", tuning.antiAlias)
@@ -231,7 +227,6 @@ private class Anime4kShaderProgram(
 
             uniform sampler2D uTexSampler;
             uniform vec2 uTexel;
-            uniform vec2 uOutputTexel;
             uniform float uScale;
             uniform float uLineRestore;
             uniform float uAntiAlias;
