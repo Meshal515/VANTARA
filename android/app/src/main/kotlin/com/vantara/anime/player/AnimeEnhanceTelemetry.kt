@@ -24,10 +24,16 @@ object AnimeEnhanceTelemetry {
         private set
     @Volatile var samples: Int = 0
         private set
+    @Volatile var lastPass: String = "idle"
+        private set
 
     private var lastSamplePtsUs = Long.MIN_VALUE
     private var pendingPtsUs = Long.MIN_VALUE
     private var pendingStartNs = 0L
+
+    fun mark(pass: String) {
+        lastPass = pass
+    }
 
     fun configureSource(width: Int, height: Int, outWidth: Int, outHeight: Int) {
         sourceWidth = width
@@ -66,6 +72,7 @@ object AnimeEnhanceTelemetry {
         profile = ""
         gpuMs = 0f
         samples = 0
+        lastPass = "idle"
         lastSamplePtsUs = Long.MIN_VALUE
         pendingPtsUs = Long.MIN_VALUE
         pendingStartNs = 0L
