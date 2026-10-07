@@ -1616,13 +1616,13 @@ class PlayerActivity : Activity() {
                 body.addView(sheetRow("تلقائي", animeEnhanceStatus(), trailing = if (animeEnhanceStored() == "auto") check() else null, selected = animeEnhanceStored() == "auto") {
                     setAnimeEnhanceSetting("auto")
                 })
-                body.addView(sheetRow("قوي", "تنظيف ضغط + Deband + Deblur + Restore + 1440p", trailing = if (animeEnhanceStored() == "strong") check() else null, selected = animeEnhanceStored() == "strong") {
+                body.addView(sheetRow("قوي", "Tuning حسب المصدر + Restore + Line Reconstruction + 1440p", trailing = if (animeEnhanceStored() == "strong") check() else null, selected = animeEnhanceStored() == "strong") {
                     setAnimeEnhanceSetting("strong")
                 })
-                body.addView(sheetRow("متوازن", "تنظيف + Deband + Restore + 1440p", trailing = if (animeEnhanceStored() == "balanced") check() else null, selected = animeEnhanceStored() == "balanced") {
+                body.addView(sheetRow("متوازن", "Restore + Edge-aware Upscale + 1440p", trailing = if (animeEnhanceStored() == "balanced") check() else null, selected = animeEnhanceStored() == "balanced") {
                     setAnimeEnhanceSetting("balanced")
                 })
-                body.addView(sheetRow("سريع", "رفع + تنعيم حواف · حمل GPU أقل", trailing = if (animeEnhanceStored() == "fast") check() else null, selected = animeEnhanceStored() == "fast") {
+                body.addView(sheetRow("سريع", "Lanczos 1440p · أقل حمل GPU", trailing = if (animeEnhanceStored() == "fast") check() else null, selected = animeEnhanceStored() == "fast") {
                     setAnimeEnhanceSetting("fast")
                 })
                 body.addView(sheetRow("إيقاف التحسين", "يعرض المصدر كما هو", trailing = if (animeEnhanceStored() == "off") check() else null, selected = animeEnhanceStored() == "off") {
