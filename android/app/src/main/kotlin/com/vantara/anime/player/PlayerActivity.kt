@@ -437,15 +437,9 @@ class PlayerActivity : Activity() {
         fill = settings.getBoolean("fill", false)
 
         MediaCache.acquire(this)
-        player = ExoPlayer.Builder(this)
-            // آخر 40 ثانية تبقى في الذاكرة: معاينة المقطع (حتى 35 ث قبل اللحظة)
-            // والعودة للحظة بعد إغلاقه بلا تنزيل ولا انتظار
-            .setLoadControl(DefaultLoadControl.Builder().setBackBuffer(BACK_BUFFER_MS, true).build())
-            .setSeekBackIncrementMs(SEEK_MS)
-            .setSeekForwardIncrementMs(SEEK_MS)
-            .build()
-        player.addListener(listener)
-        player.addAnalyticsListener(enhanceAnalytics)
+        player = newPlayer()
+        // مهم جدًا: video effects يجب أن تكون موجودة قبل أول enable للـrenderer.
+        // Media3 1.5 كان يدخل black-screen إذا تبدلت بعد تشغيل decoder على بعض الأجهزة.
         applyAnimeEnhancement(silent = true)
         buildUi()
         attach(sessionId)
@@ -1129,6 +1123,17 @@ class PlayerActivity : Activity() {
         if (controlsShown()) scheduleHide()
     }
 
+    private fun newPlayer(): ExoPlayer =
+        ExoPlayer.Builder(this)
+            .setLoadControl(DefaultLoadControl.Builder().setBackBuffer(BACK_BUFFER_MS, true).build())
+            .setSeekBackIncrementMs(SEEK_MS)
+            .setSeekForwardIncrementMs(SEEK_MS)
+            .build()
+            .also {
+                it.addListener(listener)
+                it.addAnalyticsListener(enhanceAnalytics)
+            }
+
     private fun canAnimeEnhance() =
         BuildConfig.DEBUG && ::launch.isInitialized && launch.section == "anime" && ::player.isInitialized
 
@@ -1155,13 +1160,14 @@ class PlayerActivity : Activity() {
         animeEnhanceSetting = animeEnhanceStored()
         val wanted = if (animeEnhanceSuppressed) null else runtimeOverride ?: animeEnhanceMode(animeEnhanceSetting)
         val ok = runCatching {
-            player.setVideoEffects(wanted?.let { AnimeEnhancePipeline.effects(it) }.orEmpty())
+            // لا ننادي setVideoEffects(emptyList()) عند الإيقاف؛ مجرد النداء يجعل Media3
+            // ينشئ video graph حتى بلا مؤثرات. عند الإيقاف نعيد Player نظيفًا بدل ذلك.
+            if (wanted != null) player.setVideoEffects(AnimeEnhancePipeline.effects(wanted))
         }.isSuccess
         if (!ok) {
             animeEnhanceSuppressed = true
             animeEnhanceRuntime = null
-            runCatching { player.setVideoEffects(emptyList()) }
-            if (!silent) message("تعذّر تشغيل تحسين Anime4K على هذا الجهاز")
+            if (!silent) message("تعذّر تشغيل مسار تحسين الصورة")
             return
         }
         animeEnhanceRuntime = wanted
@@ -1174,28 +1180,63 @@ class PlayerActivity : Activity() {
     }
 
     private fun setAnimeEnhanceSetting(value: String) {
-        val c = current
-        val at = position()
-        val wasPlaying = player.playWhenReady
-
         settings.edit().putString("anime4kMode", value).apply()
         animeEnhanceSuppressed = false
         animeEnhanceLastDowngradeMs = 0L
         animeEnhanceRetryingSourceId = null
+        rebuildPlayerForEnhancement(runtimeOverride = animeEnhanceMode(value), silent = false)
+        if (openSheet == SheetKind.MORE) sheet.refresh()
+    }
 
-        // Media3 can change effects dynamically, لكن على بعض الأجهزة تغيير video graph وهو
-        // يرسم frame فعليًا يعلق الـsurface. نوقف نفس المصدر لحظة، نبدل graph، ثم نعيد نفس
-        // السيرفر ونفس الثانية. لا نلمس ranking ولا session.failed.
-        if (c != null) player.stop()
-        applyAnimeEnhancement()
+    /**
+     * لا نغيّر video graph داخل Player شغّال.
+     * Media3 ينشئ PlaybackVideoGraphWrapper عند أول enable فقط؛ وعلى أجهزة معيّنة تبديل
+     * setVideoEffects لاحقًا يترك Surface سوداء. الحل الحاسم: Player جديد، effect قبل prepare،
+     * ثم نفس Candidate ونفس الموضع — بلا اعتبار السيرفر فاشل.
+     */
+    private fun rebuildPlayerForEnhancement(
+        runtimeOverride: Anime4kEffect.Mode?,
+        silent: Boolean,
+        suppress: Boolean = false,
+    ) {
+        if (!canAnimeEnhance()) return
+        val c = current
+        val at = position()
+        val wasPlaying = player.playWhenReady
+        val speed = player.playbackParameters
+
+        main.removeCallbacks(startupWatchdog)
+        main.removeCallbacks(stallWatchdog)
+
+        if (::video.isInitialized) video.player = null
+        runCatching { player.removeListener(listener) }
+        runCatching { player.removeAnalyticsListener(enhanceAnalytics) }
+        runCatching { player.release() }
+
+        player = newPlayer()
+        animeEnhanceSuppressed = suppress
+        animeEnhanceRuntime = null
+        if (!suppress && runtimeOverride != null) {
+            applyAnimeEnhancement(silent = true, runtimeOverride = runtimeOverride)
+        }
+
+        if (::video.isInitialized) video.player = player
 
         if (c != null) {
-            main.post {
-                start(c, at)
-                player.playWhenReady = wasPlaying
-            }
+            start(c, at)
+            player.playbackParameters = speed
+            player.playWhenReady = wasPlaying
         }
-        if (openSheet == SheetKind.MORE) sheet.refresh()
+
+        if (!silent) {
+            message(
+                when {
+                    suppress -> "تعطل التحسين؛ كملنا نفس السيرفر بدونه"
+                    runtimeOverride == null -> "تحسين الصورة متوقف"
+                    else -> "1440p لحظي · فريم بفريم"
+                },
+            )
+        }
     }
 
     private fun downgradeAnimeEnhancement() {
@@ -1205,16 +1246,15 @@ class PlayerActivity : Activity() {
         animeEnhanceLastDowngradeMs = now
         when (animeEnhanceRuntime) {
             Anime4kEffect.Mode.STRONG -> {
-                applyAnimeEnhancement(silent = true, runtimeOverride = Anime4kEffect.Mode.BALANCED)
+                rebuildPlayerForEnhancement(Anime4kEffect.Mode.BALANCED, silent = true)
                 message("خففنا التحسين درجة للحفاظ على السلاسة")
             }
             Anime4kEffect.Mode.BALANCED -> {
-                applyAnimeEnhancement(silent = true, runtimeOverride = Anime4kEffect.Mode.FAST)
+                rebuildPlayerForEnhancement(Anime4kEffect.Mode.FAST, silent = true)
                 message("خففنا التحسين إلى السريع للحفاظ على السلاسة")
             }
             Anime4kEffect.Mode.FAST -> {
-                animeEnhanceSuppressed = true
-                applyAnimeEnhancement(silent = true)
+                rebuildPlayerForEnhancement(null, silent = true, suppress = true)
                 message("أوقفنا التحسين مؤقتًا للحفاظ على الفريمات")
             }
             null -> Unit
@@ -1231,27 +1271,10 @@ class PlayerActivity : Activity() {
         if (animeEnhanceRetryingSourceId == c.id) return false
 
         animeEnhanceRetryingSourceId = c.id
-        val at = position()
-        val wasPlaying = player.playWhenReady
-        animeEnhanceSuppressed = true
-        animeEnhanceRuntime = null
-        main.removeCallbacks(startupWatchdog)
-        main.removeCallbacks(stallWatchdog)
-
-        // Flush the broken frame processor completely before restoring the same source.
-        runCatching { player.stop() }
-        runCatching { player.setVideoEffects(emptyList()) }
-
-        message("تعطل التحسين؛ نكمل نفس السيرفر بدونه")
-        main.post {
-            runCatching {
-                start(c, at)
-                player.playWhenReady = wasPlaying
-            }.onFailure {
-                // Only now, after a clean no-effect retry of the SAME source failed, may the normal
-                // server failover policy run.
-                fail("$reason / enhancement fallback failed")
-            }
+        runCatching {
+            rebuildPlayerForEnhancement(null, silent = false, suppress = true)
+        }.onFailure {
+            fail("$reason / enhancement fallback failed")
         }
         return true
     }
