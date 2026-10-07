@@ -1294,7 +1294,8 @@ class PlayerActivity : Activity() {
 
         animeEnhanceRetryingSourceId = c.id
         runCatching {
-            rebuildPlayerForEnhancement(null, silent = false, suppress = true)
+            rebuildPlayerForEnhancement(null, silent = true, suppress = true)
+            message("تعطل التحسين ($reason)؛ كملنا نفس السيرفر بدونه")
         }.onFailure {
             fail("$reason / enhancement fallback failed")
         }
