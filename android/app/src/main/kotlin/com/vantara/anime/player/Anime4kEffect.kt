@@ -38,9 +38,9 @@ class Anime4kEffect(
         val refine: Float,
         val sharpness: Float,
     ) {
-        FAST("fast", 0.48f, 0.14f),
-        BALANCED("balanced", 0.70f, 0.34f),
-        STRONG("strong", 0.92f, 0.52f);
+        FAST("fast", 0.50f, 0.35f),
+        BALANCED("balanced", 0.74f, 0.95f),
+        STRONG("strong", 0.96f, 1.85f);
 
         companion object {
             fun fromKey(value: String?): Mode = when (value) {
@@ -130,16 +130,16 @@ private class Anime4kShaderProgram(
                 "uCleanup",
                 when (mode) {
                     Anime4kEffect.Mode.FAST -> 0.04f
-                    Anime4kEffect.Mode.BALANCED -> 0.14f
-                    Anime4kEffect.Mode.STRONG -> 0.20f
+                    Anime4kEffect.Mode.BALANCED -> 0.10f
+                    Anime4kEffect.Mode.STRONG -> 0.12f
                 },
             )
             program.setFloatUniform(
                 "uSaturation",
                 when (mode) {
                     Anime4kEffect.Mode.FAST -> 1.01f
-                    Anime4kEffect.Mode.BALANCED -> 1.045f
-                    Anime4kEffect.Mode.STRONG -> 1.08f
+                    Anime4kEffect.Mode.BALANCED -> 1.035f
+                    Anime4kEffect.Mode.STRONG -> 1.06f
                 },
             )
             program.setFloatUniform(
