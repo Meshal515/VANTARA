@@ -14,19 +14,17 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Anime4K لحظي للمشغّل.
+ * VANTARA Anime Enhance — fused real-time frame pass.
  *
- * لا ينشئ ملفًا ولا يعيد ترميز الحلقة: كل frame يخرج من decoder يمر عبر
- * OpenGL ثم يُعرض مباشرة. الهدف الحالي 2560x1440 كحد أقصى، وبحد أقصى x2
- * لكل بُعد حتى لا نحول المصادر الضعيفة إلى حمل GPU بلا فائدة.
+ * لا يوجد تنزيل/تصدير/ملف 1440p. كل frame:
+ * decoder -> cleanup/deband -> Anime4K line reconstruction -> upscale -> clarity/sharpen
+ * -> anti-ringing -> display.
  *
- * خوارزمية إعادة بناء الحواف هنا port صغير ومباشر مبني على
- * Anime4K_Upscale_Original_x2.glsl من bloc97/Anime4K (MIT):
- * Sobel/luma direction + polynomial refinement + edge-directed blend.
- * أُضيف فقط anti-ringing clamp وdetail صغير مضبوط لكل preset.
+ * دمجنا المراحل في pass واحد عمدًا لتفادي 2-3 frame buffers ضخمة أثناء التشغيل على الجوال،
+ * ولمنع تبديل السيرفر بسبب فشل video-effect graph.
  *
- * Copyright (c) 2019-2021 bloc97 — MIT.
- * النص الكامل للرخصة في assets/licenses/Anime4K-MIT.txt.
+ * Anime4K line-reconstruction polynomial/direction is based on bloc97/Anime4K (MIT).
+ * See assets/licenses/Anime4K-MIT.txt.
  */
 @UnstableApi
 class Anime4kEffect(
@@ -35,10 +33,14 @@ class Anime4kEffect(
     private val maxHeight: Int = 1440,
 ) : GlEffect {
 
-    enum class Mode(val key: String, val refine: Float, val detail: Float) {
-        FAST("fast", 0.34f, 0.035f),
-        BALANCED("balanced", 0.50f, 0.070f),
-        STRONG("strong", 0.72f, 0.105f);
+    enum class Mode(
+        val key: String,
+        val refine: Float,
+        val sharpness: Float,
+    ) {
+        FAST("fast", 0.48f, 0.14f),
+        BALANCED("balanced", 0.70f, 0.34f),
+        STRONG("strong", 0.92f, 0.52f);
 
         companion object {
             fun fromKey(value: String?): Mode = when (value) {
@@ -52,16 +54,10 @@ class Anime4kEffect(
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
         Anime4kShaderProgram(mode, maxWidth, maxHeight, useHdr)
 
-    override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean {
-        val (w, h) = targetSize(inputWidth, inputHeight, maxWidth, maxHeight)
-        return w <= inputWidth && h <= inputHeight
-    }
+    override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean = false
 
     companion object {
-        /**
-         * 1080p 16:9 -> 2560x1440، 720p -> 2560x1440، وأي مصدر أصغر لا يتجاوز x2.
-         * يحافظ على aspect ratio ويجعل الأبعاد زوجية لتفادي مشاكل بعض مسارات codec/GL.
-         */
+        /** 1920x1080 -> 2560x1440. Smaller sources never exceed x2. */
         fun targetSize(
             inputWidth: Int,
             inputHeight: Int,
@@ -129,7 +125,39 @@ private class Anime4kShaderProgram(
                 floatArrayOf(1f / inputWidth.toFloat(), 1f / inputHeight.toFloat()),
             )
             program.setFloatUniform("uRefineStrength", mode.refine)
-            program.setFloatUniform("uDetailStrength", mode.detail)
+            program.setFloatUniform("uSharpness", mode.sharpness)
+            program.setFloatUniform(
+                "uCleanup",
+                when (mode) {
+                    Anime4kEffect.Mode.FAST -> 0.04f
+                    Anime4kEffect.Mode.BALANCED -> 0.14f
+                    Anime4kEffect.Mode.STRONG -> 0.20f
+                },
+            )
+            program.setFloatUniform(
+                "uSaturation",
+                when (mode) {
+                    Anime4kEffect.Mode.FAST -> 1.01f
+                    Anime4kEffect.Mode.BALANCED -> 1.045f
+                    Anime4kEffect.Mode.STRONG -> 1.08f
+                },
+            )
+            program.setFloatUniform(
+                "uContrast",
+                when (mode) {
+                    Anime4kEffect.Mode.FAST -> 1.01f
+                    Anime4kEffect.Mode.BALANCED -> 1.025f
+                    Anime4kEffect.Mode.STRONG -> 1.04f
+                },
+            )
+            program.setFloatUniform(
+                "uDither",
+                when (mode) {
+                    Anime4kEffect.Mode.FAST -> 0.08f
+                    Anime4kEffect.Mode.BALANCED -> 0.16f
+                    Anime4kEffect.Mode.STRONG -> 0.22f
+                },
+            )
             program.bindAttributesAndUniforms()
             GLES20.glDisable(GLES20.GL_BLEND)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -162,9 +190,14 @@ private class Anime4kShaderProgram(
         """
 
         /**
-         * Single-pass real-time port of Anime4K Original x2's line refinement.
-         * The official polynomial and directional blend are retained. Sampling the decoded
-         * texture at the output grid gives the resize; refinement then rebuilds line edges.
+         * One-pass mobile implementation:
+         *  - flat-region cleanup/deband
+         *  - Anime4K-style Sobel + polynomial line reconstruction
+         *  - edge-aware clarity/sharpen
+         *  - local anti-ringing clamp
+         *  - mild saturation/contrast matching the requested crisp 1440p look
+         *
+         * The spatial dither is deterministic from pixel coordinates, so it does not flicker.
          */
         private const val FRAGMENT_SHADER = """
             precision highp float;
@@ -172,7 +205,11 @@ private class Anime4kShaderProgram(
             uniform sampler2D uTexSampler;
             uniform vec2 uTexel;
             uniform float uRefineStrength;
-            uniform float uDetailStrength;
+            uniform float uSharpness;
+            uniform float uCleanup;
+            uniform float uSaturation;
+            uniform float uContrast;
+            uniform float uDither;
             varying vec2 vTexCoords;
 
             const float P5 =  11.68129591;
@@ -194,6 +231,12 @@ private class Anime4kShaderProgram(
                 return P5*x5 + P4*x4 + P3*x3 + P2*x2 + P1*x + P0;
             }
 
+            float hash12(vec2 p) {
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
+
             void main() {
                 vec2 p = vTexCoords;
                 vec2 d = uTexel;
@@ -208,6 +251,7 @@ private class Anime4kShaderProgram(
                 vec4 bl4 = texture2D(uTexSampler, p + vec2(-d.x,  d.y));
                 vec4 br4 = texture2D(uTexSampler, p + vec2( d.x,  d.y));
 
+                float yc = luma(cc.rgb);
                 float tl = luma(tl4.rgb);
                 float tc = luma(t4.rgb);
                 float tr = luma(tr4.rgb);
@@ -217,32 +261,52 @@ private class Anime4kShaderProgram(
                 float bc = luma(b4.rgb);
                 float br = luma(br4.rgb);
 
-                // Sobel orientation, same role as Anime4K's LUMAD/LUMAMM passes.
+                float localMinY = min(yc, min(min(tc, bc), min(ml, mr)));
+                float localMaxY = max(yc, max(max(tc, bc), max(ml, mr)));
+                float localRange = localMaxY - localMinY;
+                float flat = 1.0 - smoothstep(0.018, 0.095, localRange);
+
+                // Very small cleanup only in flat/compressed areas.
+                vec3 crossMean = (l4.rgb + r4.rgb + t4.rgb + b4.rgb) * 0.25;
+                float similar = 1.0 - smoothstep(0.018, 0.085, abs(luma(crossMean) - yc));
+                vec3 base = mix(cc.rgb, crossMean, uCleanup * flat * similar);
+
+                // Anime4K line direction / reconstruction.
                 float gx = (-tl + tr) + (-2.0 * ml + 2.0 * mr) + (-bl + br);
                 float gy = (-tl - 2.0 * tc - tr) + (bl + 2.0 * bc + br);
                 float edge = clamp(length(vec2(gx, gy)) * 0.25, 0.0, 1.0);
                 float amount = clamp(refineCurve(edge) * uRefineStrength, 0.0, 1.0);
 
                 vec2 direction = -sign(vec2(gx, gy));
-                vec4 xValue = texture2D(uTexSampler, p + vec2(d.x * direction.x, 0.0));
-                vec4 yValue = texture2D(uTexSampler, p + vec2(0.0, d.y * direction.y));
+                vec3 xValue = texture2D(uTexSampler, p + vec2(d.x * direction.x, 0.0)).rgb;
+                vec3 yValue = texture2D(uTexSampler, p + vec2(0.0, d.y * direction.y)).rgb;
                 float denom = abs(gx) + abs(gy) + 0.00001;
                 float xRatio = abs(gx) / denom;
-                vec3 directed = mix(yValue.rgb, xValue.rgb, xRatio);
+                vec3 directed = mix(yValue, xValue, xRatio);
+                vec3 result = mix(base, directed, amount);
 
-                vec3 refined = mix(cc.rgb, directed, amount);
+                // Stronger clarity than the previous build. This is what makes on/off obvious.
+                vec3 high = result - crossMean;
+                float detailGate = 0.22 + 0.78 * smoothstep(0.010, 0.18, localRange);
+                result += high * uSharpness * detailGate;
 
-                // Small edge-aware detail restoration. Keep it inside the local 5-tap envelope
-                // to avoid bright halos/ringing around line art.
-                vec3 localBlur = (l4.rgb + r4.rgb + t4.rgb + b4.rgb) * 0.25;
-                vec3 detail = (cc.rgb - localBlur) * uDetailStrength * (0.35 + 0.65 * edge);
-                vec3 result = refined + detail;
-
+                // Prevent white/black halos from escaping the local neighborhood.
                 vec3 lo = min(cc.rgb, min(min(l4.rgb, r4.rgb), min(t4.rgb, b4.rgb)));
                 vec3 hi = max(cc.rgb, max(max(l4.rgb, r4.rgb), max(t4.rgb, b4.rgb)));
                 result = clamp(result, lo, hi);
 
-                gl_FragColor = vec4(result, cc.a);
+                // Mild crisp-look finishing: preserve hue, only modestly lift saturation/contrast.
+                float y = luma(result);
+                result = mix(vec3(y), result, uSaturation);
+                float y2 = luma(result);
+                float yc2 = clamp((y2 - 0.5) * uContrast + 0.5, 0.0, 1.0);
+                result += vec3(yc2 - y2);
+
+                // Stable spatial dither in gradients to reduce banding without temporal shimmer.
+                float noise = (hash12(gl_FragCoord.xy) - 0.5) / 255.0;
+                result += vec3(noise * uDither * flat);
+
+                gl_FragColor = vec4(clamp(result, 0.0, 1.0), cc.a);
             }
         """
     }
