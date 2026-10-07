@@ -58,6 +58,7 @@ private class AnimeRestoreProgram(
     }
 
     override fun configure(inputWidth: Int, inputHeight: Int): Size {
+        AnimeEnhanceTelemetry.mark("restore.configure")
         this.inputWidth = inputWidth.coerceAtLeast(1)
         this.inputHeight = inputHeight.coerceAtLeast(1)
         tuning = AnimeQualityTuning.forSourceHeight(this.inputHeight, mode)
@@ -68,6 +69,7 @@ private class AnimeRestoreProgram(
 
     override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
         try {
+            AnimeEnhanceTelemetry.mark("restore.draw")
             AnimeEnhanceTelemetry.beginFrame(presentationTimeUs)
 
             program.use()
