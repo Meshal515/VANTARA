@@ -32,6 +32,16 @@ class AnimeQualityTuningTest {
         }
     }
 
+
+    @Test
+    fun lowResolutionUsesTwoScaleStagesBut720pAnd1080pReachQhdDirectly() {
+        assertEquals(1280 to 720, Anime4kEffect.primaryTargetSize(640, 360))
+        assertEquals(2560 to 1440, Anime4kEffect.targetSize(1280, 720))
+
+        assertEquals(2560 to 1440, Anime4kEffect.primaryTargetSize(1280, 720))
+        assertEquals(2560 to 1440, Anime4kEffect.primaryTargetSize(1920, 1080))
+    }
+
     @Test
     fun lowResolutionGetsMoreReconstructionThan1080p() {
         val p320 = AnimeQualityTuning.forSourceHeight(320, Anime4kEffect.Mode.STRONG)
