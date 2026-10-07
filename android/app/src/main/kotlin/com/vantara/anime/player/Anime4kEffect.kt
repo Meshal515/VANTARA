@@ -9,6 +9,7 @@ import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BaseGlShaderProgram
 import androidx.media3.effect.GlEffect
+import androidx.media3.effect.GlShaderProgram
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -48,7 +49,7 @@ class Anime4kEffect(
         }
     }
 
-    override fun toGlShaderProgram(context: Context, useHdr: Boolean) =
+    override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
         Anime4kShaderProgram(mode, maxWidth, maxHeight, useHdr)
 
     override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean {
