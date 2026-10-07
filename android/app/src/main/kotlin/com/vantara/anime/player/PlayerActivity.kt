@@ -325,6 +325,8 @@ class PlayerActivity : Activity() {
     private var animeEnhanceRuntime: Anime4kEffect.Mode? = null
     private var animeEnhanceSuppressed = false
     private var animeEnhanceLastDowngradeMs = 0L
+    /** يمنع أي خلل في الـGPU/effect من اتهام السيرفر وتدوير المصادر. */
+    private var animeEnhanceRetryingSourceId: String? = null
 
     private val enhanceAnalytics = object : AnalyticsListener {
         override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
@@ -336,11 +338,19 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${STARTUP_TIMEOUT_MS / 1000} ثانية") }
+    private val startupWatchdog = Runnable {
+        if (!reportedStart) {
+            val reason = "لم يبدأ خلال ${STARTUP_TIMEOUT_MS / 1000} ثانية"
+            if (!recoverEnhancementStall(reason)) fail(reason)
+        }
+    }
 
-    /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
+    /** بدأ ثم علق التحميل: enhancement يُعزل أولًا؛ السيرفر لا يُعاقب على خلل GPU. */
     private val stallWatchdog = Runnable {
-        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${STALL_TIMEOUT_MS / 1000} ثانية")
+        if (player.playbackState == Player.STATE_BUFFERING) {
+            val reason = "توقف التحميل ${STALL_TIMEOUT_MS / 1000} ثانية"
+            if (!recoverEnhancementStall(reason)) fail(reason)
+        }
     }
     private val hideControls = Runnable { setControls(false) }
     private val usageClock = ForegroundTime(SystemClock::elapsedRealtime)
@@ -564,6 +574,9 @@ class PlayerActivity : Activity() {
 
     private fun start(c: Candidate, positionMs: Long) {
         waiting?.cancel()
+        if (animeEnhanceRetryingSourceId != null && animeEnhanceRetryingSourceId != c.id) {
+            animeEnhanceRetryingSourceId = null
+        }
         hideError()
         clearSkipTimings()
         val subtitleGeneration = clearAddonSubtitles()
@@ -1127,7 +1140,7 @@ class PlayerActivity : Activity() {
         "strong" -> Anime4kEffect.Mode.STRONG
         "balanced" -> Anime4kEffect.Mode.BALANCED
         "off" -> null
-        else -> Anime4kEffect.Mode.BALANCED // auto starts balanced, then protects FPS automatically
+        else -> Anime4kEffect.Mode.STRONG // fused pass is cheap enough; auto starts visibly strong then steps down
     }
 
     /**
@@ -1155,7 +1168,7 @@ class PlayerActivity : Activity() {
         if (!silent) {
             message(
                 if (wanted == null) "تحسين الصورة متوقف"
-                else "تحسين شامل · فريم بفريم · حتى 1440p",
+                else "تحسين 1440p واضح · فريم بفريم",
             )
         }
     }
@@ -1164,6 +1177,7 @@ class PlayerActivity : Activity() {
         settings.edit().putString("anime4kMode", value).apply()
         animeEnhanceSuppressed = false
         animeEnhanceLastDowngradeMs = 0L
+        animeEnhanceRetryingSourceId = null
         applyAnimeEnhancement()
         if (openSheet == SheetKind.MORE) sheet.refresh()
     }
@@ -1174,17 +1188,51 @@ class PlayerActivity : Activity() {
         if (now - animeEnhanceLastDowngradeMs < 8_000) return
         animeEnhanceLastDowngradeMs = now
         when (animeEnhanceRuntime) {
-            Anime4kEffect.Mode.STRONG, Anime4kEffect.Mode.BALANCED -> {
+            Anime4kEffect.Mode.STRONG -> {
+                applyAnimeEnhancement(silent = true, runtimeOverride = Anime4kEffect.Mode.BALANCED)
+                message("خففنا التحسين درجة للحفاظ على السلاسة")
+            }
+            Anime4kEffect.Mode.BALANCED -> {
                 applyAnimeEnhancement(silent = true, runtimeOverride = Anime4kEffect.Mode.FAST)
-                message("خففنا Anime4K تلقائيًا للحفاظ على السلاسة")
+                message("خففنا التحسين إلى السريع للحفاظ على السلاسة")
             }
             Anime4kEffect.Mode.FAST -> {
                 animeEnhanceSuppressed = true
                 applyAnimeEnhancement(silent = true)
-                message("أوقفنا Anime4K مؤقتًا للحفاظ على الفريمات")
+                message("أوقفنا التحسين مؤقتًا للحفاظ على الفريمات")
             }
             null -> Unit
         }
+    }
+
+    /**
+     * إذا علّق video graph بسبب enhancement نعيد **نفس السيرفر** من نفس الثانية بدون effect.
+     * مهم: لا نستدعي session.failed هنا، لأن الشبكة/السيرفر لم يثبت أنهما السبب.
+     */
+    private fun recoverEnhancementStall(reason: String): Boolean {
+        if (!canAnimeEnhance() || animeEnhanceRuntime == null || animeEnhanceSuppressed) return false
+        val c = current ?: return false
+        if (animeEnhanceRetryingSourceId == c.id) return false
+
+        animeEnhanceRetryingSourceId = c.id
+        val at = position()
+        val wasPlaying = player.playWhenReady
+        animeEnhanceSuppressed = true
+        animeEnhanceRuntime = null
+        main.removeCallbacks(startupWatchdog)
+        main.removeCallbacks(stallWatchdog)
+        runCatching { player.setVideoEffects(emptyList()) }
+
+        message("تعطل التحسين؛ نكمل نفس السيرفر بدونه")
+        main.post {
+            runCatching {
+                start(c, at)
+                player.playWhenReady = wasPlaying
+            }.onFailure {
+                fail("$reason / enhancement fallback failed")
+            }
+        }
+        return true
     }
 
     private fun recoverFromAnimeEnhanceError(error: PlaybackException): Boolean {
@@ -1192,22 +1240,7 @@ class PlayerActivity : Activity() {
         if (error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED &&
             error.errorCode != PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
         ) return false
-
-        val at = position()
-        val wasPlaying = player.playWhenReady
-        animeEnhanceSuppressed = true
-        animeEnhanceRuntime = null
-        runCatching { player.setVideoEffects(emptyList()) }
-        message("تعطل تحسين الصورة؛ كملنا الحلقة بدونه")
-        // لا نرمي السيرفر الجيد بسبب عطل GPU/effect.
-        main.post {
-            runCatching {
-                player.prepare()
-                if (at > 0) player.seekTo(at)
-                player.playWhenReady = wasPlaying
-            }.onFailure { fail(error.errorCodeName) }
-        }
-        return true
+        return recoverEnhancementStall(error.errorCodeName)
     }
 
     private fun animeEnhanceStatus(): String {
