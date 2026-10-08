@@ -34,10 +34,10 @@ class AnimeQualityTuningTest {
 
 
     @Test
-    fun lowResolutionUsesTwoScaleStagesBut720pAnd1080pReachQhdDirectly() {
+    fun reconstructionTargetsFollowSourceTiers() {
         assertEquals(1280 to 720, Anime4kEffect.primaryTargetSize(640, 360))
-        assertEquals(2560 to 1440, Anime4kEffect.targetSize(1280, 720))
-
+        assertEquals(1920 to 1080, Anime4kEffect.primaryTargetSize(854, 480))
+        assertEquals(1920 to 1080, Anime4kEffect.primaryTargetSize(1024, 576))
         assertEquals(2560 to 1440, Anime4kEffect.primaryTargetSize(1280, 720))
         assertEquals(2560 to 1440, Anime4kEffect.primaryTargetSize(1920, 1080))
     }
