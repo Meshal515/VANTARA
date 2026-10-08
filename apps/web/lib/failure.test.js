@@ -226,6 +226,41 @@ describe('a very large queue', () => {
     expect(sync.pendingWrites).toBe(0);
   });
 
+  it('drains a chapter backlog when a large ops batch fails but single writes are healthy', async () => {
+    const server = fakeServer();
+    const sizes = [];
+    const sync = await loadSync(storage, async (url, options = {}) => {
+      const path = String(url);
+      if (path.includes('/v1/ops')) {
+        const body = JSON.parse(options.body ?? '{"ops":[]}');
+        sizes.push(body.ops.length);
+        if (body.ops.length > 1) return response({ error: 'batch_pressure' }, 500);
+        return response(server.handle(body.ops));
+      }
+      if (path.includes('/v1/sync')) {
+        return response({ reset: false, cursor: server.state.rev, serverRev: server.state.rev, changes: {} });
+      }
+      return response({ ok: true });
+    });
+
+    for (let i = 0; i < 14; i += 1) {
+      sync.enqueue('chapter.complete', {
+        chapterKey: `c${i}`,
+        seriesRef: 's1',
+        ratio: 1,
+        activeMs: 9_000,
+      });
+    }
+
+    await sync.push({ force: true });
+
+    expect(sizes.some((n) => n > 1)).toBe(true);
+    expect(sizes.some((n) => n === 1)).toBe(true);
+    expect(server.state.reads.size).toBe(14);
+    expect(sync.pendingWrites).toBe(0);
+    expect(sync.health().state).toBe('ok');
+  });
+
   it('keeps the reads when the queue overflows its limit', async () => {
     // 600 قراءة: أطول من السقف. لا شيء منها قابل للإسقاط، فالطابور يتجاوز
     // الحد ويُعلن ذلك بدل أن يأكل قراءة
