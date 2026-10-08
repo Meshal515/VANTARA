@@ -10,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BaseGlShaderProgram
 import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -103,9 +104,20 @@ class Anime4kEffect(
                 else -> 1440
             }.coerceAtMost(maxHeight)
             val scale = targetHeight.toFloat() / inputHeight.toFloat()
-            val targetWidth = (inputWidth * scale).roundToInt().coerceAtMost(maxWidth)
+            val aspect = inputWidth.toFloat() / inputHeight.toFloat()
+            val isWide169 = abs(aspect - (16f / 9f)) < 0.03f
+            val canonicalWidth = when (targetHeight) {
+                720 -> 1280
+                1080 -> 1920
+                else -> 2560
+            }
+            val targetWidth = if (isWide169) {
+                canonicalWidth.coerceAtMost(maxWidth)
+            } else {
+                (inputWidth * scale).roundToInt().coerceAtMost(maxWidth)
+            }
             val w = (targetWidth / 2) * 2
-            val h = ((inputHeight * scale).roundToInt().coerceAtMost(maxHeight) / 2) * 2
+            val h = (targetHeight.coerceAtMost(maxHeight) / 2) * 2
             return w.coerceAtLeast(2) to h.coerceAtLeast(2)
         }
     }
