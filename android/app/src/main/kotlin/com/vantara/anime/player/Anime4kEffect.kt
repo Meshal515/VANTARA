@@ -78,7 +78,18 @@ class Anime4kEffect(
             return w.coerceAtLeast(2) to h.coerceAtLeast(2)
         }
 
-        /** First low-resolution stage: never jumps more than 2x in one reconstruction pass. */
+        /**
+         * Real reconstruction target, not just "always resize everything to 1440p".
+         *
+         * The target follows the visual tiers requested for the phone:
+         * 320/360p -> 720p reconstruction
+         * 480/540/576p -> 1080p reconstruction
+         * 720p -> 1440p reconstruction
+         * 900/1080p -> 1440p (device cap)
+         *
+         * A later Lanczos display-fit may still map 720/1080 reconstruction surfaces onto the
+         * 1440p screen, but the expensive Anime4K-style reconstruction happens only at this tier.
+         */
         fun primaryTargetSize(
             inputWidth: Int,
             inputHeight: Int,
@@ -86,13 +97,15 @@ class Anime4kEffect(
             maxHeight: Int = 1440,
         ): Pair<Int, Int> {
             if (inputWidth <= 0 || inputHeight <= 0) return inputWidth to inputHeight
-            val finalScale = min(
-                maxWidth.toFloat() / inputWidth.toFloat(),
-                maxHeight.toFloat() / inputHeight.toFloat(),
-            )
-            val scale = min(2f, finalScale)
-            val w = (((inputWidth * scale).roundToInt().coerceAtMost(maxWidth)) / 2) * 2
-            val h = (((inputHeight * scale).roundToInt().coerceAtMost(maxHeight)) / 2) * 2
+            val targetHeight = when {
+                inputHeight <= 360 -> 720
+                inputHeight <= 576 -> 1080
+                else -> 1440
+            }.coerceAtMost(maxHeight)
+            val scale = targetHeight.toFloat() / inputHeight.toFloat()
+            val targetWidth = (inputWidth * scale).roundToInt().coerceAtMost(maxWidth)
+            val w = (targetWidth / 2) * 2
+            val h = ((inputHeight * scale).roundToInt().coerceAtMost(maxHeight) / 2) * 2
             return w.coerceAtLeast(2) to h.coerceAtLeast(2)
         }
     }
