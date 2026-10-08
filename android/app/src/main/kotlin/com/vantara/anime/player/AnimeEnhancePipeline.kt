@@ -5,16 +5,16 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
 
 /**
- * Stable live enhancement path using only Media3-owned GPU programs.
+ * Strong now means reconstruction, not cosmetic sharpening.
  *
- * STRONG is genuinely resolution-aware:
- * - <=576p: restore -> 720p -> restore -> 1080p -> restore -> 1440p -> polish
- * - 720p:   restore -> 1080p -> restore -> 1440p -> polish
- * - 900p:   restore -> 1440p -> polish
- * - 1080p:  light restore -> 1440p -> polish
+ * Reconstruction tier:
+ * - <=360p      -> Anime4K-style reconstruct to 720p, then display-fit to 1440p
+ * - 480-576p    -> reconstruct to 1080p, then display-fit to 1440p
+ * - 720p        -> reconstruct directly to 1440p
+ * - 900/1080p   -> reconstruct/refine directly to the 1440p device cap
  *
- * This avoids the failing custom GLSL path while still using the S23 GPU budget for staged
- * reconstruction instead of one soft 720p->1440p jump.
+ * The last Lanczos pass for 720/1080 intermediate surfaces is only display fitting. The visible
+ * structure/line recovery is done in Anime4kEffect, not by the scaler.
  */
 @UnstableApi
 object AnimeEnhancePipeline {
@@ -24,47 +24,38 @@ object AnimeEnhancePipeline {
         }
 
         val h = sourceHeightHint?.takeIf { it > 0 } ?: 1080
+
         if (mode == Anime4kEffect.Mode.BALANCED) {
             return listOf(
                 AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
+                Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY),
                 LanczosResample.scaleToFit(2560, 1440),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
             )
         }
 
+        // STRONG: actual line/detail reconstruction is the scale-changing stage.
+        // Low-resolution cleanup happens before it; no "0.1% final polish" is used as the result.
         return when {
+            h <= 360 -> listOf(
+                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
+                Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY), // -> 720p
+                LanczosResample.scaleToFit(2560, 1440),
+            )
             h <= 576 -> listOf(
                 AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
-                LanczosResample.scaleToFit(1280, 720),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.MID_RESTORE),
-                LanczosResample.scaleToFit(1920, 1080),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.MID_RESTORE),
+                Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY), // -> 1080p
                 LanczosResample.scaleToFit(2560, 1440),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
-            )
-            h <= 720 -> listOf(
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
-                LanczosResample.scaleToFit(1920, 1080),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.MID_RESTORE),
-                LanczosResample.scaleToFit(2560, 1440),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
-            )
-            h <= 900 -> listOf(
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
-                LanczosResample.scaleToFit(2560, 1440),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
             )
             else -> listOf(
                 AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.SOURCE_RESTORE),
-                LanczosResample.scaleToFit(2560, 1440),
-                AnimeNativeDetailEffect(mode, AnimeNativeDetailEffect.Stage.FINAL_POLISH),
+                Anime4kEffect(mode, stage = Anime4kEffect.Stage.PRIMARY), // -> 1440p cap
             )
         }
     }
 
     fun description(mode: Anime4kEffect.Mode): String = when (mode) {
-        Anime4kEffect.Mode.FAST -> "Media3 Lanczos 1440p"
-        Anime4kEffect.Mode.BALANCED -> "Native restore + Lanczos + polish"
-        Anime4kEffect.Mode.STRONG -> "Staged native reconstruction + 1440p"
+        Anime4kEffect.Mode.FAST -> "Lanczos display upscale"
+        Anime4kEffect.Mode.BALANCED -> "Anime reconstruction + 1440p display"
+        Anime4kEffect.Mode.STRONG -> "Source-tier Anime4K reconstruction"
     }
 }
