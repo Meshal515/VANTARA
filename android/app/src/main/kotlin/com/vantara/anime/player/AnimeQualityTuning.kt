@@ -32,14 +32,16 @@ object AnimeQualityTuning {
 
     private val knots = listOf(
         //      h    clean deblur line   aa     detail dither ring2
-        Knot( 320, 0.76f, 0.92f, 1.00f, 0.78f, 0.68f, 0.36f, 0.82f),
-        Knot( 360, 0.70f, 0.86f, 0.98f, 0.73f, 0.65f, 0.33f, 0.78f),
-        Knot( 480, 0.58f, 0.74f, 0.92f, 0.62f, 0.58f, 0.28f, 0.70f),
-        Knot( 540, 0.52f, 0.67f, 0.88f, 0.56f, 0.53f, 0.25f, 0.64f),
-        Knot( 576, 0.48f, 0.61f, 0.84f, 0.52f, 0.50f, 0.23f, 0.60f),
-        Knot( 720, 0.32f, 0.46f, 0.76f, 0.40f, 0.42f, 0.18f, 0.48f),
-        Knot( 900, 0.20f, 0.31f, 0.62f, 0.29f, 0.31f, 0.13f, 0.34f),
-        Knot(1080, 0.11f, 0.20f, 0.50f, 0.20f, 0.24f, 0.09f, 0.24f),
+        // Strong is intentionally reconstruction-first now. Anti-ringing is enforced in shader,
+        // so 1080p no longer receives an almost invisible "polish" preset.
+        Knot( 320, 0.78f, 0.95f, 1.00f, 0.88f, 0.76f, 0.34f, 0.86f),
+        Knot( 360, 0.74f, 0.90f, 0.99f, 0.84f, 0.72f, 0.31f, 0.82f),
+        Knot( 480, 0.64f, 0.82f, 0.96f, 0.76f, 0.66f, 0.27f, 0.76f),
+        Knot( 540, 0.58f, 0.76f, 0.93f, 0.70f, 0.62f, 0.24f, 0.70f),
+        Knot( 576, 0.54f, 0.71f, 0.90f, 0.66f, 0.60f, 0.22f, 0.66f),
+        Knot( 720, 0.38f, 0.56f, 0.88f, 0.58f, 0.54f, 0.17f, 0.56f),
+        Knot( 900, 0.24f, 0.39f, 0.78f, 0.44f, 0.44f, 0.12f, 0.42f),
+        Knot(1080, 0.15f, 0.29f, 0.70f, 0.34f, 0.36f, 0.08f, 0.34f),
     )
 
     fun forSourceHeight(height: Int, mode: Anime4kEffect.Mode): AnimeEnhanceTuning {
@@ -70,7 +72,7 @@ object AnimeQualityTuning {
         height <= 576 -> "576p reconstruction"
         height <= 720 -> "720p restore"
         height <= 900 -> "900p refine"
-        else -> "1080p polish"
+        else -> "1080p → 1440p reconstruction"
     }
 
     /** Human-readable percentage of the reconstruction aggressiveness for debug telemetry. */
