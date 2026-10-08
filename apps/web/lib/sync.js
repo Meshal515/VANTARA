@@ -838,6 +838,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * وثلاث كتابات عند الخادم مكان أعلاها.
    */
   const ENQUEUE_DEBOUNCE_MS = 400;
+  // A reader session can enqueue several SQL-heavy operations per chapter.
+  // Sending 100 logical ops at once expands to hundreds of D1 statements; one
+  // oversized/data-specific failure then blocks every later history/stat write.
+  // Keep normal writes bounded, and peel one op on a retryable batch failure so
+  // good writes can keep draining without losing the durable queue.
+  const MAX_PUSH_BATCH = 12;
 
   function schedulePush() {
     if (pushTimer !== null) return;
@@ -875,26 +881,48 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       }
 
       while (queue.length > 0) {
-        const batch = queue.slice(0, 100);
+        let batch = queue.slice(0, MAX_PUSH_BATCH);
         let payload;
         try {
           payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
         } catch (error) {
-          const status = error?.status ?? 0;
-          lastError = { status, at: Date.now(), correlationId: error?.correlationId ?? null };
-          const verdict = classifyFailure(status);
-          // الجلسة انتهت: الكتابات سليمة وتنتظر جلسة جديدة، فلا عزل ولا تراجع
-          if (verdict === 'auth') return;
+          let effectiveError = error;
+          const initialStatus = error?.status ?? 0;
 
-          for (const op of batch) {
-            const attempts = (attemptsOf.get(op.opId) ?? 0) + 1;
-            attemptsOf.set(op.opId, attempts);
-            if (shouldQuarantine({ attempts, status })) quarantineOp(op, status, verdict);
+          // 5xx on a multi-op batch may be D1 statement pressure or one poison
+          // operation. Probe only the first durable op. If it succeeds, remove it
+          // normally and continue; the backlog drains instead of wedging forever.
+          // If it also fails, treat just that op as the failed unit — repeated
+          // retries can quarantine that one without sacrificing the other chapters.
+          if (initialStatus >= 500 && batch.length > 1) {
+            const probe = [batch[0]];
+            try {
+              payload = await request('/v1/ops', { method: 'POST', body: { ops: probe } });
+              batch = probe;
+              effectiveError = null;
+            } catch (probeError) {
+              batch = probe;
+              effectiveError = probeError;
+            }
           }
-          const worst = Math.max(...batch.map((op) => attemptsOf.get(op.opId) ?? 1));
-          nextPushAt = Date.now() + nextAttemptDelay(worst);
-          emit(['sync']);
-          return;
+
+          if (effectiveError) {
+            const status = effectiveError?.status ?? 0;
+            lastError = { status, at: Date.now(), correlationId: effectiveError?.correlationId ?? null };
+            const verdict = classifyFailure(status);
+            // الجلسة انتهت: الكتابات سليمة وتنتظر جلسة جديدة، فلا عزل ولا تراجع
+            if (verdict === 'auth') return;
+
+            for (const op of batch) {
+              const attempts = (attemptsOf.get(op.opId) ?? 0) + 1;
+              attemptsOf.set(op.opId, attempts);
+              if (shouldQuarantine({ attempts, status })) quarantineOp(op, status, verdict);
+            }
+            const worst = Math.max(...batch.map((op) => attemptsOf.get(op.opId) ?? 1));
+            nextPushAt = Date.now() + nextAttemptDelay(worst);
+            emit(['sync']);
+            return;
+          }
         }
 
         const settled = new Set([...(payload?.applied ?? []), ...(payload?.skipped ?? [])]);
