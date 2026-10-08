@@ -107,7 +107,12 @@ function hostileNetwork(server, { onOps = null } = {}) {
 }
 
 function response(body, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => body,
+  };
 }
 
 async function loadSync(storage, fetchImpl) {
