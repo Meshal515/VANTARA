@@ -65,7 +65,7 @@ export function createAddonRuntime({
       if (!sourceDef) throw new Error("المصدر غير متاح");
       const raw = createBundledAdapter({ sourceDef, engine: r.registry });
       // كل تصفح فعلي للمصدر دليل على صحته: يُسجَّل في نبضه
-      const measured = (fn) => (...a) => pulse.measure(key, () => fn(...a));
+      const measured = (fn) => (...a) => pulse.measure(key, () => fn(...a), { signal: a.at(-1)?.signal });
       return { ...raw, home: measured(raw.home), latest: measured(raw.latest), popular: measured(raw.popular), search: measured(raw.search) };
     }
     const c = registry.connection(key);

@@ -1606,7 +1606,7 @@ export function createCinema(deps) {
           if (info && selectable && tier && !pending) {
             // الرقم كبيرًا والوصف تحته: «412» ثم «مشارك · قوي»
             const [count, rest] = swarmText(info).split(' مشارك');
-            stateText.replaceChildren(...(tier === 'dead' ? [el('small', null, 'لا مشاركين')] : [el('b', 'an-srv-seeds', count), el('small', null, `مشارك${rest}`)]));
+            stateText.replaceChildren(...(tier === 'dead' ? [el('small', null, 'لا مشاركين معلنين')] : [el('b', 'an-srv-seeds', count), el('small', null, `مشارك معلن${rest}`)]));
           } else stateText.textContent = pending ? 'نفحص التشغيل…' : r.runtimeReady === true && selectable ? 'يبدأ عند الاختيار' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
           b.onclick = () => selectable ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
           return b;

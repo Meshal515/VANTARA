@@ -56,17 +56,27 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
   }
 
   /** يغلّف دالة مصدر: يقيس زمنها ويسجّل نتيجتها، ويُرجع النتيجة أو يرمي الخطأ كما هو. */
-  async function measure(key, run) {
+  async function measure(key, run, { signal, timeoutMs = 20_000 } = {}) {
     const started = now();
+    let timer, abort;
     try {
-      const out = await run();
+      if (signal?.aborted) throw new DOMException('ألغي الطلب', 'AbortError');
+      const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new DOMException('انتهت مهلة المصدر', 'TimeoutError')), timeoutMs);
+        abort = () => reject(new DOMException('ألغي الطلب', 'AbortError'));
+        signal?.addEventListener('abort', abort, { once: true });
+      });
+      // بعض الجسور الأصلية لا تدعم AbortSignal؛ نتيجتها المتأخرة لا تغيّر النبض.
+      const out = await Promise.race([Promise.resolve().then(run), deadline]);
       const list = out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : null);
       record(key, list && list.length === 0 ? 'empty' : 'ok', { ms: now() - started, items: list?.length ?? null });
       return out;
     } catch (error) {
-      // إلغاء المستخدم (خرج من الصفحة) ليس عطلًا في المصدر
       if (error?.name !== 'AbortError') record(key, 'failed', { ms: now() - started, error: error?.message });
       throw error;
+    } finally {
+      clearTimeout(timer);
+      if (abort) signal?.removeEventListener('abort', abort);
     }
   }
 

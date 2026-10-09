@@ -36,6 +36,9 @@ export function renderSourceMode({
     generation = 0,
     pending = false,
     failures = 0,
+    autoMore = true,
+    resumeLoad = null,
+    activeLoad = null,
     retryTimer = null;
   const btn = (text, fn, cls = "addon-button") => {
     const b = node("button", cls, text);
@@ -181,8 +184,13 @@ export function renderSourceMode({
   root.append(more);
   // المزيد تلقائيًا عند الاقتراب من آخر الشبكة؛ الزر يبقى لمن يفضّله
   const io = typeof IntersectionObserver === "undefined" ? null
-    : new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting) && !more.hidden && !pending) more.click(); }, { rootMargin: "500px" });
+    : new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting) && !more.hidden && !pending && autoMore) more.click(); }, { rootMargin: "500px" });
   io?.observe(more);
+  const seen = new Set();
+  const workKey = (work) => {
+    const id = work.id ?? work.url;
+    return id == null ? null : JSON.stringify([work.type ?? addon.contentTypes?.[0] ?? null, id]);
+  };
   async function load({ append = false, previousPage } = {}) {
     clearTimeout(retryTimer);
     retryTimer = null;
@@ -191,9 +199,11 @@ export function renderSourceMode({
     const activeController = controller,
       run = ++generation;
     pending = true;
+    activeLoad = { append, previousPage };
     more.hidden = true;
     more.disabled = true;
     note.textContent = "جارٍ جلب المصدر…";
+    if (!append) { seen.clear(); autoMore = true; }
     if (!append) grid.replaceChildren(...Array.from({ length: 9 }, () => node("div", "up-skel")));
     paintStatus();
     try {
@@ -202,6 +212,7 @@ export function renderSourceMode({
       if (adapter.catalog) {
         const catalog = selectedCatalog();
         if (!catalog) {
+          grid.replaceChildren();
           note.textContent = "هذه الإضافة لا تقدم كتالوجًا.";
           return;
         }
@@ -249,6 +260,7 @@ export function renderSourceMode({
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
         out = await adapter.home(state.page, options);
       else {
+        grid.replaceChildren();
         note.textContent = "اكتب اسم العمل للبحث في هذا المصدر.";
         return;
       }
@@ -267,6 +279,9 @@ export function renderSourceMode({
       );
       // بطاقة «آخر التحديثات» نفسها: الغلاف كاملًا ثم الاسم، ورقم الفصل/الحلقة فقط إن ذكره المصدر
       for (const work of items) {
+        const key = workKey(work);
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
         const card = node("button", "up-card work-card"),
           art = node("span", "up-art"),
           title = node("b", "up-title", work.title ?? work.name ?? "عمل");
@@ -298,10 +313,12 @@ export function renderSourceMode({
           ? `لا نتائج لـ«${state.query}» في ${addon.name}.`
           : "المصدر استجاب بلا أعمال الآن.";
       failures = 0;
+      autoMore = true;
       paintStatus();
     } catch (error) {
       if (run === generation && !activeController.signal.aborted) {
         if (append) {
+          autoMore = false;
           if (previousPage != null) state.page = previousPage;
           more.hidden = false;
         }
@@ -351,12 +368,15 @@ export function renderSourceMode({
   };
   root.reload = load;
   root.pause = () => {
+    if (pending) resumeLoad = activeLoad;
     state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
     root.close();
   };
   root.resume = () => {
     io?.observe(more);
-    if (!grid.children.length) void load();
+    if (resumeLoad) {
+      const options = resumeLoad; resumeLoad = null; void load(options);
+    } else if (!grid.children.length) void load();
     globalThis.requestAnimationFrame?.(() =>
       globalThis.scrollTo?.({ top: state.scroll ?? 0, behavior: "instant" }),
     );
