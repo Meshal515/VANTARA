@@ -76,9 +76,31 @@ export function trustDates(units) {
   return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }
 
+/**
+ * عملٌ رآه مسح Latest يصعد في قائمة «آخر التحديثات» لمصدره منذ مسحٍ سابق في
+ * `since`: المصدر نفسه يشهد أنه تحدّث بين `since` والآن. يُرفق بتقرير فصوله
+ * التالي فيسجّل الخادم أعلى فصل حتى إن كان أول مشاهدة للعمل أو بلا تاريخ رفع
+ * (كان يصير خط أساس صامتًا فيسقط العمل من «آخر التحديثات»).
+ */
+const LISTED_TTL_MS = 120_000;
+const listedHints = new Map();
+const listedKey = (sourceId, manga) => `${sourceId}|${manga?.url ?? ''}|${normalizeTitle(manga?.title)}`;
+export function noteListed(sourceId, manga, since, now = Date.now()) {
+  if (!Number.isFinite(since) || since <= 0 || since > now) return;
+  for (const [k, v] of listedHints) if (now - v.at > LISTED_TTL_MS) listedHints.delete(k);
+  listedHints.set(listedKey(sourceId, manga), { since, at: now });
+}
+function takeListed(sourceId, manga) {
+  const key = listedKey(sourceId, manga);
+  const hint = listedHints.get(key);
+  listedHints.delete(key);
+  return hint && Date.now() - hint.at <= LISTED_TTL_MS ? hint.since : null;
+}
+
 /** المانجا: كل ما يجلبه محرك الإضافات من فصول (أي مسار). */
 export function observeMangaChapters(sourceId, manga, chapters) {
   const key = normalizeTitle(manga?.title);
+  const listed = takeListed(sourceId, manga);
   if (!key || !chapters?.length) return;
   const units = trustDates(
     chapters
@@ -96,6 +118,7 @@ export function observeMangaChapters(sourceId, manga, chapters) {
     cover: manga.thumbnailUrl ?? null,
     source: { s: sourceId, ...(manga.url ? { u: manga.url } : {}), ...(manga.title ? { t: manga.title } : {}), ...(typeof manga.memo === 'string' && manga.memo ? { m: manga.memo } : {}) },
     units,
+    ...(listed ? { listed } : {}),
   });
 }
 

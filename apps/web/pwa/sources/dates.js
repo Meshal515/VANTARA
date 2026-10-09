@@ -33,6 +33,17 @@ const UNITS = [
   [/(?<!\p{L})(seconds?|secs?|ثانية|ثوان|ثواني)/u, 1e3],
 ];
 
+/** المثنّى: «ساعتين»، «يومين»، «دقيقتين»… = اثنان من الوحدة. */
+const DUALS = [
+  [/(?<!\p{L})(سنتين|سنتان|عامين|عامان)/u, 365 * 864e5],
+  [/(?<!\p{L})(شهرين|شهران)/u, 30 * 864e5],
+  [/(?<!\p{L})(أسبوعين|اسبوعين|أسبوعان|اسبوعان)/u, 7 * 864e5],
+  [/(?<!\p{L})(يومين|يومان)/u, 864e5],
+  [/(?<!\p{L})(ساعتين|ساعتان)/u, 36e5],
+  [/(?<!\p{L})(دقيقتين|دقيقتان)/u, 6e4],
+  [/(?<!\p{L})(ثانيتين|ثانيتان)/u, 1e3],
+];
+
 function monthIndex(word) {
   const w = word.trim().toLowerCase();
   const en = EN_MONTHS.findIndex((m) => w.startsWith(m));
@@ -49,8 +60,11 @@ export function parseDate(raw, now = Date.now()) {
   if (/^(today|اليوم)/.test(lower)) return midnight;
   if (/^(yesterday|أمس|امس|يوم واحد)/.test(lower)) return midnight - 864e5;
 
-  // «منذ 3 أيام» / «3 days ago» / «منذ ساعة»
+  // «منذ 3 أيام» / «3 days ago» / «منذ ساعة» / «ساعتين ago» (المثنّى بلا رقم: Madara
+  // العربية تكتب أحدث الفصول هكذا، وكانت تُرجع 0 فيصير أحدث فصل بلا تاريخ)
   if (/ago|منذ|قبل/.test(lower)) {
+    const dual = DUALS.find(([re]) => re.test(lower));
+    if (dual && !/\d/.test(lower)) return now - 2 * dual[1];
     const n = Number(lower.match(/\d+/)?.[0] ?? 1);
     for (const [re, ms] of UNITS) if (re.test(lower)) return now - n * ms;
   }

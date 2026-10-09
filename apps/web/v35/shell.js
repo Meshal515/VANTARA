@@ -2963,6 +2963,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('collectionTitle').textContent = UPDATE_TITLES[section] ?? 'آخر التحديثات';
     q('collectionMore').hidden = true;
     showPage('collection');
+    if (section === 'manga') void sweepLatest({ minGap: 3 * 60_000 });
     mountTimeline(q('collectionGrid'), {
       section,
       el,
@@ -5094,19 +5095,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!available() || !idle()) return;
     const seen = new Set();
     const works = [...libraryWorks('all'), ...historyWorks().slice(0, 12)].filter((w) => !seen.has(w.id) && seen.add(w.id));
-    void prewarm(works, { onDone: (full) => rememberWork(full), shouldContinue: idle }).then(() => sweepLatest(idle));
+    void prewarm(works, { onDone: (full) => rememberWork(full), shouldContinue: idle });
   }, 30_000);
-  // مجسّ Latest: فصول أعمال قوائم المصادر، واحدًا واحدًا في سكون الرئيسية، كل 20 دقيقة.
+  // مجسّ Latest: صفحات «آخر التحديثات» لكل مصدر وفصول ما صعد فيها منذ المسح السابق.
   // ما يُرى يذهب لـUpdate Engine (عبر محرك الإضافات)، والخادم يقرّر ما الجديد.
+  // كان لا يعمل إلا في سكون رئيسية المانجا ويتوقف بمجرد مغادرتها (حتى بفتح «آخر
+  // التحديثات» نفسها) ومرة كل 20 دقيقة، فلا يكتمل. المسح الآن تفاضلي رخيص: يعمل
+  // ما دام التطبيق ظاهرًا خارج القارئ، كل 10 دقائق، وعند فتح «آخر التحديثات».
+  const sweepable = () => !document.hidden && root.isConnected;
   let sweptAt = 0;
-  async function sweepLatest(idle) {
-    if (!available() || Date.now() - sweptAt < 20 * 60_000 || !idle()) return;
+  let sweeping = null;
+  function sweepLatest({ minGap = 10 * 60_000 } = {}) {
+    if (sweeping || !available() || Date.now() - sweptAt < minGap || !sweepable()) return sweeping;
     sweptAt = Date.now();
-    await scanLatestChapterUpdates({ shouldContinue: idle }).catch(() => {});
-    updatesAskedAt = 0;
-    setTimeout(() => void refreshHomeUpdates(), 6000);
+    sweeping = scanLatestChapterUpdates({ shouldContinue: sweepable }).catch(() => {}).finally(() => {
+      sweeping = null;
+      updatesAskedAt = 0;
+      setTimeout(() => void refreshHomeUpdates(), 6000);
+    });
+    return sweeping;
   }
-  setInterval(() => void sweepLatest(() => !document.hidden && currentPage() === 'home' && root.dataset.section === 'manga'), 5 * 60_000);
+  setTimeout(() => void sweepLatest(), 15_000);
+  setInterval(() => void sweepLatest(), 2 * 60_000);
 
   const profile = createProfile({
     sync,
