@@ -378,3 +378,81 @@ describe('content API down while the worker is up', () => {
     expect(server.state.progress.get('c1')).toBe(30);
   });
 });
+
+describe('sync transport recovery', () => {
+  it.each(['offline', '503'])('retries the durable write after a transient %s session renewal failure', async (failure) => {
+    const server = fakeServer();
+    let renewing = false;
+    let recovered = false;
+    let sessionCalls = 0;
+    const network = hostileNetwork(server);
+    const fetchImpl = async (url, options = {}) => {
+      if (String(url).includes('/v1/session')) {
+        sessionCalls += 1;
+        if (!recovered) {
+          if (failure === 'offline') throw new TypeError('Failed to fetch');
+          return response({ error: 'unavailable' }, 503);
+        }
+        renewing = true;
+        return response({ token: 'renewed-token', user: { userId: 'u1', username: 'dahmi' } });
+      }
+      if (String(url).includes('/v1/ops') && !renewing) return response({ error: 'expired' }, 401);
+      return network.fetch(url, options);
+    };
+    const sync = await loadSync(storage, fetchImpl);
+    sync.enqueue('chapter.complete', { chapterKey: 'renewal-c1', seriesRef: 's1', ratio: 1, activeMs: 9000 });
+    const saved = storage.getItem('vantara.queue');
+    await sync.push({ force: true });
+    expect(sync.pendingWrites).toBe(1);
+    expect(sync.quarantined).toBe(0);
+    expect(storage.getItem('vantara.queue')).toBe(saved);
+
+    recovered = true;
+    await sync.push({ force: true });
+    expect(server.state.reads.get('renewal-c1')).toBe(1);
+    expect(server.state.appliedCount).toBe(1);
+    expect(sync.pendingWrites).toBe(0);
+    expect(sessionCalls).toBe(2);
+  });
+
+  it.each(['/v1/ops', '/v1/sync', '/v1/session'])('releases a stalled %s request and replays an acknowledged-but-unreceived write exactly once', async (stalledPath) => {
+    vi.useFakeTimers();
+    try {
+      const server = fakeServer();
+      const network = hostileNetwork(server);
+      let stalled = false;
+      let recovered = false;
+      const fetchImpl = async (url, options = {}) => {
+        const path = String(url);
+        if (path.includes(stalledPath) && !stalled) {
+          stalled = true;
+          if (stalledPath === '/v1/ops') server.handle(JSON.parse(options.body).ops);
+          return new Promise((resolve, reject) => {
+            options.signal?.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          });
+        }
+        if (path.includes('/v1/session')) return response({ token: 'renewed-token', user: { userId: 'u1', username: 'dahmi' } });
+        if (stalledPath === '/v1/session' && path.includes('/v1/ops') && !recovered) return response({ error: 'expired' }, 401);
+        return network.fetch(url, options);
+      };
+      const sync = await loadSync(storage, fetchImpl);
+      sync.enqueue('chapter.complete', { chapterKey: 'timeout-c1', seriesRef: 's1', ratio: 1, activeMs: 9000 });
+      let finished = false;
+      const first = (stalledPath === '/v1/sync' ? sync.pull() : sync.push({ force: true })).then(() => { finished = true; });
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(finished, 'sync must finish rather than hold its in-flight lock forever').toBe(true);
+      await first;
+      expect(sync.quarantined).toBe(0);
+      recovered = true;
+      await sync.push({ force: true });
+      await sync.pull();
+      expect(server.state.reads.get('timeout-c1')).toBe(1);
+      expect(server.state.appliedCount).toBe(1);
+      expect(sync.pendingWrites).toBe(0);
+      expect(sync.health().lastSyncAt).toBeGreaterThan(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});

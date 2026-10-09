@@ -44,6 +44,18 @@ const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
  */
 const PIN_GRANT_KEY = 'vantara.pin.grant';
 const TRANSLATION_TIMEOUT_MS = 240_000;
+const SYNC_TIMEOUT_MS = 30_000;
+
+/** مهلة النقل تشمل قراءة الجسم أيضًا كي لا يبقى قفل السحب أو الإرسال عالقًا. */
+async function withSyncDeadline(run) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException('انتهت مهلة اتصال المزامنة', 'TimeoutError')), SYNC_TIMEOUT_MS);
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * سقف الطابور.
@@ -334,8 +346,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     persistQueue();
   };
 
-  async function sessionPayload(userId, extra = {}) {
+  async function sessionPayload(userId, extra = {}, signal) {
+    if (!signal) return withSyncDeadline((deadline) => sessionPayload(userId, extra, deadline));
     const response = await fetch(`${baseUrl}/v1/session`, {
+      signal,
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -443,6 +457,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       emit(['session']);
       return payload;
     } catch (error) {
+      // انقطاع أو عطل خادم ليس إلغاء اعتماد. إبقاء التوكن يسمح للدورة التالية
+      // بتجديده وإرسال نفس الكتابات بدل توقف pull/push عند !token إلى الأبد.
+      if (classifyFailure(error?.status ?? 0) === 'retry') throw error;
       token = null;
       localStorage.removeItem(TOKEN_KEY);
       // PIN أُضيف من جهاز آخر أو الإذن انتهى: الحساب يُقفل بدل أن يُطرد
@@ -457,6 +474,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   async function request(path, options = {}, allowRefresh = true) {
+    if (!options.signal && (path === '/v1/ops' || path.startsWith('/v1/sync?'))) {
+      return withSyncDeadline((signal) => request(path, { ...options, signal }, allowRefresh));
+    }
     const headers = { ...(options.headers ?? {}) };
     if (token) headers.authorization = `Bearer ${token}`;
     if (options.body) headers['content-type'] = 'application/json';
@@ -471,7 +491,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         try {
           await refreshSession();
           return request(path, options, false);
-        } catch {
+        } catch (error) {
+          // الفشل العابر في التجديد يستحق تراجع النقل، لا تحويله إلى رفض هوية.
+          if (classifyFailure(error?.status ?? 0) === 'retry') throw error;
           // جهاز revoked أو credential مفقود: refreshSession طوى الجلسة.
         }
       } else {
