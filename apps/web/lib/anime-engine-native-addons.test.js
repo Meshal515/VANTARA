@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-const fixtures=vi.hoisted(()=>({runtime:null}));
+const fixtures=vi.hoisted(()=>({runtime:null,pwaPlugin:null}));
+vi.mock('../pwa/platform.js',()=>({isNative:()=>globalThis.Capacitor?.isNativePlatform?.()===true,webPlugin:()=>fixtures.pwaPlugin}));
 vi.mock('../addons/runtime.js',()=>({getAddonRuntime:async()=>fixtures.runtime}));
-afterEach(()=>{vi.unstubAllGlobals();vi.resetModules();});
+afterEach(()=>{fixtures.pwaPlugin=null;vi.unstubAllGlobals();vi.resetModules();});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 async function setup(pending) {
  const calls=[];
@@ -69,4 +70,36 @@ it('does not retain an addon snapshot when native prepare rejects',async()=>{
  fixtures.runtime.registry.snapshot=()=>({release});plugin.prepare=async()=>{throw new Error('prepare failed');};
  await expect(api.prepare({copies:[],identity,episode:1,session:'error'})).rejects.toThrow('prepare failed');
  expect(release).toHaveBeenCalledTimes(1);
+});
+it('starts regular anime preparation without waiting for exact-ID mapping and adds the provider later',async()=>{
+ const pending=deferred(), mapping=deferred();const {api,calls}=await setup(pending);
+ fixtures.runtime.registry.list=()=>[{key:'provider',name:'Provider',enabled:true,protocol:'stremio',capabilities:['streams'],resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}],bundled:false,compatibility:{apk:true}}];
+ fixtures.runtime.enrichAnimeIdentity=()=>mapping.promise;
+ const anime={canonicalId:'anime:21',kind:'anime',format:'TV',externalIds:{anilist:'21'},episode:2};
+ const out=await api.prepare({copies:[{sourceId:'native',url:'/work'}],identity:anime,episode:2,session:'deferred-anime'});
+ expect(out.session).toBe('deferred-anime');expect(calls[0][1].addonSources).toEqual([]);
+ mapping.resolve({...anime,externalIds:{anilist:'21',kitsu:'12'}});await new Promise(r=>setTimeout(r,0));
+ expect(calls.find(x=>x[0]==='reserve')).toBeTruthy();
+ pending.resolve([]);await new Promise(r=>setTimeout(r,0));
+ expect(calls.find(x=>x[0]==='append')[1].provider.videoId).toBe('kitsu:12:2');
+});
+it('refreshes an existing exact Kitsu copy for the selected episode instead of retaining episode one',async()=>{
+ const {api}=await setup(deferred());
+ fixtures.runtime.registry.list=()=>[{key:'provider',enabled:true,protocol:'stremio',capabilities:['streams'],resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}]}];
+ const identity={kind:'anime',format:'TV',episode:2,externalIds:{kitsu:'12'}};
+ const copies=await api.withAddonCopies([{sourceId:'addon|provider',id:'kitsu:12',url:'kitsu:12',identity:{...identity,episode:1}}],identity);
+ expect(copies[0].identity.episode).toBe(2);
+});
+
+it('uses the same generated PWA session when deferred addon discovery finishes',async()=>{
+ const pending=deferred(), mapping=deferred();const {api,calls,plugin}=await setup(pending);
+ vi.stubGlobal('Capacitor',undefined);fixtures.pwaPlugin=plugin;fixtures.runtime.runtimeName='pwa';
+ fixtures.runtime.registry.list=()=>[{key:'provider',enabled:true,protocol:'stremio',capabilities:['streams'],resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}]}];
+ fixtures.runtime.enrichAnimeIdentity=()=>mapping.promise;
+ const identity={kind:'anime',format:'TV',canonicalId:'anime:21',externalIds:{anilist:'21'}};
+ const out=await api.prepare({copies:[{sourceId:'native',url:'/work'}],identity,episode:2});
+ expect(out.session).toBe(calls[0][1].session);expect(out.session).toMatch(/^s-/);
+ mapping.resolve({...identity,episode:2,externalIds:{anilist:'21',kitsu:'12'}});await new Promise(r=>setTimeout(r,0));
+ expect(calls.find(x=>x[0]==='extend')[1]).toMatchObject({session:out.session,copies:[{sourceId:'addon|provider',identity:{episode:2}}]});
+ await api.closeSession(out.session);
 });

@@ -23,6 +23,7 @@ export const available = () => bridge() !== null;
 
 let configured = null;
 const nativeAddonSessions = new Map();
+const addonDiscoverySessions = new Map();
 let nativeAddonLifecyclePlugin = null;
 let nativeAddonLifecycleHandle = null;
 function observeNativeAddonLifecycle(plugin) {
@@ -39,6 +40,7 @@ function observeNativeAddonLifecycle(plugin) {
   }).catch(() => { if (nativeAddonLifecyclePlugin === plugin) nativeAddonLifecyclePlugin = null; });
 }
 function cancelNativeAddons(session) {
+  addonDiscoverySessions.delete(session);
   const state = nativeAddonSessions.get(session);
   if (!state) return;
   for (const job of state.jobs) job.cancel();
@@ -160,6 +162,9 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
 export async function extend(session, copies) {
   const plugin = bridge();
   if (!plugin?.extend || !session || !copies?.length) return 0;
+  const discovery = addonDiscoverySessions.get(session);
+  const mapped = copies.find(c => c.identity?.externalIds?.kitsu && c.identity.kind === discovery?.identity?.kind && c.identity.canonicalId === discovery?.identity?.canonicalId);
+  if (mapped && discovery) discovery.identity = mapped.identity;
   if (isNative() && plugin.appendAddonStreams && plugin.extendAddonSources) {
     const state = nativeAddonSessions.get(session);
     if (!state) return 0;
@@ -330,7 +335,7 @@ export async function episodes(anime) {
 export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null }) {
   const plugin = bridge();
   const native = isNative() && plugin?.appendAddonStreams;
-  const id = native ? session ?? `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` : session;
+  const id = session ?? `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let state;
   if (native) {
     cancelNativeAddons(id);
@@ -338,8 +343,20 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
     nativeAddonSessions.set(id, state);
     observeNativeAddonLifecycle(plugin);
   }
+  const context = { identity: identity ? { ...identity, episode: Number(episode) } : null };
+  addonDiscoverySessions.set(id, context);
+  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && copies.some(c => !c.sourceId?.startsWith('addon|'));
+  const discovery = deferMapping ? withAddonCopies([], context.identity).catch(() => []) : null;
+  const attachDiscovery = () => {
+    if (!discovery) return;
+    void discovery.then(extra => addonDiscoverySessions.get(id) === context && extra.length ? extend(id, extra) : null).catch(() => {});
+  };
   try {
-  if (identity) copies = await withAddonCopies(copies, { ...identity, episode: Number(episode) });
+  if (identity && !deferMapping) {
+    copies = await withAddonCopies(copies, context.identity);
+    const mapped = copies.find(c => c.identity?.externalIds?.kitsu);
+    if (mapped) context.identity = mapped.identity;
+  }
   if (native) {
     if (nativeAddonSessions.get(id) !== state) return null;
     const runtime = await getAddonRuntime(); await runtime.ready;
@@ -352,11 +369,15 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);
+    if (out?.session === id) attachDiscovery();
     return out ? { ...out, copies } : null;
   }
-  const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, ...(session ? { session } : {}) });
+  const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id });
+  if (out?.session === id && addonDiscoverySessions.get(id) === context) attachDiscovery();
+  else if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
   return out ? { ...out, copies: out.copies ?? copies } : null;
   } catch (error) {
+    if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
     if (native && nativeAddonSessions.get(id) === state) cancelNativeAddons(id);
     throw error;
   }
@@ -368,7 +389,8 @@ export async function withAddonCopies(copies, identity) {
   if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
   identity = await a.enrichAnimeIdentity?.(identity) ?? identity;
   const extra=addonCopies(a.registry,identity,a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
-  return [...copies,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
+  const refreshed = copies.map(c => extra.find(fresh => fresh.sourceId === c.sourceId && fresh.id === (c.id ?? c.url)) ?? c);
+  return [...refreshed,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
 }
 /** First confirmed copies can prepare while the other discovery path remains pending. */
 export async function firstAvailableCopies(locator, addons) {
@@ -409,6 +431,8 @@ export async function pick(session, route) {
 export async function open(args) {
   const plugin = bridge();
   if (!plugin) return null;
+  const identity = addonDiscoverySessions.get(args.session)?.identity;
+  if (identity && identity.canonicalId === args.subtitleIdentity?.canonicalId && identity.kind === args.subtitleIdentity?.kind) args = { ...args, subtitleIdentity: { ...args.subtitleIdentity, externalIds: { ...args.subtitleIdentity.externalIds, ...identity.externalIds } } };
   if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
     try {
       const a = await getAddonRuntime(); await a.ready;

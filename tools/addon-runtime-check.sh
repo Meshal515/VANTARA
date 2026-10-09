@@ -31,4 +31,5 @@ for filename in ['native-torrent.json', 'native-http.json']:
     if filename == 'native-torrent.json' and not re.fullmatch('[0-9a-f]{64}', proof.get('verifiedRangeSha256', '')):
         raise SystemExit('No verified torrent byte hash')
     print(f'{filename}: real first frame, seek and continuing playback verified')
+    print(json.dumps({'file': filename, 'proof': proof}, sort_keys=True))
 PY

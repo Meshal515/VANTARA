@@ -99,6 +99,7 @@ export function createAnime(deps) {
   const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
   // Shelf order is refreshed on entry or a user action, never by background sync.
+  const workListeners = new Set();
   const state = {
     home: null,
     loading: null,
@@ -964,6 +965,7 @@ export function createAnime(deps) {
       const copies = [...(state.work?.copies ?? []), ...work.copies];
       state.work = { ...work, copies: copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId && c.url === copy.url) === index) };
       paintSources(m, 'found');
+      for (const listener of workListeners) listener(m.id, state.work);
     };
     if (m._sourceCopy) { const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
     const remembered = knownWork(m.id);
@@ -1461,6 +1463,14 @@ export function createAnime(deps) {
         }
       };
 
+      const onWork = (id, work) => {
+        if (sheet.closed || id !== m.id) return;
+        sheet.work = work;
+        sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
+        if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
+      };
+      workListeners.add(onWork);
+      off.push(() => workListeners.delete(onWork));
       paint();
       const cooldownTimer = setInterval(() => {
         if (!sheet.closed && exhausted()) paintBest();
@@ -1501,6 +1511,7 @@ export function createAnime(deps) {
           }
           sheet.session = out.session;
           sheet.copies = out.copies ?? copies;
+          if (state.workFor === m.id && state.work) onWork(m.id, state.work);
           // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
           const snap = await engine.routes(out.session);
           sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);

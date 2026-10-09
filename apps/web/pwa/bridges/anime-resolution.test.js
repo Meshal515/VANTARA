@@ -129,3 +129,12 @@ it('retains the friendly provider label in ready and rejected routes without aut
   expect(routes.every(r => r.sourceName === 'Video')).toBe(true);
   expect(state.play).not.toHaveBeenCalled();
 });
+it('uses the active PWA episode for cached Kitsu copies and later extension',async()=>{
+ const used=[];
+ src.episodes=async c=>[{url:`kitsu:12:${c.identity.episode}`,number:c.identity.episode}];
+ src.servers=async ep=>{used.push(ep.url);return [server('fast')];};src.streams=async()=>[stream(1080)];
+ const stale={...copy,sourceId:'addon|demo',episode:1,identity:{kind:'anime',format:'TV',episode:1,externalIds:{kitsu:'12'}}};
+ const first=await AnimeEngine.prepare({copies:[stale],episode:2});sessions.push(first.session);await vi.advanceTimersByTimeAsync(0);
+ const second=await AnimeEngine.prepare({copies:[],episode:3});sessions.push(second.session);await AnimeEngine.extend({session:second.session,copies:[stale]});await vi.advanceTimersByTimeAsync(0);
+ expect(used).toEqual(['kitsu:12:2','kitsu:12:3']);expect(state.play).not.toHaveBeenCalled();
+});

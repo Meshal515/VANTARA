@@ -91,4 +91,7 @@ class RemoteAddonTest {
     @org.junit.Test fun `anime movie subtitle identity is not mistaken for an episode`() {
         org.junit.Assert.assertEquals("movie" to "kitsu:142", SubtitleProviders.videoId("""{"kind":"anime","format":"MOVIE","externalIds":{"kitsu":"142"}}""", 1f))
     }
+    @org.junit.Test fun `IMDb anime movie subtitle fallback remains a movie without a season`() {
+        org.junit.Assert.assertEquals("movie" to "tt123456", SubtitleProviders.videoId("""{"kind":"anime","format":"MOVIE","externalIds":{"imdb":"tt123456"}}""", 1f))
+    }
 }
