@@ -37,6 +37,11 @@ const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDe
 export const routeSourceLabel = (route) => SOURCE_NAMES[route.sourceId]
   ?? route.sourceName
   ?? (String(route.sourceId ?? '').startsWith('addon|') ? 'إضافة' : route.sourceId);
+/** Native runtime selection is separate from a successful HTTP probe. */
+export const routeSelectable = (r) => r.state === 'READY' && (r.probed === true || r.runtimeReady === true);
+export const routePending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null && r.runtimeReady !== true);
+export const routeDisplayName = (r) => String(r.sourceId ?? '').startsWith('addon|')
+  ? routeSourceLabel(r) : (/[\u0600-\u06FF]/.test(String(r.code ?? '')) && r.server ? r.server : r.code ?? r.server ?? 'سيرفر');
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
 
 const userKey = (base, userId) => `vantara.cinema.${base}.v1.${userId ? `user.${encodeURIComponent(userId)}` : 'guest'}`;
@@ -940,7 +945,7 @@ export function createCinema(deps) {
   const STATE_RANK = { READY: 0, RESOLVING: 1 };
   const probeRank = (r) => (r.probed === true ? 0 : r.probed === false ? 2 : 1);
   const serverKey = (r) => `${r.sourceId}|${r.server ?? r.code}`;
-  const serverName = (r) => (/[\u0600-\u06FF]/.test(String(r.code ?? '')) && r.server ? r.server : r.code ?? r.server ?? 'سيرفر');
+  const serverName = routeDisplayName;
   function failures(r) {
     const f = readJson(FAIL_KEY, {})[serverKey(r)];
     return f && Date.now() - f.at < 7 * 86_400_000 ? f.n : 0;
@@ -1529,6 +1534,7 @@ export function createCinema(deps) {
 
       const tileNodes = new Map();
       const groupNodes = new Map();
+      const groupMore = new Map();
       const routeGroups = new Map();
       const deadFold = el('details', 'cn-srv-dead');
       const deadSummary = el('summary');
@@ -1543,15 +1549,15 @@ export function createCinema(deps) {
       const paint = () => {
         queued = false;
         if (sheet.closed) return;
-        const ready = sheet.routes.filter((r) => r.state === 'READY' && r.probed === true).length;
+        const ready = sheet.routes.filter(routeSelectable).length;
         // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
         // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
-        const pendingRoute = sheet.routes.some((r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null));
+        const pendingRoute = sheet.routes.some(routePending);
         const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
         if (sheet.missing) status.textContent = m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
         else if (!sheet.session) status.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
         else if (!settled && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
-        else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${settled ? '' : ' · البقية تصل بالخلفية'}` : 'لم يجهز أي سيرفر الآن';
+        else status.textContent = ready ? `${ready} ${sheet.routes.some(r => r.runtimeReady === true) ? 'خيار متاح · التورنت يبدأ عند اختيارك' : ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${settled ? '' : ' · البقية تصل بالخلفية'}` : 'لم يجهز أي سيرفر الآن';
         best.disabled = sheet.busy || sheet.missing || (!ready && settled);
         best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
         best.classList.toggle('waiting', !ready && !settled && !sheet.missing);
@@ -1562,21 +1568,26 @@ export function createCinema(deps) {
           let b = tileNodes.get(r.id);
           if (!b) {
             b = el('button'); b.type = 'button';
-            b.innerHTML = '<span class="an-srv-top"><b class="an-srv-code"></b><span class="an-srv-tag"></span></span><span class="an-srv-state"><i class="an-srv-dot"></i><span></span></span>';
+            b.innerHTML = '<span class="an-srv-top"><b class="an-srv-code"></b><span class="an-srv-tag"></span></span><span class="an-srv-release" dir="auto"></span><span class="an-srv-state"><i class="an-srv-dot"></i><span></span></span>';
             tileNodes.set(r.id, b);
           }
-          const verified = r.state === 'READY' && r.probed === true;
-          const pending = r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null);
+          const selectable = routeSelectable(r);
+          const pending = routePending(r);
           b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}`;
           b.disabled = pending;
           b.querySelector('.an-srv-code').textContent = serverName(r);
-          b.querySelector('.an-srv-tag').textContent = routeSourceLabel(r);
-          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
-          b.onclick = () => verified ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
+          b.querySelector('.an-srv-tag').textContent = r.runtimeReady === true ? 'تورنت' : routeSourceLabel(r);
+          const release = b.querySelector('.an-srv-release');
+          release.textContent = r.label ?? '';
+          release.hidden = !r.label;
+          b.title = r.label ?? '';
+          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.runtimeReady === true && selectable ? 'يبدأ عند الاختيار' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
+          b.onclick = () => selectable ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
           return b;
         };
-        const isPending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null);
+        const isPending = routePending;
         const waiting = ready ? live.filter(isPending) : [];
+        const addonCounts = new Map();
         for (const r of live) {
           if (ready && isPending(r)) continue;
           let group = routeGroups.get(r.id);
@@ -1584,11 +1595,20 @@ export function createCinema(deps) {
           if (!groupNodes.has(group)) {
             const g = el('section', 'an-srv-group');
             const grid = el('div', 'an-srv-grid');
-            g.append(el('h4', 'an-srv-q', group), grid);
+            const more = el('details', 'cn-srv-dead an-srv-more');
+            const summary = el('summary');
+            const moreGrid = el('div', 'an-srv-grid');
+            more.append(summary, moreGrid);
+            g.append(el('h4', 'an-srv-q', group), grid, more);
+            groupMore.set(group, {more, summary, grid:moreGrid});
             groupNodes.set(group, grid);
             list.insertBefore(g, deadFold.parentNode === list ? deadFold : null);
           }
-          const grid = groupNodes.get(group), b = tile(r);
+          const isAddon = String(r.sourceId ?? '').startsWith('addon|');
+          const count = (addonCounts.get(group) ?? 0) + (isAddon ? 1 : 0);
+          addonCounts.set(group, count);
+          const grid = isAddon && count > 6 ? groupMore.get(group).grid : groupNodes.get(group);
+          const b = tile(r);
           if (b.parentNode !== grid) grid.append(b);
         }
         for (const r of waiting) { const b = tile(r); if (b.parentNode !== waitGrid) waitGrid.append(b); }
@@ -1597,7 +1617,12 @@ export function createCinema(deps) {
           if (waitFold.parentNode !== list) list.insertBefore(waitFold, deadFold.parentNode === list ? deadFold : null);
         } else if (waitFold.parentNode === list) waitFold.remove();
         // مجموعة جودة صار كل ما فيها مطويًا: لا عنوان فوق شبكة فارغة
-        for (const grid of groupNodes.values()) grid.parentNode.hidden = !grid.children.length;
+        for (const [group, grid] of groupNodes) {
+          const extra = groupMore.get(group);
+          extra.more.hidden = !extra.grid.children.length;
+          extra.summary.textContent = `نسخ إضافية (${extra.grid.children.length})`;
+          grid.parentNode.hidden = !grid.children.length && !extra.grid.children.length;
+        }
         if (dead.length) {
           deadSummary.textContent = `غير متاح (${dead.length})`;
           for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }

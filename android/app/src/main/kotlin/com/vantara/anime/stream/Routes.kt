@@ -29,6 +29,10 @@ data class Route(
      */
     val probed: Boolean? = null,
     val probeMs: Long? = null,
+    /** Selection may start native torrent acquisition; no HTTP probe or first frame is implied. */
+    val runtimeReady: Boolean = false,
+    val sourceName: String? = null,
+    val label: String? = null,
 )
 
 /** ما يرسله المحوّل عن سيرفر: مفتاحه عنده، واسمه، وحالته. */

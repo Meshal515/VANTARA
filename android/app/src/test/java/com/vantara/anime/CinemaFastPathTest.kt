@@ -27,6 +27,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /** مسار السينما السريع: فحص الرابط، الفيلم بلا رقم، والجلسة التي تكبر. */
 class CinemaFastPathTest {
@@ -197,6 +201,14 @@ class CinemaFastPathTest {
         assertEquals(c, p.best())
         assertEquals(c, p.session.next())
         assertNull(p.routeOf(c.id)?.probed)
+        val route = requireNotNull(p.routeOf(c.id))
+        val wire = Json.encodeToJsonElement(com.vantara.anime.stream.Route.serializer(), route).jsonObject
+        assertEquals(true, wire["runtimeReady"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals("s1", wire["sourceName"]?.jsonPrimitive?.content)
+        assertEquals(true, Json.encodeToJsonElement(com.vantara.anime.stream.Route.serializer(), p.routes().single()).jsonObject["runtimeReady"]?.jsonPrimitive?.booleanOrNull)
+        p.session.failed(c, "test failure")
+        assertEquals(RouteState.FAILED, p.routeOf(c.id)?.state)
+        assertEquals(false, Json.encodeToJsonElement(com.vantara.anime.stream.Route.serializer(), requireNotNull(p.routeOf(c.id))).jsonObject["runtimeReady"]?.jsonPrimitive?.booleanOrNull ?: false)
     }
 
     @Test fun `late provider reservation does not restart native preparation or repeat an addon`() {

@@ -104,6 +104,8 @@ class PreparedEpisode(
                 reason = r.reason,
                 probed = old?.probed,
                 probeMs = old?.probeMs,
+                sourceName = r.candidates.firstOrNull()?.sourceName ?: old?.sourceName,
+                label = r.candidates.firstOrNull()?.label?.takeIf { it.isNotBlank() } ?: old?.label,
             )
             byId[rid] = route
         }
@@ -238,8 +240,13 @@ class PreparedEpisode(
         return "$base$n"
     }
 
-    private fun withPlaybackState(r: Route): Route =
-        if (r.state == RouteState.READY && r.candidates.isNotEmpty() && r.candidates.all(session::isFailed)) r.copy(state = RouteState.FAILED) else r
+    private fun withPlaybackState(r: Route): Route {
+        val failed = r.state == RouteState.READY && r.candidates.isNotEmpty() && r.candidates.all(session::isFailed)
+        return r.copy(
+            state = if (failed) RouteState.FAILED else r.state,
+            runtimeReady = !failed && r.state == RouteState.READY && r.candidates.any { it in runtimeCandidates && !session.isFailed(it) },
+        )
+    }
 
     /**
      * «شغّل الأفضل»: ليس أعلى جودة فقط. الموثوقية (نجاح المضيف والمصدر)،
