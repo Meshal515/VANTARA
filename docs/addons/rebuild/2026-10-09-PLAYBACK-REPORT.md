@@ -21,7 +21,7 @@ Anime now resolves exact AniList/MAL relationships to Kitsu before compatible pr
 - Kotlin JVM: **379 tests passing / 73 classes**.
 - Native debug APK and Android instrumented test APK built successfully.
 - Actual arm64 ELF and APK 16 KiB alignment checks are documented in `native-torrent/ENGINE.md`.
-- Authored legal video/torrent and VTT fixtures exercise native verified bytes → Media3 first frame → seek → continuing frames, and HTTPS → real subtitle cue → seek. **Device execution passed** on API 30 x86_64 at `3904236a7e24a73df2e48fe011735a278a5e2d2a`: [runtime run 37972216861](https://github.com/Meshal515/VANTARA/actions/runs/37972216861), `OK (3 tests)`. Both JSON proofs passed the gate for first frame, decoded video dimensions, seek and continued frames; HTTPS also proved a real external subtitle cue and torrent reads proved a byte SHA-256. The following review fixes are being rechecked on the updated branch. The GitHub runtime gate requires both instrumentation success and explicit JSON evidence; missing proof fails the gate.
+- Authored legal video/torrent and VTT fixtures exercise native verified bytes → Media3 first frame → seek → continuing frames, and HTTPS → real subtitle cue → seek. **Device execution passed** on API 30 x86_64 at `3904236a7e24a73df2e48fe011735a278a5e2d2a`: [runtime run 37972216861](https://github.com/Meshal515/VANTARA/actions/runs/37972216861), `OK (3 tests)`. Both JSON proofs passed the gate for first frame, decoded video dimensions, seek and continued frames; HTTPS also proved a real external subtitle cue and torrent reads proved a byte SHA-256. After independent review fixes, the updated run [37973817328](https://github.com/Meshal515/VANTARA/actions/runs/37973817328) also passed at `84055a4`. Recorded JSON evidence is in `native-torrent/evidence-84055a4/`: torrent fixture first frame 1023 ms; HTTPS first frame 569 ms; verified 48,000-byte range, actual soft subtitle cue, decoded seek and continuing frames. These fixture timings do not estimate a cold public torrent. The GitHub runtime gate requires both instrumentation success and explicit JSON evidence; missing proof fails the gate.
 - Public addon research/captured responses: `STREMIO-2026-10-09-RESEARCH.md`. Real manifests and catalog/meta/subtitle resources have deterministic regression coverage. OpenSubtitles returned a downloadable SRT with real timestamps. Torrentio/Comet public stream endpoints returned 403 from the execution environment.
 
 ## Independent review corrections
@@ -39,6 +39,10 @@ Review caught cached Kitsu episode-one copies, mapping that blocked ordinary pre
 - Ordinary-source discovery arriving after the picker has closed for playback is not guaranteed to join that already-playing session; late sources are attached while the picker is active. This remaining fallback-coverage limit is not a first-frame claim.
 - Installed-addon UI → catalog → picker → player as one complete user journey is **UNVERIFIED**; native instrumentation starts at the protocol candidate/prepared-session boundary.
 - Upstream protection, empty results, unavailable titles, credentials and peer availability cannot be guaranteed by protocol compatibility. No claim of 100% availability is made.
+
+## Delivery branches
+
+The repository PWA guard requires native fingerprint equality for PWA PRs. The two-line PWA episode boundary and its regression test are therefore delivered independently in [PR #181](https://github.com/Meshal515/VANTARA/pull/181), with no native changes. The remaining shared/native addon changes are [PR #180](https://github.com/Meshal515/VANTARA/pull/180). Combined release validation covers both.
 
 ## Scope
 

@@ -1,0 +1,10 @@
+{
+  "sha": "84055a4134591542b1232029359dd91ec57cfe15",
+  "runId": 37973817328,
+  "jobId": 113966891979,
+  "apiLevel": 30,
+  "abi": "x86_64",
+  "conclusion": "success",
+  "tests": 3,
+  "scope": "Authored native torrent + public HTTPS fixture. Not public DHT, Torrentio or full addon installation UI proof."
+}

@@ -1,0 +1,13 @@
+{
+  "continuedPastSixSeconds": true,
+  "decodedAfterSeek": true,
+  "elapsedMs": 1572,
+  "externalSubtitleCue": true,
+  "firstFrame": true,
+  "firstFrameElapsedMs": 569,
+  "fixtureHost": "raw.githubusercontent.com",
+  "passed": true,
+  "positionMs": 5934,
+  "videoHeight": 180,
+  "videoWidth": 320
+}
