@@ -1366,6 +1366,20 @@
   letter-spacing: 0.08em;
   font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
 }
+.v35 .an-srv-release {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.v35 .an-srv-release[hidden] { display: none; }
+.v35 .an-srv-code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v35 .an-srv-state {
   display: inline-flex;
   align-items: center;

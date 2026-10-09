@@ -67,4 +67,12 @@ class NativeAddonCandidateTest {
         assertEquals(3, request.fileIdx)
     }
 
+    @Test fun `identical addon replies allocate one torrent ticket instead of duplicate tiles`() {
+        val stream = """{"infoHash":"0123456789abcdef0123456789abcdef01234567","fileIdx":0,"title":"Release 1080p"}"""
+        var calls = 0
+        val list = NativeAddonCandidates.parse("s", "addon|provider", "Torrentio", Json.parseToJsonElement("[$stream,$stream]"), 1000L) { calls++; "vantara-torrent://ticket-$calls/file" }
+        assertEquals(1, list.size)
+        assertEquals(1, calls)
+    }
+
 }

@@ -26,3 +26,16 @@ describe('server picker source labels', () => {
     expect(routeSourceLabel({ sourceId: 'arabseed' })).toBe('ArabSeed');
   });
 });
+
+describe('native torrent picker readiness', () => {
+  it('allows a native torrent ticket immediately without inventing an HTTP probe', async () => {
+    const ui = await import('./cinema.js');
+    const torrent = {state:'READY',runtimeReady:true,probed:null};
+    expect(ui.routeSelectable(torrent)).toBe(true);
+    expect(ui.routePending(torrent)).toBe(false);
+    expect(ui.routePending({state:'READY',probed:null})).toBe(true);
+    expect(ui.routeSelectable({state:'READY',probed:false})).toBe(false);
+    expect(ui.routeSelectable({state:'FAILED',runtimeReady:true})).toBe(false);
+    expect(ui.routeSelectable({state:'READY',probed:true})).toBe(true);
+  });
+});

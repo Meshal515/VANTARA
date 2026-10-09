@@ -43,7 +43,7 @@ object NativeAddonCandidates {
         if (!sourceId.startsWith("addon|") || sourceId.length > 4096) return emptyList()
         val sourceName = displayName(name)
         val entries = (raw as? JsonArray)?.take(1000) ?: return emptyList()
-        return entries.mapIndexedNotNull { index, element -> runCatching {
+        return entries.distinct().mapIndexedNotNull { index, element -> runCatching {
             val s = element as? JsonObject ?: return@runCatching null
             if (s.text("status")?.let { it !in setOf("READY", "RESOLVED") } == true) return@runCatching null
             val expiry = s.number("expiresAt") ?: (now + StreamClassifier.DEFAULT_TTL_MS)
