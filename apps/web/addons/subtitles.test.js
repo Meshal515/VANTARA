@@ -78,3 +78,11 @@ it('preserves a provider-confirmed video identity for compatible non-IMDb subtit
  expect(subtitleRequest({kind:'series',addonKey:'https://addon.test|demo',videoId:'custom:episode:one',season:1,episode:1}, {videoHash:'0123456789abcdef',videoSize:12345})).toMatchObject({type:'series',videoId:'custom:episode:one',extra:{videoHash:'0123456789abcdef',videoSize:12345}});
  expect(subtitleRequest({kind:'series',title:'Custom episode'},{})).toBeNull();
 });
+it('does not invent a season for an explicit anime movie with an exact IMDb ID',()=>{
+ expect(subtitleRequest({kind:'anime',format:'MOVIE',externalIds:{imdb:'tt123456'}})).toEqual({type:'movie',videoId:'tt123456',extra:{}});
+});
+it('uses a provider-specific exact request without requesting incompatible namespaces',async()=>{
+ const calls=[], results=[];
+ await discoverSubtitles({identity:{kind:'anime',format:'MOVIE',externalIds:{kitsu:'12',imdb:'tt123'}},providers:[{key:'imdb',request:()=>({type:'movie',videoId:'tt123',extra:{}}),subtitles:async input=>{calls.push(input);return [{url:'https://sub.test/a.srt',lang:'ara'}];}},{key:'wrong',request:()=>null,subtitles:async()=>{throw Error('must not request');}}],onResult:x=>results.push(x)});
+ expect(calls[0].videoId).toBe('tt123');expect(results).toHaveLength(1);
+});

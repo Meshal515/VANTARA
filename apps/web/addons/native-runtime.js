@@ -31,39 +31,50 @@ function nativeStore(storage = globalThis.localStorage) {
 }
 export function getNativeAddonRuntime() {
   if (runtime) return runtime;
-  const plugins = globalThis.Capacitor?.Plugins,
+  const plugins = globalThis.Capacitor?.Plugins ?? {},
     transport = createNativeTransport(plugins?.AddonEngine),
     defs = [];
-  const ready = (async () => {
-    if (plugins.AnimeEngine) {
-      const manifest = await (await fetch("/anime/sources.json")).json();
-      await plugins.AnimeEngine.configure({ manifest });
-      const out = await plugins.AnimeEngine.sources();
-      defs.push(
-        ...out.sources
-          .filter((s) => s.enabled)
-          .map((s) => ({
-            ...s,
-            label: s.name,
-            content: s.content ?? "anime",
-            version: 1,
-          })),
-      );
-    }
-    if (plugins.ExtensionEngine) {
-      const out = await plugins.ExtensionEngine.sources();
-      defs.push(
-        ...out.sources
-          .filter((s) => !s.filler)
-          .map((s) => ({
-            ...s,
-            content: "manga",
-            domain: null,
-            version: s.version ?? 1,
-          })),
-      );
-    }
-  })();
+  const features = { addonStreams: false, torrentSupported: false };
+  const ready = Promise.allSettled([
+    (async () => {
+      if (!plugins.AnimeEngine?.capabilities) return;
+      const measured = await plugins.AnimeEngine.capabilities();
+      features.addonStreams = measured?.addonStreams === true;
+      features.torrentSupported = features.addonStreams && measured?.torrentSupported === true;
+    })(),
+    (async () => {
+      if (plugins.AnimeEngine) {
+        const manifest = await (await fetch("/anime/sources.json")).json();
+        await plugins.AnimeEngine.configure({ manifest });
+        const out = await plugins.AnimeEngine.sources();
+        defs.push(
+          ...out.sources
+            .filter((s) => s.enabled)
+            .map((s) => ({
+              ...s,
+              label: s.name,
+              content: s.content ?? "anime",
+              version: 1,
+            })),
+        );
+      }
+    })(),
+    (async () => {
+      if (plugins.ExtensionEngine) {
+        const out = await plugins.ExtensionEngine.sources();
+        defs.push(
+          ...out.sources
+            .filter((s) => !s.filler)
+            .map((s) => ({
+              ...s,
+              content: "manga",
+              domain: null,
+              version: s.version ?? 1,
+            })),
+        );
+      }
+    })(),
+  ]);
   const def = (id) => defs.find((s) => s.id === id);
   const source = (id) => {
     const d = def(id);
@@ -99,9 +110,11 @@ export function getNativeAddonRuntime() {
   runtime = createAddonRuntime({
     runtime: {
       native: true,
+      get addonStreams() { return features.addonStreams; },
+      get torrentSupported() { return features.torrentSupported; },
       ready,
       registry: {
-        list: () => defs,
+        list: (content) => defs.filter(d => !content || d.content === content),
         def,
         source,
         call: async (id, fn) => {
@@ -114,6 +127,7 @@ export function getNativeAddonRuntime() {
     store: nativeStore(),
     transport,
   });
+  runtime.nativeCapabilities = () => ({ ...features });
   runtime.nativeSubtitleProviders = () =>
     runtime.registry
       .list()

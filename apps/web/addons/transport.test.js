@@ -16,7 +16,7 @@ it("uses GET without credentials and never follows an unchecked redirect", async
     credentials: "omit",
     redirect: "error",
   });
-  expect(options.headers).toEqual({ accept: "application/json" });
+  expect(options.headers).toEqual({ accept: "application/json, application/vnd.api+json" });
 });
 it("blocks public URL escapes before sending a request", async () => {
   let sent = 0;

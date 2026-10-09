@@ -168,11 +168,28 @@ it('reports safe failure messages and never promotes malformed responses', async
   expect(result.assessment.level).toBe('broken');
   expect(JSON.stringify(result)).not.toContain('secret-token');
 });
-it('does not expose subtitle-only or catalog-only addons as playback sources on either platform', async()=>{
-  for(const [resources,native] of [[['subtitles'],false],[['catalog'],false],[['catalog','stream','subtitles'],true]]){
+it('does not expose subtitle-only addons as playback sources on either platform', async()=>{
+  for(const [resources,native] of [[['subtitles'],false],[['subtitles'],true]]){
     const {a}=await diagnosticSetup(diagnosticManifest(resources,resources.includes('catalog')?[{type:'movie',id:'demo'}]:[]),()=>({subtitles:[]}),native);
     expect(a.sources.list()).toEqual([]);
   }
+});
+it('opens installed APK catalogs and metadata through their configured service without manufacturing playback',async()=>{
+  const {a,key,requests}=await diagnosticSetup(diagnosticManifest(['catalog','meta']),url=>url.includes('/catalog/')?{metas:[{id:'tt123',type:'movie',name:'Film'}]}:{meta:{id:'tt123',type:'movie',name:'Film'}},true);
+  expect(a.sources.list('cinema')).toMatchObject([{id:`addon|${key}`,content:'cinema'}]);
+  expect(await a.adapter(key).catalog({type:'movie',id:'demo'})).toMatchObject([{id:'tt123'}]);
+  const source=a.sources.source(`addon|${key}`);
+  const episodes=await source.episodes({type:'movie',id:'tt123'});
+  expect(await source.servers(episodes[0])).toEqual([]);
+  expect(requests.at(-1).url).toContain('/secret-token/meta/movie/tt123.json');
+  expect(a.registry.list()[0].assessment.level).toBe('stable');
+});
+it('publishes APK DASH routes while PWA keeps their unsupported reason',async()=>{
+  const {a,key}=await diagnosticSetup(diagnosticManifest(['stream'],[]),()=>({streams:[{url:'https://cdn.test/film.mpd',name:'2160p'}]}),true);
+  const source=a.sources.source(`addon|${key}`);
+  const [server]=await source.servers({type:'movie',url:'tt123'});
+  expect(await source.streams(server)).toMatchObject([{type:'dash',status:'RESOLVED',quality:2160}]);
+  expect(a.registry.health.state(key,'streams','apk').state).toBe('healthy');
 });
 it("passes playback cancellation through the Stremio facade to its actual HTTP request", async () => {
   const controller = new AbortController();

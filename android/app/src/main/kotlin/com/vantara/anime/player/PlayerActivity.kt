@@ -256,7 +256,7 @@ class PlayerActivity : Activity() {
                 gate.acquire()
                 try {
                 val tracks = withContext(Dispatchers.IO) {
-                    runCatching { SubtitleProviders.discover(addonClient, provider, launch.subtitleIdentity, episode, "subtitle-$generation-${provider.key}") }.getOrDefault(emptyList())
+                    runCatching { SubtitleProviders.discover(addonClient, provider, launch.subtitleIdentity, episode, "subtitle-$generation-${provider.key}", c) }.getOrDefault(emptyList())
                 }
                 if (current?.id == c.id && addonSubtitles.accept(generation, tracks) && openSheet == SheetKind.SUBTITLES) sheet.refresh()
                 } finally { gate.release() }
@@ -290,7 +290,7 @@ class PlayerActivity : Activity() {
             // التحديث يحدث باختيار المستخدم فقط، ويحفظ الموضع وحالة الوقف بعد تنزيل الملف.
             val at = position(); val playing = player.playWhenReady
             val media = item.buildUpon().setSubtitleConfigurations(source + config).build()
-            val factory = DefaultDataSource.Factory(this@PlayerActivity, MediaCache.factory(this@PlayerActivity, network.client, c.headers))
+            val factory = playbackDataSourceFactory(c)
             selectedAddonSubtitle = track.id
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setPreferredTextLanguage(track.lang).build()
@@ -318,11 +318,11 @@ class PlayerActivity : Activity() {
     private var resume: MutableMap<Int, Long> = mutableMapOf()
     private val settings by lazy { getSharedPreferences("vantara.player", MODE_PRIVATE) }
 
-    private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${STARTUP_TIMEOUT_MS / 1000} ثانية") }
+    private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${PlaybackBudgets.startupMs(current?.url) / 1000} ثانية") }
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
-        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${STALL_TIMEOUT_MS / 1000} ثانية")
+        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${PlaybackBudgets.stalledMs(current?.url) / 1000} ثانية")
     }
     private val hideControls = Runnable { setControls(false) }
     private val usageClock = ForegroundTime(SystemClock::elapsedRealtime)
@@ -469,7 +469,7 @@ class PlayerActivity : Activity() {
                 spinner.visibility = View.VISIBLE
                 if (reportedStart) {
                     main.removeCallbacks(stallWatchdog)
-                    main.postDelayed(stallWatchdog, STALL_TIMEOUT_MS)
+                    main.postDelayed(stallWatchdog, PlaybackBudgets.stalledMs(current?.url))
                 }
             } else {
                 main.removeCallbacks(stallWatchdog)
@@ -549,7 +549,7 @@ class PlayerActivity : Activity() {
         reportedStart = false
         startedAt = System.currentTimeMillis()
         spinner.visibility = View.VISIBLE
-        val http = MediaCache.factory(this, network.client, c.headers)
+        val mediaFactory = playbackDataSourceFactory(c)
         val item = MediaItem.Builder()
             .setUri(c.url)
             .apply {
@@ -574,14 +574,21 @@ class PlayerActivity : Activity() {
             .build()
         // جودة اختارها المستخدم تخص السيرفر السابق؛ السيرفر الجديد يبدأ تلقائيًا
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-        player.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(item), positionMs.coerceAtLeast(0))
+        player.setMediaSource(DefaultMediaSourceFactory(mediaFactory).createMediaSource(item), positionMs.coerceAtLeast(0))
         player.prepare()
         player.playWhenReady = clip == null
         main.removeCallbacks(startupWatchdog)
-        main.postDelayed(startupWatchdog, STARTUP_TIMEOUT_MS)
+        main.postDelayed(startupWatchdog, PlaybackBudgets.startupMs(c.url))
         updateQualityLabel()
         if (openSheet == SheetKind.SERVERS) sheet.refresh()
         discoverAddonSubtitles(c, subtitleGeneration)
+    }
+
+    /** Shared by playback and external subtitle selection, including local downloaded subtitle files. */
+    private fun playbackDataSourceFactory(c: Candidate): androidx.media3.datasource.DataSource.Factory {
+        val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers) else network.client
+        val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
+        return if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
     }
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
@@ -679,7 +686,7 @@ class PlayerActivity : Activity() {
 
     private fun episodeInt() = floor(episode).toInt()
 
-    private fun hasNext() = copies.isNotEmpty() && launch.total > 0 && episodeInt() + 1 <= launch.total
+    private fun hasNext() = (copies.isNotEmpty() || engine.addonProviders(sessionId).isNotEmpty()) && launch.total > 0 && episodeInt() + 1 <= launch.total
 
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
@@ -694,7 +701,10 @@ class PlayerActivity : Activity() {
             id, copies, next.toFloat(),
             Preferences(launch.quality, runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB)),
             warmSourceId = source,
+            probe = prep?.probe == true,
             preferredServer = current?.server,
+            addonProviders = engine.addonProviders(sessionId),
+            requestAddons = true,
         )
     }
 
@@ -705,7 +715,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun switchEpisode(n: Int) {
-        if (copies.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
+        val addonProviders = engine.addonProviders(sessionId)
+        if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
         cancelCountdown()
         sheet.close()
         // ليست نهاية المشاهدة: «final» للواجهة يعني أن المشغّل أُغلق
@@ -727,7 +738,7 @@ class PlayerActivity : Activity() {
             quality = launch.quality,
             variant = runCatching { Variant.valueOf(launch.variant) }.getOrDefault(Variant.SUB),
         )
-        if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs)
+        if (warmed == null) engine.prepare(id, copies, n.toFloat(), prefs, probe = prep?.probe == true, addonProviders = addonProviders, requestAddons = true)
         episode = n.toFloat()
         if (presenceActive) sendPresence()
         clearSkipTimings()

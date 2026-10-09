@@ -26,7 +26,7 @@ export function createTransport({
         credentials: "omit",
         redirect: "error",
         referrerPolicy: "no-referrer",
-        headers: { accept: json ? "application/json" : "text/plain" },
+        headers: { accept: json ? "application/json, application/vnd.api+json" : "text/plain" },
         signal: controller.signal,
       });
       if (res.url && new URL(res.url).origin !== u.origin)

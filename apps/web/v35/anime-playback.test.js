@@ -1,18 +1,18 @@
 import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ find: vi.fn(async () => ({ copies: [{ sourceId: 'shahiid', url: '/rezero', title: 'Re:Zero 4th Season' }] })), listeners: new Map(), open: vi.fn(), best: vi.fn(async () => ({ candidate: 'stream-480', code: 'MMX' })) }));
+const state = vi.hoisted(() => ({ find: vi.fn(async () => ({ copies: [{ sourceId: 'shahiid', url: '/rezero', title: 'Re:Zero 4th Season' }] })), addons: vi.fn(async () => []), extend: vi.fn(async () => 1), listeners: new Map(), open: vi.fn(), best: vi.fn(async () => ({ candidate: 'stream-480', code: 'MMX' })) }));
 vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() {} }));
 vi.mock('../lib/anime-engine.js', async (original) => ({
   ...await original(), available: () => true, sources: async () => [], onNeedsHuman() {},
   on: (event, fn) => { state.listeners.set(event, fn); return () => state.listeners.delete(event); },
-  findWorkStream: state.find,
+  findWorkStream: state.find, withAddonCopies: state.addons, extend: state.extend,
   prepare: async () => ({ session: 'test-session', routes: [], done: false }),
   routes: async () => ({ routes: [], done: false }), best: state.best,
   pick: async (_session, route) => route === '480' ? 'stream-480' : 'stream-1080',
   open: state.open, closeSession: async () => {},
 }));
 const { createAnime } = await import('./anime.js');
-afterEach(() => { state.listeners.clear(); state.open.mockClear(); state.best.mockClear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { state.listeners.clear(); state.open.mockClear(); state.best.mockClear(); state.addons.mockReset().mockResolvedValue([]); state.extend.mockClear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('APK server events and completed preparation keep the selector open until the user chooses', async () => {
   vi.useFakeTimers();
   const { window, document } = parseHTML('<html><body><main></main></body></html>');
@@ -56,4 +56,26 @@ it('keeps uncertain source search distinct from unavailable in the playback shee
   expect(body.textContent).toContain('تعذّر البحث');
   expect(body.querySelector('.an-pick-best').disabled).toBe(false);
   expect(state.open).not.toHaveBeenCalled(); cleanup?.();
+});
+
+it('joins late ordinary sources to an addon-first picker without autoplay', async () => {
+  vi.useFakeTimers();
+  let publish, finish;
+  state.find.mockImplementationOnce((_titles, onHit) => { publish = onHit; return new Promise(resolve => { finish = resolve; }); });
+  state.addons.mockResolvedValueOnce([{sourceId:'addon|kitsu',url:'kitsu:12',id:'kitsu:12',identity:{kind:'anime',format:'TV',externalIds:{kitsu:'12'},episode:1}}]);
+  const { window, document } = parseHTML('<html><body><main></main></body></html>');
+  vi.stubGlobal('window', window); vi.stubGlobal('document', document);
+  vi.stubGlobal('Image', function () { return document.createElement('img'); });
+  vi.stubGlobal('requestAnimationFrame', (fn) => setTimeout(fn, 0));
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem() {} });
+  let cleanup; const body = document.querySelector('main');
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+  const anime=createAnime({root:body,q:()=>null,el,toast(){},genreAr:s=>s,openSheet:fn=>{cleanup=fn(body);},closeSheet(){},currentPage:()=> 'anime'});
+  anime.play({id:21,title:'One Piece',format:'TV',episodes:1200},2);
+  await vi.advanceTimersByTimeAsync(0);
+  state.extend.mockClear();
+  const core={copies:[{sourceId:'wit',url:'/one-piece'}]};publish(core);finish(core);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([core.copies[0]]));
+  expect(state.open).not.toHaveBeenCalled();cleanup?.();
 });

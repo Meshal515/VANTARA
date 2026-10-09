@@ -1,0 +1,44 @@
+{
+  "observedDate": "2026-10-09",
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "httpStatus": 200,
+  "corsAllowOrigin": "*",
+  "sourceUrl": "https://kitsu.io/api/edge/mappings?filter[externalSite]=anilist/anime&filter[externalId]=21&include=item",
+  "response": {
+    "data": [
+      {
+        "type": "mappings",
+        "id": "254544",
+        "attributes": {
+          "externalSite": "anilist/anime",
+          "externalId": "21"
+        },
+        "relationships": {
+          "item": {
+            "data": {
+              "type": "anime",
+              "id": "12"
+            }
+          }
+        }
+      }
+    ],
+    "included": [
+      {
+        "type": "anime",
+        "id": "12",
+        "attributes": {
+          "subtype": "TV",
+          "episodeCount": null
+        }
+      }
+    ],
+    "links": {}
+  },
+  "omittedFields": [
+    "titles/descriptions",
+    "image URLs",
+    "other metadata",
+    "link URLs except next-page marker"
+  ]
+}

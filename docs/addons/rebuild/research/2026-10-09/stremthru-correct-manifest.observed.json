@@ -1,0 +1,39 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://stremthru.13377001.xyz/stremio/torz/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "xyz.13377001.stremthru.torz",
+    "name": "StremThru Torz",
+    "version": "0.105.3",
+    "resources": [
+      {
+        "name": "stream",
+        "types": [
+          "movie",
+          "series",
+          "anime"
+        ],
+        "idPrefixes": [
+          "tt",
+          "kitsu:",
+          "mal:"
+        ]
+      }
+    ],
+    "types": [],
+    "catalogs": [],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": true
+    }
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}

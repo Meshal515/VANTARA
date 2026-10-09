@@ -25,6 +25,8 @@ import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { duration as insightDuration } from './insights.js';
 
+export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
+
 const HOME_KEY = 'anime.home.v2';
 // Legacy unowned keys remain on disk for recovery, but are never read into a new account.
 const LIST_KEY = 'vantara.anime.list.v2.guest';
@@ -97,6 +99,7 @@ export function createAnime(deps) {
   const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
   // Shelf order is refreshed on entry or a user action, never by background sync.
+  const workListeners = new Set();
   const state = {
     home: null,
     loading: null,
@@ -959,8 +962,10 @@ export function createAnime(deps) {
     const adopt = (work) => {
       keepWork(m.id, work);
       if (!current()) return;
-      state.work = work;
+      const copies = [...(state.work?.copies ?? []), ...work.copies];
+      state.work = { ...work, copies: copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId && c.url === copy.url) === index) };
       paintSources(m, 'found');
+      for (const listener of workListeners) listener(m.id, state.work);
     };
     if (m._sourceCopy) { const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
     const remembered = knownWork(m.id);
@@ -969,16 +974,21 @@ export function createAnime(deps) {
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
       void engine.findWorkStream(titles, adopt, { year: m.year ?? null }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
+      void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(() => {});
       return remembered;
     }
     paintSources(m, 'loading');
     const pending = (async () => {
       try {
-        const work = await engine.findWorkStream(titles, adopt, { year: m.year ?? null });
+        let sourceError = null;
+        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null }).catch(error => { sourceError = error; return null; });
+        const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { if (copies.length) adopt({ title: m.title, copies }); return copies; });
+        const work = await engine.firstAvailableCopies(core, addons);
+        if (!work?.copies?.length && sourceError) throw sourceError;
         if (!current()) return null;
-        if (work) adopt(work);
+        if (work?.copies?.length) adopt(work);
         else paintSources(m, 'none');
-        return work;
+        return work?.copies?.length ? state.work : null;
       } catch {
         if (current()) { state.workError = true; paintSources(m, 'error'); }
         return null;
@@ -1453,6 +1463,14 @@ export function createAnime(deps) {
         }
       };
 
+      const onWork = (id, work) => {
+        if (sheet.closed || id !== m.id) return;
+        sheet.work = work;
+        sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
+        if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
+      };
+      workListeners.add(onWork);
+      off.push(() => workListeners.delete(onWork));
       paint();
       const cooldownTimer = setInterval(() => {
         if (!sheet.closed && exhausted()) paintBest();
@@ -1486,13 +1504,14 @@ export function createAnime(deps) {
           const copies = previousServer?.sourceId
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
-          const out = await engine.prepare({ copies, episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server });
+          const out = await engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;
           }
           sheet.session = out.session;
           sheet.copies = out.copies ?? copies;
+          if (state.workFor === m.id && state.work) onWork(m.id, state.work);
           // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
           const snap = await engine.routes(out.session);
           sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);
@@ -1533,7 +1552,7 @@ export function createAnime(deps) {
         prefer: code ?? prefer,
         title: m.title,
         animeId: String(m.id),
-        subtitleIdentity: { canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', externalIds: m.externalIds ?? { mal: m.idMal, anilist: m.id }, season: m.season ?? null, episode: n },
+        subtitleIdentity: { ...animeAddonIdentity(m, n), externalIds: { ...animeAddonIdentity(m, n).externalIds, ...(sheet.copies?.find(c => c.identity?.externalIds?.kitsu)?.identity?.externalIds ?? {}) } },
         usageUserId: currentUser(),
         episode: n,
         total: m.aired || m.episodes || 0,

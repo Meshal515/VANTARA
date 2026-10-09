@@ -1,0 +1,18 @@
+{
+  "continuedPastSixSeconds": true,
+  "decodedAfterSeek": true,
+  "elapsedMs": 2039,
+  "firstFrame": true,
+  "firstFrameElapsedMs": 1023,
+  "fixtureBytes": 229261,
+  "infoHash": "835807f58a2dcf504db52e10d543551e890fb4c8",
+  "mediaItems": 1,
+  "nativeLibrariesLoaded": true,
+  "passed": true,
+  "positionMs": 5944,
+  "verifiedRangeBytes": 48000,
+  "verifiedRangeSha256": "da075077b79bdf96052ff25b745041e305ec11a4f8b8e4f0f5ae86a47173edd0",
+  "videoHeight": 180,
+  "videoWidth": 320,
+  "webSeedRequests": 1
+}

@@ -1,0 +1,62 @@
+{
+  "observedDate": "2026-10-09",
+  "evidence": "LIVE_GITHUB_API",
+  "repositories": [
+    {
+      "repository": "MrDiavelin/subpool",
+      "url": "https://github.com/MrDiavelin/subpool",
+      "commit": "a3276e072aceee61cb86d5ad1d120814a1bb1e7d",
+      "pushedAt": "2026-10-08T19:58:10Z",
+      "license": "NOASSERTION",
+      "homepage": "https://subpool-diavelin.vercel.app"
+    },
+    {
+      "repository": "MunifTanjim/stremthru",
+      "url": "https://github.com/MunifTanjim/stremthru",
+      "commit": "b66650a5c91833932ecaf815a98c53719f7c0e9f",
+      "pushedAt": "2026-10-02T12:38:37Z",
+      "license": "MIT",
+      "homepage": "http://docs.stremthru.13377001.xyz"
+    },
+    {
+      "repository": "Stremio/stremio-addon-sdk",
+      "url": "https://github.com/Stremio/stremio-addon-sdk",
+      "commit": "ec4e0a49e61bac4f2285891d39414dfbafe93f58",
+      "pushedAt": "2026-10-02T11:13:39Z",
+      "license": "MIT",
+      "homepage": "https://www.stremio.com/addon-sdk"
+    },
+    {
+      "repository": "TheBeastLT/torrentio-scraper",
+      "url": "https://github.com/TheBeastLT/torrentio-scraper",
+      "commit": "d812d87aa8f65a1fe0d4f15a66bee7ebdba9bdd0",
+      "pushedAt": "2026-10-07T19:14:20Z",
+      "license": "Apache-2.0",
+      "homepage": ""
+    },
+    {
+      "repository": "Viren070/AIOStreams",
+      "url": "https://github.com/Viren070/AIOStreams",
+      "commit": "b17de1eabd7d98e6f4a65aa01229d215081ff38f",
+      "pushedAt": "2026-10-06T20:47:48Z",
+      "license": "AGPL-3.0",
+      "homepage": "http://docs.aiostreams.viren070.me/"
+    },
+    {
+      "repository": "g0ldyy/comet",
+      "url": "https://github.com/g0ldyy/comet",
+      "commit": "f56677f05ed9a158f9a0338ad2f44d8efde35969",
+      "pushedAt": "2026-08-26T12:58:44Z",
+      "license": "GPL-3.0",
+      "homepage": ""
+    },
+    {
+      "repository": "mhdzumair/MediaFusion",
+      "url": "https://github.com/mhdzumair/MediaFusion",
+      "commit": "f48113e53daf66d62afec377907dfef0dce32b84",
+      "pushedAt": "2026-09-09T01:57:06Z",
+      "license": "MIT",
+      "homepage": "https://mhdzumair.github.io/MediaFusion/docs"
+    }
+  ]
+}

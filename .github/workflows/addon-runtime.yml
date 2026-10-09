@@ -1,0 +1,73 @@
+name: Android addon playback runtime
+
+on:
+  push:
+    branches: [chatgpt/addon-playback-compatibility-20261009, main]
+    paths:
+      - 'android/app/src/**/addons/**'
+      - 'android/app/src/androidTest/assets/addon-*'
+      - 'android/app/build.gradle'
+      - 'android/app/src/main/cpp/**'
+      - 'tools/addon-runtime-check.sh'
+      - '.github/workflows/addon-runtime.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: addon-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-playback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: Build native runtime and emulator APKs without changing product ABI
+        run: |
+          cat > "$RUNNER_TEMP/addon-x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/addon-x86.gradle" :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Preinstall emulator image with bounded retries
+        run: |
+          set -euo pipefail
+          sdk_manager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          for attempt in 1 2 3; do
+            if "$sdk_manager" --install 'system-images;android-30;default;x86_64'; then exit 0; fi
+            rm -rf "$ANDROID_HOME/system-images/android-30/default/x86_64"
+            sleep $((attempt * 5))
+          done
+          exit 1
+      - name: Native verified torrent bytes, Media3 first frame, seek and continued playback
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/addon-runtime-check.sh addon-runtime-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: addon-runtime-${{ github.sha }}
+          path: |
+            addon-runtime-evidence/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn

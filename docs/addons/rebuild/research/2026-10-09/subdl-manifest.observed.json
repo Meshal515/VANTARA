@@ -1,0 +1,36 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://subdl.strem.top/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "community.subdl.subtitles",
+    "name": "SubDL Subtitles",
+    "version": "1.2.2",
+    "resources": [
+      "subtitles"
+    ],
+    "types": [
+      "movie",
+      "series",
+      "anime",
+      "subtitles"
+    ],
+    "catalogs": [],
+    "idPrefixes": [
+      "tt",
+      "kitsu"
+    ],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": true
+    }
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}

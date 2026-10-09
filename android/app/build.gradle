@@ -34,6 +34,8 @@ def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 android {
     namespace "com.vantara.app"
     compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion "27.2.12479018"
+    externalNativeBuild { cmake { path file("src/main/cpp/CMakeLists.txt"); version "3.22.1" } }
 
     signingConfigs {
         release {
@@ -136,6 +138,8 @@ configurations.all {
 }
 
 repositories {
+    // MIT JNI bindings + BSD libtorrent, isolated to their official artifact host.
+    maven { url "https://dl.frostwire.com/maven"; content { includeGroup "com.frostwire" } }
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
@@ -166,6 +170,10 @@ dependencies {
 
     // ── مشغّل الأنمي: Media3 أصلي (لا WebView). الرابط + ترويساته يمرّان
     // عبر OkHttp نفسه فيحملان كوكيز Cloudflare وترويسات السيرفر ──
+    implementation "com.frostwire:jlibtorrent:2.0.12.9"
+    implementation "com.frostwire:jlibtorrent-android-arm64:2.0.12.9"
+    // Filtered out of production APK by its existing arm64 ABI filter.
+    implementation "com.frostwire:jlibtorrent-android-x86_64:2.0.12.9"
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
     implementation "androidx.media3:media3-exoplayer-dash:$media3Version"

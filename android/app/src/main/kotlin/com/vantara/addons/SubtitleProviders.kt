@@ -15,22 +15,36 @@ data class AddonSubtitle(val id: String, val provider: String, val lang: String,
 object SubtitleProviders {
     private val json = Json { ignoreUnknownKeys = true }
     fun providers(raw: String?): List<AddonSubtitleProvider> = runCatching { json.decodeFromString<List<AddonSubtitleProvider>>(raw ?: "[]").take(100) }.getOrDefault(emptyList())
-    fun videoId(raw: String?, episode: Float): Pair<String, String>? = runCatching {
+    fun videoId(raw: String?, episode: Float, preferImdb: Boolean = false): Pair<String, String>? = runCatching {
         val context = json.parseToJsonElement(raw ?: "{}").jsonObject
-        val imdb = context["externalIds"]?.jsonObject?.get("imdb")?.jsonPrimitive?.contentOrNull ?: return null
+        val externalIds = context["externalIds"]?.jsonObject
+        val kind = context["kind"]?.jsonPrimitive?.contentOrNull
+        val kitsu = if (preferImdb) null else externalIds?.get("kitsu")?.jsonPrimitive?.contentOrNull
+        if (kind == "anime" && context["format"]?.jsonPrimitive?.contentOrNull == "MOVIE" && kitsu != null && Regex("[0-9]+").matches(kitsu) && kitsu.toLongOrNull()?.let { it > 0 } == true) return "movie" to "kitsu:$kitsu"
+        if (kind == "anime" && kitsu != null && Regex("[0-9]+").matches(kitsu) && kitsu.toLongOrNull()?.let { it > 0 } == true && episode >= 1 && episode.toInt().toFloat() == episode) {
+            return "series" to "kitsu:$kitsu:${episode.toInt()}"
+        }
+        val imdb = externalIds?.get("imdb")?.jsonPrimitive?.contentOrNull ?: return null
         if (!Regex("tt\\d+").matches(imdb)) return null
-        val type = if (context["kind"]?.jsonPrimitive?.contentOrNull == "movie") "movie" else if (context["kind"]?.jsonPrimitive?.contentOrNull in listOf("series", "anime")) "series" else return null
+        val type = if (kind == "movie" || kind == "anime" && context["format"]?.jsonPrimitive?.contentOrNull == "MOVIE") "movie" else if (context["kind"]?.jsonPrimitive?.contentOrNull in listOf("series", "anime")) "series" else return null
         if (type == "movie") return type to imdb
         val season = context["season"]?.jsonPrimitive?.intOrNull ?: return null
         if (season < 0 || episode < 1 || episode.toInt().toFloat() != episode) return null
         type to "$imdb:$season:${episode.toInt()}"
     }.getOrNull()
-    fun discover(client: RemoteAddonClient, provider: AddonSubtitleProvider, context: String?, episode: Float, requestId: String): List<AddonSubtitle> {
-        val (type, id) = videoId(context, episode) ?: return emptyList()
-        if (provider.types.isNotEmpty() && type !in provider.types || provider.idPrefixes.isNotEmpty() && provider.idPrefixes.none { id.startsWith(it) }) return emptyList()
+    fun discover(client: RemoteAddonClient, provider: AddonSubtitleProvider, context: String?, episode: Float, requestId: String, stream: com.vantara.anime.stream.Candidate? = null): List<AddonSubtitle> {
+        val (type, id) = listOfNotNull(videoId(context, episode), videoId(context, episode, preferImdb = true)).firstOrNull { (type, id) ->
+            (provider.types.isEmpty() || type in provider.types) && (provider.idPrefixes.isEmpty() || provider.idPrefixes.any { id.startsWith(it) })
+        } ?: return emptyList()
         val base = RemoteAddonClient.publicUrl(provider.manifestUrl)
         require(base.encodedPath.endsWith("/manifest.json"))
-        val path = base.encodedPath.removeSuffix("/manifest.json") + "/subtitles/$type/" + java.net.URLEncoder.encode(id, "UTF-8") + ".json"
+        val extras = listOfNotNull(
+            stream?.filename?.let { "filename" to it },
+            stream?.videoHash?.let { "videoHash" to it },
+            stream?.videoSize?.let { "videoSize" to it.toString() },
+        ).joinToString("&") { (key, value) -> "$key=${java.net.URLEncoder.encode(value, "UTF-8")}" }
+        val path = base.encodedPath.removeSuffix("/manifest.json") + "/subtitles/$type/" + java.net.URLEncoder.encode(id, "UTF-8") +
+            (if (extras.isEmpty()) "" else "/$extras") + ".json"
         val endpoint = base.newBuilder().encodedPath(path).build()
         val raw = json.parseToJsonElement(client.request(endpoint.toString(), requestId)).jsonObject["subtitles"]?.jsonArray ?: return emptyList()
         require(raw.size <= 1000)

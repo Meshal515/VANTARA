@@ -65,4 +65,33 @@ class RemoteAddonTest {
         assertFalse(reached)
     }
 
+    @Test fun `native subtitle lookup includes selected release and preserves configured base query`() {
+        var path: String? = null
+        var query: String? = null
+        val client = RemoteAddonClient(OkHttpClient.Builder().addInterceptor { chain ->
+            path = chain.request().url.encodedPath
+            query = chain.request().url.query
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body("{\"subtitles\":[]}".toResponseBody()).build()
+        }.build())
+        val stream = com.vantara.anime.stream.Candidate("id", "addon|one", "One", "One", "video.test", "https://video.test/file.mp4", resolvedAt = 0, expiresAt = 1000,
+            filename = "Series S01E01 2160p.mkv", videoHash = "abcdef", videoSize = 123456)
+        SubtitleProviders.discover(client, AddonSubtitleProvider("key", "Sub", "https://addon.test/config/manifest.json?token=private"),
+            """{"kind":"series","externalIds":{"imdb":"tt1196946"},"season":1}""", 1f, "request", stream)
+        assertTrue(path!!.contains("tt1196946%3A1%3A1/filename=Series+S01E01+2160p.mkv&videoHash=abcdef&videoSize=123456.json"))
+        assertEquals("token=private", query)
+    }
+
+    @Test fun `Kitsu mapped anime subtitle identity is episode exact with no guessed IMDb season`() {
+        assertEquals("series" to "kitsu:1234:9", SubtitleProviders.videoId("""{"kind":"anime","externalIds":{"kitsu":"1234","anilist":"999"}}""", 9f))
+        assertNull(SubtitleProviders.videoId("""{"kind":"movie","externalIds":{"kitsu":"1234"}}""", 9f))
+        assertNull(SubtitleProviders.videoId("""{"kind":"anime","externalIds":{"kitsu":"title guessed"}}""", 9f))
+        assertNull(SubtitleProviders.videoId("""{"kind":"anime","externalIds":{"kitsu":"1234"}}""", 9.5f))
+    }
+
+    @org.junit.Test fun `anime movie subtitle identity is not mistaken for an episode`() {
+        org.junit.Assert.assertEquals("movie" to "kitsu:142", SubtitleProviders.videoId("""{"kind":"anime","format":"MOVIE","externalIds":{"kitsu":"142"}}""", 1f))
+    }
+    @org.junit.Test fun `IMDb anime movie subtitle fallback remains a movie without a season`() {
+        org.junit.Assert.assertEquals("movie" to "tt123456", SubtitleProviders.videoId("""{"kind":"anime","format":"MOVIE","externalIds":{"imdb":"tt123456"}}""", 1f))
+    }
 }

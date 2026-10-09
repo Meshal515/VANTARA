@@ -25,7 +25,7 @@ class RemoteAddonClient(base: OkHttpClient) {
     fun request(url: String, requestId: String, limit: Int = 2 * 1024 * 1024, timeoutMs: Long = 15000): String {
         require(limit in 1..2 * 1024 * 1024)
         val target = publicUrl(url)
-        val call = client.newCall(Request.Builder().url(target).get().header("Accept", "application/json, text/plain").build())
+        val call = client.newCall(Request.Builder().url(target).get().header("Accept", "application/json, application/vnd.api+json, text/plain").build())
         call.timeout().timeout(timeoutMs.coerceIn(1000, 45000), TimeUnit.MILLISECONDS)
         synchronized(cancelled) {
             require(calls.putIfAbsent(requestId, call) == null) { "طلب إضافة مكرر" }

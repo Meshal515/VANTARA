@@ -1,0 +1,17 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://subpool-diavelin.vercel.app/subtitles/movie/tt1254207.json",
+  "httpStatus": 200,
+  "response": {
+    "subtitles": [
+      {
+        "id": "subpool-setup-required",
+        "url": "https://subpool-diavelin.vercel.app/message/en/setup.srt",
+        "lang": "eng",
+        "label": "⚠ No subtitle source connected – open the addon settings"
+      }
+    ],
+    "cacheMaxAge": 0
+  }
+}

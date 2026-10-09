@@ -24,6 +24,15 @@ const row = (name, extra = {}) => ({
   bundled: true,
   ...extra,
 });
+it("opens native external catalog addons without the obsolete subtitles-only notice", () => {
+  setup();
+  const addon=row("Catalog",{bundled:false,protocol:"stremio",capabilities:["catalog","meta","streams"],compatibility:{apk:true,apkCapabilities:["catalog","meta","streams"]}});
+  const onOpenSource=vi.fn();
+  const view=renderAddonDetails({addon,registry:{runtimeName:"apk"},onOpenSource});
+  click(view,"فتح المصدر");
+  expect(onOpenSource).toHaveBeenCalledWith(addon);
+  expect(view.textContent).not.toContain("ترجمات مستقلة فقط");
+});
 it("filters cards and searches addon names without changing application section", () => {
   setup();
   const view = renderAddons({

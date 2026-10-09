@@ -50,6 +50,11 @@ data class Candidate(
     val audio: List<TrackRef> = emptyList(),
     val resolvedAt: Long,
     val expiresAt: Long,
+    val filename: String? = null,
+    val videoHash: String? = null,
+    val videoSize: Long? = null,
+    val duration: Long? = null,
+    val fps: Double? = null,
 )
 
 object StreamClassifier {

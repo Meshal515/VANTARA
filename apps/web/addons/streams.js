@@ -1,6 +1,32 @@
 import { publicUrl } from "./manifest.js";
 import { plainObject, boundedItems } from "./contracts.js";
-export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
+const cleanText = (value, max = 2000) => typeof value === "string" ? value.replace(/[\x00-\x1f]/g, " ").slice(0, max) : null;
+function requestHeaders(value) {
+  if (value == null) return {};
+  if (!plainObject(value) || Object.keys(value).length > 32) throw new Error("headers");
+  const out = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (!/^[!#$%&'*+.^_`|~0-9a-z-]{1,80}$/i.test(key) || typeof val !== "string" || val.length > 8192 || /[\x00-\x1f\x7f]/.test(val) ||
+      /^(host|connection|content-length|transfer-encoding|proxy-authorization|proxy-connection)$/i.test(key)) throw new Error("headers");
+    out[key] = val;
+  }
+  return out;
+}
+function torrentFields(stream) {
+  let magnet = null, infoHash = stream.infoHash;
+  if (typeof stream.url === "string" && stream.url.startsWith("magnet:")) {
+    const uri = new URL(stream.url);
+    if (stream.url.length > 16000) throw new Error("magnet");
+    const hash = uri.searchParams.getAll("xt").map(x => /^urn:btih:([a-f\d]{40})$/i.exec(x)?.[1]).find(Boolean);
+    if (!hash || infoHash && String(infoHash).toLowerCase() !== hash.toLowerCase()) throw new Error("magnet");
+    infoHash = hash;
+    magnet = stream.url;
+  }
+  if (typeof infoHash !== "string" || !/^[a-f\d]{40}$/i.test(infoHash) || stream.fileIdx != null && (!Number.isSafeInteger(stream.fileIdx) || stream.fileIdx < 0)) throw new Error("torrent");
+  const sources = (Array.isArray(stream.sources) ? stream.sources : []).slice(0, 100).filter(x => typeof x === "string" && x.length <= 2000 && !/[\x00-\x1f]/.test(x) && /^(tracker:(?:https?|udp):\/\/|dht:[a-f\d]{40}$)/i.test(x));
+  return { infoHash: infoHash.toLowerCase(), magnet, fileIdx: stream.fileIdx ?? null, sources };
+}
+export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName = "pwa", torrentSupported = false } = {}) {
   return boundedItems(raw).map((s, index) => {
     const base = {
       id: `${addonKey}|${index}`,
@@ -12,15 +38,17 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       reason: "نوع Stream غير مدعوم على هذه المنصة",
     };
     if (!plainObject(s)) return { ...base, reason: "بيانات Stream غير صالحة" };
-    if (s.infoHash) return { ...base, reason: "رابط تورنت يحتاج خدمة تحولّه إلى رابط فيديو مباشر؛ تشغيل PWA الحالي لا يدعمه" };
     if (s.externalUrl) return { ...base, reason: "هذه النتيجة تفتح موقعًا خارجيًا ولا توفر رابط فيديو مباشرًا" };
-    if (s.ytId || s.nzbUrl || s.archiveUrl || s.behaviorHints?.notWebReady)
+    const native = runtimeName === "apk";
+    const torrent = s.infoHash != null || typeof s.url === "string" && s.url.startsWith("magnet:");
+    if (s.ytId || s.nzbUrl || s.archiveUrl || (!native && s.behaviorHints?.notWebReady && !torrent))
       return base;
-    let url;
+    let url, torrentData;
     try {
-      url = publicUrl(s.url);
+      if (torrent) torrentData = torrentFields(s);
+      else url = publicUrl(s.url);
     } catch {
-      return { ...base, reason: "رابط الفيديو غير مسموح" };
+      return { ...base, reason: torrent ? "بيانات التورنت غير صالحة" : "رابط الفيديو غير مسموح" };
     }
     const hint = String(s.name ?? "") + " " + String(s.title ?? "");
     const quality =
@@ -34,7 +62,7 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       ? s.expiresAt
       : (() => {
           for (const k of ["expires", "exp", "e"]) {
-            const n = Number(url.searchParams.get(k));
+            const n = Number(url?.searchParams.get(k));
             if (n > 1000000000 && n < 100000000000) return n * 1000;
           }
           return null;
@@ -55,15 +83,23 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
           return [];
         }
       });
-    const needsHeaders =
-      s.behaviorHints?.proxyHeaders?.request ||
-      s.behaviorHints?.proxyHeaders?.response ||
-      (s.headers && Object.keys(s.headers).length > 0);
+    let headers;
+    try { headers = { ...requestHeaders(s.headers), ...requestHeaders(s.behaviorHints?.proxyHeaders?.request) }; }
+    catch { return { ...base, reason: "رؤوس الفيديو غير صالحة" }; }
+    const needsHeaders = Object.keys(headers).length > 0 || Boolean(s.behaviorHints?.proxyHeaders?.response);
+    const responseHeaders = s.behaviorHints?.proxyHeaders?.response;
+    const needsResponseTransform = native && responseHeaders != null &&
+      (!plainObject(responseHeaders) || Object.keys(responseHeaders).some(key => !/^access-control-/i.test(key)));
+    const unavailableTorrent = torrent && !(native && torrentSupported);
+    const unsupported = unavailableTorrent || needsResponseTransform || (!native && needsHeaders);
     return {
       ...base,
-      url: url.href,
+      ...(torrentData ?? { url: url.href }),
+      name: cleanText(s.name, 160),
+      title: cleanText(s.title ?? s.description),
+      headers: native ? headers : {},
       type:
-        s.type === "hls" || /\.m3u8(?:\?|$)/i.test(url.href)
+        torrent ? "torrent" : s.type === "hls" || /\.m3u8(?:\?|$)/i.test(url.href)
           ? "hls"
           : s.type === "dash" || /\.mpd(?:\?|$)/i.test(url.href)
             ? "dash"
@@ -81,10 +117,13 @@ export function normalizeStreams(raw, { addonKey, now = Date.now() } = {}) {
       status:
         expiresAt && expiresAt <= now
           ? "EXPIRED"
-          : needsHeaders
+          : unsupported
             ? "UNSUPPORTED"
             : "RESOLVED",
-      reason: needsHeaders
+      reason: unavailableTorrent
+        ? native ? "محرك التورنت غير متاح في هذه النسخة؛ استخدم رابطًا مباشرًا أو حدّث APK" : "تشغيل التورنت المباشر يحتاج APK أو خدمة تحولّه إلى فيديو مباشر"
+        : needsResponseTransform ? "هذه النتيجة تحتاج تعديل استجابة الفيديو غير المدعوم في المشغل الحالي"
+        : !native && needsHeaders
         ? "هذا Stream يتطلب رؤوس HTTP لا يدعمها تشغيل PWA الحالي"
         : expiresAt && expiresAt <= now
           ? "انتهت صلاحية الرابط"

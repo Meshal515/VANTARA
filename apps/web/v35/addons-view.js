@@ -1,4 +1,5 @@
 import { publicUrl } from "../addons/manifest.js";
+import { supportedCapabilities } from "../addons/assessment.js";
 import { glyphNode } from "./icons.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -40,9 +41,7 @@ const needsConfiguration = (a) =>
 const canOpen = (a, registry) =>
   a.enabled !== false &&
   !needsConfiguration(a) &&
-  a.compatibility?.[registry.runtimeName ?? "pwa"] !== false &&
-  (registry.runtimeName !== "apk" || a.bundled) &&
-  (a.capabilities ?? []).some((c) => ["catalog", "search", "home"].includes(c));
+  supportedCapabilities(a, registry.runtimeName ?? "pwa").some((c) => ["catalog", "search", "home"].includes(c));
 const health = (a) => {
   if (needsConfiguration(a))
     return {
@@ -191,18 +190,6 @@ export function renderAddonDetails({
         "addon-notice",
         addon.compatibility.reason ??
           "قدرات هذه الإضافة غير مدعومة في هذه المنصة.",
-      ),
-    );
-  if (
-    registry.runtimeName === "apk" &&
-    !addon.bundled &&
-    addon.compatibility?.apk
-  )
-    root.append(
-      node(
-        "p",
-        "addon-notice",
-        "متاح في APK: ترجمات مستقلة فقط. لا تدعم هذه الإضافة تشغيل الفيديو عبر مسار APK.",
       ),
     );
   let busy = false,

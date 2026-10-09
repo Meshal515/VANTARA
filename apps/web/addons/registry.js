@@ -229,9 +229,12 @@ export function createAddonRegistry({
     return mutate(async () => {
       const r = row(key);
       if (sessions || !r.staged) return false;
+      const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
+      if (checked.errors.length || checked.manifest.key !== key)
+        throw new Error("النسخة الجديدة غير متوافقة");
       const before = structuredClone(r);
       r.previous = { manifest: r.manifest, manifestRaw: r.manifestRaw, url: r.url };
-      Object.assign(r, r.staged, { staged: null, cacheEpoch: crypto.randomUUID() });
+      Object.assign(r, r.staged, { manifest: checked.manifest, staged: null, cacheEpoch: crypto.randomUUID() });
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
       health.reset(key);
       return true;
@@ -242,10 +245,11 @@ export function createAddonRegistry({
       const r = row(key);
       if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
       const prev = r.previous;
-      if (validateManifest(prev.manifestRaw, { origin: new URL(prev.url).origin }).errors.length)
+      const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin });
+      if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة السابقة غير متوافقة");
       const before = structuredClone(r);
-      Object.assign(r, prev, { previous: null, staged: null, cacheEpoch: crypto.randomUUID() });
+      Object.assign(r, prev, { manifest: checked.manifest, previous: null, staged: null, cacheEpoch: crypto.randomUUID() });
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
       health.reset(key);
     });
