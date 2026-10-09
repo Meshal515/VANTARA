@@ -91,8 +91,6 @@ function rank(s, list) {
 }
 
 async function runCopy(r, s, copy, episode) {
-  // Work discovery may retain an earlier episode. Requests and cache keys belong to this session.
-  if (copy.sourceId?.startsWith("addon|")) copy = { ...copy, episode: Number(episode), identity: copy.identity ? { ...copy.identity, episode: Number(episode) } : copy.identity };
   const source = sourcesOf(r).source(copy.sourceId);
   const def = sourcesOf(r).def(copy.sourceId);
   if (!source || !def) return;
