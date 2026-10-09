@@ -162,3 +162,19 @@ it("retries the same failed next page while keeping loaded cards", async () => {
   expect(seen).toEqual([1, 2, 2]);
   expect(view.textContent).toContain("Page 2");
 });
+it("shows a failing source clearly and heals itself with one automatic retry", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  let calls = 0;
+  const view = renderSourceMode({
+    addon: { key: "core|x", name: "X", capabilities: ["home"], contentTypes: ["manga"] },
+    state: { tab: "home", query: "", page: 1 },
+    adapter: { home: async () => { if (++calls === 1) throw new Error("timeout"); return { mangas: [{ url: "/a", title: "A" }], hasNextPage: false }; } },
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector(".addon-source-error").textContent).toContain("نعيد المحاولة");
+  await new Promise((r) => setTimeout(r, 2600));
+  expect(calls).toBe(2);
+  expect(view.querySelector(".addon-source-error")).toBeNull();
+  expect(view.querySelector(".up-card .up-title").textContent).toBe("A");
+  view.close();
+});

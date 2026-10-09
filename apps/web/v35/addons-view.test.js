@@ -472,3 +472,36 @@ it("refreshes installed version actions after activation and rollback", async ()
   await tick();
   expect(onBack).toHaveBeenCalledTimes(2);
 });
+it("groups installed sources by section with their real pulse and probes due sources by itself", async () => {
+  setup();
+  const { createSourcePulse } = await import("../addons/source-pulse.js");
+  const m = new Map();
+  const pulse = createSourcePulse({ storage: { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) } });
+  pulse.record("core|lek", "ok", { ms: 900 });
+  const probed = [];
+  const onOpenSource = vi.fn();
+  vi.useFakeTimers();
+  const view = renderAddons({
+    registry: { runtimeName: "apk", list: () => [
+      row("مانجا ليك", { key: "core|lek", capabilities: ["home", "search"] }),
+      row("WitAnime", { key: "core|wit", contentTypes: ["anime"], capabilities: ["home", "search"] }),
+      row("Torrentio", { key: "t", bundled: false, protocol: "stremio", capabilities: ["streams"], contentTypes: ["movie"] }),
+    ] },
+    pulse,
+    onOpenSource,
+    onProbe: async (a) => { probed.push(a.key); pulse.record(a.key, "failed", { error: "timeout" }); },
+  });
+  const groups = [...view.querySelectorAll(".addon-group-head h3")].map((h) => h.textContent);
+  expect(groups).toEqual(["مصادر المانجا", "مصادر الأنمي", "إضافات Stremio والخدمات"]);
+  const lek = view.querySelector('[data-key="core|lek"]');
+  expect(lek.querySelector(".addon-pulse").textContent).toContain("يعمل");
+  expect(view.querySelector('[data-key="core|wit"] .addon-pulse').textContent).toContain("لم يُفحص بعد");
+  await vi.advanceTimersByTimeAsync(800);
+  vi.useRealTimers();
+  expect(probed).toEqual(["core|wit"]); // السليم حديثًا لا يُطرق
+  expect(view.querySelector('[data-key="core|wit"] .addon-pulse').textContent).toContain("لا يستجيب");
+  expect(view.querySelector(".addon-summary").textContent).toContain("1 من 2 مصدر يعمل");
+  lek.querySelector(".addon-row-main").click();
+  expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({ key: "core|lek" }));
+  view.close();
+});

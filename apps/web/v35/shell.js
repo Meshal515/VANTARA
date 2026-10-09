@@ -3612,7 +3612,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      addonHubView = renderAddons({ registry: addons.registry, onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options) });
+      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
@@ -3625,7 +3625,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('utilityTitle').textContent = addon.name;
     showPage('utility');
     const adapter = addons.adapter(addon.key);
-    sourceView = renderSourceMode({ addon, adapter, state: sourceState, onBack: openAddons, onOpenWork: async (item) => {
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async (item) => {
       try {
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);

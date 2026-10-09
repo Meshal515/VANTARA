@@ -15,6 +15,7 @@
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { parseRelease, releaseScore, specLine, swarmText, swarmTier } from '../addons/release-info.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
@@ -1533,6 +1534,13 @@ export function createCinema(deps) {
       body.append(bar, scroll, foot);
 
       const tileNodes = new Map();
+      const releases = new Map();
+      const isAddonRoute = (r) => String(r.sourceId ?? '').startsWith('addon|');
+      const releaseOf = (r) => {
+        if (!isAddonRoute(r) || !r.label) return null;
+        if (!releases.has(r.id)) releases.set(r.id, parseRelease(r.sourceName ?? r.server ?? '', r.label));
+        return releases.get(r.id);
+      };
       const groupNodes = new Map();
       const groupMore = new Map();
       const routeGroups = new Map();
@@ -1573,22 +1581,43 @@ export function createCinema(deps) {
           }
           const selectable = routeSelectable(r);
           const pending = routePending(r);
-          b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}`;
+          const info = releaseOf(r);
+          const tier = info ? swarmTier(info.seeders) : null;
+          b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}${info ? ' an-srv--release' : ''}${tier ? ` an-srv--swarm-${tier}` : ''}`;
           b.disabled = pending;
-          b.querySelector('.an-srv-code').textContent = serverName(r);
-          b.querySelector('.an-srv-tag').textContent = r.runtimeReady === true ? 'تورنت' : routeSourceLabel(r);
+          // صف النسخة: الإضافة والموقع سطر صغير، لا اسم يتكرر بخط كبير في كل بطاقة
+          b.querySelector('.an-srv-code').textContent = info ? [info.provider ?? serverName(r), info.site].filter(Boolean).join(' · ') : serverName(r);
+          // نسخة إضافة (Torrentio وأشباهه): ما قالته عن نفسها بدل اسم الملف الخام
+          const tag = info && ([...info.hdr, info.source === 'CAM' ? 'CAM' : info.source].filter(Boolean).join(' · ') || null);
+          b.querySelector('.an-srv-tag').textContent = tag ?? (r.runtimeReady === true ? 'تورنت' : routeSourceLabel(r));
+          b.querySelector('.an-srv-tag').classList.toggle('an-srv-tag--cam', info?.source === 'CAM');
           const release = b.querySelector('.an-srv-release');
-          release.textContent = r.label ?? '';
-          release.hidden = !r.label;
-          b.title = r.label ?? '';
-          b.querySelector('.an-srv-state > span').textContent = pending ? 'نفحص التشغيل…' : r.runtimeReady === true && selectable ? 'يبدأ عند الاختيار' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
+          const spec = info ? specLine(info) : '';
+          release.textContent = spec || (r.label ?? '');
+          release.hidden = !release.textContent;
+          let langs = b.querySelector('.an-srv-langs');
+          const langText = info ? [info.arabic ? 'عربي' : null, info.multiAudio ? 'صوت متعدد' : null, info.multiSubs ? 'ترجمات متعددة' : null].filter(Boolean) : [];
+          if (langText.length) {
+            if (!langs) { langs = el('span', 'an-srv-langs'); release.after(langs); }
+            langs.replaceChildren(...langText.map((t) => el('i', t === 'عربي' ? 'an-srv-lang an-srv-lang--ar' : 'an-srv-lang', t)));
+          } else langs?.remove();
+          b.title = info?.filename ?? r.label ?? '';
+          const stateText = b.querySelector('.an-srv-state > span');
+          if (info && selectable && tier && !pending) {
+            // الرقم كبيرًا والوصف تحته: «412» ثم «مشارك · قوي»
+            const [count, rest] = swarmText(info).split(' مشارك');
+            stateText.replaceChildren(...(tier === 'dead' ? [el('small', null, 'لا مشاركين')] : [el('b', 'an-srv-seeds', count), el('small', null, `مشارك${rest}`)]));
+          } else stateText.textContent = pending ? 'نفحص التشغيل…' : r.runtimeReady === true && selectable ? 'يبدأ عند الاختيار' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
           b.onclick = () => selectable ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
           return b;
         };
         const isPending = routePending;
         const waiting = ready ? live.filter(isPending) : [];
         const addonCounts = new Map();
-        for (const r of live) {
+        // نسخ الإضافات داخل الجودة: الأقوى سربًا أولًا، وبلا مشاركين/CAM في «نسخ إضافية»
+        const ordered = [...live.filter((r) => !isAddonRoute(r)), ...live.filter(isAddonRoute).sort((a, b) => releaseScore(releaseOf(b)) - releaseScore(releaseOf(a)))];
+        const placed = new Map();
+        for (const r of ordered) {
           if (ready && isPending(r)) continue;
           let group = routeGroups.get(r.id);
           if (!group) { group = engine.groupRoutes([r])[0]?.[0] ?? 'السيرفرات'; routeGroups.set(r.id, group); }
@@ -1604,12 +1633,17 @@ export function createCinema(deps) {
             groupNodes.set(group, grid);
             list.insertBefore(g, deadFold.parentNode === list ? deadFold : null);
           }
-          const isAddon = String(r.sourceId ?? '').startsWith('addon|');
-          const count = (addonCounts.get(group) ?? 0) + (isAddon ? 1 : 0);
+          const isAddon = isAddonRoute(r);
+          const info = isAddon ? releaseOf(r) : null;
+          const weak = info && (swarmTier(info.seeders) === 'dead' || info.source === 'CAM');
+          const count = (addonCounts.get(group) ?? 0) + (isAddon && !weak ? 1 : 0);
           addonCounts.set(group, count);
-          const grid = isAddon && count > 6 ? groupMore.get(group).grid : groupNodes.get(group);
+          const grid = isAddon && (weak || count > 6) ? groupMore.get(group).grid : groupNodes.get(group);
           const b = tile(r);
-          if (b.parentNode !== grid) grid.append(b);
+          // الترتيب يتبع القوة؛ لا تُحرَّك إلا بطاقة خرجت عن مكانها
+          const prev = placed.get(grid) ?? null;
+          if (b.parentNode !== grid || b.previousElementSibling !== prev) prev ? prev.after(b) : grid.prepend(b);
+          placed.set(grid, b);
         }
         for (const r of waiting) { const b = tile(r); if (b.parentNode !== waitGrid) waitGrid.append(b); }
         if (waiting.length) {
