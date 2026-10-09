@@ -1,11 +1,11 @@
 import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ routes: [], listeners: new Map(), open: vi.fn(), pick: vi.fn(async (_s,id) => id) }));
+const state = vi.hoisted(() => ({ routes: [], session: null, listeners: new Map(), open: vi.fn(), pick: vi.fn(async (_s,id) => id) }));
 vi.mock('./motion.js', () => ({ pop() {}, progressFill() {}, reduced: () => true, revealIn() {}, stripIn() {} }));
 vi.mock('../lib/anime-engine.js', async original => ({
   ...await original(), available: () => true, sources: async () => [], onNeedsHuman() {},
   on: (event,fn) => { state.listeners.set(event,fn); return () => state.listeners.delete(event); },
-  withAddonCopies: async () => [], prepare: async args => ({session:args.session,routes:state.routes,done:true}),
+  withAddonCopies: async () => [], prepare: async args => { state.session=args.session; return {session:args.session,routes:state.routes,done:true}; },
   routes: async () => ({routes:state.routes,done:true}), episodes: async () => [],
   pick: state.pick, open: state.open, closeSession: async () => {},
 }));
@@ -44,6 +44,12 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   expect(more.open).toBeFalsy();
   expect(more.querySelector('summary').textContent).toContain('67');
   expect(more.querySelectorAll('.an-srv').length).toBe(67);
+  more.open=true;
+  state.listeners.get('route')({session:state.session,route:{...state.routes[72],state:'FAILED',runtimeReady:false}});
+  await vi.advanceTimersByTimeAsync(1);
+  expect(more.querySelector('summary').textContent).toContain('66');
+  expect(more.querySelectorAll('.an-srv').length).toBe(66);
+  expect(more.open).toBe(true);
   await first.onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.pick).toHaveBeenCalled();

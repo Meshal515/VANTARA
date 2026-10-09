@@ -1616,17 +1616,17 @@ export function createCinema(deps) {
           waitSummary.textContent = `تُجهَّز بالخلفية (${waiting.length})`;
           if (waitFold.parentNode !== list) list.insertBefore(waitFold, deadFold.parentNode === list ? deadFold : null);
         } else if (waitFold.parentNode === list) waitFold.remove();
+        if (dead.length) {
+          deadSummary.textContent = `غير متاح (${dead.length})`;
+          for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }
+          if (deadFold.parentNode !== list) list.append(deadFold);
+        }
         // مجموعة جودة صار كل ما فيها مطويًا: لا عنوان فوق شبكة فارغة
         for (const [group, grid] of groupNodes) {
           const extra = groupMore.get(group);
           extra.more.hidden = !extra.grid.children.length;
           extra.summary.textContent = `نسخ إضافية (${extra.grid.children.length})`;
           grid.parentNode.hidden = !grid.children.length && !extra.grid.children.length;
-        }
-        if (dead.length) {
-          deadSummary.textContent = `غير متاح (${dead.length})`;
-          for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }
-          if (deadFold.parentNode !== list) list.append(deadFold);
         }
       };
       const queuePaint = () => {
