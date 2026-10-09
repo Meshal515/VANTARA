@@ -384,3 +384,25 @@ it('keeps a playable sibling and legitimate empty results through the facade', a
   streams = [];
   expect(await s.streams({ ...server, url: 'tt1254207' })).toEqual([]);
 });
+it("gives anime/cinema core sources «آخر التحديثات» only when the source really has latest", async () => {
+  const defs = [
+    { id: "ok", label: "OkAnime", content: "anime", version: 1, domain: "ok.test" },
+    { id: "plain", label: "Plain", content: "cinema", version: 1, domain: "plain.test" },
+  ];
+  const r = {
+    ready: Promise.resolve(),
+    store: createStore({ indexedDB: null }),
+    registry: {
+      list: () => defs,
+      source: (id) => (id === "ok" ? { latest: async () => [], search: async () => [] } : { search: async () => [] }),
+      def: (id) => defs.find((d) => d.id === id),
+      call: async () => [],
+    },
+  };
+  const a = createAddonRuntime({ runtime: r, store: r.store, transport: {} });
+  await a.ready;
+  const caps = Object.fromEntries(a.registry.list().filter((m) => m.bundled).map((m) => [m.sourceId, m.capabilities]));
+  expect(caps.ok).toContain("home");
+  expect(caps.plain).not.toContain("home");
+  expect(caps.plain).toContain("search");
+});
