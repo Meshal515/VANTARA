@@ -12,7 +12,8 @@
 
 import { addonCopies } from '../addons/video.js';
 import { getAddonRuntime } from '../addons/runtime.js';
-import { webPlugin } from '../pwa/platform.js';
+import { nativeAddonPreparation } from '../addons/native-preparation.js';
+import { isNative, webPlugin } from '../pwa/platform.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
@@ -21,6 +22,36 @@ const bridge = () => globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('An
 export const available = () => bridge() !== null;
 
 let configured = null;
+const nativeAddonSessions = new Map();
+let nativeAddonLifecyclePlugin = null;
+let nativeAddonLifecycleHandle = null;
+function observeNativeAddonLifecycle(plugin) {
+  if (!plugin.addListener || nativeAddonLifecyclePlugin === plugin) return;
+  nativeAddonLifecycleHandle?.remove?.();
+  nativeAddonLifecyclePlugin = plugin;
+  const registered = plugin.addListener('sessionClosed', event => {
+    const state = nativeAddonSessions.get(event.session);
+    if (state && event.addonGeneration === state.generation) cancelNativeAddons(event.session);
+  });
+  Promise.resolve(registered).then(handle => {
+    if (nativeAddonLifecyclePlugin === plugin) nativeAddonLifecycleHandle = handle;
+    else handle?.remove?.();
+  }).catch(() => { if (nativeAddonLifecyclePlugin === plugin) nativeAddonLifecyclePlugin = null; });
+}
+function cancelNativeAddons(session) {
+  const state = nativeAddonSessions.get(session);
+  if (!state) return;
+  for (const job of state.jobs) job.cancel();
+  state.snapshot?.release();
+  nativeAddonSessions.delete(session);
+}
+function startNativeAddons(session, plan, plugin, state) {
+  if (nativeAddonSessions.get(session) !== state) return;
+  for (const source of plan.sourceIds) state.sources.add(source);
+  const job = plan.start(session, plugin, { addonGeneration: state.generation });
+  state.jobs.add(job);
+  void job.done.catch(() => {}).finally(() => state.jobs.delete(job));
+}
 
 /** يرسل البيان للمحرك مرة لكل تشغيل (أو من جديد إن طُلب). */
 export function configure({ force = false, fetchImpl = globalThis.fetch } = {}) {
@@ -129,6 +160,23 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
 export async function extend(session, copies) {
   const plugin = bridge();
   if (!plugin?.extend || !session || !copies?.length) return 0;
+  if (isNative() && plugin.appendAddonStreams && plugin.extendAddonSources) {
+    const state = nativeAddonSessions.get(session);
+    if (!state) return 0;
+    const native = copies.filter(c => !c.sourceId?.startsWith('addon|'));
+    const external = copies.filter(c => c.sourceId?.startsWith('addon|') && !state.sources.has(c.sourceId));
+    let added = native.length ? (await plugin.extend({ session, copies: native }).catch(() => null))?.added ?? 0 : 0;
+    if (nativeAddonSessions.get(session) !== state) return 0;
+    if (external.length) {
+      const runtime = await getAddonRuntime(); await runtime.ready;
+      if (nativeAddonSessions.get(session) !== state) return 0;
+      const plan = nativeAddonPreparation({ runtime, copies: external, episode: state.episode });
+      const reserved = await plugin.extendAddonSources({ session, sourceIds: plan.sourceIds, addonGeneration: state.generation });
+      if (nativeAddonSessions.get(session) !== state) return 0;
+      if (reserved?.added) { startNativeAddons(session, plan, plugin, state); added += reserved.added; }
+    }
+    return added;
+  }
   return (await plugin.extend({ session, copies }).catch(() => null))?.added ?? 0;
 }
 
@@ -280,21 +328,51 @@ export async function episodes(anime) {
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
 export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null }) {
+  const plugin = bridge();
+  const native = isNative() && plugin?.appendAddonStreams;
+  const id = native ? session ?? `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` : session;
+  let state;
+  if (native) {
+    cancelNativeAddons(id);
+    state = { episode, sources: new Set(), jobs: new Set(), generation: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` };
+    nativeAddonSessions.set(id, state);
+    observeNativeAddonLifecycle(plugin);
+  }
+  try {
   if (identity) copies = await withAddonCopies(copies, { ...identity, episode: Number(episode) });
+  if (native) {
+    if (nativeAddonSessions.get(id) !== state) return null;
+    const runtime = await getAddonRuntime(); await runtime.ready;
+    if (nativeAddonSessions.get(id) !== state) return null;
+    state.snapshot = runtime.registry.snapshot?.();
+    const plan = nativeAddonPreparation({ runtime, copies, episode });
+    await configure();
+    if (nativeAddonSessions.get(id) !== state) return null;
+    const out = await plugin.prepare({ copies: copies.filter(c => !c.sourceId?.startsWith('addon|')), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
+    if (nativeAddonSessions.get(id) !== state) return null;
+    if (out?.session === id) startNativeAddons(id, plan, plugin, state);
+    else cancelNativeAddons(id);
+    return out ? { ...out, copies } : null;
+  }
   const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, ...(session ? { session } : {}) });
   return out ? { ...out, copies: out.copies ?? copies } : null;
+  } catch (error) {
+    if (native && nativeAddonSessions.get(id) === state) cancelNativeAddons(id);
+    throw error;
+  }
 }
 
-/** إضافات الفيديو تستخدم الهوية المؤكدة فقط؛ مصادر APK تبقى في المحرك الأصلي. */
+/** إضافات الفيديو تستخدم الهوية المؤكدة فقط، وتلتحق بالمصادر الأصلية على المنصتين. */
 export async function withAddonCopies(copies, identity) {
-  if(globalThis.Capacitor?.getPlatform?.()==='android')return copies;
   const a=await getAddonRuntime();await a.ready;
-  const extra=addonCopies(a.registry,identity);
+  if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
+  identity = await a.enrichAnimeIdentity?.(identity) ?? identity;
+  const extra=addonCopies(a.registry,identity,a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
   return [...copies,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
 }
 /** First confirmed copies can prepare while the other discovery path remains pending. */
 export async function firstAvailableCopies(locator, addons) {
-  const found = Promise.resolve(locator);
+  const found = Promise.resolve(locator).then(x => x ?? { copies: [] });
   const extra = Promise.resolve(addons).then(copies => ({ copies }), () => ({ copies: [] }));
   return Promise.race([found.then(x => x.copies.length ? x : extra.then(y => y.copies.length ? y : x)), extra.then(x => x.copies.length ? x : found)]);
 }
@@ -341,7 +419,7 @@ export async function open(args) {
   return true;
 }
 
-export const closeSession = (session) => call('closeSession', { session });
+export const closeSession = (session) => { cancelNativeAddons(session); return call('closeSession', { session }); };
 
 /** ما أرسله المشغّل (لحظات وترشيحات) ولم يصل المجلس بعد. يُفرَّغ بالقراءة. */
 export async function outbox(userId) {

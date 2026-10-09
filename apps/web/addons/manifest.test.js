@@ -100,6 +100,20 @@ it("normalizes real Stremio resources and preserves advertised filtering", () =>
   expect(x.manifest.capabilities).toEqual(["subtitles"]);
   expect(x.manifest.resources[0].types).toEqual(["series"]);
 });
+it("supports each Stremio request capability on APK independently of torrent playback", () => {
+  const result = check({ id: "org.native", name: "Native", version: "1.0.0", types: ["movie", "series"], resources: ["catalog", "meta", "stream", "subtitles"], catalogs: [{ type: "movie", id: "top" }] });
+  expect(result.errors).toEqual([]);
+  expect(result.compatibility.apk).toBe(true);
+  expect(result.compatibility.apkCapabilities).toEqual(["catalog", "meta", "streams", "subtitles"]);
+});
+it("keeps Stremio opaque manifest IDs separate from VANTARA Remote v1 identifier rules", () => {
+ const id="stremio.addons.mediafusion|elfhosted";
+ const stremio={id,name:"MediaFusion",version:"1.0.0",types:["movie"],resources:["stream"],catalogs:[]};
+ expect(check(stremio).manifest).toMatchObject({id,key:`https://demo.test|${id}`});
+ expect(check({...native(),id}).errors).toContain("id");
+ for(const unsafe of [".","..","../other","other/work","bad\\id","bad\nidentity","a".repeat(161)])
+  expect(check({...stremio,id:unsafe}).errors).toContain("id");
+});
 it.each([
   "http://demo.test",
   "https://127.0.0.1/x",

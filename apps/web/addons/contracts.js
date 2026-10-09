@@ -21,6 +21,7 @@ export const LIMITS = Object.freeze({
   manifest: 256 * 1024,
   resource: 2 * 1024 * 1024,
   items: 1000,
+  videos: 10000,
 });
 export const PRODUCT_VERSION = "0.2.2";
 export function boundedItems(value) {

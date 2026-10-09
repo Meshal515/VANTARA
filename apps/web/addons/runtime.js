@@ -1,3 +1,4 @@
+import { createAnimeIdentityResolver, kitsuVideoRequest } from "./anime-mapping.js";
 import { isNative, webPlugin } from "../pwa/platform.js";
 import { createAddonCache } from "./cache.js";
 import { createAddonRegistry } from "./registry.js";
@@ -23,6 +24,10 @@ export function createAddonRuntime({
 } = {}) {
   if (!store) throw new Error("مخزن الإضافات غير متاح");
   const runtimeName = r.native ? "apk" : "pwa";
+  const capabilitiesFor = m => supportedCapabilities(m, runtimeName)
+    .filter(cap => cap !== "streams" || runtimeName !== "apk" || r.addonStreams !== false);
+  const streamRouteSupported = stream => (!stream.status || stream.status === "RESOLVED") &&
+    (runtimeName === "apk" ? stream.type !== "torrent" || r.torrentSupported === true : stream.type !== "dash" && stream.type !== "torrent");
   const core = [],
     registry = createAddonRegistry({
       store,
@@ -49,6 +54,7 @@ export function createAddonRuntime({
     );
   });
   const cache = createAddonCache({ store });
+  const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
@@ -60,13 +66,13 @@ export function createAddonRuntime({
       throw Object.assign(new Error("تحتاج الإضافة إلى إعداد قبل الاستخدام"), { code: "CONFIG_REQUIRED" });
     const raw =
       c.manifest.protocol === "stremio"
-        ? createStremioAdapter({ ...c, transport })
+        ? createStremioAdapter({ ...c, transport, runtimeName, torrentSupported: r.torrentSupported === true })
         : createRemoteAdapter({ ...c, transport });
     const out = {};
     for (const [method, fn] of Object.entries(raw)) {
       out[method] = async (...args) => {
         const cap = method === "request" ? args[0] : { series: "details" }[method] ?? method;
-        if (!supportedCapabilities(c.manifest, runtimeName).includes(cap))
+        if (!capabilitiesFor(c.manifest).includes(cap))
           throw Object.assign(new Error("هذه القدرة غير مدعومة في هذه المنصة"), { code: "UNSUPPORTED_RESOURCE" });
         const input = JSON.stringify(args, (k, v) =>
             k === "signal" || typeof v === "function" ? undefined : v,
@@ -91,7 +97,7 @@ export function createAddonRuntime({
           }))) throw Object.assign(new Error("الإضافة أعادت بيانات ترجمة غير صالحة"), { code: "INVALID_RESPONSE" });
           const items = Array.isArray(result) ? result : result?.items ?? result?.mangas ?? result?.chapters ?? result?.episodes ?? result?.pages;
           const usable = cap === "streams"
-            ? Array.isArray(result) && result.some((x) => x.url && x.type !== "dash" && (!x.status || x.status === "RESOLVED"))
+            ? Array.isArray(result) && result.some((x) => (x.url || x.infoHash || x.magnet) && streamRouteSupported(x))
             : !Array.isArray(items) || items.length > 0;
           const evidence = { version: c.manifest.version, cacheEpoch: c.cacheEpoch };
           if (usable)
@@ -156,7 +162,7 @@ export function createAddonRuntime({
       .list()
       .filter(
         (x) =>
-          !x.bundled && x.enabled && x.compatibility?.[runtimeName] !== false &&
+          !x.bundled && x.enabled && capabilitiesFor(x).length > 0 &&
           !(x.configuration?.required && !x.configuration.configured),
       );
   function def(id) {
@@ -237,6 +243,8 @@ export function createAddonRuntime({
                 externalIds: work.externalIds,
               },
             ];
+          const kitsu = kitsuVideoRequest(work.identity);
+          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: kitsu.type, externalIds: work.externalIds }];
           if (
             Number.isInteger(work.requestedSeason) &&
             Number.isInteger(work.episode)
@@ -284,7 +292,7 @@ export function createAddonRuntime({
       },
       async servers(ep) {
         // Catalog/meta facets enumerate works; only stream providers own routes.
-        if (!m.capabilities.includes("streams")) return [];
+        if (!capabilitiesFor(m).includes("streams")) return [];
         return [
           {
             key: ep.url,
@@ -297,21 +305,21 @@ export function createAddonRuntime({
         ];
       },
       async streams(server, onResult, { signal } = {}) {
-        if (!m.capabilities.includes("streams")) return [];
+        if (!capabilitiesFor(m).includes("streams")) return [];
         const list = await a.streams({
           type: server.type,
           videoId: server.url,
           signal,
         });
         const usable = list
-          .filter((x) => x.status === "RESOLVED" && x.type !== "dash")
+          .filter((x) => x.status === "RESOLVED" && streamRouteSupported(x))
           .map((x) => ({
             ...x,
             identity: {
               kind: server.type,
-              externalIds: server.episode.externalIds,
-              season: server.episode.season,
-              episode: server.episode.number,
+              externalIds: server.episode?.externalIds,
+              season: server.episode?.season,
+              episode: server.episode?.number,
               videoId: server.url,
               addonKey: m.key,
             },
@@ -322,7 +330,7 @@ export function createAddonRuntime({
           const rejected = list[0];
           throw new Error(rejected.reason ?? (rejected.type === "dash"
             ? "DASH غير مدعوم في مشغل PWA الحالي"
-            : "نوع الفيديو غير مدعوم في مشغل PWA الحالي"));
+            : "نوع الفيديو غير مدعوم في المشغل الحالي"));
         }
         onResult?.(usable);
         return usable;
@@ -334,10 +342,9 @@ export function createAddonRuntime({
       return [
         ...r.registry.list(content),
         ...external()
-          .filter(() => runtimeName !== "apk")
           .filter((m) =>
-            m.capabilities.some((c) =>
-              ["search", "streams", "pages"].includes(c),
+            capabilitiesFor(m).some((c) =>
+              ["catalog", "search", "streams", "pages"].includes(c),
             ),
           )
           .map((m) => def(`addon|${m.key}`))
@@ -380,7 +387,7 @@ export function createAddonRuntime({
     const initial = assessAddon(addon, runtimeName);
     if (["disabled", "configuration", "unsupported", "builtin"].includes(initial.level))
       return { checks: [{ capability: "addon", state: initial.level, message: initial.detail }], assessment: initial };
-    const supported = supportedCapabilities(addon, runtimeName);
+    const supported = capabilitiesFor(addon);
     const a = adapter(key, { diagnostic: true });
     let catalogItems = [];
     const check = async (capability, run) => {
@@ -389,7 +396,7 @@ export function createAddonRuntime({
         if (signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
         const result = await run();
         const h = registry.health.state(key, capability, runtimeName);
-        const unsupported = capability === "streams" && Array.isArray(result) && result.length > 0 && result.every((x) => x.status === "UNSUPPORTED" || x.type === "dash");
+        const unsupported = capability === "streams" && Array.isArray(result) && result.length > 0 && result.every((x) => !streamRouteSupported(x));
         checks.push({ capability, state: unsupported ? "unsupported" : h.state === "empty" ? "empty" : "passed", message: unsupported ? "استجابت الخدمة؛ صيغ التشغيل المتاحة غير مدعومة في هذه المنصة" : h.state === "empty" ? "استجابة صالحة؛ لا توجد نتائج متاحة لهذا الطلب" : "استجابة فعلية صالحة؛ لا تعني جاهزية تشغيل الفيديو" });
         return result;
       } catch (error) {
@@ -449,6 +456,11 @@ export function createAddonRuntime({
     subtitleProviders,
     diagnose,
     runtimeName,
+    async enrichAnimeIdentity(identity, options) {
+      await ready;
+      const eligible = registry.list().some(m => !m.bundled && m.enabled && m.protocol === "stremio" && capabilitiesFor(m).includes("streams") && !(m.configuration?.required && !m.configuration.configured) && ["series", "movie"].some(type => matchesStremioResource(m, "stream", type, "kitsu:1:1")));
+      return eligible ? animeIdentity.enrich(identity, options) : identity;
+    },
   };
 }
 export async function getAddonRuntime(r) {

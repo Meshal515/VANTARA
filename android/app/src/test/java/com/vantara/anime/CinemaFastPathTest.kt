@@ -167,4 +167,80 @@ class CinemaFastPathTest {
         p.job?.cancel()
         assertFalse(p.beginBatch())
     }
+    @Test fun `external addon reservation survives immediate empty native completion`() {
+        val p = prepared()
+        p.reserveAddonBatches(listOf("addon|one", "addon|two", "addon|one"))
+        p.finish()
+        assertFalse(p.done)
+        assertFalse(p.claimAddonBatch("addon|foreign"))
+        assertTrue(p.claimAddonBatch("addon|one"))
+        assertFalse(p.claimAddonBatch("addon|one"))
+        p.finish()
+        assertFalse(p.done)
+        assertTrue(p.claimAddonBatch("addon|two"))
+        p.finish()
+        assertTrue(p.done)
+    }
+
+    @Test fun `external addon results are refused after session closes`() {
+        val p = prepared()
+        p.reserveAddonBatches(listOf("addon|one"))
+        p.job?.cancel()
+        assertFalse(p.claimAddonBatch("addon|one"))
+    }
+
+    @Test fun `native torrent ticket becomes selectable without claiming an HTTP probe`() {
+        val p = prepared()
+        val c = cand("torrent", "torrent", 2160).copy(url = "vantara-torrent://ticket/file")
+        p.allowRuntimeCandidate(c.id)
+        p.report(ready("torrent", c))
+        assertEquals(c, p.best())
+        assertEquals(c, p.session.next())
+        assertNull(p.routeOf(c.id)?.probed)
+    }
+
+    @Test fun `late provider reservation does not restart native preparation or repeat an addon`() {
+        val p = prepared()
+        p.finish()
+        assertTrue(p.done)
+        assertEquals(1, p.reserveAddonBatches(listOf("addon|one")))
+        assertFalse(p.done)
+        assertEquals(0, p.reserveAddonBatches(listOf("addon|one")))
+        assertTrue(p.claimAddonBatch("addon|one"))
+        p.finish()
+        assertTrue(p.done)
+        assertEquals(0, p.reserveAddonBatches(listOf("addon|one")))
+    }
+
+    @Test fun `old addon generation cannot claim or reserve batches in reused session`() {
+        val p = prepared()
+        p.reserveAddonBatches(listOf("addon|one"))
+        assertFalse(p.claimAddonBatch("addon|one", "old-generation"))
+        assertEquals(0, p.reserveAddonBatches(listOf("addon|two"), "old-generation"))
+        assertTrue(p.claimAddonBatch("addon|one", p.addonGeneration))
+    }
+
+    @Test fun `concurrent session selection and route snapshots avoid reversed locks`() {
+        val p = prepared()
+        val c = cand("concurrent", "video.cdn", 1080)
+        p.report(ready("concurrent", c)); p.allowRuntimeCandidate(c.id)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val workers = java.util.concurrent.Executors.newFixedThreadPool(2) { action -> Thread(action).apply { isDaemon = true } }
+        try {
+            val routes = workers.submit { start.await(); repeat(10_000) { p.routes(); p.routeOf(c.id) } }
+            val selection = workers.submit { start.await(); repeat(10_000) { p.session.remaining; p.session.reorder { p.rank(it) } } }
+            start.countDown()
+            routes.get(5, java.util.concurrent.TimeUnit.SECONDS); selection.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } finally { workers.shutdownNow() }
+    }
+
+    @Test fun `session owns unreported torrent choices and refuses late registration after close`() {
+        val p = prepared()
+        assertTrue(p.ownTorrentTicket("vantara-torrent://unreported/file"))
+        p.job?.cancel()
+        assertEquals(listOf("vantara-torrent://unreported/file"), p.takeTorrentTickets())
+        assertTrue(p.takeTorrentTickets().isEmpty())
+        assertFalse(p.ownTorrentTicket("vantara-torrent://late/file"))
+    }
+
 }

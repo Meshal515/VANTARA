@@ -1,0 +1,35 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json",
+  "httpStatus": 200,
+  "response": {
+    "subtitles": [
+      {
+        "id": "5833874",
+        "lang": "eng",
+        "subtitleFileName": "big_buck_bunny.eng.srt",
+        "movieReleaseName": "big_buck_bunny",
+        "fpsMilli": 24000,
+        "season": 0,
+        "episode": 0,
+        "url": "https://example.com/observed-subtitle-0.srt"
+      },
+      {
+        "id": "5511948",
+        "lang": "ind",
+        "subtitleFileName": "Big Buck Bunny.srt",
+        "movieReleaseName": "Big Buck Bunny",
+        "fpsMilli": 30000,
+        "season": 0,
+        "episode": 0,
+        "url": "https://example.com/observed-subtitle-1.srt"
+      }
+    ]
+  },
+  "originalCount": 2,
+  "sanitization": {
+    "downloadUrls": "replaced with inert example.com placeholders",
+    "omittedFields": "provider fields unrelated to routing"
+  }
+}

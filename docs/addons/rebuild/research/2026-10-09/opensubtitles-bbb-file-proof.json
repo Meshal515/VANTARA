@@ -1,0 +1,12 @@
+{
+  "evidence": "LIVE_DOWNLOAD_PROBE_NOT_PLAYER_RENDER",
+  "observedDate": "2026-10-09",
+  "provider": "OpenSubtitles v3",
+  "workId": "tt1254207",
+  "language": "eng",
+  "httpStatus": 200,
+  "curlExit": 0,
+  "urlAndContentOmitted": true,
+  "bytes": 134,
+  "containsSrtTimestamp": true
+}

@@ -37,3 +37,10 @@ it('uses the same resource matching semantics and does not assign unknown work I
  expect(addonCopies({list:()=>[{...m,configuration:{required:true,configured:false}}]},identity)).toEqual([]);
  expect(addonCopies({list:()=>[m]},{kind:'series',addonKey:'x',videoId:'custom:one',season:1,episode:1})).toEqual([]);
 });
+it('fans out exact Kitsu anime IDs and leaves the AniList season out of the video ID', () => {
+ const anime={...m,resources:[{name:'stream',types:['series','movie'],idPrefixes:['kitsu:']}]};
+ const identity={kind:'anime',format:'TV',externalIds:{anilist:'21',kitsu:'12'},season:3,episode:1101};
+ expect(addonCopies({list:()=>[anime]},identity,'apk')[0]).toMatchObject({url:'kitsu:12',id:'kitsu:12',type:'series',identity});
+ expect(addonCopies({list:()=>[m]},identity,'apk')).toEqual([]);
+ expect(addonCopies({list:()=>[anime]},{...identity,format:'MOVIE'},'apk')[0].type).toBe('movie');
+});

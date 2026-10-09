@@ -1,0 +1,29 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://opensubtitles-v3.strem.io/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "org.stremio.opensubtitlesv3",
+    "name": "OpenSubtitles v3",
+    "version": "1.0.0",
+    "resources": [
+      "subtitles"
+    ],
+    "types": [
+      "movie",
+      "series"
+    ],
+    "catalogs": [],
+    "idPrefixes": [
+      "tt"
+    ]
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}

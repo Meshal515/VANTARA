@@ -1,0 +1,64 @@
+{
+  "evidence": "AUTHORED_SOURCE_CONTRACT_FIXTURE_NOT_LIVE_PLAYBACK",
+  "sourceUrl": "https://github.com/TheBeastLT/torrentio-scraper/blob/d812d87aa8f65a1fe0d4f15a66bee7ebdba9bdd0/addon/lib/streamInfo.js",
+  "notes": [
+    "Hashes, trackers, filenames, IDs and URLs below are inert authored placeholders.",
+    "Seeders occur in Torrentio display text, not a standard structured seeders field.",
+    "Local subtitle URL represents Stremio runtime reference; remote adapter must not admit it."
+  ],
+  "manifest": {
+    "id": "com.stremio.torrentio.addon",
+    "name": "Torrentio",
+    "version": "0.0.15",
+    "types": [
+      "movie",
+      "series",
+      "anime",
+      "other"
+    ],
+    "resources": [
+      {
+        "name": "stream",
+        "types": [
+          "movie",
+          "series",
+          "anime"
+        ],
+        "idPrefixes": [
+          "tt",
+          "kitsu"
+        ]
+      }
+    ],
+    "catalogs": [],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": false
+    }
+  },
+  "response": {
+    "streams": [
+      {
+        "name": "Torrentio\n4K HDR10",
+        "title": "Example.S01E01.2160p.WEB.H265.mkv\n👤 42 💾 4 GB",
+        "infoHash": "0123456789abcdef0123456789abcdef01234567",
+        "fileIdx": 0,
+        "sources": [
+          "tracker:udp://tracker.example.com:6969/announce",
+          "dht:0123456789abcdef0123456789abcdef01234567"
+        ],
+        "behaviorHints": {
+          "filename": "Example.S01E01.2160p.WEB.H265.mkv",
+          "bingeGroup": "torrentio|series|2160p"
+        },
+        "subtitles": [
+          {
+            "id": "local",
+            "lang": "ara",
+            "url": "http://localhost:11470/0123456789abcdef0123456789abcdef01234567/1/example.srt"
+          }
+        ]
+      }
+    ]
+  }
+}

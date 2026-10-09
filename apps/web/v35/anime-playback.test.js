@@ -5,7 +5,7 @@ vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() 
 vi.mock('../lib/anime-engine.js', async (original) => ({
   ...await original(), available: () => true, sources: async () => [], onNeedsHuman() {},
   on: (event, fn) => { state.listeners.set(event, fn); return () => state.listeners.delete(event); },
-  findWorkStream: state.find,
+  findWorkStream: state.find, withAddonCopies: async () => [],
   prepare: async () => ({ session: 'test-session', routes: [], done: false }),
   routes: async () => ({ routes: [], done: false }), best: state.best,
   pick: async (_session, route) => route === '480' ? 'stream-480' : 'stream-1080',

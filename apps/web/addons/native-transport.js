@@ -4,7 +4,7 @@ export function createNativeTransport(
   plugin = globalThis.Capacitor?.Plugins?.AddonEngine,
 ) {
   if (!plugin?.request || !plugin?.cancel)
-    throw new Error("يتطلب تحديث APK الذي يدعم إضافات الترجمة");
+    throw new Error("يتطلب تحديث APK الذي يدعم الإضافات");
   async function text(
     url,
     { signal, limit = 2 * 1024 * 1024, timeout = 15000 } = {},

@@ -1,0 +1,31 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://v3-cinemeta.strem.io/catalog/movie/top/search=Big%20Buck%20Bunny.json",
+  "httpStatus": 200,
+  "response": {
+    "metas": [
+      {
+        "name": "Big Hero 6",
+        "type": "movie",
+        "year": "2014",
+        "id": "tt2245084",
+        "releaseInfo": "2014"
+      },
+      {
+        "name": "Big Brother",
+        "type": "movie",
+        "year": "2018",
+        "id": "tt7336572",
+        "releaseInfo": "2018"
+      }
+    ]
+  },
+  "omittedFields": [
+    "display images",
+    "descriptions",
+    "external links",
+    "other records"
+  ],
+  "originalCount": 6
+}

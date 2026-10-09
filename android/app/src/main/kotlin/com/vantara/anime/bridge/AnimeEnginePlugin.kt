@@ -127,15 +127,40 @@ class AnimeEnginePlugin : Plugin() {
             preferredSourceId = call.getString("preferredSourceId"),
             preferredServer = call.getString("preferredServer"),
             probe = call.getBoolean("probe") ?: false,
+            addonGeneration = call.getString("addonGeneration") ?: java.util.UUID.randomUUID().toString(),
+            addonProviders = call.getArray("addonProviders")?.let { raw -> runCatching { json.decodeFromString<List<com.vantara.addons.NativeStremioProvider>>(raw.toString()) }.getOrDefault(emptyList()) }.orEmpty(),
+            addonSources = call.getArray("addonSources")?.let { ids -> (0 until ids.length()).mapNotNull { ids.optString(it).takeIf { it.startsWith("addon|") } } }.orEmpty(),
         )
         prep.listen { route ->
-            val event = JSObject().put("session", session).put("retryAt", retryAt(prep))
+            val event = JSObject().put("session", session).put("addonGeneration", prep.addonGeneration).put("retryAt", retryAt(prep))
             if (route == null) notifyListeners("prepared", event)
             else notifyListeners("route", event.put("route", route, com.vantara.anime.stream.Route.serializer()))
         }
-        JSObject().put("session", session)
+        JSObject().put("session", session).put("addonGeneration", prep.addonGeneration)
             .put("routes", prep.routes(), ListSerializer(com.vantara.anime.stream.Route.serializer()))
             .put("done", prep.done).put("retryAt", retryAt(prep))
+    }
+
+    @PluginMethod
+    fun capabilities(call: PluginCall) {
+        call.resolve(JSObject().put("addonStreams", true)
+            .put("torrentSupported", com.vantara.addons.torrent.TorrentEngine.nativeAvailable()))
+    }
+
+    @PluginMethod
+    fun extendAddonSources(call: PluginCall) {
+        val session = call.getString("session") ?: return call.reject("session مطلوب")
+        val ids = call.getArray("sourceIds") ?: return call.reject("sourceIds مطلوب")
+        call.resolve(JSObject().put("added", engine.extendAddonSources(session, (0 until ids.length()).map { ids.optString(it) }, call.getString("addonGeneration"))))
+    }
+
+    @PluginMethod
+    fun appendAddonStreams(call: PluginCall) = run(call) {
+        val session = call.getString("session") ?: error("session مطلوب")
+        val sourceId = call.getString("sourceId") ?: error("sourceId مطلوب")
+        val entries = call.getArray("streams") ?: JSArray()
+        JSObject().put("added", engine.appendAddonStreams(session, sourceId, call.getString("name") ?: "إضافة", json.parseToJsonElement(entries.toString()),
+            call.getObject("provider")?.let { runCatching { json.decodeFromString<com.vantara.addons.NativeStremioProvider>(it.toString()) }.getOrNull() }, call.getString("addonGeneration")))
     }
 
     private fun retryAt(prep: com.vantara.anime.stream.PreparedEpisode): Long =

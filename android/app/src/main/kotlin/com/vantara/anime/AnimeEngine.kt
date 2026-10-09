@@ -423,7 +423,7 @@ class AnimeEngine(context: Context) {
         return list
     }
 
-    private data class SessionRequest(val copies: List<SourceAnime>, val number: Float, val prefs: Preferences)
+    private data class SessionRequest(val copies: List<SourceAnime>, val number: Float, val prefs: Preferences, val addonProviders: List<com.vantara.addons.NativeStremioProvider> = emptyList())
     private val sessionRequests = ConcurrentHashMap<String, SessionRequest>()
 
     /**
@@ -454,15 +454,25 @@ class AnimeEngine(context: Context) {
         preferredServer: String? = null,
         /** افحص كل سيرفر جاهز بطلب قصير (السينما). */
         probe: Boolean = false,
+        addonSources: List<String> = emptyList(),
+        addonProviders: List<com.vantara.addons.NativeStremioProvider> = emptyList(),
+        requestAddons: Boolean = false,
+        addonGeneration: String = java.util.UUID.randomUUID().toString(),
     ): com.vantara.anime.stream.PreparedEpisode {
-        prepared.remove(sessionId)?.job?.cancel()
+        prepared.remove(sessionId)?.let(::releasePrepared)
         val session = PlaybackSession(emptyList(), health)
-        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health, limitedSourceId = warmSourceId, probe = probe)
+        val prep = com.vantara.anime.stream.PreparedEpisode(sessionId, copies, number, prefs, session, health, limitedSourceId = warmSourceId, probe = probe, addonGeneration = addonGeneration)
         sessions[sessionId] = session
-        sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
+        sessionRequests[sessionId] = SessionRequest(copies, number, prefs, addonProviders.filter { it.valid() }.take(128))
         prepared[sessionId] = prep
         // Own both warm-up and later expansion so closing the session cancels both.
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
+        prep.reserveAddonBatches(addonSources)
+        if (requestAddons) {
+            val providers = addonProviders.filter { it.valid() && (warmSourceId == null || it.sourceId == warmSourceId) && it.endpoint(number) != null }.distinctBy { it.sourceId }.take(128)
+            prep.reserveAddonBatches(providers.map { it.sourceId })
+            providers.forEach { launchAddonRequest(prep, it) }
+        }
         launchPreparation(prep, copies.filter { warmSourceId == null || it.sourceId == warmSourceId }, preferredSourceId ?: warmSourceId, preferredServer)
         return prep
     }
@@ -477,9 +487,59 @@ class AnimeEngine(context: Context) {
         val known = req.copies.map { it.sourceId to it.url }.toSet()
         val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
         if (fresh.isEmpty() || !prep.beginBatch()) return 0
-        sessionRequests[id] = req.copy(copies = req.copies + fresh)
+        sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
         launchPreparation(prep, fresh)
         return fresh.size
+    }
+
+    fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =
+        prepared[id]?.let { if (generation == null) 0 else it.reserveAddonBatches(sourceIds, generation) } ?: 0
+
+    fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
+
+    private fun launchAddonRequest(prep: com.vantara.anime.stream.PreparedEpisode, provider: com.vantara.addons.NativeStremioProvider) {
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            val raw = try {
+                withTimeout(46_000) { kotlinx.coroutines.runInterruptible { provider.streams(com.vantara.addons.nativeAddonClient(appContext), prep.number, "stream-${prep.id}-${provider.sourceId.hashCode()}") } }
+            } catch (_: TimeoutCancellationException) { kotlinx.serialization.json.JsonArray(emptyList()) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { kotlinx.serialization.json.JsonArray(emptyList()) }
+            if (prepared[prep.id] === prep) appendAddonStreams(prep.id, provider.sourceId, provider.name, raw, provider, prep.addonGeneration)
+        }
+    }
+
+    /** External HTTP protocol requests run in the addon adapter; playback stays Native. */
+    fun appendAddonStreams(id: String, sourceId: String, name: String, raw: kotlinx.serialization.json.JsonElement, provider: com.vantara.addons.NativeStremioProvider? = null, generation: String? = null): Int {
+        val prep = prepared[id] ?: return 0
+        if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return 0
+        if (provider?.sourceId == sourceId && provider.valid()) sessionRequests.computeIfPresent(id) { _, req ->
+            req.copy(addonProviders = (req.addonProviders.filter { it.sourceId != sourceId } + provider).take(128))
+        }
+        val list = com.vantara.addons.NativeAddonCandidates.parse(id, sourceId, name, raw, System.currentTimeMillis()) { stream ->
+            val torrentEngine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
+            val uri = torrentEngine.register(com.vantara.addons.NativeAddonCandidates.torrentRequest(stream))
+            if (prep.ownTorrentTicket(uri.toString())) uri.toString() else { torrentEngine.release(uri); null }
+        }
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            try {
+                if (prepared[id] !== prep || prep.job?.isActive != true) return@launch
+                for (c in list) {
+                    if (prepared[id] !== prep || prep.job?.isActive != true) break
+                    val report = com.vantara.anime.stream.RouteReport(sourceId, c.id, c.server, c.quality, c.variant,
+                        com.vantara.anime.stream.RouteState.READY, listOf(c))
+                    if (c.url.startsWith("vantara-torrent:")) prep.allowRuntimeCandidate(c.id)
+                    prep.report(report)
+                }
+                // All provider choices are visible immediately; bounded probes run independently.
+                if (prep.probe) coroutineScope {
+                    for (c in list.filterNot { it.url.startsWith("vantara-torrent:") }) launch {
+                        probeRoute(prep, com.vantara.anime.stream.RouteReport(sourceId, c.id, c.server, c.quality, c.variant,
+                            com.vantara.anime.stream.RouteState.READY, listOf(c)))
+                    }
+                }
+            } finally { prep.finish() }
+        }
+        return list.size
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
@@ -500,7 +560,7 @@ class AnimeEngine(context: Context) {
                     val t0 = System.nanoTime()
                     val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
                         kotlinx.coroutines.runInterruptible {
-                            runCatching { com.vantara.anime.stream.StreamProbe.check(probeClient, c) }.getOrDefault(false)
+                            runCatching { com.vantara.anime.stream.StreamProbe.check(if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient, c) }.getOrDefault(false)
                         }
                     } ?: false
                     val ms = (System.nanoTime() - t0) / 1_000_000
@@ -516,6 +576,9 @@ class AnimeEngine(context: Context) {
         val prep = prepared[id] ?: return false
         val req = sessionRequests[id] ?: return false
         if (prep.job?.isActive != true || !prep.beginFullPreparation()) return false
+        val providers = req.addonProviders.filter { it.sourceId != prep.limitedSourceId && it.endpoint(prep.number) != null }
+        prep.reserveAddonBatches(providers.map { it.sourceId })
+        providers.forEach { launchAddonRequest(prep, it) }
         launchPreparation(prep, req.copies.filter { it.sourceId != prep.limitedSourceId })
         return true
     }
@@ -565,10 +628,16 @@ class AnimeEngine(context: Context) {
 
     fun sessionCandidate(session: PlaybackSession, id: String): Candidate? = session.find(id)
 
+    private fun releasePrepared(prep: com.vantara.anime.stream.PreparedEpisode) {
+        prep.job?.cancel()
+        for (uri in prep.takeTorrentTickets()) com.vantara.addons.torrent.TorrentEngine.get(appContext).release(android.net.Uri.parse(uri))
+        com.vantara.anime.player.PlaybackEvents.emit("sessionClosed", org.json.JSONObject().put("session", prep.id).put("addonGeneration", prep.addonGeneration))
+    }
+
     fun closeSession(id: String) {
         sessions.remove(id)
         sessionRequests.remove(id)
-        prepared.remove(id)?.job?.cancel()
+        prepared.remove(id)?.let(::releasePrepared)
         health.flush()
     }
 

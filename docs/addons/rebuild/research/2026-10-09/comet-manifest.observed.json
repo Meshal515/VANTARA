@@ -1,0 +1,42 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://comet.elfhosted.com/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "comet.elfhosted.com",
+    "name": "Comet | ElfHosted",
+    "version": "2.0.0",
+    "resources": [
+      {
+        "name": "stream",
+        "types": [
+          "movie",
+          "series"
+        ],
+        "idPrefixes": [
+          "tt",
+          "kitsu"
+        ]
+      }
+    ],
+    "types": [
+      "movie",
+      "series",
+      "anime",
+      "other"
+    ],
+    "catalogs": [],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": false
+    }
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}

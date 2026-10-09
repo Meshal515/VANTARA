@@ -4,10 +4,10 @@ import { matchesStremioResource } from "./stremio-model.js";
 export function nextEpisodeCopies(copies = [], episode, identity = {}) {
   return copies.map(c => ({ ...c, ...(identity.kind === "series" ? { requestedSeason: identity.season ?? c.requestedSeason } : {}), ...(c.sourceId?.startsWith("addon|") ? { episode, identity: { ...c.identity, ...identity, episode } } : {}) }));
 }
-export function addonCopies(registry, identity) {
+export function addonCopies(registry, identity, runtimeName = "pwa") {
   // Cross-provider video fan-out needs a canonical work ID, not just one
   // provider's private episode ID. Its own source copy already retains that ID.
-  if (!/^tt\d+$/.test(identity?.externalIds?.imdb ?? "")) return [];
+  if (!/^tt\d+$/.test(identity?.externalIds?.imdb ?? "") && !(identity?.kind === "anime" && /^[1-9]\d*$/.test(String(identity.externalIds?.kitsu ?? "")))) return [];
   const input = subtitleRequest(identity);
   if (!input) return [];
   return registry
@@ -16,7 +16,7 @@ export function addonCopies(registry, identity) {
       (m) =>
         !m.bundled &&
         m.enabled &&
-        m.compatibility?.pwa !== false &&
+        m.compatibility?.[runtimeName] !== false &&
         m.protocol === "stremio" &&
         m.capabilities.includes("streams") &&
         !(m.configuration?.required && !m.configuration.configured) &&
@@ -24,8 +24,8 @@ export function addonCopies(registry, identity) {
     )
     .map((m) => ({
       sourceId: `addon|${m.key}`,
-      url: identity.externalIds.imdb,
-      id: identity.externalIds.imdb,
+      url: identity.kind === "anime" && identity.externalIds.kitsu ? `kitsu:${identity.externalIds.kitsu}` : identity.externalIds.imdb,
+      id: identity.kind === "anime" && identity.externalIds.kitsu ? `kitsu:${identity.externalIds.kitsu}` : identity.externalIds.imdb,
       type: input.type,
       title: m.name,
       requestedSeason: identity.season,

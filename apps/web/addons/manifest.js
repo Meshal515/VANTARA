@@ -4,7 +4,8 @@ import {
   PRODUCT_VERSION,
   plainObject,
 } from "./contracts.js";
-import { normalizeStremioManifest } from "./stremio-model.js";
+import { normalizeStremioManifest, safeStremioString } from "./stremio-model.js";
+import { STREMIO_NATIVE_CAPABILITIES } from "./assessment.js";
 /** قبول أسماء HTTPS العامة فقط؛ الطلب مباشر بلا cookies ولا proxy يتصل بعناوين داخلية. */
 export function publicUrl(input) {
   let u;
@@ -60,12 +61,17 @@ export function validateManifest(
   }
   if (!plainObject(raw))
     return { manifest: null, compatibility, errors: ["manifest"] };
-  if (typeof raw.id !== "string" || !/^[a-zA-Z0-9._-]{3,160}$/.test(raw.id))
+  const stremio = Array.isArray(raw.resources) && Array.isArray(raw.types);
+  // Stremio IDs are opaque provider identifiers, not Remote v1's DNS-style
+  // names. Keep them bounded and free of path/control characters.
+  const validId = stremio
+    ? safeStremioString(raw.id) && raw.id !== "." && raw.id !== ".." && !/[\/\\]/.test(raw.id)
+    : typeof raw.id === "string" && /^[a-zA-Z0-9._-]{3,160}$/.test(raw.id);
+  if (!validId)
     errors.push("id");
   if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.length > 160)
     errors.push("name");
   if (!version(raw.version)) errors.push("version");
-  const stremio = Array.isArray(raw.resources) && Array.isArray(raw.types);
   const protocol = stremio ? "stremio" : "vantara";
   let capabilities, resources, types, permissions, baseUrl, stremioModel;
   if (stremio) {
@@ -81,10 +87,8 @@ export function validateManifest(
       verification: false,
     };
     baseUrl = base;
-    compatibility.apk = capabilities.includes("subtitles");
-    compatibility.apkCapabilities = capabilities.includes("subtitles")
-      ? ["subtitles"]
-      : [];
+    compatibility.apkCapabilities = capabilities.filter(cap => STREMIO_NATIVE_CAPABILITIES.includes(cap));
+    compatibility.apk = compatibility.apkCapabilities.length > 0;
   } else {
     if (raw.protocolVersion !== 1) errors.push("protocolVersion");
     if (raw.runtime !== "remote") errors.push("runtime");

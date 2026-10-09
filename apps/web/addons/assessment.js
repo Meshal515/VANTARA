@@ -1,9 +1,13 @@
 const RECENT = 7 * 86400000;
 const state = (level, label, detail) => ({ level, label, detail });
+// These are data-only request adapters. A stream response is not first-frame
+// evidence; its HTTP/torrent route is checked by the playback runtime separately.
+export const STREMIO_NATIVE_CAPABILITIES = ["catalog", "meta", "streams", "subtitles"];
 export function supportedCapabilities(addon, runtimeName = "pwa") {
   if (addon.compatibility?.[runtimeName] === false) return [];
   if (runtimeName === "apk" && !addon.bundled)
-    return (addon.capabilities ?? []).filter((cap) => addon.protocol === "stremio" && cap === "subtitles" || addon.compatibility?.apkCapabilities?.includes(cap));
+    return (addon.capabilities ?? []).filter((cap) =>
+      (addon.compatibility?.apkCapabilities ?? (addon.protocol === "stremio" ? STREMIO_NATIVE_CAPABILITIES : [])).includes(cap));
   return addon.capabilities ?? [];
 }
 export function assessAddon(addon, runtimeName = "pwa", now = Date.now()) {

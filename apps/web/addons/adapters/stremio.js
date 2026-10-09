@@ -2,7 +2,7 @@ import { LIMITS, plainObject } from "../contracts.js";
 import { publicUrl } from "../manifest.js";
 import { normalizeStreams } from "../streams.js";
 import { catalogExtras, matchesStremioResource, safeStremioString, StremioError } from "../stremio-model.js";
-export function createStremioAdapter({ manifest, manifestUrl, transport }) {
+export function createStremioAdapter({ manifest, manifestUrl, transport, runtimeName = "pwa", torrentSupported = false }) {
   const endpoint = publicUrl(manifestUrl);
   function resource(name, type, id, extra = {}) {
     if (manifest.configuration?.required && !manifest.configuration.configured)
@@ -65,15 +65,15 @@ export function createStremioAdapter({ manifest, manifestUrl, transport }) {
       (out.meta.type && out.meta.type !== type)
     )
       throw new StremioError("INVALID_RESPONSE", "meta");
-    if (out.meta.videos != null && (!Array.isArray(out.meta.videos) || out.meta.videos.length > LIMITS.items)) throw new StremioError("INVALID_RESPONSE", "meta");
+    if (out.meta.videos != null && (!Array.isArray(out.meta.videos) || out.meta.videos.length > LIMITS.videos)) throw new StremioError("INVALID_RESPONSE", "meta");
     return { ...out.meta, ...(out.meta.videos ? { videos: out.meta.videos.filter((video) => plainObject(video) && safeStremioString(video.id, 2000)) } : {}) };
   }
-  async function streams({ type, videoId, signal, onResult }) {
-    const out = await request("stream", { type, id: videoId, signal });
+  async function streams({ type, videoId, extra = {}, signal, onResult }) {
+    const out = await request("stream", { type, id: videoId, extra, signal });
     const entries = items(out.streams, "stream", (item) =>
       ["url", "infoHash", "ytId", "externalUrl", "nzbUrl"].some((key) => typeof item[key] === "string" && item[key].trim().length) ||
       ["rarUrls", "zipUrls", "7zipUrls", "tgzUrls", "tarUrls"].some((key) => Array.isArray(item[key]) && item[key].length) ? item : null);
-    const list = normalizeStreams(entries, { addonKey: manifest.key });
+    const list = normalizeStreams(entries, { addonKey: manifest.key, runtimeName, torrentSupported });
     onResult?.(list);
     return list;
   }

@@ -1,0 +1,32 @@
+{
+  "checkedOn": "2026-10-09",
+  "wrapper": {
+    "repository": "https://github.com/frostwire/frostwire-jlibtorrent",
+    "release": "release/2.0.12.9",
+    "releasedOn": "2026-05-14T17:09:51Z",
+    "license": "MIT",
+    "coordinates": "com.frostwire:jlibtorrent:2.0.12.9",
+    "bundledOpenSslBuildScriptVersion": "3.6.0",
+    "bundledOpenSslLicense": "Apache-2.0; full LICENSE.txt in APK notice assets"
+  },
+  "androidArm64": {
+    "coordinates": "com.frostwire:jlibtorrent-android-arm64:2.0.12.9",
+    "upstreamJarSha256": "8e48600b74a9f497ce2c7e1e6a025ce550f039658baef986ad634298758d5b9d",
+    "elfLoadAlignmentBytes": [
+      16384,
+      16384,
+      16384
+    ],
+    "resolvedOfficialMavenJarSha256": "8e48600b74a9f497ce2c7e1e6a025ce550f039658baef986ad634298758d5b9d"
+  },
+  "ownByteCopyShim": {
+    "source": "android/app/src/main/cpp/torrent_bytes.c",
+    "elfLoadAlignmentBytes": [
+      16384,
+      16384
+    ]
+  },
+  "builtDebugApkZipalign16KiB": "PASS",
+  "deviceFirstFrame": "UNVERIFIED until TorrentPlaybackDeviceTest executes",
+  "nativeMagnetDhtOnPublicSwarm": "UNVERIFIED"
+}

@@ -1,3 +1,4 @@
+import { kitsuVideoRequest } from "./anime-mapping.js";
 import { publicUrl } from "./manifest.js";
 import { boundedItems } from "./contracts.js";
 import { runProgressive } from "./scheduler.js";
@@ -10,16 +11,17 @@ export const language = (v) =>
 export function subtitleRequest(identity, stream = {}) {
   const imdb = identity?.externalIds?.imdb;
   const providerId = identity?.addonKey && typeof identity.videoId === "string" && identity.videoId.length <= 2000 && !/[\x00-\x1f]/.test(identity.videoId) ? identity.videoId : null;
-  if (!providerId && !/^tt\d+$/.test(imdb ?? "")) return null;
+  const kitsu = !providerId && kitsuVideoRequest(identity);
+  if (!providerId && !kitsu && !/^tt\d+$/.test(imdb ?? "")) return null;
   const type =
-    identity.kind === "movie"
+    kitsu?.type ?? (identity.kind === "movie"
       ? "movie"
       : ["series", "anime"].includes(identity.kind)
         ? "series"
-        : null;
+        : null);
   if (!type) return null;
   if (
-    !providerId && type === "series" &&
+    !providerId && !kitsu && type === "series" &&
     (!Number.isInteger(identity.season) ||
       identity.season < 0 ||
       !Number.isInteger(identity.episode) ||
@@ -32,7 +34,7 @@ export function subtitleRequest(identity, stream = {}) {
   return {
     type,
     videoId:
-      providerId ?? (type === "movie"
+      providerId ?? kitsu?.videoId ?? (type === "movie"
         ? imdb
         : `${imdb}:${identity.season}:${identity.episode}`),
     extra,

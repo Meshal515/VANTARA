@@ -66,3 +66,26 @@ it('preserves real subtitle file matching hints and refuses response-header-only
  const [s]=normalizeStreams([{url:'https://cdn.test/a.mp4',behaviorHints:{filename:'real.mkv',videoHash:'0123456789abcdef',videoSize:12345,proxyHeaders:{response:{'Access-Control-Allow-Origin':'*'}}}}],{addonKey:'a'});
  expect(s).toMatchObject({filename:'real.mkv',videoHash:'0123456789abcdef',videoSize:12345,status:'UNSUPPORTED'});
 });
+
+it('routes native HTTP request headers and browser-only hints without pretending PWA can proxy them', () => {
+ const raw=[{url:'https://cdn.test/movie.mkv', name:'2160p HDR', behaviorHints:{notWebReady:true,proxyHeaders:{request:{Referer:'https://provider.test/', 'User-Agent':'Player'},response:{'Access-Control-Allow-Origin':'*'}}}}];
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'apk'})[0]).toMatchObject({status:'RESOLVED',type:'mp4',quality:2160,headers:{Referer:'https://provider.test/','User-Agent':'Player'}});
+ expect(normalizeStreams(raw,{addonKey:'a'})[0].status).toBe('UNSUPPORTED');
+});
+it('keeps native torrent file identity and peer hints only when a real torrent runtime is present', () => {
+ const infoHash='0123456789abcdef0123456789abcdef01234567';
+ const raw=[{infoHash,fileIdx:3,sources:['tracker:udp://tracker.example.com:80','dht:'+infoHash],name:'Torrentio 4K',title:'Release',behaviorHints:{filename:'release.mkv',videoSize:123456,notWebReady:true}}];
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'apk',torrentSupported:true})[0]).toMatchObject({status:'RESOLVED',type:'torrent',infoHash,fileIdx:3,filename:'release.mkv',quality:2160,sources:raw[0].sources});
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'apk'})[0].status).toBe('UNSUPPORTED');
+ expect(normalizeStreams(raw,{addonKey:'a',torrentSupported:true})[0].status).toBe('UNSUPPORTED');
+});
+it('does not confuse torrent hash with the OpenSubtitles movie hash and isolates malformed native fields', () => {
+ const infoHash='0123456789abcdef0123456789abcdef01234567';
+ const out=normalizeStreams([{infoHash,fileIdx:-1},{infoHash:'garbage'},{url:'https://cdn.test/a.mp4',headers:{Referer:'bad\r\nInjected: x'}},{infoHash}],{addonKey:'a',runtimeName:'apk',torrentSupported:true});
+ expect(out.slice(0,3).every(x=>x.status==='UNSUPPORTED')).toBe(true);
+ expect(out[3]).toMatchObject({status:'RESOLVED',type:'torrent',fileIdx:null,videoHash:null});
+});
+it('accepts a valid magnet result natively and preserves the selected file index', () => {
+ const hash='0123456789abcdef0123456789abcdef01234567';
+ expect(normalizeStreams([{url:`magnet:?xt=urn:btih:${hash}&tr=udp%3A%2F%2Ftracker.example.com%3A80`,fileIdx:0}],{addonKey:'a',runtimeName:'apk',torrentSupported:true})[0]).toMatchObject({type:'torrent',status:'RESOLVED',infoHash:hash,fileIdx:0});
+});

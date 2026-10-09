@@ -146,3 +146,19 @@ it("does not expose arbitrary transport status data or fail on a null rejection"
   const b = make(raw(), async () => { throw null; });
   await expect(b.subtitles({ type: "movie", videoId: "tt1" })).rejects.toMatchObject({ code: "REQUEST_FAILED" });
 });
+it('uses native stream capabilities and forwards valid stream extraArgs on configured endpoints', async () => {
+ let request;
+ const adapter=createStremioAdapter({manifest,manifestUrl:'https://addon.test/settings/manifest.json?token=s',runtimeName:'apk',torrentSupported:true,transport:{json:async url=>{request=url;return {streams:[{infoHash:'0123456789abcdef0123456789abcdef01234567',fileIdx:2}]};}}});
+ const [stream]=await adapter.streams({type:'series',videoId:'tt1196946:1:1',extra:{filename:'release.mkv',videoSize:100}});
+ expect(stream).toMatchObject({type:'torrent',fileIdx:2,status:'RESOLVED'});
+ expect(decodeURIComponent(new URL(request).pathname)).toContain('/settings/stream/series/tt1196946:1:1/filename=release.mkv&videoSize=100.json');
+ expect(new URL(request).searchParams.get('token')).toBe('s');
+});
+it('allows long-running series metadata beyond 1000 episodes while bounding the list separately', async()=>{
+ const manifest={key:'x',types:['series'],resources:[{name:'meta',types:['series']}],catalogs:[]};
+ const videos=Array.from({length:1200},(_,i)=>({id:`kitsu:12:${i+1}`,episode:i+1}));
+ const a=createStremioAdapter({manifest,manifestUrl:'https://addon.test/manifest.json',transport:{json:async()=>({meta:{id:'kitsu:12',type:'series',videos}})}});
+ expect((await a.meta({type:'series',id:'kitsu:12'})).videos).toHaveLength(1200);
+ videos.push(...Array.from({length:8801},(_,i)=>({id:String(i)})));
+ await expect(a.meta({type:'series',id:'kitsu:12'})).rejects.toThrow();
+});

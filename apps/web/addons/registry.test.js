@@ -185,3 +185,30 @@ it('keeps lifecycle mutations in memory consistent when storage rejects them',as
  await expect(r.pin(one.key,true)).rejects.toThrow();expect(r.list()[0].pinned).toBe(false);
  await expect(r.remove(one.key)).rejects.toThrow();expect(r.list()).toHaveLength(1);
 });
+it.each(['rollback','activateStaged'])('renormalizes older saved APK capability policy during %s',async(method)=>{
+ const store=createStore({indexedDB:null});let version='1.0.0';
+ const opts={store,runtimeName:'apk',transport:{json:async()=>raw(version)}};
+ const r=createAddonRegistry(opts);await r.ready;const one=await r.install(await r.inspect('https://addon.test/configured/manifest.json'));
+ version='2.0.0';await r.stage(one.key);
+ if(method==='rollback')await r.activateStaged(one.key);
+ const saved=(await store.get('state','addons.v1')).value;
+ const target=method==='rollback'?saved[0].previous:saved[0].staged;
+ target.manifest.compatibility={pwa:true,apk:false,apkCapabilities:[]};
+ await store.set('state','addons.v1',saved);
+ const next=createAddonRegistry(opts);await next.ready;await next[method](one.key);
+ expect(next.list()[0].compatibility).toMatchObject({apk:true,apkCapabilities:['streams']});
+ expect(next.connection(one.key).manifestUrl).toContain('/configured/manifest.json');
+});
+it('rejects corrupt saved staged data before it can replace the active provider',async()=>{
+ const store=createStore({indexedDB:null});let version='1.0.0';const opts={store,transport:{json:async()=>raw(version)}};
+ const r=createAddonRegistry(opts);await r.ready;const one=await r.install(await r.inspect('https://addon.test/manifest.json'));version='2.0.0';await r.stage(one.key);
+ const saved=(await store.get('state','addons.v1')).value;saved[0].staged.manifestRaw={...raw('2.0.0'),id:'different.provider'};await store.set('state','addons.v1',saved);
+ const next=createAddonRegistry(opts);await next.ready;await expect(next.activateStaged(one.key)).rejects.toThrow('متوافقة');expect(next.list()[0].version).toBe('1.0.0');
+});
+it('round-trips pipe-bearing Stremio IDs through install, connection and persisted reload',async()=>{
+ const store=createStore({indexedDB:null});const id='stremio.addons.mediafusion|elfhosted';const opts={store,runtimeName:'apk',transport:{json:async()=>({...raw(),id})}};
+ const r=createAddonRegistry(opts);await r.ready;const one=await r.install(await r.inspect('https://mediafusion.test/private-config/manifest.json'));
+ expect(one.key).toBe(`https://mediafusion.test|${id}`);
+ const next=createAddonRegistry(opts);await next.ready;expect(next.list()[0].key).toBe(one.key);expect(next.connection(one.key).manifest.id).toBe(id);
+ expect(JSON.stringify(next.list())).not.toContain('private-config');
+});

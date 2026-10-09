@@ -1,0 +1,21 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://v3-cinemeta.strem.io/meta/movie/tt1254207.json",
+  "httpStatus": 200,
+  "response": {
+    "meta": {
+      "name": "Big Buck Bunny",
+      "type": "movie",
+      "year": "2008",
+      "id": "tt1254207",
+      "releaseInfo": "2008"
+    }
+  },
+  "omittedFields": [
+    "display images",
+    "descriptions",
+    "external links",
+    "other records"
+  ]
+}

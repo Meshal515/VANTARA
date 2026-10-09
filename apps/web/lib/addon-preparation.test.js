@@ -1,6 +1,6 @@
 import {expect,it,vi} from 'vitest';
 vi.mock('../addons/runtime.js',()=>({getAddonRuntime:async()=>({ready:Promise.resolve(),registry:{list:()=>[{key:'demo',enabled:true,protocol:'stremio',capabilities:['streams'],resources:[{name:'stream',types:['series']}],types:['series'],idPrefixes:[],name:'Demo'}]}})}));
-vi.mock('../pwa/platform.js',()=>({webPlugin:()=>null}));
+vi.mock('../pwa/platform.js',()=>({webPlugin:()=>null,isNative:()=>false}));
 import {prepare,firstAvailableCopies} from './anime-engine.js';
 it('returns effective addon copies to the caller for subsequent episodes',async()=>{
  const plugin={configure:async()=>({ok:true}),prepare:async()=>({session:'s',routes:[]})};globalThis.Capacitor={Plugins:{AnimeEngine:plugin}};vi.stubGlobal('fetch',async()=>({json:async()=>({})}));

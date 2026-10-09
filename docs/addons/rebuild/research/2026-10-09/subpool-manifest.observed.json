@@ -1,0 +1,38 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://subpool-diavelin.vercel.app/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "community.diavelin.subpool",
+    "name": "SubPool by Diavelin",
+    "version": "3.15.0",
+    "resources": [
+      "subtitles"
+    ],
+    "types": [
+      "movie",
+      "series",
+      "anime"
+    ],
+    "catalogs": [],
+    "idPrefixes": [
+      "tt",
+      "kitsu",
+      "mal",
+      "anilist",
+      "anidb"
+    ],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": true
+    }
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}

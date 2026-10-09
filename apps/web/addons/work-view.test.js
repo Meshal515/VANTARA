@@ -68,3 +68,9 @@ it('retains the provider identity when anime has only a MAL ID, and fails clearl
  expect(decodeURIComponent(w.id)).toContain('provider:');expect(w.externalIds.mal).toBe('42');
  await expect(restoreSourceWork(`anime:${w.id}`,{addons:{registry:{list:()=>[]}}})).rejects.toThrow('ثبّت');
 });
+it('restores provider-local work references without splitting an opaque Stremio addon identifier',async()=>{
+ const {restoreSourceWork}=await import('./work-view.js');const addon={key:'https://addon.test|stremio.addons.mediafusion|elfhosted',protocol:'stremio',enabled:true,contentTypes:['movie'],capabilities:['meta']};
+ const original=sourceWorkModel({id:'mf:123',title:'Local film',type:'movie'},{addon});const keys=[];
+ const restored=await restoreSourceWork(`cinema:${original.id}`,{addons:{registry:{list:()=>[addon]},adapter:key=>{keys.push(key);return {meta:async x=>({id:x.id,type:'movie',name:'Local film'})};},sources:{source:()=>({episodes:async()=>[{number:1}]})}}});
+ expect(restored._sourceCopy.id).toBe('mf:123');expect(keys).toEqual([addon.key]);expect(restored.id).toBe(original.id);
+});

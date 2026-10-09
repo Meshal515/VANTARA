@@ -22,6 +22,7 @@ class PreparedEpisode(
     val limitedSourceId: String? = null,
     /** يُفحص كل سيرفر جاهز بطلب قصير (السينما). الأنمي بلا فحص كما كان. */
     val probe: Boolean = false,
+    val addonGeneration: String = java.util.UUID.randomUUID().toString(),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val primaryQuality = HashMap<String, Int?>()
@@ -31,6 +32,10 @@ class PreparedEpisode(
     private val candidateProbes = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private val probing = HashSet<String>()
     private val listeners = CopyOnWriteArrayList<(Route?) -> Unit>()
+    private val torrentTickets = HashSet<String>()
+    private val pendingAddons = HashSet<String>()
+    private val completedAddons = HashSet<String>()
+    private val runtimeCandidates = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var pendingBatches = 1
     private var fullPreparation = limitedSourceId == null
 
@@ -38,11 +43,11 @@ class PreparedEpisode(
     @Volatile var done = false
         private set
 
-    init { if (probe) session.acceptsCandidate = { candidateProbes[it.id] == true } }
+    init { if (probe) session.acceptsCandidate = { candidateProbes[it.id] == true || it.id in runtimeCandidates } }
 
-    fun routes(): List<Route> = synchronized(this) { byId.values.map(::withPlaybackState) }
+    fun routes(): List<Route> = synchronized(this) { byId.values.toList() }.map(::withPlaybackState)
 
-    fun routeOf(candidateId: String): Route? = synchronized(this) { routeOfCandidate[candidateId]?.let(byId::get)?.let(::withPlaybackState) }
+    fun routeOf(candidateId: String): Route? = synchronized(this) { routeOfCandidate[candidateId]?.let(byId::get) }?.let(::withPlaybackState)
 
     fun candidate(id: String): Candidate? = synchronized(this) { candidates[id] }
 
@@ -166,6 +171,41 @@ class PreparedEpisode(
         true
     }
 
+    /** Reserve before native preparation launches, including an empty native source batch. */
+    fun reserveAddonBatches(sourceIds: List<String>, generation: String = addonGeneration): Int = synchronized(this) {
+        if (generation != addonGeneration || job?.isActive != true) return@synchronized 0
+        val fresh = sourceIds.asSequence().filter { it.startsWith("addon|") && it.length <= 4096 }
+            .distinct().filter { it !in pendingAddons && it !in completedAddons }.take(128).toList()
+        pendingAddons.addAll(fresh)
+        pendingBatches += fresh.size
+        if (fresh.isNotEmpty()) done = false
+        fresh.size
+    }
+
+    /** A provider can complete once; foreign/duplicate/closed-session results are ignored. */
+    fun claimAddonBatch(sourceId: String, generation: String = addonGeneration): Boolean = synchronized(this) {
+        if (generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
+        completedAddons.add(sourceId)
+        true
+    }
+
+    /** Own choices before they are reported, so cancellation cannot leak unselected tickets. */
+    fun ownTorrentTicket(uri: String): Boolean = synchronized(this) {
+        if (job?.isActive != true) return@synchronized false
+        torrentTickets.add(uri)
+        true
+    }
+
+    fun takeTorrentTickets(): List<String> = synchronized(this) {
+        torrentTickets.toList().also { torrentTickets.clear() }
+    }
+
+    /** A native torrent ticket is preparable; it is not an HTTP probe or a first frame. */
+    fun allowRuntimeCandidate(candidateId: String) {
+        runtimeCandidates.add(candidateId)
+        session.changes.value = session.changes.value + 1
+    }
+
     /** Promote a warm session once; its existing candidates and player remain intact. */
     fun beginFullPreparation(): Boolean = synchronized(this) {
         if (fullPreparation) return@synchronized false
@@ -228,7 +268,7 @@ class PreparedEpisode(
 
     /** Cinema's search/extraction result is not a playable stream until its probe succeeds. */
     fun playable(list: List<Candidate>): List<Candidate> = if (!probe) list else synchronized(this) {
-        list.filter { candidateProbes[it.id] == true }
+        list.filter { candidateProbes[it.id] == true || it.id in runtimeCandidates }
     }
 
     fun best(preferCode: String? = null): Candidate? = rank(playable(synchronized(this) { candidates.values.toList() }), preferCode).firstOrNull()

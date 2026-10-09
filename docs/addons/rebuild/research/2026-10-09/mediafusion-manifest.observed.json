@@ -1,0 +1,62 @@
+{
+  "evidence": "LIVE_CAPTURE_MINIMIZED",
+  "observedDate": "2026-10-09",
+  "sourceUrl": "https://mediafusion.elfhosted.com/manifest.json",
+  "httpStatus": 200,
+  "manifest": {
+    "id": "stremio.addons.mediafusion|elfhosted",
+    "name": "MediaFusion | ElfHosted",
+    "version": "6.1.6",
+    "resources": [
+      "catalog",
+      {
+        "idPrefixes": [
+          "tt",
+          "tmdb:",
+          "tvdb:",
+          "mal:",
+          "mf",
+          "dl"
+        ],
+        "name": "stream",
+        "types": [
+          "movie",
+          "series",
+          "tv",
+          "events"
+        ]
+      },
+      {
+        "idPrefixes": [
+          "mf",
+          "dl"
+        ],
+        "name": "meta",
+        "types": [
+          "movie",
+          "series",
+          "tv",
+          "events"
+        ]
+      }
+    ],
+    "types": [
+      "movie",
+      "series",
+      "tv",
+      "events"
+    ],
+    "catalogs": [],
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": false
+    }
+  },
+  "omittedFields": [
+    "branding URLs",
+    "description",
+    "issuer/signature metadata",
+    "contact information",
+    "unknown extensions"
+  ]
+}
