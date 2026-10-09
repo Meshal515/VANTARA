@@ -4,6 +4,8 @@ import { assertBoundedData, canonicalData, manifestEndpoint, parseAddonImport } 
 import { assessAddon } from "./assessment.js";
 import { createHealth } from "./health.js";
 const STORAGE = "addons.v1";
+// عمليًا بلا حد (Stremio المعتاد أقل من 20)؛ المساحة الفعلية تحرس نفسها: حفظ فاشل يُرجع التثبيت برسالة واضحة
+const MAX_INSTALLED = 300;
 export function createAddonRegistry({
   store,
   transport,
@@ -160,7 +162,7 @@ export function createAddonRegistry({
         previews.delete(preview);
         return view(before);
       }
-      if (!before && entries.size >= 100) throw new Error("الحد الأقصى 100 إضافة مثبتة");
+      if (!before && entries.size >= MAX_INSTALLED) throw new Error(`الحد الأقصى ${MAX_INSTALLED} إضافة مثبتة`);
       if (before && sessions) throw new Error("انتظر انتهاء الجلسة قبل استبدال نسخة الإضافة");
       const next = {
         manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url,

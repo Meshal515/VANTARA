@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { createAddonRegistry } from "./registry.js";
-import { createStore } from "../pwa/cache/store.js";
+import { createStore, SPACES } from "../pwa/cache/store.js";
 const raw = (version = "1.0.0") => ({
   id: "org.demo",
   name: "Demo",
@@ -211,4 +211,17 @@ it('round-trips pipe-bearing Stremio IDs through install, connection and persist
  expect(one.key).toBe(`https://mediafusion.test|${id}`);
  const next=createAddonRegistry(opts);await next.ready;expect(next.list()[0].key).toBe(one.key);expect(next.connection(one.key).manifest.id).toBe(id);
  expect(JSON.stringify(next.list())).not.toContain('private-config');
+});
+it("installs well beyond the old 100 limit, and a full storage rolls back with a clear message", async () => {
+  // مثل الإنتاج (pwa/runtime.js): مساحة state للإضافات 16MB
+  const store = createStore({ indexedDB: null, spaces: { ...SPACES, state: { ttlMs: Infinity, maxBytes: 16 * 1024 * 1024 } } });
+  const r = createAddonRegistry({ store, transport: { json: async (url) => ({ ...raw(), id: `org.demo.${new URL(url).pathname.split("/")[1]}`, name: url }) } });
+  await r.ready;
+  for (let i = 0; i < 150; i++) await r.install(await r.inspect(`https://addon.test/a${i}/manifest.json`));
+  expect(r.list()).toHaveLength(150);
+  const set = store.set;
+  store.set = async () => false;
+  await expect(r.install(await r.inspect("https://addon.test/full/manifest.json"))).rejects.toThrow("مساحة التخزين غير كافية");
+  expect(r.list()).toHaveLength(150);
+  store.set = set;
 });

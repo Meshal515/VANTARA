@@ -251,6 +251,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   /** لا نرسل قبل هذا الوقت: تراجع أُسّي بعد فشل مؤقت. */
   let nextPushAt = 0;
   let pushTimer = null;
+  // بعد dispose لا يعمل أي مؤقّت مؤجّل لهذا العميل (تبديل حساب، أو اختبار انتهى)
+  let disposed = false;
   /** طلب إرسال وصل أثناء إرسال جارٍ: يُنفَّذ بعده لا يُلغى. */
   let pushAgain = false;
   /**
@@ -697,7 +699,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
    */
   async function pull() {
-    if (!token) return;
+    if (!token || disposed) return;
     if (pulling) {
       pullAgain = true;
       return;
@@ -846,7 +848,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   const MAX_PUSH_BATCH = 12;
 
   function schedulePush() {
-    if (pushTimer !== null) return;
+    if (pushTimer !== null || disposed) return;
     pushTimer = setTimeout(() => {
       pushTimer = null;
       void push();
@@ -1267,6 +1269,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   return {
+    /** يوقف مؤقّتات هذا العميل المؤجّلة؛ لا يمسّ الطابور المحفوظ. */
+    dispose() {
+      disposed = true;
+      if (pushTimer !== null) clearTimeout(pushTimer);
+      pushTimer = null;
+    },
     get user() {
       return user;
     },
