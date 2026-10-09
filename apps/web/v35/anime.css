@@ -1997,3 +1997,69 @@
     width: 100%;
   }
 }
+
+/* نسخ الإضافات: صحة السرب المعلنة ولغات النسخة */
+.v35 .an-srv--swarm-strong .an-srv-dot { background: var(--success); }
+.v35 .an-srv--swarm-fair .an-srv-dot { background: color-mix(in srgb, var(--success) 55%, var(--warning)); }
+.v35 .an-srv--swarm-weak .an-srv-dot { background: var(--warning); }
+.v35 .an-srv--swarm-dead .an-srv-dot { background: var(--danger); }
+.v35 .an-srv--swarm-dead .an-srv-state { color: var(--danger); }
+.v35 .an-srv-tag--cam { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.v35 .an-srv-langs { display: flex; flex-wrap: wrap; gap: 4px; }
+.v35 .an-srv-lang {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+  background: var(--surface-3, color-mix(in srgb, var(--text-1) 8%, transparent));
+}
+.v35 .an-srv-lang--ar { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+/* صف نسخة إضافة: بعرض كامل، المواصفات يمينًا وقوة السرب يسارًا */
+.v35 .an-srv.an-srv--release {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'top state' 'release state' 'langs state';
+  align-items: center;
+  column-gap: 12px;
+  min-height: 0;
+  padding: 12px 14px;
+}
+.v35 .an-srv--release .an-srv-top { grid-area: top; justify-content: flex-start; flex-wrap: nowrap; }
+.v35 .an-srv--release .an-srv-code {
+  order: 2;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+.v35 .an-srv--release .an-srv-tag { order: 1; font-size: 11px; flex: none; }
+.v35 .an-srv--release .an-srv-release {
+  grid-area: release;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+  -webkit-line-clamp: 1;
+}
+.v35 .an-srv--release .an-srv-langs { grid-area: langs; }
+.v35 .an-srv--release .an-srv-state {
+  grid-area: state;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 88px;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.25;
+}
+.v35 .an-srv--release .an-srv-state > span { display: grid; justify-items: center; gap: 2px; }
+.v35 .an-srv-seeds {
+  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--text-1);
+}
+.v35 .an-srv--release .an-srv-state small { font-size: 10.5px; font-weight: 700; color: var(--text-3); }
+.v35 .an-srv--swarm-dead .an-srv-state small { color: var(--danger); }

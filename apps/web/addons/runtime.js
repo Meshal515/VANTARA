@@ -11,6 +11,7 @@ import { assessAddon, supportedCapabilities } from "./assessment.js";
 import { catalogExtras, matchesStremioResource } from "./stremio-model.js";
 import { publicUrl } from "./manifest.js";
 import { plainObject } from "./contracts.js";
+import { createSourcePulse } from "./source-pulse.js";
 
 const section = (m) =>
   m.contentTypes.includes("manga")
@@ -22,6 +23,7 @@ export function createAddonRuntime({
   runtime: r,
   transport = createTransport(),
   store = r?.addonStore ?? r?.store,
+  pulse = createSourcePulse(),
 } = {}) {
   if (!store) throw new Error("مخزن الإضافات غير متاح");
   const runtimeName = r.native ? "apk" : "pwa";
@@ -45,10 +47,11 @@ export function createAddonRuntime({
         version: String(d.version),
         contentTypes:
           d.content === "cinema" ? ["movie", "series"] : [d.content],
+        // «آخر التحديثات» لكل مصدر يقدّم latest فعلًا (كل مصادر الـAPK، ومحرّكات الويب التي تعرفه)
         capabilities:
           d.content === "manga"
             ? ["home", "search", "details", "chapters", "pages"]
-            : ["search", "details", "episodes", "streams"],
+            : [...(typeof r.registry.source?.(d.id)?.latest === "function" ? ["home"] : []), "search", "details", "episodes", "streams"],
         permissions: { networkHosts: [d.domain] },
         bundled: true,
       })),
@@ -60,7 +63,10 @@ export function createAddonRuntime({
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
-      return createBundledAdapter({ sourceDef, engine: r.registry });
+      const raw = createBundledAdapter({ sourceDef, engine: r.registry });
+      // كل تصفح فعلي للمصدر دليل على صحته: يُسجَّل في نبضه
+      const measured = (fn) => (...a) => pulse.measure(key, () => fn(...a), { signal: a.at(-1)?.signal });
+      return { ...raw, home: measured(raw.home), latest: measured(raw.latest), popular: measured(raw.popular), search: measured(raw.search) };
     }
     const c = registry.connection(key);
     if (c.manifest.configuration?.required && !c.manifest.configuration.configured)
@@ -383,6 +389,21 @@ export function createAddonRuntime({
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));
   }
+  /** فحص مصدر مدمج بطلب حقيقي: آخر التحديثات إن وُجدت، وإلا بحث قصير. */
+  async function probeCore(addon, { signal } = {}) {
+    const a = adapter(addon.key);
+    const home = (addon.capabilities ?? []).includes("home");
+    let check;
+    try {
+      const out = await (home ? a.home(1, { signal }) : a.search("one", 1, { signal }));
+      const n = (out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : [])).length;
+      check = { capability: home ? "home" : "search", state: n ? "passed" : "empty", message: n ? `أعاد ${n} عملًا` : "استجاب بلا نتائج" };
+    } catch (error) {
+      if (error?.name === "AbortError" || signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
+      check = { capability: home ? "home" : "search", state: "failed", message: error?.name === "TimeoutError" ? "انتهت مهلة الفحص" : "تعذر الطلب من المصدر" };
+    }
+    return { checks: [check], assessment: assessAddon(addon, runtimeName), pulse: pulse.get(addon.key) };
+  }
   async function diagnose(key, { signal, sample } = {}) {
     await ready;
     if (signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
@@ -390,7 +411,8 @@ export function createAddonRuntime({
     if (!addon) throw new Error("الإضافة غير موجودة");
     const checks = [];
     const initial = assessAddon(addon, runtimeName);
-    if (["disabled", "configuration", "unsupported", "builtin"].includes(initial.level))
+    if (initial.level === "builtin") return probeCore(addon, { signal });
+    if (["disabled", "configuration", "unsupported"].includes(initial.level))
       return { checks: [{ capability: "addon", state: initial.level, message: initial.detail }], assessment: initial };
     const supported = capabilitiesFor(addon);
     const a = adapter(key, { diagnostic: true });
@@ -460,6 +482,7 @@ export function createAddonRuntime({
     ready,
     subtitleProviders,
     diagnose,
+    pulse,
     runtimeName,
     async enrichAnimeIdentity(identity, options) {
       await ready;

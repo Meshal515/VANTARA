@@ -1,6 +1,7 @@
 import { publicUrl } from "../addons/manifest.js";
 import { supportedCapabilities } from "../addons/assessment.js";
 import { glyphNode } from "./icons.js";
+import { pulseView } from "../addons/source-pulse.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -385,23 +386,26 @@ export function renderAddons({
   onOpenSource = () => {},
   onBack = () => {},
   onCheck,
+  pulse = null,
+  onProbe = null,
 }) {
   const root = node("div", "addon-hub");
   root.dir = "rtl";
-  const header = node("section", "addon-hero"),
+  // رأس حي: كم مصدرًا يعمل الآن، لا شعار تسويقي
+  const header = node("section", "addon-hero addon-hero--status"),
     heading = node("div"),
-    mark = node("span", "addon-hero-mark");
-  mark.append(glyphNode("puzzle", { size: 84 }));
+    mark = node("span", "addon-hero-mark"),
+    summary = node("p", "addon-summary"),
+    checkAll = button("افحص الكل", () => probeAll({ force: true }), "addon-button addon-button-quiet addon-check-all");
+  mark.append(glyphNode("puzzle", { size: 40 }));
+  summary.setAttribute("role", "status");
   heading.append(
-    node("p", "addon-eyebrow", "VANTARA · مكتبتك تتسع"),
-    node("h2", null, "اكتشف أكثر. أضف ما يناسبك."),
-    node(
-      "p",
-      "addon-muted",
-      "مصادرك وإضافاتك في مكان واحد، من اكتشاف الأعمال إلى الترجمة.",
-    ),
+    node("p", "addon-eyebrow", "VANTARA · المصادر والإضافات"),
+    node("h2", null, "مصادرك"),
+    summary,
   );
-  header.append(heading, mark);
+  header.append(mark, heading);
+  if (onProbe) header.append(checkAll);
   const toolbar = node("div", "addon-toolbar"),
     tabs = node("div", "addon-tabs"),
     search = node("input", "addon-input addon-search"),
@@ -587,7 +591,14 @@ export function renderAddons({
       b.setAttribute("aria-pressed", String(b.dataset.filter === filter));
     for (const b of states.children)
       b.setAttribute("aria-pressed", String(b.dataset.state === stateFilter));
-    states.hidden = explore;
+    const stateCount = {
+      disabled: registry.list().filter((a) => !a.enabled).length,
+      updates: registry.list().filter((a) => a.stagedVersion).length,
+      verification: registry.list().filter((a) => a.permissions?.verification || Object.values(a.health ?? {}).some((h) => h.reason === "NEEDS_VERIFICATION")).length,
+    };
+    for (const b of states.children) b.hidden = b.dataset.state !== "installed" && !stateCount[b.dataset.state] && stateFilter !== b.dataset.state;
+    states.hidden = explore || [...states.children].every((b) => b.hidden || b.dataset.state === "installed");
+    paintSummary();
     let entries = explore ? recommendations : registry.list();
     entries = entries.filter(
       (a) =>
@@ -602,7 +613,8 @@ export function renderAddons({
                 (h) => h.reason === "NEEDS_VERIFICATION",
               )))),
     );
-    for (const a of entries) {
+    if (!explore) paintRows(entries);
+    for (const a of explore ? entries : []) {
       const card = node("article", "addon-card"),
         head = node("div", "addon-card-heading"),
         title = node("div");
@@ -713,6 +725,126 @@ export function renderAddons({
           "خدمات عامة معروفة، وليست شهادة بجاهزية كل قدرة. قد تحتاج بعض الخدمات حسابًا أو إعدادًا خاصًا.",
         ),
       );
+  }
+  // ───── صفوف «إضافاتي»: مجمّعة حسب القسم، ولكل صف حالته الحقيقية ─────
+  const rowNodes = new Map();
+  let probing = new Set(), probeController = null, probeTimer = null, probeRunning = false;
+  const sectionOf = (a) =>
+    !a.bundled ? "external"
+      : (a.contentTypes ?? []).includes("manga") ? "manga"
+      : (a.contentTypes ?? []).includes("anime") ? "anime"
+      : "cinema";
+  const SECTION_TITLES = { manga: "مصادر المانجا", anime: "مصادر الأنمي", cinema: "الأفلام والمسلسلات", external: "إضافات Stremio والخدمات" };
+  /** ما تقدّمه الإضافة بكلمات المستخدم: «سيرفرات تورنت · أفلام، مسلسلات». */
+  const offers = (a) => {
+    const caps = a.capabilities ?? [];
+    const what = a.bundled
+      ? (caps.includes("home") ? "آخر التحديثات وبحث" : "بحث")
+      : [caps.includes("streams") && "سيرفرات تشغيل", caps.includes("subtitles") && "ترجمات", caps.includes("catalog") && "كتالوج", caps.includes("meta") && !caps.includes("catalog") && "بيانات"].filter(Boolean).join(" و") || "إضافة";
+    const types = (a.contentTypes ?? []).map((t) => labels[t] ?? t).join("، ");
+    return a.bundled ? what : [what, types].filter(Boolean).join(" · ");
+  };
+  /** حالة الصف: النبض الفعلي للمصدر المدمج، وتقييم الأدلة للإضافة الخارجية. */
+  const statusOf = (a) => {
+    if (a.bundled) return pulseView(pulse?.get(a.key), { checking: probing.has(a.key) });
+    const h = health(a);
+    const level = { stable: "ok", broken: "failed", configuration: "config", disabled: "off", unsupported: "off" }[h.level] ?? "unknown";
+    return { level, label: h.level === "candidate" ? "لم تُختبر بعد" : h.label, detail: null };
+  };
+  function paintPulse(a, line) {
+    const st = statusOf(a);
+    line.className = `addon-pulse addon-pulse--${st.level}`;
+    line.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, st.label));
+    if (st.detail) line.append(node("span", null, st.detail));
+    line.closest?.(".addon-row")?.setAttribute("data-level", st.level);
+  }
+  function addonRow(a) {
+    const row = node("article", "addon-row"),
+      main = node("div", "addon-row-main"),
+      line = node("p", "addon-pulse"),
+      actions = node("div", "addon-row-actions");
+    row.dataset.key = a.key;
+    const name = node("h3", null, a.name);
+    name.dir = "auto";
+    main.append(name, node("p", "addon-row-meta", offers(a)), line);
+    const config = needsConfiguration(a) ? configureLink(a, registry) : null;
+    const open = canOpen(a, registry);
+    if (config) actions.append(config);
+    else if (open) actions.append(button("فتح", () => onOpenSource(a), "addon-button addon-button-primary addon-row-open"));
+    actions.append(button("تفاصيل", () => showDetails(a), "addon-button addon-button-quiet"));
+    row.append(logo(a), main, actions);
+    // الصف كله يفتح المصدر (كبطاقة عمل)، والأزرار تبقى لعملها
+    row.onclick = (e) => {
+      if (e.target.closest?.("button, a")) return;
+      open ? onOpenSource(a) : showDetails(a);
+    };
+    paintPulse(a, line);
+    rowNodes.set(a.key, { row, line, addon: a });
+    return row;
+  }
+  function paintRows(entries) {
+    rowNodes.clear();
+    const groups = new Map();
+    for (const a of entries) {
+      const k = sectionOf(a);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(a);
+    }
+    for (const k of ["manga", "anime", "cinema", "external"]) {
+      const list = groups.get(k);
+      if (!list?.length) continue;
+      const group = node("section", "addon-group"),
+        head = node("header", "addon-group-head");
+      head.append(node("h3", null, SECTION_TITLES[k]), node("span", "addon-group-count", String(list.length)));
+      group.append(head, ...list.map(addonRow));
+      cards.append(group);
+    }
+    scheduleProbe();
+  }
+  function paintSummary() {
+    const bundled = registry.list().filter((a) => a.bundled && a.enabled !== false);
+    const levels = bundled.map((a) => statusOf(a).level);
+    const ok = levels.filter((l) => l === "ok" || l === "empty").length,
+      bad = levels.filter((l) => l === "failed").length,
+      checking = levels.filter((l) => l === "checking").length;
+    const parts = [`${ok} من ${bundled.length} مصدر يعمل`];
+    if (bad) parts.push(`${bad} لا يستجيب`);
+    if (checking) parts.push(`يُفحص ${checking}…`);
+    summary.textContent = bundled.length ? parts.join(" · ") : "أضف مصدرًا أو إضافة لتبدأ.";
+    checkAll.disabled = checking > 0;
+  }
+  function refreshRow(key) {
+    const r = rowNodes.get(key);
+    if (r) paintPulse(r.addon, r.line);
+    paintSummary();
+  }
+  /** الإصلاح الذاتي: يفحص المصادر المدمجة التي حان فحصها (اثنان معًا) ويحدّث صفوفها. */
+  async function probeAll({ force = false } = {}) {
+    if (!onProbe || !pulse || closed || probeRunning) return;
+    const queue = registry.list().filter((a) => a.bundled && a.enabled !== false && !probing.has(a.key) && (force || pulse.due(a.key)));
+    if (!queue.length) { scheduleProbe(30_000); return; }
+    probeRunning = true;
+    probeController ??= new AbortController();
+    const signal = probeController.signal;
+    const worker = async () => {
+      while (queue.length && !signal.aborted) {
+        const a = queue.shift();
+        probing.add(a.key);
+        refreshRow(a.key);
+        try { await onProbe(a, { signal }); } catch {}
+        probing.delete(a.key);
+        if (!signal.aborted) refreshRow(a.key);
+      }
+    };
+    try { await Promise.all([worker(), worker()]); }
+    finally {
+      probeRunning = false;
+      scheduleProbe(30_000);
+    }
+  }
+  function scheduleProbe(delay = 700) {
+    if (!onProbe || !pulse || probeTimer || closed || probeRunning) return;
+    probeTimer = setTimeout(() => { probeTimer = null; void probeAll(); }, delay);
   }
   for (const [id, label] of [
     ["all", "الكل"],
@@ -940,6 +1072,11 @@ export function renderAddons({
   }
   root.close = () => {
     closed = true;
+    clearTimeout(probeTimer);
+    probeTimer = null;
+    probeController?.abort();
+    probeController = null;
+    probing = new Set();
     clearPreview({ force: true });
     activeDetail?.close?.();
   };
