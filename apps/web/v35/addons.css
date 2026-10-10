@@ -972,3 +972,6 @@
 .addon-source .addon-source-error b { color: var(--danger, #ff6b7d); font-size: 14px; }
 .addon-source .addon-source-error p { margin: 0 0 6px; font-size: 12px; color: var(--text-3, #85809a); }
 .addon-source .addon-source-more { display: block; margin: 8px auto 0; }
+
+.addon-playback-health { font-size: 12.5px; opacity: 0.85; }
+.addon-playback-health.is-bad { color: #ffb070; opacity: 1; }

@@ -16,6 +16,7 @@ import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
  * فتظهر فورًا في الفتحة التالية. التشغيل (السيرفرات) من امتدادات المصادر
  * العربية، ويُربط في الخطوة التالية.
  */
+import { reportSource } from '../lib/source-report.js';
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr, searchAnime } from '../lib/anime-meta.js';
 import { pageIn, pop, revealIn, stripIn } from './motion.js';
@@ -1216,6 +1217,8 @@ export function createAnime(deps) {
     }
   }
   engine.on('outbox', () => void flushOutbox());
+  // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
+  engine.on('playstat', (e) => reportSource(e));
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void flushOutbox();
   });

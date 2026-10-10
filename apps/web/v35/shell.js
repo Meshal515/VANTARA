@@ -63,7 +63,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { refsOf } from '../lib/manga-alias-store.js';
-import { connectSourceReports } from '../lib/source-report.js';
+import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
@@ -3628,7 +3628,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options) });
+      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }

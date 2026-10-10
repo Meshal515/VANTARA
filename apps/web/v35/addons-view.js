@@ -388,6 +388,7 @@ export function renderAddons({
   onCheck,
   pulse = null,
   onProbe = null,
+  playbackHealth = null,
 }) {
   const root = node("div", "addon-hub");
   root.dir = "rtl";
@@ -406,6 +407,19 @@ export function renderAddons({
   );
   header.append(mark, heading);
   if (onProbe) header.append(checkAll);
+  // «تعذّر» الحقيقي من هواتفكم (آخر 7 أيام): الهدف ≤ 1% من محاولات فتح الحلقات
+  if (playbackHealth && (filter === "anime" || filter === "cinema")) {
+    const health = node("p", "addon-summary addon-playback-health");
+    heading.append(health);
+    void Promise.resolve(playbackHealth(filter)).then((h) => {
+      if (!h || !h.attempts) { health.textContent = "تعذّر التشغيل: لا قياس بعد (يبدأ مع أول حلقات تُفتح بالتحديث الجديد)"; return; }
+      const pct = (h.failRate * 100).toFixed(h.failRate < 0.1 ? 1 : 0);
+      const verdict = h.meetsTarget === null ? `قليل للحكم (${h.attempts} محاولة)` : h.meetsTarget ? "ضمن الهدف ≤1%" : "فوق الهدف ≤1%";
+      const worst = h.servers.find((x) => x.failed > 0);
+      health.textContent = `تعذّر التشغيل: ${pct}% من ${h.attempts} محاولة · ${verdict}${worst ? ` · أكثر سيرفر يتعطّل: ${worst.server}` : ""}`;
+      health.classList.toggle("is-bad", h.meetsTarget === false);
+    }).catch(() => health.remove());
+  }
   const toolbar = node("div", "addon-toolbar"),
     tabs = node("div", "addon-tabs"),
     search = node("input", "addon-input addon-search"),
