@@ -82,7 +82,9 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         if (!managerHolder.isInitialized()) return null
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null
-        return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true)
+        val flags = runCatching { handle.flags() }.getOrNull()
+        return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
+            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers())
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
 
@@ -195,6 +197,10 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                 }
             }
             val found = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") { manager.find(Sha1Hash(hash))?.takeIf { it.isValid } }
+            // libtorrent adds a magnet PAUSED + AUTO_MANAGED by default, and acquire() only resumed it
+            // after metadata — which a paused torrent never fetches. Live emulator proof: 120+ DHT nodes,
+            // 4 popular swarms, 0 peers, "metadata unavailable". The player asked for it: start now.
+            runCatching { found.unsetFlags(TorrentFlags.AUTO_MANAGED); found.resume() }
             synchronized(monitor) { torrent = found; addTrackers(found, request) }
             return found
         }

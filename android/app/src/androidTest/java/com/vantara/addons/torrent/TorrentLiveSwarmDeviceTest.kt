@@ -69,6 +69,14 @@ class TorrentLiveSwarmDeviceTest {
             proofFile.writeText(proof.toString(2))
             engine.close()
         }
+        // Control: if the production public-only IP filter were what blocks peers, an open filter would play.
+        if (!proof.optBoolean("passed")) {
+            val open = TorrentEngine(context) { com.frostwire.jlibtorrent.swig.ip_filter() }
+            try {
+                val control = attempt(open, "Sintel (بلا فلتر IP — للمقارنة)", fixtures.first().second)
+                results.put(control); proof.put("controlOpenFilterPassed", control.optBoolean("passed"))
+            } finally { proofFile.writeText(proof.toString(2)); open.close() }
+        }
         assertTrue("No fixture reached first frame + seek from a real swarm", proof.optBoolean("passed"))
     }
 
@@ -83,7 +91,8 @@ class TorrentLiveSwarmDeviceTest {
         fun mark(event: String) {
             val s = engine.stats(uri)
             timeline.put(JSONObject().put("t", SystemClock.elapsedRealtime() - begun).put("event", event).put("dht", engine.dhtNodes())
-                .put("peers", s?.peers).put("seeds", s?.seeds).put("rate", s?.downloadBytesPerSecond).put("done", s?.totalDone).put("metadata", s?.metadata))
+                .put("peers", s?.peers).put("seeds", s?.seeds).put("rate", s?.downloadBytesPerSecond).put("done", s?.totalDone).put("metadata", s?.metadata)
+                .put("state", s?.state).put("paused", s?.paused).put("known", s?.known).put("candidates", s?.candidates))
         }
         val sampler = Thread {
             try { while (!Thread.currentThread().isInterrupted) { Thread.sleep(3000); mark("sample") } } catch (_: InterruptedException) {}
