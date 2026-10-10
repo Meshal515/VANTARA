@@ -70,16 +70,12 @@
 .v35 .tg-card {
   --tg-a: #8f5cff;
   position: relative;
-  display: grid; gap: 10px;
-  width: min(272px, 72vw);
-  padding: 14px 14px 12px;
-  border-radius: 20px;
-  border: 1px solid color-mix(in srgb, var(--tg-a) 38%, transparent);
-  background:
-    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tg-a) 34%, transparent) 0%, transparent 60%),
-    linear-gradient(180deg, #1b1726, #121019);
-  box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--tg-a) 55%, transparent);
-  overflow: hidden;
+  display: grid; gap: 12px;
+  width: min(280px, 74vw);
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   text-align: start;
 }
 .v35 .tg-card--anime { --tg-a: #ff5c8a; }
@@ -90,7 +86,7 @@
   display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
   background: color-mix(in srgb, var(--tg-a) 22%, transparent); color: var(--tg-a);
 }
-.v35 .tg-card-icon svg { fill: currentColor; stroke: currentColor; }
+
 .v35 .tg-card-kind { flex: 1; font-size: 12px; font-weight: 700; color: color-mix(in srgb, var(--tg-a) 70%, #fff); }
 .v35 .tg-live {
   display: inline-flex; align-items: center; gap: 5px;
@@ -99,10 +95,12 @@
   font-size: 11px; font-weight: 700; color: var(--text-2);
 }
 .v35 .tg-card.is-live .tg-live { background: rgba(48, 209, 120, 0.16); color: #6fe3a1; }
-.v35 .tg-card.is-live .tg-live::before {
-  content: ''; width: 6px; height: 6px; border-radius: 99px; background: #30d178;
-  box-shadow: 0 0 0 0 rgba(48, 209, 120, 0.6); animation: tg-pulse 1.6s infinite;
-}
+.v35 .tg-card.is-live .tg-live::before { content: ''; width: 6px; height: 6px; border-radius: 99px; background: #30d178; }
+.v35 .tg-card-body { display: flex; gap: 11px; align-items: stretch; }
+.v35 .tg-card-cover { flex: none; width: 56px; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--surface-3); }
+.v35 .tg-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .tg-card-cover.is-empty img { display: none; }
+.v35 .tg-card-text { display: grid; align-content: center; gap: 8px; min-width: 0; }
 .v35 .tg-card-title { display: block; font-weight: 800; font-size: 16px; line-height: 1.35; color: #fff; }
 .v35 .tg-card-who { display: flex; align-items: center; gap: 10px; min-height: 30px; }
 .v35 .tg-card-people { display: flex; align-items: center; flex: none; }
@@ -118,7 +116,7 @@
   transition: transform 140ms ease, filter 140ms ease;
 }
 .v35 .tg-card--cinema .tg-enter { color: #1a1300; }
-.v35 .tg-enter svg { fill: currentColor; }
+.v35 .tg-enter svg { fill: currentColor; stroke: none; }
 .v35 .tg-enter:active { transform: scale(0.98); filter: brightness(0.92); }
 .v35 .tg-enter:disabled { background: rgba(255,255,255,.1); color: var(--text-2); }
 @keyframes tg-pulse {
@@ -140,7 +138,7 @@
   transition: background 160ms ease, transform 140ms ease;
 }
 .v35 .tg-strip:active { transform: scale(0.96); background: rgba(255, 255, 255, 0.16); }
-.v35 .tg-dot { width: 7px; height: 7px; border-radius: 99px; background: #30d178; animation: tg-pulse 1.8s infinite; flex: none; }
+.v35 .tg-dot { width: 7px; height: 7px; border-radius: 99px; background: #30d178; flex: none; }
 .v35 .tg-dot.is-bad { background: #ff6b6e; animation: none; }
 .v35 .tg-faces { display: inline-flex; align-items: center; }
 .v35 .tg-face {
@@ -171,7 +169,7 @@
 /* لوحة الغرفة */
 .v35 .tg-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .v35 .tg-live--on { background: rgba(48, 209, 120, 0.14); color: #6fe3a1; }
-.v35 .tg-live--on::before { content: ''; width: 6px; height: 6px; border-radius: 99px; background: #30d178; animation: tg-pulse 1.6s infinite; }
+.v35 .tg-live--on::before { content: ''; width: 6px; height: 6px; border-radius: 99px; background: #30d178; }
 .v35 .tg-list { display: grid; gap: 6px; margin-bottom: 16px; }
 .v35 .tg-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -228,7 +226,6 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   color: #fff; font-size: 13px; font-weight: 700;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, -16px) scale(0.92); opacity: 0;
   transition: transform 320ms cubic-bezier(.2,.8,.2,1), opacity 220ms ease;
   pointer-events: none;
@@ -245,3 +242,13 @@
   .v35 .tg-face.is-new, .tg-pop > img { animation: none; }
 }
 .tg-pop .avatar-letter { display: grid; place-items: center; background: #2a2635; color: #fff; font-size: 12px; font-weight: 800; }
+
+/* زر الترجمة في نفس الشريط: العنوان ينكمش أولًا، والكبسولة تصغر بلا أن تدفع الأزرار خارج الشاشة */
+.v35 .rd-top .rd-titles { min-width: 0; }
+.v35 .rd-top .rd-titles strong, .v35 .rd-top .rd-titles span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v35 .rd-top .rd-together { margin-inline-start: 4px; }
+.v35 .rd-top:has(#rdTlBtn:not([hidden])) .tg-face:nth-child(3) { display: none; }
+/* زر الترجمة يبقى ظاهرًا دائمًا ولا تغطيه الأفاتارات: له مكانه الثابت، والكبسولة هي التي تصغر */
+.v35 .rd-top #rdTlBtn { flex: none; position: relative; z-index: 2; }
+.v35 .rd-top .rd-together { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.v35 .rd-top:has(#rdTlBtn:not([hidden])) .tg-face:nth-child(n+3):not(.tg-more) { display: none; }

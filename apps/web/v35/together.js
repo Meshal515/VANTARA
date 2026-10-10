@@ -258,10 +258,24 @@ export function createTogether(deps) {
     // الرأس: نوع الغرفة وحالتها الحية (مباشر / يتجهّزون / انتهت)
     const top = el('div', 'tg-card-top');
     const icon = el('span', 'tg-card-icon');
-    icon.innerHTML = glyph(reading ? 'book' : 'play', { size: 16 });
+    icon.innerHTML = reading
+      ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor"/></svg>';
     const kind = el('span', 'tg-card-kind', kindLabel(media, row.mode));
     const live = el('span', 'tg-live', '…');
     top.append(icon, kind, live);
+    // غلاف العمل بجانب العنوان
+    const body = el('div', 'tg-card-body');
+    const cover = el('span', 'tg-card-cover');
+    const coverUrl = media?.cover ?? deps.sync.rows?.('works', (w) => w.series_ref === media?.seriesRef)?.[0]?.cover_url ?? null;
+    if (coverUrl) {
+      const img = new Image();
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = coverUrl;
+      img.onerror = () => cover.classList.add('is-empty');
+      cover.append(img);
+    } else cover.classList.add('is-empty');
     const title = el('bdi', 'tg-card-title', media?.label ?? 'دعوة');
     const who = el('div', 'tg-card-who');
     const people = el('div', 'tg-card-people');
@@ -282,7 +296,10 @@ export function createTogether(deps) {
       const s = start(row.code, media, row.mode);
       deps.openMedia(media, s);
     };
-    wrap.append(top, title, who, enter);
+    const text = el('div', 'tg-card-text');
+    text.append(title, who);
+    body.append(cover, text);
+    wrap.append(top, body, enter);
     void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).then((r) => {
       alive = r != null;
       if (!r) {
