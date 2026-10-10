@@ -13,7 +13,7 @@
 
 import { verifyIdentityToken } from '@vantara/domain';
 import { bearerFrom } from './session.ts';
-import { createSettings, normalizeCode, parseMedia, roomCode, RoomCore, type Out, type Persisted } from './together-core.ts';
+import { createSettings, normalizeCode, parseInvitees, parseMedia, roomCode, RoomCore, type Out, type Persisted } from './together-core.ts';
 import type { Env } from './types.ts';
 
 // ---- سطح Durable Objects الذي نستعمله فقط (نفس نهج types.ts: بلا workers-types) ----
@@ -80,14 +80,19 @@ export class TogetherRoom {
     const now = Date.now();
     if (url.pathname === '/init' && request.method === 'POST') {
       if (this.core) return json({ error: 'exists' }, 409);
-      const body = (await request.json()) as { code: string; hostUserId: string; input: Record<string, unknown> | null };
-      this.core = RoomCore.create(createSettings(body.input, body.hostUserId, body.code, now), parseMedia(body.input?.['media']), now);
+      const body = (await request.json()) as { code: string; hostUserId: string; input: Record<string, unknown> | null; allowed: string[] | '*' };
+      this.core = RoomCore.create(createSettings(body.input, body.hostUserId, body.code, now, body.allowed), parseMedia(body.input?.['media']), now);
       await this.persist();
       return json({ ok: true });
     }
     if (url.pathname === '/info') {
       if (!this.core) return json({ error: 'gone' }, 404);
-      return json({ room: this.core.roomView(), state: this.core.timeline, people: this.core.members.size });
+      // لبطاقة الدعوة في الشات: من داخل الآن، وهل بدأت (فيدخلك على طول في نفس الثانية)
+      return json({
+        room: this.core.roomView(),
+        state: this.core.timeline,
+        people: this.core.roster(now).map((r) => ({ userId: r.userId, name: r.name, avatarKey: r.avatarKey, host: r.host, state: r.state })),
+      });
     }
     if (url.pathname !== '/ws') return json({ error: 'not_found' }, 404);
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'upgrade_required' }, 426);
@@ -221,15 +226,18 @@ export async function togetherRoute(path: string, request: Request, env: Env, no
 
   if (path === '/v1/together/rooms' && request.method === 'POST') {
     const input = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const { results } = await env.DB.prepare("SELECT user_id FROM accounts WHERE lifecycle = 'ACTIVE'").all<{ user_id: string }>();
+    const allowed = parseInvitees(input?.['invite'], results.map((r) => r.user_id), claims.userId);
+    if (!allowed) return json({ error: 'invite_required' }, 400);
     for (let attempt = 0; attempt < 4; attempt++) {
       const code = roomCode();
       const res = await ns.get(ns.idFromName(code)).fetch(new Request('https://room/init', {
         method: 'POST',
-        body: JSON.stringify({ code, hostUserId: claims.userId, input }),
+        body: JSON.stringify({ code, hostUserId: claims.userId, input, allowed }),
       }));
       if (res.status === 409) continue;
       if (!res.ok) return json({ error: 'room_failed' }, 502);
-      return json({ code });
+      return json({ code, invited: allowed });
     }
     return json({ error: 'room_failed' }, 503);
   }

@@ -16,16 +16,27 @@ const BURST_GAP_MS = 150;
 const RESYNC_MS = 30_000;
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
 
-/** ينشئ غرفة ويُرجع رمزها. */
-export async function createRoom({ baseUrl, token, cap = 10, mode = 'sync', control = 'host', media, fetchImpl = fetch }) {
+/**
+ * ينشئ غرفة لمن اخترتهم (invite: معرّفات أو '*') ويُرجع رمزها الداخلي. الرمز لا يراه
+ * أحد: بطاقة الدعوة في المجلس (عملية together.invite) هي التي تحمله للمدعوين.
+ */
+export async function createRoom({ baseUrl, token, invite, mode = 'sync', control = 'host', media, fetchImpl = fetch }) {
   const res = await fetchImpl(`${baseUrl}/v1/together/rooms`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ cap, mode, control, media }),
+    body: JSON.stringify({ invite, mode, control, media }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.code) throw Object.assign(new Error(body.error ?? 'room_failed'), { status: res.status });
   return body.code;
+}
+
+/** حال الغرفة لبطاقة الدعوة: من داخل، وهل بدأت. null = انتهت. */
+export async function roomInfo({ baseUrl, token, code, fetchImpl = fetch }) {
+  const res = await fetchImpl(`${baseUrl}/v1/together/rooms/${encodeURIComponent(code)}`, { headers: { authorization: `Bearer ${token}` } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw Object.assign(new Error('room_info_failed'), { status: res.status });
+  return res.json();
 }
 
 /** رابط دعوة يفتح نفس الحلقة/الفصل داخل الغرفة. */
@@ -40,9 +51,9 @@ export function parseInvite(hash) {
 
 /**
  * joinRoom({baseUrl, code, getToken}) ← room
- *   room.on(event, fn): welcome | state | roster | joined | left | host | room | status | full | denied
+ *   room.on(event, fn): welcome | state | roster | status | joined | left | host | room | presence | full | gone | uninvited | denied
  *   room.command('play'|'pause'|'seek'|'load', {pos, media})
- *   room.report({...})، room.setMode('sync'|'free')، room.settings({cap, control})، room.giveHost(userId)
+ *   room.report({...})، room.setMode('sync'|'free')، room.settings({control})، room.invite(userIds)، room.giveHost(userId)
  *   room.clock، room.timeline، room.roster، room.info، room.me، room.isHost، room.close()
  */
 export function joinRoom({
@@ -64,7 +75,7 @@ export function joinRoom({
   const emit = (event, payload) => {
     for (const fn of listeners.get(event) ?? []) try { fn(payload); } catch { /* مستمع معطوب لا يوقف الغرفة */ }
   };
-  const setStatus = (s) => { if (s !== status) { status = s; emit('status', s); } };
+  const setStatus = (s) => { if (s !== status) { status = s; emit('connection', s); } };
   const later = (fn, ms) => { const id = timers.setTimeout(fn, ms); pending.push(id); return id; };
   const clearPending = () => { for (const id of pending) timers.clearTimeout(id); pending = []; };
   const send = (msg) => {
@@ -142,12 +153,17 @@ export function joinRoom({
         return;
       case 'full':
       case 'gone':
+      case 'uninvited':
         // نهائي: لا إعادة محاولة، حتى لو لم يصل رمز الإغلاق
         closed = true;
         clearPending();
         try { ws?.close(1000, msg.t); } catch { /* مغلق */ }
         setStatus(msg.t);
         emit(msg.t, msg);
+        return;
+      case 'status':
+        // «اشتغل الفيديو عند دحمي» / «تعذّر تشغيل السيرفر عند مشعل»
+        emit('status', msg);
         return;
       case 'joined':
       case 'left':
@@ -182,6 +198,7 @@ export function joinRoom({
     setMode(mode) { return send({ t: 'mode', mode }); },
     settings(s) { return send({ t: 'settings', ...s }); },
     giveHost(userId) { return send({ t: 'host', userId }); },
+    invite(userIds) { return send({ t: 'invite', ...(userIds === '*' ? { all: true } : { userIds }) }); },
     close() {
       closed = true;
       clearPending();

@@ -166,6 +166,7 @@ export type OpKind =
   | 'majlis.delete'
   | 'majlis.read'
   | 'majlis.meta'
+  | 'together.invite'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'

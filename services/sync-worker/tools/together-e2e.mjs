@@ -5,7 +5,7 @@
  * الحسابات الثلاثة هي التي تزرعها الترحيلات (ngm، dahmi، mansour).
  */
 import { mintIdentityToken } from '../../../packages/domain/dist/index.js';
-import { createRoom, joinRoom } from '../../../apps/web/lib/together/room.js';
+import { createRoom, joinRoom, roomInfo } from '../../../apps/web/lib/together/room.js';
 import { createDriftController, targetAt } from '../../../apps/web/lib/together/sync.js';
 const base = process.env.TOGETHER_BASE ?? 'http://127.0.0.1:8787';
 const SECRET = process.env.TOGETHER_SECRET ?? 'dev-identity-secret-at-least-32-characters-long';
@@ -17,9 +17,11 @@ const until = async (fn, ms = 5000) => { const s = Date.now(); while (Date.now()
 const results = []; const check = (name, ok, extra = '') => { results.push({ name, ok }); console.log(`${ok ? '✓' : '✗'} ${name} ${extra}`); };
 
 const media = { key: 'anime:frieren:e5', kind: 'anime', label: 'Frieren — الحلقة 5' };
-const code = await createRoom({ baseUrl: base, token: T.host, cap: 2, media });
+const code = await createRoom({ baseUrl: base, token: T.host, invite: [U.dahmi], media });
 check('إنشاء غرفة وإرجاع رمز', /^[A-Z2-9]{6}$/.test(code), code);
 const unauth = await fetch(`${base}/v1/together/rooms`, { method: 'POST', body: '{}' });
+const noInvite = await fetch(`${base}/v1/together/rooms`, { method: 'POST', headers: { authorization: `Bearer ${T.host}` }, body: JSON.stringify({ invite: [], media }) });
+check('لا غرفة بلا مدعوين', noInvite.status === 400, String(noInvite.status));
 check('رفض إنشاء بلا توكن', unauth.status === 401, String(unauth.status));
 
 const host = joinRoom({ baseUrl: base, code, getToken: () => T.host });
@@ -35,8 +37,18 @@ await until(() => host.clock.rtt != null && dahmi.clock.rtt != null, 3000); awai
 check('الساعة المشتركة: rtt محلي صغير', host.clock.rtt < 50, `rtt=${host.clock.rtt?.toFixed(1)}ms offset=${host.clock.offset.toFixed(1)}ms`);
 
 const third = joinRoom({ baseUrl: base, code, getToken: () => T.third });
-check('الثالث يُرفض في غرفة سعتها 2', await until(() => third.status === 'full' || third.status === 'gone', 6000), third.status);
+check('غير المدعو لا يدخل', await until(() => third.status === 'uninvited', 6000), third.status);
 third.close();
+
+// غرفة الانتظار: «جاري التجهيز» ثم «جاهز» تحت كل أفاتار، والتنبيهات فورية
+check('الغرفة تبدأ في الانتظار (لم تبدأ)', host.timeline.started === false && dahmi.timeline.started === false);
+const statuses = []; host.on('status', (m) => statuses.push(`${m.name}:${m.state}`));
+dahmi.report({ pos: 0, at: dahmi.clock.serverNow(), state: 'preparing', source: 'witanime' });
+await until(() => statuses.length >= 1);
+dahmi.report({ pos: 0, at: dahmi.clock.serverNow(), state: 'ready', source: 'witanime' });
+check('المضيف يرى «جاري التجهيز» ثم «جاهز» عند دحمي فورًا', await until(() => statuses.includes('دحمي:ready')), JSON.stringify(statuses));
+const info = await roomInfo({ baseUrl: base, token: T.dahmi, code });
+check('بطاقة الدعوة ترى من داخل وهل بدأت', info?.people?.length === 2 && info.state.started === false, JSON.stringify(info?.people?.map((p) => p.state)));
 
 let denied = false; dahmi.on('denied', () => (denied = true));
 dahmi.command('play', { pos: 0 });
@@ -44,7 +56,7 @@ check('غير المضيف لا يتحكم', await until(() => denied));
 
 const seqBefore = dahmi.timeline.seq;
 host.command('play', { pos: 10_000 });
-check('أمر المضيف يصل للجميع', await until(() => dahmi.timeline?.seq === seqBefore + 1 && host.timeline?.seq === seqBefore + 1));
+check('«ابدأ» من المضيف يصل للجميع ويبدأ الحلقة', await until(() => dahmi.timeline?.seq === seqBefore + 1 && host.timeline?.seq === seqBefore + 1 && dahmi.timeline.started === true));
 const tl = dahmi.timeline;
 const leadAtArrival = tl.at - dahmi.clock.serverNow();
 check('الأمر مجدول للمستقبل (يصل قبل موعده)', leadAtArrival > 0 && leadAtArrival <= 300, `باقي ${leadAtArrival.toFixed(0)}ms عند الوصول`);
@@ -54,6 +66,9 @@ check('الجهازان يحسبان نفس الموقع المطلوب', Math.a
 // تقارير → اللوحة ترى سيرفر كل شخص
 host.report({ pos: 10_500, at: host.clock.serverNow(), state: 'playing', source: 'witanime', mediaKey: media.key, version: { durationMs: 1_440_000 } });
 await wait(1100);
+dahmi.report({ pos: 9_000, at: dahmi.clock.serverNow(), state: 'buffering', source: 'torrent', mediaKey: media.key, version: { durationMs: 1_530_000 } });
+dahmi.report({ pos: 9_000, at: dahmi.clock.serverNow(), state: 'failed', source: 'okru' });
+check('«تعذّر تشغيل السيرفر عند دحمي» يصل فورًا', await until(() => statuses.includes('دحمي:failed')));
 dahmi.report({ pos: 9_000, at: dahmi.clock.serverNow(), state: 'buffering', source: 'torrent', mediaKey: media.key, version: { durationMs: 1_530_000 } });
 const seen = await until(() => host.roster.find((r) => r.userId === U.dahmi)?.source === 'torrent', 3000);
 const rd = host.roster.find((r) => r.userId === U.dahmi);
@@ -98,10 +113,27 @@ await wait(1100);
 const panel = host.roster.find((r) => r.userId === U.dahmi);
 check('اللوحة ترى فرق المزامنة الفعلي', panel?.driftMs != null && Math.abs(panel.driftMs) < 60, `driftMs=${panel?.driftMs} p95=${panel?.driftP95}`);
 
+// دخول متأخر والحلقة تعمل: بلا انتظار ولا «جاهز»، مباشرة عند الثانية الحالية
+host.invite([U.third]);
+await wait(300);
+const late = joinRoom({ baseUrl: base, code, getToken: () => T.third });
+check('المدعو لاحقًا يدخل والحلقة بدأت (مباشرة)', await until(() => late.status === 'live' && late.timeline?.started === true && late.timeline.playing === true), late.status);
+const lateTarget = targetAt(late.timeline, late.clock.serverNow()); const hostTarget = targetAt(host.timeline, host.clock.serverNow());
+check('المتأخر يحسب نفس الثانية', Math.abs(lateTarget - hostTarget) < 30, `فرق ${Math.abs(lateTarget - hostTarget).toFixed(0)}ms عند ${(hostTarget / 1000).toFixed(1)}ث`);
+
+// الحلقة التالية في نفس الغرفة: الكل «جاري التجهيز» ثم تبدأ وحدها حين يجهزون
+const next = { key: 'anime:frieren:e6', kind: 'anime', label: 'Frieren — الحلقة 6' };
+host.command('load', { media: next });
+check('الحلقة التالية: نفس الغرفة، انتظار من جديد', await until(() => late.timeline?.media?.key === next.key && late.timeline.started === false && dahmi2.timeline.started === false));
+for (const r of [host, dahmi2, late]) r.report({ pos: 0, at: r.clock.serverNow(), state: 'ready', source: 'sim', mediaKey: next.key });
+check('تبدأ وحدها حين يجهز الجميع', await until(() => late.timeline?.started === true && host.timeline.started === true && late.timeline.playing === true));
+late.close();
+await wait(300);
+
 // انتقال الاستضافة بعد 60 ث من غياب المضيف
 host.close();
 let newHost = null; dahmi2.on('host', (id) => (newHost = id));
-check('خروج المضيف يصل كـ left', await until(() => dahmi2.roster.length === 1));
+check('خروج المضيف يصل كـ left', await until(() => dahmi2.roster.length === 1), String(dahmi2.roster.length));
 console.log('… انتظار مهلة غياب المضيف (60 ث)');
 check('بعد 60 ث تنتقل الاستضافة لدحمي', await until(() => newHost === U.dahmi, 70_000), String(newHost));
 check('دحمي صار يتحكم', dahmi2.isHost);

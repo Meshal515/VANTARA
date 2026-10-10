@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, LEAD_MS, normalizeCode, positionAt, roomCode, RoomCore, versionMatch, type Out,
+  AUTOSTART_MS, createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, LEAD_MS, normalizeCode, parseInvitees, positionAt, roomCode, RoomCore, versionMatch, type Out,
 } from './together-core.ts';
 
 const HOST = 'u-host';
@@ -8,8 +8,8 @@ const media = { key: 'anime:frieren:e5', kind: 'anime', label: 'Frieren 5' };
 const msgs = (out: Out[]) => out.filter((o): o is Extract<Out, { msg: unknown }> => 'msg' in o);
 const of = (out: Out[], t: string) => msgs(out).filter((o) => o.msg['t'] === t);
 
-function room(input: Record<string, unknown> = {}, now = 1_000) {
-  const core = RoomCore.create(createSettings(input, HOST, 'ABCDEF', now), media as never, now);
+function room(input: Record<string, unknown> = {}, now = 1_000, allowed: string[] | '*' = '*') {
+  const core = RoomCore.create(createSettings(input, HOST, 'ABCDEF', now, allowed), media as never, now);
   core.join({ conn: 'c-host', userId: HOST, name: 'المضيف', avatarKey: null }, now);
   return core;
 }
@@ -41,7 +41,8 @@ describe('Together room core', () => {
   });
 
   it('announces joins to others, caps people not connections, and lets the same account reconnect', () => {
-    const core = room({ cap: 2 });
+    const core = room();
+    core.settings = { ...core.settings, cap: 2 };
     const out = core.join({ conn: 'c-b', userId: 'u-b', name: 'دحمي', avatarKey: 'a1' }, 2_000);
     expect(of(out, 'welcome')[0]!.to).toEqual(['c-b']);
     const joined = of(out, 'joined')[0]!;
@@ -129,7 +130,70 @@ describe('Together room core', () => {
     expect(code).toMatch(/^[A-HJKMNP-Z2-9]{6}$/);
     expect(normalizeCode(code.toLowerCase())).toBe(code);
     expect(normalizeCode('ABC0EF')).toBeNull();
-    expect(createSettings({ cap: 99 }, HOST, code, 0).cap).toBe(10);
-    expect(createSettings({ cap: 1 }, HOST, code, 0).cap).toBe(2);
+    // لا تحديد عدد: الغرفة على قدر المدعوين، والسقف 10
+    expect(createSettings({ cap: 2 }, HOST, code, 0).cap).toBe(10);
+  });
+
+  it('only invited people get in; the host can add more later', () => {
+    expect(parseInvitees(['u-b', 'u-b', HOST, 'ghost'], ['u-b', 'u-c', HOST], HOST)).toEqual(['u-b']);
+    expect(parseInvitees('all', [], HOST)).toBe('*');
+    expect(parseInvitees([], ['u-b'], HOST)).toBeNull();
+    const core = room({}, 1_000, ['u-b']);
+    expect(of(core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000), 'welcome')).toHaveLength(1);
+    const out = core.join({ conn: 'c-c', userId: 'u-c', name: 'ج', avatarKey: null }, 2_100);
+    expect(of(out, 'uninvited')).toHaveLength(1);
+    expect(out.some((o) => 'close' in o && o.close === 'c-c')).toBe(true);
+    expect(of(core.handle('c-b', { t: 'invite', userIds: ['u-c'] }, 2_200), 'denied')).toHaveLength(1);
+    core.handle('c-host', { t: 'invite', userIds: ['u-c'] }, 2_300);
+    expect(of(core.join({ conn: 'c-c2', userId: 'u-c', name: 'ج', avatarKey: null }, 2_400), 'welcome')).toHaveLength(1);
+  });
+
+  it('starts in the lobby; a late joiner after start sees started=true and goes straight in', () => {
+    const core = room();
+    expect(core.timeline.started).toBe(false);
+    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 5_000);
+    expect(core.timeline.started).toBe(true);
+    const late = core.join({ conn: 'c-late', userId: 'u-late', name: 'متأخر', avatarKey: null }, 65_000);
+    const w = of(late, 'welcome')[0]!.msg as { state: { started: boolean; playing: boolean } };
+    expect(w.state).toMatchObject({ started: true, playing: true });
+    expect(positionAt(core.timeline, 65_000)).toBe(60_000 - LEAD_MS);
+  });
+
+  it('broadcasts state changes at once: preparing → ready → playing, and failed', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'دحمي', avatarKey: null }, 2_000);
+    const a = core.handle('c-b', { t: 'report', pos: 0, state: 'preparing', source: 'witanime' }, 3_000);
+    expect(of(a, 'status')[0]!.msg).toMatchObject({ name: 'دحمي', state: 'preparing', source: 'witanime' });
+    // نفس الحالة بعد 200ms: لا تنبيه ثانٍ
+    expect(of(core.handle('c-b', { t: 'report', pos: 0, state: 'preparing' }, 3_200), 'status')).toHaveLength(0);
+    expect(of(core.handle('c-b', { t: 'report', pos: 0, state: 'playing' }, 3_300), 'status')[0]!.msg).toMatchObject({ state: 'playing' });
+    expect(of(core.handle('c-b', { t: 'report', pos: 0, state: 'failed', source: 'okru' }, 3_400), 'status')[0]!.msg).toMatchObject({ state: 'failed', source: 'okru' });
+  });
+
+  it('the next episode stays in the same room and starts itself when everyone is ready', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 3_000);
+    const next = { key: 'anime:frieren:e6', kind: 'anime', label: 'Frieren 6' };
+    core.handle('c-host', { t: 'cmd', op: 'load', media: next }, 1_500_000);
+    expect(core.timeline).toMatchObject({ started: false, autoStart: true, playing: false, pos: 0 });
+    expect(core.timeline.media?.key).toBe(next.key);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready' }, 1_503_000);
+    expect(core.timeline.started).toBe(false);
+    const out = core.handle('c-b', { t: 'report', pos: 0, state: 'ready' }, 1_505_000);
+    expect(of(out, 'state')).toHaveLength(1);
+    expect(core.timeline).toMatchObject({ started: true, playing: true, at: 1_505_000 + LEAD_MS });
+  });
+
+  it('a slow participant cannot hold the next episode: it starts after the grace from host ready', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:x:e2', kind: 'anime', label: 'x 2' } }, 10_000);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'preparing' }, 10_500);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready' }, 11_000);
+    expect(core.nextDeadline()).toBe(11_000 + AUTOSTART_MS);
+    expect(core.tick(11_000 + AUTOSTART_MS - 1).out).toHaveLength(0);
+    expect(of(core.tick(11_000 + AUTOSTART_MS).out, 'state')).toHaveLength(1);
+    expect(core.timeline.started).toBe(true);
   });
 });
