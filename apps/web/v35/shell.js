@@ -2272,7 +2272,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
-  function openCinemaRef(ref, { title = null, cover = null } = {}) {
+  function openCinemaRef(ref, { title = null, cover = null, playAt = null } = {}) {
     const [, id, season] = ref.split(':');
     if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
     closeSheet();
@@ -2281,7 +2281,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       applySection('cinema');
       showHome('cinema');
     }
-    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover });
+    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover }, { playAt });
   }
 
   // ── ورقة المعاينة ──
@@ -5020,7 +5020,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const episode = Number.isFinite(live) ? live : media.episode;
       openAnimeRef(media.seriesRef, { title: media.title, cover: media.cover, chapter: { number: episode, label: `الحلقة ${episode}` }, play: true });
     } else if (media.kind === 'cinema') {
-      openCinemaRef(media.seriesRef, { title: media.title, cover: media.cover });
+      const live = Number(/#(\d+)$/.exec(together.session?.room.timeline?.media?.key ?? '')?.[1]);
+      const season = Number(String(media.seriesRef).split(':')[2]) || media.season || null;
+      openCinemaRef(media.seriesRef, { title: media.title, cover: media.cover, playAt: { season, episode: Number.isFinite(live) ? live : media.episode } });
     }
   }
 
@@ -5239,6 +5241,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
+    together: () => together,
     // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
     share: (work) =>
       openShareSheet({

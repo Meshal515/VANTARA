@@ -1255,7 +1255,7 @@ export function createCinema(deps) {
 
   // ───────────── صفحة العمل ─────────────
 
-  async function openWork(m, { autoplay = false } = {}) {
+  async function openWork(m, { autoplay = false, playAt = null } = {}) {
     const token = ++state.token;
     // عمل آخر: جلسة العمل السابق الدافئة تُغلق (روابطها لا تخصّ هذا)
     if (state.warm && String(state.warm.key).split(':')[0] !== String(m.id)) dropWarm();
@@ -1278,7 +1278,8 @@ export function createCinema(deps) {
     state.detail = full;
     senseSeries(full);
     renderDetail(full);
-    if (autoplay) {
+    if (playAt) play(full, full.type === 'series' ? (playAt.season ?? 1) : null, playAt.episode ?? 1, 0);
+    else if (autoplay) {
       const r = resumePoint(full);
       play(full, r.season, r.episode, r.position);
     }
@@ -1507,6 +1508,11 @@ export function createCinema(deps) {
       return;
     }
     const sheet = { session: null, routes: [], done: false, closed: false, launched: false, busy: false, found: null, missing: false };
+    // Together: نفس الأنمي — دخول من البطاقة يشغّل أول سيرفر جاهز وحده، والمشغّل يتسلّم الغرفة
+    const hub = deps.together?.() ?? null;
+    const togetherRef = `cinema:${playKey(m, season)}`;
+    const togetherEp = m.type === 'movie' ? 1 : n;
+    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp));
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
@@ -1531,6 +1537,21 @@ export function createCinema(deps) {
       const best = el('button', 'an-pick-best');
       best.type = 'button';
       foot.append(best);
+      if (hub && !sheet.autoTogether) {
+        const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
+          hub.openInvite({
+            kind: 'cinema',
+            key: `${togetherRef}#${togetherEp}`,
+            label: m.type === 'series' ? `${displayTitle(m)} — ${heading}` : displayTitle(m),
+            seriesRef: togetherRef,
+            title: displayTitle(m),
+            cover: m.poster ?? null,
+            episode: togetherEp,
+            season: m.type === 'series' ? season : null,
+          }, { onStarted: () => { sheet.autoTogether = true; withFriends.remove(); queuePaint(); } });
+        }, 'شاهد مع أصدقائك');
+        foot.append(withFriends);
+      }
       body.append(bar, scroll, foot);
 
       const tileNodes = new Map();
@@ -1558,6 +1579,10 @@ export function createCinema(deps) {
         queued = false;
         if (sheet.closed) return;
         const ready = sheet.routes.filter(routeSelectable).length;
+        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.session && ready) {
+          sheet.autoTogether = false;
+          queueMicrotask(() => best.onclick());
+        }
         // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
         // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
         const pendingRoute = sheet.routes.some(routePending);
@@ -1777,6 +1802,7 @@ export function createCinema(deps) {
         presenceUserId: presence?.userId ?? null,
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
+        ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
       });
     }
   }
