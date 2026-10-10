@@ -728,7 +728,7 @@ export function renderAddons({
   }
   // ───── صفوف «إضافاتي»: مجمّعة حسب القسم، ولكل صف حالته الحقيقية ─────
   const rowNodes = new Map();
-  let probing = new Set(), probeController = null, probeTimer = null;
+  let probing = new Set(), probeController = null, probeTimer = null, probeRunning = false;
   const sectionOf = (a) =>
     !a.bundled ? "external"
       : (a.contentTypes ?? []).includes("manga") ? "manga"
@@ -820,9 +820,10 @@ export function renderAddons({
   }
   /** الإصلاح الذاتي: يفحص المصادر المدمجة التي حان فحصها (اثنان معًا) ويحدّث صفوفها. */
   async function probeAll({ force = false } = {}) {
-    if (!onProbe || !pulse || closed) return;
+    if (!onProbe || !pulse || closed || probeRunning) return;
     const queue = registry.list().filter((a) => a.bundled && a.enabled !== false && !probing.has(a.key) && (force || pulse.due(a.key)));
-    if (!queue.length) return;
+    if (!queue.length) { scheduleProbe(30_000); return; }
+    probeRunning = true;
     probeController ??= new AbortController();
     const signal = probeController.signal;
     const worker = async () => {
@@ -835,11 +836,15 @@ export function renderAddons({
         if (!signal.aborted) refreshRow(a.key);
       }
     };
-    await Promise.all([worker(), worker()]);
+    try { await Promise.all([worker(), worker()]); }
+    finally {
+      probeRunning = false;
+      scheduleProbe(30_000);
+    }
   }
-  function scheduleProbe() {
-    if (!onProbe || !pulse || probeTimer || closed) return;
-    probeTimer = setTimeout(() => { probeTimer = null; void probeAll(); }, 700);
+  function scheduleProbe(delay = 700) {
+    if (!onProbe || !pulse || probeTimer || closed || probeRunning) return;
+    probeTimer = setTimeout(() => { probeTimer = null; void probeAll(); }, delay);
   }
   for (const [id, label] of [
     ["all", "الكل"],

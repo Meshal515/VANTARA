@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSourcePulse, pulseView } from './source-pulse.js';
 
 const memory = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; };
@@ -47,4 +47,28 @@ describe('نبض المصدر', () => {
     expect(pulseView(null).label).toBe('لم يُفحص بعد');
     expect(pulseView(null, { checking: true }).level).toBe('checking');
   });
+});
+
+it('ينهي الطلب العالق ولا يسمح لنتيجة متأخرة بتغيير حالة المصدر', async () => {
+  vi.useFakeTimers();
+  try {
+    const pulse = createSourcePulse({ storage: memory() });
+    let finish;
+    const result = pulse.measure('core|slow', () => new Promise(r => { finish = r; }), { timeoutMs: 100 });
+    const check = expect(result).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(100);
+    await check;
+    expect(pulse.get('core|slow').state).toBe('failed');
+    finish({ items: [1] });
+    await Promise.resolve();
+    expect(pulse.get('core|slow').state).toBe('failed');
+  } finally { vi.useRealTimers(); }
+});
+it('إلغاء الفحص يفك الطلب حتى لو تجاهل المصدر إشارة الإلغاء', async () => {
+  const pulse = createSourcePulse({ storage: memory() });
+  const controller = new AbortController();
+  const result = pulse.measure('core|slow', () => new Promise(() => {}), { signal: controller.signal });
+  controller.abort();
+  await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+  expect(pulse.get('core|slow')).toBeNull();
 });

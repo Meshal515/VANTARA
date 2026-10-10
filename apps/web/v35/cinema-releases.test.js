@@ -64,14 +64,14 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(best.querySelector('.an-srv-release').textContent).toBe('61 GB · HEVC · Atmos');
   expect(best.querySelector('.an-srv-lang--ar').textContent).toBe('عربي');
   expect(best.querySelector('.an-srv-seeds').textContent).toBe('412');
-  expect(best.querySelector('.an-srv-state').textContent).toBe('412مشارك · قوي');
+  expect(best.querySelector('.an-srv-state').textContent).toBe('412مشارك معلن · قوي');
   expect(best.className).toContain('an-srv--swarm-strong');
-  expect(visible(uhd)[2].querySelector('.an-srv-state').textContent).toBe('2مشارك · ضعيف');
+  expect(visible(uhd)[2].querySelector('.an-srv-state').textContent).toBe('2مشارك معلن · ضعيف');
   // 1080: العربية متوسطة السرب لا تتقدم على 1240 قوي؛ الميت مطويّ
   const fhd = groups.find((g) => g.textContent.includes('YTS') || g.textContent.includes('2.1 GB'));
   expect(visible(fhd).map((b) => b.title)).toEqual(['Fight.Club.1999.1080p.BluRay.x264.AAC-YTS', 'Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed']);
   expect(folded(fhd).map((b) => b.title)).toEqual(['Fight.Club.1999.1080p.BluRay.x265']);
-  expect(folded(fhd)[0].querySelector('.an-srv-state').textContent).toBe('لا مشاركين');
+  expect(folded(fhd)[0].querySelector('.an-srv-state').textContent).toBe('لا مشاركين معلنين');
   // اختيار المستخدم يبقى: المطويّ والضعيف قابلان للضغط
   expect(folded(fhd)[0].disabled).toBe(false);
   await best.onclick();

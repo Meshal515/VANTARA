@@ -505,3 +505,22 @@ it("groups installed sources by section with their real pulse and probes due sou
   expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({ key: "core|lek" }));
   view.close();
 });
+
+it('يعيد فحص المصدر المتعثر عند انتهاء المهلة ويوقف الفحص عند الخروج', async () => {
+  setup();
+  const { createSourcePulse } = await import('../addons/source-pulse.js');
+  vi.useFakeTimers();
+  try {
+    const pulse = createSourcePulse({ storage: null });
+    let calls = 0;
+    const view = renderAddons({ registry: { list: () => [row('Source', { key: 'core|x' })] }, pulse,
+      onProbe: async (a) => { calls++; pulse.record(a.key, 'failed'); } });
+    await vi.advanceTimersByTimeAsync(700);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(2);
+    view.close();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toBe(2);
+  } finally { vi.useRealTimers(); }
+});

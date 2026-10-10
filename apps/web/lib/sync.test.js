@@ -53,6 +53,7 @@ function jsonResponse(body, status = 200, headers = {}) {
     // الربط، فبدا العطل في المزامنة وهو في النموذج.
     headers: { get: (name) => headers[String(name).toLowerCase()] ?? null },
     json: async () => body,
+    clone: () => jsonResponse(body, status, headers),
   };
 }
 
@@ -433,16 +434,15 @@ describe('the identity seam the content api reads', () => {
     await expect(sync.refreshSession()).rejects.toMatchObject({ status: 401 });
   });
 
-  it('folds the session when the refresh fails on the network', async () => {
-    // هذا ما كان ناقصًا في عقدي: تجديد فاشل يجب أن يُنهي دعوى «مسجَّل الدخول»،
-    // وإلا بقيت الواجهة تعرض حسابًا لا توكن له وتفشل كل نداء بلا تفسير
+  it('preserves the session when renewal fails on the network', async () => {
+    // عطل النقل لا يلغي الهوية؛ الدورة التالية تعيد التجديد دون لمس الكتابات.
     const fetchImpl = vi.fn(async () => {
       throw new Error('offline');
     });
     const sync = await loadSync({ storage, fetchImpl });
     await expect(sync.refreshSession()).rejects.toThrow('offline');
-    expect(sync.signedIn).toBe(false);
-    expect(sync.authorizationHeader).toBeNull();
+    expect(sync.signedIn).toBe(true);
+    expect(sync.authorizationHeader).toBe('Bearer token-1');
   });
 });
 
