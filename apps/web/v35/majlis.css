@@ -786,3 +786,21 @@
 .v35 .mj-emoji--on {
   background: var(--accent-soft);
 }
+
+/* «شاهد اللقطة»: زر صريح تحت بطاقة اللحظة */
+.v35 .mj-clip-watch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent, #8f5cff);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.v35 .mj-clip-watch:active { transform: scale(0.97); }

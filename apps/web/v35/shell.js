@@ -19,7 +19,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -50,7 +50,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentStart } from '../lib/anime-engine.js';
+import { momentRange, momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
@@ -2265,7 +2265,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const episode = chapter && Number.isFinite(chapter.number) ? chapter.number : null;
     const position = chapter ? momentStart(chapter.label) : null;
-    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position });
+    // لحظة من المجلس: «شاهد اللقطة» يشغّل مداها وحده
+    const clip = chapter ? momentRange(chapter.label) : null;
+    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip });
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
@@ -2967,6 +2969,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountTimeline(q('collectionGrid'), {
       section,
       el,
+      canonical: section === 'manga' ? canonicalEventWorks : null,
       mountCover: (art, g) => void mountImage(art, g.section === 'manga' ? workOfEvent(g) : workFromRef(g.work, g.title, g.cover)),
       visible: () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section,
       image: (src) => {
@@ -3013,7 +3016,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function refreshHomeUpdates() {
     if (Date.now() - updatesAskedAt < 120_000) return;
     updatesAskedAt = Date.now();
-    const groups = await latestGroups('manga').catch(() => null);
+    const groups = await latestGroups('manga', 14, canonicalEventWorks).catch(() => null);
     if (!groups?.length) return;
     state.home.updates = groups.map(workOfEvent);
     if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();

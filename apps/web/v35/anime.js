@@ -492,7 +492,7 @@ export function createAnime(deps) {
 
   // ───────────── صفحة الأنمي ─────────────
 
-  async function openAnime(m, { episode = null, position = null } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null } = {}) {
     const token = ++state.detailToken;
     state.episodeRange = 0;
     state.detail = m;
@@ -508,7 +508,7 @@ export function createAnime(deps) {
       renderDetail(full);
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
-      if (episode && position != null) playEpisode(full, episode, { position });
+      if (episode && position != null) playEpisode(full, episode, { position, clip });
       if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
       // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
       void fetchMalEpisodes(full.idMal)
@@ -1229,7 +1229,7 @@ export function createAnime(deps) {
    * «شغّل الأفضل» يزن الموثوقية وسرعة البدء والجودة والفشل الأخير، ويرجّح
    * سيرفرك السابق لهذا الأنمي دون أن يقفل عليه.
    */
-  function playEpisode(m, n, { position = null } = {}) {
+  function playEpisode(m, n, { position = null, clip = null } = {}) {
     if (!engine.available()) {
       deps.openSheet((body) => {
         const head = el('div', 'an-sheet-head');
@@ -1243,7 +1243,7 @@ export function createAnime(deps) {
       return;
     }
     const saved = localWatch()[m.id]?.episodes?.[n];
-    const startAt = position ?? (saved && !saved.done ? saved.position : 0);
+    const startAt = clip?.startMs ?? position ?? (saved && !saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
@@ -1273,7 +1273,8 @@ export function createAnime(deps) {
         et.dir = 'auto';
         cap.append(et);
       }
-      if (startAt > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(startAt)}`));
+      if (clip) cap.append(el('span', 'an-pick-resume', `اللقطة ${engine.clock(clip.startMs)}–${engine.clock(clip.endMs)}`));
+      else if (startAt > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(startAt)}`));
       hero.append(cap);
 
       const status = el('div', 'an-srv-status');
@@ -1557,6 +1558,7 @@ export function createAnime(deps) {
         episode: n,
         total: m.aired || m.episodes || 0,
         position: startAt,
+        ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
         poster: m.posterSmall ?? m.poster ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
         copies: sheet.copies ?? sheet.work.copies,

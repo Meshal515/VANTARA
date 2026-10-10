@@ -21,6 +21,8 @@ export function splitNames(raw) {
   for (const part of String(raw ?? '').split(/\s*[,;؛،|\n]\s*|\s+\/\s+/)) {
     const name = part.replace(/\s+/g, ' ').trim();
     if (name.length < 2 || name.length > 120 || NONE.test(name)) continue;
+    // اسم قصّه الموقع («The Regressed Mercenary’s Mach…» عند Mangalek): ليس اسمًا
+    if (/(?:…|\.{3})$/.test(name)) continue;
     if (!out.some((n) => n.toLowerCase() === name.toLowerCase())) out.push(name);
   }
   return out;

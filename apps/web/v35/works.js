@@ -13,6 +13,7 @@ import engine from '../lib/extension-engine.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
 import { aliasMap, learnAliases, loadAliases, noteRefAlias } from '../lib/manga-alias-store.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
+import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed } from '../lib/update-engine.js';
@@ -41,15 +42,42 @@ export function seriesRefOf(work) {
 function workIndex() {
   void loadAliases();
   const index = canonicalIndex({ aliases: aliasMap() });
-  const add = index.add;
-  index.add = (entry) => {
-    const hit = add(entry);
-    const own = normalizeTitle(entry?.manga?.title);
-    if (hit && own && own !== hit.work.key) noteRefAlias(`ext:${own}`, `ext:${hit.work.key}`);
-    return hit;
+  const list = index.list;
+  index.list = () => {
+    const works = list();
+    for (const w of works) for (const own of w.keys ?? []) if (own !== w.key) noteRefAlias(`ext:${own}`, `ext:${w.key}`);
+    return works;
   };
   return index;
 }
+
+/**
+ * مفاتيح الهوية الواحدة لأحداث «آخر التحديثات»: الخط الزمني كان يجمّع بالعنوان الخام
+ * (`ext:<عنوان>`) فيظهر «Magic Emperor» و«Demonic Emperor» بطاقتين. نفس `canonicalIndex`
+ * الذي تبني به القوائم، بأدلته وحارسه: مصدر يعرض العنوانين عملين لا يُدمجان.
+ * يعيد Map<مفتاح الحدث، مفتاح العمل>.
+ */
+export function canonicalEventWorks(events) {
+  void loadAliases();
+  const index = canonicalIndex({ aliases: aliasMap() });
+  const own = new Map();
+  for (const e of events ?? []) {
+    const work = String(e?.work ?? '');
+    if (e?.section !== 'manga' || !work.startsWith('ext:') || own.has(work)) continue;
+    const title = String(e.title ?? '');
+    const key = normalizeTitle(title);
+    if (!key) continue;
+    const sources = (e.sources ?? []).filter((x) => x?.s);
+    for (const x of sources.length ? sources : [{ s: 'updates' }]) index.add({ sourceId: x.s, label: x.s, manga: { title, url: x.u ?? '', memo: x.m ?? '' } });
+    own.set(work, key);
+  }
+  const out = new Map();
+  for (const [work, key] of own) out.set(work, `ext:${index.keyOf(key)}`);
+  return out;
+}
+
+/** كل نسخ العمل ردّت حديثًا بلا فصل: لا تُعرض بطاقةً «لا فصول متاحة». */
+const isEmptyWork = (work) => knownEmpty(work, mirrorFamily);
 
 export function toV35Work(work) {
   const cover = work.thumbnailUrl ?? null;
@@ -270,9 +298,16 @@ function recentWorks(entries) {
   for (const { source, manga, chapter, chapters, observedAt } of entries) {
     const hit = index.add({ sourceId: source.id, label: source.label, manga, chapters });
     if (!hit) continue;
-    if (!observed.has(hit.work.key) || observedAt > observed.get(hit.work.key).at) observed.set(hit.work.key, { chapter, at: observedAt });
+    if (!observed.has(hit.key) || observedAt > observed.get(hit.key).at) observed.set(hit.key, { chapter, at: observedAt });
   }
   const works = index.list().filter((w) => !isWestern(w));
+  // ما رُصد لكل نسخة يصير للبطاقة التي انضمت إليها (الأحدث يفوز)
+  for (const [own, seen] of [...observed]) {
+    const key = index.keyOf(own);
+    if (key === own) continue;
+    observed.delete(own);
+    if (!observed.has(key) || seen.at > observed.get(key).at) observed.set(key, seen);
+  }
   for (const w of works) {
     w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
     w.title = w.editions[0]?.manga?.title ?? w.title;
@@ -462,7 +497,8 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
   const positions = new Map();
   let hasNextPage = false;
   // بترتيب ثابت للمصادر لا بترتيب ردّها: العنوان والغلاف الأولان من أوثقها
-  for (const { source, value } of [...ok].sort((a, b) => sourceRank(a.source.id) - sourceRank(b.source.id) || String(a.source.id).localeCompare(String(b.source.id)))) {
+  const pages = await Promise.all(ok.map(async ({ source, value }) => ({ source, value: await withMangaDexNames(source.id, value) })));
+  for (const { source, value } of pages.sort((a, b) => sourceRank(a.source.id) - sourceRank(b.source.id) || String(a.source.id).localeCompare(String(b.source.id)))) {
     hasNextPage ||= Boolean(value?.hasNextPage);
     addPage(index, positions, source, value);
   }
@@ -474,21 +510,27 @@ function addPage(index, positions, source, value) {
   mangas.forEach((manga, pos) => {
     const hit = index.add({ sourceId: source.id, label: source.label, manga });
     if (!hit) return;
-    const list = positions.get(hit.work.key) ?? [];
+    // بمفتاح النسخة: البطاقة التي تنضم إليها تُعرف عند الترتيب، بعد كل الأدلة
+    const list = positions.get(hit.key) ?? [];
     list.push({ pos, len: mangas.length });
-    positions.set(hit.work.key, list);
+    positions.set(hit.key, list);
   });
 }
 function ranked(index, positions, kind, { keepWestern = false } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
-  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)));
+  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)) && !isEmptyWork(w));
+  const byWork = new Map();
+  for (const [own, list] of positions) {
+    const key = index.keyOf(own);
+    byWork.set(key, [...(byWork.get(key) ?? []), ...list]);
+  }
   for (const w of works) {
     w.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
     // العنوان والغلاف من أوثق نسخة، لا من أول مصدر ردّ
     w.title = w.editions[0]?.manga?.title ?? w.title;
     w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
   }
-  return rankListing(works, positions, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
+  return rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
 }
 
 /**
@@ -518,7 +560,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
       const t0 = Date.now();
       const stage = query ? 'search' : 'list';
       try {
-        const value = await withTimeout(
+        const value = await withMangaDexNames(source.id, await withTimeout(
           genre
             ? engine.genre(source.id, genre, page)
             : query
@@ -529,7 +571,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
                   ? sourceLatest(source.id, page)
                   : engine.catalogue(source.id, page),
           LISTING_TIMEOUT_MS,
-        );
+        ));
         hasNextPage ||= Boolean(value?.hasNextPage);
         reportSource({ section: 'manga', sourceId: source.id, stage, outcome: value?.mangas?.length ? 'ok' : 'empty', ms: Date.now() - t0 });
         addPage(index, positions, source, value);
@@ -577,6 +619,17 @@ export function failureOf(error) {
     state: timeout ? 'SOURCE_TIMEOUT' : 'SOURCE_ERROR',
     reason: timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
   };
+}
+
+/**
+ * أسماء العمل الأخرى من صفحته (حقلها في الـPWA، أو آخر الوصف في إضافات الـAPK):
+ * القوائم القادمة تجمع نسخه بأسمائها المختلفة في بطاقة واحدة. تُحفظ بمفتاح
+ * البطاقة القانوني، فيبقى هو مفتاحها في كل قائمة بعدها.
+ */
+function learnDetailAliases(key, detail) {
+  if (!key || !detail) return;
+  const names = detail.altNames?.length ? detail.altNames : aliasesFromText(detail.description);
+  if (names.length) learnAliases(key, names);
 }
 
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
@@ -635,8 +688,8 @@ export async function detail(v35work) {
   const main = values.find((v) => v.detail) ?? null;
   // أسماء العمل الأخرى من صفحته (حقلها في الـPWA، أو آخر الوصف في إضافات الـAPK):
   // القوائم القادمة تجمع نسخه بأسمائها المختلفة في بطاقة واحدة
-  const altNames = main?.detail?.altNames?.length ? main.detail.altNames : aliasesFromText(main?.detail?.description);
-  if (altNames.length) learnAliases(work.key, altNames);
+  learnDetailAliases(work.key, main?.detail);
+  for (const v of values) if (Array.isArray(v.chapters)) noteEditionChapters(mirrorFamily(v.sourceId), v.manga?.url, v.chapters.length);
   const chapters = localizeFiller(mergeChapters(values, { rank: sourceRank }));
   const answered = new Set(values.map((v) => v.sourceId));
   // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
@@ -766,11 +819,13 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
             detail = out.manga ?? detail;
             // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
             if (isWesternManga(detail)) learnWestern(v35work._work?.key);
+            learnDetailAliases(v35work._work?.key, detail);
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
             edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS) };
           }
           failed.delete(edition.sourceId);
+          if (Array.isArray(edition.chapters)) noteEditionChapters(mirrorFamily(edition.sourceId), edition.manga?.url, edition.chapters.length);
           // مصدرٌ ردّ بلا فصول اليوم لا يمحو ما عرفناه منه أمس
           if (edition.chapters?.length || !editions.find((e) => e.sourceId === edition.sourceId)?.chapters?.length) {
             editions = unionEditions(editions, [edition]);

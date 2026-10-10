@@ -589,6 +589,18 @@ export function createMajlis(ctx) {
       ctx.preview(work, chapter ? { chapter } : {});
     };
     card.append(b);
+    // لحظة: زر صريح يشغّل مداها وحده عند صديقك، ثم «إعادة» أو «الحلقة كاملة»
+    if (moment) {
+      const watch = el('button', 'mj-clip-watch');
+      watch.type = 'button';
+      watch.innerHTML = glyph('play', { size: 15, filled: true });
+      watch.append(el('span', null, 'شاهد اللقطة'));
+      watch.onclick = () => {
+        acknowledge('rec', r.id, true);
+        ctx.preview(work, { chapter });
+      };
+      card.append(watch);
+    }
     const chips = reactionChips('rec', r.id);
     if (chips) card.append(chips);
     card.append(el('time', 'mj-time', timeLabel(e.at)));

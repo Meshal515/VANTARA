@@ -5,6 +5,8 @@
  * الصور من خادم MangaDex@Home المعيّن لكل فصل (`/at-home/server/<id>`).
  */
 
+import { mangaDexNames } from '../../../lib/manga-evidence.js';
+
 const API = 'https://api.mangadex.org';
 const LIMIT = 20;
 const RATINGS = ['safe', 'suggestive'];
@@ -33,7 +35,13 @@ export const mangadex = {
       const alt = (a.altTitles ?? []).find((t) => t[lang])?.[lang];
       return String(pick(a.title, 'en', 'ja-ro', 'ko-ro', 'zh-ro') || alt || '').trim();
     };
-    const toManga = (m) => ({ url: `/manga/${m.id}`, title: titleOf(m), thumbnailUrl: coverOf(m, 256) });
+    // أسماؤه الأخرى تصل مع القائمة نفسها: دليل هويته عند المصادر العربية
+    // («Hoegwihan Yongbyeong-eun…» هو «The Regressed Mercenary's Machinations»)
+    const toManga = (m) => {
+      const title = titleOf(m);
+      const altNames = mangaDexNames(m).filter((n) => n !== title);
+      return { url: `/manga/${m.id}`, title, thumbnailUrl: coverOf(m, 256), ...(altNames.length ? { altNames } : {}) };
+    };
 
     async function list(page, order, title = '') {
       const url = new URL(`${API}/manga`);

@@ -494,6 +494,16 @@ export function clock(ms) {
 /** عنوان اللحظة في المجلس، ومنه تُقرأ بدايتها عند صديقك. */
 export const momentLabel = (episode, startMs, endMs) => `الحلقة ${episode} · ${clock(startMs)}–${clock(endMs)}`;
 
+/** مدى اللحظة كاملًا من عنوانها («· 12:10–12:30») لـ«شاهد اللقطة»، أو null. */
+export function momentRange(label) {
+  const m = /·\s*(\d+(?::\d{2}){1,2})\s*[–-]\s*(\d+(?::\d{2}){1,2})/.exec(String(label ?? ''));
+  if (!m) return null;
+  const ms = (t) => t.split(':').reduce((acc, part) => acc * 60 + Number(part), 0) * 1000;
+  const startMs = ms(m[1]);
+  const endMs = ms(m[2]);
+  return endMs > startMs ? { startMs, endMs } : null;
+}
+
 export function momentStart(label) {
   const m = /·\s*(\d+(?::\d{2}){1,2})\s*[–-]/.exec(String(label ?? ''));
   if (!m) return null;
