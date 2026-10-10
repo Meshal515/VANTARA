@@ -2,13 +2,14 @@ name: Android addon playback runtime
 
 on:
   push:
-    branches: [chatgpt/addon-playback-compatibility-20261009, main]
+    branches: [chatgpt/addon-playback-compatibility-20261009, main, 'claude/**']
     paths:
       - 'android/app/src/**/addons/**'
       - 'android/app/src/androidTest/assets/addon-*'
       - 'android/app/build.gradle'
       - 'android/app/src/main/cpp/**'
       - 'tools/addon-runtime-check.sh'
+      - 'tools/addon-live-torrent.sh'
       - '.github/workflows/addon-runtime.yml'
 
 permissions:
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   native-playback:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -62,7 +63,7 @@ jobs:
           target: default
           arch: x86_64
           disable-animations: true
-          script: bash tools/addon-runtime-check.sh addon-runtime-evidence
+          script: bash tools/addon-runtime-check.sh addon-runtime-evidence && bash tools/addon-live-torrent.sh addon-runtime-evidence/live
       - uses: actions/upload-artifact@v4
         if: always()
         with:
