@@ -15,6 +15,8 @@ import {
 } from '@vantara/domain';
 import legacyWorker from './index.ts';
 import { collectTimelines } from './collectors.ts';
+import { togetherRoute } from './together.ts';
+export { TogetherRoom } from './together.ts';
 import { bearerFrom, mintToken } from './session.ts';
 import { cancelDeletion, checkPin, createAccount, grantPin, grantValid, lifecycleOf, pinOf, purgeAccount, purgeExpired, requestDeletion, updatePin } from './accounts.ts';
 import type { Env, ExecutionContext } from './types.ts';
@@ -564,6 +566,13 @@ export default {
           status: response.status,
           headers: { ...JSON_HEADERS, ...cors },
         });
+      }
+
+      // Together قبل البوابة العامة: WebSocket المتصفح يحمل التوكن بروتوكولًا فرعيًا لا ترويسة
+      const together = await togetherRoute(path, request, env, now);
+      if (together) {
+        if (together.status === 101) return together;
+        return new Response(together.body, { status: together.status, headers: { ...JSON_HEADERS, ...cors } });
       }
 
       const accountResponse = await accountRoute(path, request, env, now);
