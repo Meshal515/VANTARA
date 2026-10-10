@@ -12,18 +12,22 @@ adb shell run-as com.vantara.app.debug cat files/addon-proof/live-torrent.json >
 python3 - "$evidence" <<'PY'
 import json, pathlib, sys, os
 ev = pathlib.Path(sys.argv[1])
-out = ["## تورنت حي (سرب حقيقي، Big Buck Bunny من archive.org)"]
+out = ["## تورنت حي (أسراب حقيقية، أفلام Blender المفتوحة)"]
 try:
     p = json.loads((ev / "live-torrent.json").read_text())
 except Exception as e:
     out.append(f"لا دليل: {e}"); p = None
 if p:
-    out.append(f"- النتيجة: {'✅ نجح' if p.get('passed') else '❌ فشل'} · أول صورة: {p.get('firstFrameMs')} ms · بعد القفز: {p.get('seekMs')} ms · {p.get('videoWidth')}x{p.get('videoHeight')}")
-    if p.get('failure'): out.append(f"- السبب: `{p['failure']}`")
-    out.append("\n| t (ms) | الحدث | مشاركون | زارعون | سرعة KB/s | محمّل MB |\n|---|---|---|---|---|---|")
-    for e in p.get('timeline', []):
-        r = e.get('rate'); d = e.get('done')
-        out.append(f"| {e['t']} | {e['event']} | {e.get('peers')} | {e.get('seeds')} | {round(r/1024) if r is not None else ''} | {round(d/1048576,1) if d is not None else ''} |")
+    out.append(f"- النتيجة العامة: {'✅ نجح (' + p.get('winner','') + ')' if p.get('passed') else '❌ لم ينجح أي فيلم'}")
+    for r in p.get('results', []):
+        out.append(f"\n### {r.get('name')} — {'✅' if r.get('passed') else '❌'} · أول صورة: {r.get('firstFrameMs')} ms · بعد القفز: {r.get('seekMs')} ms · {r.get('videoWidth')}x{r.get('videoHeight')}")
+        if r.get('failure'): out.append(f"- السبب: `{r['failure']}`")
+        out.append("\n| t (ms) | الحدث | DHT | مشاركون | زارعون | سرعة KB/s | محمّل MB |\n|---|---|---|---|---|---|---|")
+        tl = r.get('timeline', [])
+        keep = [e for i, e in enumerate(tl) if e['event'] != 'sample' or i % 3 == 0]
+        for e in keep:
+            rate = e.get('rate'); d = e.get('done')
+            out.append(f"| {e['t']} | {e['event']} | {e.get('dht')} | {e.get('peers')} | {e.get('seeds')} | {round(rate/1024) if rate is not None else ''} | {round(d/1048576,1) if d is not None else ''} |")
 text = "\n".join(out)
 print(text)
 s = os.environ.get("GITHUB_STEP_SUMMARY")

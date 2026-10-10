@@ -74,6 +74,8 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
     fun release(uri: Uri) { uri.host?.let(tickets::remove) }
+    /** Routing-table size: 0 for a long time means the device cannot reach the BitTorrent network at all. */
+    fun dhtNodes(): Long = if (managerHolder.isInitialized()) runCatching { manager.dhtNodes() }.getOrDefault(0L) else 0L
     /** Live swarm facts for a ticket: what Stremio shows while buffering. Null before the session exists. */
     fun stats(uri: Uri): TorrentStats? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
