@@ -42,6 +42,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import com.vantara.addons.*
@@ -134,6 +136,9 @@ class PlayerActivity : Activity() {
         val presenceUserId: String? = null,
         val presenceDeviceId: String? = null,
         val presenceDeviceCredential: String? = null,
+        /** «شاهد اللقطة»: يشغّل المدى وحده ثم يعرض إعادة/أكمل/من البداية. -1 = حلقة كاملة. */
+        val clipStartMs: Long = -1,
+        val clipEndMs: Long = -1,
     ) {
         /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
         fun ref() = "$section:$animeId"
@@ -166,6 +171,49 @@ class PlayerActivity : Activity() {
     private var errorCard: View? = null
     private var countdownCard: View? = null
     private var clip: ClipEditor? = null
+
+    // ───── الترجمة: نعرضها بأنفسنا (تأخير/تقديم، حجم، موضع) ─────
+    private lateinit var subsView: TextView
+    /** ترجمة ملف (إضافة): كل الأسطر عندنا فالإزاحة بالاتجاهين. null = ترجمة الفيديو عبر Media3. */
+    private var ownCues: List<TimedCue>? = null
+    private var subtitleDelayMs = 0L
+    private var shownSub = ""
+    private var subtitleTab = 0
+    private val embeddedCues = Any()
+    private val subsTick = object : Runnable {
+        override fun run() {
+            val cues = ownCues ?: return
+            showSub(SubtitleText.at(cues, SubtitleText.fileTime(position(), subtitleDelayMs)))
+            main.postDelayed(this, 80)
+        }
+    }
+
+    // ───── الشبكة ─────
+    @OptIn(UnstableApi::class) private val net = NetStats()
+    private var netChip: TextView? = null
+    private val netTick = object : Runnable {
+        override fun run() {
+            if (openSheet == SheetKind.NETWORK) sheet.refresh()
+            netChip?.let { chip -> if (chip.visibility == View.VISIBLE) chip.text = netSummary() }
+            if (openSheet == SheetKind.NETWORK || netChip?.visibility == View.VISIBLE) main.postDelayed(this, 1000)
+        }
+    }
+
+    // ───── «شاهد اللقطة» ─────
+    private var clipWatch: LongRange? = null
+    private var clipEndCard: View? = null
+    private var clipLast = -1L
+    private val clipTick = object : Runnable {
+        override fun run() {
+            val range = clipWatch ?: return
+            val now = position()
+            if (clipEndCard == null && player.isPlaying && clipLast in range.first until range.last && now >= range.last) {
+                player.pause(); showClipEnd()
+            }
+            clipLast = now
+            main.postDelayed(this, 200)
+        }
+    }
 
     private val engine by lazy { AnimeEngine.get(this) }
     private val network: NetworkHelper by lazy { Injekt.get<NetworkHelper>() }
@@ -243,6 +291,7 @@ class PlayerActivity : Activity() {
         addonClient.cancelPrefix("subtitle-")
         subtitleFiles.forEach { it.delete() }; subtitleFiles.clear()
         selectedAddonSubtitle = null
+        stopOwnSubtitles()
         return addonSubtitles.begin()
     }
 
@@ -268,36 +317,55 @@ class PlayerActivity : Activity() {
         val c = current ?: return
         val generation = addonSubtitles.generation
         val selection = addonSubtitles.select()
-        sheet.close()
+        sheet.refresh()
         scope.launch {
-            val file = withContext(Dispatchers.IO) {
-                runCatching {
-                    val text = addonClient.request(track.url, "subtitle-$generation-file-${track.id}")
-                    val vtt = text.trimStart().startsWith("WEBVTT")
-                    require(vtt || Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->").containsMatchIn(text))
-                    File.createTempFile("addon-subtitle-", if (vtt) ".vtt" else ".srt", cacheDir).apply { writeText(text) }
-                }.getOrNull()
+            // الملف كله عندنا: نعرضه بأنفسنا، فلا يُعاد تحضير الفيديو (كان يعيد تحميله، والتورنت يعيد الاتصال)
+            val cues = withContext(Dispatchers.IO) {
+                runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-${track.id}")) }.getOrNull()
             }
-            if (file == null) { if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
-            if (!addonSubtitles.current(generation, selection) || current?.id != c.id) { file.delete(); return@launch }
-            subtitleFiles.add(file)
-            val item = player.currentMediaItem ?: return@launch
-            val source = item.localConfiguration?.subtitleConfigurations.orEmpty().filter { it.id?.startsWith("addon|") != true }
-            val config = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.fromFile(file))
-                .setId("addon|${track.id}").setLabel("${track.lang} — ${track.provider}").setLanguage(track.lang)
-                .setMimeType(if (file.extension == "vtt") MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP)
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()
-            // التحديث يحدث باختيار المستخدم فقط، ويحفظ الموضع وحالة الوقف بعد تنزيل الملف.
-            val at = position(); val playing = player.playWhenReady
-            val media = item.buildUpon().setSubtitleConfigurations(source + config).build()
-            val factory = playbackDataSourceFactory(c)
+            if (cues.isNullOrEmpty()) { if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
+            if (!addonSubtitles.current(generation, selection) || current?.id != c.id) return@launch
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            main.removeCallbacksAndMessages(embeddedCues)
             selectedAddonSubtitle = track.id
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setPreferredTextLanguage(track.lang).build()
-            player.setMediaSource(DefaultMediaSourceFactory(factory).createMediaSource(media), at)
-            player.prepare(); player.playWhenReady = playing
+            ownCues = cues
+            main.removeCallbacks(subsTick); main.post(subsTick)
+            if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
         }
     }
+
+    private fun stopOwnSubtitles() {
+        ownCues = null
+        main.removeCallbacks(subsTick)
+        if (::subsView.isInitialized) showSub("")
+    }
+
+    private fun showSub(text: String) {
+        if (text == shownSub || !::subsView.isInitialized) return
+        shownSub = text
+        subsView.text = text
+        subsView.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** الحجم والموضع والخلفية من الإعدادات (تبقى بين الحلقات). */
+    private fun applySubtitleStyle() {
+        if (!::subsView.isInitialized) return
+        val size = settings.getInt("subSize", 1).coerceIn(0, 3)
+        val pos = settings.getInt("subPos", 0).coerceIn(0, 2)
+        val box = settings.getBoolean("subBox", false)
+        subsView.textSize = listOf(15f, 18f, 22f, 27f)[size]
+        subsView.layoutParams = (subsView.layoutParams as FrameLayout.LayoutParams).apply { bottomMargin = dp(listOf(26, 70, 128)[pos]) }
+        if (box) {
+            subsView.background = rounded(0xB3000000.toInt(), dp(8).toFloat())
+            subsView.setShadowLayer(0f, 0f, 0f, 0)
+            subsView.setPadding(dp(12), dp(4), dp(12), dp(6))
+        } else {
+            subsView.background = null
+            subsView.setShadowLayer(dp(4).toFloat(), 0f, dp(1).toFloat(), Color.BLACK)
+            subsView.setPadding(dp(6), dp(2), dp(6), dp(2))
+        }
+    }
+
     private var preferCode: String? = null
     private var startedAt = 0L
     private var reportedStart = false
@@ -426,18 +494,23 @@ class PlayerActivity : Activity() {
             showError("انتهت جلسة الحلقة — افتحها من جديد")
             return
         }
+        if (launch.clipStartMs >= 0 && launch.clipEndMs > launch.clipStartMs) {
+            clipWatch = launch.clipStartMs..launch.clipEndMs
+            main.post(clipTick)
+        }
+        val startAt = clipWatch?.first ?: launch.positionMs
         val picked = launch.candidate?.let { s.take(it) }
         if (picked != null) {
-            start(picked, launch.positionMs)
+            start(picked, startAt)
         } else if (prep != null) {
             spinner.visibility = View.VISIBLE
             message("نجهّز أفضل سيرفر…", long = true)
             waiting = scope.launch {
                 val best = prep.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
-                if (best != null) start(best, launch.positionMs) else showError("لم يجهز أي سيرفر لهذه الحلقة")
+                if (best != null) start(best, startAt) else showError("لم يجهز أي سيرفر لهذه الحلقة")
             }
         } else {
-            s.next()?.let { start(it, launch.positionMs) } ?: showError("لا توجد سيرفرات متاحة لهذه الحلقة")
+            s.next()?.let { start(it, startAt) } ?: showError("لا توجد سيرفرات متاحة لهذه الحلقة")
         }
         main.post(usageTick)
         main.postDelayed(progressTick, PROGRESS_EVERY_MS)
@@ -505,7 +578,16 @@ class PlayerActivity : Activity() {
             sampleUsage()
         }
 
+        override fun onCues(cueGroup: CueGroup) {
+            if (ownCues != null) return
+            val text = cueGroup.cues.mapNotNull { it.text?.toString()?.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+            // ترجمة الفيديو تصل لحظة موعدها: التأخير ممكن (نؤجّلها)، التقديم لا
+            val delay = subtitleDelayMs.coerceAtLeast(0)
+            if (delay == 0L) showSub(text) else main.postAtTime({ showSub(text) }, embeddedCues, SystemClock.uptimeMillis() + delay)
+        }
+
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            main.removeCallbacksAndMessages(embeddedCues)
             loadCoverage()
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
                 coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
@@ -588,7 +670,9 @@ class PlayerActivity : Activity() {
     private fun playbackDataSourceFactory(c: Candidate): androidx.media3.datasource.DataSource.Factory {
         val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers) else network.client
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
-        return if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
+        val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
+        // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)
+        return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net) } }
     }
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
@@ -801,7 +885,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK }
 
     private var openSheet: SheetKind? = null
 
@@ -818,6 +902,17 @@ class PlayerActivity : Activity() {
             resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
         root.addView(video, match())
+        video.subtitleView?.visibility = View.GONE
+        subsView = label("", 18f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            textDirection = View.TEXT_DIRECTION_FIRST_STRONG
+            maxWidth = (resources.displayMetrics.widthPixels * 0.86f).toInt()
+            setLineSpacing(0f, 1.08f)
+            visibility = View.GONE
+        }
+        root.addView(subsView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        applySubtitleStyle()
 
         val gestures = View(this)
         gestures.setOnTouchListener(Gestures())
@@ -874,6 +969,14 @@ class PlayerActivity : Activity() {
 
         unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE }
         root.addView(unlockButton, FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER_VERTICAL or Gravity.RIGHT).apply { rightMargin = dp(28) })
+
+        netChip = label("", 11.5f, Color.WHITE, bold = true).apply {
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = rounded(Tone.alpha(Tone.SURFACE, 0xC0), dp(12).toFloat())
+            visibility = View.GONE
+        }
+        root.addView(netChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.LEFT).apply { topMargin = dp(18); leftMargin = dp(22) })
+        if (settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
 
         sheet = VSheet(root)
         sheet.onClose = {
@@ -1026,6 +1129,8 @@ class PlayerActivity : Activity() {
             return
         }
         main.removeCallbacks(hideControls)
+        // الترجمة ترتفع فوق شريط التحكم حين يظهر فلا يغطيها
+        if (::subsView.isInitialized) subsView.animate().translationY(if (show) -dp(78).toFloat() else 0f).setDuration(180).start()
         if (show) {
             controls.visibility = View.VISIBLE
             controls.animate().alpha(1f).setDuration(160).start()
@@ -1331,38 +1436,184 @@ class PlayerActivity : Activity() {
 
     private fun showSubtitles() {
         open(SheetKind.SUBTITLES, "الترجمة") { body ->
-            val text = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && (0 until it.length).any { i -> it.getTrackFormat(i).id?.startsWith("addon|") != true } }
-            if (text.isEmpty() && addonSubtitles.tracks.isEmpty()) {
-                body.addView(sheetRow("لا توجد ترجمة منفصلة لهذا الفيديو", null, selected = true))
-                return@open
-            }
-            val disabled = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
-            body.addView(sheetRow("إيقاف", null, trailing = if (disabled) check() else null, selected = disabled) {
-                addonSubtitles.select(); selectedAddonSubtitle = null
-                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
-                sheet.close()
-            })
-            if (text.isNotEmpty()) body.addView(sectionLabel("الترجمة من الفيديو"))
-            for (g in text) for (i in 0 until g.length) {
-                val f = g.getTrackFormat(i)
-                if (f.id?.startsWith("addon|") == true) continue
-                val on = !disabled && g.isTrackSelected(i)
-                val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
-                body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
-                    addonSubtitles.select(); selectedAddonSubtitle = null
-                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
-                        .build()
-                    sheet.close()
-                })
-            }
-            if (addonSubtitles.tracks.isNotEmpty()) body.addView(sectionLabel("ترجمات إضافية"))
-            for (track in addonSubtitles.tracks) {
-                val on = !disabled && selectedAddonSubtitle == track.id
-                body.addView(sheetRow(java.util.Locale(track.lang).getDisplayLanguage(java.util.Locale("ar")), track.provider, trailing = if (on) check() else null, selected = on) { selectAddonSubtitle(track) })
-            }
+            body.addView(tabs(listOf("المسارات", "الضبط"), subtitleTab) { subtitleTab = it; sheet.refresh() })
+            if (subtitleTab == 1) subtitleSettings(body) else subtitleTracks(body)
         }
+    }
+
+    private fun subtitleTracks(body: LinearLayout) {
+        val text = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && (0 until it.length).any { i -> it.getTrackFormat(i).id?.startsWith("addon|") != true } }
+        if (text.isEmpty() && addonSubtitles.tracks.isEmpty()) {
+            body.addView(sheetRow("لا توجد ترجمة منفصلة لهذا الفيديو", null, selected = true))
+            return
+        }
+        val disabled = ownCues == null && player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+        body.addView(sheetRow("إيقاف", null, trailing = if (disabled) check() else null, selected = disabled) {
+            addonSubtitles.select(); selectedAddonSubtitle = null; stopOwnSubtitles()
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            sheet.refresh()
+        })
+        if (text.isNotEmpty()) body.addView(sectionLabel("الترجمة من الفيديو"))
+        for (g in text) for (i in 0 until g.length) {
+            val f = g.getTrackFormat(i)
+            if (f.id?.startsWith("addon|") == true) continue
+            val on = ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i)
+            val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
+            body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
+                addonSubtitles.select(); selectedAddonSubtitle = null; stopOwnSubtitles()
+                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
+                    .build()
+                sheet.refresh()
+            })
+        }
+        if (addonSubtitles.tracks.isNotEmpty()) body.addView(sectionLabel("ترجمات إضافية"))
+        for (track in addonSubtitles.tracks) {
+            val on = ownCues != null && selectedAddonSubtitle == track.id
+            body.addView(sheetRow(java.util.Locale(track.lang).getDisplayLanguage(java.util.Locale("ar")), track.provider, trailing = if (on) check() else null, selected = on) { selectAddonSubtitle(track) })
+        }
+    }
+
+    /** التوقيت والحجم والموضع والخلفية: كل ضغطة تظهر على الفيديو مباشرة واللوحة جانبية. */
+    private fun subtitleSettings(body: LinearLayout) {
+        body.addView(sectionLabel("التوقيت"))
+        body.addView(label(SubtitleText.delayLabel(subtitleDelayMs), 22f, Tone.TEXT, bold = true).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(0, dp(2), 0, dp(8))
+        })
+        val shift = { d: Long ->
+            subtitleDelayMs = (subtitleDelayMs + d).coerceIn(-30_000, 30_000)
+            main.removeCallbacksAndMessages(embeddedCues)
+            sheet.refresh()
+        }
+        body.addView(choiceRow(listOf("أبكر 0.5", "أبكر 0.1", "أتأخر 0.1", "أتأخر 0.5"), -1) { i -> shift(listOf(-500L, -100L, 100L, 500L)[i]) })
+        body.addView(label("الترجمة تظهر بعد الكلام ← «أبكر». تسبقه ← «أتأخر».", 12f, Tone.TEXT_3).apply { setPadding(0, dp(8), 0, 0) })
+        if (ownCues == null && subtitleDelayMs < 0) body.addView(label("ترجمة الفيديو المدمجة لا تُقدَّم قبل موعدها؛ التقديم يعمل مع الترجمات الإضافية.", 12f, Tone.WARN).apply { setPadding(0, dp(6), 0, 0) })
+        if (subtitleDelayMs != 0L) body.addView(pillButton("تصفير التوقيت", primary = false) { subtitleDelayMs = 0; main.removeCallbacksAndMessages(embeddedCues); sheet.refresh() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+
+        body.addView(sectionLabel("الحجم"))
+        body.addView(choiceRow(listOf("صغير", "متوسط", "كبير", "كبير جدًا"), settings.getInt("subSize", 1)) { i -> settings.edit().putInt("subSize", i).apply(); applySubtitleStyle(); sheet.refresh() })
+        body.addView(sectionLabel("الموضع"))
+        body.addView(choiceRow(listOf("أسفل", "أعلى قليلًا", "أعلى"), settings.getInt("subPos", 0)) { i -> settings.edit().putInt("subPos", i).apply(); applySubtitleStyle(); sheet.refresh() })
+        body.addView(sectionLabel("الخلفية"))
+        body.addView(choiceRow(listOf("ظل", "خلفية داكنة"), if (settings.getBoolean("subBox", false)) 1 else 0) { i -> settings.edit().putBoolean("subBox", i == 1).apply(); applySubtitleStyle(); sheet.refresh() })
+    }
+
+    /** تبويبات أعلى اللوحة. */
+    private fun tabs(names: List<String>, selected: Int, onPick: (Int) -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = rounded(Tone.SURFACE_2, dp(14).toFloat())
+        setPadding(dp(4), dp(4), dp(4), dp(4))
+        names.forEachIndexed { i, name ->
+            addView(label(name, 13.5f, if (i == selected) Color.WHITE else Tone.TEXT_2, bold = true).apply {
+                gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; minHeight = dp(38)
+                background = if (i == selected) pressable(Tone.ACCENT, dp(11).toFloat()) else pressable(0, dp(11).toFloat())
+                setOnClickListener { onPick(i) }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) }
+    }
+
+    /** صف خيارات متساوية (selected = -1 لأزرار فعل بلا حالة). */
+    private fun choiceRow(names: List<String>, selected: Int, onPick: (Int) -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        names.forEachIndexed { i, name ->
+            val on = i == selected
+            addView(label(name, 12.5f, if (on) Color.WHITE else Tone.TEXT_2, bold = true).apply {
+                gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; minHeight = dp(42)
+                setPadding(dp(4), 0, dp(4), 0)
+                background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat())
+                setOnClickListener { onPick(i) }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i < names.size - 1) marginEnd = dp(6) })
+        }
+    }
+
+    // ───────────── الشبكة ─────────────
+
+    private fun torrentStats() = current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let {
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).stats(android.net.Uri.parse(it)) }.getOrNull()
+    }
+
+    private fun netSummary(): String {
+        val ms = net.latencyMs()?.let { "$it ms" } ?: "— ms"
+        val speed = String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(net.bytesPerSecond()))
+        val ahead = "${player.totalBufferedDuration / 1000} ث"
+        val t = torrentStats()?.let { " · ${it.peers} مشارك" } ?: ""
+        return "$ms · $speed · $ahead$t"
+    }
+
+    private fun showNetwork() {
+        open(SheetKind.NETWORK, "الشبكة", "قياس حي من طلبات هذا الفيديو نفسها") { body ->
+            val latency = net.latencyMs()
+            val bps = net.bytesPerSecond()
+            val estimate = runCatching { DefaultBandwidthMeter.getSingletonInstance(this).bitrateEstimate }.getOrDefault(0L)
+            val need = player.videoFormat?.bitrate?.takeIf { it > 0 }?.toLong()
+            val buffered = player.totalBufferedDuration
+            val t = torrentStats()
+            body.addView(metricRow("زمن الاستجابة", latency?.let { "$it ms" } ?: "لم يُقس بعد", when { latency == null -> Tone.TEXT_3; latency < 300 -> Tone.OK; latency < 800 -> Tone.WARN; else -> Tone.BAD }))
+            body.addView(metricRow("السرعة الآن", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(bps)), Tone.TEXT))
+            if (estimate > 0) body.addView(metricRow("تقدير المشغّل", String.format(java.util.Locale.US, "%.1f Mbps", estimate / 1_000_000.0), Tone.TEXT_2))
+            body.addView(metricRow("جاهز أمامك", "${buffered / 1000} ثانية", if (buffered >= 15_000) Tone.OK else if (buffered >= 5_000) Tone.WARN else Tone.BAD))
+            player.videoFormat?.let { f ->
+                val rate = need?.let { String.format(java.util.Locale.US, " · %.1f Mbps", it / 1_000_000.0) } ?: ""
+                body.addView(metricRow("الفيديو", "${f.height.takeIf { it > 0 }?.let { "${it}p" } ?: "—"}$rate", Tone.TEXT_2))
+            }
+            if (t != null) {
+                body.addView(metricRow("مشاركون متصلون", "${t.peers} (زارعون ${t.seeds})", if (t.peers > 0) Tone.OK else Tone.BAD))
+                body.addView(metricRow("تحميل التورنت", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(t.downloadBytesPerSecond)), Tone.TEXT))
+            }
+            net.host?.let { body.addView(metricRow("السيرفر", it, Tone.TEXT_3)) }
+            body.addView(label(NetStats.verdict(latency, bps, need, buffered, t?.peers), 14f, Tone.TEXT, bold = true).apply { setPadding(0, dp(12), 0, dp(4)) })
+            val chipOn = netChip?.visibility == View.VISIBLE
+            body.addView(sheetRow("إظهار القياس فوق الفيديو", "زمن الاستجابة · السرعة · الجاهز", trailing = if (chipOn) check() else null, selected = chipOn) {
+                val on = netChip?.visibility != View.VISIBLE
+                settings.edit().putBoolean("netChip", on).apply()
+                netChip?.visibility = if (on) View.VISIBLE else View.GONE
+                main.removeCallbacks(netTick); main.post(netTick)
+                sheet.refresh()
+            })
+        }
+        main.removeCallbacks(netTick); main.post(netTick)
+    }
+
+    private fun metricRow(name: String, value: String, color: Int): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(9), 0, dp(9))
+        addView(label(name, 13.5f, Tone.TEXT_2), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(label(value, 14.5f, color, bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR })
+    }
+
+    // ───────────── «شاهد اللقطة» ─────────────
+
+    private fun showClipEnd() {
+        val range = clipWatch ?: return
+        clipEndCard?.let(root::removeView)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(22), dp(18), dp(22), dp(18))
+            background = rounded(Tone.alpha(Tone.SURFACE, 0xF2), dp(22).toFloat(), dp(1), Tone.LINE)
+            isClickable = true
+        }
+        card.addView(label("انتهت اللقطة", 18f, Tone.TEXT, bold = true))
+        card.addView(label("${ClipMath.clock(range.first)} – ${ClipMath.clock(range.last)}", 13f, Tone.TEXT_3).apply { setPadding(0, dp(4), 0, dp(14)); textDirection = View.TEXT_DIRECTION_LTR })
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val close = { clipEndCard?.let(root::removeView); clipEndCard = null }
+        buttons.addView(pillButton("إعادة اللقطة", primary = true) { close(); player.seekTo(range.first); clipLast = range.first; player.play() })
+        buttons.addView(pillButton("أكمل من هنا", primary = false) { close(); endClipMode(); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        buttons.addView(pillButton("الحلقة من البداية", primary = false) { close(); endClipMode(); player.seekTo(0); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        card.addView(buttons)
+        root.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        clipEndCard = card
+        setControls(false)
+    }
+
+    private fun endClipMode() {
+        clipWatch = null
+        main.removeCallbacks(clipTick)
+        message("الحلقة كاملة")
     }
 
     private fun showSpeed() {
@@ -1384,6 +1635,7 @@ class PlayerActivity : Activity() {
         open(SheetKind.MORE, "المزيد") { body ->
             body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
+            body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow("رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
                     pickFriend("رشّح الحلقة ${fmtEpisode(episode)}") { to, name -> queueMoment(to, name, null) }

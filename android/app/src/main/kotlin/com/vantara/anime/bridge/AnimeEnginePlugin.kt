@@ -102,6 +102,8 @@ class AnimeEnginePlugin : Plugin() {
                 presenceUserId = call.getString("presenceUserId"),
                 presenceDeviceId = call.getString("presenceDeviceId"),
                 presenceDeviceCredential = call.getString("presenceDeviceCredential"),
+                clipStartMs = (call.getDouble("clipStart") ?: -1.0).toLong(),
+                clipEndMs = (call.getDouble("clipEnd") ?: -1.0).toLong(),
             ),
         )
         activity.startActivity(intent)

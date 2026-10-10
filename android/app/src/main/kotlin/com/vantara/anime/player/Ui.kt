@@ -289,11 +289,20 @@ class VSheet(private val host: FrameLayout) {
 
     fun scrollTo(y: Int) { scroller?.smoothScrollTo(0, y.coerceAtLeast(0)) }
 
+    private var side = false
+
+    /**
+     * في الوضع الأفقي (المشاهدة) اللوحة شريط جانبي يمين الشاشة بعرض ~40%: الفيديو يبقى ظاهرًا
+     * وأثر كل ضغطة (حجم الترجمة، توقيتها) يُرى فورًا. في العمودي ورقة سفلية كما كانت.
+     */
     fun open(title: String, subtitle: String? = null, maxWidthDp: Int = 560, build: (LinearLayout) -> Unit) {
         close(animated = false)
         this.build = build
+        val hostW = host.width.takeIf { it > 0 } ?: ctx.resources.displayMetrics.widthPixels
+        val hostH = host.height.takeIf { it > 0 } ?: ctx.resources.displayMetrics.heightPixels
+        side = hostW > hostH
         val s = View(ctx).apply {
-            setBackgroundColor(Tone.SCRIM)
+            setBackgroundColor(if (side) 0x47000000 else Tone.SCRIM)
             alpha = 0f
             setOnClickListener { close() }
         }
@@ -301,16 +310,17 @@ class VSheet(private val host: FrameLayout) {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             background = GradientDrawable().apply {
-                setColor(Tone.SURFACE)
-                cornerRadii = floatArrayOf(dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), 0f, 0f, 0f, 0f)
+                setColor(if (side) Tone.alpha(Tone.SURFACE, 0xF0) else Tone.SURFACE)
+                val r = dp(22).toFloat()
+                cornerRadii = if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(dp(1), Tone.LINE)
             }
-            setPadding(dp(18), dp(8), dp(18), dp(14))
+            setPadding(dp(18), dp(if (side) 16 else 8), dp(18), dp(14))
             isClickable = true
             // لمسة داخل الورقة لا تصل للمشغّل تحتها
             setOnTouchListener { _, _ -> false }
         }
-        p.addView(View(ctx).apply { background = rounded(0x33FFFFFF, dp(3).toFloat()) }, LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
+        if (!side) p.addView(View(ctx).apply { background = rounded(0x33FFFFFF, dp(3).toFloat()) }, LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
         val head = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         head.addView(ctx.label(title, 17f, Tone.TEXT, bold = true))
         if (subtitle != null) head.addView(ctx.label(subtitle, 12.5f, Tone.TEXT_3).apply { setPadding(0, dp(5), 0, 0) })
@@ -326,9 +336,21 @@ class VSheet(private val host: FrameLayout) {
         scroller = scroll
         build(b)
 
-        val h = host.height.takeIf { it > 0 } ?: ctx.resources.displayMetrics.heightPixels
-        val w = host.width.takeIf { it > 0 } ?: ctx.resources.displayMetrics.widthPixels
+        val h = hostH
+        val w = hostW
         host.addView(s, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (side) {
+            val width = (w * 0.40f).toInt().coerceIn(dp(300), dp(420)).coerceAtMost(w)
+            host.addView(p, FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.RIGHT).apply {
+                topMargin = dp(12); bottomMargin = dp(12); rightMargin = dp(12)
+            })
+            scrim = s
+            panel = p
+            p.translationX = width.toFloat() + dp(12)
+            p.animate().translationX(0f).setDuration(240).setInterpolator(DecelerateInterpolator(2f)).start()
+            s.animate().alpha(1f).setDuration(200).start()
+            return
+        }
         host.addView(
             p,
             FrameLayout.LayoutParams(minOf(w, ctx.dp(maxWidthDp)), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
@@ -364,7 +386,8 @@ class VSheet(private val host: FrameLayout) {
         if (!animated) {
             host.removeView(p); s?.let(host::removeView)
         } else {
-            p.animate().translationY(p.height.toFloat()).setDuration(200).withEndAction { host.removeView(p) }.start()
+            if (side) p.animate().translationX(p.width.toFloat() + dp(12)).setDuration(180).withEndAction { host.removeView(p) }.start()
+            else p.animate().translationY(p.height.toFloat()).setDuration(200).withEndAction { host.removeView(p) }.start()
             s?.animate()?.alpha(0f)?.setDuration(200)?.withEndAction { host.removeView(s) }?.start()
         }
         onClose?.invoke()
