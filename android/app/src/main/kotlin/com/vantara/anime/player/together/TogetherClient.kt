@@ -87,6 +87,10 @@ class TogetherClient(
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
                 main.post { handle(msg) }
             }
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                // Complete the server's close handshake so onClosed can schedule reconnect.
+                webSocket.close(code, reason)
+            }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { dropped(code) }.let {}
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { dropped(response?.code ?: 1006) }.let {}
         })
