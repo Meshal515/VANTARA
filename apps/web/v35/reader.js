@@ -37,6 +37,7 @@ import {
 import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
+import { readerBridge } from './together.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 
@@ -138,6 +139,7 @@ export function openSmartReader(deps, ctx) {
     <header class="rd-top" id="rdTop">
       ${iconButton('back', 'رجوع', { act: 'exit' })}
       <button class="rd-titles rd-titles--chapters" type="button" data-act="chapters" aria-label="الفصول" aria-haspopup="dialog"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></button>
+      <span class="rd-together" id="rdTogether" hidden></span>
       <button class="rd-tl-btn" type="button" data-act="translate" id="rdTlBtn" hidden aria-pressed="false">${glyph('translateAr', { size: 20 })}<span>ترجمة</span></button>
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
@@ -159,6 +161,35 @@ export function openSmartReader(deps, ctx) {
   deps.mount(root);
   const q = (id) => root.querySelector(`#${id}`);
   const scroll = q('rdScroll');
+
+  // ───────────────────────── Together: القراءة مع الأصدقاء ─────────────────────────
+  // الأفاتارات جزء من الشريط العلوي: تظهر حين تضغط على الصفحة وتختفي معه.
+  const hub = deps.together ?? null;
+  const releaseSurface = hub?.useSurface({ openSheet: (b) => openSheet(b), closeSheet: () => closeSheet(), toast: (t) => toast(t) }) ?? null;
+  let tg = null;
+  let unmountStrip = null;
+  function attachTogether(session) {
+    if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
+    tg = readerBridge(session, {
+      seriesRef: ref,
+      onFollow: ({ chapter, index }) => {
+        if (state.row && Number(state.row.number) === chapter) jumpTo(index);
+        else {
+          const row = sequence.find((r) => Number(r.number) === chapter);
+          if (row) void openChapter(row, { startAt: index });
+          else toast(`المضيف في الفصل ${chapter}، وما لقيناه عندك`);
+        }
+      },
+    });
+    const host = q('rdTogether');
+    host.hidden = false;
+    unmountStrip = hub.mountStrip(host);
+    if (state.seg) tgPage(state.seg, state.seg.current ?? 0);
+    else tg.preparing();
+  }
+  function tgPage(seg, index) {
+    tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index, pages: seg.slots.length, source: seg.row.sourceId ?? null });
+  }
 
   /**
    * القراءة المتواصلة: الفصول قطعٌ متتالية في نفس التمرير (`segs`)، والفصل
@@ -820,6 +851,7 @@ export function openSmartReader(deps, ctx) {
     updateProgress();
     afterProgress();
     tl.focus(seg, index, segs);
+    tgPage(seg, index);
   }
   function updateProgress() {
     const n = state.pages.length;
@@ -1279,6 +1311,8 @@ export function openSmartReader(deps, ctx) {
       }
       body.append(sheetItem('layers', 'المصدر', openSourceSheet, { trail: state.row.label ?? '' }));
       if (deps.friends) body.append(sheetItem('share', 'رشّح هذا الفصل', openShareChapter));
+      if (hub && !tg) body.append(sheetItem('users', 'اقرأ مع أصدقائك', openTogetherInvite));
+      if (tg) body.append(sheetItem('users', 'غرفة القراءة', () => { closeSheet(); hub.openPanel(); }));
       if (deps.report) body.append(sheetItem('flag', 'بلّغ عن مشكلة', openReport));
     });
   }
@@ -1411,6 +1445,21 @@ export function openSmartReader(deps, ctx) {
       }
     });
   }
+  function openTogetherInvite() {
+    closeSheet();
+    const row = state.row;
+    const n = Number(row?.number);
+    if (!row || !Number.isFinite(n)) return toast('هالفصل ما له رقم، ما نقدر نقرأه معًا');
+    hub.openInvite({
+      kind: 'manga',
+      key: `manga:${ref}#${n}`,
+      label: `${ctx.title} — ${chapterLabel(row)}`,
+      seriesRef: ref,
+      title: ctx.title,
+      cover: readingOwner.coverUrl,
+      chapter: n,
+    }, { onStarted: (session) => attachTogether(session) });
+  }
   function openShareChapter() {
     openShareSheet({
       sync,
@@ -1508,7 +1557,13 @@ export function openSmartReader(deps, ctx) {
   let stopNativeLifecycle = () => {};
   applySettings();
   deps.immersive?.(true);
-  void openChapter(ctx.row);
+  // دخلت من بطاقة «قراءة معًا»: الجلسة جاهزة، والقارئ يربط نفسه بها، ويفتح على
+  // صفحة المضيف نفسها إن كانت الغرفة متزامنة وبدأت (لا فصل الدعوة القديم)
+  attachTogether(hub?.session);
+  const follow = tg?.initial() ?? null;
+  const followRow = follow ? sequence.find((r) => Number(r.number) === follow.chapter) : null;
+  if (followRow) void openChapter(followRow, { startAt: follow.index });
+  else void openChapter(ctx.row);
 
   stopNativeLifecycle = listenFollowForeground((e) => {
     nativeForeground = e?.active !== false;
@@ -1548,6 +1603,9 @@ export function openSmartReader(deps, ctx) {
     deps.setReading?.(null);
     deps.immersive?.(false);
     tl.destroy();
+    tg?.destroy();
+    unmountStrip?.();
+    releaseSurface?.();
   }
 
   return { root, handleBack, destroy: () => !exited && (exited = true, tickActive(), flushProgress(), destroy()) };

@@ -1,0 +1,133 @@
+/* VANTARA Together — الدعوة، البطاقة، الأفاتارات في الشريط، لوحة الغرفة */
+
+.v35 .tg-head { margin-bottom: 14px; }
+.v35 .tg-head h3 { margin: 0 0 4px; font-size: var(--fs-title, 18px); }
+.v35 .tg-head p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
+
+/* اختيار الأشخاص: تضغط على الأفاتار فيتحدد، بلا خانات ولا أرقام */
+.v35 .tg-people {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px 8px;
+  padding-bottom: 8px;
+}
+.v35 .tg-person {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-2);
+  transition: transform 160ms ease;
+}
+.v35 .tg-person:active { transform: scale(0.96); }
+.v35 .tg-person span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.v35 .tg-person > img,
+.v35 .tg-person > .avatar-letter {
+  width: 58px; height: 58px;
+  box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3px var(--line-strong);
+  transition: box-shadow 160ms ease, opacity 160ms ease;
+}
+.v35 .tg-person.is-on { color: var(--text-1, #fff); }
+.v35 .tg-person.is-on > img,
+.v35 .tg-person.is-on > .avatar-letter { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 4px var(--accent); }
+.v35 .tg-person.is-on::after {
+  content: '✓';
+  position: absolute;
+  top: 2px; inset-inline-end: calc(50% - 34px);
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px; font-weight: 800;
+}
+.v35 .tg-all { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); border-radius: 99px; }
+
+.v35 .tg-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 14px; }
+.v35 .tg-mode {
+  display: grid; gap: 3px; text-align: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md, 12px);
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+.v35 .tg-mode b { color: var(--text-1, #fff); font-size: 14px; }
+.v35 .tg-mode span { font-size: 12px; line-height: 1.4; }
+.v35 .tg-mode.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.v35 .tg-send:disabled { opacity: 0.5; }
+.v35 .tg-empty { color: var(--text-2); font-size: var(--fs-meta); text-align: center; }
+
+/* بطاقة الدعوة في المجلس */
+.v35 .tg-card { display: grid; gap: 6px; padding: 12px; min-width: 220px; }
+.v35 .tg-card-kind { font-size: 12px; font-weight: 700; color: var(--accent-text); }
+.v35 .tg-card-title { display: block; font-weight: 700; font-size: 15px; }
+.v35 .tg-card-people { display: flex; align-items: center; min-height: 26px; }
+.v35 .tg-card-people > * { margin-inline-start: -6px; box-shadow: 0 0 0 2px var(--surface-2); border-radius: 99px; }
+.v35 .tg-card-people > *:first-child { margin-inline-start: 0; }
+.v35 .tg-card-status { font-size: 12px; color: var(--text-2); }
+.v35 .tg-enter { justify-self: start; display: inline-flex; align-items: center; gap: 6px; padding-inline: 18px; }
+.v35 .tg-enter:disabled { opacity: 0.5; }
+
+/* الأفاتارات جزء من الشريط العلوي للقارئ/المشغّل: تظهر وتختفي معه */
+.v35 .tg-strip {
+  display: inline-flex; align-items: center;
+  padding: 3px 6px;
+  border-radius: 99px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.v35 .tg-face {
+  display: inline-grid; place-items: center;
+  width: 26px; height: 26px;
+  margin-inline-start: -7px;
+  border-radius: 99px;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+  transition: transform 260ms cubic-bezier(.2,.8,.2,1), opacity 260ms ease;
+}
+.v35 .tg-face:first-child { margin-inline-start: 0; }
+.v35 .tg-face.is-new { animation: tg-slide-in 420ms cubic-bezier(.2,.8,.2,1) both; }
+.v35 .tg-face.is-busy { opacity: 0.6; }
+.v35 .tg-face.is-failed { box-shadow: 0 0 0 2px #e5484d; }
+.v35 .tg-more {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 11px; font-weight: 800;
+}
+@keyframes tg-slide-in {
+  from { transform: translateY(-10px) scale(0.6); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.v35 .rd-together[hidden] { display: none; }
+
+/* لوحة الغرفة */
+.v35 .tg-list { display: grid; gap: 4px; margin-bottom: 14px; }
+.v35 .tg-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.v35 .tg-row:last-child { border-bottom: 0; }
+.v35 .tg-row-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.v35 .tg-row-names { display: grid; gap: 2px; min-width: 0; }
+.v35 .tg-row-names b { font-size: 14px; }
+.v35 .tg-row-state { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .tg-row-state.is-failed { color: #ff8b8e; }
+.v35 .tg-row-state.is-playing { color: #6fd39b; }
+.v35 .tg-row-where { display: grid; justify-items: end; gap: 3px; flex: none; }
+.v35 .tg-row-pos { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px; }
+.v35 .tg-badge { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); }
+.v35 .tg-badge.is-warn { background: rgba(255, 170, 60, 0.16); color: #ffc070; }
+.v35 .tg-drift { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.v35 .tg-actions { display: grid; gap: 8px; }
+.v35 .tg-leave { color: #ff8b8e; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v35 .tg-face.is-new { animation: none; }
+}

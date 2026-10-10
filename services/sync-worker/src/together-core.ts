@@ -435,6 +435,7 @@ export class RoomCore {
         at: m.report?.at ?? null,
         state: m.report?.state ?? 'preparing',
         source: m.report?.source ?? null,
+        mediaKey: m.report?.mediaKey ?? null,
         driftMs: m.report?.driftMs ?? null,
         driftP95: m.report?.driftP95 ?? null,
         sameMedia: m.report?.mediaKey == null || this.timeline.media == null ? null : m.report.mediaKey === this.timeline.media.key,
