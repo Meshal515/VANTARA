@@ -20,6 +20,8 @@ import { candidatePaths, addonMedia } from '../../addons/media.js';
 import { createSubtitleSession } from './subtitles.js';
 import { nextEpisodeCopies } from '../../addons/video.js';
 import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
+import { createTogetherPlayer } from './together-player.js';
+import { connectionLabel, stateLabel } from '../../v35/together.js';
 
 const START_TIMEOUT_MS = 15_000;
 const REPORT_EVERY_MS = 5_000;
@@ -134,6 +136,9 @@ export function openPlayer(args) {
   active?.close(false);
   loadCss();
   const { runtime, engine, sessionOf, readyCandidates, emit } = args;
+  const together = args.together?.session ? args.together : null;
+  let tg = null;
+  let releaseTogether = () => {};
   // للاختبار فقط: مقطع تجربة قصير يُقبل
   const minDuration = Number(args.minRealDuration) || MIN_REAL_DURATION_S;
   const movie = args.section === 'cinema' && (Number(args.episode) < 0 || Number(args.total) <= 1);
@@ -257,6 +262,39 @@ export function openPlayer(args) {
 
   root.append(video, gestures, seekLeft, seekRight, spinner, controls, pill, unlockBtn, errorCard, sheetScrim, sheet);
   document.body.append(root);
+  if (together) {
+    root.classList.add('v35');
+    const strip = el('button', 'pp-together');
+    strip.type = 'button'; strip.dir = 'rtl';
+    root.append(strip);
+    const lobby = el('div', 'pp-lobby'); lobby.dir = 'rtl'; lobby.hidden = true; root.append(lobby);
+    const hub = together.hub;
+    const unmount = hub.mountStrip(strip);
+    let sheetCleanup = null;
+    const surface = hub.useSurface({ openSheet: build => {
+      sheetCleanup?.(); sheetCleanup = null;
+      openSheet('مشاهدة معًا', null, body => { sheetCleanup = build(body); });
+    }, closeSheet, toast: message });
+    tg = createTogetherPlayer({ room: together.session.room, mode: together.session.mode, mediaPrefix: together.mediaPrefix, video,
+      episode: () => state.episode, source: () => state.current?.code ?? null,
+      onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
+      onLobby: ({ visible, prepared, blocked, host, connection, roster, start, resume }) => {
+        lobby.hidden = !visible; lobby.replaceChildren();
+        if (!visible) return;
+        lobby.append(el('strong', null, 'مشاهدة معًا'), el('p', null, connectionLabel(connection)));
+        const people = el('div', 'pp-lobby-people');
+        for (const m of roster) people.append(el('div', 'pp-lobby-person', `${m.name}${m.host ? ' · المضيف' : ''} · ${stateLabel(m.state)}`));
+        lobby.append(people);
+        const hint = blocked ? 'المتصفح يحتاج ضغطة منك لتشغيل الفيديو' : !prepared ? 'جاري تجهيز الفيديو من سيرفرك…' : host ? 'ابدأ عندما تكون جاهزًا؛ من يتأخر يلحق بكم' : 'فيديوك جاهز · بانتظار المضيف يبدأ…';
+        lobby.append(el('p', null, hint));
+        const b = el('button', 'pp-pill-btn pp-pill-btn--primary', blocked ? 'تابع معهم' : host ? 'ابدأ' : 'افتح لوحة الغرفة');
+        b.type = 'button'; b.disabled = !blocked && host && (!prepared || connection !== 'live'); b.onclick = blocked ? resume : host ? start : () => hub.openPanel(); lobby.append(b);
+      },
+    });
+    const off = hub.onChange(s => { if (s === together.session) return; tg?.destroy(); tg = null; lobby.remove(); strip.remove(); });
+    releaseTogether = () => { sheetCleanup?.(); off(); tg?.destroy(); unmount(); surface(); if (hub.session === together.session) hub.leave(); };
+    root._togetherSheetCleanup = () => { sheetCleanup?.(); sheetCleanup = null; };
+  }
   document.documentElement.classList.add('pwa-playing');
   // ملء الشاشة والوضع الأفقي كالـAPK، حيث يسمح المتصفح (لا في آيفون)
   try {
@@ -324,6 +362,7 @@ export function openPlayer(args) {
   }
 
   function togglePlay() {
+    if (tg?.playPause(video.paused)) return;
     if (video.paused) video.play().catch(() => {});
     else video.pause();
     showControls();
@@ -332,6 +371,7 @@ export function openPlayer(args) {
   let seekTimer = 0;
   function seekBy(sec) {
     if (!Number.isFinite(video.duration)) return;
+    if (tg?.seek(Math.max(0, Math.min(video.duration - .5, video.currentTime + sec)) * 1000)) return;
     video.currentTime = Math.max(0, Math.min(video.duration - 0.5, video.currentTime + sec));
     seekAccum += sec;
     const badge = sec < 0 ? seekLeft : seekRight;
@@ -390,7 +430,7 @@ export function openPlayer(args) {
   const seekToX = (x) => {
     const r = track.getBoundingClientRect();
     const p = Math.max(0, Math.min(1, (x - r.left) / r.width));
-    if (Number.isFinite(video.duration)) video.currentTime = p * video.duration;
+    if (Number.isFinite(video.duration) && !tg?.seek(p * video.duration * 1000)) video.currentTime = p * video.duration;
     paintTime();
   };
   bar.addEventListener('pointerdown', (e) => {
@@ -430,6 +470,7 @@ export function openPlayer(args) {
     return body;
   }
   function closeSheet() {
+    root._togetherSheetCleanup?.();
     root.classList.remove('pp--sheet');
     sheet.hidden = true;
     sheetScrim.hidden = true;
@@ -703,6 +744,7 @@ export function openPlayer(args) {
   }
 
   function showError(text) {
+    tg?.failed();
     errorCard.replaceChildren();
     errorCard.append(el('strong', null, text), el('p', null, 'جرّب سيرفرًا آخر أو أعد المحاولة بعد قليل'));
     const actions = el('div', 'pp-error__actions');
@@ -842,6 +884,7 @@ export function openPlayer(args) {
     state.current = c;
     subtitleSession.setStream(c);
     state.started = false;
+    tg?.preparing();
     state.tried.add(c.id);
     errorCard.hidden = true;
     paint();
@@ -864,6 +907,7 @@ export function openPlayer(args) {
         showControls();
         emit('server', { animeId: args.animeId ?? null, code: c.code, sourceId: c.sourceId, server: c.server, quality: c.quality ?? currentHeight() ?? null });
         report();
+        tg?.ready();
         return true;
       }
       reason = out.reason;
@@ -924,9 +968,14 @@ export function openPlayer(args) {
     }
   }
 
-  async function goEpisode(n) {
+  async function goEpisode(n, fromRoom = false) {
     const copies = nextEpisodeCopies(args.copies, n, args.subtitleIdentity);
-    if (!copies.length || n < 1 || (state.total > 0 && n > state.total)) return;
+    if (!copies.length || n < 1 || (state.total > 0 && n > state.total)) {
+      if (fromRoom) { tg?.failed(); showError(`الحلقة ${n} غير متاحة من مصادرك`); }
+      return;
+    }
+    if (!fromRoom && tg?.changeEpisode(n)) return;
+    tg?.preparing();
     report();
     setBusy(true, `نجهّز الحلقة ${n}…`);
     errorCard.hidden = true;
@@ -987,6 +1036,7 @@ export function openPlayer(args) {
     if (state.closed) return;
     if (notify) report(true);
     state.closed = true;
+    releaseTogether();
     clearInterval(countdown);
     clearInterval(watchdog);
     subtitleSession.close();
@@ -1048,6 +1098,7 @@ export function openPlayer(args) {
     // نهاية مقطع لم يُعتمد (صورة خطأ قصيرة) ليست نهاية الحلقة
     if (!state.started) return;
     report();
+    if (tg && !together.session.room.isHost && (together.session.room.info?.mode ?? together.session.mode) === 'sync') return message('بانتظار المضيف للحلقة التالية…');
     offerNext();
   });
   // خطأ بعد البداية (مقطع رُفض، رابط انتهى): علاج من نفس اللحظة

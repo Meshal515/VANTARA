@@ -1,6 +1,8 @@
 {
   "$comment": "المواقع التي يحق لجالب الويب طلبها (services/web-fetcher). سطر يطابق الموقع ونطاقاته الفرعية. كل مضيف في تعريفات المصادر يجب أن يكون هنا (يحرسه repository-safety).",
   "redirectAliases": {
+    "tuktuk-sa.online": ["tuktukhd.com", "tuktuk-sa.online"],
+    "k8w4e.sbs": ["egydead.live", "egydead.space", "egydead.fyi", "m6o3p.sbs", "k8w4e.sbs"],
     "share4max.net": ["share4max.com", "share4max.net", "megamax.me", "megatuktuk.com", "megatuktuk.store"],
     "lolololu.website": ["lulustream.com", "luluvdo.com", "earnvids.com", "lolololu.website"],
     "uqload.vc": ["uqload.is", "uqload.net", "uqload.vc"],
@@ -28,10 +30,12 @@
     "myseed.pics",
     "myseed.tv",
     "tuktukhd.com",
+    "tuktuk-sa.online",
     "egydead.live",
     "egydead.space",
     "egydead.fyi",
     "m6o3p.sbs",
+    "k8w4e.sbs",
     "ok.ru",
     "okcdn.ru",
     "mycdn.me",

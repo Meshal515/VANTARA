@@ -118,7 +118,7 @@ export function parseMedia(raw: unknown): MediaRef | null {
 
 /** الموقع المرجعي عند لحظة الخادم t. */
 export function positionAt(t: Timeline, now: number): number {
-  if (!t.playing) return t.pos;
+  if (!t.playing || t.media?.kind === 'manga') return t.pos;
   return Math.max(0, t.pos + Math.max(0, now - t.at) * t.rate);
 }
 
@@ -336,7 +336,7 @@ export class RoomCore {
     const r = host?.report;
     if (!r) return;
     const playing = r.state === 'playing' || r.state === 'buffering';
-    const pos = playing ? r.pos + Math.max(0, now - r.at) : r.pos;
+    const pos = playing && this.timeline.media?.kind !== 'manga' ? r.pos + Math.max(0, now - r.at) : r.pos;
     this.timeline = { ...this.timeline, playing: this.timeline.playing, pos, at: now, seq: this.timeline.seq + 1 };
   }
 

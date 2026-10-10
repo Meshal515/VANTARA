@@ -18,9 +18,10 @@ import { verifyIdentityToken } from '@vantara/domain';
 import allowJson from '../../../apps/web/pwa/sources/allow.json';
 import { hostAllowed, parseTarget, targetAllowed, redirectAllowed, type AllowList } from './allow.ts';
 import { mintGrant, verifyGrant } from './grant.ts';
+import { browserFallback, type BrowserEnv } from './browser.ts';
 import { isPlaylist, rewritePlaylist } from './hls.ts';
 
-export interface Env {
+export interface Env extends BrowserEnv {
   VANTARA_IDENTITY_SECRET: string;
   ALLOWED_ORIGINS?: string;
 }
@@ -275,7 +276,18 @@ async function handleFetch(request: Request, env: Env, cors: Record<string, stri
     // صفحة تحدٍّ قصيرة: نقرؤها لنقول نوعها، والباقي يمرّ تيارًا بلا قراءة
     if ([403, 429, 503].includes(response.status) && (response.headers.get('content-type') ?? '').includes('html')) {
       const text = await response.text();
-      out.set('x-vf-challenge', challengeOf(response.status, text));
+      const challenge = challengeOf(response.status, text);
+      if (challenge !== 'none') {
+        const rendered = await browserFallback(env, userId, {url:target.toString(),method,body,headers,follow:input.follow !== false}, fetchImpl);
+        if (rendered) {
+          out.set('x-vf-status',String(rendered.status)); out.set('x-vf-url',rendered.url);
+          out.set('content-type',rendered.type || 'text/html; charset=utf-8');
+          out.delete('x-vf-set-cookie');
+          if (rendered.location) out.set('x-vf-location',new URL(rendered.location,rendered.url).toString());
+          return new Response(rendered.text,{status:200,headers:out});
+        }
+      }
+      out.set('x-vf-challenge', challenge);
       return new Response(text, { status: 200, headers: out });
     }
     return new Response(response.body, { status: 200, headers: out });

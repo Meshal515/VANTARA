@@ -62,29 +62,36 @@ export const egydead = {
   kind: 'egydead-site',
   content: 'cinema',
   create(def, { fetch, hosts }) {
-    const base = `https://${def.domain}`;
+    let base = `https://${def.domain}`;
     const abs = (p) => (String(p).startsWith('http') ? p : `${base}${p}`);
+    const page = async (url, options) => {
+      const res = await fetch.page(url, options);
+      base = new URL(res.url).origin;
+      return res;
+    };
 
     return {
       async search(query) {
         const url = new URL(`${base}/`);
         url.searchParams.set('s', query.trim());
-        return cardsOf((await fetch.page(url.toString())).text, def.id, base);
+        const res = await page(url.toString());
+        return cardsOf(res.text, def.id, base);
       },
       async latest() {
-        return cardsOf((await fetch.page(`${base}/`)).text, def.id, base);
+        const res = await page(`${base}/`);
+        return cardsOf(res.text, def.id, base);
       },
       async episodes(item) {
         if (kindOfPath(item.url) !== 'series') return [{ sourceId: def.id, url: item.url, name: item.title, number: 1 }];
-        const res = await fetch.page(abs(item.url));
+        const res = await page(abs(item.url));
         const list = episodesOf(res.text, def.id, base);
         if (list.length) return list;
         const n = episodeNumber(item.title);
         return n ? [{ sourceId: def.id, url: item.url, name: `الحلقة ${n}`, number: n }] : [];
       },
       async servers(episode) {
-        const page = abs(episode.url);
-        const res = await fetch.page(page, { form: { View: 1 }, referer: page });
+        const watch = abs(episode.url);
+        const res = await page(watch, { form: { View: 1 }, referer: watch });
         const variant = variantOf(episode.name);
         return serversOf(res.text, base).map((s) => ({ key: `e${s.url.length}${s.name}`, name: s.name, quality: null, variant, data: { url: s.url, page: res.url } }));
       },

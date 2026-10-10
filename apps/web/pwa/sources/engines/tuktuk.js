@@ -27,7 +27,7 @@ export const tuktuk = {
   kind: 'tuktuk-site',
   content: 'cinema',
   create(def, { fetch, hosts }) {
-    const base = `https://${def.domain}`;
+    let base = `https://${def.domain}`;
     const abs = (p) => (String(p).startsWith('http') ? p : `${base}${p}`);
 
     function search(html) {
@@ -38,14 +38,32 @@ export const tuktuk = {
       return foldCards(cards, def.id);
     }
 
+    async function listing(query = null) {
+      const url = new URL(`${base}/`);
+      if (query != null) url.searchParams.set('s', query.trim());
+      let res = await fetch.page(url.toString());
+      base = new URL(res.url).origin;
+      const link = attr(q(parseHtml(res.text), 'a.go-stream[data-link]'), 'data-link');
+      if (link) {
+        const decoded = b64(link);
+        let destination;
+        try { destination = new URL(decoded); } catch { throw new Error('رابط انتقال المصدر غير صالح'); }
+        const host = destination.hostname;
+        if (destination.protocol !== 'https:' || destination.port || destination.username || destination.password ||
+            !(host === 'tuktuk-sa.online' || host.endsWith('.tuktuk-sa.online'))) throw new Error('وجهة انتقال المصدر غير موثوقة');
+        if (query != null) destination.searchParams.set('s', query.trim());
+        res = await fetch.page(destination.toString());
+        base = new URL(res.url).origin;
+      }
+      return search(res.text);
+    }
+
     return {
       async search(query) {
-        const url = new URL(`${base}/`);
-        url.searchParams.set('s', query.trim());
-        return search((await fetch.page(url.toString())).text);
+        return listing(query);
       },
       async latest() {
-        return search((await fetch.page(`${base}/`)).text);
+        return listing();
       },
       async episodes(item) {
         if (kindOf(item.title) !== 'series') return [{ sourceId: def.id, url: item.url, name: item.title, number: 1 }];

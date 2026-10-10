@@ -73,12 +73,9 @@ export const witanime = {
         const csrf = attr(q(parseHtml(page), 'meta[name=csrf-token]'), 'content');
         if (!csrf) throw new Error('لا رمز CSRF في صفحة الحلقة');
         const sourcesUrl = page.match(/sourcesUrl:\s*'([^']+)'/)?.[1]?.replace(/\\\//g, '/') ?? `${episode.url.replace(/\/+$/, '')}/sources`;
-        let players = {};
-        try {
-          players = JSON.parse(await post(sourcesUrl, csrf, watch)).players ?? {};
-        } catch {
-          players = {};
-        }
+        // Preserve HTTP/challenge errors: they are not an empty server listing.
+        const { players } = JSON.parse(await post(sourcesUrl, csrf, watch));
+        if (!players || typeof players !== 'object' || Array.isArray(players)) throw new Error('استجابة سيرفرات WitAnime غير صالحة');
         const out = [];
         for (const [quality, list] of Object.entries(players).sort((a, b) => rank(a[0]) - rank(b[0]))) {
           for (const p of list ?? []) {
