@@ -381,6 +381,28 @@ export function createTogether(deps) {
     mountStrip,
     openPanel,
     leave,
+    /** هل الجلسة النشطة لهذا العمل (و/أو هذه الحلقة)؟ */
+    matches(seriesRef, episode = null) {
+      const m = session?.room.timeline?.media ?? session?.media;
+      if (!session || session.media?.seriesRef !== seriesRef) return false;
+      if (episode == null) return true;
+      const n = Number(/#([^#]+)$/.exec(m?.key ?? '')?.[1] ?? session.media.episode);
+      return n === Number(episode);
+    },
+    /**
+     * المشغّل الأصلي يتصل بالغرفة بنفسه (يبقى متصلًا والشاشة مقفلة)، فاتصال الويب
+     * يُغلق بهدوء قبله: نفس الحساب باتصالين كان سيطرد أحدهما الآخر.
+     */
+    handOff(seriesRef) {
+      if (!session || session.media?.seriesRef !== seriesRef) return null;
+      const cfg = { baseUrl: deps.baseUrl(), code: session.code, token: token(), mode: session.room.info?.mode ?? session.mode, mediaPrefix: seriesRef };
+      const s = session;
+      session = null;
+      for (const off of s.offs) off();
+      s.room.close();
+      emit();
+      return cfg;
+    },
     /** يُستدعى من رابط/إشعار «#together=CODE». */
     joinByCode(code, row) {
       if (session?.code === code) return deps.openMedia(session.media, session);

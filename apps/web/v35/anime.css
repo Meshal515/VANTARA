@@ -1304,6 +1304,13 @@
   font-size: 15px;
   font-weight: 800;
 }
+.v35 .an-pick-together {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 46px; margin-top: 8px;
+  border: 1px solid var(--line-strong); border-radius: 14px;
+  background: var(--surface-1); color: var(--text-1, #fff);
+  font: inherit; font-size: 14px; font-weight: 700;
+}
 .v35 .an-pick-best:active {
   background: var(--accent-press);
 }

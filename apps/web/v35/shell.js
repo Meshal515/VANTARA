@@ -2254,7 +2254,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع الأنمي `anime:<AniList id>`: يفتح صفحة الأنمي في قسمه، واللحظة
   // المرسلة («الحلقة 12 · 12:10–12:20») تفتح ورقة سيرفراتها من ثانيتها.
 
-  function openAnimeRef(ref, { title = null, cover = null, chapter = null } = {}) {
+  function openAnimeRef(ref, { title = null, cover = null, chapter = null, play = false } = {}) {
     const rawId = ref.slice('anime:'.length);
     const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
     if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
@@ -2268,7 +2268,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const position = chapter ? momentStart(chapter.label) : null;
     // لحظة من المجلس: «شاهد اللقطة» يشغّل مداها وحده
     const clip = chapter ? momentRange(chapter.label) : null;
-    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip });
+    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip, play });
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
@@ -5015,7 +5015,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (media.kind === 'manga') {
       void openWork(workFromRef(media.seriesRef, media.title, media.cover), { readNumber: Number.isFinite(media.chapter) ? media.chapter : null });
     } else if (media.kind === 'anime') {
-      openAnimeRef(media.seriesRef, { title: media.title, cover: media.cover, chapter: { number: media.episode, label: `الحلقة ${media.episode}` } });
+      // الحلقة التي في الغرفة الآن (قد يكون المضيف انتقل للتالية بعد الدعوة)
+      const live = Number(/#(\d+)$/.exec(together.session?.room.timeline?.media?.key ?? '')?.[1]);
+      const episode = Number.isFinite(live) ? live : media.episode;
+      openAnimeRef(media.seriesRef, { title: media.title, cover: media.cover, chapter: { number: episode, label: `الحلقة ${episode}` }, play: true });
     } else if (media.kind === 'cinema') {
       openCinemaRef(media.seriesRef, { title: media.title, cover: media.cover });
     }
@@ -5215,6 +5218,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     restoreSourceWork: restoreAddonWork,
     openProfile,
     friends: () => deps.friends?.() ?? [],
+    together: () => together,
     // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
     setWatching: (info) => deps.setWatching?.(info),
     playerPresence: () => deps.playerPresence?.(),
