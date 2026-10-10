@@ -251,9 +251,33 @@ describe('شاشة المالك 2026-10-10: عملان بأسماء إنجليز
     season.add({ sourceId: 'b', manga: { title: 'Solo Leveling Ragnarok', url: '/2', altNames: ['나 혼자만 레벨업: 라그나로크'] } });
     expect(season.list()).toHaveLength(2);
     const guard = canonicalIndex();
-    guard.add({ sourceId: 'mangalek', manga: { title: 'Work A Title', url: '/a', altNames: ['세계멸망전'] } });
-    guard.add({ sourceId: 'mangalek', manga: { title: 'Work B Title', url: '/b', altNames: ['세계멸망전'] } });
+    guard.add({ sourceId: 'mangalek', manga: { title: 'Alpha Hunter Saga', url: '/a', altNames: ['세계멸망전'] } });
+    guard.add({ sourceId: 'mangalek', manga: { title: 'Crimson Knight Chronicle', url: '/b', altNames: ['세계멸망전'] } });
     expect(guard.list()).toHaveLength(2);
     expect(guard.rejected.join(' ')).toContain('mangalek');
+  });
+});
+
+describe('الأسماء المشحونة: حالات المالك', () => {
+  it('World Destruction War (عربي) و World Extinction War (MangaDex/MangaFire) بطاقة واحدة', async () => {
+    const { readFileSync } = await import('node:fs');
+    const data = JSON.parse(readFileSync(new URL('../data/manga-aliases.json', import.meta.url), 'utf8'));
+    const index = canonicalIndex({ aliases: new Map(Object.entries(data.aliases)) });
+    for (const s of ['mangalek', 'azora', 'teamx']) index.add({ sourceId: s, manga: { title: 'World Destruction War', url: `/${s}` } });
+    index.add({ sourceId: 'mangadex', manga: { title: 'World Extinction War', url: '/manga/x' } });
+    index.add({ sourceId: 'mangafire', manga: { title: 'World Extinction War', url: '/x' } });
+    index.add({ sourceId: 'teamx', manga: { title: 'Demonic Emperor', url: '/d' } });
+    index.add({ sourceId: 'mangalek', manga: { title: 'Magic emperor', url: '/m' } });
+    expect(index.list().map((w) => w.key).sort()).toEqual(['magic emperor', 'world destruction war']);
+  });
+});
+
+describe('العنوان الأصلي المشترك لا يدمج الجزء الجانبي', () => {
+  it('The Ravages of Time ≠ The Ravages of Time: Blue Hawk ولو تشاركا «火鳳燎原»', () => {
+    const index = canonicalIndex();
+    index.add({ sourceId: 'a', manga: { title: 'The Ravages of Time', url: '/1', altNames: ['火鳳燎原'] } });
+    index.add({ sourceId: 'b', manga: { title: 'The Ravages of Time: Blue Hawk', url: '/2', altNames: ['火鳳燎原'] } });
+    expect(index.list()).toHaveLength(2);
+    expect(index.rejected.join(' ')).toContain('اسم جزء آخر');
   });
 });

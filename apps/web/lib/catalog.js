@@ -559,9 +559,20 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 		};
 		for (const k of entryKeys) for (const raw of aliases.get(k) ?? []) noteOriginal(k, raw);
 		for (const e of entries) for (const n of e.names) noteOriginal(e.own, n.raw);
+		// اسمٌ يحوي الآخر ويزيد عليه («The Ravages of Time» و«… Blue Hawk») جزءٌ ثانٍ أو جانبي يشارك
+		// الأصل عنوانه غالبًا: لا يُدمج بهذا الدليل وحده
+		const spinOff = (a, b) => {
+			const wa = new Set(keyWords(a));
+			const wb = new Set(keyWords(b));
+			const [small, big] = wa.size <= wb.size ? [wa, wb] : [wb, wa];
+			return small.size < big.size && [...small].every((w) => big.has(w));
+		};
 		for (const [o, keys] of [...byOriginal].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
 			const list = [...keys].sort();
-			for (let i = 1; i < list.length; i++) union(list[0], list[i], `عنوان أصلي «${o}»`);
+			for (let i = 1; i < list.length; i++) {
+				if (spinOff(list[0], list[i])) { rejected.push(`«${list[0]}» ≠ «${list[i]}» (عنوان أصلي «${o}»): اسم جزء آخر`); continue; }
+				union(list[0], list[i], `عنوان أصلي «${o}»`);
+			}
 		}
 
 		// البطاقات: مكوّن لكل جذر، بمفتاح ثابت
