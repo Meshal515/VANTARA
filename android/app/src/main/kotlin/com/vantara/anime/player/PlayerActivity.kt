@@ -511,10 +511,10 @@ class PlayerActivity : Activity() {
             message("نجهّز أفضل سيرفر…", long = true)
             waiting = scope.launch {
                 val best = prep.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
-                if (best != null) start(best, startAt) else showError("لم يجهز أي سيرفر لهذه الحلقة")
+                if (best != null) start(best, startAt) else { attemptEnd("error", "no_server_ready"); showError("لم يجهز أي سيرفر لهذه الحلقة") }
             }
         } else {
-            s.next()?.let { start(it, startAt) } ?: showError("لا توجد سيرفرات متاحة لهذه الحلقة")
+            s.next()?.let { start(it, startAt) } ?: run { attemptEnd("error", "no_servers"); showError("لا توجد سيرفرات متاحة لهذه الحلقة") }
         }
         main.post(usageTick)
         main.postDelayed(progressTick, PROGRESS_EVERY_MS)
@@ -581,6 +581,8 @@ class PlayerActivity : Activity() {
                 if (!reportedStart) {
                     reportedStart = true
                     main.removeCallbacks(startupWatchdog)
+                    attemptEnd("ok")
+                    current?.let { c -> playStat("server", codeOf(c) ?: c.server, "ok", ms = System.currentTimeMillis() - startedAt) }
                     current?.let { c ->
                         session?.started(c, System.currentTimeMillis() - startedAt)
                         codeOf(c)?.let { code ->
@@ -709,6 +711,27 @@ class PlayerActivity : Activity() {
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
 
+    // ───────────── قياس «تعذّر» الحقيقي ─────────────
+    // محاولة = فتح حلقة للمشاهدة. نجاحها = أول إطار جاهز (بعد أي تبديل سيرفر تلقائي).
+    // فشلها = لا سيرفر اشتغل، أو انتظر المستخدم 8 ث فأكثر ثم خرج. تُرسل عدّادات بلا
+    // عمل ولا مستخدم (/v1/diag/sources) فيُعرف معدّل التعذّر الفعلي على الهواتف ولكل سيرفر.
+    private var attemptAt = SystemClock.elapsedRealtime()
+    private var attemptDone = false
+    private fun statId(raw: String?) = raw.orEmpty().lowercase().replace(Regex("[^a-z0-9._@-]"), "_").take(60).ifEmpty { "unknown" }
+    private fun playStat(stage: String, sourceId: String, outcome: String, reason: String = "", ms: Long = 0) =
+        PlaybackEvents.emit("playstat", JSONObject().put("section", launch.section).put("sourceId", statId(sourceId))
+            .put("stage", stage).put("outcome", outcome).put("reason", reason).put("ms", ms))
+    private fun attemptBegin() { attemptAt = SystemClock.elapsedRealtime(); attemptDone = false }
+    private fun attemptEnd(outcome: String, reason: String = "") {
+        if (attemptDone) return
+        attemptDone = true
+        playStat("play", "episode", outcome, reason, SystemClock.elapsedRealtime() - attemptAt)
+    }
+    private fun attemptAbandon() {
+        if (!attemptDone && SystemClock.elapsedRealtime() - attemptAt >= 8_000) attemptEnd("timeout", "left_waiting")
+        attemptDone = true
+    }
+
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
         clearSkipTimings()
@@ -718,6 +741,7 @@ class PlayerActivity : Activity() {
         val c = current ?: return
         // «تعذّر تشغيل السيرفر عند فلان» يصل الغرفة فورًا، والتبديل لسيرفر آخر لا يوقف أحدًا
         together?.onFailed(codeOf(c) ?: c.server)
+        playStat("server", codeOf(c) ?: c.server, if (reason.contains("timeout", true) || reason.contains("stall", true)) "timeout" else "error", reason.take(60), System.currentTimeMillis() - startedAt)
         current = null
         val at = position()
         val next = session?.failed(c, reason)
@@ -755,6 +779,7 @@ class PlayerActivity : Activity() {
             } else {
                 spinner.visibility = View.GONE
                 report(final = false)
+                attemptEnd("error", "all_servers_failed")
                 showError("تعذّر التشغيل من كل السيرفرات المتاحة")
             }
         }
@@ -835,6 +860,8 @@ class PlayerActivity : Activity() {
     private fun switchEpisode(n: Int) {
         val addonProviders = engine.addonProviders(sessionId)
         if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
+        attemptAbandon()
+        attemptBegin()
         cancelCountdown()
         sheet.close()
         // ليست نهاية المشاهدة: «final» للواجهة يعني أن المشغّل أُغلق
@@ -871,7 +898,7 @@ class PlayerActivity : Activity() {
         val from = resume[n] ?: 0L
         waiting = scope.launch {
             val best = p.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
-            if (best != null) start(best, from) else showError("لم يجهز أي سيرفر للحلقة $n")
+            if (best != null) start(best, from) else { attemptEnd("error", "no_server_ready"); showError("لم يجهز أي سيرفر للحلقة $n") }
         }
     }
 
@@ -2003,6 +2030,7 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         clip?.release()
+        attemptAbandon()
         together?.destroy()
         unlisten?.invoke()
         clearAddonSubtitles()
