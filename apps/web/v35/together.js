@@ -13,6 +13,7 @@
 import { glyph } from './icons.js';
 import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
+import { isNative } from '../pwa/platform.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -64,7 +65,7 @@ export function positionLabel(member, media, serverNow) {
   if (member?.pos == null) return '';
   if (media?.kind === 'manga') {
     const chapter = /#([^#]+)$/.exec(member.mediaKey ?? '')?.[1] ?? null;
-    return `صفحة ${Math.round(member.pos) + 1}${chapter ? ` · الفصل ${chapter}` : ''}`;
+    return `صفحة ${Math.floor(member.pos) + 1}${chapter ? ` · الفصل ${chapter}` : ''}`;
   }
   return clockLabel(memberPosition(member, serverNow));
 }
@@ -135,6 +136,7 @@ export function createTogether(deps) {
     }));
     s.offs.push(room.on('host', (id) => { if (id === room.me) ui().toast('صرت المضيف'); }));
     s.offs.push(room.on('connection', (c) => {
+      paintStrips();
       if (c === 'full') ui().toast('الغرفة ممتلئة');
       else if (c === 'gone') ui().toast('انتهت الغرفة');
       else if (c === 'uninvited') ui().toast('هالغرفة لأشخاص محددين');
@@ -143,7 +145,8 @@ export function createTogether(deps) {
     }));
     s.offs.push(room.on('room', (r) => { s.mode = r.mode; paintStrips(); }));
     s.offs.push(room.on('roster', paintStrips));
-    s.offs.push(room.on('state', ({ state }) => { if (state?.media) s.media = state.media; }));
+    // Timeline media contains only key/kind/label; retain the invitation's launch routing.
+    s.offs.push(room.on('state', ({ state }) => { if (state?.media) s.media = { ...s.media, ...state.media }; }));
     emit();
     return s;
   }
@@ -367,10 +370,13 @@ export function createTogether(deps) {
     }
     const faces = el('span', 'tg-faces');
     faces.append(...nodes);
-    const dot = el('i', `tg-dot${roster.some((r) => r.state === 'failed') ? ' is-bad' : ''}`);
-    host.replaceChildren(dot, faces);
-    host.setAttribute('aria-label', `في الغرفة ${roster.length}`);
+    host.replaceChildren(faces);
+    const label = `في الغرفة ${roster.length} · ${connectionLabel(session?.room.status)} · افتح المشاركين`;
+    host.setAttribute('aria-label', label);
+    host.title = label;
     host.setAttribute('role', 'button');
+    host.tabIndex = 0;
+    host.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); } };
   }
 
   // ───────────── لوحة الغرفة ─────────────
@@ -395,7 +401,7 @@ export function createTogether(deps) {
       body.append(head, list, actions);
       const paint = () => {
         const now = s.room.clock.serverNow();
-        count.textContent = `${s.room.roster.length} في الغرفة`;
+        count.textContent = `${s.room.roster.length} في الغرفة · ${connectionLabel(s.room.status)}`;
         list.replaceChildren(...s.room.roster.map((r) => {
           const row = el('div', 'tg-row');
           const who = el('div', 'tg-row-who');
@@ -425,7 +431,7 @@ export function createTogether(deps) {
         actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(); ui().toast('طلعت من الغرفة'); }));
       };
       paint();
-      const offs = [s.room.on('roster', paint), s.room.on('room', paint)];
+      const offs = [s.room.on('roster', paint), s.room.on('room', paint), s.room.on('connection', paint), s.room.on('state', paint)];
       const timer = setInterval(paint, 1000);
       return () => { for (const off of offs) off(); clearInterval(timer); };
     });
@@ -458,6 +464,7 @@ export function createTogether(deps) {
      */
     handOff(seriesRef) {
       if (!session || session.media?.seriesRef !== seriesRef) return null;
+      if (!isNative()) return { hub: this, session, mediaPrefix: seriesRef };
       const cfg = { baseUrl: deps.baseUrl(), code: session.code, token: token(), mode: session.room.info?.mode ?? session.mode, mediaPrefix: seriesRef };
       const s = session;
       session = null;
@@ -487,6 +494,7 @@ export function readerBridge(session, { seriesRef, onFollow }) {
   let timer = null;
   let trailing = null;
   let lastAppliedSeq = -1;
+  let lastSent = -Infinity;
   const keyOf = (n) => `manga:${seriesRef}#${n}`;
   const synced = () => (room.info?.mode ?? session.mode) === 'sync';
 
@@ -498,13 +506,14 @@ export function readerBridge(session, { seriesRef, onFollow }) {
   const offState = room.on('state', ({ state, by }) => apply(state, by));
   function apply(state, by) {
     if (!state || !synced() || room.isHost || by === room.me) return;
-    if (state.seq === lastAppliedSeq) return;
+    if (state.seq <= lastAppliedSeq) return;
     lastAppliedSeq = state.seq;
     const chapter = /#([^#]+)$/.exec(state.media?.key ?? '')?.[1];
     if (chapter == null) return;
-    onFollow({ chapter: Number(chapter), index: Math.max(0, Math.round(state.pos)) });
+    onFollow({ chapter: Number(chapter), index: Math.max(0, state.pos) });
   }
   const offWelcome = room.on('welcome', (w) => { if (!room.isHost) apply(w.state, null); });
+  const offMode = room.on('room', () => { if (synced()) { lastAppliedSeq = -1; apply(room.timeline, null); } });
 
   // القراءة لا غرفة انتظار لها: أول صفحة عند المضيف تبدأ الغرفة
   const ensureStarted = () => {
@@ -513,7 +522,7 @@ export function readerBridge(session, { seriesRef, onFollow }) {
   const offLive = room.on('welcome', () => setTimeout(ensureStarted, 0));
 
   return {
-    /** القارئ وصل صفحة. المضيف في المتزامن يحرّك الغرفة (بعد استقرار 300ms). */
+    /** موضع قراءة مستمر. المضيف يحرّك الغرفة بحد إرسال كل 80ms. */
     page({ chapter, label, index, pages, source }) {
       const changedChapter = current?.chapter !== chapter;
       current = { chapter, label, index, pages, source };
@@ -522,14 +531,20 @@ export function readerBridge(session, { seriesRef, onFollow }) {
       clearTimeout(trailing);
       if (Date.now() - sentAt > 1000 || changedChapter) { sentAt = Date.now(); report(); }
       else trailing = setTimeout(() => { sentAt = Date.now(); report(); }, 1000 - (Date.now() - sentAt));
-      if (!room.canControl || !synced()) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (changedChapter || room.timeline?.media?.key !== keyOf(chapter)) {
+      // Only host scrolling drives the room: following scroll events cannot echo commands.
+      if (!room.isHost || !synced()) return;
+      const send = () => {
+        timer = null;
+        if (!current || !room.isHost || !synced()) return;
+        lastSent = Date.now();
+        const { chapter, label, index } = current;
+        if (room.timeline?.media?.key !== keyOf(chapter)) {
           room.command('load', { media: { key: keyOf(chapter), kind: 'manga', label: label ?? `الفصل ${chapter}` }, pos: index });
           room.command('play', { pos: index });
         } else room.command('seek', { pos: index });
-      }, 300);
+      };
+      if (changedChapter || Date.now() - lastSent >= 80) { clearTimeout(timer); send(); }
+      else if (!timer) timer = setTimeout(send, 80 - (Date.now() - lastSent));
     },
     /** أين يبدأ القارئ: صفحة المضيف إن كانت الغرفة متزامنة وبدأت، وإلا null (فصل الدعوة). */
     initial() {
@@ -538,10 +553,14 @@ export function readerBridge(session, { seriesRef, onFollow }) {
       const chapter = /#([^#]+)$/.exec(t.media?.key ?? '')?.[1];
       if (chapter == null) return null;
       lastAppliedSeq = t.seq;
-      return { chapter: Number(chapter), index: Math.max(0, Math.round(t.pos)) };
+      return { chapter: Number(chapter), index: Math.max(0, t.pos) };
     },
     preparing() { report('preparing'); },
     failed(source) { if (current) current.source = source; report('failed'); },
-    destroy() { clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); report('paused'); },
+    destroy() { clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); offMode(); report('paused'); },
   };
+}
+
+export function connectionLabel(status) {
+  return ({ live: 'متصل', connecting: 'جاري الاتصال…', reconnecting: 'انقطع الاتصال · نعيد الاتصال…', closed: 'غادرت الغرفة', gone: 'انتهت الغرفة', replaced: 'الجلسة على جهاز آخر', uninvited: 'غير مدعو', full: 'الغرفة ممتلئة' })[status] ?? 'جاري الاتصال…';
 }

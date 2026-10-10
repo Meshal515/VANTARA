@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, relative, sep } from 'node:path';
 import test from 'node:test';
 
 /**
@@ -1385,8 +1385,8 @@ test('PWA modules are reached only through the platform gate', () => {
   const leaks = [];
   for (const file of outside) {
     for (const [, spec] of readFileSync(file, 'utf8').matchAll(/(?:import|from)\s*\(?\s*['"]([^'"]*pwa\/[^'"]+)['"]/g)) {
-      const target = resolve(dirname(file), spec).split('/apps/web/')[1];
-      if (!allowed.has(target)) leaks.push(`${file.split('/apps/web/')[1]} → ${target}`);
+      const target = relative(resolve(ROOT, 'apps/web'), resolve(dirname(file), spec)).split(sep).join('/');
+      if (!allowed.has(target)) leaks.push(`${relative(resolve(ROOT, 'apps/web'), file).split(sep).join('/')} → ${target}`);
     }
   }
   assert.deepEqual(leaks, [], 'only pwa/platform.js (gate) and pwa/boot.js (inert in the APK) may be imported outside pwa/');
@@ -1407,7 +1407,7 @@ test('every PWA module is precached by the service worker', () => {
   const shell = new Set([...worker.matchAll(/^\s*'(\/[^']+)',$/gm)].map((m) => m[1]));
   const missing = webFiles(resolve(ROOT, 'apps/web/pwa'))
     .filter((f) => !f.includes('.test.') && !f.endsWith('/allow.json'))
-    .map((f) => `/${f.split('/apps/web/')[1]}`)
+    .map((f) => `/${relative(resolve(ROOT, 'apps/web'), f).split(sep).join('/')}`)
     .filter((p) => !shell.has(p));
   assert.deepEqual(missing, [], 'a PWA module missing from SHELL breaks the app offline');
 });

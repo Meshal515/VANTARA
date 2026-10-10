@@ -38,6 +38,7 @@ import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
+import { readingPosition, readingTop } from './reader-scroll.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 
@@ -168,12 +169,35 @@ export function openSmartReader(deps, ctx) {
   const releaseSurface = hub?.useSurface({ openSheet: (b) => openSheet(b), closeSheet: () => closeSheet(), toast: (t) => toast(t) }) ?? null;
   let tg = null;
   let unmountStrip = null;
+  let followAnchor = null;
+  let followFrame = 0;
+  let scrollReportFrame = 0;
+  const following = () => hub?.session && !hub.session.room.isHost && (hub.session.room.info?.mode ?? hub.session.mode) === 'sync';
+  function followScroll(position, immediate = false) {
+    followAnchor = { chapter: Number(state.row?.number), position };
+    if (settings.mode === 'paged') return jumpTo(Math.floor(position), !immediate);
+    cancelAnimationFrame(followFrame);
+    const move = () => {
+      followFrame = 0;
+      if (!following() || !followAnchor || Number(state.row?.number) !== followAnchor.chapter) return;
+      const target = readingTop(state.slots.map(s => s.frame), followAnchor.position, scroll.getBoundingClientRect().top, scroll.scrollTop);
+      if (target == null) return;
+      const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+      const delta = Math.max(0, Math.min(max, target)) - scroll.scrollTop;
+      scroll.scrollTop += immediate || Math.abs(delta) < 1 ? delta : delta * .35;
+      if (!immediate && Math.abs(delta) >= 1) followFrame = requestAnimationFrame(move);
+    };
+    move();
+  }
+  const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number)) followScroll(followAnchor.position);
+  }) : null;
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
       seriesRef: ref,
       onFollow: ({ chapter, index }) => {
-        if (state.row && Number(state.row.number) === chapter) jumpTo(index);
+        if (state.row && Number(state.row.number) === chapter) followScroll(index);
         else {
           const row = sequence.find((r) => Number(r.number) === chapter);
           if (row) void openChapter(row, { startAt: index });
@@ -188,7 +212,8 @@ export function openSmartReader(deps, ctx) {
     else tg.preparing();
   }
   function tgPage(seg, index) {
-    tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index, pages: seg.slots.length, source: seg.row.sourceId ?? null });
+    const position = settings.mode === 'paged' ? index : readingPosition(seg.slots.map(s => s.frame), scroll.getBoundingClientRect().top);
+    tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index: position, pages: seg.slots.length, source: seg.row.sourceId ?? null });
   }
 
   /**
@@ -420,7 +445,8 @@ export function openSmartReader(deps, ctx) {
     segs.push(seg);
     scroll.replaceChildren(seg.el);
     observePages();
-    const start = Math.min(startAt ?? savedPage(row, pages.length), pages.length - 1);
+    const requested = startAt ?? savedPage(row, pages.length);
+    const start = Math.min(Math.floor(requested), pages.length - 1);
     requestSegment(seg, start);
     seg.current = start;
     seg.furthest = start;
@@ -428,7 +454,9 @@ export function openSmartReader(deps, ctx) {
     // فصلٌ يحتاج ترجمة: ننتظر أقل جاهز يكفي، أو «اقرأ الآن»
     // الترجمة ثابتة من أول صفحة حتى لو دخل القارئ في المنتصف.
     tl.openGate(seg, 0);
-    if (start > 0) {
+    if (following() && startAt != null) {
+      requestAnimationFrame(() => followScroll(requested, true));
+    } else if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);
         toast(`كمّلت من صفحة ${start + 1}`);
@@ -477,6 +505,7 @@ export function openSmartReader(deps, ctx) {
       frame.setAttribute('aria-label', `${chapterLabel(row)} — صفحة ${index + 1} من ${pages.length}`);
       frame.append(el('div', 'skeleton'));
       seg.el.append(frame);
+      followResize?.observe(frame);
       return { page, frame, loaded: false };
     });
     seg.end = el('section', 'rd-end');
@@ -600,7 +629,7 @@ export function openSmartReader(deps, ctx) {
       const old = segs.shift();
       const anchor = state.seg.slots[state.seg.current]?.frame;
       const before = anchor?.getBoundingClientRect().top ?? 0;
-      for (const sl of old.slots) observer?.unobserve(sl.frame);
+      for (const sl of old.slots) { observer?.unobserve(sl.frame); followResize?.unobserve(sl.frame); }
       old.el.remove();
       const after = anchor?.getBoundingClientRect().top ?? 0;
       if (settings.mode !== 'paged' && Math.abs(after - before) > 1) scroll.scrollTop += after - before;
@@ -976,6 +1005,10 @@ export function openSmartReader(deps, ctx) {
   });
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
   scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
+  scroll.addEventListener('scroll', () => {
+    if (!tg || !state.seg || scrollReportFrame) return;
+    scrollReportFrame = requestAnimationFrame(() => { scrollReportFrame = 0; if (state.seg) tgPage(state.seg, state.seg.current ?? 0); });
+  }, { passive: true });
   scroll.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button, a, input')) return;
     taps.down(pointer(e));
@@ -1595,6 +1628,9 @@ export function openSmartReader(deps, ctx) {
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     activeClock.sample(null);
     observer?.disconnect();
+    followResize?.disconnect();
+    cancelAnimationFrame(followFrame);
+    cancelAnimationFrame(scrollReportFrame);
     document.removeEventListener('keydown', onKey);
     taps.reset();
     document.removeEventListener('visibilitychange', onVisibility);

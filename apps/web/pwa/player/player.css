@@ -708,3 +708,13 @@ html.pwa-playing body {
   }
   .pwa-player.pp--sheet .pp-sheet--subtitle-adjust { transform: translateY(0); }
 }
+/* Together stays visible while ordinary playback controls are hidden. */
+.pwa-player .pp-together { position: absolute; z-index: 15; top: max(12px, env(safe-area-inset-top)); right: 14px; color: #fff; font: inherit; }
+.pwa-player:has(.pp-together) .pp-top { padding-inline-end: 130px; }
+.pwa-player .pp-lobby { position: absolute; inset: 0; z-index: 12; background: #09070de8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 30px; color: #fff; text-align: center; }
+.pwa-player .pp-lobby[hidden] { display: none; }
+.pwa-player .pp-lobby-people { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.pwa-player .pp-lobby-person { border: 1px solid #514366; padding: 12px; border-radius: 16px; }
+.pwa-player:has(.pp-together) .pp-scrim { z-index: 20; }
+.pwa-player:has(.pp-together) .pp-sheet { z-index: 21; }
+@media (max-width: 600px) { .pwa-player .pp-together { top: 68px; right: 8px; } .pwa-player:has(.pp-together) .pp-top { padding-inline-end: max(20px, env(safe-area-inset-right, 0px)); } }

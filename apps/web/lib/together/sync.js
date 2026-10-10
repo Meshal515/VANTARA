@@ -61,7 +61,7 @@ export function createClock({ now = () => performance.now(), keep = 8 } = {}) {
 /** الموقع المطلوب عند لحظة الخادم t، مع إزاحة نسخة هذا المشارك (نسخة بمقدمة أطول = إزاحة موجبة). */
 export function targetAt(timeline, t, offsetMs = 0) {
   if (!timeline) return null;
-  const base = timeline.playing ? timeline.pos + Math.max(0, t - timeline.at) * (timeline.rate ?? 1) : timeline.pos;
+  const base = timeline.playing && timeline.media?.kind !== 'manga' ? timeline.pos + Math.max(0, t - timeline.at) * (timeline.rate ?? 1) : timeline.pos;
   return Math.max(0, base + offsetMs);
 }
 
