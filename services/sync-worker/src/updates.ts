@@ -62,6 +62,8 @@ interface Report {
   cover: string | null;
   source: Source | null;
   units: Unit[];
+  /** المصدر رفع العمل في قائمة «آخر التحديثات» بين هذا الوقت والآن (مسح Latest). */
+  listed: number | null;
 }
 
 /** خط أساس العمل: أعلى وحدة معروفة. */
@@ -75,6 +77,8 @@ interface Mark {
 const JUMP = { chapter: 30, episode: 12 } as const;
 /** أكبر دفعة بلا تواريخ تُعدّ إصدارًا حقيقيًا؛ ما فوقها لحاق مصدر أكمل. */
 const BURST = 3;
+/** شهادة قائمة Latest تُقبل لنافذة قريبة فقط: «تحدّث منذ أمس» لا يُكتب «الآن». */
+const LISTED_WINDOW = 3 * 3_600_000;
 
 const reliable = (p: unknown, now: number) => {
   const n = num(p);
@@ -122,7 +126,9 @@ export function parseReport(raw: unknown, now: number): Report | null {
   }
   if (kind === 'movie' && !units.length) units.push({ season: null, number: 0, publishedAt: null });
   if (!units.length) return null;
-  return { work: workKey, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units };
+  const listedAt = num(r.listed);
+  const listed = kind !== 'movie' && listedAt != null && listedAt <= now && now - listedAt <= LISTED_WINDOW ? listedAt : null;
+  return { work: workKey, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units, listed };
 }
 
 function mergeSources(old: Source[], add: Source[]): Source[] {
@@ -145,8 +151,11 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
   if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
+  // شهادة Latest: أعلى وحدة بلا تاريخ حدثٌ واحد (بوقت الاكتشاف) لا خط أساس صامت
+  const vouched = (fresh: Unit[], ok: boolean) =>
+    report.listed != null && ok && top.publishedAt == null && !fresh.includes(top) ? [...fresh, top] : fresh;
   if (!mark) {
-    return { fresh: sorted.filter((u) => u.publishedAt != null), mark: { season: top.season, number: top.number } };
+    return { fresh: vouched(sorted.filter((u) => u.publishedAt != null), true), mark: { season: top.season, number: top.number } };
   }
   const limit = JUMP[report.kind];
   const above = sorted.filter((u) => {
@@ -159,7 +168,7 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
   const catchUp = undated.length > BURST;
   const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null && !catchUp)];
   const last = above[above.length - 1];
-  return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
+  return { fresh: vouched(fresh, last === top), mark: last ? { season: last.season, number: last.number } : mark };
 }
 
 export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, now: number): Promise<Response> {

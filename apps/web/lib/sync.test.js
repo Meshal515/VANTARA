@@ -6,7 +6,7 @@
  * تُرسل بعد. هذه المسارات لا تظهر في اختبار دالة نقية، وهي تمامًا حيث يضيع
  * عمل المستخدم.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** `localStorage` في الذاكرة، مع سقف اختياري لمحاكاة الامتلاء. */
 function fakeStorage({ failOn = null } = {}) {
@@ -28,11 +28,20 @@ function fakeStorage({ failOn = null } = {}) {
 
 const SIGNED_IN = { userId: 'u1', username: 'dahmi', displayName: 'دحمي' };
 
+// كل عميل يُنشأ هنا يُوقف بعد اختباره: مؤقّت إرسال مؤجّل من اختبار سابق كان
+// يعمل متأخرًا تحت الضغط ويكتب في تخزين الاختبار التالي فيفشله عشوائيًا.
+const live = [];
+afterEach(() => {
+  while (live.length) live.pop().dispose();
+});
+
 async function loadSync({ storage, fetchImpl }) {
   globalThis.localStorage = storage;
   globalThis.fetch = fetchImpl;
   const { createSync } = await import('./sync.js');
-  return createSync({ baseUrl: 'https://sync.test' });
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+  live.push(sync);
+  return sync;
 }
 
 function jsonResponse(body, status = 200, headers = {}) {

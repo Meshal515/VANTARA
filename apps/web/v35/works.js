@@ -15,6 +15,7 @@ import { aliasMap, learnAliases, loadAliases, noteRefAlias } from '../lib/manga-
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
+import { noteListed } from '../lib/update-engine.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -121,72 +122,144 @@ const chapterId = (chapter) => {
   const number = chapterNumberOf(chapter);
   return number >= 0 ? `n:${number}` : `name:${normalizeTitle(chapter?.name) || chapter?.url || ''}`;
 };
-/** نطابق هوية الفصل عبر المسوحات؛ لا نعتمد تاريخ رفع قد يغيب أو يخطئ. */
+/** أقصى صفحات Latest للمصدر في المسح الواحد. مانجا ليك (قياس حي): 25 عملًا للصفحة، 100 تحديث في 12 ساعة، ودفعات بـ25 عملًا في الساعة. */
+const LATEST_PAGES = 4;
+/** رأس القائمة يُفحص دائمًا: عملٌ تحدّث وهو في القمة لا يتحرّك فيها. */
+const LATEST_HEAD = 3;
+const CURSOR_KEYS = 150;
+const listKey = (manga) => String(manga?.url ?? '') || normalizeTitle(manga?.title);
+
+/**
+ * أي أعمال قائمة Latest صعدت منذ المسح السابق (`prev`: ترتيب مفاتيحه حينها).
+ *
+ * القائمة مرتّبة بآخر تحديث: ما تحدّث بعد المسح السابق يعلو كل ما لم يتحدّث،
+ * وما لم يتحدّث يبقى بترتيبه القديم. فمن الأسفل: ما دامت الأعمال القديمة بنفس
+ * ترتيبها فهي لم تتحرك، وأول عمل يكسر الترتيب هو وكل ما فوقه صعد. الحدّ لا يُعدّ
+ * مؤكدًا إلا بعملين قديمين متتاليين في الترتيب. يرجع فهرس أول عمل ثابت، أو -1
+ * إن لم يتأكد حدّ في الصفحات المقروءة بعد (فكل ما فيها صعد، والصفحة التالية تُقرأ).
+ */
+export function latestBoundary(keys, prev) {
+  const at = new Map(prev.map((k, i) => [k, i]));
+  let min = Infinity;
+  let stable = -1;
+  for (let i = keys.length - 1; i >= 0; i -= 1) {
+    const p = at.get(keys[i]);
+    if (p == null) continue;
+    if (p > min) break;
+    if (min !== Infinity) stable = i;
+    min = p;
+  }
+  return stable;
+}
+
+/**
+ * مسح «آخر التحديثات»: صفحات Latest لكل مصدر ثم فصول ما تحدّث فيها. الفصول
+ * تمرّ على `Update Engine` (مجسّ محرك الإضافات) فيقرّر الخادم ما الجديد.
+ *
+ * كان يقرأ الصفحة الأولى وحدها ويجلب فصول كل أعمالها كل مرة، واحدًا واحدًا في
+ * سكون الرئيسية، فلا يكتمل غالبًا: من 64 عملًا تحدّث في مانجا ليك يصل الخادمَ
+ * بضعة فقط. الآن: مؤشر لكل مصدر (ترتيب قائمته في المسح السابق) فلا تُجلب إلا
+ * فصول ما صعد منذها ورأس القائمة، والصفحات تُقرأ حتى يظهر الحدّ القديم (4 بحد
+ * أقصى). وما صعد يُرسل بشهادة «تحدّث منذ المسح السابق» (`listed`) فلا يصير
+ * خط أساس صامتًا إن كانت أول مشاهدة للعمل أو بلا تاريخ رفع.
+ */
 export async function collectLatestChapters(list, page, {
   latest = (id, p) => engine.latest(id, p),
   chapters = (id, manga) => engine.chapters(id, manga),
+  listed = noteListed,
   now = Date.now(),
   onUpdate = () => {},
-  known = { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} },
+  known = { initialized: false, workChapters: {}, observed: {}, lastUpdate: {}, cursors: {} },
   concurrency = 8,
   shouldContinue = () => true,
+  maxPages = LATEST_PAGES,
 } = {}) {
-  known ??= { initialized: false, workChapters: {}, observed: {}, lastUpdate: {} };
+  known ??= { initialized: false, workChapters: {}, observed: {}, lastUpdate: {}, cursors: {} };
   const entries = [];
-  const next = { initialized: true, workChapters: { ...(known.workChapters ?? {}) }, observed: { ...(known.observed ?? {}) }, lastUpdate: { ...(known.lastUpdate ?? {}) } };
+  const next = {
+    initialized: true,
+    workChapters: { ...(known.workChapters ?? {}) },
+    observed: { ...(known.observed ?? {}) },
+    lastUpdate: { ...(known.lastUpdate ?? {}) },
+    cursors: { ...(known.cursors ?? {}) },
+  };
   let hasNextPage = false;
-  const tasks = [];
-  let cursor = 0;
-  let pendingPages = list.length;
-  const waiters = [];
-  const wake = () => { while (waiters.length) waiters.shift()(); };
+
+  /** صفحات المصدر حتى الحدّ القديم، وما يُجلب فصوله منها (الأقدم أولًا). */
+  const plan = async (source) => {
+    const prev = known.cursors?.[source.id] ?? null;
+    const mangas = [];
+    let more = false;
+    let stable = -1;
+    for (let p = page; p < page + (prev ? maxPages : 1) && shouldContinue(); p += 1) {
+      const value = await withTimeout(latest(source.id, p), LISTING_TIMEOUT_MS);
+      more = Boolean(value?.hasNextPage);
+      if (p === page) hasNextPage ||= more;
+      const seen = new Set(mangas.map(listKey));
+      mangas.push(...(value?.mangas ?? []).filter((m) => listKey(m) && !seen.has(listKey(m))));
+      if (!prev) break;
+      stable = latestBoundary(mangas.map(listKey), prev.keys ?? []);
+      if (stable >= 0 || !more) break;
+    }
+    if (!mangas.length) return null; // لم يُقرأ شيء: المؤشر القديم يبقى كما هو
+    const keys = mangas.map(listKey);
+    // بلا مسح سابق: الصفحة الأولى كلها، بلا شهادة (لا نعرف متى تحدّثت)
+    const moved = !prev ? keys.length : stable >= 0 ? stable : keys.length;
+    const retry = prev?.retry ?? {};
+    const tasks = [];
+    keys.forEach((key, position) => {
+      const since = prev && position < moved ? prev.at : retry[key] ?? null;
+      if (position < moved || position < LATEST_HEAD || retry[key]) tasks.push({ source, manga: mangas[position], position, key, since });
+    });
+    const tail = (prev?.keys ?? []).filter((k) => !keys.includes(k));
+    return { tasks: tasks.reverse(), cursor: { at: now, keys: [...keys, ...tail].slice(0, CURSOR_KEYS) } };
+  };
+
+  const fetchChapters = async ({ source, manga, position, since }) => {
+    if (since) listed(source.id, manga, since);
+    const rows = await withTimeout(chapters(source.id, manga), LISTING_TIMEOUT_MS);
+    if (!rows.length) return;
+    const id = normalizeTitle(manga.title);
+    if (!id) return;
+    const before = new Set(known.workChapters?.[id] ?? []);
+    const unseen = known.initialized ? rows.filter((r) => !before.has(chapterId(r))) : [];
+    const latestKnown = rows.find((r) => chapterId(r) === known.lastUpdate?.[id]);
+    const pick = latestKnown && !unseen.length ? latestKnown : (unseen.length ? unseen : rows).reduce((best, row) =>
+      !best || chapterNumberOf(row) > chapterNumberOf(best) ? row : best, null);
+    const observedAt = unseen.length ? now : known.observed?.[id] ?? 0;
+    next.workChapters[id] = [...new Set([...(next.workChapters[id] ?? []), ...rows.map(chapterId)])];
+    next.observed[id] = Math.max(next.observed[id] ?? 0, observedAt);
+    if (unseen.length) next.lastUpdate[id] = chapterId(pick);
+    entries.push({ source, manga, chapter: pick, chapters: rows, observedAt, position });
+    onUpdate(entries, hasNextPage);
+  };
+
+  // مصدر لكل عامل: فصول المصدر الواحد واحدًا بعد واحد (لا نُغرق موقعًا)، والمصادر بالتوازي
   let sourceCursor = 0;
-  const pageWorker = async () => {
+  const worker = async () => {
     while (sourceCursor < list.length && shouldContinue()) {
       const source = list[sourceCursor++];
+      let planned;
       try {
-        const value = await withTimeout(latest(source.id, page), LISTING_TIMEOUT_MS);
-        hasNextPage ||= Boolean(value?.hasNextPage);
-        for (const [position, manga] of (value?.mangas ?? []).entries()) tasks.push({ source, manga, position });
+        planned = await plan(source);
       } catch {
-        // مصدر لا يرد لا يحبس المصادر الأسرع.
-      } finally {
-        pendingPages -= 1;
-        wake();
+        planned = null;
       }
-    }
-    if (!shouldContinue()) { pendingPages = 0; wake(); }
-  };
-  const pages = Array.from({ length: Math.min(concurrency, list.length) }, pageWorker);
-  const worker = async () => {
-    while (shouldContinue() && (pendingPages || cursor < tasks.length)) {
-      if (cursor >= tasks.length) {
-        await new Promise((resolve) => waiters.push(resolve));
-        continue;
+      if (!planned) continue; // مصدر لا يرد لا يحبس المصادر الأسرع، ومؤشره القديم يبقى
+      const retry = {};
+      for (const task of planned.tasks) {
+        if (!shouldContinue()) { if (task.since) retry[task.key] = task.since; continue; }
+        try {
+          await fetchChapters(task);
+        } catch {
+          // عملٌ لم يُجلب يُعاد في المسح التالي ما دامت شهادته قائمة
+          if (task.since) retry[task.key] = task.since;
+        }
       }
-      const { source, manga, position } = tasks[cursor++];
-      try {
-        const rows = await withTimeout(chapters(source.id, manga), LISTING_TIMEOUT_MS);
-        if (!rows.length) continue;
-        const id = normalizeTitle(manga.title);
-        if (!id) continue;
-        const before = new Set(known.workChapters?.[id] ?? []);
-        const unseen = known.initialized ? rows.filter((r) => !before.has(chapterId(r))) : [];
-        const latestKnown = rows.find((r) => chapterId(r) === known.lastUpdate?.[id]);
-        const pick = latestKnown && !unseen.length ? latestKnown : (unseen.length ? unseen : rows).reduce((best, row) =>
-          !best || chapterNumberOf(row) > chapterNumberOf(best) ? row : best, null);
-        const observedAt = unseen.length ? now : known.observed?.[id] ?? 0;
-        next.workChapters[id] = [...new Set([...(next.workChapters[id] ?? []), ...rows.map(chapterId)])];
-        next.observed[id] = Math.max(next.observed[id] ?? 0, observedAt);
-        if (unseen.length) next.lastUpdate[id] = chapterId(pick);
-        entries.push({ source, manga, chapter: pick, chapters: rows, observedAt, position });
-        onUpdate(entries, hasNextPage);
-      } catch {
-        // مصدر معطّل لا يسقط النتائج الموثقة من المصادر الأخرى.
-      }
+      next.cursors[source.id] = { ...planned.cursor, ...(Object.keys(retry).length ? { retry } : {}) };
     }
   };
-  await Promise.all([...pages, ...Array.from({ length: Math.min(concurrency, Math.max(1, list.length)) }, worker)]);
+  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, list.length)) }, worker));
   entries.sort((a, b) => b.observedAt - a.observedAt || a.position - b.position || sourceRank(a.source.id) - sourceRank(b.source.id));
   return { entries, hasNextPage, known: next };
 }
@@ -478,15 +551,18 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
 
 /** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
 export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
-  const list = await listingSources({ includeFillers: true });
+  // العربية وحدها: قوائم مصادر التكملة الإنجليزية (MangaDex…) مئات الأعمال العالمية
+  // كل ساعة، كانت تستهلك المسح كله وتملأ «آخر التحديثات» بأعمال لا نسخة عربية لها
+  const list = await listingSources();
   const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
   const { entries, known } = await collectLatestChapters(list, 1, {
     known: prior,
-    concurrency: 1,
+    latest: sourceLatest,
+    concurrency: 3,
     shouldContinue,
     onUpdate: (found) => onUpdate(recentWorks(found)),
   });
-  if (entries.length) await writeKv(CHAPTER_UPDATES_KEY, known);
+  await writeKv(CHAPTER_UPDATES_KEY, known);
   return recentWorks(entries);
 }
 

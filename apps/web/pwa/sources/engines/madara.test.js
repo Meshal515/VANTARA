@@ -139,4 +139,15 @@ describe('chapter dates', () => {
     expect(parseDate('14 أيلول 2026', now)).toBe(Date.UTC(2026, 8, 14));
     expect(parseDate('???', now)).toBe(0);
   });
+  // مانجا ليك تكتب أحدث فصولها «ساعتين ago» و«ساعة ago»: كانت 0 فيصير أحدث فصل بلا
+  // تاريخ، وأول مشاهدة لعمله خط أساس صامت لا يظهر في «آخر التحديثات»
+  it('reads Arabic dual and number-less relative dates as Mangalek prints its newest chapters', () => {
+    expect(parseDate('ساعتين ago', now)).toBe(now - 2 * 36e5);
+    expect(parseDate('ساعة ago', now)).toBe(now - 36e5);
+    expect(parseDate('4 ساعات ago', now)).toBe(now - 4 * 36e5);
+    expect(parseDate('منذ يومين', now)).toBe(now - 2 * 864e5);
+    expect(parseDate('دقيقتين ago', now)).toBe(now - 2 * 6e4);
+    expect(parseDate('منذ أسبوعين', now)).toBe(now - 14 * 864e5);
+    expect(parseDate('منذ شهرين', now)).toBe(now - 60 * 864e5);
+  });
 });

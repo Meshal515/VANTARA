@@ -122,6 +122,46 @@ describe('Update Engine: خط الأساس', () => {
   });
 });
 
+/**
+ * «آخر التحديثات» ناقصة: 64 عملًا صعدت في قائمة Latest لمانجا ليك، وأحدث فصولها
+ * بلا تاريخ رفع («ساعتين ago» لا يُفهم في Keiyoushi). أول مشاهدة لكل عمل كانت خط
+ * أساس صامتًا فلا يظهر منها شيء. شهادة القائمة (`listed`) تجعل أعلى فصل حدثًا واحدًا.
+ */
+describe('Update Engine: شهادة قائمة Latest', () => {
+  const listed = (work: string, numbers: number[], since: number, dates: Record<number, number> = {}) => ({ ...manga(work, numbers, 'mangalek', dates), listed: since });
+
+  it('64 works that moved up in a source Latest list are 64 timeline rows, not a silent baseline', async () => {
+    const before = env();
+    const works = Array.from({ length: 64 }, (_, i) => manga(`ext:work ${i}`, range(1, 10 + i), 'mangalek', { 1: NOW - 90 * 86_400_000 }));
+    await observe(before, works, NOW);
+    // بلا شهادة (السلوك القديم): لا شيء حديث من الـ64
+    expect((await list(before, 'section=manga&limit=100')).events.filter((x) => (x.at as number) > NOW - H)).toHaveLength(0);
+
+    const e = env();
+    const vouched = works.map((w, i) => listed(w.work, range(1, 10 + i), NOW - 20 * 60_000, { 1: NOW - 90 * 86_400_000 }));
+    // دفعات المجسّ كما يرسلها الجهاز (20 عملًا لكل طلب)
+    for (let i = 0; i < vouched.length; i += 20) await observe(e, vouched.slice(i, i + 20), NOW);
+    const fresh = (await list(e, 'section=manga&limit=100')).events.filter((x) => x.at === NOW);
+    expect(fresh).toHaveLength(64);
+    expect(new Set(fresh.map((x) => x.work)).size).toBe(64);
+    expect(fresh.find((x) => x.work === 'ext:work 5')).toMatchObject({ number: 15, publishedAt: null, firstSeenAt: NOW });
+  });
+
+  it('only the top unit is vouched; old testimony and catch-up below it stay quiet', async () => {
+    const e = env();
+    // شهادة أقدم من ثلاث ساعات لا تُقبل («تحدّث منذ أمس» لا يُكتب الآن)
+    expect(await observe(e, [listed('ext:stale', range(1, 40), NOW - 5 * H)], NOW)).toMatchObject({ created: 0 });
+    // عمل معروف عند 2 ومصدر أكمل يلحق بـ19 فصلًا بلا تواريخ وهو في قائمة Latest: حدث واحد لأعلاها
+    await observe(e, [manga('ext:finals', [1, 2], 'small')], NOW);
+    expect(await observe(e, [listed('ext:finals', range(1, 21), NOW + H - 600_000)], NOW + H)).toMatchObject({ created: 1 });
+    expect((await list(e, 'section=manga')).events.map((x) => x.id)).toEqual(['ext:finals|c:21']);
+    // قفزة ترقيم خاطئة لا تشفع لها الشهادة
+    expect(await observe(e, [listed('ext:finals', [9999], NOW + 2 * H - 600_000)], NOW + 2 * H)).toMatchObject({ created: 0 });
+    // تاريخ موثوق يبقى كما هو؛ الشهادة لا تضيف حدثًا ثانيًا
+    expect(await observe(e, [listed('ext:dated', [7, 8], NOW - H, { 8: NOW - 2 * H })], NOW)).toMatchObject({ created: 1 });
+  });
+});
+
 describe('Update Engine: الأقسام والخط الزمني', () => {
   it('series seasons, anime episodes, movie availability; newest first with a stable cursor', async () => {
     const e = env();
