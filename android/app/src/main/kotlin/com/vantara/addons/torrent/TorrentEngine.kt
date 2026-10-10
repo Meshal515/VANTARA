@@ -74,6 +74,18 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
     fun release(uri: Uri) { uri.host?.let(tickets::remove) }
+    /** Routing-table size: 0 for a long time means the device cannot reach the BitTorrent network at all. */
+    fun dhtNodes(): Long = if (managerHolder.isInitialized()) runCatching { manager.dhtNodes() }.getOrDefault(0L) else 0L
+    /** Live swarm facts for a ticket: what Stremio shows while buffering. Null before the session exists. */
+    fun stats(uri: Uri): TorrentStats? {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
+        if (!managerHolder.isInitialized()) return null
+        val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
+        val status = runCatching { handle.status() }.getOrNull() ?: return null
+        val flags = runCatching { handle.flags() }.getOrNull()
+        return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
+            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers())
+    }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
 
     internal fun acquire(uri: Uri, cancelled: () -> Boolean): Lease {
@@ -144,18 +156,30 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         private var memoryBytes = 0
         @Volatile var idleAt = System.currentTimeMillis(); private set
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
+        /**
+         * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
+         * live at the end of the file). Pausing here disconnected every peer on each reopen, so a real
+         * swarm never got past the first seconds: a black screen that loads forever. The torrent now
+         * stays connected for a short grace period and pauses only if nobody reopened it.
+         */
         fun drop() = synchronized(monitor) {
             if (refs > 0) refs--
             if (refs == 0) {
-                idleAt = System.currentTimeMillis()
-                torrent?.takeIf { it.isValid }?.let { handle ->
-                    handle.pause(); handle.clearPieceDeadlines()
-                    window.forEach { handle.piecePriority(it, Priority.IGNORE) }
-                }
-                window = emptyList()
-                pieces.clear(); reading.clear(); failed.clear(); memoryBytes = 0
+                val at = System.currentTimeMillis()
+                idleAt = at
+                reading.clear(); failed.clear()
+                if (!shutdown.get()) runCatching { pruner.schedule({ pauseIfStillIdle(at) }, IDLE_GRACE_MS, TimeUnit.MILLISECONDS) }
             }
             monitor.notifyAll()
+        }
+        private fun pauseIfStillIdle(since: Long) = synchronized(monitor) {
+            if (refs != 0 || idleAt != since) return@synchronized
+            torrent?.takeIf { it.isValid }?.let { handle ->
+                handle.pause(); handle.clearPieceDeadlines()
+                window.forEach { handle.piecePriority(it, Priority.IGNORE) }
+            }
+            window = emptyList()
+            pieces.clear(); reading.clear(); failed.clear(); memoryBytes = 0
         }
         fun unused() = synchronized(monitor) { refs == 0 }
         fun handle(cancelled: () -> Boolean, request: TorrentRequest): TorrentHandle {
@@ -173,6 +197,10 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                 }
             }
             val found = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") { manager.find(Sha1Hash(hash))?.takeIf { it.isValid } }
+            // libtorrent adds a magnet PAUSED + AUTO_MANAGED by default, and acquire() only resumed it
+            // after metadata — which a paused torrent never fetches. Live emulator proof: 120+ DHT nodes,
+            // 4 popular swarms, 0 peers, "metadata unavailable". The player asked for it: start now.
+            runCatching { found.unsetFlags(TorrentFlags.AUTO_MANAGED); found.resume() }
             synchronized(monitor) { torrent = found; addTrackers(found, request) }
             return found
         }
@@ -184,6 +212,8 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
+                // Container index lives at the head or the tail: fetch both before the extractor asks.
+                for (piece in TorrentPolicy.edges(file, info.pieceLength())) handle.piecePriority(piece, Priority.SIX)
                 selected = file.index; initialized = true; window = emptyList()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }
@@ -204,6 +234,9 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         }
         fun piece(piece: Int, cancelled: () -> Boolean): ByteArray {
             val start = System.nanoTime()
+            var progressAt = start
+            var checkedAt = 0L
+            var done = -1L
             synchronized(monitor) {
                 while (true) {
                     checkCancelled(cancelled)
@@ -213,7 +246,14 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                     val handle = torrent ?: throw IOException("Torrent session ended")
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
                     if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
-                    if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) >= PIECE_TIMEOUT_MS) {
+                    // A 4K piece can be 16 MB: fail on a stalled swarm, not on a slow but moving one.
+                    val now = System.nanoTime()
+                    if (now - checkedAt >= ONE_SECOND_NS) {
+                        checkedAt = now
+                        val total = runCatching { handle.status().totalDone() }.getOrDefault(done)
+                        if (total > done) { if (done >= 0) progressAt = now; done = total }
+                    }
+                    if (TimeUnit.NANOSECONDS.toMillis(now - progressAt) >= PIECE_STALL_MS || TimeUnit.NANOSECONDS.toMillis(now - start) >= PIECE_MAX_WAIT_MS) {
                         reading.remove(piece)
                         throw IOException("Torrent buffer timed out; try another source")
                     }
@@ -270,7 +310,10 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         private const val TICKET_TTL_MS = 30L * 60 * 1000
         private const val IDLE_TTL_MS = 60_000L
         private const val METADATA_TIMEOUT_MS = 45_000L
-        private const val PIECE_TIMEOUT_MS = 30_000L
+        private const val PIECE_STALL_MS = 30_000L
+        private const val PIECE_MAX_WAIT_MS = 180_000L
+        private const val IDLE_GRACE_MS = 20_000L
+        private const val ONE_SECOND_NS = 1_000_000_000L
         private val PRIVATE_RANGES = listOf(
             "0.0.0.0" to "0.255.255.255", "10.0.0.0" to "10.255.255.255", "100.64.0.0" to "100.127.255.255",
             "127.0.0.0" to "127.255.255.255", "169.254.0.0" to "169.254.255.255", "172.16.0.0" to "172.31.255.255",
