@@ -5,16 +5,18 @@
  *                                  [--aliases-out=apps/web/data/manga-aliases.json]
  *
  * 1. يجمع قوائم كل المصادر (الرائج + الأحدث، عدة صفحات)، مرآة واحدة لكل موقع.
- * 2. يجمّعها كما يجمّعها التطبيق (`canonicalIndex` بالأسماء البديلة المعروفة).
- * 3. يقرأ الأسماء البديلة من صفحة كل عمل، ويكشف:
+ * 2. يجمّعها كما يجمّعها التطبيق (`canonicalIndex`): أدلة القوائم نفسها (توأم
+ *    العنوان، اسم الرابط، أسماء MangaDex) + الأسماء البديلة المشحونة.
+ * 3. يقرأ الأسماء البديلة وعدد الفصول من صفحة كل بطاقة، ويكشف:
  *    - تكرارًا ظاهرًا: بطاقتان، واسم إحداهما من أسماء الأخرى البديلة.
- *    - دمجًا مريبًا: بطاقة واحدة تحمل نسخًا بفصول متباعدة جدًا (قد تكون عملين).
- * والتقرير: Raw entries · Canonical unique · Merged · Duplicates visible · Ambiguous.
+ *    - بطاقات بلا فصول: كل نسخها ردّت بلا فصل (لا تُعرض في التطبيق بعد أول فتح).
+ * والتقرير: Raw entries · Unique (exact) · Unique before details · Unique after ·
+ * Merged · Duplicates visible · Ambiguous rejected.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { liveFetcher, useLinkedom } from './live-fetcher.mjs';
 import { ENGINES } from '../../apps/web/pwa/sources/engines/index.js';
-import { aliasEvidence, canonicalIndex, mirrorFamily } from '../../apps/web/lib/catalog.js';
+import { aliasEvidence, canonicalIndex, mirrorFamily, normalizeTitle } from '../../apps/web/lib/catalog.js';
 
 useLinkedom();
 const arg = (k, d = null) => process.argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? d;
@@ -50,8 +52,15 @@ for (const def of defs) {
   console.error(`${def.id.split('.').pop().padEnd(18)} ${n}`);
 }
 
-// 2) التجميع كما في التطبيق (بلا أسماء بديلة بعد)
-const before = canonicalIndex();
+// 2) التجميع كما في التطبيق: أدلة القوائم + الأسماء المشحونة (بلا صفحات بعد)
+let shipped = {};
+try {
+  shipped = JSON.parse(readFileSync(new URL('../../apps/web/data/manga-aliases.json', import.meta.url))).aliases ?? {};
+} catch {
+  shipped = {};
+}
+const exactKeys = new Set(entries.map((e) => normalizeTitle(e.manga.title)).filter(Boolean));
+const before = canonicalIndex({ aliases: new Map(Object.entries(shipped)) });
 for (const e of entries) before.add(e);
 const cards = before.list();
 
@@ -66,7 +75,9 @@ await Promise.all(
       const d = await t(ed.engine.series(ed.manga)).catch(() => null);
       const names = d?.manga?.altNames ?? [];
       if (names.length) aliases.set(card.key, names);
-      card.chapters = d?.chapters?.length ?? null;
+      // عدد الفصول من كل نسخ البطاقة (بطاقة بلا فصول = كلها ردّت بصفر)
+      const counts = await Promise.all(card.editions.map((e, i) => (i === 0 ? Promise.resolve(d?.chapters?.length ?? null) : t(e.engine.chapters(e.manga)).then((c) => c?.length ?? null, () => null))));
+      card.chapters = counts.every((c) => c === 0) ? 0 : Math.max(...counts.map((c) => c ?? -1));
       if (++done % 50 === 0) console.error(`details ${done}`);
     }
   }),
@@ -83,25 +94,46 @@ for (const [key, names] of aliases) {
   }
 }
 
-// 5) بعد الربط بالأسماء البديلة
-const after = canonicalIndex({ aliases });
+// 5) بعد الربط بالأسماء البديلة (المشحونة + صفحات الأعمال)
+const learned = new Map(Object.entries(shipped));
+for (const [key, names] of aliases) learned.set(key, [...new Set([...(learned.get(key) ?? []), ...names])]);
+const after = canonicalIndex({ aliases: learned });
 for (const e of entries) after.add(e);
+const afterCards = after.list();
+const afterKeys = new Set(afterCards.map((c) => c.key));
+const stillDuplicate = duplicates.filter((d) => {
+  const ka = after.canonicalOf(d.a);
+  const kb = after.canonicalOf(d.b);
+  return ka !== kb && afterKeys.has(ka) && afterKeys.has(kb);
+});
 
-const merged = cards.filter((c) => new Set(c.editions.map((e) => mirrorFamily(e.sourceId))).size > 1);
+const merged = afterCards.filter((c) => new Set(c.editions.map((e) => mirrorFamily(e.sourceId))).size > 1);
+const empty = cards.filter((c) => c.chapters === 0);
 const report = {
   rawEntries: entries.length,
-  uniqueBefore: cards.length,
-  uniqueAfter: after.list().length,
+  uniqueExactTitles: exactKeys.size,
+  uniqueBeforeDetails: cards.length,
+  uniqueAfter: afterCards.length,
   crossSourceMerged: merged.length,
   detailsRead: done,
   withAliases: aliases.size,
   duplicatesVisibleBefore: duplicates.length,
+  duplicatesVisibleAfter: stillDuplicate.length,
+  emptyCards: empty.length,
   ambiguousRejected: after.rejected?.length ?? 0,
 };
 console.log('| المقياس | القيمة |\n|---|---|');
 for (const [k, v] of Object.entries(report)) console.log(`| ${k} | ${v} |`);
 console.log('\nتكرارات ظاهرة كُشفت (قبل الربط):');
 for (const d of duplicates.slice(0, 40)) console.log(`- «${d.a}» [${d.sources[0].join('، ')}] = «${d.b}» [${d.sources[1].join('، ')}] ← ${d.evidence}`);
+if (stillDuplicate.length) {
+  console.log('\nتكرارات باقية بعد الربط:');
+  for (const d of stillDuplicate.slice(0, 40)) console.log(`- «${d.a}» = «${d.b}» ← ${d.evidence}`);
+}
+if (empty.length) {
+  console.log('\nبطاقات بلا فصول (كل نسخها ردّت بصفر):');
+  for (const c of empty.slice(0, 40)) console.log(`- «${c.title}» [${c.editions.map((e) => e.label).join('، ')}]`);
+}
 if (after.rejected?.length) {
   console.log('\nأسماء بديلة رُفضت لأنها تشير لأكثر من عمل:');
   for (const r of after.rejected.slice(0, 20)) console.log(`- ${r}`);
@@ -120,4 +152,9 @@ if (arg('aliases-out')) {
   writeFileSync(arg('aliases-out'), `${JSON.stringify({ $comment: 'الأسماء البديلة لأعمال المانجا: مفتاح العمل ← أسماؤه الأخرى (من صفحات الأعمال). tools/pwa/manga-dedup.mjs --aliases-out', aliases: sorted }, null, 1)}\n`);
   console.error(`aliases: ${Object.keys(sorted).length} works`);
 }
-if (arg('json')) writeFileSync(arg('json'), JSON.stringify({ report, duplicates, rejected: after.rejected ?? [] }, null, 2));
+// كل دمج بين عناوين مختلفة يُطبع للمراجعة البشرية: ZERO WRONG MERGE لا يُفترض، يُفحص
+const multi = afterCards.filter((c) => (c.keys ?? []).length > 1);
+console.log(`\nبطاقات تجمع عناوين مختلفة (${multi.length}):`);
+for (const c of multi) console.log(`- «${c.title}» ← ${c.editions.map((e) => `«${e.manga.title}» [${e.label}]`).join('، ')}`);
+const lite = (e) => ({ sourceId: e.sourceId, label: e.label, manga: { title: e.manga.title, url: e.manga.url, memo: e.manga.memo, altNames: e.manga.altNames } });
+if (arg('json')) writeFileSync(arg('json'), JSON.stringify({ report, duplicates, rejected: after.rejected ?? [], merged: multi.map((c) => ({ key: c.key, keys: c.keys, titles: c.editions.map((e) => e.manga.title) })), entries: entries.map(lite) }, null, 2));
