@@ -99,14 +99,17 @@ class TogetherPlayer(
 
     /** الشريط العلوي: 3 أفاتارات ثم «+N». */
     fun mountStrip(into: LinearLayout) {
+        // كبسولة زجاجية: نقطة «مباشر» ثم 3 وجوه و«+N» — نفس تصميم القارئ في الويب
         strip = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(context.dp(6), 0, context.dp(6), 0)
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(context.dp(9), 0, context.dp(5), 0)
+            background = rounded(0x17FFFFFF, context.dp(18).toFloat(), context.dp(1), 0x1FFFFFFF)
             contentDescription = "الغرفة"
             setOnClickListener { openPanel() }
         }
-        into.addView(strip, 1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(40)))
+        into.addView(strip, 1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(36)).apply { marginStart = context.dp(8); marginEnd = context.dp(8) })
         paintStrip()
     }
 
@@ -293,14 +296,25 @@ class TogetherPlayer(
 
     // ───────────── الواجهة ─────────────
 
-    private fun face(m: Member, size: Int): TextView = context.label(m.name.take(1), (size / 2.6f), Color.WHITE, bold = true).apply {
+    private fun stateColor(state: String) = when (state) {
+        "playing", "ready" -> 0xFF30D178.toInt()
+        "preparing", "buffering" -> 0xFFF5B942.toInt()
+        "failed" -> 0xFFFF6B6E.toInt()
+        else -> 0xFF8A8694.toInt()
+    }
+
+    /** وجه دائري بلون ثابت للاسم. [ring] حلقة بلون الحالة (غرفة الانتظار). */
+    private fun face(m: Member, size: Int, ring: Boolean = false): TextView = context.label(m.name.take(1), (size / 2.6f), Color.WHITE, bold = true).apply {
         gravity = Gravity.CENTER
-        background = GradientDrawable().apply {
+        val hue = ((m.name.hashCode() and 0x7fffffff) % 360).toFloat()
+        background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.HSVToColor(floatArrayOf(hue, 0.5f, 0.85f)), Color.HSVToColor(floatArrayOf((hue + 25) % 360, 0.7f, 0.5f))),
+        ).apply {
             shape = GradientDrawable.OVAL
-            setColor(Color.HSVToColor(floatArrayOf(((m.name.hashCode() and 0x7fffffff) % 360).toFloat(), 0.45f, 0.55f)))
-            if (m.state == "failed") setStroke(context.dp(2), 0xFFE5484D.toInt()) else setStroke(context.dp(2), 0x8C000000.toInt())
+            setStroke(context.dp(if (ring) 3 else 2), if (ring) stateColor(m.state) else if (m.state == "failed") 0xFFFF6B6E.toInt() else 0xFF15121C.toInt())
         }
-        alpha = if (m.state == "preparing" || m.state == "buffering") 0.6f else 1f
+        alpha = if (m.state == "preparing" || m.state == "buffering") (if (ring) 0.8f else 0.6f) else 1f
     }
 
     private fun paintStrip() {
@@ -308,17 +322,20 @@ class TogetherPlayer(
         val known = (0 until s.childCount).mapNotNull { s.getChildAt(it).tag as? String }.toSet()
         s.removeAllViews()
         val people = client.roster.sortedWith(compareByDescending<Member> { it.host }.thenBy { it.joinedAt })
+        s.addView(View(context).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (people.any { it.state == "failed" }) 0xFFFF6B6E.toInt() else 0xFF30D178.toInt()) }
+        }, LinearLayout.LayoutParams(context.dp(7), context.dp(7)).apply { marginEnd = context.dp(7) })
         people.take(3).forEachIndexed { i, m ->
             val f = face(m, 26).apply { tag = m.userId }
-            s.addView(f, LinearLayout.LayoutParams(context.dp(26), context.dp(26)).apply { if (i > 0) marginStart = -context.dp(7) })
+            s.addView(f, LinearLayout.LayoutParams(context.dp(26), context.dp(26)).apply { if (i > 0) marginStart = -context.dp(8) })
             // دخل الحين: ينزلق بنعومة في مكانه
             if (m.userId !in known && known.isNotEmpty()) { f.translationY = -context.dp(10).toFloat(); f.alpha = 0f; f.animate().translationY(0f).alpha(1f).setDuration(380).start() }
         }
         if (people.size > 3) {
             s.addView(context.label("+${people.size - 3}", 10.5f, Color.WHITE, bold = true).apply {
                 gravity = Gravity.CENTER
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x29FFFFFF) }
-            }, LinearLayout.LayoutParams(context.dp(26), context.dp(26)).apply { marginStart = -context.dp(7) })
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2A2635.toInt()); setStroke(context.dp(2), 0xFF15121C.toInt()) }
+            }, LinearLayout.LayoutParams(context.dp(26), context.dp(26)).apply { marginStart = -context.dp(8) })
         }
         s.visibility = if (people.isEmpty()) View.GONE else View.VISIBLE
     }
@@ -343,12 +360,18 @@ class TogetherPlayer(
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     layoutDirection = View.LAYOUT_DIRECTION_RTL
-                    setPadding(0, context.dp(8), 0, context.dp(8))
+                    setPadding(context.dp(10), context.dp(9), context.dp(10), context.dp(9))
+                    background = rounded(0x0AFFFFFF, context.dp(14).toFloat(), context.dp(1), 0x0FFFFFFF)
                 }
-                row.addView(face(m, 36), LinearLayout.LayoutParams(context.dp(36), context.dp(36)))
+                val faceBox = FrameLayout(context)
+                faceBox.addView(face(m, 34), FrameLayout.LayoutParams(context.dp(34), context.dp(34)))
+                faceBox.addView(View(context).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(stateColor(m.state)); setStroke(context.dp(2), 0xFF0F0D16.toInt()) }
+                }, FrameLayout.LayoutParams(context.dp(11), context.dp(11), Gravity.BOTTOM or Gravity.START))
+                row.addView(faceBox, LinearLayout.LayoutParams(context.dp(36), context.dp(36)))
                 val names = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(context.dp(10), 0, context.dp(10), 0) }
                 names.addView(context.label(if (m.userId == client.me) "أنت" else m.name, 14f, Tone.TEXT, bold = true))
-                names.addView(context.label(listOfNotNull(stateLabel(m.state), m.source).joinToString(" · "), 12f, if (m.state == "failed") 0xFFFF8B8E.toInt() else Tone.TEXT_2))
+                names.addView(context.label(listOfNotNull(stateLabel(m.state), m.source).joinToString(" · "), 12f, when (m.state) { "failed" -> 0xFFFF8B8E.toInt(); "playing", "ready" -> 0xFF6FE3A1.toInt(); "preparing", "buffering" -> 0xFFF5C76A.toInt(); else -> Tone.TEXT_2 }))
                 row.addView(names, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 val where = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
                 val pos = if (m.state == "playing" && m.pos != null && m.at != null) m.pos + max(0.0, now - m.at) else m.pos
@@ -360,7 +383,7 @@ class TogetherPlayer(
                 )
                 if (tags.isNotEmpty()) where.addView(context.label(tags.joinToString(" · "), 11f, Tone.TEXT_3))
                 row.addView(where)
-                body.addView(row)
+                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(6) })
             }
             if (client.isHost) {
                 body.addView(button(if (synced) "حوّلها منفصلة" else "حوّلها متزامنة", primary = false) { client.setMode(if (synced) "free" else "sync") })
@@ -384,7 +407,7 @@ class TogetherPlayer(
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 layoutDirection = View.LAYOUT_DIRECTION_RTL
-                setBackgroundColor(0xB3000000.toInt())
+                setBackgroundColor(0xC705040A.toInt())
                 swallowTouches()
             }
             hooks.overlayHost().addView(lobby, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -405,9 +428,9 @@ class TogetherPlayer(
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         for (m in client.roster.sortedBy { it.joinedAt }) {
             val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(context.dp(12), 0, context.dp(12), 0) }
-            col.addView(face(m, 52), LinearLayout.LayoutParams(context.dp(52), context.dp(52)))
+            col.addView(face(m, 56, ring = true), LinearLayout.LayoutParams(context.dp(56), context.dp(56)))
             col.addView(context.label(if (m.userId == client.me) "أنت" else m.name, 13f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER; setPadding(0, context.dp(6), 0, 0) })
-            col.addView(context.label(stateLabel(m.state), 11.5f, if (m.state == "ready") 0xFF6FD39B.toInt() else if (m.state == "failed") 0xFFFF8B8E.toInt() else Tone.TEXT_2).apply { gravity = Gravity.CENTER })
+            col.addView(context.label(stateLabel(m.state), 11.5f, when (m.state) { "ready", "playing" -> 0xFF6FE3A1.toInt(); "failed" -> 0xFFFF8B8E.toInt(); else -> 0xFFF5C76A.toInt() }).apply { gravity = Gravity.CENTER })
             row.addView(col)
         }
         l.addView(row)

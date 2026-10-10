@@ -104,18 +104,34 @@ export function createTogether(deps) {
   const emit = () => { for (const fn of listeners) try { fn(session); } catch { /* */ } };
   const personOf = (r) => ({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey });
 
+  /** كبسولة صغيرة أعلى الشاشة: وجه الشخص ينزلق مع «دحمي دخل»، ثم تختفي وحدها. */
+  function pop(person, text, tone = '') {
+    if (typeof document === 'undefined' || !document.body) return ui().toast(text);
+    const box = el('div', `tg-pop${tone ? ` is-${tone}` : ''}`);
+    box.setAttribute('role', 'status');
+    if (person) box.append(deps.avatarNode(person, 24));
+    box.append(el('span', null, text));
+    document.body.append(box);
+    requestAnimationFrame(() => box.classList.add('is-in'));
+    setTimeout(() => { box.classList.remove('is-in'); setTimeout(() => box.remove(), 320); }, 2400);
+  }
+  const personByName = (s, name) => {
+    const r = s.room.roster.find((x) => x.name === name);
+    return r ? personOf(r) : { displayName: name, avatarKey: null };
+  };
+
   function start(code, media, mode) {
     leave();
     const room = join({ baseUrl: deps.baseUrl(), code, getToken: token });
     const s = { code, media, mode, room, strips: new Set(), offs: [] };
     session = s;
     const kind = () => (s.room.timeline?.media ?? s.media)?.kind ?? 'anime';
-    s.offs.push(room.on('joined', (m) => ui().toast(`${m.name} دخل`)));
-    s.offs.push(room.on('left', (m) => ui().toast(`${m.name} طلع`)));
+    s.offs.push(room.on('joined', (m) => pop({ displayName: m.name, avatarKey: m.avatarKey ?? null }, `${m.name} دخل`, 'in')));
+    s.offs.push(room.on('left', (m) => pop(personByName(s, m.name), `${m.name} طلع`)));
     s.offs.push(room.on('status', (m) => {
       if (m.userId === room.me) return;
       const text = statusToast(m, kind());
-      if (text) ui().toast(text);
+      if (text) pop(personByName(s, m.name), text, m.state === 'failed' ? 'bad' : m.state === 'playing' ? 'ok' : '');
     }));
     s.offs.push(room.on('host', (id) => { if (id === room.me) ui().toast('صرت المضيف'); }));
     s.offs.push(room.on('connection', (c) => {
@@ -237,19 +253,27 @@ export function createTogether(deps) {
 
   function card(row) {
     const media = (() => { try { return JSON.parse(row.media_json); } catch { return null; } })();
-    const wrap = el('div', 'mc-card tg-card');
+    const reading = media?.kind === 'manga';
+    const wrap = el('div', `tg-card tg-card--${media?.kind ?? 'anime'}`);
+    // الرأس: نوع الغرفة وحالتها الحية (مباشر / يتجهّزون / انتهت)
     const top = el('div', 'tg-card-top');
-    top.append(el('span', 'tg-card-kind', kindLabel(media, row.mode)));
+    const icon = el('span', 'tg-card-icon');
+    icon.innerHTML = glyph(reading ? 'book' : 'play', { size: 16 });
+    const kind = el('span', 'tg-card-kind', kindLabel(media, row.mode));
+    const live = el('span', 'tg-live', '…');
+    top.append(icon, kind, live);
     const title = el('bdi', 'tg-card-title', media?.label ?? 'دعوة');
+    const who = el('div', 'tg-card-who');
     const people = el('div', 'tg-card-people');
-    const status = el('span', 'tg-card-status', '…');
-    const enter = el('button', 'btn btn-primary tg-enter');
+    const status = el('span', 'tg-card-status');
+    who.append(people, status);
+    const enter = el('button', 'tg-enter');
     enter.type = 'button';
     enter.innerHTML = `${glyph('play', { size: 16 })}<span>دخول</span>`;
     const mine = row.host_id === deps.sync.user?.userId;
-    let live = null;
+    let alive = null;
     enter.onclick = () => {
-      if (live === false) return;
+      if (alive === false) return;
       // في الغرفة أصلًا: نفس الجلسة، بلا إعادة اتصال
       if (session?.code === row.code) {
         deps.openMedia(session.media, session);
@@ -258,26 +282,33 @@ export function createTogether(deps) {
       const s = start(row.code, media, row.mode);
       deps.openMedia(media, s);
     };
-    wrap.append(top, title, people, status, enter);
+    wrap.append(top, title, who, enter);
     void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).then((r) => {
-      live = r != null;
+      alive = r != null;
       if (!r) {
+        wrap.classList.add('is-over');
+        live.textContent = 'انتهت';
         status.textContent = 'انتهت الغرفة';
         enter.disabled = true;
         enter.querySelector('span').textContent = 'انتهت';
         return;
       }
+      const started = Boolean(r.state?.started);
+      wrap.classList.toggle('is-live', started && r.people.length > 0);
+      live.textContent = !r.people.length ? 'فاضية' : started ? 'مباشر' : 'يتجهّزون';
       const { shown, more } = stripPeople(r.people.map((p) => ({ ...p, joinedAt: 0 })));
-      people.replaceChildren(...shown.map((p) => deps.avatarNode({ displayName: p.name, avatarKey: p.avatarKey }, 26)));
-      if (more) people.append(el('span', 'tg-more', `+${more}`));
-      const reading = media?.kind === 'manga';
+      people.replaceChildren(...shown.map((p) => {
+        const f = el('span', 'tg-card-face');
+        f.append(deps.avatarNode({ displayName: p.name, avatarKey: p.avatarKey }, 28));
+        return f;
+      }));
+      if (more) { const m = el('span', 'tg-card-face tg-more', `+${more}`); m.dir = 'ltr'; people.append(m); }
+      const names = r.people.slice(0, 2).map((p) => p.name).join('، ');
       status.textContent = !r.people.length
         ? 'ما فيه أحد داخل الحين'
-        : r.state?.started
-          ? `${reading ? 'يقرؤون' : 'يشاهدون'} الحين · ${r.people.length}`
-          : `يتجهّزون · ${r.people.length}`;
-      if (mine && !session) enter.querySelector('span').textContent = 'ارجع للغرفة';
-    }).catch(() => { status.textContent = ''; });
+        : `${names}${r.people.length > 2 ? ` و${r.people.length - 2} غيرهم` : ''} ${started ? (reading ? 'يقرؤون الحين' : 'يشاهدون الحين') : 'يتجهّزون'}`;
+      if (session?.code === row.code || (mine && !session)) enter.querySelector('span').textContent = 'ارجع للغرفة';
+    }).catch(() => { live.textContent = ''; });
     return wrap;
   }
 
@@ -303,16 +334,24 @@ export function createTogether(deps) {
     const roster = session?.room.roster ?? [];
     const { shown, more } = stripPeople(roster);
     const known = new Set([...host.querySelectorAll('[data-user]')].map((n) => n.dataset.user));
+    const first = !host.querySelector('[data-user]');
     const nodes = shown.map((r) => {
       const node = el('span', `tg-face${r.state === 'failed' ? ' is-failed' : r.state === 'preparing' || r.state === 'buffering' ? ' is-busy' : ''}`);
       node.dataset.user = r.userId;
       node.append(deps.avatarNode(personOf(r), 26));
       // دخل الحين: ينزلق بنعومة في مكانه
-      if (!known.has(r.userId)) node.classList.add('is-new');
+      if (!first && !known.has(r.userId)) node.classList.add('is-new');
       return node;
     });
-    if (more) nodes.push(el('span', 'tg-face tg-more', `+${more}`));
-    host.replaceChildren(...nodes);
+    if (more) {
+      const m = el('span', 'tg-face tg-more', `+${more}`);
+      m.dir = 'ltr';
+      nodes.push(m);
+    }
+    const faces = el('span', 'tg-faces');
+    faces.append(...nodes);
+    const dot = el('i', `tg-dot${roster.some((r) => r.state === 'failed') ? ' is-bad' : ''}`);
+    host.replaceChildren(dot, faces);
     host.setAttribute('aria-label', `في الغرفة ${roster.length}`);
     host.setAttribute('role', 'button');
   }
@@ -326,7 +365,11 @@ export function createTogether(deps) {
       body.classList.add('tg-sheet');
       const head = el('div', 'tg-head');
       const media = s.room.timeline?.media ?? s.media;
-      head.append(el('h3', null, kindLabel(media, s.room.info?.mode ?? s.mode)));
+      const titleRow = el('div', 'tg-head-row');
+      titleRow.append(el('h3', null, kindLabel(media, s.room.info?.mode ?? s.mode)));
+      const count = el('span', 'tg-live tg-live--on');
+      titleRow.append(count);
+      head.append(titleRow);
       const what = el('p', null, media?.label ?? '');
       what.dir = 'auto';
       head.append(what);
@@ -335,10 +378,13 @@ export function createTogether(deps) {
       body.append(head, list, actions);
       const paint = () => {
         const now = s.room.clock.serverNow();
+        count.textContent = `${s.room.roster.length} في الغرفة`;
         list.replaceChildren(...s.room.roster.map((r) => {
           const row = el('div', 'tg-row');
           const who = el('div', 'tg-row-who');
-          who.append(deps.avatarNode(personOf(r), 36));
+          const face = el('span', `tg-row-face is-${r.state}`);
+          face.append(deps.avatarNode(personOf(r), 40));
+          who.append(face);
           const names = el('div', 'tg-row-names');
           names.append(el('b', null, r.userId === s.room.me ? 'أنت' : r.name));
           const line = [stateLabel(r.state, media?.kind), r.source].filter(Boolean).join(' · ');
@@ -357,9 +403,9 @@ export function createTogether(deps) {
         actions.replaceChildren();
         if (s.room.isHost) {
           const mode = s.room.info?.mode ?? s.mode;
-          actions.append(button('btn tg-switch', `<span>${mode === 'sync' ? 'حوّلها منفصلة' : 'حوّلها متزامنة'}</span>`, () => s.room.setMode(mode === 'sync' ? 'free' : 'sync')));
+          actions.append(button('tg-action', `${glyph('refresh', { size: 18 })}<span>${mode === 'sync' ? 'حوّلها منفصلة' : 'حوّلها متزامنة'}</span>`, () => s.room.setMode(mode === 'sync' ? 'free' : 'sync')));
         }
-        actions.append(button('btn tg-leave', '<span>اطلع من الغرفة</span>', () => { ui().closeSheet(); leave(); ui().toast('طلعت من الغرفة'); }));
+        actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(); ui().toast('طلعت من الغرفة'); }));
       };
       paint();
       const offs = [s.room.on('roster', paint), s.room.on('room', paint)];

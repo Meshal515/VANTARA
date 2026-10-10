@@ -35,7 +35,7 @@ const hub = createTogether({
 });
 function attach(session) {
   if (bridge) return;
-  bridge = readerBridge(session, { seriesRef: 'ext:solo', onFollow: ({ chapter, index }) => { reader.chapter = chapter; reader.index = index; paint(); bridge.page({ ...reader }); } });
+  bridge = readerBridge(session, { seriesRef: 'ext:solo', onFollow: ({ chapter, index }) => { reader.chapter = chapter; reader.index = index; paint(); bridge.page({ ...reader, label: `الفصل ${reader.chapter}`, source: p.get('source') }); } });
   $('strip').hidden = false; hub.mountStrip($('strip'));
   const init = bridge.initial(); if (init) { reader.chapter = init.chapter; reader.index = init.index; }
   paint(); bridge.page({ ...reader, label: `الفصل ${reader.chapter}`, source: p.get('source') });

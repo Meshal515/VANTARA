@@ -619,7 +619,10 @@ export function createRoom(ctx) {
       }
     } else {
       bubble.classList.add('mc-bubble--card');
-      if (it.type === 'together') bubble.append(ctx.together ? ctx.together.card(r) : el('p', 'mc-text', 'دعوة'));
+      if (it.type === 'together') {
+        bubble.classList.add('mc-bubble--together');
+        bubble.append(ctx.together ? ctx.together.card(r) : el('p', 'mc-text', 'دعوة'));
+      }
       else {
         bubble.append(it.type === 'rec' ? recCard(r) : frameCard(r));
         if (!mine) ctx.markSeen(it.type, r.id);
