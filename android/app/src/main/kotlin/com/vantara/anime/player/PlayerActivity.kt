@@ -139,12 +139,16 @@ class PlayerActivity : Activity() {
         /** «شاهد اللقطة»: يشغّل المدى وحده ثم يعرض إعادة/أكمل/من البداية. -1 = حلقة كاملة. */
         val clipStartMs: Long = -1,
         val clipEndMs: Long = -1,
+        /** VANTARA Together (JSON: TogetherLaunch): المشغّل داخل غرفة مع الأصدقاء. */
+        val together: String? = null,
     ) {
         /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
         fun ref() = "$section:$animeId"
     }
 
     private lateinit var launch: Launch
+    private var together: com.vantara.anime.player.together.TogetherPlayer? = null
+    private lateinit var topBar: LinearLayout
     private lateinit var player: ExoPlayer
     private lateinit var video: PlayerView
     private lateinit var root: FrameLayout
@@ -515,6 +519,28 @@ class PlayerActivity : Activity() {
         main.post(usageTick)
         main.postDelayed(progressTick, PROGRESS_EVERY_MS)
         main.post(clockTick)
+        startTogether()
+    }
+
+    /** غرفة Together: الاتصال والأفاتارات في الشريط العلوي، والمزامنة تعمل مع المشغّل. */
+    private fun startTogether() {
+        val raw = launch.together ?: return
+        val cfg = runCatching { json.decodeFromString(com.vantara.anime.player.together.TogetherLaunch.serializer(), raw) }.getOrNull() ?: return
+        val t = com.vantara.anime.player.together.TogetherPlayer(this, network.client, cfg, object : com.vantara.anime.player.together.TogetherPlayer.Hooks {
+            override val player get() = this@PlayerActivity.player
+            override fun message(text: String) = this@PlayerActivity.message(text)
+            override fun episode() = episodeInt()
+            override fun sourceName() = current?.let { codeOf(it) ?: it.server }
+            override fun switchToEpisode(n: Int) = switchEpisode(n)
+            override fun hasNextEpisode() = hasNext()
+            override fun openPanel(title: String, build: (LinearLayout) -> Unit) = open(SheetKind.TOGETHER, title, build = build)
+            override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
+            override fun overlayHost() = root
+            override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
+        })
+        together = t
+        t.mountStrip(topBar)
+        t.start()
     }
 
     /** يربط المشغّل بحلقة: الجلسة والتجهيز، وتحديث ورقة السيرفرات لحظة يتغيّر شيء. */
@@ -538,6 +564,8 @@ class PlayerActivity : Activity() {
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             sampleUsage()
+            if (state == Player.STATE_BUFFERING) together?.onBuffering()
+            if (state == Player.STATE_READY) together?.onReady()
             if (state == Player.STATE_BUFFERING) {
                 spinner.visibility = View.VISIBLE
                 if (reportedStart) {
@@ -568,7 +596,8 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_ENDED) {
                 report(final = false)
-                onEnded()
+                // في الغرفة: المضيف ينقل الجميع للتالية، والبقية ينتظرونه
+                if (together?.onEnded() != true) onEnded()
             }
             bar.durationMs = player.duration.takeIf { it > 0 } ?: 0
         }
@@ -589,6 +618,7 @@ class PlayerActivity : Activity() {
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
             loadCoverage()
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) together?.onUserSeek(newPosition.positionMs)
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
                 coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
             } else {
@@ -603,6 +633,7 @@ class PlayerActivity : Activity() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) together?.onUserPlayPause(playWhenReady)
             playButton.setImageDrawable(Glyph(if (playWhenReady) Glyph.Kind.PAUSE else Glyph.Kind.PLAY, Color.WHITE))
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
@@ -630,6 +661,7 @@ class PlayerActivity : Activity() {
         current = c
         reportedStart = false
         startedAt = System.currentTimeMillis()
+        together?.onPreparing()
         spinner.visibility = View.VISIBLE
         val mediaFactory = playbackDataSourceFactory(c)
         val item = MediaItem.Builder()
@@ -684,6 +716,8 @@ class PlayerActivity : Activity() {
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
         val c = current ?: return
+        // «تعذّر تشغيل السيرفر عند فلان» يصل الغرفة فورًا، والتبديل لسيرفر آخر لا يوقف أحدًا
+        together?.onFailed(codeOf(c) ?: c.server)
         current = null
         val at = position()
         val next = session?.failed(c, reason)
@@ -885,7 +919,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
 
     private var openSheet: SheetKind? = null
 
@@ -980,6 +1014,7 @@ class PlayerActivity : Activity() {
 
         sheet = VSheet(root)
         sheet.onClose = {
+            if (openSheet == SheetKind.TOGETHER) together?.panelClosed()
             openSheet = null
             if (player.isPlaying) scheduleHide()
         }
@@ -993,7 +1028,7 @@ class PlayerActivity : Activity() {
         }
         controls.addView(shade, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120), Gravity.TOP))
         // الشريط العلوي بالعربية: الرجوع والعنوان يمينًا، الأدوات يسارًا
-        val top = LinearLayout(this).apply {
+        val top = LinearLayout(this).also { topBar = it }.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
@@ -1968,6 +2003,7 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         clip?.release()
+        together?.destroy()
         unlisten?.invoke()
         clearAddonSubtitles()
         scope.cancel()
