@@ -134,7 +134,7 @@ class TogetherPlayer(
                 jumpToRoom(t)
             }
         }
-        report(if (hooks.player.isPlaying) "playing" else "paused")
+        report(stateNow())
     }
 
     fun onBuffering() = report("buffering")
@@ -177,7 +177,18 @@ class TogetherPlayer(
 
     // ───────────── أحداث الغرفة ─────────────
 
-    override fun onWelcome() { paintStrip(); report(if (ready) "ready" else "preparing", force = true) }
+    override fun onWelcome() {
+        // A fast local source can become ready before the WebSocket welcome.
+        // Reconcile that first frame with the room instead of playing behind the lobby.
+        if (synced && ready) client.timeline?.let { t ->
+            if (!t.started) {
+                withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(0) }
+                showLobby()
+            } else jumpToRoom(t)
+        }
+        paintStrip()
+        report(stateNow(), force = true)
+    }
 
     override fun onState(timeline: Timeline, by: String?) {
         val ep = episodeOf(timeline.mediaKey)
@@ -225,8 +236,8 @@ class TogetherPlayer(
     private fun step() {
         val p = hooks.player
         val t = client.timeline
-        if (t != null && synced && t.started && ready && client.clock.ready && episodeOf(t.mediaKey) == hooks.episode()) {
-            val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
+        val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
+        if (t != null && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
             val pos = p.currentPosition.toDouble()
             val d = ctl.step(
                 t, pos, at,
@@ -251,7 +262,16 @@ class TogetherPlayer(
 
     private fun jumpToRoom(t: Timeline) {
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
-        val target = targetAt(t, at + if (t.playing) ctl.loadMs else 0.0)
+        if (at < t.at) {
+            // Apply the scheduled command at the shared instant, not on receipt.
+            main.postDelayed({
+                if (synced && ready && client.timeline?.seq == t.seq && episodeOf(t.mediaKey) == hooks.episode()) jumpToRoom(t)
+            }, (t.at - at).toLong().coerceAtLeast(1L))
+            return
+        }
+        // Explicit commands/late join use the current room position. The drift controller
+        // retains its measured seek prediction for subsequent correction.
+        val target = targetAt(t, at)
         withApplying {
             if (abs(hooks.player.currentPosition - target) > SyncRules.HOST_CMD_SEEK_MS) { seekIssuedAt = SystemClock.elapsedRealtime(); hooks.player.seekTo(target.roundToLong()) }
             hooks.player.playWhenReady = t.playing
