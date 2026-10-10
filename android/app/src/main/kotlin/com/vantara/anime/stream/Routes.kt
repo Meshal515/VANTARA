@@ -33,11 +33,6 @@ data class Route(
     val runtimeReady: Boolean = false,
     val sourceName: String? = null,
     val label: String? = null,
-    /** فحص السرب الحي للتورنت: checking · alive · slow · dead، أو null لما لا يُفحص. */
-    val swarm: String? = null,
-    val swarmPeers: Int? = null,
-    val swarmSeeds: Int? = null,
-    val swarmMs: Long? = null,
 )
 
 /** ما يرسله المحوّل عن سيرفر: مفتاحه عنده، واسمه، وحالته. */

@@ -531,8 +531,6 @@ class AnimeEngine(context: Context) {
                     prep.report(report)
                 }
                 // All provider choices are visible immediately; bounded probes run independently.
-                // التورنت: فحص سرب حي للأقوى إعلانًا أولًا (حتى 12 نسخة، 3 معًا)، يتصل فعلًا ولا يحمّل الفيديو
-                if (prep.probe) launch { probeSwarms(prep, list.filter { it.url.startsWith("vantara-torrent:") }) }
                 if (prep.probe) coroutineScope {
                     for (c in list.filterNot { it.url.startsWith("vantara-torrent:") }) launch {
                         probeRoute(prep, com.vantara.anime.stream.RouteReport(sourceId, c.id, c.server, c.quality, c.variant,
@@ -542,30 +540,6 @@ class AnimeEngine(context: Context) {
             } finally { prep.finish() }
         }
         return list.size
-    }
-
-    private val swarmSlots = Semaphore(3)
-
-    private suspend fun probeSwarms(prep: com.vantara.anime.stream.PreparedEpisode, torrents: List<com.vantara.anime.stream.Candidate>) {
-        val seeds = Regex("👤\\s*(\\d+)")
-        val ordered = torrents.sortedByDescending { c -> seeds.find(c.label.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0 }.take(12)
-        for (c in ordered) prep.routeOf(c.id)?.let { prep.markSwarm(it.id, "checking") }
-        coroutineScope {
-            for (c in ordered) launch {
-                swarmSlots.withPermit {
-                    if (prep.job?.isActive != true) return@withPermit
-                    val result = kotlinx.coroutines.runInterruptible {
-                        runCatching {
-                            com.vantara.addons.torrent.TorrentEngine.get(appContext).probe(android.net.Uri.parse(c.url)) { prep.job?.isActive != true }
-                        }.getOrNull()
-                    }
-                    val route = prep.routeOf(c.id) ?: return@withPermit
-                    if (result == null) { prep.markSwarm(route.id, "dead"); return@withPermit }
-                    prep.markSwarm(route.id, result.verdict, result.peers, result.seeds, result.ms)
-                    prep.markProbe(route.id, result.verdict != "dead", result.ms, c.id)
-                }
-            }
-        }
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
