@@ -1527,6 +1527,7 @@ function screenSmartReader(target) {
       mount,
       exit: () => void go({ name: 'v35' }),
       friends: () => frameCapability().friends(),
+      together: v35?.together ?? null,
       sendFrame: (payload) => sync.enqueue('frame.send', payload),
       report: (input) => submitReport({ api, ...input, context: { screen: 'READER' } }),
       // الحضور: الأصدقاء يرون ما تقرؤه، ومرجع العمل الموحّد (`ext:…`) يسافر

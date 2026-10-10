@@ -343,6 +343,8 @@ const DELTA_TABLES = [
   ['majlis_meta', 'id, name, avatar_key, updated_by, updated_at, rev'],
   ['majlis_reads', 'user_id, read_at, rev'],
   ['majlis_message_receipts', 'message_id, user_id, seen_at, rev'],
+  // بطاقة دعوة Together: للمضيف ومن دُعي فقط
+  ['together_invites', 'code, host_id, invitees_json, mode, kind, media_json, created_at, rev'],
 ] as const;
 
 /** سقف الدفعة لكل جدول. دفعة ضخمة تتجاوز حد زمن الـWorker وتفشل كلها. */
@@ -474,6 +476,12 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
         return {
           sql: " AND (from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0))",
           values: [userId, userId, hiddenToken(userId)],
+        };
+
+      case 'together_invites':
+        return {
+          sql: " AND (host_id = ? OR instr(invitees_json, ?) > 0 OR invitees_json = '[\"*\"]')",
+          values: [userId, JSON.stringify(userId)],
         };
 
       // التوصية: البثّ القديم للجميع كما كان، والموجّهة القديمة خاصة، والجديدة
@@ -1703,6 +1711,53 @@ export function statementsFor(
     }
 
     /**
+     * دعوة Together: بطاقة في المجلس لمن اخترتهم فقط، مع إشعار لكل مدعو.
+     * الغرفة نفسها أنشأها POST /v1/together/rooms، وهي التي تقرر من يدخل؛ هذه
+     * البطاقة لا تمنح دخولًا. إعادة الإرسال لنفس الرمز تضيف مدعوين (المضيف وحده).
+     */
+    case 'together.invite': {
+      const code = asString(p['code'], 6);
+      if (!code || !/^[A-HJKMNP-Z2-9]{6}$/.test(code)) return null;
+      const known = new Set(ctx.accounts);
+      const raw = p['invitees'];
+      const invitees = raw === '*'
+        ? ['*']
+        : Array.isArray(raw)
+          ? [...new Set(raw.filter((id): id is string => typeof id === 'string' && known.has(id) && id !== userId))].slice(0, 9)
+          : [];
+      if (!invitees.length) return null;
+      const media = (p['media'] ?? null) as Record<string, unknown> | null;
+      const kind = media?.['kind'];
+      if (kind !== 'anime' && kind !== 'cinema' && kind !== 'manga') return null;
+      const mediaJson = JSON.stringify(media);
+      if (mediaJson.length > 2000) return null;
+      const mode = p['mode'] === 'free' ? 'free' : 'sync';
+      const recipients = invitees[0] === '*' ? ctx.accounts.filter((id) => id !== userId) : invitees;
+      const label = asString(media?.['label'], 200);
+      return [
+        db
+          .prepare(
+            `INSERT INTO together_invites (code, host_id, invitees_json, mode, kind, media_json, created_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (code) DO UPDATE SET invitees_json = excluded.invitees_json, rev = excluded.rev
+              WHERE together_invites.host_id = excluded.host_id`,
+          )
+          .bind(code, userId, JSON.stringify(invitees), mode, kind, mediaJson, now, rev),
+        ...notificationStatements(db, {
+          opId: op.opId,
+          kind: 'TOGETHER',
+          recipients,
+          actorId: userId,
+          seriesRef: asString(media?.['seriesRef'], 200),
+          body: label,
+          link: `#together=${code}`,
+          now,
+          rev,
+        }),
+      ];
+    }
+
+    /**
      * رسالة في المجلس: نص أو صوت، وقد تكون ردًّا على أي شيء فيه (رسالة، ترشيح،
      * فريم). المعرّف هو opId: إعادة الإرسال بعد انقطاع صفٌّ واحد. الصوت لا
      * يُقبل إلا ملفًّا رفعه المرسل نفسه وهو صوت فعلًا (من بايتاته).
@@ -2235,6 +2290,7 @@ const DEPRECATED_NOOP_KINDS = new Set(['activity.add']);
 
 /** العمليات التي تحتاج قائمة الحسابات (بثّ لكل المستلمين). */
 const ACCOUNT_AWARE_KINDS = new Set([
+  'together.invite',
   'recommendation.send',
   'frame.send',
   'rating.set',

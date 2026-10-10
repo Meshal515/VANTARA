@@ -123,6 +123,7 @@ const KEYS = {
   majlis_meta: (row) => row.id,
   majlis_reads: (row) => row.user_id,
   majlis_message_receipts: (row) => `${row.message_id}/${row.user_id}`,
+  together_invites: (row) => row.code,
 };
 
 function readJson(key, fallback) {

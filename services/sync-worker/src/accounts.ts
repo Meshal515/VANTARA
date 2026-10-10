@@ -265,7 +265,7 @@ const PERSONAL: ReadonlyArray<readonly [string, string]> = [
   ['rafiq_prefs', 'user_id'], ['rafiq_recs', 'user_id'], ['rafiq_profile', 'user_id'], ['rafiq_usage', 'user_id'],
   ['rafiq_external', 'user_id'], ['majlis_message_receipts', 'user_id'], ['majlis_messages', 'sender_id'],
   ['majlis_hidden', 'user_id'], ['majlis_reads', 'user_id'], ['usage_sections', 'user_id'], ['work_insights', 'user_id'],
-  ['view_privacy', 'user_id'], ['account_pins', 'user_id'], ['trusted_devices', 'user_id'], ['applied_ops', 'user_id'],
+  ['view_privacy', 'user_id'], ['together_invites', 'host_id'], ['account_pins', 'user_id'], ['trusted_devices', 'user_id'], ['applied_ops', 'user_id'],
 ];
 
 /**

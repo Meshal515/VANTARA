@@ -38,6 +38,8 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** اختياري: مفتاح OpenAI للترجمة. غيابه = «الترجمة غير مفعّلة»، والباقي يعمل. */
   OPENAI_API_KEY?: string;
+  /** VANTARA Together: غرفة لكل Durable Object. غيابه (الاختبارات) = 503 لمسارات Together فقط. */
+  TOGETHER?: import('./together.ts').DONamespace;
   /** اختياري: النموذج (الافتراضي gpt-6-luna)، ومستوى التفكير، وحد الصفحات الأسبوعي لكل حساب. */
   TRANSLATE_MODEL?: string;
   TRANSLATE_EFFORT?: string;

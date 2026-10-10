@@ -44,6 +44,7 @@ import { endpoints } from '../lib/config.js';
 import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
+import { createTogether } from './together.js';
 import { openProfileEditor } from './profile-editor.js';
 import { SECTIONS, readSection, writeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
@@ -62,7 +63,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { refsOf } from '../lib/manga-alias-store.js';
-import { connectSourceReports } from '../lib/source-report.js';
+import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
@@ -2253,7 +2254,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع الأنمي `anime:<AniList id>`: يفتح صفحة الأنمي في قسمه، واللحظة
   // المرسلة («الحلقة 12 · 12:10–12:20») تفتح ورقة سيرفراتها من ثانيتها.
 
-  function openAnimeRef(ref, { title = null, cover = null, chapter = null } = {}) {
+  function openAnimeRef(ref, { title = null, cover = null, chapter = null, play = false } = {}) {
     const rawId = ref.slice('anime:'.length);
     const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
     if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
@@ -2267,11 +2268,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const position = chapter ? momentStart(chapter.label) : null;
     // لحظة من المجلس: «شاهد اللقطة» يشغّل مداها وحده
     const clip = chapter ? momentRange(chapter.label) : null;
-    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip });
+    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip, play });
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
-  function openCinemaRef(ref, { title = null, cover = null } = {}) {
+  function openCinemaRef(ref, { title = null, cover = null, playAt = null } = {}) {
     const [, id, season] = ref.split(':');
     if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
     closeSheet();
@@ -2280,7 +2281,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       applySection('cinema');
       showHome('cinema');
     }
-    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover });
+    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover }, { playAt });
   }
 
   // ── ورقة المعاينة ──
@@ -3330,7 +3331,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     displayName: nameOf(userId),
     avatarKey: sync.rows('profiles', (p) => p.user_id === userId)[0]?.avatar_key ?? null,
   });
-  const KIND_ICON = { FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info' };
+  const KIND_ICON = { FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info', TOGETHER: 'users' };
 
   function notificationCopy(row) {
     const frameId = frameIdFromLink(row.link);
@@ -3362,6 +3363,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return { text: 'تفاعل مع تعليقك', cover: work?.cover_url ?? null };
       case 'COMMENT_REPLY':
         return { text: 'ردّ على تعليقك', cover: work?.cover_url ?? null };
+      case 'TOGETHER': {
+        const code = /#together=([A-Z0-9]{6})/.exec(row.link ?? '')?.[1] ?? null;
+        const invite = code ? sync.rows('together_invites', (x) => x.code === code)[0] : null;
+        const reading = invite?.kind === 'manga';
+        return {
+          text: `يدعوك ${reading ? 'تقرأ' : 'تشاهد'} معه`,
+          title: row.body ?? null,
+          cover: work?.cover_url ?? null,
+          open: () => code && together.joinByCode(code, invite),
+        };
+      }
       case 'FRIEND_ACTIVITY':
         return { text: row.body || 'عنده جديد', cover: work?.cover_url ?? null };
       default:
@@ -3616,7 +3628,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options) });
+      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
@@ -4987,6 +4999,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return goBack();
   }
 
+  // VANTARA Together: ادعُ بالأفاتارات، والبطاقة في المجلس، والجلسة يربطها المشغّل والقارئ
+  const together = createTogether({
+    sync,
+    baseUrl: () => endpoints().sync,
+    friends: () => deps.friends?.() ?? [],
+    avatarNode,
+    openSheet,
+    closeSheet,
+    toast,
+    openMedia: (media) => openTogetherMedia(media),
+  });
+  function openTogetherMedia(media) {
+    if (!media) return;
+    if (media.kind === 'manga') {
+      void openWork(workFromRef(media.seriesRef, media.title, media.cover), { readNumber: Number.isFinite(media.chapter) ? media.chapter : null });
+    } else if (media.kind === 'anime') {
+      // الحلقة التي في الغرفة الآن (قد يكون المضيف انتقل للتالية بعد الدعوة)
+      const live = Number(/#(\d+)$/.exec(together.session?.room.timeline?.media?.key ?? '')?.[1]);
+      const episode = Number.isFinite(live) ? live : media.episode;
+      openAnimeRef(media.seriesRef, { title: media.title, cover: media.cover, chapter: { number: episode, label: `الحلقة ${episode}` }, play: true });
+    } else if (media.kind === 'cinema') {
+      const live = Number(/#(\d+)$/.exec(together.session?.room.timeline?.media?.key ?? '')?.[1]);
+      const season = Number(String(media.seriesRef).split(':')[2]) || media.season || null;
+      openCinemaRef(media.seriesRef, { title: media.title, cover: media.cover, playAt: { season, episode: Number.isFinite(live) ? live : media.episode } });
+    }
+  }
+
   const friendsHost = q('friendsBody');
   friendsHost.classList.add('fr-host');
   const friends = createFriends({
@@ -5010,6 +5049,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   const room = createRoom({
     sync,
+    together,
     mount: root,
     avatarNode,
     mountImage,
@@ -5180,6 +5220,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     restoreSourceWork: restoreAddonWork,
     openProfile,
     friends: () => deps.friends?.() ?? [],
+    together: () => together,
     // الحضور: أصدقاؤك يرون «يشاهد: … الحلقة 12» في المجلس
     setWatching: (info) => deps.setWatching?.(info),
     playerPresence: () => deps.playerPresence?.(),
@@ -5200,6 +5241,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
+    together: () => together,
     // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
     share: (work) =>
       openShareSheet({
@@ -5337,6 +5379,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   let savedScroll = 0;
   return {
     root,
+    together,
     showPage,
     openWork,
     /** عمل من مرجعه وحده (إشعار، رابط): صفحته في الواجهة لا الشاشة القديمة. */

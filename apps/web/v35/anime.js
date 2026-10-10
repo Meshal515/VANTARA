@@ -16,6 +16,7 @@ import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
  * فتظهر فورًا في الفتحة التالية. التشغيل (السيرفرات) من امتدادات المصادر
  * العربية، ويُربط في الخطوة التالية.
  */
+import { reportSource } from '../lib/source-report.js';
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr, searchAnime } from '../lib/anime-meta.js';
 import { pageIn, pop, revealIn, stripIn } from './motion.js';
@@ -492,7 +493,7 @@ export function createAnime(deps) {
 
   // ───────────── صفحة الأنمي ─────────────
 
-  async function openAnime(m, { episode = null, position = null, clip = null } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false } = {}) {
     const token = ++state.detailToken;
     state.episodeRange = 0;
     state.detail = m;
@@ -508,7 +509,7 @@ export function createAnime(deps) {
       renderDetail(full);
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
-      if (episode && position != null) playEpisode(full, episode, { position, clip });
+      if (episode && (position != null || play)) playEpisode(full, episode, { position, clip });
       if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
       // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
       void fetchMalEpisodes(full.idMal)
@@ -1216,6 +1217,8 @@ export function createAnime(deps) {
     }
   }
   engine.on('outbox', () => void flushOutbox());
+  // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
+  engine.on('playstat', (e) => reportSource(e));
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void flushOutbox();
   });
@@ -1247,6 +1250,10 @@ export function createAnime(deps) {
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
+    // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
+    const hub = deps.together?.() ?? null;
+    const togetherRef = `anime:${m.id}`;
+    sheet.autoTogether = Boolean(hub?.matches(togetherRef, n));
     let paintQueued = false;
     let off = [];
 
@@ -1295,6 +1302,26 @@ export function createAnime(deps) {
       const bestBtn = el('button', 'an-pick-best');
       bestBtn.type = 'button';
       foot.append(bestBtn);
+      if (hub && !sheet.autoTogether) {
+        const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
+          hub.openInvite({
+            kind: 'anime',
+            key: `${togetherRef}#${n}`,
+            label: `${m.title} — الحلقة ${n}`,
+            seriesRef: togetherRef,
+            title: m.title,
+            cover: m.posterSmall ?? m.poster ?? null,
+            episode: n,
+          }, {
+            onStarted: () => {
+              sheet.autoTogether = true;
+              withFriends.remove();
+              queuePaint();
+            },
+          });
+        }, 'شاهد مع أصدقائك');
+        foot.append(withFriends);
+      }
       body.append(bar, scroll, foot);
 
       const filter = { q: 'all', v: null };
@@ -1357,6 +1384,11 @@ export function createAnime(deps) {
         paintQueued = false;
         if (sheet.closed) return;
         paintBest();
+        // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
+        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some((r) => r.state === 'READY')) {
+          sheet.autoTogether = false;
+          queueMicrotask(() => bestBtn.onclick());
+        }
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
         if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.searchError ? 'تعذّر البحث في المصادر — أعد المحاولة' : sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
@@ -1569,6 +1601,7 @@ export function createAnime(deps) {
         presenceUserId: presence?.userId ?? null,
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
+        ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
       });
     }
   }

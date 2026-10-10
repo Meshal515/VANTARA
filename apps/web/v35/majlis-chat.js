@@ -32,6 +32,8 @@ export function timeline(sync, me) {
     ...sync.rows('majlis_messages', (m) => !hidden.has(`msg:${m.id}`)).map((m) => ({ key: `msg:${m.id}`, type: 'msg', at: m.created_at, from: m.sender_id, row: m })),
     ...sync.rows('recommendations', (r) => !r.removed && !hidden.has(`rec:${r.id}`)).map((r) => ({ key: `rec:${r.id}`, type: 'rec', at: r.created_at, from: r.from_id, row: r })),
     ...sync.rows('frames', (f) => !f.removed && !hidden.has(`frame:${f.id}`)).map((f) => ({ key: `frame:${f.id}`, type: 'frame', at: f.created_at, from: f.from_id, row: f })),
+    // دعوة Together: الخادم لا يرسلها إلا للمضيف ومن دُعي
+    ...sync.rows('together_invites', () => true).map((t) => ({ key: `together:${t.code}`, type: 'together', at: t.created_at, from: t.host_id, row: t })),
   ];
   items.sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || String(a.key).localeCompare(String(b.key)));
   const out = items.slice(-MAX_ITEMS);
@@ -66,6 +68,7 @@ export function messageReaders(sync, message, members, state = receiptState(sync
 /** الترشيح والفريم لهما إيصالات سابقة؛ لا نعرض من أُخفي عنه أو لم يُرسل له. */
 export function itemReaders(sync, item, members, state = receiptState(sync)) {
   if (item.type === 'msg') return messageReaders(sync, item.row, members, state);
+  if (item.type === 'together') return [];
   const row = item.row;
   const hiddenIds = parse(row.hidden_json, []);
   const hidden = new Set(Array.isArray(hiddenIds) ? hiddenIds : []);
@@ -616,8 +619,14 @@ export function createRoom(ctx) {
       }
     } else {
       bubble.classList.add('mc-bubble--card');
-      bubble.append(it.type === 'rec' ? recCard(r) : frameCard(r));
-      if (!mine) ctx.markSeen(it.type, r.id);
+      if (it.type === 'together') {
+        bubble.classList.add('mc-bubble--together');
+        bubble.append(ctx.together ? ctx.together.card(r) : el('p', 'mc-text', 'دعوة'));
+      }
+      else {
+        bubble.append(it.type === 'rec' ? recCard(r) : frameCard(r));
+        if (!mine) ctx.markSeen(it.type, r.id);
+      }
     }
     if (it.last || r._pending) {
       const meta = el('span', 'mc-meta');
@@ -632,7 +641,7 @@ export function createRoom(ctx) {
       const receipts = readersButton(it, readState);
       if (receipts) item.append(receipts);
     }
-    if (it.type !== 'msg') {
+    if (it.type === 'rec' || it.type === 'frame') {
       const chips = reactionsOf(it.type === 'rec' ? 'rec' : 'frame', r.id);
       if (chips) item.append(chips);
     }
@@ -649,6 +658,8 @@ export function createRoom(ctx) {
 
   function openActions(it, bubble) {
     closeActions();
+    // بطاقة الدعوة: زرّها «دخول»، بلا تفاعل ولا حذف
+    if (it.type === 'together') return;
     const r = it.row;
     const mine = it.from === me();
     const canDelete = (mine || kit.isOwner(me())) && !(it.type === 'msg' && r.deleted);
@@ -1115,7 +1126,7 @@ export function createRoom(ctx) {
     isOpen: () => Boolean(node),
     onChange(tables) {
       if (!node) return;
-      const watched = ['majlis_messages', 'majlis_hidden', 'recommendations', 'frames', 'majlis_reactions', 'profiles', 'accounts', 'works'];
+      const watched = ['majlis_messages', 'majlis_hidden', 'recommendations', 'frames', 'together_invites', 'majlis_reactions', 'profiles', 'accounts', 'works'];
       if (tables.some((t) => watched.includes(t))) renderList();
       else if (tables.includes('majlis_message_receipts') || tables.includes('majlis_reads') || tables.includes('majlis_receipts')) refreshReaders();
       if (tables.includes('majlis_meta') || tables.includes('accounts')) node.querySelector('.mc-head')?.replaceWith(header());

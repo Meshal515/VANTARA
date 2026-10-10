@@ -15,6 +15,15 @@ database_name = "vantara"
 # تثبيته في المستودع يعني أن أي fork ينشر على قاعدة غيره.
 database_id = "__D1_DATABASE_ID__"
 
+# VANTARA Together: غرفة واحدة = كائن واحد. SQLite-backed (متاح في الخطة المجانية).
+[[durable_objects.bindings]]
+name = "TOGETHER"
+class_name = "TogetherRoom"
+
+[[migrations]]
+tag = "together-v1"
+new_sqlite_classes = ["TogetherRoom"]
+
 [observability]
 enabled = true
 

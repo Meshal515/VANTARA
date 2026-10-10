@@ -72,3 +72,39 @@ export async function flushSourceReports() {
 export function _pending() {
   return [...pending.values()];
 }
+
+/**
+ * معدّل «تعذّر» الحقيقي من عدّادات `/v1/diag/sources` (المشغّل الأصلي):
+ *   محاولة = فتح حلقة للمشاهدة (stage 'play'). تعذّرت = لا سيرفر اشتغل، أو انتظر
+ *   المستخدم 8 ث فأكثر ثم خرج. والهدف ≤ 1%.
+ * ويُرتَّب كل سيرفر بمعدّل فشله، فيُعرف من يجرّ الرقم.
+ */
+export function playbackHealth(rows, { section = null } = {}) {
+  const mine = rows.filter((r) => r.platform === 'apk' && (!section || r.section === section));
+  const sum = (xs) => xs.reduce((n, r) => n + Number(r.count ?? 0), 0);
+  const plays = mine.filter((r) => r.stage === 'play');
+  const attempts = sum(plays);
+  const failed = sum(plays.filter((r) => r.outcome !== 'ok'));
+  const okRows = plays.filter((r) => r.outcome === 'ok');
+  const okCount = sum(okRows);
+  const reasons = {};
+  for (const r of plays) if (r.outcome !== 'ok') reasons[r.reason || r.outcome] = (reasons[r.reason || r.outcome] ?? 0) + Number(r.count ?? 0);
+  const servers = new Map();
+  for (const r of mine.filter((x) => x.stage === 'server')) {
+    const s = servers.get(r.source_id) ?? { server: r.source_id, ok: 0, failed: 0 };
+    if (r.outcome === 'ok') s.ok += Number(r.count ?? 0);
+    else s.failed += Number(r.count ?? 0);
+    servers.set(r.source_id, s);
+  }
+  return {
+    attempts,
+    failed,
+    failRate: attempts ? failed / attempts : null,
+    meetsTarget: attempts >= 100 ? failed / attempts <= 0.01 : null,
+    avgStartMs: okCount ? Math.round(okRows.reduce((n, r) => n + Number(r.ms_sum ?? 0), 0) / okCount) : null,
+    reasons,
+    servers: [...servers.values()]
+      .map((s) => ({ ...s, failRate: s.ok + s.failed ? s.failed / (s.ok + s.failed) : 0 }))
+      .sort((a, b) => b.failed - a.failed),
+  };
+}
