@@ -139,12 +139,16 @@ class PlayerActivity : Activity() {
         /** «شاهد اللقطة»: يشغّل المدى وحده ثم يعرض إعادة/أكمل/من البداية. -1 = حلقة كاملة. */
         val clipStartMs: Long = -1,
         val clipEndMs: Long = -1,
+        /** VANTARA Together (JSON: TogetherLaunch): المشغّل داخل غرفة مع الأصدقاء. */
+        val together: String? = null,
     ) {
         /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
         fun ref() = "$section:$animeId"
     }
 
     private lateinit var launch: Launch
+    private var together: com.vantara.anime.player.together.TogetherPlayer? = null
+    private lateinit var topBar: LinearLayout
     private lateinit var player: ExoPlayer
     private lateinit var video: PlayerView
     private lateinit var root: FrameLayout
@@ -507,14 +511,36 @@ class PlayerActivity : Activity() {
             message("نجهّز أفضل سيرفر…", long = true)
             waiting = scope.launch {
                 val best = prep.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
-                if (best != null) start(best, startAt) else showError("لم يجهز أي سيرفر لهذه الحلقة")
+                if (best != null) start(best, startAt) else { attemptEnd("error", "no_server_ready"); showError("لم يجهز أي سيرفر لهذه الحلقة") }
             }
         } else {
-            s.next()?.let { start(it, startAt) } ?: showError("لا توجد سيرفرات متاحة لهذه الحلقة")
+            s.next()?.let { start(it, startAt) } ?: run { attemptEnd("error", "no_servers"); showError("لا توجد سيرفرات متاحة لهذه الحلقة") }
         }
         main.post(usageTick)
         main.postDelayed(progressTick, PROGRESS_EVERY_MS)
         main.post(clockTick)
+        startTogether()
+    }
+
+    /** غرفة Together: الاتصال والأفاتارات في الشريط العلوي، والمزامنة تعمل مع المشغّل. */
+    private fun startTogether() {
+        val raw = launch.together ?: return
+        val cfg = runCatching { json.decodeFromString(com.vantara.anime.player.together.TogetherLaunch.serializer(), raw) }.getOrNull() ?: return
+        val t = com.vantara.anime.player.together.TogetherPlayer(this, network.client, cfg, object : com.vantara.anime.player.together.TogetherPlayer.Hooks {
+            override val player get() = this@PlayerActivity.player
+            override fun message(text: String) = this@PlayerActivity.message(text)
+            override fun episode() = episodeInt()
+            override fun sourceName() = current?.let { codeOf(it) ?: it.server }
+            override fun switchToEpisode(n: Int) = switchEpisode(n)
+            override fun hasNextEpisode() = hasNext()
+            override fun openPanel(title: String, build: (LinearLayout) -> Unit) = open(SheetKind.TOGETHER, title, build = build)
+            override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
+            override fun overlayHost() = root
+            override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
+        })
+        together = t
+        t.mountStrip(topBar)
+        t.start()
     }
 
     /** يربط المشغّل بحلقة: الجلسة والتجهيز، وتحديث ورقة السيرفرات لحظة يتغيّر شيء. */
@@ -538,6 +564,8 @@ class PlayerActivity : Activity() {
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             sampleUsage()
+            if (state == Player.STATE_BUFFERING) together?.onBuffering()
+            if (state == Player.STATE_READY) together?.onReady()
             if (state == Player.STATE_BUFFERING) {
                 spinner.visibility = View.VISIBLE
                 if (reportedStart) {
@@ -553,6 +581,8 @@ class PlayerActivity : Activity() {
                 if (!reportedStart) {
                     reportedStart = true
                     main.removeCallbacks(startupWatchdog)
+                    attemptEnd("ok")
+                    current?.let { c -> playStat("server", codeOf(c) ?: c.server, "ok", ms = System.currentTimeMillis() - startedAt) }
                     current?.let { c ->
                         session?.started(c, System.currentTimeMillis() - startedAt)
                         codeOf(c)?.let { code ->
@@ -568,7 +598,8 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_ENDED) {
                 report(final = false)
-                onEnded()
+                // في الغرفة: المضيف ينقل الجميع للتالية، والبقية ينتظرونه
+                if (together?.onEnded() != true) onEnded()
             }
             bar.durationMs = player.duration.takeIf { it > 0 } ?: 0
         }
@@ -589,6 +620,7 @@ class PlayerActivity : Activity() {
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
             loadCoverage()
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) together?.onUserSeek(newPosition.positionMs)
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
                 coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
             } else {
@@ -603,6 +635,7 @@ class PlayerActivity : Activity() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) together?.onUserPlayPause(playWhenReady)
             playButton.setImageDrawable(Glyph(if (playWhenReady) Glyph.Kind.PAUSE else Glyph.Kind.PLAY, Color.WHITE))
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
@@ -630,6 +663,7 @@ class PlayerActivity : Activity() {
         current = c
         reportedStart = false
         startedAt = System.currentTimeMillis()
+        together?.onPreparing()
         spinner.visibility = View.VISIBLE
         val mediaFactory = playbackDataSourceFactory(c)
         val item = MediaItem.Builder()
@@ -677,6 +711,27 @@ class PlayerActivity : Activity() {
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
 
+    // ───────────── قياس «تعذّر» الحقيقي ─────────────
+    // محاولة = فتح حلقة للمشاهدة. نجاحها = أول إطار جاهز (بعد أي تبديل سيرفر تلقائي).
+    // فشلها = لا سيرفر اشتغل، أو انتظر المستخدم 8 ث فأكثر ثم خرج. تُرسل عدّادات بلا
+    // عمل ولا مستخدم (/v1/diag/sources) فيُعرف معدّل التعذّر الفعلي على الهواتف ولكل سيرفر.
+    private var attemptAt = SystemClock.elapsedRealtime()
+    private var attemptDone = false
+    private fun statId(raw: String?) = raw.orEmpty().lowercase().replace(Regex("[^a-z0-9._@-]"), "_").take(60).ifEmpty { "unknown" }
+    private fun playStat(stage: String, sourceId: String, outcome: String, reason: String = "", ms: Long = 0) =
+        PlaybackEvents.emit("playstat", JSONObject().put("section", launch.section).put("sourceId", statId(sourceId))
+            .put("stage", stage).put("outcome", outcome).put("reason", reason).put("ms", ms))
+    private fun attemptBegin() { attemptAt = SystemClock.elapsedRealtime(); attemptDone = false }
+    private fun attemptEnd(outcome: String, reason: String = "") {
+        if (attemptDone) return
+        attemptDone = true
+        playStat("play", "episode", outcome, reason, SystemClock.elapsedRealtime() - attemptAt)
+    }
+    private fun attemptAbandon() {
+        if (!attemptDone && SystemClock.elapsedRealtime() - attemptAt >= 8_000) attemptEnd("timeout", "left_waiting")
+        attemptDone = true
+    }
+
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
         clearSkipTimings()
@@ -684,6 +739,9 @@ class PlayerActivity : Activity() {
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
         val c = current ?: return
+        // «تعذّر تشغيل السيرفر عند فلان» يصل الغرفة فورًا، والتبديل لسيرفر آخر لا يوقف أحدًا
+        together?.onFailed(codeOf(c) ?: c.server)
+        playStat("server", codeOf(c) ?: c.server, if (reason.contains("timeout", true) || reason.contains("stall", true)) "timeout" else "error", reason.take(60), System.currentTimeMillis() - startedAt)
         current = null
         val at = position()
         val next = session?.failed(c, reason)
@@ -721,6 +779,7 @@ class PlayerActivity : Activity() {
             } else {
                 spinner.visibility = View.GONE
                 report(final = false)
+                attemptEnd("error", "all_servers_failed")
                 showError("تعذّر التشغيل من كل السيرفرات المتاحة")
             }
         }
@@ -801,6 +860,8 @@ class PlayerActivity : Activity() {
     private fun switchEpisode(n: Int) {
         val addonProviders = engine.addonProviders(sessionId)
         if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
+        attemptAbandon()
+        attemptBegin()
         cancelCountdown()
         sheet.close()
         // ليست نهاية المشاهدة: «final» للواجهة يعني أن المشغّل أُغلق
@@ -837,7 +898,7 @@ class PlayerActivity : Activity() {
         val from = resume[n] ?: 0L
         waiting = scope.launch {
             val best = p.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
-            if (best != null) start(best, from) else showError("لم يجهز أي سيرفر للحلقة $n")
+            if (best != null) start(best, from) else { attemptEnd("error", "no_server_ready"); showError("لم يجهز أي سيرفر للحلقة $n") }
         }
     }
 
@@ -885,7 +946,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
 
     private var openSheet: SheetKind? = null
 
@@ -980,6 +1041,7 @@ class PlayerActivity : Activity() {
 
         sheet = VSheet(root)
         sheet.onClose = {
+            if (openSheet == SheetKind.TOGETHER) together?.panelClosed()
             openSheet = null
             if (player.isPlaying) scheduleHide()
         }
@@ -993,7 +1055,7 @@ class PlayerActivity : Activity() {
         }
         controls.addView(shade, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120), Gravity.TOP))
         // الشريط العلوي بالعربية: الرجوع والعنوان يمينًا، الأدوات يسارًا
-        val top = LinearLayout(this).apply {
+        val top = LinearLayout(this).also { topBar = it }.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
@@ -1968,6 +2030,8 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         clip?.release()
+        attemptAbandon()
+        together?.destroy()
         unlisten?.invoke()
         clearAddonSubtitles()
         scope.cancel()
