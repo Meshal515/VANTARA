@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { parseHTML } from 'linkedom';
 import { createTogether, readerBridge } from './together.js';
 import { targetAt } from '../lib/together/sync.js';
 const roomOf = () => {
@@ -47,4 +48,23 @@ it('sends continuous scroll while the host keeps moving instead of debouncing in
 });
 it('a reading position never advances as video milliseconds', () => {
   const room=roomOf(); expect(targetAt(room.timeline,10000)).toBe(4.25);
+});
+it('renders profile avatars and +N only, and updates overflow when people leave', () => {
+  const { document } = parseHTML('<html><body><button id="strip"></button></body></html>');
+  vi.stubGlobal('document', document);
+  const room = roomOf(); room.status = 'live';
+  room.roster = Array.from({length:8}, (_,i) => ({userId:`u${i}`,name:`Person ${i}`,avatarKey:`face-${i}`,joinedAt:i,host:i===0,state:'ready'}));
+  const hub = createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia:vi.fn(),avatarNode:p=> {
+    const img=document.createElement('img'); img.src=`/avatars/${p.avatarKey}.png`; img.alt=p.displayName; return img;
+  }});
+  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime'}),mode:'sync'});
+  const strip=document.querySelector('#strip'); hub.mountStrip(strip);
+  expect([...strip.querySelectorAll('img')].map(n=>n.getAttribute('src'))).toEqual(['/avatars/face-0.png','/avatars/face-1.png','/avatars/face-2.png']);
+  expect(strip.textContent).toBe('+5');
+  expect(strip.getAttribute('aria-label')).toContain('8');
+  expect(strip.querySelector('.tg-connection')).toBeNull();
+  room.roster=room.roster.slice(0,7); room.emit('roster',room.roster); expect(strip.textContent).toBe('+4');
+  room.roster=room.roster.slice(0,3); room.emit('roster',room.roster); expect(strip.querySelectorAll('img')).toHaveLength(3); expect(strip.textContent).toBe('');
+  room.roster=room.roster.slice(0,2); room.emit('roster',room.roster); expect(strip.querySelectorAll('img')).toHaveLength(2); expect(strip.querySelector('.tg-more')).toBeNull();
+  hub.leave();
 });

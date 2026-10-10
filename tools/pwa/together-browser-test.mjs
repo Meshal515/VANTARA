@@ -14,7 +14,7 @@ const {chromium}=requireDeps(process.env.BROWSER_MODULE_ROOT)('playwright');
 const {WebSocketServer}=requireDeps(process.env.WS_MODULE_ROOT)('ws');
 const output=resolve(process.env.TEST_OUTPUT ?? 'work/together-browser');await mkdir(output,{recursive:true});
 const fixture=await readFile('android/app/src/androidTest/assets/addon-torrent-proof.mp4');
-const room=RoomCore.create({code:'ABCDEF',hostUserId:'host',cap:10,mode:'sync',control:'host',createdAt:Date.now(),allowed:['guest','late']},{key:'anime:42#1',kind:'anime',label:'Fixture episode 1'},Date.now());
+const room=RoomCore.create({code:'ABCDEF',hostUserId:'host',cap:10,mode:'sync',control:'host',createdAt:Date.now(),allowed:['guest','late','extra1','extra2','extra3','extra4']},{key:'anime:42#1',kind:'anime',label:'Fixture episode 1'},Date.now());
 const sockets=new Map();let next=0;
 let nativeSnapshot=null;const nativeActions=[];
 const android=process.argv.includes('--android');
@@ -27,13 +27,15 @@ import {openPlayer} from '/pwa/player/player.js';
 import {openSmartReader} from '/v35/reader.js';
 const user=new URLSearchParams(location.search).get('user')||'host';
 const sync={authorizationHeader:'Bearer '+user,user:{userId:user},rows:()=>[],enqueue:()=>{}};
-const hub=createTogether({sync,baseUrl:()=>location.origin,avatarNode:p=>{const n=document.createElement('span');n.textContent=p.displayName?.slice(0,1);return n;},toast:console.log,openMedia:()=>{},openSheet:()=>{},closeSheet:()=>{}});
+const hub=createTogether({sync,baseUrl:()=>location.origin,avatarNode:p=>{const n=document.createElement('img');n.src=p.avatarKey||'/avatars/man.webp';n.alt='';n.style.cssText='width:26px;height:26px;border-radius:99px;object-fit:cover';return n;},toast:console.log,openMedia:()=>{},openSheet:()=>{},closeSheet:()=>{}});
 window.hub=hub;window.errors=[];
-window.launch=()=>{
+window.launch=async({waitRoom=false}={})=>{
  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',key:'anime:42#1',kind:'anime'}),mode:'sync'});
+ if(waitRoom&&hub.session.room.status!=='live')await new Promise(resolve=>{const off=hub.session.room.on('connection',status=>{if(status==='live'){off();resolve();}});});
  const cand={id:'fixture',route:'fixture',url:location.origin+'/fixture.mp4',type:'mp4',code:'Local '+user,sourceId:'test',server:'fixture'};
  const session={cands:new Map([['fixture',cand]]),done:true};
- window.player=openPlayer({title:'Together real video test',episode:1,total:2,session:'fixture',candidate:'fixture',section:'anime',minRealDuration:1,copies:[{sourceId:'test',url:'/fixture',title:'Fixture'}],together:hub.handOff('anime:42'),runtime:{ensureMedia:async()=>{},fetcher:{mediaUrl:u=>u}},engine:{closeSession:async()=>{},best:async()=>({candidate:'fixture'}),prepare:async()=>({session:'fixture',copies:[{sourceId:'test',url:'/fixture',title:'Fixture'}]})},sessionOf:()=>session,readyCandidates:()=>[cand],emit:()=>{}});
+ window.closedSessions=[];window.proofEpisode=1;
+ window.player=openPlayer({title:'Together real video test',episode:1,total:4,session:'fixture',candidate:'fixture',section:'anime',minRealDuration:1,copies:[{sourceId:'test',url:'/fixture',title:'Fixture'}],together:hub.handOff('anime:42'),runtime:{ensureMedia:async()=>{if(window.holdMedia){window.holdMedia=false;await new Promise(resolve=>{window.releaseMedia=resolve;});}},fetcher:{mediaUrl:u=>{window.mediaRequests=(window.mediaRequests||0)+1;return u;}}},engine:{closeSession:async({session})=>{closedSessions.push(session);},best:async()=>({candidate:'fixture'}),prepare:async({episode,copies})=>{if(window.holdEpisode===episode)await new Promise(resolve=>{window.releaseEpisode=resolve;});return {session:'fixture-'+episode,copies};}},sessionOf:()=>session,readyCandidates:()=>[cand],emit:(event,payload)=>{if(event==='episode')window.proofEpisode=payload.episode;}});
 };
 window.read=()=>{
  hub.joinByCode('READ01',{media_json:JSON.stringify({seriesRef:'manga:test',key:'manga:test#1',kind:'manga'}),mode:'sync'});
@@ -54,12 +56,13 @@ const server=createServer(async(req,res)=>{
    res.writeHead(m?206:200,{'content-type':'video/mp4','accept-ranges':'bytes','content-length':end-start+1,...(m?{'content-range':`bytes ${start}-${end}/${fixture.length}`}:{})});res.end(fixture.subarray(start,end+1));return;
   }
   const path=resolve('apps/web','.'+new URL(req.url,'http://local').pathname);if(!path.startsWith(resolve('apps/web')+'/')&&!path.startsWith(resolve('apps/web')+'\\'))throw Error('path');
-  res.setHeader('content-type',({'.js':'text/javascript','.css':'text/css','.json':'application/json'})[extname(path)]??'text/plain');res.end(await readFile(path));
+  res.setHeader('content-type',({'.js':'text/javascript','.css':'text/css','.json':'application/json','.webp':'image/webp'})[extname(path)]??'text/plain');res.end(await readFile(path));
  }catch{res.writeHead(404);res.end();}
 });
 const wss=new WebSocketServer({server,handleProtocols:()=> 'vantara.together'});
 wss.on('connection',(socket,req)=>{const id=String(++next),user=(req.headers['sec-websocket-protocol']??'').split(',').map(s=>s.trim()).find(s=>s.startsWith('bearer.'))?.slice(7)??req.headers.authorization?.replace(/^Bearer\s+/,'');const core=req.url.includes('READ01')?reading:room;
- sockets.set(id,socket);cores.set(id,core);send(core.join({conn:id,userId:user,name:user,avatarKey:null},Date.now()));
+ const profiles={host:['مشعل','meshal'],guest:['دحمي','d7m'],late:['منصور','man']};const profile=profiles[user]??[user,'man'];
+ sockets.set(id,socket);cores.set(id,core);send(core.join({conn:id,userId:user,name:profile[0],avatarKey:'/avatars/'+profile[1]+'.webp'},Date.now()));
  socket.on('message',raw=>send(core.handle(id,JSON.parse(raw),Date.now())));socket.on('close',()=>{sockets.delete(id);cores.delete(id);send(core.leave(id,Date.now()));});});
 // Each core sends only to its own connections.
 const originalSend=send;send=out=>{for(const o of out){if(o.close){originalSend([o]);continue;}const core=o.msg.room?.code==='READ01'||o.msg.state?.media?.kind==='manga'?reading:null;originalSend([{...o,to:o.to==='all'&&core?[...cores].filter(([,c])=>c===core).map(([id])=>id):o.to}]);}};
@@ -74,6 +77,7 @@ try{
  const host=await context.newPage(),guest=await mobile.newPage();
  for(const p of [host,guest])p.on('pageerror',e=>errors.push(e.message));
  const launch=async(p,user,method='launch')=>{await p.goto(base+'/harness?user='+user);await p.waitForFunction(()=>window.ready);await p.evaluate(m=>window[m](),method);};
+ const panelVisible=async p=>{await p.waitForTimeout(350);assert.ok(await p.locator('.tg-row').first().evaluate(n=>{const r=n.getBoundingClientRect();return Boolean(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('.pp-sheet'));}),'room panel is covered by the waiting lobby');};
  if(android){
   await launch(host,'host');
   adbRun('shell','am','force-stop','com.vantara.proof');
@@ -81,7 +85,7 @@ try{
   const wait=async(check,ms=20000)=>{const start=Date.now();while(!check()){if(Date.now()-start>ms)throw Error('native condition timed out: '+JSON.stringify(nativeSnapshot));await host.waitForTimeout(150);}};
   await wait(()=>room.roster(Date.now()).length===2&&room.roster(Date.now()).every(r=>r.state==='ready'));
   await wait(()=>nativeSnapshot?.ready&&!nativeSnapshot.playing&&nativeSnapshot.pos<100);
-  await host.locator('.pp-together').click();assert.equal(await host.locator('.tg-row').count(),2);await host.screenshot({path:resolve(output,'desktop-android-room.png')});
+  await host.locator('.pp-together').click();assert.equal(await host.locator('.tg-row').count(),2);await panelVisible(host);await host.screenshot({path:resolve(output,'desktop-android-room.png')});
   // Device wall clocks need not match. Extrapolate a native sample from receipt time;
   // uncertainty is one local HTTP transit, not the emulator's system-clock offset.
   const sample=async()=>{const web=await host.locator('video').evaluate(v=>({pos:v.currentTime*1000,at:Date.now(),playing:!v.paused}));const n=nativeSnapshot;results.deviceWallClockOffsetMs=n.receivedAt-n.at;return Math.abs(web.pos-(n.pos+(n.playing?web.at-n.receivedAt:0)));};
@@ -99,20 +103,40 @@ try{
  } else {
  await launch(host,'host');await launch(guest,'guest');
  for(const p of [host,guest])await p.waitForFunction(()=>hub.session?.room.roster.length===2&&hub.session.room.roster.every(r=>r.state==='ready'),{timeout:20000});
- await host.locator('.pp-together').click();assert.equal(await host.locator('.tg-row').count(),2);await host.screenshot({path:resolve(output,'desktop-room.png')});
+ await host.locator('.pp-together').click();assert.equal(await host.locator('.tg-row').count(),2);await panelVisible(host);await host.screenshot({path:resolve(output,'desktop-room.png')});
  // Close the real player sheet then start from the lobby button.
- await host.locator('.pp-sheet-backdrop').evaluate(n=>n.click()).catch(()=>{});
+ await host.locator('.pp-scrim').click({position:{x:10,y:10}});
  await host.evaluate(()=>hub.session.room.command('play',{pos:0}));await host.waitForTimeout(1700);
  const sample=async()=>{const times=await Promise.all([host,guest].map(p=>p.locator('video').evaluate(v=>v.currentTime)));return Math.abs(times[0]-times[1])*1000;};
  const drift=[];for(let i=0;i<6;i++){drift.push(await sample());await host.waitForTimeout(250);}results.videoDriftMs={samples:drift,max:Math.max(...drift)};assert.ok(Math.max(...drift)<800,'real player drift over 800ms');
  await host.evaluate(()=>hub.session.room.command('pause',{pos:2000}));await host.waitForTimeout(950);for(const p of [host,guest])assert.equal(await p.locator('video').evaluate(v=>v.paused),true);
  await host.evaluate(()=>hub.session.room.command('seek',{pos:1000}));await host.waitForTimeout(950);results.pausedSeekDriftMs=await sample();assert.ok(results.pausedSeekDriftMs<120);
  const late=await context.newPage();await launch(late,'late');await late.waitForFunction(()=>hub.session.room.roster.find(r=>r.userId==='late')?.state==='paused',{timeout:20000});assert.ok(Math.abs(await late.locator('video').evaluate(v=>v.currentTime)-1)<.15);results.lateJoin=true;
+ await host.evaluate(async()=>{const {joinRoom}=await import('/lib/together/room.js');window.extraRooms=[1,2,3,4].map(i=>joinRoom({baseUrl:location.origin,code:'ABCDEF',getToken:()=> 'extra'+i}));});
+ for(const p of [host,guest]){
+  await p.waitForFunction(()=>document.querySelector('.pp-together .tg-more')?.textContent==='+4');
+  assert.equal(await p.locator('.pp-together img').count(),3);
+  assert.equal(await p.locator('.pp-together').textContent(),'+4');
+  assert.ok(await p.locator('.pp-together .tg-faces').evaluate(n=>{const [a,b]=[...n.children].map(c=>c.getBoundingClientRect());return a.width>0&&Math.abs(a.x-b.x)>0&&Math.abs(a.x-b.x)<a.width;}),'profile avatars must overlap');
+ }
+ results.avatarPile={visible:3,remaining:4,overlapping:true};
+ await host.screenshot({path:resolve(output,'desktop-avatars.png')});await guest.screenshot({path:resolve(output,'mobile-avatars.png')});
+ await host.evaluate(()=>extraRooms.forEach(r=>r.close()));await host.waitForFunction(()=>hub.session.room.roster.length===3&&!document.querySelector('.pp-together .tg-more'));
  const guestId=[...room.members].find(([,m])=>m.userId==='guest')[0];sockets.get(guestId).close(1012,'test restart');await guest.waitForFunction(()=>hub.session.room.status==='reconnecting');await guest.waitForFunction(()=>hub.session.room.status==='live',{timeout:10000});results.reconnect=true;
  await host.evaluate(()=>hub.session.room.setMode('free'));await guest.waitForFunction(()=>hub.session.room.info.mode==='free');await guest.locator('video').evaluate(v=>v.currentTime=2);await guest.waitForTimeout(800);assert.ok(await guest.locator('video').evaluate(v=>v.currentTime)>1.9);results.separate=true;
  await host.evaluate(()=>hub.session.room.setMode('sync'));await guest.waitForFunction(()=>hub.session.room.info.mode==='sync');await host.waitForTimeout(800);
  await host.evaluate(()=>hub.session.room.command('load',{media:{key:'anime:42#2',kind:'anime',label:'Episode 2'},pos:0}));await guest.waitForFunction(()=>hub.session.room.timeline.media.key.endsWith('#2'));await guest.waitForTimeout(1800);results.nextEpisode=await guest.locator('video').evaluate(v=>v.readyState>=3);
+ await guest.evaluate(()=>{window.holdEpisode=3;});
+ await host.evaluate(()=>hub.session.room.command('load',{media:{key:'anime:42#3',kind:'anime',label:'Episode 3'},pos:0}));await guest.waitForFunction(()=>typeof window.releaseEpisode==='function');
+ await host.evaluate(()=>hub.session.room.command('load',{media:{key:'anime:42#4',kind:'anime',label:'Episode 4'},pos:0}));await guest.waitForFunction(()=>window.proofEpisode===4&&hub.session.room.roster.find(r=>r.userId==='guest')?.mediaKey==='anime:42#4');
+ await guest.evaluate(()=>releaseEpisode());await guest.waitForTimeout(1800);assert.equal(await guest.evaluate(()=>window.proofEpisode),4,'older episode preparation replaced the latest episode');
+ assert.ok(await guest.evaluate(()=>closedSessions.includes('fixture-3')),'superseded prepared session must close');results.supersededEpisode=true;
+ const cached=await mobile.newPage();await cached.goto(base+'/harness?user=extra1');await cached.waitForFunction(()=>window.ready);await cached.evaluate(()=>launch({waitRoom:true}));await cached.waitForFunction(()=>window.proofEpisode===4&&hub.session.room.roster.find(r=>r.userId==='extra1')?.mediaKey==='anime:42#4',{timeout:20000});await cached.evaluate(()=>player.close());await cached.close();results.cachedWelcomeLateJoin=true;
+ await guest.evaluate(()=>{window.holdMedia=true;document.querySelector('video').dispatchEvent(new Event('error'));});await guest.waitForFunction(()=>typeof window.releaseMedia==='function');
+ await host.evaluate(()=>hub.session.room.command('load',{media:{key:'anime:42#2',kind:'anime',label:'Episode 2'},pos:0}));await guest.waitForFunction(()=>window.proofEpisode===2&&hub.session.room.roster.find(r=>r.userId==='guest')?.mediaKey==='anime:42#2');
+ const mediaBefore=await guest.evaluate(()=>window.mediaRequests||0);await guest.evaluate(()=>releaseMedia());await guest.waitForTimeout(1600);assert.equal(await guest.evaluate(()=>window.mediaRequests||0),mediaBefore,'old episode healing resumed after a new episode loaded');results.supersededHealing=true;
  await guest.screenshot({path:resolve(output,'mobile-room.png')});
+ assert.ok(await guest.locator('.pp-titles').evaluate(n=>n.getBoundingClientRect().width)>100,'Together must not squeeze the mobile title to zero');
  for(const p of [host,guest,late])await p.evaluate(()=>player.close());await host.waitForTimeout(300);assert.equal(room.members.size,0);results.noOrphans=true;
  await launch(host,'host','read');await launch(guest,'guest','read');
  await host.addStyleTag({url:base+'/v35/reader.css'});await guest.addStyleTag({url:base+'/v35/reader.css'});
@@ -126,6 +150,10 @@ try{
  await launch(late,'late','read');await late.addStyleTag({url:base+'/v35/reader.css'});await late.waitForTimeout(1100);
  const fraction=async(p)=>p.evaluate(()=>{const s=document.querySelector('#rdScroll'),f=s.querySelector('.rd-page');return s.scrollTop/f.getBoundingClientRect().height;});
  assert.ok(Math.abs(await fraction(late)-current)<.02);results.readingLateJoin=true;
+ await guest.evaluate(()=>{reader.root.classList.add('rd--chrome');document.querySelector('#rdTlBtn').hidden=false;});
+ assert.equal(await guest.locator('.rd-together img').count(),3);
+ assert.ok(await guest.locator('.rd-together .tg-face').evaluateAll(nodes=>nodes.every(n=>{const r=n.getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth;})),'translation must not hide or clip the third avatar');
+ results.readerAvatarPile=true;
  await host.evaluate(()=>hub.session.room.setMode('free'));await guest.waitForFunction(()=>hub.session.room.info.mode==='free');const before=await fraction(guest);await host.locator('#rdScroll').evaluate(n=>n.scrollTop=900);await host.waitForTimeout(800);assert.ok(Math.abs(await fraction(guest)-before)<.005);results.readingSeparate=true;
  await host.evaluate(()=>hub.session.room.setMode('sync'));await host.waitForTimeout(800);assert.ok(Math.abs(await fraction(guest)-reading.timeline.pos)<.02);
  await guest.locator('.rd-page').first().evaluate(n=>n.style.height='2700px');await guest.waitForTimeout(900);assert.ok(Math.abs(await fraction(guest)-reading.timeline.pos)<.02);results.readingResize=true;

@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTogetherPlayer } from './together-player.js';
 
-function fixture(host = false) {
+function fixture(host = false, existingTimeline = null) {
   const events = new Map();
   const room = { status: 'live', me: host ? 'host' : 'guest', isHost: host, canControl: host,
     info: { mode: 'sync' }, timeline: { media: { key: 'anime:42#1', kind: 'anime' }, started: false, playing: false, pos: 0, at: 1000, seq: 0 },
     roster: [], clock: { serverNow: () => 1000 }, command: vi.fn(), report: vi.fn(),
     on: (e, fn) => { const set = events.get(e) ?? new Set(); set.add(fn); events.set(e, set); return () => set.delete(fn); },
   };
+  if (existingTimeline) room.timeline = {...room.timeline, ...existingTimeline};
   const video = { currentTime: 0, duration: 1200, readyState: 4, paused: false, playbackRate: 1,
     buffered: { length: 1, start: () => 0, end: () => 1200 }, play: vi.fn(function () { this.paused = false; return Promise.resolve(); }), pause: vi.fn(function () { this.paused = true; }) };
   let episode = 1;
@@ -30,6 +31,12 @@ describe('web Together player uses Android room protocol', () => {
     expect(f.video.currentTime).toBeCloseTo(42); expect(f.video.play).toHaveBeenCalled();
     f.receive({ ...f.room.timeline, playing: false, pos: 90000, seq: 2 });
     expect(f.video.paused).toBe(true); expect(f.video.currentTime).toBe(90); f.bridge.destroy();
+  });
+  it('reconciles an episode transition received before the player mounted', () => {
+    vi.useFakeTimers(); const f=fixture(false,{media:{key:'anime:42#2',kind:'anime'},started:true,playing:false,pos:42000,seq:2});
+    f.bridge.ready(); expect(f.hooks.onEpisode).toHaveBeenCalledOnce(); expect(f.hooks.onEpisode).toHaveBeenCalledWith(2);
+    expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({state:'preparing'}));
+    f.bridge.ready(); expect(f.video.currentTime).toBe(42); expect(f.video.paused).toBe(true); f.bridge.destroy();
   });
   it('keeps host controls on the wire and guest controls out of it', () => {
     vi.useFakeTimers(); const h = fixture(true); h.bridge.ready(); h.bridge.playPause(true); h.bridge.seek(80000);

@@ -76,7 +76,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     report();
   }, 500);
   const api = {
-    ready() { prepared = true; failed = false; loadingEpisode = null; align(true); report(true); paintLobby(); },
+    // Welcome can arrive while the shell is preparing the invitation's source.
+    ready() { prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
     preparing() { prepared = false; failed = false; report(true); paintLobby(); },
     failed() { prepared = false; failed = true; report(true); paintLobby(); },
     playPause(playing) {

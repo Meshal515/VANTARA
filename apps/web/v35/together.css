@@ -125,14 +125,13 @@
   100% { box-shadow: 0 0 0 0 rgba(48, 209, 120, 0); }
 }
 
-/* الأفاتارات جزء من الشريط العلوي للقارئ/المشغّل: كبسولة زجاجية تظهر وتختفي معه */
+/* ثلاثة أفاتارات متداخلة ثم عدد الباقين؛ تفاصيل الاتصال في لوحة الغرفة. */
 .v35 .tg-strip {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 36px; padding: 0 5px 0 9px;
+  display: inline-flex; align-items: center; flex: none;
+  height: 36px; padding: 0 5px;
   border-radius: 99px;
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  background: transparent;
+  border: 0;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 160ms ease, transform 140ms ease;
@@ -140,10 +139,11 @@
 .v35 .tg-strip:active { transform: scale(0.96); background: rgba(255, 255, 255, 0.16); }
 .v35 .tg-dot { width: 7px; height: 7px; border-radius: 99px; background: #30d178; flex: none; }
 .v35 .tg-dot.is-bad { background: #ff6b6e; animation: none; }
-.v35 .tg-faces { display: inline-flex; align-items: center; }
+.v35 .tg-faces { display: inline-flex; align-items: center; flex: none; }
 .v35 .tg-face {
   display: inline-grid; place-items: center;
   width: 26px; height: 26px;
+  flex: none;
   margin-inline-start: -8px;
   border-radius: 99px;
   overflow: hidden;
@@ -247,8 +247,6 @@
 .v35 .rd-top .rd-titles { min-width: 0; }
 .v35 .rd-top .rd-titles strong, .v35 .rd-top .rd-titles span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v35 .rd-top .rd-together { margin-inline-start: 4px; }
-.v35 .rd-top:has(#rdTlBtn:not([hidden])) .tg-face:nth-child(3) { display: none; }
 /* زر الترجمة يبقى ظاهرًا دائمًا ولا تغطيه الأفاتارات: له مكانه الثابت، والكبسولة هي التي تصغر */
 .v35 .rd-top #rdTlBtn { flex: none; position: relative; z-index: 2; }
-.v35 .rd-top .rd-together { flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.v35 .rd-top:has(#rdTlBtn:not([hidden])) .tg-face:nth-child(n+3):not(.tg-more) { display: none; }
+.v35 .rd-top .rd-together { flex: none; }

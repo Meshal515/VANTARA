@@ -154,6 +154,8 @@ export function openPlayer(args) {
     lastReport: 0,
     closed: false,
     startTimer: null,
+    cancelAttempt: null,
+    mediaGeneration: 0,
     started: false,
     locked: false,
     fill: false,
@@ -788,6 +790,7 @@ export function openPlayer(args) {
   }
 
   function teardownSource() {
+    state.cancelAttempt?.();
     clearTimeout(state.startTimer);
     subtitleSession.resetMedia();
     state.hls?.destroy?.();
@@ -808,12 +811,15 @@ export function openPlayer(args) {
       const done = (ok, reason = null) => {
         if (settled) return;
         settled = true;
+        if (state.cancelAttempt === cancel) state.cancelAttempt = null;
         clearTimeout(state.startTimer);
         video.removeEventListener('playing', onPlay);
         video.removeEventListener('error', onError);
         video.removeEventListener('loadedmetadata', onMeta);
         resolve({ ok, reason });
       };
+      const cancel = () => done(false, 'cancelled');
+      state.cancelAttempt = cancel;
       const onMeta = () => {
         const bad = judgePlayback({ duration: video.duration, videoWidth: video.videoWidth || 1, minDuration });
         if (bad === 'placeholder') done(false, 'placeholder');
@@ -880,7 +886,8 @@ export function openPlayer(args) {
     stall: 'توقّف ولم يكمل',
   };
 
-  async function playCandidate(c, { seek = 0 } = {}) {
+  async function playCandidate(c, { seek = 0, generation = state.mediaGeneration } = {}) {
+    if (state.closed || generation !== state.mediaGeneration) return false;
     state.current = c;
     subtitleSession.setStream(c);
     state.started = false;
@@ -890,11 +897,13 @@ export function openPlayer(args) {
     paint();
     setBusy(true, `جارٍ التشغيل · ${c.code}`);
     const paths = await candidatePaths(c,runtime);
+    if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
     if(addonMedia(c))video.crossOrigin="anonymous";else video.removeAttribute("crossorigin");
     let reason = null;
     for (const [via, url] of paths) {
-      if (state.closed || state.current !== c) return false;
+      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
       const out = await attempt(url, c.type);
+      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
       if (out.ok) {
         state.via = via;
         state.started = true;
@@ -920,22 +929,24 @@ export function openPlayer(args) {
 
   /** المرشّح المختار ثم الباقي بالترتيب، حتى يعمل واحد. */
   async function playFrom(firstId, seek = 0) {
+    const generation = state.mediaGeneration;
     const s = sessionOf(state.session);
     if (!s) return showError('انتهت الجلسة، افتح الحلقة من جديد');
     const pool = () => readyCandidates(s, args.prefer ?? null).filter((c) => !state.tried.has(c.id) && !state.failed.has(c.route));
     const first = firstId ? s.cands.get(firstId) : null;
-    if (first && (await playCandidate(first, { seek }))) return;
+    if (first && (await playCandidate(first, { seek, generation }))) return;
     for (;;) {
-      if (state.closed) return;
+      if (state.closed || generation !== state.mediaGeneration) return;
       let next = pool()[0];
       if (!next && !s.done) {
         setBusy(true, 'نجهّز سيرفرًا آخر…');
         const out = await engine.best({ session: state.session, prefer: args.prefer ?? null, waitMs: 30_000 }).catch(() => null);
+        if (state.closed || generation !== state.mediaGeneration) return;
         next = pool()[0] ?? (out?.candidate && !state.tried.has(out.candidate) ? s.cands.get(out.candidate) : null);
       }
       if (!next) return showError('ما اشتغل أي سيرفر لهذي الحلقة');
       if (state.current && state.started === false) message(`${state.current.code}: ${state.failed.get(state.current.route) ?? 'فشل'} — نجرّب التالي`, 2500);
-      if (await playCandidate(next, { seek })) return;
+      if (await playCandidate(next, { seek, generation })) return;
     }
   }
 
@@ -948,11 +959,15 @@ export function openPlayer(args) {
     state.healing = true;
     const at = Math.round((video.currentTime || 0) * 1000);
     const c = state.current;
+    const generation = state.mediaGeneration;
+    const stale = () => state.closed || generation !== state.mediaGeneration || state.current !== c;
     message(`انقطع ${c.code} — نكمل من نفس اللحظة`, 3000);
     try {
       if (state.via === 'direct' && !addonMedia(c)) {
         await runtime.ensureMedia().catch(() => null);
+        if (stale()) return;
         const out = await attempt(runtime.fetcher.mediaUrl(c.url, c.referer), c.type);
+        if (stale()) return;
         if (out.ok) {
           state.via = 'edge';
           if (at > 0 && Number.isFinite(video.duration)) video.currentTime = at / 1000;
@@ -961,10 +976,11 @@ export function openPlayer(args) {
           return;
         }
       }
+      if (stale()) return;
       state.failed.set(c.route, REASON[why] ?? 'انقطع');
       await playFrom(null, at);
     } finally {
-      state.healing = false;
+      if (generation === state.mediaGeneration) state.healing = false;
     }
   }
 
@@ -975,15 +991,30 @@ export function openPlayer(args) {
       return;
     }
     if (!fromRoom && tg?.changeEpisode(n)) return;
+    const generation = ++state.mediaGeneration;
+    state.healing = false;
     tg?.preparing();
     report();
     setBusy(true, `نجهّز الحلقة ${n}…`);
     errorCard.hidden = true;
+    const previous = state.current;
+    state.current = null;
+    state.started = false;
     teardownSource();
     args.subtitleIdentity = {...args.subtitleIdentity, episode:n};
     subtitleSession.setIdentity(args.subtitleIdentity);
     void engine.closeSession({ session: state.session });
-    const prep = await engine.prepare({ copies, episode: n, preferredSourceId: state.current?.sourceId ?? null, preferredServer: state.current?.server ?? null });
+    let prep;
+    try {
+      prep = await engine.prepare({ copies, episode: n, preferredSourceId: previous?.sourceId ?? null, preferredServer: previous?.server ?? null });
+    } catch (error) {
+      if (state.closed || generation !== state.mediaGeneration) return;
+      throw error;
+    }
+    if (state.closed || generation !== state.mediaGeneration) {
+      void engine.closeSession({ session: prep.session });
+      return;
+    }
     args.copies = prep.copies ?? copies;
     state.session = prep.session;
     state.episode = n;
@@ -993,6 +1024,7 @@ export function openPlayer(args) {
     paint();
     emit('episode', { animeId: args.animeId ?? null, session: state.session, episode: n });
     const best = await engine.best({ session: state.session, prefer: args.prefer ?? null, waitMs: 45_000 }).catch(() => null);
+    if (state.closed || generation !== state.mediaGeneration) return;
     await playFrom(best?.candidate ?? null);
   }
 

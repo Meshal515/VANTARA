@@ -370,10 +370,10 @@ export function createTogether(deps) {
     }
     const faces = el('span', 'tg-faces');
     faces.append(...nodes);
-    const dot = el('i', `tg-dot${roster.some((r) => r.state === 'failed') ? ' is-bad' : ''}`);
-    const status = el('span', 'tg-connection', `${roster.length} · ${connectionLabel(session?.room.status)}`);
-    host.replaceChildren(dot, faces, status);
-    host.setAttribute('aria-label', `في الغرفة ${roster.length}`);
+    host.replaceChildren(faces);
+    const label = `في الغرفة ${roster.length} · ${connectionLabel(session?.room.status)} · افتح المشاركين`;
+    host.setAttribute('aria-label', label);
+    host.title = label;
     host.setAttribute('role', 'button');
     host.tabIndex = 0;
     host.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); } };
