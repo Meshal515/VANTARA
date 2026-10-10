@@ -70,6 +70,20 @@ class TorrentRequest(infoHash: String, val fileIdx: Int? = null, sources: List<S
 }
 
 data class TorrentFile(val index: Int, val path: String, val size: Long, val offset: Long)
+/**
+ * فحص حي لسرب قبل التشغيل: هل وصلت بيانات التورنت من المشاركين، وكم مشاركًا اتصل فعلًا.
+ * لا يُحمَّل شيء من الفيديو (يتوقف التورنت عند جاهزية البيانات).
+ */
+data class TorrentProbe(val metadata: Boolean, val peers: Int, val seeds: Int, val ms: Long) {
+    /** alive: بيانات + مشارك · slow: مشاركون بلا بيانات بعد · dead: لا أحد خلال المهلة. */
+    val verdict: String get() = when {
+        metadata && peers > 0 -> "alive"
+        metadata -> "slow"
+        peers > 0 -> "slow"
+        else -> "dead"
+    }
+}
+
 data class TorrentStats(
     val peers: Int, val seeds: Int, val downloadBytesPerSecond: Long, val totalDone: Long, val metadata: Boolean,
     val state: String? = null, val paused: Boolean = false, val candidates: Int = 0, val known: Int = 0,

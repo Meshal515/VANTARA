@@ -74,6 +74,35 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
     fun release(uri: Uri) { uri.host?.let(tickets::remove) }
+    /**
+     * فحص حي قبل الاختيار: يضيف الـmagnet ويشغّله ([State.handle] يفك الإيقاف) ويراقب حتى تصل البيانات
+     * أو تنتهي المهلة. STOP_WHEN_READY يوقفه عند جاهزية البيانات فلا يُحمّل الفيديو؛ وبيانات التورنت
+     * تُحفظ (metadata.torrent) فيبدأ التشغيل بعدها أسرع. نسخة يقرؤها المشغّل الآن لا تُلمس.
+     */
+    fun probe(uri: Uri, timeoutMs: Long = PROBE_TIMEOUT_MS, cancelled: () -> Boolean = { false }): TorrentProbe {
+        val request = uri.host?.let(tickets::get)?.request ?: throw IOException("Torrent playback ticket expired")
+        val begun = System.nanoTime()
+        val elapsed = { TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begun) }
+        val stopped = { shutdown.get() || cancelled() }
+        val state = synchronized(states) { states.computeIfAbsent(request.infoHash) { State(request.infoHash) } }
+        val handle = state.handle(stopped, request)
+        var peers = 0; var seeds = 0; var metadata = false
+        while (!stopped() && elapsed() < timeoutMs) {
+            val status = runCatching { handle.status() }.getOrNull()
+            if (status != null) { peers = maxOf(peers, status.numPeers()); seeds = maxOf(seeds, status.numSeeds()) }
+            metadata = handle.torrentFile()?.isValid == true
+            if (metadata && peers > 0) break
+            try { Thread.sleep(400) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
+        }
+        if (metadata) runCatching {
+            val info = handle.torrentFile()
+            val file = File(state.folder.parentFile, "metadata.torrent")
+            if (info != null && !file.isFile) file.writeBytes(info.bencode())
+        }
+        if (state.unused()) runCatching { handle.pause() }
+        return TorrentProbe(metadata, peers, seeds, elapsed())
+    }
+
     /** Routing-table size: 0 for a long time means the device cannot reach the BitTorrent network at all. */
     fun dhtNodes(): Long = if (managerHolder.isInitialized()) runCatching { manager.dhtNodes() }.getOrDefault(0L) else 0L
     /** Live swarm facts for a ticket: what Stremio shows while buffering. Null before the session exists. */
@@ -310,6 +339,7 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         private const val TICKET_TTL_MS = 30L * 60 * 1000
         private const val IDLE_TTL_MS = 60_000L
         private const val METADATA_TIMEOUT_MS = 45_000L
+        const val PROBE_TIMEOUT_MS = 20_000L
         private const val PIECE_STALL_MS = 30_000L
         private const val PIECE_MAX_WAIT_MS = 180_000L
         private const val IDLE_GRACE_MS = 20_000L

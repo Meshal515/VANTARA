@@ -104,6 +104,10 @@ class PreparedEpisode(
                 reason = r.reason,
                 probed = old?.probed,
                 probeMs = old?.probeMs,
+                swarm = old?.swarm,
+                swarmPeers = old?.swarmPeers,
+                swarmSeeds = old?.swarmSeeds,
+                swarmMs = old?.swarmMs,
                 sourceName = r.candidates.firstOrNull()?.sourceName ?: old?.sourceName,
                 label = r.candidates.firstOrNull()?.label?.takeIf { it.isNotBlank() } ?: old?.label,
             )
@@ -142,6 +146,15 @@ class PreparedEpisode(
     /** Each candidate is probed once, even if an adapter reports it twice. */
     fun claimProbe(candidateId: String): Boolean = synchronized(this) {
         !candidateProbes.containsKey(candidateId) && probing.add(candidateId)
+    }
+
+    /** حالة فحص السرب الحي لسيرفر تورنت (checking ثم النتيجة) تصل للواجهة كأي تغيّر. */
+    fun markSwarm(routeId: String, state: String, peers: Int? = null, seeds: Int? = null, ms: Long? = null) {
+        synchronized(this) {
+            val old = byId[routeId] ?: return
+            byId[routeId] = old.copy(swarm = state, swarmPeers = peers ?: old.swarmPeers, swarmSeeds = seeds ?: old.swarmSeeds, swarmMs = ms ?: old.swarmMs)
+        }
+        session.changes.value = session.changes.value + 1
     }
 
     fun markProbe(routeId: String, ok: Boolean, ms: Long, candidateId: String? = null) {
