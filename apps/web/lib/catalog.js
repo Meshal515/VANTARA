@@ -315,6 +315,19 @@ function evidenceIn(words, prepared) {
 	return null;
 }
 
+const ORIGINAL_SCRIPT = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/gu;
+/**
+ * العنوان الأصلي (هانغل/كانجي/كانا) من اسم بديل، أو null: الأحرف الأصلية وحدها بعد
+ * NFKC بلا مسافات ولا ترقيم، أربعة فأكثر وغالبية الاسم. «魔皇大管家» نعم، «魔王» لا.
+ * اسم بديل يجمع عدة أسماء في نص واحد («امبراطور السحر … Demonic Emperor») لا يُقرأ عنوانًا أصليًا.
+ */
+export function originalTitle(raw) {
+	const text = String(raw ?? '').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '');
+	const chars = text.match(ORIGINAL_SCRIPT) ?? [];
+	if (chars.length < 4 || chars.length < text.length * 0.8) return null;
+	return chars.join('');
+}
+
 /**
  * عنوانان لعمل واحد بلا اسم بديل: نفس الكلمات المميِّزة («Wistoria’s Wand and
  * Sword» = «WISTORIA: WAND AND SWORD»، كلمتان فأكثر)، أو نفسها بفرق مفرد/جمع
@@ -532,6 +545,23 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			const roots = new Set(owners.filter((o) => nodes.has(o)).map(find));
 			if (roots.size === 1 && owners.every((o) => nodes.has(o))) union([...roots][0], k, 'اسم بديل');
 			else rejected.push(`«${k}» ← ${owners.map((u) => `«${u}»`).join(' / ')}`);
+		}
+
+		// 4) العنوان الأصلي المشترك: «세계멸망전» عند MangaDex («World Extinction War») وعند
+		// المصدر العربي («World Destruction War»). عنوان كوري/صيني/ياباني من أربعة أحرف فأكثر
+		// ومطابق حرفيًا اسمٌ لعمل بعينه لا كلمة عامة؛ وحارس المصدر الواحد يبقى فوقه.
+		const byOriginal = new Map();
+		const noteOriginal = (k, raw) => {
+			const o = originalTitle(raw);
+			if (!o) return;
+			if (!byOriginal.has(o)) byOriginal.set(o, new Set());
+			byOriginal.get(o).add(k);
+		};
+		for (const k of entryKeys) for (const raw of aliases.get(k) ?? []) noteOriginal(k, raw);
+		for (const e of entries) for (const n of e.names) noteOriginal(e.own, n.raw);
+		for (const [o, keys] of [...byOriginal].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+			const list = [...keys].sort();
+			for (let i = 1; i < list.length; i++) union(list[0], list[i], `عنوان أصلي «${o}»`);
 		}
 
 		// البطاقات: مكوّن لكل جذر، بمفتاح ثابت

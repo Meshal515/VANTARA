@@ -51,6 +51,31 @@ function workIndex() {
   return index;
 }
 
+/**
+ * مفاتيح الهوية الواحدة لأحداث «آخر التحديثات»: الخط الزمني كان يجمّع بالعنوان الخام
+ * (`ext:<عنوان>`) فيظهر «Magic Emperor» و«Demonic Emperor» بطاقتين. نفس `canonicalIndex`
+ * الذي تبني به القوائم، بأدلته وحارسه: مصدر يعرض العنوانين عملين لا يُدمجان.
+ * يعيد Map<مفتاح الحدث، مفتاح العمل>.
+ */
+export function canonicalEventWorks(events) {
+  void loadAliases();
+  const index = canonicalIndex({ aliases: aliasMap() });
+  const own = new Map();
+  for (const e of events ?? []) {
+    const work = String(e?.work ?? '');
+    if (e?.section !== 'manga' || !work.startsWith('ext:') || own.has(work)) continue;
+    const title = String(e.title ?? '');
+    const key = normalizeTitle(title);
+    if (!key) continue;
+    const sources = (e.sources ?? []).filter((x) => x?.s);
+    for (const x of sources.length ? sources : [{ s: 'updates' }]) index.add({ sourceId: x.s, label: x.s, manga: { title, url: x.u ?? '', memo: x.m ?? '' } });
+    own.set(work, key);
+  }
+  const out = new Map();
+  for (const [work, key] of own) out.set(work, `ext:${index.keyOf(key)}`);
+  return out;
+}
+
 /** كل نسخ العمل ردّت حديثًا بلا فصل: لا تُعرض بطاقةً «لا فصول متاحة». */
 const isEmptyWork = (work) => knownEmpty(work, mirrorFamily);
 

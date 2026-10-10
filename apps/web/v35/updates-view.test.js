@@ -68,3 +68,19 @@ describe('آخر التحديثات', () => {
     expect(trustDates(real)).toEqual(real);
   });
 });
+
+describe('آخر التحديثات: الهوية الواحدة', () => {
+  it('حدثان لعمل واحد باسمين يصيران بطاقة واحدة بالمفتاح القانوني', async () => {
+    const { groupEvents } = await import('./updates-view.js');
+    const events = [
+      { id: 'a', section: 'manga', work: 'ext:demonic emperor', title: 'Demonic Emperor', kind: 'chapter', number: 920, at: 3 },
+      { id: 'b', section: 'manga', work: 'ext:magic emperor', title: 'Magic emperor', kind: 'chapter', number: 919, at: 2 },
+      { id: 'c', section: 'manga', work: 'ext:solo leveling', title: 'Solo Leveling', kind: 'chapter', number: 200, at: 1 },
+    ];
+    const canonical = new Map([['ext:demonic emperor', 'ext:magic emperor'], ['ext:magic emperor', 'ext:magic emperor']]);
+    const groups = groupEvents(events, canonical);
+    expect(groups.map((g) => g.work)).toEqual(['ext:magic emperor', 'ext:solo leveling']);
+    expect(groups[0].high).toBe(920);
+    expect(groupEvents(events)).toHaveLength(3);
+  });
+});

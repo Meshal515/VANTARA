@@ -65,11 +65,14 @@ export function canonicalEvent(e) {
  * («الفصل 201 +2»). كانت الدفعات تُدمج متتالية فقط، فعملٌ تخلّلته أعمال يظهر
  * مرتين وثلاثًا في الشبكة نفسها. الترتيب يبقى صادقًا: أحدث حدث يقرّر الموضع.
  */
-export function groupEvents(events) {
+export function groupEvents(events, canonical = null) {
   const out = [];
   const byWork = new Map();
   for (const raw of events) {
-    const e = canonicalEvent(raw);
+    let e = canonicalEvent(raw);
+    // نفس العمل بأسماء مختلفة («Magic Emperor» و«Demonic Emperor»): مفتاح الهوية الواحدة
+    const same = canonical?.get(e.work);
+    if (same && same !== e.work) e = { ...e, work: same };
     const key = `${e.section ?? ''}|${e.work}`;
     const g = byWork.get(key);
     if (!g) {
@@ -112,7 +115,7 @@ export function unitLabel(g) {
  * يرسم الخط الزمني في `host` ويحمّل المزيد بالتمرير. `open(group)` يفتح العمل.
  * `empty()` ما يُعرض قبل أن يسجّل VANTARA أي تحديث لهذا القسم.
  */
-export function mountTimeline(host, { section, el, open, empty, image, mountCover, visible = () => host.isConnected }) {
+export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected }) {
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, loading: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token;
@@ -156,7 +159,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   // شبكة متصلة بلا عناوين أيام (كانت تترك فراغات): الوقت على كل بطاقة يكفي
   const paint = () => {
     const before = new Map([...list.children].map((n) => [n.dataset.eventId, n]));
-    const next = groupEvents(state.events).map((g) => {
+    const next = groupEvents(state.events, canonical?.(state.events) ?? null).map((g) => {
       const node = before.get(g.id);
       if (node && JSON.stringify(node._group) === JSON.stringify(g)) return node;
       return row(g);
@@ -211,7 +214,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   const api = {
     dispose() { state.token = {}; clearInterval(timer); io?.disconnect(); },
     refresh() {
-      return mountTimeline(host, { section, el, open, empty, image, mountCover, visible });
+      return mountTimeline(host, { section, el, open, empty, image, mountCover, canonical, visible });
     },
   };
   mounted.set(host, api);
@@ -219,7 +222,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
 }
 
 /** أول N تحديثات (لشريط الرئيسية)، مجمّعة. */
-export async function latestGroups(section, n = 14) {
+export async function latestGroups(section, n = 14, canonical = null) {
   const page = await timeline(section, { limit: 40 });
-  return page ? groupEvents(page.events).slice(0, n) : null;
+  return page ? groupEvents(page.events, canonical?.(page.events) ?? null).slice(0, n) : null;
 }

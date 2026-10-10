@@ -222,3 +222,38 @@ describe('looser matching never merges namesakes', () => {
     expect(build([entry('mangalek', 'Monster'), dexEntry('Kaibutsu', 'y', ['Monster'])]).list()).toHaveLength(2);
   });
 });
+
+describe('شاشة المالك 2026-10-10: عملان بأسماء إنجليزية مختلفة', () => {
+  it('World Extinction War = World Destruction War بعنوانهما الكوري الأصلي «세계멸망전»', () => {
+    const index = canonicalIndex({ aliases: new Map([['world destruction war', ['세계멸망전', 'حرب الدمار العالمي']]]) });
+    index.add({ sourceId: 'mangalek', manga: { title: 'World Destruction War', url: '/w' } });
+    index.add({ sourceId: 'azora', manga: { title: 'World Destruction War', url: '/w2' } });
+    index.add({ sourceId: 'mangadex', manga: { title: 'World Extinction War', url: '/manga/x', altNames: ['Segye Myeolmangjeon', '세계멸망전'] } });
+    const works = index.list();
+    expect(works).toHaveLength(1);
+    expect(works[0].editions.map((e) => e.sourceId).sort()).toEqual(['azora', 'mangadex', 'mangalek']);
+  });
+
+  it('Magic Emperor = Demonic Emperor (اسم MangaDex البديل)', () => {
+    const index = canonicalIndex();
+    index.add({ sourceId: 'teamx', manga: { title: 'Demonic Emperor', url: '/d' } });
+    index.add({ sourceId: 'mangadex', manga: { title: 'Magic Emperor', url: '/manga/m', altNames: ['Demonic Emperor', 'Mo Huang Da Guan Jia', '魔皇大管家'] } });
+    expect(index.list()).toHaveLength(1);
+  });
+
+  it('عنوان أصلي قصير أو مختلف بحرف لا يدمج، ومصدر يعرضهما عملين يبقيان عملين', () => {
+    const short = canonicalIndex();
+    short.add({ sourceId: 'a', manga: { title: 'Demon King One', url: '/1', altNames: ['魔王'] } });
+    short.add({ sourceId: 'b', manga: { title: 'Demon King Two', url: '/2', altNames: ['魔王'] } });
+    expect(short.list()).toHaveLength(2);
+    const season = canonicalIndex();
+    season.add({ sourceId: 'a', manga: { title: 'Solo Leveling', url: '/1', altNames: ['나 혼자만 레벨업'] } });
+    season.add({ sourceId: 'b', manga: { title: 'Solo Leveling Ragnarok', url: '/2', altNames: ['나 혼자만 레벨업: 라그나로크'] } });
+    expect(season.list()).toHaveLength(2);
+    const guard = canonicalIndex();
+    guard.add({ sourceId: 'mangalek', manga: { title: 'Work A Title', url: '/a', altNames: ['세계멸망전'] } });
+    guard.add({ sourceId: 'mangalek', manga: { title: 'Work B Title', url: '/b', altNames: ['세계멸망전'] } });
+    expect(guard.list()).toHaveLength(2);
+    expect(guard.rejected.join(' ')).toContain('mangalek');
+  });
+});
