@@ -177,3 +177,13 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
     expect(await findWorkStream(['Bleach'])).toBe(null);
   });
 });
+
+describe('شاهد اللقطة', () => {
+  it('يقرأ مدى اللحظة من عنوانها', async () => {
+    const { momentRange, momentLabel } = await import('./anime-engine.js');
+    expect(momentRange(momentLabel(12, 730_000, 750_000))).toEqual({ startMs: 730_000, endMs: 750_000 });
+    expect(momentRange('الحلقة 3 · 1:02:10–1:02:30')).toEqual({ startMs: 3_730_000, endMs: 3_750_000 });
+    expect(momentRange('الحلقة 3')).toBeNull();
+    expect(momentRange('الحلقة 3 · 2:00–1:00')).toBeNull();
+  });
+});

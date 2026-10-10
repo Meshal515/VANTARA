@@ -50,7 +50,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentStart } from '../lib/anime-engine.js';
+import { momentRange, momentStart } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
@@ -2265,7 +2265,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const episode = chapter && Number.isFinite(chapter.number) ? chapter.number : null;
     const position = chapter ? momentStart(chapter.label) : null;
-    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position });
+    // لحظة من المجلس: «شاهد اللقطة» يشغّل مداها وحده
+    const clip = chapter ? momentRange(chapter.label) : null;
+    void anime.openAnime({ id, title: title ?? 'أنمي', poster: cover, posterSmall: cover }, { episode, position, clip });
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
