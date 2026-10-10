@@ -70,7 +70,6 @@ class TorrentRequest(infoHash: String, val fileIdx: Int? = null, sources: List<S
 }
 
 data class TorrentFile(val index: Int, val path: String, val size: Long, val offset: Long)
-data class TorrentStats(val peers: Int, val seeds: Int, val downloadBytesPerSecond: Long, val totalDone: Long, val metadata: Boolean)
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
 /** Pure bounds/selection rules, shared by native loader and regression tests. */
@@ -90,13 +89,6 @@ object TorrentPolicy {
         require(piece <= Int.MAX_VALUE)
         val offset = (absolute % pieceLength).toInt()
         return PieceRead(piece.toInt(), offset, minOf(count.toLong(), file.size - position, (pieceLength - offset).toLong()).toInt())
-    }
-    /** First piece and the last two of the file: MP4 moov, MKV cues and AVI idx1 live at one end. */
-    fun edges(file: TorrentFile, pieceLength: Int): List<Int> {
-        if (file.size <= 0) return emptyList()
-        val first = (file.offset / pieceLength).toInt()
-        val last = ((Math.addExact(file.offset, file.size) - 1) / pieceLength).toInt()
-        return listOf(first, last - 1, last).filter { it in first..last }.distinct()
     }
     fun window(file: TorrentFile, position: Long, pieceLength: Int, count: Int = 12): List<Int> {
         require(count in 1..64)

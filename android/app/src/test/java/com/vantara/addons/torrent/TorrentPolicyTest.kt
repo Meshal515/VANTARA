@@ -48,10 +48,4 @@ class TorrentPolicyTest {
         assertThrows(IllegalArgumentException::class.java) { TorrentPolicy.selectFile(listOf(TorrentFile(0, "../escape.mp4", 100, 0)), null) }
         assertThrows(IllegalArgumentException::class.java) { TorrentPolicy.selectFile(listOf(TorrentFile(0, "video.mp4.exe", 100, 0)), 0) }
     }
-    @Test fun containerEdgesAreFetchedFirst() {
-        // MP4 moov / MKV cues / AVI idx1 at the tail: the extractor's first seek must not wait for a cold piece
-        assertEquals(listOf(0, 3, 4), TorrentPolicy.edges(TorrentFile(0, "movie.mkv", 450, 30), 100))
-        assertEquals(listOf(2), TorrentPolicy.edges(TorrentFile(1, "tiny.mp4", 10, 250), 100))
-        assertEquals(emptyList<Int>(), TorrentPolicy.edges(TorrentFile(1, "empty.mp4", 0, 250), 100))
-    }
 }
