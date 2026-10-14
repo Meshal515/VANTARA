@@ -208,8 +208,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!page) {
       refresh.disabled = false;
       if (!state.events.length) {
-        state.done = true;
-        list.replaceChildren(empty());
+        // A network error is not an empty feed. Allow a retry on every platform.
+        list.replaceChildren(el('div', 'up-error', 'تعذّر جلب آخر التحديثات. اضغط تحديث لإعادة المحاولة.'));
       }
       return;
     }
@@ -253,6 +253,9 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
         if (section === 'manga') await loadAliases();
       const page = await timeline(section, { limit: 100 });
         if (token !== state.token || !page) return false;
+        // An initial failed/empty page has no valid pagination cursor yet.
+        // A successful manual retry must reopen older pages when available.
+        if (!state.events.length) { state.next = page.next; state.done = !page.next; }
         state.events = reconcileTimelineRefresh(state.events, page.events, page.snapshotAt ?? Date.now());
         if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
         // Keep the original pagination cursor. The refresh must not
