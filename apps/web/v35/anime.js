@@ -1253,7 +1253,7 @@ export function createAnime(deps) {
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;
-    sheet.autoTogether = false; // Joining a room must not auto-play an arbitrary source.
+    sheet.autoTogether = Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
     let paintQueued = false;
     let off = [];
 
@@ -1314,6 +1314,7 @@ export function createAnime(deps) {
             episode: n,
           }, {
             onStarted: () => {
+              sheet.autoTogether = !globalThis.VantaraDesktop;
               withFriends.remove();
               queuePaint();
             },
