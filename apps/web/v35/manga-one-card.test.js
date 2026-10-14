@@ -11,6 +11,7 @@ vi.mock('../lib/extension-engine.js', () => ({
 
 import engine from '../lib/extension-engine.js';
 import { _reset, noteEditionChapters } from '../lib/manga-evidence.js';
+import { _reset as resetAliases } from '../lib/manga-alias-store.js';
 import { browse, resetSources } from './works.js';
 
 const P = 'eu.kanade.tachiyomi.extension';
@@ -43,6 +44,7 @@ const DEX_API = {
 let dexCalls = 0;
 beforeEach(() => {
   _reset();
+  resetAliases();
   resetSources();
   dexCalls = 0;
   engine.sources.mockResolvedValue(Object.keys(PAGES).map((id) => ({ id, label: id.split('.').pop() })));
@@ -85,6 +87,31 @@ describe('manga listing: one work = one card', () => {
     noteEditionChapters(`${P}.all.mangadex`, `/manga/${LONELY}`, 3);
     const back = await browse({ kind: 'popular' });
     expect(back.items.some((w) => w.title.english === 'Iphak Yongbyeong')).toBe(true);
+  });
+
+
+  it('merges differently named editions on the first page, even while shipped aliases are still loading', async () => {
+    engine.popular.mockImplementation(async (id) => ({
+      mangas: id.endsWith('.mangalek')
+        ? [{ title: 'Demonic Emperor', url: '/demonic-emperor' }]
+        : id.endsWith('.mangaswat')
+          ? [{ title: 'Magic Emperor', url: '/magic-emperor' }]
+          : [],
+      hasNextPage: false,
+    }));
+    let aliasLoads = 0;
+    vi.stubGlobal('fetch', async (url) => {
+      if (String(url).includes('/data/manga-aliases.json')) {
+        aliasLoads++;
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return { ok: true, json: async () => ({ aliases: { 'demonic emperor': ['Magic Emperor'] } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    const { items } = await browse({ kind: 'popular' });
+    expect(aliasLoads).toBe(1);
+    expect(items).toHaveLength(1);
+    expect(items[0]._work.editions.map((edition) => edition.sourceId.split('.').pop()).sort()).toEqual(['mangalek', 'mangaswat']);
   });
 
   it('MangaDex unreachable: the listing still renders, never merges by guessing', async () => {
