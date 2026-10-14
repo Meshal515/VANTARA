@@ -54,7 +54,7 @@ export function startDesktopDefaultAddons({ runtime, onStatus = () => {}, timeou
     return write;
   };
   const existing = (provider, manifestId = provider.manifestId, exceptKey) => registry.list().find(row =>
-    !row.bundled && row.key !== exceptKey && (row.id === manifestId || row.key?.startsWith(`${new URL(provider.url).origin}|`)));
+    !row.bundled && row.key !== exceptKey && row.id === manifestId);
   const ownedBundle = provider => {
     const info = bundles[provider.id];
     if (!info || provider.id !== 'torrentio') return null;
@@ -97,6 +97,7 @@ export function startDesktopDefaultAddons({ runtime, onStatus = () => {}, timeou
         preview = rows[0].preview;
       }
       clearTimeout(timer);
+      if (preview.manifest.id !== provider.manifestId) throw new Error('هوية الإضافة لا تطابق المزود');
       if (preview.manifest.configuration?.required && !preview.manifest.configuration.configured) {
         emit(provider, 'setup', provider.configureUrl ? { configureUrl: provider.configureUrl } : {});
         return;

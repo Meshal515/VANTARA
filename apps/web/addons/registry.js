@@ -35,7 +35,20 @@ export function createAddonRegistry({
   let sessions = 0,
     profileKey = "local";
   const pins = new Map();
-  const pinned = (key) => pins.get(JSON.stringify([profileKey, key])) ?? false;
+  const pinned = (key) => {
+    const current = pins.get(JSON.stringify([profileKey, key]));
+    if (current !== undefined) return current;
+    return (entries.get(key)?.formerKeys ?? []).some(old => pins.get(JSON.stringify([profileKey, old])) === true);
+  };
+  function safeFormerKey(value, id) {
+    if (typeof value !== "string") return false;
+    const split = value.indexOf("|");
+    try { return value === `${publicUrl(value.slice(0, split)).origin}|${id}`; } catch { return false; }
+  }
+  function resolveKey(key) {
+    if (entries.has(key)) return key;
+    return [...entries.values()].find(row => row.formerKeys?.includes(key))?.manifest.key ?? key;
+  }
   const ready = (async () => {
     const savedPins = await store
       .get("state", "addons.pins.v1")
@@ -65,6 +78,7 @@ export function createAddonRegistry({
           entries.set(checked.manifest.key, {
             ...row,
             manifest: checked.manifest,
+            formerKeys: (Array.isArray(row.formerKeys) ? row.formerKeys.slice(-50) : []).filter(value => safeFormerKey(value, checked.manifest.id)),
           });
       } catch {
         /* سجل إضافة تالف لا يعطل core */
@@ -151,13 +165,16 @@ export function createAddonRegistry({
     }));
     return results;
   }
-  function install(preview, { replace = true, expectedCacheEpoch } = {}) {
+  function install(preview, { replace = true, expectedCacheEpoch, replaceKey } = {}) {
     return mutate(async () => {
       const hidden = previews.get(preview);
       if (!hidden) throw new Error("عاين الإضافة أولًا");
       const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
       if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
-      const m = checked.manifest, before = entries.get(m.key);
+      const m = checked.manifest, target = entries.get(m.key), before = replaceKey ? row(replaceKey) : target;
+      if (replaceKey && before.manifest.id !== m.id) throw new Error("هوية الإضافة مختلفة عن الإعداد المراد استبداله");
+      if (replaceKey && target && target !== before) throw new Error("يوجد إعداد مثبت على هذا المضيف؛ راجعه قبل الاستبدال");
+      const beforeKey = before?.manifest.key, moved = beforeKey && beforeKey !== m.key;
       if (expectedCacheEpoch !== undefined && before?.cacheEpoch !== expectedCacheEpoch) {
         previews.delete(preview);
         return null;
@@ -176,13 +193,16 @@ export function createAddonRegistry({
         manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url,
         enabled: before?.enabled ?? true, installedAt: before?.installedAt ?? clock(),
         cacheEpoch: crypto.randomUUID(), staged: null,
-        previous: before ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+        previous: before && !moved ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+        formerKeys: before ? [...new Set([...(before.formerKeys ?? []), ...(moved ? [beforeKey] : [])])].filter(key => key !== m.key).slice(-50) : [],
       };
+      if (moved) entries.delete(beforeKey);
       entries.set(m.key, next);
       try { await save(); }
-      catch (e) { if (before) entries.set(m.key, before); else entries.delete(m.key); throw e; }
+      catch (e) { entries.delete(m.key); if (before) entries.set(beforeKey, before); throw e; }
       previews.delete(preview);
       health.reset(m.key);
+      if (moved) health.reset(beforeKey);
       return view(next);
     });
   }
@@ -193,14 +213,14 @@ export function createAddonRegistry({
     return new URL('/configure', new URL(r.url).origin).href;
   }
   function row(key) {
-    const r = entries.get(key);
+    const r = entries.get(resolveKey(key));
     if (!r) throw new Error("إضافة خارجية غير مثبتة");
     return r;
   }
   function pin(key, value) {
     const pinKey = JSON.stringify([profileKey, key]);
     return mutate(async () => {
-      if (!entries.has(key) && !coreAdapters.some((c) => c.key === key)) throw new Error("الإضافة غير موجودة");
+      if (!entries.has(resolveKey(key)) && !coreAdapters.some((c) => c.key === key)) throw new Error("الإضافة غير موجودة");
       const before = pins.get(pinKey);
       pins.set(pinKey, Boolean(value));
       try {
@@ -217,6 +237,7 @@ export function createAddonRegistry({
   }
   function remove(key) {
     return mutate(async () => {
+      key = resolveKey(key);
       const before = row(key);
       entries.delete(key);
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
@@ -237,6 +258,8 @@ export function createAddonRegistry({
   }
   function activateStaged(key) {
     return mutate(async () => {
+      key = resolveKey(key);
+      key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.staged) return false;
       const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
@@ -252,6 +275,7 @@ export function createAddonRegistry({
   }
   function rollback(key) {
     return mutate(async () => {
+      key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
       const prev = r.previous;
@@ -302,6 +326,7 @@ export function createAddonRegistry({
     rollback,
     snapshot,
     connection,
+    resolveKey,
     health,
   };
 }

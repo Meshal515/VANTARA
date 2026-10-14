@@ -9,6 +9,8 @@
  * وعند غيابه (متصفح خاص) يعمل كل شيء بلا كاش — أبطأ لا أقل.
  */
 
+import { refsOf } from './manga-alias-store.js';
+
 const DB = 'vantara-chapters';
 const STORE = 'works';
 const MAX_WORKS = 200;
@@ -55,8 +57,31 @@ function run(mode, fn, store = STORE) {
 }
 
 /** @returns {Promise<{ editions: object[], detail: object|null, at: number, discoveredAt: number }|null>} */
-export function readWork(id) {
-  return run('readonly', (s) => s.get(id)).catch(() => null);
+export async function readWork(id) {
+  const caches = (await Promise.all(refsOf(id).map((ref) => run('readonly', (s) => s.get(ref)).catch(() => null)))).filter(Boolean);
+  if (caches.length < 2) return caches[0] ?? null;
+  const editions = new Map();
+  for (const cached of caches) for (const edition of cached.editions ?? []) {
+    const key = JSON.stringify([edition.sourceId, edition.manga?.url ?? '']);
+    const prior = editions.get(key);
+    if (!prior) { editions.set(key, edition); continue; }
+    const chapters = new Map();
+    // The current reference wins duplicate chapter metadata; former caches
+    // complete gaps while every original IndexedDB entry stays untouched.
+    for (const chapter of [...(prior.chapters ?? []), ...(edition.chapters ?? [])]) {
+      const identity = chapter.url || JSON.stringify([chapter.chapterNumber, chapter.name]);
+      if (!chapters.has(identity)) chapters.set(identity, chapter);
+    }
+    editions.set(key, { ...edition, ...prior, manga: { ...edition.manga, ...prior.manga }, chapters: [...chapters.values()] });
+  }
+  return {
+    ...caches[caches.length - 1], ...caches[0],
+    editions: [...editions.values()],
+    detail: caches.find((c) => c.detail)?.detail ?? null,
+    // An older contributing cache must still trigger the usual refresh.
+    at: Math.min(...caches.map((c) => c.at ?? 0)),
+    discoveredAt: Math.min(...caches.map((c) => c.discoveredAt ?? 0)),
+  };
 }
 
 export async function writeWork(id, value) {

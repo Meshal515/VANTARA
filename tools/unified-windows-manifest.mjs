@@ -5,12 +5,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { validateStableManifest } from './release-manifest-validation.mjs';
 
 export function joinDesktopRelease(manifest, { installerPath, baseUrl, version } = {}) {
-  if (!manifest || manifest.format !== 2 ||
-      !Number.isSafeInteger(manifest.versionCode) || manifest.versionCode < 1 ||
-      !/^\d+\.\d+\.\d+$/.test(manifest.versionName ?? '') ||
-      !manifest.apk?.sha256 || !manifest.web?.sha256) throw new Error('بيان APK/الويب غير صالح');
+  validateStableManifest(manifest);
   if (version !== manifest.versionName) throw new Error('نسخة ويندوز لا تطابق إصدار Android');
   const name=basename(installerPath ?? '');
   if (name !== `VANTARA-${version}-Windows-x64-Setup.exe`) throw new Error('اسم مثبت ويندوز غير مطابق');

@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
 const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
 const { firstPartyRequest } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
+const { createVideoHost } = require('./video-host.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 app.setName('VANTARA');
@@ -18,14 +19,19 @@ const profileReady=portable?migratePortableProfile(previousProfile,portableProfi
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
 let window;
 let services;
+let videoHost;
+let playbackSession=null;
 let quitting = false;
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
 const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
+const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
+  if(event.type==='playback/preparing')playbackSession=event.session;
+  if(['playback/closed','playback/error'].includes(event.type)&&event.session===playbackSession)playbackSession=null;
   if (window && !window.isDestroyed()) window.webContents.send('vantara:event', event);
 }
 
@@ -62,7 +68,7 @@ function openSettings(url) {
 
 function register(channel, handler) {
   ipcMain.handle(`vantara:${channel}`, (event, args) => {
-    if (event.sender !== window?.webContents || !isAppFrame(event.senderFrame?.url)) throw new Error('هذا الطلب ليس من VANTARA المحلي');
+    if (event.sender !== window?.webContents || event.senderFrame !== window?.webContents.mainFrame || !isAppFrame(event.senderFrame?.url)) throw new Error('هذا الطلب ليس من VANTARA المحلي');
     return handler(args);
   });
 }
@@ -80,10 +86,18 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     } catch { return new Response('الملف غير موجود', { status: 404 }); }
   });
   const { createDesktopServices } = await import('./src/services.mjs');
+  if(process.platform==='win32')videoHost=createVideoHost({
+    getWindow:()=>window,
+    executable:process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),
+    scaleFactor:bounds=>screen.getDisplayMatching(bounds).scaleFactor,
+    onFailure:session=>{publish({type:'playback/error',session,message:'أغلقت نافذة الفيديو المدمجة؛ اختر مصدرًا من جديد'});void services?.stopPlayback({session});},
+  });
   services = createDesktopServices({
     userData: app.getPath('userData'),
     binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
     platform: process.platform,
+    videoHost,
+    inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
@@ -99,12 +113,21 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     return true;
   });
   register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
-  register('show-app',()=>{window.show();window.focus();return true;});
-  register('show-player',()=>{window.minimize();return true;});
+  register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
+  register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
+  register('player-viewport',args=>videoHost?.viewport(args)??false);
+  register('player-fullscreen',({enabled}={})=>{if(typeof enabled!=='boolean')throw new Error('طلب ملء الشاشة غير صالح');window.setFullScreen(enabled);return true;});
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: path.join(assets, 'icons/icon-512.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+  });
+  window.on?.('resize',()=>videoHost?.resize());
+  window.on?.('move',()=>videoHost?.resize());
+  window.on?.('minimize',()=>videoHost?.hide());
+  window.on?.('restore',()=>videoHost?.show());
+  window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{
+    if(isMainFrame){videoHost?.hide();if(playbackSession)void services.stopPlayback({session:playbackSession});}
   });
   window.webContents.session?.webRequest?.onHeadersReceived?.({urls:['https://vantara-sync.ngm-309.workers.dev/*']},(details,callback)=>{
     const headers=Object.fromEntries(Object.entries(details.responseHeaders??{}).filter(([key])=>key.toLowerCase()!=='access-control-allow-origin'));
@@ -138,6 +161,13 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     ] },
     { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', role: 'togglefullscreen' }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
   ]));
+  if(videoReportOption){
+    if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');
+    const fixtureOption=process.argv.find(x=>x.startsWith('--native-video-smoke-fixture='));
+    if(!fixtureOption)throw new Error('إثبات الفيديو يحتاج fixture مؤلفًا');
+    await require('./video-smoke.cjs').runEmbeddedVideoSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-video-smoke-fixture='.length),reportPath:videoReportOption.slice('--native-video-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
+    app.quit();return;
+  }
   await window.loadURL('vantara://app/index.html');
   if (reportOption) {
     setTimeout(async () => {

@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: android-stable-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CF_PAGES_PROJECT: vantara
@@ -224,9 +224,35 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" \
-            dist/VANTARA-stable.apk dist/VANTARA-web.zip dist/vantara-update.json \
-            --target "$HEAD_SHA" \
-            --title "VANTARA $VERSION_NAME" \
-            --notes "النسخة المستقرة من main. التطبيق يجدها وحده من «يوجد تحديث جديد»." \
-            --latest
+          # Stage assets in a draft; a retry recovers a partially uploaded release.
+          # GITHUB_TOKEN publication does not emit release:published to other workflows.
+          # The Windows companion consumes this workflow's successful workflow_run.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > "$RUNNER_TEMP/release-state.json"; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$HEAD_SHA" \
+              --title "VANTARA $VERSION_NAME" --draft \
+              --notes "النسخة المستقرة من main. التطبيق يجدها وحده من «يوجد تحديث جديد»."
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > "$RUNNER_TEMP/release-state.json"
+          fi
+          target=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')
+          test "$target" = "$HEAD_SHA" || { echo 'Stable tag belongs to another commit'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/published"
+          if jq -e '.isDraft == false' "$RUNNER_TEMP/release-state.json" >/dev/null; then
+            # Never erase a previously joined Windows entry on an Android rerun.
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/published" \
+              --pattern 'VANTARA-stable.apk' --pattern 'VANTARA-web.zip' --pattern 'vantara-update.json'
+            cmp dist/VANTARA-stable.apk "$RUNNER_TEMP/published/VANTARA-stable.apk"
+            cmp dist/VANTARA-web.zip "$RUNNER_TEMP/published/VANTARA-web.zip"
+            jq -S 'del(.desktop)' dist/vantara-update.json > "$RUNNER_TEMP/local-manifest.json"
+            jq -S 'del(.desktop)' "$RUNNER_TEMP/published/vantara-update.json" > "$RUNNER_TEMP/remote-manifest.json"
+            cmp "$RUNNER_TEMP/local-manifest.json" "$RUNNER_TEMP/remote-manifest.json"
+            echo 'Published release already matches; preserving all platforms.'
+            exit 0
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/VANTARA-stable.apk dist/VANTARA-web.zip dist/vantara-update.json dist/VANTARA-stable.apk.sha256
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/published" \
+            --pattern 'VANTARA-stable.apk' --pattern 'VANTARA-web.zip' --pattern 'vantara-update.json'
+          node tools/release-manifest-validation.mjs "$RUNNER_TEMP/published/vantara-update.json" \
+            "$RUNNER_TEMP/published/VANTARA-stable.apk" "$RUNNER_TEMP/published/VANTARA-web.zip"
+          cmp dist/vantara-update.json "$RUNNER_TEMP/published/vantara-update.json"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

@@ -65,3 +65,30 @@ describe('web Together player uses Android room protocol', () => {
     now=1700;vi.advanceTimersByTime(400);expect(f.video.paused).toBe(true);expect(f.video.currentTime).toBe(3);f.bridge.destroy();
   });
 });
+
+it('keeps a participant offset through pause/seek, reports room time and bounds the local target',()=>{
+  vi.useFakeTimers(); const f=fixture(true,{started:true,playing:false,pos:40000,seq:1}); f.bridge.ready();
+  expect(typeof f.bridge.setVideoOffset).toBe('function');
+  f.bridge.setVideoOffset(30000); expect(f.video.currentTime).toBe(70); expect(f.room.command).not.toHaveBeenCalled();
+  expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({pos:40000,driftMs:0}));
+  f.bridge.seek(90000); expect(f.room.command).toHaveBeenLastCalledWith('seek',{pos:60000});
+  f.bridge.playPause(false); expect(f.room.command).toHaveBeenLastCalledWith('pause',{pos:40000});
+  f.receive({...f.room.timeline,pos:1190000,seq:2}); expect(f.video.currentTime).toBe(1200);
+  expect(f.bridge.setVideoOffset(121000)).toBe(false);
+  f.bridge.setVideoOffset(-120000); f.receive({...f.room.timeline,pos:10000,seq:3}); expect(f.video.currentTime).toBe(0);
+  f.receive({...f.room.timeline,media:{key:'anime:42#2',kind:'anime'},seq:4});
+  expect(f.hooks.onLobby.mock.lastCall[0].videoOffsetMs).toBe(0); f.bridge.destroy();
+});
+
+it('keeps a shifted playing participant at normal rate on periodic drift checks',()=>{
+  vi.useFakeTimers();const f=fixture(false,{started:true,playing:true,pos:40000,seq:1});
+  f.bridge.ready();f.bridge.setVideoOffset(30000);vi.advanceTimersByTime(12000);
+  expect(f.video.currentTime).toBe(70);expect(f.video.playbackRate).toBe(1);expect(f.room.command).not.toHaveBeenCalled();f.bridge.destroy();
+});
+
+it('ignores a source ready callback arriving after the player has been destroyed',()=>{
+  vi.useFakeTimers();const f=fixture(false,{started:true,playing:true,pos:40000,seq:1});
+  f.bridge.destroy();f.room.report.mockClear();f.hooks.onLobby.mockClear();f.video.play.mockClear();
+  f.bridge.ready();f.bridge.preparing();f.bridge.failed();
+  expect(f.video.currentTime).toBe(0);expect(f.video.play).not.toHaveBeenCalled();expect(f.room.report).not.toHaveBeenCalled();expect(f.hooks.onLobby).not.toHaveBeenCalled();expect(vi.getTimerCount()).toBe(0);
+});

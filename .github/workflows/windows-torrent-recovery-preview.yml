@@ -12,11 +12,28 @@ env:
   VERSION: 0.1.0-preview.6
   TAG: windows-v0.1.0-preview.6
 jobs:
+  video-host:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile embedded video host
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
   build:
+    needs: video-host
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-video-host
+          path: ${{ runner.temp }}/video-host
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
@@ -43,7 +60,7 @@ jobs:
           p=pathlib.Path('apps/desktop/windows.nsi');s=p.read_text();s=re.sub(r'VIProductVersion "[^"]+"','VIProductVersion "0.1.0.6"',s,count=1);s=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);s=re.sub(r'("DisplayVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);p.write_text(s)
           p=pathlib.Path('apps/web/lib/config.js');p.write_text(p.read_text().replace('__VANTARA_VERSION__',v))
           PY
-          node tools/build-windows.mjs --output="$RUNNER_TEMP/windows"
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --output="$RUNNER_TEMP/windows"
           test -s "$RUNNER_TEMP/windows/VANTARA-$VERSION-Windows-x64-Setup.exe"
           (cd "$RUNNER_TEMP/windows" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4

@@ -19,7 +19,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -396,7 +396,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
       ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
     ]);
-    return [...refs]
+    const cards = [...refs]
       .map((ref) => {
         const row = libraryRows().find((r) => r.series_ref === ref);
         const col = sync.rows('collections', (r) => r.user_id === me() && r.series_ref === ref)[0];
@@ -415,6 +415,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return true;
       })
       .map(({ work }) => work);
+    return mergeWorkPages(cards);
   }
   const descriptorOf = (w) => ({
     seriesRef: String(w.id),
@@ -770,8 +771,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
     // عدة فصول نزلت للعمل: بطاقة واحدة ورقم خفيف بعددها
-    const more = work._newCount > 1 ? ` +${work._newCount}` : '';
-    return work._updateAt ? `${label}${more} · ${agoAr(work._updateAt)}` : label + more;
+    const more = work._newCount > 1 ? ` +${work._newCount - 1}` : '';
+    const when = work._updatePublishedAt > 0 ? agoAr(work._updateAt) : `رُصد ${agoAr(work._updateAt)}`;
+    return work._updateAt ? `${label}${more} · ${when}` : label + more;
   }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
@@ -909,7 +911,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   };
   const recentFromLatest = (fresh, previous) =>
-    uniqueById([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
+    mergeWorkPages([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
   let latestJob = null;
   let latestResult = null;
   let latestPartial = null;
@@ -1299,7 +1301,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
         const { items } = await browse({ query: titleOf(work), keepWestern: true });
-        const found = items.find((w) => w.id === work.id) ?? items.find((w) => titlesMatch(titleOf(w), titleOf(work)));
+        const found = matchingWork(items, work);
         if (found && state.current === work) {
           // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
           const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
@@ -3005,7 +3007,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     // غلاف الحدث مرشّحٌ دائمًا بعد غلاف العمل: غلافٌ محفوظ قديم لا يُسقط البطاقة إلى حرف
     if (g.cover && base.bannerImage !== g.cover && !coverCandidates(base).some((c) => c.url === g.cover)) base.bannerImage = g.cover;
-    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _newCount: g.events?.length ?? 1 };
+    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _updatePublishedAt: g.publishedAt, _newCount: g.events?.length ?? 1 };
   }
   function openUpdate(g) {
     if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });

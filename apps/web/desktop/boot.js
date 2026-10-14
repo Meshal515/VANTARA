@@ -4,6 +4,7 @@ import { getRuntime as runtimeFor } from './runtime.js';
 import { startDesktopDefaultAddons } from './default-addons.js';
 import { installFirstPartyTransport } from './first-party.js';
 import { startDesktopUpdateWatch } from './update-check.js';
+import { installDesktopPlayer } from './player.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -43,6 +44,7 @@ export function installDesktopBridges(g = globalThis) {
   const getRuntime = () => runtimeFor(g);
   installFirstPartyTransport(g);
   const engine = createDesktopEngine({ bridge: g.VantaraDesktop, getRuntime });
+  installDesktopPlayer({g,bridge:g.VantaraDesktop,engine});
   let modules;
   const ExtensionEngine=new Proxy({}, {get(_,method){if(method==='then')return undefined;return async args=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;

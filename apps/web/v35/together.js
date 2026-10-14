@@ -490,6 +490,8 @@ export function createTogether(deps) {
 export function readerBridge(session, { seriesRef, onFollow }) {
   const room = session.room;
   let current = null;
+  let destroyed = false;
+  let welcomeTimer = null;
   let sentAt = 0;
   let timer = null;
   let trailing = null;
@@ -505,11 +507,12 @@ export function readerBridge(session, { seriesRef, onFollow }) {
 
   const offState = room.on('state', ({ state, by }) => apply(state, by));
   function apply(state, by) {
-    if (!state || !synced() || room.isHost || by === room.me) return;
+    if (destroyed || !state || !synced() || room.isHost || by === room.me) return;
+    if (!Number.isFinite(state.seq) || !Number.isFinite(state.pos) || state.media?.kind !== 'manga' || !state.media.key?.startsWith(`manga:${seriesRef}#`)) return;
     if (state.seq <= lastAppliedSeq) return;
-    lastAppliedSeq = state.seq;
     const chapter = /#([^#]+)$/.exec(state.media?.key ?? '')?.[1];
-    if (chapter == null) return;
+    if (chapter == null || !Number.isFinite(Number(chapter))) return;
+    lastAppliedSeq = state.seq;
     onFollow({ chapter: Number(chapter), index: Math.max(0, state.pos) });
   }
   const offWelcome = room.on('welcome', (w) => { if (!room.isHost) apply(w.state, null); });
@@ -517,13 +520,14 @@ export function readerBridge(session, { seriesRef, onFollow }) {
 
   // القراءة لا غرفة انتظار لها: أول صفحة عند المضيف تبدأ الغرفة
   const ensureStarted = () => {
-    if (room.isHost && current && room.timeline && !room.timeline.started) room.command('play', { pos: current.index });
+    if (!destroyed && room.isHost && current && room.timeline && !room.timeline.started) room.command('play', { pos: current.index });
   };
-  const offLive = room.on('welcome', () => setTimeout(ensureStarted, 0));
+  const offLive = room.on('welcome', () => { clearTimeout(welcomeTimer); welcomeTimer = setTimeout(ensureStarted, 0); });
 
   return {
     /** موضع قراءة مستمر. المضيف يحرّك الغرفة بحد إرسال كل 80ms. */
     page({ chapter, label, index, pages, source }) {
+      if (destroyed || !Number.isFinite(chapter) || !Number.isFinite(index)) return;
       const changedChapter = current?.chapter !== chapter;
       current = { chapter, label, index, pages, source };
       ensureStarted();
@@ -549,15 +553,15 @@ export function readerBridge(session, { seriesRef, onFollow }) {
     /** أين يبدأ القارئ: صفحة المضيف إن كانت الغرفة متزامنة وبدأت، وإلا null (فصل الدعوة). */
     initial() {
       const t = room.timeline;
-      if (!t || !synced() || room.isHost || !t.started) return null;
+      if (!t || !synced() || room.isHost || !t.started || !Number.isFinite(t.pos) || t.media?.kind !== 'manga' || !t.media.key?.startsWith(`manga:${seriesRef}#`)) return null;
       const chapter = /#([^#]+)$/.exec(t.media?.key ?? '')?.[1];
-      if (chapter == null) return null;
+      if (chapter == null || !Number.isFinite(Number(chapter))) return null;
       lastAppliedSeq = t.seq;
       return { chapter: Number(chapter), index: Math.max(0, t.pos) };
     },
     preparing() { report('preparing'); },
     failed(source) { if (current) current.source = source; report('failed'); },
-    destroy() { clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); offMode(); report('paused'); },
+    destroy() { if (destroyed) return; destroyed = true; clearTimeout(welcomeTimer); clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); offMode(); report('paused'); },
   };
 }
 

@@ -6,13 +6,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/extension-engine.js', () => ({
-  default: { sources: vi.fn(), popular: vi.fn(), catalogue: vi.fn(), chapters: vi.fn(), isAvailable: () => true },
+  default: { sources: vi.fn(), popular: vi.fn(), catalogue: vi.fn(), chapters: vi.fn(), search: vi.fn(), series: vi.fn(), isAvailable: () => true },
 }));
 
 import engine from '../lib/extension-engine.js';
 import { _reset, noteEditionChapters } from '../lib/manga-evidence.js';
-import { _reset as resetAliases } from '../lib/manga-alias-store.js';
-import { browse, mergeWorkPages, resetSources } from './works.js';
+import { _reset as resetAliases, refsOf } from '../lib/manga-alias-store.js';
+import { browse, describe as describeWork, discoverEditions, mergeWorkPages, resetSources, toV35Work } from './works.js';
 
 const P = 'eu.kanade.tachiyomi.extension';
 const DEX = '53f1ec5e-058b-4d18-a23b-2a7dbca5669f';
@@ -60,6 +60,108 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('manga listing: one work = one card', () => {
+  const card = (sourceId, title, url, extra = {}) => toV35Work({
+    key: title.toLowerCase(), title, editions: [{ sourceId, label: sourceId, manga: { title, url, ...extra } }],
+  });
+
+  it('keeps late alias evidence from the same source edition instead of discarding its second appearance', () => {
+    const first = card('ar.a', 'Magic Emperor', '/magic');
+    const other = card('ar.b', 'Demonic Emperor', '/demonic');
+    const enriched = card('ar.a', 'Magic Emperor', '/magic', { altNames: ['Demonic Emperor'], thumbnailUrl: '/cover.jpg' });
+    const merged = mergeWorkPages([first, other, enriched]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]._work.editions).toHaveLength(2);
+    expect(merged[0].coverImage.large).toBe('/cover.jpg');
+  });
+
+  it('a thinner refreshed edition does not erase the already loaded cover', () => {
+    const known = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: '/known-cover.jpg' });
+    const fresh = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: null });
+    const [merged] = mergeWorkPages([known, fresh]);
+    expect(merged.coverImage.large).toBe('/known-cover.jpg');
+  });
+
+  it('merged saved library cards retain every former reference and their first position', () => {
+    const saved = card('ar.a', 'Magic Emperor', '/magic', { altNames: ['Demonic Emperor'] });
+    saved.id = 'ext:former canonical name';
+    const unrelated = { id: 'anime:12', title: { english: 'Other content' } };
+    const other = card('ar.b', 'Demonic Emperor', '/demonic');
+    const merged = mergeWorkPages([saved, unrelated, other]);
+    expect(merged.map((w) => w.id)).toEqual(['ext:demonic emperor', 'anime:12']);
+    expect(refsOf(merged[0].id)).toEqual(expect.arrayContaining(['ext:former canonical name', 'ext:magic emperor', 'ext:demonic emperor']));
+    expect(merged[0]._work.editions).toHaveLength(2);
+  });
+
+  it('merges a thousand works with five sources without writing the full reference graph per edition', () => {
+    const data = new Map();
+    let writes = 0;
+    vi.stubGlobal('localStorage', { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { writes++; data.set(key, value); } });
+    resetAliases();
+    const cards = Array.from({ length: 1000 }, (_, i) => Array.from({ length: 5 }, (_, s) =>
+      card(`source.${s}`, s === 0 ? `Saga Hero ${i}` : `قصة بطل ${i}`, `/work/${i}`, s === 0 ? { altNames: [`قصة بطل ${i}`] } : {})
+    )).flat();
+    const merged = mergeWorkPages(cards);
+    expect(merged).toHaveLength(1000);
+    expect(merged.every((w) => w._work.editions.length === 5)).toBe(true);
+    const persisted = JSON.parse(data.get('vantara.manga.refAliases.v1'));
+    expect(Object.values(persisted).flat()).toHaveLength(2000);
+    expect(writes).toBeLessThanOrEqual(2);
+  });
+
+  it('preserves chapter editions and detail facts when a saved work merges with a later page', () => {
+    const first = card('ar.a', 'Magic Emperor', '/magic', { altNames: ['Demonic Emperor'] });
+    const chapters = [{ name: 'Chapter 1', chapterNumber: 1, url: '/c/1' }];
+    Object.assign(first, { chapters: 1, description: 'Story', _editions: [{ ...first._work.editions[0], chapters }] });
+    const [merged] = mergeWorkPages([first, card('ar.b', 'Demonic Emperor', '/demonic')]);
+    expect(merged.description).toBe('Story');
+    expect(merged.chapters).toBe(1);
+    expect(merged._editions[0].chapters).toEqual(chapters);
+  });
+
+  it('preserves chapters from repeated detailed appearances of the same source edition', () => {
+    const first = card('ar.a', 'Magic Emperor', '/magic');
+    const next = card('ar.a', 'Magic Emperor', '/magic');
+    const chapters = (numbers) => numbers.map((n) => ({ name: `Chapter ${n}`, chapterNumber: n, url: `/c/${n}` }));
+    first._editions = [{ ...first._work.editions[0], chapters: chapters([1, 2]) }];
+    next._editions = [{ ...next._work.editions[0], chapters: chapters([2, 3]) }];
+    const [merged] = mergeWorkPages([first, next]);
+    expect(merged._editions).toHaveLength(1);
+    expect(merged._editions[0].chapters.map((c) => c.chapterNumber).sort()).toEqual([1, 2, 3]);
+    expect(merged.chapters).toBe(3);
+  });
+
+  it('does not substitute a related spinoff when looking up a saved work description', async () => {
+    const work = { id: 'ext:the return of legendary sword master', title: { english: 'The Return Of Legendary Sword Master' } };
+    engine.sources.mockResolvedValue([{ id: 'ar.a' }]);
+    engine.search.mockResolvedValue({ mangas: [{ title: 'The Return Of Legendary Sword Master Reborn', url: '/spinoff' }] });
+    engine.series.mockResolvedValue({ manga: { description: 'A different story' }, chapters: [] });
+    expect(await describeWork(work)).toBe(work);
+  });
+
+  it('recovers a saved English title from an Arabic source with explicit URL slug evidence', async () => {
+    const work = { id: 'ext:the regressed mercenary s machinations', title: { english: 'The Regressed Mercenary’s Machinations' } };
+    engine.sources.mockResolvedValue([{ id: 'ar.a' }]);
+    engine.search.mockResolvedValue({ mangas: [{ title: 'المرتزق العائد لديه خطة', url: '/manhwa/the-regressed-mercenarys-machinations' }] });
+    engine.series.mockResolvedValue({ manga: { description: 'The correct story' }, chapters: [] });
+    expect((await describeWork(work)).description).toBe('The correct story');
+  });
+
+  it('does not discover a spinoff by an eighty-percent name overlap', async () => {
+    const first = card('ar.a', 'The Return Of The Legendary Sword Master', '/main');
+    engine.sources.mockResolvedValue([{ id: 'ar.a' }, { id: 'ar.b' }]);
+    engine.search.mockResolvedValue({ mangas: [{ title: 'The Return Of The Legendary Sword Master Reborn', url: '/spinoff' }] });
+    expect(await discoverEditions(first)).toEqual([]);
+  });
+
+  it('rejects ambiguous source search results instead of adopting the first matching alternate title', async () => {
+    const first = card('ar.a', 'Iron Blooded Hunter Returns', '/main', { altNames: ['Iron Blooded Hunter Return'] });
+    engine.sources.mockResolvedValue([{ id: 'ar.a' }, { id: 'ar.b' }]);
+    engine.search.mockResolvedValue({ mangas: [
+      { title: 'Iron Blooded Hunter Returns', url: '/one' },
+      { title: 'Iron Blooded Hunter Return', url: '/two' },
+    ] });
+    expect(await discoverEditions(first)).toEqual([]);
+  });
   it('the four cards of The Regressed Mercenary are one card with every source', async () => {
     const { items } = await browse({ kind: 'popular' });
     const mercenary = items.filter((w) => w._work.editions.some((e) => /mercenary|المرتزق|hoegwihan/i.test(e.manga.title)));

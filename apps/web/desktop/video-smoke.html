@@ -1,0 +1,10 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>VANTARA · إثبات الفيديو المدمج</title><style>body{margin:0;font-family:Arial;background:#08080a}</style></head><body>
+<script type="module">
+import {installDesktopPlayer} from './player.js';
+const bridge=window.VantaraDesktop;
+installDesktopPlayer({bridge,engine:{
+ playerCommand:args=>bridge.playbackCommand(args),closeSession:args=>bridge.stopPlayback(args),
+ playerState:async()=>({candidate:'owned',sources:[{id:'owned',label:'فيديو مؤلف للتحقق'}]}),addListener:()=>({remove(){}}),
+}});
+window.VantaraVideoSmokeReady=true;
+</script></body></html>

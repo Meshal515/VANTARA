@@ -26,6 +26,26 @@ test('اختيار fileIdx صفر دقيق ولا يخمّن أكبر ملف', (
   assert.equal(selectTorrentFile([{name:'Sample/sample.mp4',length:10000},{name:'Movie.mkv',length:900000}],{}),1);
   assert.throws(()=>selectTorrentFile([{name:'S01E01.mkv',length:40000},{name:'S01E02.mkv',length:40000}],{}),/يلزم اختيار/);
 });
+test('اسم ملف صريح غير موجود أو ملتبس لا يتحول إلى فيلم آخر',()=>{
+  assert.throws(()=>selectTorrentFile([{name:'wrong.mkv',length:10}],{filename:'requested.mkv'}),/ملف/);
+  assert.equal(selectTorrentFile([{name:'A/episode.mkv',length:10},{name:'B/episode.mkv',length:10}],{filename:'B/episode.mkv'}),1);
+  assert.throws(()=>selectTorrentFile([{name:'A/episode.mkv',length:10},{name:'B/episode.mkv',length:10}],{filename:'episode.mkv'}),/ملف/);
+});
+test('mpv uses a trusted embedded HWND and releases it after process cleanup',async t=>{
+  let released=0;
+  const {dir,services}=await fixture(t,'normal',{videoHost:{acquire:async()=>({windowId:'123456',close:async()=>{released++;}})}});
+  await services.startPlayback({session:'embedded',candidate:{infoHash:hash,fileIdx:0}});
+  const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
+  assert.ok(args.includes('--wid=123456'));assert.ok(args.includes('--osc=no'));
+  await services.stopPlayback({session:'embedded'});assert.equal(released,1);
+});
+test('native stages describe metadata, one selected file, and first-frame decoding without URLs',async t=>{
+  const {services,events}=await fixture(t);
+  await services.startPlayback({session:'stages',candidate:{infoHash:hash,fileIdx:0}});
+  const stages=events.filter(e=>e.type==='playback/stage').map(e=>e.stage);
+  assert.ok(stages.includes('engine-start'));assert.ok(stages.includes('metadata'));assert.ok(stages.includes('file-selected'));assert.ok(stages.includes('first-frame'));
+  assert.ok(events.filter(e=>e.type==='playback/stage').every(e=>!JSON.stringify(e).includes('http')));
+});
 test('تعاد محاولات metadata على أخطاء مؤقتة فقط، وليس عند بيانات غير صالحة',()=>{
   assert.equal(retryableMetadataFailure({status:503}),true);
   assert.equal(retryableMetadataFailure({status:429}),true);

@@ -73,6 +73,7 @@ import java.io.IOException
 @CapacitorPlugin(name = "ExtensionEngine")
 class ExtensionEnginePlugin : Plugin() {
 
+    private val imageSlots = kotlinx.coroutines.sync.Semaphore(2)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
@@ -335,6 +336,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val chapter = chapterFrom(call.getObject("chapter"))
                 // Dilar وMangaDar يحتاجان إصلاح صفحاتٍ أثبته الـspike على الجهاز
                 val list = SourceCompatRepairs.loadPages(source, chapter)
+                pageImageCache.selectChapter(requireSourceId(call) + ":" + chapter.url, list.mapNotNull { it.imageUrl }.map(::digestOf).toSet())
                 val out = JSArray()
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("pages", out).put("count", list.size))
@@ -357,7 +359,7 @@ class ExtensionEnginePlugin : Plugin() {
      */
     @PluginMethod
     fun image(call: PluginCall) {
-        scope.launch {
+        scope.launch { imageSlots.withPermit {
             try {
                 val source = obtain(requireSourceId(call))
                 val asHttp = source as? HttpSource
@@ -383,12 +385,12 @@ class ExtensionEnginePlugin : Plugin() {
                             // (Referer/Origin/custom headers) and keep the
                             // streaming response alive until its body is read.
                             asHttp.getImage(page).use { res ->
-                                res.body.bytes() to res.header("content-type")
+                                res.body.byteStream().use { PageImageCache.read(it, res.body.contentLength()) } to res.header("content-type")
                             }
                         } else {
                             network.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
                                 require(res.isSuccessful) { "image HTTP ${res.code} ← $url" }
-                                res.body.bytes() to res.header("content-type")
+                                res.body.byteStream().use { PageImageCache.read(it, res.body.contentLength()) } to res.header("content-type")
                             }
                         }
                     }
@@ -406,12 +408,7 @@ class ExtensionEnginePlugin : Plugin() {
                     // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
                     // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
                     withContext(Dispatchers.IO) {
-                        val tmp = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.part")
-                        tmp.writeBytes(bytes)
-                        if (!tmp.renameTo(file)) {
-                            tmp.delete()
-                            if (!(file.isFile && file.length() == bytes.size.toLong())) error("cannot cache page image")
-                        }
+                        pageImageCache.write(file, bytes)
                     }
                 }
 
@@ -431,7 +428,7 @@ class ExtensionEnginePlugin : Plugin() {
             } catch (t: Throwable) {
                 call.reject(t.readable(), t.javaClass.name, t as? Exception)
             }
-        }
+        } }
     }
 
     /**
@@ -445,13 +442,13 @@ class ExtensionEnginePlugin : Plugin() {
      */
     @PluginMethod
     fun cover(call: PluginCall) {
-        scope.launch {
+        scope.launch { imageSlots.withPermit {
             try {
                 val url = call.getString("url")?.takeIf { it.startsWith("http") } ?: error("cover url is required")
                 val hit = withContext(Dispatchers.IO) { coverHit(url) }
                 if (hit != null) {
                     call.resolve(JSObject().put("path", hit.absolutePath).put("cached", true))
-                    return@launch
+                    return@withPermit
                 }
                 val sourceId = call.getString("sourceId")
                 val source = sourceId?.let { runCatching { obtain(it) }.getOrNull() } as? HttpSource
@@ -462,7 +459,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val (bytes, contentType) = withContext(Dispatchers.IO) {
                     client.newCall(request).execute().use { res ->
                         require(res.isSuccessful) { "cover HTTP ${res.code}" }
-                        res.body.bytes() to res.header("content-type")
+                        res.body.byteStream().use { PageImageCache.read(it, res.body.contentLength()) } to res.header("content-type")
                     }
                 }
                 require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
@@ -483,7 +480,7 @@ class ExtensionEnginePlugin : Plugin() {
             } catch (t: Throwable) {
                 call.reject(t.readable(), t.javaClass.name, t as? Exception)
             }
-        }
+        } }
     }
 
     private val coverDir by lazy {
@@ -546,7 +543,9 @@ class ExtensionEnginePlugin : Plugin() {
      * الامتداد يُقرَّر من نوع الاستجابة وقت التنزيل، فلا يُعرف وقت البحث في
      * الكاش. والبحث بالبادئة يجد الملف بلا أن نخمّن نوعه مرة ثانية.
      */
-    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 1024)
+    private val pageImageCache by lazy { PageImageCache(pageCacheDir) }
+
+    private fun cacheHit(url: String): java.io.File? = pageImageCache.find(digestOf(url), 1024)
 
     /**
      * الملف المحفوظ لرابط، بفحص مباشر لا بمسح المجلد: مسحُ آلاف الملفات عند
@@ -556,7 +555,7 @@ class ExtensionEnginePlugin : Plugin() {
         val digest = digestOf(url)
         for (ext in CACHE_EXTENSIONS) {
             val f = java.io.File(dir, "$digest.$ext")
-            if (f.isFile && f.length() > minBytes) return f
+            if (f.isFile && f.length() in (minBytes + 1)..PageImageCache.MAX_IMAGE_BYTES.toLong()) return f
         }
         return null
     }

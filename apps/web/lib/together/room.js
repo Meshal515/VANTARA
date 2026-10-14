@@ -90,19 +90,23 @@ export function joinRoom({
     const token = getToken();
     const url = `${baseUrl.replace(/^http/, 'ws')}/v1/together/rooms/${encodeURIComponent(code)}/ws`;
     setStatus(attempt ? 'reconnecting' : 'connecting');
-    ws = new WebSocketImpl(url, token ? [PROTOCOL, `bearer.${token}`] : [PROTOCOL]);
-    ws.onopen = () => {
+    const socket = new WebSocketImpl(url, token ? [PROTOCOL, `bearer.${token}`] : [PROTOCOL]);
+    ws = socket;
+    socket.onopen = () => {
+      if (closed || ws !== socket) return;
       attempt = 0;
       for (let i = 0; i < BURST; i++) later(ping, i * BURST_GAP_MS);
       const resync = () => { ping(); later(resync, RESYNC_MS); };
       later(resync, RESYNC_MS);
     };
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (closed || ws !== socket) return;
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       onMessage(msg);
     };
-    ws.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (closed || ws !== socket) return;
       clearPending();
       ws = null;
       if (closed) return;
@@ -131,13 +135,13 @@ export function joinRoom({
         roster = msg.roster ?? [];
         // تقدير أولي للساعة من رسالة الترحيب حتى تصل عينات ping
         if (!clock.ready && Number.isFinite(msg.now)) clock.sample(now(), msg.now, now());
-        acceptState(msg.state, true);
+        acceptState(msg.state);
         setStatus('live');
-        emit('welcome', msg);
+        emit('welcome', { ...msg, state: timeline });
         emit('roster', roster);
         return;
       case 'state':
-        acceptState(msg.state, false, msg.by);
+        acceptState(msg.state, msg.by);
         return;
       case 'roster':
         roster = msg.roster ?? [];
@@ -174,9 +178,9 @@ export function joinRoom({
     }
   }
 
-  function acceptState(state, force, by = null) {
-    if (!state) return;
-    if (!force && timeline && state.seq < timeline.seq) return;
+  function acceptState(state, by = null) {
+    if (!state || !Number.isFinite(state.seq) || !Number.isFinite(state.pos)) return;
+    if (timeline && state.seq <= timeline.seq) return;
     timeline = state;
     emit('state', { state, by });
   }

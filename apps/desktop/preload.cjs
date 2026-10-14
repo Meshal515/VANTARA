@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   requestFirstParty: call('request-first-party'),
   showApp:call('show-app'),
   showPlayer:call('show-player'),
+  playerViewport:call('player-viewport'),
+  playerFullscreen:call('player-fullscreen'),
   startPlayback: call('start-playback'),
   stopPlayback: call('stop-playback'),
   playbackCommand: call('playback-command'),

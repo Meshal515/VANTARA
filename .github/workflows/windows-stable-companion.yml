@@ -1,32 +1,90 @@
 name: VANTARA unified Windows stable releases
 on:
+  workflow_run:
+    workflows: ['Android stable APK']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stable_tag:
+        description: 'Published stable tag to recover (stable-N)'
+        required: true
+        type: string
   release:
     types: [published]
 permissions:
-  contents: write
+  contents: read
+  actions: read
 concurrency:
-  group: windows-stable-${{ github.event.release.tag_name }}
+  group: windows-stable-${{ github.event.release.tag_name || inputs.stable_tag || github.event.workflow_run.id }}
   cancel-in-progress: false
 jobs:
+  resolve:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Resolve only a published stable release from this repository
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.stable_tag }}
+        run: |
+          set -euo pipefail
+          tag=$(python3 - <<'PYCODE'
+          import json,os,re
+          event=json.load(open(os.environ['GITHUB_EVENT_PATH']))
+          kind=os.environ['GITHUB_EVENT_NAME']
+          tag=('stable-'+str(event['workflow_run']['run_number'])) if kind=='workflow_run' else (event['release']['tag_name'] if kind=='release' else os.environ['INPUT_TAG'])
+          assert re.fullmatch(r'stable-[1-9][0-9]*',tag), 'Invalid stable tag'
+          print(tag)
+          PYCODE
+          )
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease > "$RUNNER_TEMP/release.json"
+          jq -e '.isDraft == false and .isPrerelease == false' "$RUNNER_TEMP/release.json"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+  video-host:
+    needs: resolve
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+          fetch-depth: 0
+      - name: Require the release commit to belong to main before executing build code
+        shell: bash
+        run: |
+          git fetch origin main:refs/remotes/origin/main --force
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Compile the embedded Windows video host
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
   build:
-    if: ${{ startsWith(github.event.release.tag_name, 'stable-') && github.event.release.prerelease == false && github.event.release.draft == false }}
+    needs: [resolve, video-host]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.resolve.outputs.tag }}
           fetch-depth: 0
       - name: Validate stable tag and fetch Android update manifest
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           git fetch origin main:refs/remotes/origin/main --force
           git merge-base --is-ancestor HEAD origin/main
           mkdir -p "$RUNNER_TEMP/stable"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/stable" --pattern 'vantara-update.json'
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/stable" --pattern 'vantara-update.json' --pattern 'VANTARA-stable.apk' --pattern 'VANTARA-web.zip'
+          node tools/release-manifest-validation.mjs "$RUNNER_TEMP/stable/vantara-update.json" "$RUNNER_TEMP/stable/VANTARA-stable.apk" "$RUNNER_TEMP/stable/VANTARA-web.zip"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fx 'VANTARA-stable.apk'
           code="$(echo "$TAG" | sed 's/^stable-//')"
           test "$code" = "$(jq -r '.versionCode' "$RUNNER_TEMP/stable/vantara-update.json")"
@@ -37,6 +95,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - run: pnpm install --frozen-lockfile
       - name: Stamp the exact Android stable version into desktop
         run: |
           set -euo pipefail
@@ -64,10 +127,14 @@ jobs:
           node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/services.test.mjs apps/desktop/src/resource.test.mjs
           node --check apps/desktop/main.cjs
           node --check apps/web/desktop/update-check.js
-          node --test apps/web/desktop/update-check.test.js
+          pnpm exec vitest run apps/web/desktop/update-check.test.js apps/web/lib/updater.test.js
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-video-host
+          path: ${{ runner.temp }}/video-host
       - name: Build release Windows binaries
         run: |
-          node tools/build-windows.mjs --output="$RUNNER_TEMP/stable"
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/stable" --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe"
           test -s "$RUNNER_TEMP/stable/VANTARA-$VERSION-Windows-x64-Setup.exe"
           (cd "$RUNNER_TEMP/stable" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
@@ -82,13 +149,13 @@ jobs:
           if-no-files-found: error
 
   verify:
-    needs: build
+    needs: [resolve, build]
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.resolve.outputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -118,13 +185,18 @@ jobs:
           if-no-files-found: warn
 
   publish:
-    needs: [build, verify]
+    needs: [resolve, build, verify]
+    permissions:
+      contents: write
+    concurrency:
+      group: windows-stable-publish-${{ needs.resolve.outputs.tag }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.resolve.outputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -135,12 +207,22 @@ jobs:
       - name: Upload binaries before advertising Windows update
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           dir="$RUNNER_TEMP/stable"
           version="$(cat "$dir/VERSION.txt")"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern 'vantara-update.json'
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern 'vantara-update.json' --pattern 'VANTARA-stable.apk' --pattern 'VANTARA-web.zip'
+          node tools/release-manifest-validation.mjs "$dir/vantara-update.json" "$dir/VANTARA-stable.apk" "$dir/VANTARA-web.zip"
+          if jq -e '.desktop != null' "$dir/vantara-update.json" >/dev/null; then
+            # Published Windows assets are immutable; reruns only verify them.
+            mkdir -p "$dir/existing"
+            name=$(basename "$(jq -r '.desktop.url' "$dir/vantara-update.json")")
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir/existing" --pattern "$name"
+            node tools/release-manifest-validation.mjs "$dir/vantara-update.json" "$dir/VANTARA-stable.apk" "$dir/VANTARA-web.zip" "$dir/existing/$name"
+            echo 'Windows update is already published and verified; preserving assets.'
+            exit 0
+          fi
           (cd "$dir" && sha256sum -c SHA256SUMS.txt)
           installer="$dir/VANTARA-$version-Windows-x64-Setup.exe"
           archive="$dir/VANTARA-$version-Windows-x64.zip"
@@ -151,5 +233,10 @@ jobs:
             --installer "$installer" --version "$version" \
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$installer" "$archive" "$dir/SHA256SUMS.txt" --clobber
+          # Verify the uploaded files themselves before the manifest advertises them.
+          mkdir -p "$dir/published"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir/published" --pattern "$(basename "$installer")" --pattern "$(basename "$archive")"
+          cmp "$installer" "$dir/published/$(basename "$installer")"
+          cmp "$archive" "$dir/published/$(basename "$archive")"
           cp "$dir/vantara-update.next.json" "$dir/vantara-update.json"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$dir/vantara-update.json" --clobber

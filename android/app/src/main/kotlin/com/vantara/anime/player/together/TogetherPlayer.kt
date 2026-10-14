@@ -80,10 +80,12 @@ class TogetherPlayer(
     private var lobby: LinearLayout? = null
     private var strip: LinearLayout? = null
     private var panelOpen = false
+    private val videoOffset = VideoOffset()
+    private var offsetEpisode = hooks.episode()
 
     private val synced get() = client.mode == "sync"
     private fun mediaKey(ep: Int = hooks.episode()) = "${launch.mediaPrefix}#$ep"
-    private fun episodeOf(key: String?) = key?.substringAfterLast('#', "")?.toIntOrNull()
+    private fun episodeOf(key: String?) = key?.takeIf { it.startsWith("${launch.mediaPrefix}#") }?.substringAfterLast('#', "")?.toIntOrNull()
 
     fun start() {
         client.connect()
@@ -115,7 +117,10 @@ class TogetherPlayer(
 
     // ───────────── أحداث المشغّل ─────────────
 
-    fun onPreparing() { ready = false; failedSource = null; report("preparing", force = true) }
+    fun onPreparing() {
+        if (offsetEpisode != hooks.episode()) { videoOffset.reset(); offsetEpisode = hooks.episode() }
+        ready = false; failedSource = null; report("preparing", force = true)
+    }
 
     fun onReady() {
         val t = client.timeline
@@ -149,6 +154,7 @@ class TogetherPlayer(
         }
         if (!hooks.hasNextEpisode()) return false
         val next = hooks.episode() + 1
+        videoOffset.reset(); offsetEpisode = next
         client.command("load", 0.0, mediaKey(next), "الحلقة $next")
         hooks.switchToEpisode(next)
         return true
@@ -160,7 +166,7 @@ class TogetherPlayer(
         val t = client.timeline ?: return false
         if (!synced) return false
         if (client.canControl) {
-            if (!t.started && playing) client.command("play", 0.0) else client.command(if (playing) "play" else "pause", hooks.player.currentPosition.toDouble())
+            if (!t.started && playing) client.command("play", 0.0) else client.command(if (playing) "play" else "pause", videoOffset.toRoom(hooks.player.currentPosition))
             return false
         }
         hooks.message("المضيف يتحكم بالتشغيل")
@@ -171,7 +177,7 @@ class TogetherPlayer(
     /** المستخدم قدّم/رجّع. */
     fun onUserSeek(toMs: Long) {
         if (applying || !synced) return
-        if (client.canControl) client.command("seek", toMs.toDouble())
+        if (client.canControl) client.command("seek", videoOffset.toRoom(toMs))
         else hooks.message("المضيف يتحكم بالتشغيل — نرجّعك معهم")
     }
 
@@ -194,7 +200,7 @@ class TogetherPlayer(
         val ep = episodeOf(timeline.mediaKey)
         // الحلقة التالية (أو أي حلقة اختارها المضيف): كل واحد يجهّزها بسيرفره
         if (ep != null && ep != hooks.episode()) {
-            if (synced || by == client.hostUserId) { ready = false; hooks.switchToEpisode(ep) }
+            if (synced || by == client.hostUserId) { ready = false; videoOffset.reset(); offsetEpisode = ep; hooks.switchToEpisode(ep) }
             return
         }
         if (timeline.started) hideLobby() else if (synced && ready) showLobby()
@@ -237,7 +243,7 @@ class TogetherPlayer(
         val p = hooks.player
         val t = client.timeline
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
-        if (t != null && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
+        if (t != null && synced && t.started && ready && client.isConnected && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
             val pos = p.currentPosition.toDouble()
             val d = ctl.step(
                 t, pos, at,
@@ -245,6 +251,8 @@ class TogetherPlayer(
                 canRate = !p.isCurrentMediaItemLive,
                 bufferedAhead = max(0L, p.bufferedPosition - p.currentPosition).toDouble(),
                 bufferedBehind = min(p.currentPosition, BACK_BUFFER_MS).toDouble(),
+                offsetMs = videoOffset.ms.toDouble(),
+                durationMs = p.duration.takeIf { it > 0 },
             )
             withApplying {
                 if (p.playWhenReady != d.playing) p.playWhenReady = d.playing
@@ -261,6 +269,7 @@ class TogetherPlayer(
     }
 
     private fun jumpToRoom(t: Timeline) {
+        if (!client.isConnected) return
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
         if (at < t.at) {
             // Apply the scheduled command at the shared instant, not on receipt.
@@ -269,9 +278,10 @@ class TogetherPlayer(
             }, (t.at - at).toLong().coerceAtLeast(1L))
             return
         }
+        if (hooks.player.playbackState == Player.STATE_BUFFERING) return
         // Explicit commands/late join use the current room position. The drift controller
         // retains its measured seek prediction for subsequent correction.
-        val target = targetAt(t, at)
+        val target = videoOffset.target(t, at, hooks.player.duration.takeIf { it > 0 })
         withApplying {
             if (abs(hooks.player.currentPosition - target) > SyncRules.HOST_CMD_SEEK_MS) { seekIssuedAt = SystemClock.elapsedRealtime(); hooks.player.seekTo(target.roundToLong()) }
             hooks.player.playWhenReady = t.playing
@@ -297,9 +307,9 @@ class TogetherPlayer(
         lastReportAt = now
         val (_, p95) = ctl.stats()
         val t = client.timeline
-        val drift = if (t != null && t.started && synced) (hooks.player.currentPosition - targetAt(t, client.clock.serverNow(now.toDouble()))).roundToLong() else null
+        val drift = if (t != null && t.started && synced) (hooks.player.currentPosition - videoOffset.target(t, client.clock.serverNow(now.toDouble()), hooks.player.duration.takeIf { it > 0 })).roundToLong() else null
         client.report(
-            pos = hooks.player.currentPosition.toDouble(),
+            pos = videoOffset.toRoom(hooks.player.currentPosition),
             state = state,
             source = failedSource ?: hooks.sourceName(),
             mediaKey = mediaKey(),
@@ -405,10 +415,34 @@ class TogetherPlayer(
                 row.addView(where)
                 body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(6) })
             }
+            if (synced) {
+                body.addView(context.label("إزاحة مصدر الفيديو", 15f, Tone.TEXT, bold = true))
+                val seconds = videoOffset.ms / 1000
+                body.addView(context.label("فرق المصدر: ${if (seconds > 0) "+" else ""}$seconds ثانية · لنسختك فقط", 12f, Tone.TEXT_2))
+                val offsets = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_LTR }
+                for (delta in listOf(-10000L, -1000L, 1000L, 10000L)) {
+                    val control = button("${if (delta > 0) "+" else "−"}${abs(delta) / 1000}ث", primary = false) { setVideoOffset(videoOffset.ms + delta) }
+                    control.isEnabled = abs(videoOffset.ms + delta) <= 120000L
+                    control.alpha = if (control.isEnabled) 1f else .4f
+                    control.contentDescription = "${if (delta > 0) "تقديم" else "تأخير"} فيديوك ${abs(delta) / 1000} ثانية"
+                    control.setPadding(context.dp(4), context.dp(11), context.dp(4), context.dp(11))
+                    offsets.addView(control, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }
+                offsets.addView(button("تصفير", primary = false) { setVideoOffset(0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                body.addView(offsets)
+            }
             if (client.isHost) {
                 body.addView(button(if (synced) "حوّلها منفصلة" else "حوّلها متزامنة", primary = false) { client.setMode(if (synced) "free" else "sync") })
             }
         }
+    }
+
+    fun setVideoOffset(ms: Long): Boolean {
+        if (!synced || !videoOffset.set(ms)) return false
+        client.timeline?.takeIf { it.started && ready && client.isConnected }?.let { jumpToRoom(it) }
+        report(stateNow(), force = true)
+        if (panelOpen) hooks.refreshPanel()
+        return true
     }
 
     fun panelClosed() { panelOpen = false }

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { addonCopies } from "./video.js";
+import { addonCopies, nextEpisodeCopies } from "./video.js";
 const m = {
   key: "x",
   name: "Streams",
@@ -43,4 +43,19 @@ it('fans out exact Kitsu anime IDs and leaves the AniList season out of the vide
  expect(addonCopies({list:()=>[anime]},identity,'apk')[0]).toMatchObject({url:'kitsu:12',id:'kitsu:12',type:'series',identity});
  expect(addonCopies({list:()=>[m]},identity,'apk')).toEqual([]);
  expect(addonCopies({list:()=>[anime]},{...identity,format:'MOVIE'},'apk')[0].type).toBe('movie');
+});
+it('uses canonical episode identity for cross-provider copies even when origin has a private ID', () => {
+ const identity={kind:'series',addonKey:'origin',videoId:'private:episode',externalIds:{imdb:'tt123'},season:2,episode:3};
+ expect(addonCopies({list:()=>[m]},identity)).toHaveLength(1);
+});
+it('chooses the declared canonical namespace separately for each anime stream provider',()=>{
+ const kitsu={...m,key:'kitsu',resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}]};
+ const identity={kind:'anime',format:'TV',externalIds:{kitsu:'12',imdb:'tt123'},season:2,episode:3};
+ const copies=addonCopies({list:()=>[kitsu,m]},identity);
+ expect(copies.map(copy=>copy.url)).toEqual(['kitsu:12','tt123']);
+});
+
+it('does not retain a previous episode private video ID when advancing addon copies',()=>{
+ const [next]=nextEpisodeCopies([{sourceId:'addon|origin',identity:{kind:'series',addonKey:'origin',videoId:'private:first',episode:1,season:2}}],2,{kind:'series',season:2});
+ expect(next.identity.episode).toBe(2);expect(next.identity.videoId).toBeUndefined();
 });

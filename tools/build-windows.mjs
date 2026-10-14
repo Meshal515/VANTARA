@@ -14,6 +14,10 @@ const nsisdir = argument('nsisdir', process.env.NSISDIR);
 const portable = path.join(output, 'VANTARA-Windows-x64');
 const app = path.join(portable, 'resources', 'app');
 const native = path.join(app, 'native');
+const videoHost = path.resolve(argument('video-host',path.join(repo,'apps/desktop/native/vantara-video-host.exe')));
+// A Windows build must contain the real child-window host; never fall back to
+// an external mpv window when CI forgot its Windows-compiled companion.
+await fs.access(videoHost).catch(()=>{throw new Error('Missing native video host: compile tools/build-video-host.ps1 on Windows and supply --video-host=path');});
 const version = JSON.parse(await fs.readFile(path.join(repo, 'apps/desktop/package.json'), 'utf8')).version;
 const artifacts = [
   { name: 'electron-v44.7.2-win32-x64.zip', url: 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip', sha256: '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4', source: 'https://github.com/electron/electron/tree/v44.7.2' },
@@ -80,11 +84,12 @@ await fs.cp(path.join(repo, 'apps', 'desktop'), app, {
   recursive: true,
   filter: filename => !/(?:^|[/\\])node_modules(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|windows\.nsi$/.test(filename),
 });
+await fs.copyFile(videoHost,path.join(native,'vantara-video-host.exe'));
 await fs.cp(path.join(repo, 'apps', 'web'), path.join(app, 'web'), {
   recursive: true,
   filter: filename => !/\.test\.js$|(?:^|[/\\])node_modules(?:[/\\]|$)/.test(filename),
 });
-const binaries = await Promise.all(['VANTARA.exe', 'resources/app/native/rqbit.exe', 'resources/app/native/mpv.exe', 'resources/app/native/vulkan-1.dll', 'resources/app/native/vcruntime140.dll', 'resources/app/native/vcruntime140_1.dll'].map(name => pe64(path.join(portable, name))));
+const binaries = await Promise.all(['VANTARA.exe', 'resources/app/native/rqbit.exe', 'resources/app/native/mpv.exe', 'resources/app/native/vantara-video-host.exe', 'resources/app/native/vulkan-1.dll', 'resources/app/native/vcruntime140.dll', 'resources/app/native/vcruntime140_1.dll'].map(name => pe64(path.join(portable, name))));
 const required = ['resources/app/main.cjs', 'resources/app/preload.cjs', 'resources/app/src/services.mjs', 'resources/app/web/desktop/index.html', 'resources/app/web/desktop/boot.js', 'resources/app/web/fonts/NotoSansArabic.var.woff2'];
 await Promise.all(required.map(name => fs.access(path.join(portable, name))));
 

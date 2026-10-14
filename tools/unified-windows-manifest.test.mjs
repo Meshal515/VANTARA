@@ -10,7 +10,7 @@ test('The same stable release publishes Android and Windows with a measured hash
   t.after(()=>rm(dir,{force:true,recursive:true}));
   const file=join(dir,'VANTARA-0.0.140-Windows-x64-Setup.exe');
   await writeFile(file,Buffer.alloc(1024,7));
-  const current={format:2,versionName:'0.0.140',versionCode:140,native:'a'.repeat(24),apk:{sha256:'b'.repeat(64)},web:{sha256:'c'.repeat(64)}};
+  const current={format:2,versionName:'0.0.140',versionCode:140,native:'a'.repeat(24),apk:{url:'https://github.com/Meshal515/VANTARA/releases/download/stable-140/VANTARA-stable.apk',size:1,sha256:'b'.repeat(64)},web:{url:'https://github.com/Meshal515/VANTARA/releases/download/stable-140/VANTARA-web.zip',size:1,sha256:'c'.repeat(64)}};
   const base='https://github.com/Meshal515/VANTARA/releases/download/stable-140';
   const next=joinDesktopRelease(current,{installerPath:file,baseUrl:base,version:current.versionName});
   assert.equal(next.versionName,current.versionName);

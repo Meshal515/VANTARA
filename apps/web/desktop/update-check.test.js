@@ -1,10 +1,10 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { newerVersion, desktopUpdateFromManifest, checkDesktopUpdate } from './update-check.js';
 
 const release = {
   format:2,versionName:'0.0.140',versionCode:140,
-  desktop:{version:'0.0.140',sha256:'a'.repeat(64),size:230000000,
+  desktop:{platform:'win32-x64',installer:'nsis',version:'0.0.140',sha256:'a'.repeat(64),size:230000000,
     url:'https://github.com/Meshal515/VANTARA/releases/download/stable-140/VANTARA-0.0.140-Windows-x64-Setup.exe'},
   changelog:['إصلاح مشغل الفيديو'],
 };
@@ -28,4 +28,12 @@ test('Source must respond with a valid manifest',async()=>{
   const bridge={version:'0.1.0-preview.3',requestResource:async()=>({status:200,text:JSON.stringify(release)})};
   assert.deepEqual((await checkDesktopUpdate(bridge))?.version,'0.0.140');
   await assert.rejects(checkDesktopUpdate({...bridge,requestResource:async()=>({status:503,text:'{}'})}),/قراءة/);
+});
+
+test('Windows accepts only the matching stable platform metadata',()=>{
+  for(const bad of [
+    {...release,format:1}, {...release,versionName:'0.0.141'},
+    {...release,desktop:{...release.desktop,platform:'android'}},
+    {...release,desktop:{...release.desktop,installer:'portable'}},
+  ]) assert.equal(desktopUpdateFromManifest(bad,'0.0.139'),null);
 });
