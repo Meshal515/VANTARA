@@ -39,6 +39,16 @@ test('mpv uses a trusted embedded HWND and releases it after process cleanup',as
   assert.ok(args.includes('--wid=123456'));assert.ok(args.includes('--osc=no'));
   await services.stopPlayback({session:'embedded'});assert.equal(released,1);
 });
+test('مشغل Windows يطلب حتى دقيقة كاش أمامي بحد RAM ويحاول التسريع العتادي الآمن',async t=>{
+  const {dir,services}=await fixture(t);
+  await services.startPlayback({session:'memory-cache',candidate:{url:'https://video.example.com/test.mp4'}});
+  const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
+  assert.ok(args.includes('--cache-secs=60'));
+  assert.ok(args.some(x=>/^--demuxer-max-bytes=(128|256|512)MiB$/.test(x)));
+  assert.ok(args.some(x=>/^--demuxer-max-back-bytes=(32|64|128)MiB$/.test(x)));
+  assert.ok(args.includes('--cache-on-disk=no'));
+  assert.ok(args.includes('--hwdec=auto-safe'));
+});
 test('native stages describe metadata, one selected file, and first-frame decoding without URLs',async t=>{
   const {services,events}=await fixture(t);
   await services.startPlayback({session:'stages',candidate:{infoHash:hash,fileIdx:0}});
