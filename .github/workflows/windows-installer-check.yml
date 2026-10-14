@@ -51,11 +51,12 @@ jobs:
           }
           $mpv = Join-Path $installDir 'resources\app\native\mpv.exe'
           $report.mpvHash = (Get-FileHash $mpv).Hash
-          & $mpv --version
-          $report.mpvExitCode = $LASTEXITCODE
+          $mpvProcess = Start-Process -FilePath $mpv -ArgumentList '--version' -Wait -PassThru -RedirectStandardOutput (Join-Path $packageDir 'mpv-version.txt')
+          $report.mpvExitCode = $mpvProcess.ExitCode
+          Get-Content (Join-Path $packageDir 'mpv-version.txt')
           $report | ConvertTo-Json | Set-Content (Join-Path $packageDir 'installer-report.json')
           $report | ConvertTo-Json
-          if ($LASTEXITCODE -ne 0) { throw 'المشغل لا يعمل بعد التثبيت' }
+          if ($report.mpvExitCode -ne 0) { throw 'المشغل لا يعمل بعد التثبيت' }
       - name: جمع نتائج الفحص ومعلومات الحماية
         if: always()
         shell: pwsh
@@ -70,5 +71,6 @@ jobs:
           path: |
             ${{ runner.temp }}/vantara-install-check/*.json
             ${{ runner.temp }}/vantara-install-check/native-files.txt
+            ${{ runner.temp }}/vantara-install-check/mpv-version.txt
             ${{ runner.temp }}/vantara-install-check/defender-unavailable.txt
           if-no-files-found: warn
