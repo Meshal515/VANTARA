@@ -1253,7 +1253,7 @@ export function createAnime(deps) {
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, n));
+    sheet.autoTogether = false; // Joining a room must not auto-play an arbitrary source.
     let paintQueued = false;
     let off = [];
 
@@ -1302,7 +1302,7 @@ export function createAnime(deps) {
       const bestBtn = el('button', 'an-pick-best');
       bestBtn.type = 'button';
       foot.append(bestBtn);
-      if (hub && !sheet.autoTogether) {
+      if (hub && !hub.matches(togetherRef, n)) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'anime',
@@ -1314,7 +1314,6 @@ export function createAnime(deps) {
             episode: n,
           }, {
             onStarted: () => {
-              sheet.autoTogether = true;
               withFriends.remove();
               queuePaint();
             },
