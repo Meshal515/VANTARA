@@ -6,11 +6,11 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: vantara-windows-preview5
+  group: vantara-windows-preview6
   cancel-in-progress: false
 env:
-  VERSION: 0.1.0-preview.5
-  TAG: windows-v0.1.0-preview.5
+  VERSION: 0.1.0-preview.6
+  TAG: windows-v0.1.0-preview.6
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -28,7 +28,7 @@ jobs:
       - name: Install and test affected Windows modules
         run: |
           pnpm install --frozen-lockfile
-          pnpm exec vitest run apps/web/desktop/together-player.test.js apps/web/desktop/boot.test.js apps/web/desktop/engine.test.js apps/web/desktop/default-addons.test.js
+          pnpm exec vitest run apps/web/desktop/together-player.test.js apps/web/desktop/boot.test.js apps/web/desktop/engine.test.js apps/web/desktop/default-addons.test.js apps/web/desktop/engine.test.js
           node --test apps/desktop/src/services.test.mjs
           node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/resource.test.mjs
           node --check apps/desktop/main.cjs
@@ -40,7 +40,7 @@ jobs:
           v=os.environ['VERSION']
           p=pathlib.Path('apps/desktop/package.json');j=json.loads(p.read_text());j['version']=v;p.write_text(json.dumps(j,indent=2,ensure_ascii=False)+'\n')
           p=pathlib.Path('apps/desktop/preload.cjs');p.write_text(re.sub(r"version: '[^']+'", "version: '"+v+"'",p.read_text(),count=1))
-          p=pathlib.Path('apps/desktop/windows.nsi');s=p.read_text();s=re.sub(r'VIProductVersion "[^"]+"','VIProductVersion "0.1.0.5"',s,count=1);s=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);s=re.sub(r'("DisplayVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);p.write_text(s)
+          p=pathlib.Path('apps/desktop/windows.nsi');s=p.read_text();s=re.sub(r'VIProductVersion "[^"]+"','VIProductVersion "0.1.0.6"',s,count=1);s=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);s=re.sub(r'("DisplayVersion" )"[^"]+"',r'\g<1>"'+v+'"',s,count=1);p.write_text(s)
           p=pathlib.Path('apps/web/lib/config.js');p.write_text(p.read_text().replace('__VANTARA_VERSION__',v))
           PY
           node tools/build-windows.mjs --output="$RUNNER_TEMP/windows"
@@ -48,7 +48,7 @@ jobs:
           (cd "$RUNNER_TEMP/windows" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-torrent-preview5
+          name: windows-torrent-preview6
           path: |
             ${{ runner.temp }}/windows/*-Setup.exe
             ${{ runner.temp }}/windows/*-x64.zip
@@ -66,15 +66,15 @@ jobs:
           node-version: '24'
       - uses: actions/download-artifact@v4
         with:
-          name: windows-torrent-preview5
+          name: windows-torrent-preview6
           path: ${{ runner.temp }}/windows
       - name: Real installer and native video smoke
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $dir=Join-Path $env:RUNNER_TEMP 'windows'
-          $installer=Join-Path $dir 'VANTARA-0.1.0-preview.5-Windows-x64-Setup.exe'
-          $target=Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview5-Test'
+          $installer=Join-Path $dir 'VANTARA-0.1.0-preview.6-Windows-x64-Setup.exe'
+          $target=Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview6-Test'
           $process=Start-Process -FilePath $installer -ArgumentList "/S /D=$target" -PassThru
           if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Installer timed out' }
           if ($process.ExitCode -ne 0) { throw "Installer exit $($process.ExitCode)" }
@@ -88,7 +88,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: windows-torrent-preview5
+          name: windows-torrent-preview6
           path: ${{ runner.temp }}/windows
       - name: Publish tested preview
         env:
@@ -103,5 +103,5 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION – preventive torrent recovery" \
-            --notes "Preview improvements: safely choose the only video in a torrent, retry transient magnet metadata errors, one bounded first-frame recovery, dedicated local watch-party source video timing control. This does not claim zero torrent failures or in-app MPV embedding. Real cross-device room playback needs field verification." \
+            --notes "Preview includes torrent metadata retries, unique-video selection, bounded first-frame recovery, local source video offset for watch parties and anime subtitle Kitsu ID enrichment. Windows real MPV smoke checked. MPV is still an external window; live Torrentio and cross-device playback not verified." \
             --prerelease --latest=false
