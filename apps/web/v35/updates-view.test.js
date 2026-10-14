@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agoAr, groupEvents, mergeTimelineEvents, unitLabel } from './updates-view.js';
+import { agoAr, groupEvents, mergeTimelineEvents, unitLabel, reconcileTimelineRefresh, paintWithScrollAnchor } from './updates-view.js';
 import { trustDates } from '../lib/update-engine.js';
 
 /** الخط الزمني: وقت نسبي صادق، ودفعات الفصول بطاقة واحدة بلا خلط أعمال. */
@@ -82,5 +82,44 @@ describe('آخر التحديثات: الهوية الواحدة', () => {
     expect(groups.map((g) => g.work)).toEqual(['ext:magic emperor', 'ext:solo leveling']);
     expect(groups[0].high).toBe(920);
     expect(groupEvents(events)).toHaveLength(3);
+  });
+});
+
+describe('refresh keeps historical pages and the user's place across platforms', () => {
+  it('a refresh prepends new events and updates existing entries but does not erase older pagination', () => {
+    const base = [
+      { id: 'older', work: 'old', at: 100, publishedAt: 100, title: 'old' },
+      { id: 'earlier', work: 'early', at: 50, publishedAt: 50, title: 'early' },
+    ];
+    const refreshed = reconcileTimelineRefresh(base, [
+      { id: 'new', work: 'new', at: 200, publishedAt: 200, title: 'new' },
+      { id: 'older', work: 'old', at: 100, publishedAt: 100, title: 'updated' },
+    ], 500);
+    expect(refreshed.map(item => item.id)).toEqual(['new', 'older', 'earlier']);
+    expect(refreshed[1].title).toBe('updated');
+    expect(base.map(item => item.id)).toEqual(['older', 'earlier']);
+    expect(reconcileTimelineRefresh(refreshed, [{ id: 'new', work: 'new', at: 200, publishedAt: 200 }], 500)).toHaveLength(3);
+  });
+
+  it('retains the first visible card screen position when new cards are inserted above', () => {
+    const moves = [];
+    const view = { innerHeight: 750, scrollBy: (x, y) => moves.push([x, y]) };
+    const card = (id, top) => ({
+      dataset: { eventId: id },
+      getBoundingClientRect: () => ({ top, bottom: top + 200 }),
+    });
+    const list = { ownerDocument: { defaultView: view }, children: [card('top', -250), card('visible', 120), card('below', 800)] };
+    paintWithScrollAnchor(list, () => {
+      list.children = [card('new', -250), card('top', -100), card('visible', 370), card('below', 1050)];
+    });
+    expect(moves).toEqual([[0, 250]]);
+  });
+  it('avoids scrolling when the visible anchor is unchanged', () => {
+    const moves = [];
+    const view = { innerHeight: 700, scrollBy: (x, y) => moves.push([x, y]) };
+    const item = { dataset: { eventId: 'same' }, getBoundingClientRect: () => ({ top: 100, bottom: 200 }) };
+    const list = { ownerDocument: { defaultView: view }, children: [item] };
+    paintWithScrollAnchor(list, () => {});
+    expect(moves).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure } from './services.mjs';
 
 const hash = 'a'.repeat(40);
 test('HTTPS يرفض الأهداف الداخلية وكل DNS يحتوي عنوانًا داخليًا', async () => {
@@ -22,6 +22,16 @@ test('اختيار fileIdx صفر دقيق ولا يخمّن أكبر ملف', (
   assert.equal(selectTorrentFile([files[0]],{}),0);
   assert.throws(() => selectTorrentFile(files,{}), /small.mp4.*large.mkv/);
   assert.throws(() => selectTorrentFile(files,{fileIdx:2}), /fileIdx/);
+  assert.equal(selectTorrentFile([{name:'movie.mkv',length:600000},{name:'movie.ar.srt',length:1000},{name:'cover.jpg',length:1200}],{}),0);
+  assert.equal(selectTorrentFile([{name:'Sample/sample.mp4',length:10000},{name:'Movie.mkv',length:900000}],{}),1);
+  assert.throws(()=>selectTorrentFile([{name:'S01E01.mkv',length:40000},{name:'S01E02.mkv',length:40000}],{}),/يلزم اختيار/);
+});
+test('تعاد محاولات metadata على أخطاء مؤقتة فقط، وليس عند بيانات غير صالحة',()=>{
+  assert.equal(retryableMetadataFailure({status:503}),true);
+  assert.equal(retryableMetadataFailure({status:429}),true);
+  assert.equal(retryableMetadataFailure({code:'ECONNRESET'}),true);
+  assert.equal(retryableMetadataFailure({status:400,message:'رفض محرك التورنت الطلب'}),false);
+  assert.equal(retryableMetadataFailure({status:403}),false);
 });
 test('لا يقبل hashes أو headers أو magnets مخالفة للعقد', () => {
   assert.equal(validateCandidate({infoHash:hash,fileIdx:0,sources:['tracker:https://example.com/announce']}).fileIdx,0);
@@ -30,17 +40,17 @@ test('لا يقبل hashes أو headers أو magnets مخالفة للعقد', (
   }
 });
 
-async function fixture(t, mode='normal') {
+async function fixture(t, mode='normal', serviceOptions={}) {
   const dir=await mkdtemp(join(tmpdir(),'vantara-services-test-'));
   t.after(() => rm(dir,{recursive:true,force:true}));
   const rqbit=join(dir,'rqbit'), mpv=join(dir,'mpv');
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
-const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?65*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
+const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?65*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:tracks.length+1,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
-  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform});
+  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,...serviceOptions});
   t.after(()=>services.close());return {dir,services,events,binaries:{rqbit,mpv}};
 }
 test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC وتقدم وأوامر وتنظيف',async t=>{
@@ -71,6 +81,26 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
   await services.close();await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
+});
+test('عطل metadata المؤقت يعالج تلقائيًا قبل بدء المشغل من دون تكرار إضافة التورنت',async t=>{
+  const {dir,services,events}=await fixture(t,'transient-metadata');
+  assert.deepEqual(await services.startPlayback({session:'metadata-recovered',candidate:{infoHash:hash,fileIdx:0}}),{started:true});
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(requests.filter(r=>r.url.includes('list_only=true')).length,2);
+  assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1);
+  assert.ok(events.some(e=>e.type==='playback/ready'));
+  assert.equal(events.some(e=>e.type==='playback/error'),false);
+});
+test('عند تعليق أول إطار يعيد فتح proxy مرة واحدة دون إعادة إضافة التورنت',async t=>{
+  const {dir,services,events}=await fixture(t,'not-decoded',{firstFrameRecoveryMs:60,firstFrameFailureMs:100});
+  await services.startPlayback({session:'stalled',candidate:{infoHash:hash,fileIdx:0}});
+  await new Promise(resolve=>setTimeout(resolve,450));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(commands.filter(r=>r.command[0]==='loadfile').length,2);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1);
+  assert.ok(events.some(e=>e.type==='playback/retrying'));
+  assert.ok(events.some(e=>e.type==='playback/error'));
 });
 test('الإغلاق أثناء metadata يلغي الطلب ولا يترك عملية أو حدث جلسة قديمة',async t=>{
   const {services,events}=await fixture(t,'slow');

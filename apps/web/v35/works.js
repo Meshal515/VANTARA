@@ -480,6 +480,7 @@ export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editi
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
+  await loadAliases(); // The first page must use the shipped aliases.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
@@ -533,6 +534,45 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
   return rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
 }
 
+
+/**
+ * Combine paginated manga listings using the same guarded canonical identity
+ * as each individual page. Deduplicating only by item.id leaves duplicate
+ * cards when an alternate title first appears on a later source page.
+ * Preserve the earliest card's position and every edition/source.
+ */
+export function mergeWorkPages(items) {
+  const index = workIndex();
+  const positions = new Map();
+  const seenEditions = new Set();
+  const unrelated = [];
+  for (const [position, item] of items.entries()) {
+    if (!item?._work?.editions?.length) {
+      if (item?.id) unrelated.push({ position, item });
+      continue;
+    }
+    for (const edition of item._work.editions) {
+      const identity = `${edition.sourceId}|${edition.manga?.url || normalizeTitle(edition.manga?.title)}`;
+      if (seenEditions.has(identity)) continue;
+      const added = index.add(edition);
+      if (!added) continue;
+      seenEditions.add(identity);
+      positions.set(added.key, Math.min(position, positions.get(added.key) ?? Infinity));
+    }
+  }
+  const grouped = index.list().map((work) => {
+    work.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
+    work.title = work.editions[0]?.manga?.title ?? work.title;
+    work.thumbnailUrl = work.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? work.thumbnailUrl;
+    return { position: Math.min(...work.keys.map((key) => positions.get(key) ?? Infinity)), item: toV35Work(work) };
+  });
+  const seenIds = new Set();
+  return [...grouped, ...unrelated]
+    .sort((a, b) => a.position - b.position)
+    .map(({ item }) => item)
+    .filter((item) => !seenIds.has(item.id) && seenIds.add(item.id));
+}
+
 /**
  * مثل `browse` لكن لا ينتظر أبطأ مصدر: `onUpdate` يُنادى مع كل مصدر يردّ
  * بالقائمة المدموجة حتى الآن. مصدرٌ ثانٍ عنده نفس العمل يُضاف إليه نسخةً، فلا
@@ -541,6 +581,7 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}, {
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
+  await loadAliases(); // Streaming first paint must resolve canonical names too.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   const index = workIndex();
   const positions = new Map();

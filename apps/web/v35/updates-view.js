@@ -8,6 +8,7 @@
 
 import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
+import { loadAliases } from '../lib/manga-alias-store.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -25,6 +26,32 @@ export function mergeTimelineEvents(visible, incoming, { enteredAt, now = Date.n
   }
   const events = [...known.values()];
   return inserted ? events.sort((a, b) => b.at - a.at || String(b.id).localeCompare(String(a.id))) : events;
+}
+
+/**
+ * Reconcile newer pages without dropping older pages: those may be offscreen
+ * and expensive to reload (especially covers on mobile PWA and WebView).
+ */
+export function reconcileTimelineRefresh(visible, incoming, now = Date.now()) {
+  return mergeTimelineEvents(visible, incoming, { enteredAt: 0, now, refresh: true });
+}
+
+/** Preserve the first visible card's screen position while newer cards are added above it. */
+export function paintWithScrollAnchor(list, paint, view = list.ownerDocument?.defaultView) {
+  const viewport = view?.innerHeight ?? Infinity;
+  const anchor = [...list.children].find(node => {
+    if (!node.dataset?.eventId || typeof node.getBoundingClientRect !== 'function') return false;
+    const rect = node.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < viewport;
+  });
+  const id = anchor?.dataset.eventId;
+  const before = anchor?.getBoundingClientRect().top;
+  paint();
+  if (!id || !Number.isFinite(before)) return;
+  const retained = [...list.children].find(node => node.dataset?.eventId === id);
+  if (!retained) return;
+  const delta = retained.getBoundingClientRect().top - before;
+  if (Number.isFinite(delta) && Math.abs(delta) > 0.5) view?.scrollBy?.(0, delta);
 }
 
 const mounted = new WeakMap();
@@ -117,7 +144,7 @@ export function unitLabel(g) {
  */
 export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected }) {
   mounted.get(host)?.dispose();
-  const state = { events: [], next: null, loading: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
+  const state = { events: [], next: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token;
   host.replaceChildren();
   host.classList.add('up-feed');
@@ -174,14 +201,15 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     state.loading = true;
     refresh.disabled = true;
     if (!state.events.length) list.replaceChildren(...Array.from({ length: 6 }, () => el('div', 'up-skel')));
+    if (section === 'manga') await loadAliases();
     const page = await timeline(section, { before: state.next });
     if (token !== state.token) return;
     state.loading = false;
     if (!page) {
       refresh.disabled = false;
       if (!state.events.length) {
-        state.done = true;
-        list.replaceChildren(empty());
+        // A network error is not an empty feed. Allow a retry on every platform.
+        list.replaceChildren(el('div', 'up-error', 'تعذّر جلب آخر التحديثات. اضغط تحديث لإعادة المحاولة.'));
       }
       return;
     }
@@ -205,6 +233,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!state.polled || polling || state.loading || !visible() || document.hidden) return;
     polling = true;
     try {
+      if (section === 'manga') await loadAliases();
       const page = await timeline(section, { limit: 100 });
       if (token !== state.token || !page) return;
       const next = mergeTimelineEvents(state.events, page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
@@ -213,8 +242,33 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   }, 5000);
   const api = {
     dispose() { state.token = {}; clearInterval(timer); io?.disconnect(); },
-    refresh() {
-      return mountTimeline(host, { section, el, open, empty, image, mountCover, canonical, visible });
+    async refresh() {
+      // Do not recreate the feed. That drops loaded pages, reloads covers
+      // and sends the user to the top on all three platforms.
+      if (state.loading || state.refreshing) return false;
+      state.refreshing = true;
+      refresh.disabled = true;
+      refresh.textContent = 'جارٍ التحديث…';
+      try {
+        if (section === 'manga') await loadAliases();
+      const page = await timeline(section, { limit: 100 });
+        if (token !== state.token || !page) return false;
+        // An initial failed/empty page has no valid pagination cursor yet.
+        // A successful manual retry must reopen older pages when available.
+        if (!state.events.length) { state.next = page.next; state.done = !page.next; }
+        state.events = reconcileTimelineRefresh(state.events, page.events, page.snapshotAt ?? Date.now());
+        if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
+        // Keep the original pagination cursor. The refresh must not
+        // silently reset the older history or change its traversal.
+        paintWithScrollAnchor(list, paint);
+        return true;
+      } finally {
+        if (token === state.token) {
+          state.refreshing = false;
+          refresh.disabled = false;
+          refresh.textContent = 'تحديث';
+        }
+      }
     },
   };
   mounted.set(host, api);
@@ -223,6 +277,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
 
 /** أول N تحديثات (لشريط الرئيسية)، مجمّعة. */
 export async function latestGroups(section, n = 14, canonical = null) {
+  if (section === 'manga') await loadAliases();
   const page = await timeline(section, { limit: 40 });
   return page ? groupEvents(page.events, canonical?.(page.events) ?? null).slice(0, n) : null;
 }

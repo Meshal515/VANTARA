@@ -78,10 +78,28 @@ export function installDesktopBridges(g = globalThis) {
   };
   engine.addListener('playerError', error => show(`تعذر التشغيل: ${message(error)}`, true));
   engine.addListener('desktopNotice',event=>show(message(event.message),true));
-  let lobbyPanel,wasLobby=false;
+  let lobbyPanel,wasLobby=false,offsetPanel;
   engine.addListener('desktopTogether',lobby=>{
     if(!g.document?.body)return;
-    if(lobby.closed){lobbyPanel?.remove();lobbyPanel=null;wasLobby=false;return;}
+    if(lobby.closed){lobbyPanel?.remove();lobbyPanel=null;offsetPanel?.remove();offsetPanel=null;wasLobby=false;return;}
+    // Independent local video offset: adjust for intro/recap mismatches only.
+    if(typeof lobby.setVideoOffset === 'function' && Number.isFinite(lobby.videoOffsetMs)) {
+      if(!offsetPanel) {
+        offsetPanel=element(g.document,'section',null,'desktop-video-offset');
+        offsetPanel.setAttribute('aria-label','مطابقة توقيت مصدر الفيديو');
+        Object.assign(offsetPanel.style,{position:'fixed',bottom:'80px',right:'20px',zIndex:'10003',padding:'12px',borderRadius:'12px',background:'#18161f',color:'#fff',direction:'rtl',boxShadow:'0 6px 30px #0008'});
+        g.document.body.append(offsetPanel);
+      }
+      offsetPanel.replaceChildren(element(g.document,'strong','إزاحة مصدر الفيديو'));
+      const value=element(g.document,'p',`فرق المصدر: ${(lobby.videoOffsetMs/1000).toFixed(2)} ثانية`);
+      offsetPanel.append(value);
+      for(const delta of [-10000,-1000,1000,10000]) {
+        const b=element(g.document,'button',`${delta>0?'+':''}${delta/1000}ث`);
+        b.type='button';b.style.margin='4px';b.onclick=()=>lobby.setVideoOffset(lobby.videoOffsetMs+delta);
+        offsetPanel.append(b);
+      }
+      const reset=element(g.document,'button','تصفير');reset.type='button';reset.onclick=()=>lobby.setVideoOffset(0);offsetPanel.append(reset);
+    } else {offsetPanel?.remove();offsetPanel=null;}
     if(!lobbyPanel){lobbyPanel=element(g.document,'section',null,'desktop-together-lobby');Object.assign(lobbyPanel.style,{position:'fixed',inset:'12% max(24px, 20%) auto',zIndex:'10002',padding:'24px',borderRadius:'16px',background:'#111116',color:'#f3f4f8',direction:'rtl',boxShadow:'0 12px 80px #000'});g.document.body.append(lobbyPanel);}
     lobbyPanel.hidden=!lobby.visible;
     lobbyPanel.replaceChildren(element(g.document,'h2','مشاهدة مع أصدقائك'),element(g.document,'p',lobby.connection==='live'?'متصل بالغرفة':'جارٍ الاتصال بالغرفة…'));
