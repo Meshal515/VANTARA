@@ -165,9 +165,10 @@ async function localJSON(base,path,{body,signal,timeout=15000,auth}={}) {
 export function retryableMetadataFailure(error) {
   const code=String(error?.code ?? '');
   const status=Number(error?.status);
-  return status===408 || status===429 || status>=500 && status<600 ||
-    ['ECONNRESET','ECONNREFUSED','EPIPE','ETIMEDOUT','EAI_AGAIN'].includes(code) ||
-    /انقطع نقل|رفض محرك التورنت الطلب|مهلة بيانات التورنت/.test(String(error?.message ?? ''));
+  // 400/401/403/404 are deterministic failures: never repeat bad requests.
+  if (Number.isFinite(status) && status >= 400) return status === 408 || status === 429 || status >= 500;
+  return ['ECONNRESET','ECONNREFUSED','EPIPE','ETIMEDOUT','EAI_AGAIN'].includes(code) ||
+    /انقطع نقل|مهلة بيانات التورنت/.test(String(error?.message ?? ''));
 }
 async function getTorrentMetadata(request, sleepFor, isCurrent) {
   let last;
@@ -219,7 +220,7 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   const states=new Set(), resourceControllers=new Set();
@@ -236,7 +237,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);
+    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -347,7 +348,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const options={auth:state.auth,signal:state.controller.signal};
     const deadline=Date.now()+15000;
     for(;;){assertSession(state);try{await localJSON(state.api,'/',{...options,timeout:1000});break;}catch(e){if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');await sleep(50,state.controller.signal);}}
-    const metadataDeadline=Date.now()+120000;
+
     const metadata=await getTorrentMetadata(
       ()=>localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:45000}),
       ms=>sleep(ms,state.controller.signal),()=>assertSession(state));assertSession(state);
@@ -358,7 +359,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     catch { throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت؛ اختر مصدرًا آخر'); }
     assertSession(state);
     validateTorrentStorage(metadata.details.files[index],storage.bavail*storage.bsize);
-    const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:Math.max(1,metadataDeadline-Date.now())});assertSession(state);
+    // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
+    // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
+    const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:120000});assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     state.torrentId=added.id;
     state.statsTimer=setInterval(async()=>{
@@ -387,7 +390,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress});emitPlaybackState(state);};
+    const ready=()=>{if(state.ready)return;state.ready=true;clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
@@ -432,6 +435,20 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     });
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     await ipcCommand(state,['loadfile',url]);assertSession(state);
+    // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.
+    // أعد فتح رابط الـproxy الداخلي *مرة واحدة*؛ يحتفظ rqbit بنفس الجلسة
+    // والأجزاء التي وصلت، فلا يُعاد حل المغناطيس أو الاختيار أو الإعدادات.
+    if(!state.ready) {
+      state.firstFrameWatchdog=setTimeout(()=>{
+        if(state.stopped||current!==state||state.ready)return;
+        emit(state,{type:'playback/retrying',message:'نعيد الاتصال بالفيديو مع إبقاء تنزيل التورنت نشطًا'});
+        void ipcCommand(state,['loadfile',url,'replace']).catch(()=>{});
+        state.firstFrameWatchdog=setTimeout(()=>{
+          if(!state.stopped&&current===state&&!state.ready)
+            void fail(state,'لم يصل إطار فيديو بعد إعادة المحاولة؛ يمكنك تجربة سيرفر آخر');
+        },firstFrameFailureMs);
+      },firstFrameRecoveryMs);
+    }
   }
   async function startPlayback({session,candidate,title,position=0,pause=false}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
