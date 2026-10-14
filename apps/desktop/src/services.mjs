@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import fs, { mkdir, rm } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
+import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom, TORRENT_FREE_RESERVE } from './torrent-cache.mjs';
 
 const secret = () => randomBytes(24).toString('hex');
 export function validateResourceRequest({url,method='GET',body=null,headers={},binary=false,follow=true}={}) {
@@ -241,7 +242,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearTimeout(state.firstFrameWatchdog);
+    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.storageTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -250,6 +251,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
+      if(state.cacheParent)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
       if(state.subtitleDir)await rm(state.subtitleDir,{recursive:true,force:true}).catch(()=>{});
       states.delete(state);
@@ -346,7 +348,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function engine(state,candidate) {
     emit(state,{type:'playback/stage',stage:'engine-start'});
     const apiPort=await port();assertSession(state);
-    const dir=join(userData,'torrent-cache',secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
+    const chosen=await selectTorrentCacheRoot({userData,platform});assertSession(state);
+    state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
+    const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
+    emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
     state.auth=`vantara:${secret()}`;state.api=`http://127.0.0.1:${apiPort}`;
     const env=cleanEnv();env.RQBIT_HTTP_BASIC_AUTH_USERPASS=state.auth;
     const args=['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-upnp-port-forward','--disable-lsd','--disable-dht-persistence','--listen-port','0','server','start',dir,'--disable-persistence'];
@@ -363,10 +368,22 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const index=selectTorrentFile(metadata.details.files,candidate);
     emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
     let storage;
-    try { storage=await fs.statfs(userData,{bigint:true}); }
+    try { storage=await fs.statfs(dir,{bigint:true}); }
     catch { throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت؛ اختر مصدرًا آخر'); }
     assertSession(state);
     validateTorrentStorage(metadata.details.files[index],storage.bavail*storage.bsize);
+    // rqbit streams ranges, but does not currently promise LRU eviction of downloaded pieces.
+    // Keep the operating system safe: stop before the selected volume becomes full.
+    state.storageTimer=setInterval(async()=>{
+      if(state.stopped||state.storageChecking)return;
+      state.storageChecking=true;
+      try {
+        const available=await cacheFreeBytes(dir);
+        if(!state.stopped&&available<TORRENT_FREE_RESERVE)
+          await fail(state,'مساحة كاش التورنت قاربت الامتلاء؛ أوقفنا التنزيل لحماية القرص. المحرك الحالي لا يمسح القطع القديمة أثناء المشاهدة.');
+      } catch { /* a transient statfs failure is not proof of insufficient storage */ }
+      finally {state.storageChecking=false;}
+    },2000);
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
     const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:120000});assertSession(state);
@@ -565,12 +582,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
 }
 
 export function validateTorrentStorage(file,availableBytes) {
-  const length=file?.length;
-  if(!Number.isSafeInteger(length)||length<=0)throw new Error('حجم ملف التورنت غير معروف أو غير صالح؛ اختر مصدرًا آخر');
-  if(length>64*1024**3)throw new Error('هذا المصدر أكبر من 64 غيغابايت، وهو حد التخزين في النسخة التجريبية؛ اختر مصدرًا أصغر');
-  if(typeof availableBytes!=='bigint'||availableBytes<0n)throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت');
-  if(availableBytes<BigInt(length)+64n*1024n**2n)throw new Error('المساحة لا تكفي لملف التورنت واحتياط 64 ميغابايت؛ حرر مساحة أو اختر مصدرًا أصغر');
-  return length;
+  return validateStreamingHeadroom(file,availableBytes);
 }
 
 function subtitleLanguage(value) {
