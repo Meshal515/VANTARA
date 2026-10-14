@@ -1,0 +1,57 @@
+name: معاينة VANTARA لويندوز
+
+on:
+  push:
+    branches: [codex/windows-torrentio-design-20261014]
+    paths: ['.github/workflows/windows-preview.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-preview-0.1.0-preview.1
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: تثبيت أدوات تغليف ويندوز
+        run: sudo apt-get update && sudo apt-get install -y nsis 7zip
+      - name: التحقق من قشرة التطبيق والخدمات
+        run: |
+          node --test apps/desktop/security.test.cjs apps/desktop/src/services.test.mjs
+          node --check apps/desktop/main.cjs
+          node --check tools/build-windows.mjs
+      - name: بناء المثبت والحزمة المحمولة من المصادر المثبتة بالبصمات
+        run: |
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/windows-preview"
+          test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64-Setup.exe"
+          cd "$RUNNER_TEMP/windows-preview"
+          sha256sum -c SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VANTARA-Windows-x64-preview
+          path: |
+            ${{ runner.temp }}/windows-preview/*-Setup.exe
+            ${{ runner.temp }}/windows-preview/*-x64.zip
+            ${{ runner.temp }}/windows-preview/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+      - name: إرفاق الحزم وإتاحة تنزيل المعاينة
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload windows-v0.1.0-preview.1 \
+            "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64-Setup.exe" \
+            "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64.zip" \
+            "$RUNNER_TEMP/windows-preview/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit windows-v0.1.0-preview.1 --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --draft=false --prerelease --latest=false
