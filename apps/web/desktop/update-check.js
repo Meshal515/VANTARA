@@ -19,7 +19,8 @@ export function newerVersion(candidate, installed) {
 export function desktopUpdateFromManifest(manifest, installed) {
   if (!manifest || !/^\d+\.\d+\.\d+$/.test(manifest.desktop?.version ?? '')) return null;
   const entry=manifest.desktop;
-  if (!newerVersion(entry.version,installed) ||
+  const previewToStable = /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
+  if (!(previewToStable || newerVersion(entry.version,installed)) ||
     !/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '') ||
     !Number.isSafeInteger(entry.size) || entry.size<=0 ||
     !Number.isSafeInteger(manifest.versionCode) || manifest.versionCode<=0) return null;
