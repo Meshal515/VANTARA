@@ -35,6 +35,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Compile native embedded Windows video host and test renderer bridge
+        shell: pwsh
+        run: |
+          ./tools/build-video-host.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows embedded video host compiler failed' }
+          if (-not (Test-Path 'apps/desktop/native/vantara-video-host.exe')) { throw 'Missing embedded Windows video host' }
+          node --test apps/desktop/video-host.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Video host unit tests failed' }
       - name: Test Windows drive selection and actual statfs access
         shell: pwsh
         run: |
