@@ -231,3 +231,24 @@ it('انقطاع الغرفة بعد التشغيل لا يوقف الفيديو
    expect(commands).toContainEqual({session:'s',command:'pause',value:true});
  }finally{await f.engine.closeSession({session:'s'});}
 });
+
+it('دعوة الأصدقاء أثناء تشغيل الحلقة تلحق الغرفة بالمصدر نفسه وتبدأ من موضع المضيف',async()=>{
+  const f=fixture(),started=[],listeners=new Map();
+  const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>Date.now()},
+    timeline:{media:{key:'anime:owned#1'},started:false,playing:false,pos:0,at:Date.now()},
+    on(name,fn){const set=listeners.get(name)??new Set();set.add(fn);listeners.set(name,set);return()=>set.delete(fn);},
+    report(){},command(op,args){started.push({op,args});}};
+  const joined={room,mode:'sync'},hub={session:null,openPanel:vi.fn(),openInvite:vi.fn((media,{onStarted})=>{expect(media).toMatchObject({seriesRef:'anime:owned',episode:1});hub.session=joined;onStarted(joined);}),onChange:()=>()=>{}};
+  await prepared(f);const best=await f.engine.best({session:'s'});
+  try{
+    await f.engine.play({session:'s',candidate:best.candidate,animeId:'owned',episode:1,title:'حلقة اختبار',roomHub:hub});
+    f.emit({type:'playback/ready',session:'s'});
+    f.emit({type:'playback/progress',session:'s',position:23000,duration:120000,paused:false});
+    expect(f.engine.openPlayerRoom({session:'s'})).toBe(true);
+    expect(hub.openInvite).toHaveBeenCalledOnce();
+    expect(started).toEqual([{op:'play',args:{pos:23000}}]);
+    expect(f.starts).toHaveLength(1);
+    expect((await f.engine.playerState({session:'s'})).together).toBe(true);
+    f.engine.openPlayerRoom({session:'s'});expect(hub.openPanel).toHaveBeenCalledOnce();
+  }finally{await f.engine.closeSession({session:'s'});}
+});
