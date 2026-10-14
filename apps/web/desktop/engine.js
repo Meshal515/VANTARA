@@ -235,12 +235,20 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
             onDetach:()=>{
               if(s.together!==coordinator)return;
               if(!s.nativeReady||!args.together.session.room.timeline?.started){s.resumeAfterDetach=true;if(s.nativeReady){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}}
-              s.transitionGeneration=(s.transitionGeneration??0)+1;s.prepareGeneration=(s.prepareGeneration??0)+1;
-              s.controller.abort();s.controller=new AbortController();s.running=0;s.done=true;s.together=null;
+              s.transitionGeneration=(s.transitionGeneration??0)+1;
+              // Room teardown must NEVER cancel or navigate an already-playing video.
+              // Only cancel a pending next-episode handoff whose result is now obsolete.
+              if(s.episodeTransitioning){
+                s.prepareGeneration=(s.prepareGeneration??0)+1;
+                s.controller.abort();s.controller=new AbortController();s.running=0;s.done=true;
+                s.episodeTransitioning=false;
+              }
+              s.together=null;
               emit('desktopTogether',{session:s.id,closed:true});
             },
             onEpisode:async n=>{
               const transition=s.transitionGeneration=(s.transitionGeneration??0)+1;
+              s.episodeTransitioning=true;
               const owned=()=>current(s)&&s.together===coordinator&&s.transitionGeneration===transition;
               s.episodeCopies??=[...s.copies.values()];
               const copies=s.episodeCopies.map(copy=>({...copy,episode:n,identity:copy.identity?{...copy.identity,episode:n}:copy.identity}));
@@ -252,6 +260,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
                 if(!next)throw new Error('لا يوجد مصدر للحلقة الجديدة؛ اختر مصدرًا من التطبيق');
                 await engine.play({...args,candidate:next.id,episode:n,position:0,subtitleIdentity:args.subtitleIdentity?{...args.subtitleIdentity,episode:n}:null});
               }catch(error){if(owned()){coordinator.failed();emit('desktopNotice',{session:s.id,message:error.message});}}
+              finally{if(s.transitionGeneration===transition)s.episodeTransitioning=false;}
             }});
           s.together=coordinator;
         }
