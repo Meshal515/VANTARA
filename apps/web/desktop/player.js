@@ -15,6 +15,9 @@ const styles=`
 .desktop-player-seek{flex:1}.desktop-player-time{direction:ltr;font-variant-numeric:tabular-nums;font-size:13px}
 .desktop-player-status{min-height:20px;color:#c5bdd5;font-size:13px}.desktop-player-status[data-error=true]{color:#ff8899}
 .desktop-player-url{display:flex;gap:8px;margin-top:8px}.desktop-player-url input{flex:1;min-width:160px;direction:ltr}
+.desktop-room-layer{position:fixed;inset:0;z-index:10005;background:#000a;display:grid;place-items:center;padding:20px;overflow:auto}
+.desktop-room-body{box-sizing:border-box;width:min(540px,95vw);max-height:85vh;overflow:auto;background:#15121c;border:1px solid #433651;border-radius:16px;padding:18px;color:#f3f4f8;direction:rtl}
+.desktop-room-close{display:block;margin:0 0 12px auto}
 @media(max-height:650px){.desktop-player header{min-height:48px;padding:8px 16px}.desktop-player-controls{padding:8px 16px;gap:6px}.desktop-player button,.desktop-player select{padding:5px 9px}}
 `;
 /** Real native video occupies .desktop-player-video. Chromium controls live in
@@ -22,7 +25,7 @@ const styles=`
 export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engine}={}) {
   if(!g.document?.body||typeof bridge?.playerViewport!=='function')return null;
   const doc=g.document;
-  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0;
+  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0;
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}};
   const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
@@ -34,7 +37,11 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     void bridge.playerViewport({session,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden}).catch(error=>tell(error.message,true));
   };
   const update=()=>{if(!panel)return;pause.textContent=paused?'تشغيل':'إيقاف مؤقت';pause.setAttribute('aria-label',paused?'تشغيل الفيديو':'إيقاف الفيديو مؤقتًا');seek.max=String(duration||1);seek.value=String(Math.min(position,duration||position));seek.disabled=!ready||!duration;time.textContent=`${clock(position)} / ${clock(duration)}`;};
-  const dismiss=()=>{observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
+  const closeRoomSheet=()=>{
+    const cleanup=roomModalCleanup;roomModalCleanup=null;roomModal?.remove();roomModal=null;
+    try{cleanup?.();}catch{}
+  };
+  const dismiss=()=>{closeRoomSheet();releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
   const close=async()=>{const id=session;if(!id)return;viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action});b.onclick=fn;return b;};
   async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;
@@ -71,7 +78,25 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const external=node('details'),summary=node('summary','تحميل ترجمة خارجية');external.append(summary);
     const form=node('form',null,{class:'desktop-player-url'}),url=node('input',null,{type:'url',required:'',placeholder:'https://…/subtitles.srt','aria-label':'رابط ترجمة HTTPS'}),submit=node('button','تحميل',{type:'submit'});form.append(url,submit);form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{await command('subtitle-load',{url:url.value,lang:'ar',label:'ترجمة خارجية',select:true});}finally{submit.disabled=false;}};external.append(form);external.ontoggle=()=>viewport();controls.append(external);
     status=node('div','يبدأ المحرك ويجهز بيانات الفيديو…',{class:'desktop-player-status',role:'status','aria-live':'polite'});controls.append(status);
-    panel.append(header,video,controls);doc.body.append(panel);update();void sources();
+    panel.append(header,video,controls);doc.body.append(panel);
+    const hub=engine.roomHub?.({session});
+    if(hub?.useSurface){
+      releaseRoomSurface=hub.useSurface({
+        openSheet:build=>{
+          closeRoomSheet();
+          const layer=node('section',null,{class:'desktop-room-layer',role:'dialog','aria-modal':'true'});
+          const body=node('div',null,{class:'desktop-room-body'});
+          const closeButton=button('إغلاق','room-close',closeRoomSheet);
+          closeButton.classList.add('desktop-room-close');
+          body.append(closeButton);layer.append(body);panel.append(layer);roomModal=layer;
+          roomModalCleanup=build(body)??null;
+          return closeRoomSheet;
+        },
+        closeSheet:closeRoomSheet,
+        toast:message=>tell(message),
+      });
+    }
+    update();void sources();
     if(g.ResizeObserver){observer=new g.ResizeObserver(()=>viewport());observer.observe(video);}
     viewport();header.querySelector('button')?.focus?.();
   }
@@ -90,7 +115,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='playback/closed'){viewport(true);dismiss();if(fullscreen){fullscreen=false;void bridge.playerFullscreen({enabled:false});}}
   });
   const routeListener=engine.addListener?.('route',()=>void sources());
+  const togetherListener=engine.addListener?.('desktopTogether',event=>{if(event.session===session)void sources();});
   const keyboard=e=>{if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','Escape'].includes(e.key))e.preventDefault();if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
   g.addEventListener?.('keydown',keyboard);g.addEventListener?.('resize',viewport);
-  return {close,dispose(){void close();off?.();void routeListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
+  return {close,dispose(){void close();off?.();void routeListener?.remove?.();void togetherListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
 }
