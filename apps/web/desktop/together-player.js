@@ -10,7 +10,8 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   // Local media timelines can differ by an intro or recap, even when the room clock is exact.
   let videoOffsetMs = 0;
   const localToRoom = value => Math.max(0,Math.round(value-videoOffsetMs));
-  const roomToLocal = value => Math.max(0,Math.round(value+videoOffsetMs));
+  const clampLocal = value => Math.max(0, Math.min(native.duration ?? Infinity, Math.round(value)));
+  const localTarget = (timeline, at) => clampLocal(targetAt(timeline, at, videoOffsetMs));
   let lastReport = -Infinity, lastState = null;
   const synced = () => (room.info?.mode ?? together.session.mode) === 'sync';
   const live = () => room.status === 'live';
@@ -48,7 +49,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     if (!force && state === lastState && now - lastReport < 2000) return;
     lastReport = now; lastState = state;
     room.report({ pos: localToRoom(native.position), at: now, state, source: source(), mediaKey: key(),
-      version: { durationMs: native.duration }, driftMs: synced() && prepared && room.timeline?.started ? Math.round(native.position - roomToLocal(targetAt(room.timeline, now))) : null,
+      version: { durationMs: native.duration }, driftMs: synced() && prepared && room.timeline?.started ? Math.round(native.position - localTarget(room.timeline, now)) : null,
       driftP95: controller.stats().p95 });
   }
   function lobby() {
@@ -62,9 +63,8 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     if (!t.started) { pause(true); return; }
     if (now < t.at) return;
     if (native.buffering) return;
-    const shiftedTimeline = { ...t, pos: roomToLocal(t.pos ?? 0) };
-    const decision = controller.step({ timeline: shiftedTimeline, pos: native.position, at: now, buffering: native.buffering });
-    const seek = force && !native.buffering ? roomToLocal(targetAt(t, now)) : decision.seekTo;
+    const decision = controller.step({ timeline: t, pos: native.position, at: now, buffering: native.buffering, offsetMs: videoOffsetMs, durationMs: native.duration });
+    const seek = force && !native.buffering ? localTarget(t, now) : decision.seekTo;
     if (seek != null && Math.abs(native.position - seek) > 100) { native.position = Math.round(seek); command('seek', native.position); }
     const rate = Math.max(0.95, Math.min(1.05, decision.rate));
     if (native.rate !== rate) { native.rate = rate; command('rate', rate); }
@@ -75,7 +75,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     clearTimeout(scheduled); scheduled = null;
     const number = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
     if (state?.media?.key?.startsWith(`${together.mediaPrefix}#`) && number > 0 && number !== episode()) {
-      if (loadingEpisode !== number) { prepared = false; failed = false; loadingEpisode = number; videoOffsetMs=0; onEpisode(number); }
+      if (loadingEpisode !== number) { prepared = false; failed = false; loadingEpisode = number; videoOffsetMs=0; native.duration = null; onEpisode(number); }
     } else {
       align(true);
       if (state?.at > room.clock.serverNow()) {

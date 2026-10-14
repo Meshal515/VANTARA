@@ -40,6 +40,18 @@ export function subtitleRequest(identity, stream = {}) {
     extra,
   };
 }
+/** Private video IDs belong only to their originating addon. Canonical IDs
+ * are separate alternatives so namespace filtering never widens that trust. */
+export function subtitleRequests(identity, stream = {}, addonKey = null) {
+  const canonical = { ...identity, addonKey: null, videoId: null };
+  const { kitsu, ...externalIds } = identity?.externalIds ?? {};
+  const requests = [
+    ...(addonKey && addonKey === identity?.addonKey ? [subtitleRequest(identity, stream)] : []),
+    subtitleRequest(canonical, stream),
+    subtitleRequest({ ...canonical, externalIds }, stream),
+  ].filter(Boolean);
+  return requests.filter((request, index) => requests.findIndex(other => other.type === request.type && other.videoId === request.videoId) === index);
+}
 export async function discoverSubtitles({
   identity,
   stream = {},
@@ -53,14 +65,14 @@ export async function discoverSubtitles({
   const seen = new Set();
   await runProgressive(
     providers.flatMap((p) => {
-      const request = p.request ? p.request(identity, stream) : input;
+      const request = p.request ? p.request(identity, stream) : subtitleRequests(identity, stream, p.key)[0];
       if (!request) return [];
       return [{
       origin: p.origin ?? p.key,
       addonKey: p.key,
       run: async (signal) => {
         const result = boundedItems(await p.subtitles({ ...request, signal }));
-        onHealth(p.key, true);
+        if (!signal?.aborted) onHealth(p.key, true);
         return { p, result };
       },
     }]; }),

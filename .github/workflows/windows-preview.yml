@@ -14,11 +14,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  video-host:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile embedded video host
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
   preview:
+    needs: video-host
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-video-host
+          path: ${{ runner.temp }}/video-host
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -31,7 +48,7 @@ jobs:
           node --check tools/build-windows.mjs
       - name: بناء المثبت والحزمة المحمولة من المصادر المثبتة بالبصمات
         run: |
-          node tools/build-windows.mjs --output="$RUNNER_TEMP/windows-preview"
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --output="$RUNNER_TEMP/windows-preview"
           test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe"
           cd "$RUNNER_TEMP/windows-preview"
           sha256sum -c SHA256SUMS.txt

@@ -20,11 +20,14 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import com.vantara.app.BuildConfig
 import com.vantara.plugins.update.ApkCheck
 import com.vantara.plugins.update.WebBundleState
+import com.vantara.plugins.update.UpdateDownload
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -55,13 +58,15 @@ import java.util.zip.ZipInputStream
 class AppUpdatePlugin : Plugin() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val updateLock = Mutex()
     private val main = Handler(Looper.getMainLooper())
     private val http by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
-            .followSslRedirects(true)
+            .followSslRedirects(false)
+            .callTimeout(10, TimeUnit.MINUTES)
             .build()
     }
     private lateinit var state: WebBundleState
@@ -76,7 +81,7 @@ class AppUpdatePlugin : Plugin() {
         // ثم loadWebView)، فالرجوع أو الترقية يسريان على هذا الإقلاع نفسه
         lastBoot = state.onBoot()
         (lastBoot as? WebBundleState.Boot.Trial)?.let { watch(it.version) }
-        scope.launch { prune() }
+        scope.launch { updateLock.withLock { prune() } }
     }
 
     override fun handleOnDestroy() {
@@ -120,7 +125,9 @@ class AppUpdatePlugin : Plugin() {
             try {
                 val body = http.newCall(Request.Builder().url(url).header("Cache-Control", "no-cache").build()).execute().use { res ->
                     require(res.isSuccessful) { "manifest HTTP ${res.code}" }
-                    res.body.string()
+                    val source = res.body.source()
+                    require(!source.request(256 * 1024L + 1)) { "manifest too large" }
+                    source.readUtf8()
                 }
                 call.resolve(JSObject().put("json", body))
             } catch (t: Throwable) {
@@ -137,7 +144,7 @@ class AppUpdatePlugin : Plugin() {
     fun healthy(call: PluginCall) {
         val version = call.getString("version") ?: ""
         val confirmed = state.healthy(version)
-        if (confirmed) scope.launch { prune() }
+        if (confirmed) scope.launch { updateLock.withLock { prune() } }
         val rolledBack = (lastBoot as? WebBundleState.Boot.RolledBack)?.version
         call.resolve(JSObject().put("confirmed", confirmed).put("rolledBack", rolledBack))
     }
@@ -147,15 +154,17 @@ class AppUpdatePlugin : Plugin() {
     fun downloadWeb(call: PluginCall) {
         val url = httpsUrl(call) ?: return
         val sha = call.getString("sha256")?.lowercase() ?: return call.reject("sha256 required")
-        val version = call.getString("version")?.filter { it.isLetterOrDigit() || it == '.' || it == '-' }
+        val version = call.getString("version")?.takeIf { Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(it) }
             ?: return call.reject("version required")
         if (BuildConfig.VANTARA_NATIVE == DEV) return call.reject("dev build")
+        if (!Regex("[a-f0-9]{64}").matches(sha)) return call.reject("sha256 required")
         if (version in state.bad()) return call.reject("bad version")
-        scope.launch {
+        scope.launch { updateLock.withLock {
+            if (state.keep().any { File(it).name == version }) return@withLock call.reject("bundle already protected")
             val staging = File(webRoot, "$version.partial")
             try {
                 val zip = File(context.cacheDir, "updates/web-$version.zip").apply { parentFile?.mkdirs() }
-                download(url, zip, sha)
+                download(url, zip, sha, MAX_WEB_BYTES, call.data.optLong("size", -1L))
                 staging.deleteRecursively()
                 staging.mkdirs()
                 unzip(zip, staging)
@@ -172,9 +181,10 @@ class AppUpdatePlugin : Plugin() {
                 call.resolve(JSObject().put("staged", version))
             } catch (t: Throwable) {
                 staging.deleteRecursively()
+                File(context.cacheDir, "updates/web-$version.zip").delete()
                 call.reject(t.message ?: "web update failed")
             }
-        }
+        } }
     }
 
     /** يعرض الحزمة الجاهزة الآن (رجوع من الخلفية بعد مدة). يعيد تحميل الصفحة. */
@@ -194,7 +204,7 @@ class AppUpdatePlugin : Plugin() {
         state.reset()
         call.resolve()
         main.post { bridge.setServerAssetPath("public") }
-        scope.launch { prune() }
+        scope.launch { updateLock.withLock { prune() } }
     }
 
     /**
@@ -206,6 +216,7 @@ class AppUpdatePlugin : Plugin() {
     fun installApk(call: PluginCall) {
         val url = httpsUrl(call) ?: return
         val sha = call.getString("sha256")?.lowercase() ?: return call.reject("sha256 required")
+        if (!Regex("[a-f0-9]{64}").matches(sha)) return call.reject("sha256 required")
         val pm = context.packageManager
         if (!pm.canRequestPackageInstalls()) {
             val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
@@ -213,21 +224,22 @@ class AppUpdatePlugin : Plugin() {
             context.startActivity(intent)
             return call.resolve(JSObject().put("needsPermission", true))
         }
-        scope.launch {
+        scope.launch { updateLock.withLock {
             try {
                 val apk = File(context.cacheDir, "updates/VANTARA.apk").apply { parentFile?.mkdirs() }
-                download(url, apk, sha)
+                download(url, apk, sha, MAX_APK_BYTES, call.data.optLong("size", -1L))
                 val verdict = ApkCheck.verify(candidateInfo(apk), describe(installedInfo()))
                 if (verdict != ApkCheck.Verdict.OK) {
                     apk.delete()
-                    return@launch call.reject(verdict.name, verdict.name)
+                    return@withLock call.reject(verdict.name, verdict.name)
                 }
                 commitSession(apk)
+                apk.delete()
                 call.resolve(JSObject().put("started", true))
             } catch (t: Throwable) {
                 call.reject(t.message ?: "apk update failed")
             }
-        }
+        } }
     }
 
     private fun commitSession(apk: File) {
@@ -241,7 +253,7 @@ class AppUpdatePlugin : Plugin() {
             }
         }
         val id = installer.createSession(params)
-        installer.openSession(id).use { session ->
+        try { installer.openSession(id).use { session ->
             session.openWrite("base.apk", 0, apk.length()).use { out ->
                 apk.inputStream().use { it.copyTo(out, 256 * 1024) }
                 session.fsync(out)
@@ -251,6 +263,10 @@ class AppUpdatePlugin : Plugin() {
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
             session.commit(PendingIntent.getBroadcast(context, id, result, flags).intentSender)
+        }
+        } catch (t: Throwable) {
+            runCatching { installer.abandonSession(id) }
+            throw t
         }
     }
 
@@ -284,7 +300,14 @@ class AppUpdatePlugin : Plugin() {
     }
 
     private fun httpsUrl(call: PluginCall): String? {
-        val url = call.getString("url")?.takeIf { it.startsWith("https://") }
+        val url = call.getString("url")?.takeIf { raw ->
+            runCatching {
+                val uri = java.net.URI(raw)
+                uri.scheme == "https" && uri.host == "github.com" && uri.port == -1 &&
+                    uri.userInfo == null && uri.query == null && uri.fragment == null &&
+                    Regex("/Meshal515/VANTARA/releases/(latest/download|download/stable-[1-9][0-9]*)/(vantara-update[.]json|VANTARA-stable[.]apk|VANTARA-web[.]zip)").matches(uri.path)
+            }.getOrDefault(false)
+        }
         if (url == null) call.reject("https url required")
         return url
     }
@@ -292,54 +315,57 @@ class AppUpdatePlugin : Plugin() {
     /** ما لا يلزم: غير الحالية والسابقة والجاهزة. */
     private fun prune() {
         val keep = state.keep()
+        val updates = File(context.cacheDir, "updates")
+        val staleBefore = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+        updates.listFiles()?.filter { it.isFile && it.lastModified() < staleBefore &&
+            (it.name.endsWith(".partial") || it.name == "VANTARA.apk" || it.name.startsWith("web-")) }?.forEach { it.delete() }
         webRoot.listFiles()?.filter { it.isDirectory && it.absolutePath !in keep }?.forEach { it.deleteRecursively() }
     }
 
-    private fun download(url: String, out: File, sha: String) {
-        val digest = MessageDigest.getInstance("SHA-256")
+    /** Downloads restart safely; HTTP Range resume is not claimed for update packages. */
+    private fun download(url: String, out: File, sha: String, maxBytes: Long, expectedSize: Long) {
         http.newCall(Request.Builder().url(url).build()).execute().use { res ->
             require(res.isSuccessful) { "download HTTP ${res.code}" }
-            val total = res.body.contentLength()
-            var received = 0L
             var lastEmit = 0L
-            out.outputStream().use { sink ->
-                res.body.byteStream().use { input ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        sink.write(buf, 0, n)
-                        digest.update(buf, 0, n)
-                        received += n
-                        val now = System.currentTimeMillis()
-                        if (now - lastEmit > 250) {
-                            lastEmit = now
-                            notifyListeners("progress", JSObject().put("received", received).put("total", total))
-                        }
+            res.body.byteStream().use { input ->
+                // UpdateDownload enforces sizes/storage and rejects sha256 mismatch before rename.
+                UpdateDownload.write(input, out, sha, res.body.contentLength(), maxBytes, expectedSize) { received, total ->
+                    val now = System.currentTimeMillis()
+                    if (now - lastEmit > 250) {
+                        lastEmit = now
+                        notifyListeners("progress", JSObject().put("received", received).put("total", total))
                     }
                 }
             }
-        }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        if (actual != sha) {
-            out.delete()
-            error("sha256 mismatch")
         }
     }
 
     /** فكٌّ بلا خروج من المجلد (zip-slip): اسمٌ يقفز خارج الهدف يرفض الحزمة كلها. */
     private fun unzip(zip: File, into: File) {
         val base = into.canonicalPath + File.separator
+        var bytes = 0L
+        var entries = 0
         ZipInputStream(zip.inputStream().buffered()).use { zin ->
             while (true) {
                 val entry = zin.nextEntry ?: break
+                require(++entries <= 10000) { "too many bundle entries" }
                 val file = File(into, entry.name)
                 require(file.canonicalPath.startsWith(base)) { "bad entry ${entry.name}" }
                 if (entry.isDirectory) {
                     file.mkdirs()
                 } else {
                     file.parentFile?.mkdirs()
-                    file.outputStream().use { zin.copyTo(it) }
+                    file.outputStream().use { sink ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = zin.read(buffer)
+                            if (n < 0) break
+                            bytes += n
+                            require(bytes <= MAX_UNPACKED_BYTES) { "bundle too large" }
+                            require(into.usableSpace >= n + UpdateDownload.RESERVE_BYTES) { "insufficient bundle storage" }
+                            sink.write(buffer, 0, n)
+                        }
+                    }
                 }
                 zin.closeEntry()
             }
@@ -354,6 +380,9 @@ class AppUpdatePlugin : Plugin() {
         const val NATIVE_API = 2
         const val DEV = "dev"
         const val BUNDLE_META = "vantara-bundle.json"
+        private const val MAX_APK_BYTES = 1024L * 1024 * 1024
+        private const val MAX_WEB_BYTES = 256L * 1024 * 1024
+        private const val MAX_UNPACKED_BYTES = 512L * 1024 * 1024
         private const val WATCHDOG_MS = 20_000L
         private const val PREFS = "VantaraWebUpdate"
         private const val CAP_PREFS = "CapWebViewSettings"

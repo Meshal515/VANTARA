@@ -44,6 +44,7 @@ export function createAnimeIdentityResolver({ transport, maxEntries = 200, ttlMs
       while (cache.size > Math.max(1, Math.min(2000, maxEntries))) cache.delete(cache.keys().next().value);
     }
     const existing = numericId(identity.externalIds?.kitsu);
+    if (!ids.size) return identity;
     if (ids.size !== 1 || (existing && !ids.has(existing))) {
       if (!existing) return identity;
       const { kitsu, ...externalIds } = identity.externalIds;

@@ -139,3 +139,12 @@ describe('مشاهدة ويندوز المشتركة تستخدم الغرفة �
     expect(f.hooks.onDetach).toHaveBeenCalledOnce();f.player.close();
   });
 });
+
+it('clamps shifted playback and drift to the participant duration and correctly advances negative offsets',()=>{
+  vi.useFakeTimers(); const f=fixture(false,{started:true,playing:true,pos:5000,seq:1});
+  f.event('progress',{position:0,duration:60000}); f.event('ready'); f.player.setVideoOffset(-10000);
+  f.now(8000); f.emit('connection');
+  expect(f.bridge.playbackCommand).toHaveBeenLastCalledWith(expect.objectContaining({command:'seek',value:2000}));
+  f.player.setVideoOffset(120000); expect(f.bridge.playbackCommand).toHaveBeenCalledWith(expect.objectContaining({command:'seek',value:60000}));
+  expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({driftMs:0})); f.player.close();
+});

@@ -68,6 +68,21 @@ fun targetAt(t: Timeline, at: Double, offsetMs: Double = 0.0): Double {
     return max(0.0, base + offsetMs)
 }
 
+/** Source compensation is participant-local; never mutates the room timeline. */
+class VideoOffset {
+    var ms = 0L
+        private set
+    fun set(value: Long): Boolean {
+        if (value < -120000L || value > 120000L) return false
+        ms = value
+        return true
+    }
+    fun reset() { ms = 0 }
+    fun toRoom(position: Long): Double = max(0.0, position.toDouble() - ms)
+    fun target(t: Timeline, at: Double, durationMs: Long? = null): Double =
+        min(durationMs?.takeIf { it > 0 }?.toDouble() ?: Double.POSITIVE_INFINITY, targetAt(t, at, ms.toDouble()))
+}
+
 /** وسيط محافظ: في العدد الزوجي الأقرب للصفر، فقراءة شاذة واحدة لا تقرّر وحدها. */
 internal fun conservativeMedian(xs: List<Double>): Double {
     val s = xs.sorted()
@@ -100,12 +115,15 @@ class DriftController {
         bufferedAhead: Double = 0.0,
         bufferedBehind: Double = 0.0,
         offsetMs: Double = 0.0,
+        durationMs: Long? = null,
     ): Decision {
-        val target = targetAt(timeline, at, offsetMs)
+        fun boundedTarget(t: Double) = min(durationMs?.takeIf { it > 0 }?.toDouble() ?: Double.POSITIVE_INFINITY, targetAt(timeline, t, offsetMs))
+        val target = boundedTarget(at)
         val e = pos - target
+        if (buffering) { reset(); return Decision(timeline.playing, 1.0, null, e, "buffering") }
         val hostCommand = lastSeq != null && timeline.seq != lastSeq
         lastSeq = timeline.seq
-        fun seekTarget(cheap: Boolean) = targetAt(timeline, at + if (cheap || !timeline.playing) 0.0 else loadMs, offsetMs).toLong()
+        fun seekTarget(cheap: Boolean) = boundedTarget(at + if (cheap || !timeline.playing) 0.0 else loadMs).toLong()
 
         if (hostCommand) {
             reset()
@@ -114,7 +132,6 @@ class DriftController {
                 return Decision(timeline.playing, 1.0, seekTarget(cheapSeek(e, bufferedAhead, bufferedBehind)), e, "host-command")
             }
         }
-        if (buffering) { reset(); return Decision(timeline.playing, 1.0, null, e, "buffering") }
         if (!timeline.playing) {
             reset()
             val far = abs(e) > SyncRules.PAUSED_SEEK_MS

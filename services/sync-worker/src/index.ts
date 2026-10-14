@@ -631,12 +631,14 @@ async function handleSourceLatest(request: Request, env: Env, path: string, now:
   const sourceId = asString(body?.['sourceId'], 120);
   if (!sourceId || !/^[\w.:-]+$/.test(sourceId)) return json({ error: 'source' }, { status: 400 });
   if (path === '/v1/source-latest/claim') {
+    const leaseToken = crypto.randomUUID();
     const out = await env.DB.prepare(
-      `INSERT INTO source_latest (source_id, lease_until) VALUES (?, ?)
-       ON CONFLICT (source_id) DO UPDATE SET lease_until = excluded.lease_until
+      `INSERT INTO source_latest (source_id, lease_until, lease_token) VALUES (?, ?, ?)
+       ON CONFLICT (source_id) DO UPDATE SET lease_until = excluded.lease_until, lease_token = excluded.lease_token
        WHERE source_latest.fetched_at < ? AND source_latest.lease_until < ?`,
-    ).bind(sourceId, now + 20_000, now - 60_000, now).run();
-    return json({ claimed: Number(out.meta?.changes ?? 0) > 0, leaseUntil: now + 20_000 });
+    ).bind(sourceId, now + 45_000, leaseToken, now - 60_000, now).run();
+    const claimed = Number(out.meta?.changes ?? 0) > 0;
+    return json({ claimed, leaseUntil: now + 45_000, ...(claimed ? { leaseToken } : {}) });
   }
   if (path !== '/v1/source-latest') return json({ error: 'not_found' }, { status: 404 });
   const value = body?.['value'] as { mangas?: unknown[]; hasNextPage?: unknown } | null;
@@ -644,9 +646,11 @@ async function handleSourceLatest(request: Request, env: Env, path: string, now:
   const payload = JSON.stringify({ mangas: value.mangas, hasNextPage: Boolean(value.hasNextPage) });
   if (payload.length > 160_000) return json({ error: 'listing_too_large' }, { status: 413 });
   const leaseUntil = asNumber(body?.['leaseUntil']);
+  const leaseToken = asString(body?.['leaseToken'], 64);
+  if (!leaseToken) return json({ ok: false, fetchedAt: now });
   const published = await env.DB.prepare(
-    'UPDATE source_latest SET payload = ?, fetched_at = ?, lease_until = 0 WHERE source_id = ? AND lease_until = ?',
-  ).bind(payload, now, sourceId, leaseUntil).run();
+    'UPDATE source_latest SET payload = ?, fetched_at = ?, lease_until = 0, lease_token = NULL WHERE source_id = ? AND lease_until = ? AND lease_token = ? AND lease_until > ?',
+  ).bind(payload, now, sourceId, leaseUntil, leaseToken, now).run();
   return json({ ok: Number(published.meta?.changes ?? 0) > 0, fetchedAt: now });
 }
 

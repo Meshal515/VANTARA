@@ -16,6 +16,14 @@ describe('آخر التحديثات', () => {
     expect(live.map((e) => e.id)).toEqual(['new', 'yesterday']);
     expect(mergeTimelineEvents(live, incoming, { enteredAt: NOW, now: NOW + 30_000, refresh: true }).map((e) => e.id)).toEqual(['new', 'unknown', 'five-hours', 'yesterday']);
   });
+  it('inserts an explicitly verified source advance live while keeping undated first sightings out', () => {
+    const base = [{ id: 'old', work: 'old', at: NOW - H, publishedAt: NOW - H }];
+    const incoming = [
+      { id: 'advance', work: 'advance', at: NOW + 1000, firstSeenAt: NOW + 1000, publishedAt: null, observedAdvance: true },
+      { id: 'unknown', work: 'unknown', at: NOW + 2000, firstSeenAt: NOW + 2000, publishedAt: null },
+    ];
+    expect(mergeTimelineEvents(base, incoming, { enteredAt: NOW, now: NOW + 3000 }).map(e => e.id)).toEqual(['advance', 'old']);
+  });
   it('retains genuine dated batches, but rejects synthetic timestamps over an entire long backlog', () => {
     const batch = [627, 626, 625, 624].map((number) => ({ number, publishedAt: NOW }));
     expect(trustDates(batch)).toEqual(batch);
@@ -85,7 +93,7 @@ describe('آخر التحديثات: الهوية الواحدة', () => {
   });
 });
 
-describe('refresh keeps historical pages and the user's place across platforms', () => {
+describe("refresh keeps historical pages and the user's place across platforms", () => {
   it('a refresh prepends new events and updates existing entries but does not erase older pagination', () => {
     const base = [
       { id: 'older', work: 'old', at: 100, publishedAt: 100, title: 'old' },

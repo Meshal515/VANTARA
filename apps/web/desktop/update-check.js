@@ -17,7 +17,9 @@ export function newerVersion(candidate, installed) {
 }
 
 export function desktopUpdateFromManifest(manifest, installed) {
-  if (!manifest || !/^\d+\.\d+\.\d+$/.test(manifest.desktop?.version ?? '')) return null;
+  if (!manifest || manifest.format !== 2 || manifest.versionName !== manifest.desktop?.version ||
+      manifest.desktop?.platform !== 'win32-x64' || manifest.desktop?.installer !== 'nsis' ||
+      !/^\d+\.\d+\.\d+$/.test(manifest.desktop?.version ?? '')) return null;
   const entry=manifest.desktop;
   const previewToStable = /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
   if (!(previewToStable || newerVersion(entry.version,installed)) ||

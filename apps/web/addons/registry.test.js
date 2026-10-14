@@ -254,3 +254,32 @@ it("installs well beyond the old 100 limit, and a full storage rolls back with a
   expect(r.list()).toHaveLength(150);
   store.set = set;
 });
+it('atomically replaces a configured addon host after review and preserves its old source key across reload',async()=>{
+ const store=createStore({indexedDB:null}),transport={json:async()=>raw()},r=createAddonRegistry({store,transport});await r.ready;
+ const original=await r.install(await r.inspect('https://addon.test/settings/manifest.json?token=old'));await r.enable(original.key,false);await r.pin(original.key,true);
+ const next=await r.install(await r.inspect('https://newhost.test/settings/manifest.json?token=new'),{replaceKey:original.key});
+ expect(r.list()).toHaveLength(1);expect(next.enabled).toBe(false);expect(next.installedAt).toBe(original.installedAt);expect(next.pinned).toBe(true);
+ const again=createAddonRegistry({store,transport});await again.ready;await again.enable(next.key,true);
+ expect(again.connection(original.key).manifestUrl).toBe('https://newhost.test/settings/manifest.json?token=new');
+ expect(again.resolveKey(original.key)).toBe(next.key);
+});
+it('keeps both original settings and target host untouched if a replacement cannot be saved',async()=>{
+ const store=createStore({indexedDB:null}),transport={json:async()=>raw()},r=createAddonRegistry({store,transport});await r.ready;
+ const original=await r.install(await r.inspect('https://addon.test/manifest.json'));const set=store.set;store.set=async()=>false;
+ await expect(r.install(await r.inspect('https://newhost.test/manifest.json'),{replaceKey:original.key})).rejects.toThrow('حفظ');store.set=set;
+ expect(r.list()).toHaveLength(1);expect(r.connection(original.key).manifestUrl).toBe('https://addon.test/manifest.json');
+});
+it('requires the same addon ID and refuses host replacement during an active session',async()=>{
+ const store=createStore({indexedDB:null});let id='org.demo';const r=createAddonRegistry({store,transport:{json:async()=>({...raw(),id})}});await r.ready;
+ const original=await r.install(await r.inspect('https://addon.test/manifest.json'));id='org.other';
+ await expect(r.install(await r.inspect('https://newhost.test/manifest.json'),{replaceKey:original.key})).rejects.toThrow('هوية');
+ id='org.demo';const session=r.snapshot();
+ await expect(r.install(await r.inspect('https://newhost.test/manifest.json'),{replaceKey:original.key})).rejects.toThrow('الجلسة');session.release();expect(r.list()).toHaveLength(1);
+});
+it('removes a reviewed replacement when called through an old saved addon key',async()=>{
+ const store=createStore({indexedDB:null}),r=createAddonRegistry({store,transport:{json:async()=>raw()}});await r.ready;
+ const original=await r.install(await r.inspect('https://addon.test/manifest.json'));
+ await r.install(await r.inspect('https://other.test/manifest.json'),{replaceKey:original.key});
+ await r.remove(original.key);expect(r.list()).toEqual([]);
+ const again=createAddonRegistry({store,transport:{json:async()=>raw()}});await again.ready;expect(again.list()).toEqual([]);
+});

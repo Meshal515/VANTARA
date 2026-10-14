@@ -109,8 +109,12 @@ export function selectTorrentFile(files, candidate) {
     return candidate.fileIdx;
   }
   if (candidate.filename) {
-    const matches = files.map((f,i) => [f,i]).filter(([f]) => f.name === candidate.filename || basename(f.name.replaceAll('\\','/')) === candidate.filename);
+    const target=String(candidate.filename).replaceAll('\\','/');
+    const exact=files.map((f,i)=>[f,i]).filter(([f])=>String(f.name).replaceAll('\\','/')===target);
+    if(exact.length===1)return exact[0][1];
+    const matches = files.map((f,i) => [f,i]).filter(([f]) => !target.includes('/')&&basename(String(f.name).replaceAll('\\','/')) === target);
     if (matches.length === 1) return matches[0][1];
+    throw new Error('اسم ملف الفيديو المطلوب غير موجود أو يطابق أكثر من ملف؛ اختر fileIdx محددًا');
   }
   if (files.length === 1) return 0;
   // ملفات subtitles / nfo / screenshots ليست حلقات. اختر تلقائيًا فقط
@@ -220,7 +224,7 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   const states=new Set(), resourceControllers=new Set();
@@ -243,6 +247,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.cleanup=(async()=>{
       if(state.proxy){state.proxy.closeAllConnections();await new Promise(resolve=>state.proxy.close(resolve));}
       await Promise.all([...state.children].map(kill));
+      await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
@@ -339,6 +344,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     assertSession(state);return mapped(target);
   }
   async function engine(state,candidate) {
+    emit(state,{type:'playback/stage',stage:'engine-start'});
     const apiPort=await port();assertSession(state);
     const dir=join(userData,'torrent-cache',secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     state.auth=`vantara:${secret()}`;state.api=`http://127.0.0.1:${apiPort}`;
@@ -349,11 +355,13 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const deadline=Date.now()+15000;
     for(;;){assertSession(state);try{await localJSON(state.api,'/',{...options,timeout:1000});break;}catch(e){if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');await sleep(50,state.controller.signal);}}
 
+    emit(state,{type:'playback/stage',stage:'metadata'});
     const metadata=await getTorrentMetadata(
       ()=>localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:45000}),
       ms=>sleep(ms,state.controller.signal),()=>assertSession(state));assertSession(state);
     if(metadata.details?.info_hash?.toLowerCase()!==candidate.infoHash)throw new Error('هوية التورنت لا تطابق النتيجة');
     const index=selectTorrentFile(metadata.details.files,candidate);
+    emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
     let storage;
     try { storage=await fs.statfs(userData,{bigint:true}); }
     catch { throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت؛ اختر مصدرًا آخر'); }
@@ -364,6 +372,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:120000});assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     state.torrentId=added.id;
+    emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped)return;state.statsPending=true;
       try{const stats=await localJSON(state.api,`/torrents/${added.id}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
@@ -383,19 +392,25 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     });
   }
   async function player(state,url,title,position,pause) {
+    if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
+    if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
     const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=15','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
+    if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
+    emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
     child(state,binaries.mpv,args,cleanEnv(),(message,code)=>{if(message==='أغلق البرنامج المرفق'&&code===0&&state.ready){emit(state,{type:'playback/closed',...state.progress});cleanup(state).then(()=>{if(current===state)current=null;});}else fail(state,message);});
     state.socket=await connectIPC(state,state.ipc);assertSession(state);
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress});emitPlaybackState(state);};
+    const ready=()=>{if(state.ready)return;state.ready=true;clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
         const end=buffer.indexOf('\n'),line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line);}catch{continue;}
         if(event.request_id!=null){const pending=state.pending.get(event.request_id);if(pending){state.pending.delete(event.request_id);clearTimeout(pending.timer);event.error==='success'?pending.resolve(event.data):pending.reject(new Error('رفض المشغل الأمر'));}}
+        if(event.event==='client-message'&&['vantara-fullscreen','vantara-back'].includes(event.args?.[0]))emit(state,{type:'playback/action',action:event.args[0]==='vantara-fullscreen'?'fullscreen':'close'});
         if(event.event==='seek')state.seekRevision=(state.seekRevision??0)+1;
         if(event.event==='playback-restart'&&state.ready&&state.seekRevision!==state.publishedSeekRevision) {
           const revision=state.seekRevision;state.publishedSeekRevision=revision;
@@ -417,6 +432,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(event.event==='end-file'&&event.reason==='error')fail(state,'تعذر فتح الفيديو في المشغل');
         if(event.event==='property-change'){
           if(event.name==='track-list'&&Array.isArray(event.data)) {
+            state.audioTracks=event.data.filter(t=>t.type==='audio'&&Number.isSafeInteger(t.id)&&t.id>=0).slice(0,100)
+              .map(t=>({id:t.id,lang:subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'صوت'),selected:t.selected===true}));
+            emit(state,{type:'playback/audio',tracks:state.audioTracks});
             state.subtitleTracks=event.data.filter(t=>t.type==='sub'&&Number.isSafeInteger(t.id)&&t.id>=0).slice(0,200)
               .map(t=>({id:t.id,lang:subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'ترجمة'),selected:t.selected===true}));
             const selected=state.subtitleTracks.find(t=>t.selected),selectedId=selected?.id??null;
@@ -434,6 +452,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       }
     });
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
+    emit(state,{type:'playback/stage',stage:'first-frame'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.
     // أعد فتح رابط الـproxy الداخلي *مرة واحدة*؛ يحتفظ rqbit بنفس الجلسة
@@ -442,7 +461,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       state.firstFrameWatchdog=setTimeout(()=>{
         if(state.stopped||current!==state||state.ready)return;
         emit(state,{type:'playback/retrying',message:'نعيد الاتصال بالفيديو مع إبقاء تنزيل التورنت نشطًا'});
-        void ipcCommand(state,['loadfile',url,'replace']).catch(()=>{});
+        // Per-file --start survives normal initial loading, but retry explicitly
+        // reapplies position and pause so a paused room never starts by itself.
+        void ipcCommand(state,['loadfile',url,'replace',-1,`start=${position/1000},pause=${pause?'yes':'no'}`]).catch(()=>{});
         state.firstFrameWatchdog=setTimeout(()=>{
           if(!state.stopped&&current===state&&!state.ready)
             void fail(state,'لم يصل إطار فيديو بعد إعادة المحاولة؛ يمكنك تجربة سيرفر آخر');
@@ -461,7 +482,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     try{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
-      emit(state,{type:'playback/preparing'});
+      emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
       const url=candidate.infoHash?await engine(state,candidate):await makeProxy(state,candidate.url,candidate.headers);
       assertSession(state);await player(state,url,title,position,pause);assertSession(state);
       const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
@@ -530,6 +551,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(command==='pause'&&typeof value==='boolean')await ipcCommand(state,['set_property','pause',value]);
     else if(command==='seek'&&Number.isFinite(value)&&value>=0)await ipcCommand(state,['seek',value/1000,'absolute']);
     else if(command==='rate'&&Number.isFinite(value)&&value>=0.95&&value<=1.05)await ipcCommand(state,['set_property','speed',value]);
+    else if(command==='volume'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','volume',value]);
+    else if(command==='audio-select'&&Number.isSafeInteger(value)&&state.audioTracks?.some(t=>t.id===value))await ipcCommand(state,['set_property','aid',value]);
     else if(command==='subtitle-load')await loadSubtitle(state,value);
     else if(command==='subtitle-off') {state.subtitleManual=true;await ipcCommand(state,['set_property','sid','no']);}
     else if(command==='subtitle-select'&&Number.isSafeInteger(value)&&state.subtitleTracks.some(t=>t.id===value)) {state.subtitleManual=true;await ipcCommand(state,['set_property','sid',value]);}

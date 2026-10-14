@@ -21,6 +21,7 @@ import { createSubtitleSession } from './subtitles.js';
 import { nextEpisodeCopies } from '../../addons/video.js';
 import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
 import { createTogetherPlayer } from './together-player.js';
+import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
 import { connectionLabel, stateLabel } from '../../v35/together.js';
 
 const START_TIMEOUT_MS = 15_000;
@@ -273,14 +274,22 @@ export function openPlayer(args) {
     const hub = together.hub;
     const unmount = hub.mountStrip(strip);
     let sheetCleanup = null;
+    let localOffset = 0, setLocalOffset = null, offsetControls = null;
     const surface = hub.useSurface({ openSheet: build => {
       sheetCleanup?.(); sheetCleanup = null;
-      openSheet('مشاهدة معًا', null, body => { sheetCleanup = build(body); });
+      openSheet('مشاهدة معًا', null, body => {
+        sheetCleanup = build(body);
+        if ((together.session.room.info?.mode ?? together.session.mode) === 'sync' && setLocalOffset) {
+          offsetControls = createVideoOffsetControls({ getOffset: () => localOffset, setOffset: ms => setLocalOffset(ms) });
+          body.append(offsetControls);
+        }
+      });
     }, closeSheet, toast: message });
     tg = createTogetherPlayer({ room: together.session.room, mode: together.session.mode, mediaPrefix: together.mediaPrefix, video,
       episode: () => state.episode, source: () => state.current?.code ?? null,
       onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
-      onLobby: ({ visible, prepared, blocked, host, connection, roster, start, resume }) => {
+      onLobby: ({ visible, prepared, blocked, host, connection, roster, start, resume, videoOffsetMs, setVideoOffset }) => {
+        localOffset = videoOffsetMs; setLocalOffset = setVideoOffset; offsetControls?.refresh();
         lobby.hidden = !visible; lobby.replaceChildren();
         if (!visible) return;
         lobby.append(el('strong', null, 'مشاهدة معًا'), el('p', null, connectionLabel(connection)));

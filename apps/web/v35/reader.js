@@ -38,7 +38,7 @@ import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
-import { readingPosition, readingTop } from './reader-scroll.js';
+import { readingPosition, readingTop, createReadingFollower } from './reader-scroll.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 
@@ -170,35 +170,41 @@ export function openSmartReader(deps, ctx) {
   let tg = null;
   let unmountStrip = null;
   let followAnchor = null;
-  let followFrame = 0;
+  let pendingFollow = null;
+  let loadingChapter = null;
   let scrollReportFrame = 0;
+  let scrollReportTimer = null;
+  let lastScrollReport = -Infinity;
   const following = () => hub?.session && !hub.session.room.isHost && (hub.session.room.info?.mode ?? hub.session.mode) === 'sync';
-  function followScroll(position, immediate = false) {
-    followAnchor = { chapter: Number(state.row?.number), position };
-    if (settings.mode === 'paged') return jumpTo(Math.floor(position), !immediate);
-    cancelAnimationFrame(followFrame);
-    const move = () => {
-      followFrame = 0;
-      if (!following() || !followAnchor || Number(state.row?.number) !== followAnchor.chapter) return;
-      const target = readingTop(state.slots.map(s => s.frame), followAnchor.position, scroll.getBoundingClientRect().top, scroll.scrollTop);
-      if (target == null) return;
-      const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-      const delta = Math.max(0, Math.min(max, target)) - scroll.scrollTop;
-      scroll.scrollTop += immediate || Math.abs(delta) < 1 ? delta : delta * .35;
-      if (!immediate && Math.abs(delta) >= 1) followFrame = requestAnimationFrame(move);
-    };
-    move();
+  const followMotion = createReadingFollower({
+    active: () => following() && document.visibilityState !== 'hidden' && nativeForeground && settings.mode !== 'paged',
+    getPosition: () => scroll.scrollTop,
+    setPosition: top => { scroll.scrollTop = top; },
+    readTarget: () => {
+      const seg = followAnchor && segs.find(s => Number(s.row.number) === followAnchor.chapter);
+      if (!seg) return null;
+      const target = readingTop(seg.frames, followAnchor.position, scroll.getBoundingClientRect().top, scroll.scrollTop);
+      return target == null ? null : Math.max(0, Math.min(Math.max(0, scroll.scrollHeight - scroll.clientHeight), target));
+    },
+  });
+  function followScroll(position, immediate = false, chapter = Number(state.row?.number)) {
+    if (!Number.isFinite(position)) return;
+    followAnchor = { chapter, position };
+    if (settings.mode === 'paged') { followMotion.suspend(); return jumpTo(Math.floor(position), !immediate); }
+    followMotion.update(immediate);
   }
   const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-    if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number)) followScroll(followAnchor.position);
+    if (followAnchor && following()) followMotion.update();
   }) : null;
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
       seriesRef: ref,
       onFollow: ({ chapter, index }) => {
-        if (state.row && Number(state.row.number) === chapter) followScroll(index);
-        else {
+        pendingFollow = { chapter, index };
+        const seg = segs.find(s => Number(s.row.number) === chapter);
+        if (seg) { enterSegment(seg); followScroll(index, false, chapter); }
+        else if (loadingChapter !== chapter) {
           const row = sequence.find((r) => Number(r.number) === chapter);
           if (row) void openChapter(row, { startAt: index });
           else toast(`المضيف في الفصل ${chapter}، وما لقيناه عندك`);
@@ -212,7 +218,10 @@ export function openSmartReader(deps, ctx) {
     else tg.preparing();
   }
   function tgPage(seg, index) {
-    const position = settings.mode === 'paged' ? index : readingPosition(seg.slots.map(s => s.frame), scroll.getBoundingClientRect().top);
+    if (!tg) return;
+    const viewportTop = scroll.getBoundingClientRect().top;
+    if (settings.mode !== 'paged') seg = segs.find(s => s.frames.at(-1)?.getBoundingClientRect().bottom > viewportTop) ?? segs.at(-1) ?? seg;
+    const position = settings.mode === 'paged' ? index : readingPosition(seg.frames, viewportTop);
     tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index: position, pages: seg.slots.length, source: seg.row.sourceId ?? null });
   }
 
@@ -245,6 +254,7 @@ export function openSmartReader(deps, ctx) {
 
   function applySettings() {
     root.dataset.mode = settings.mode;
+    if (followAnchor && following()) followScroll(followAnchor.position, true, followAnchor.chapter);
     root.dataset.fit = settings.fit;
     root.style.setProperty('--rd-gap', `${settings.gap}px`);
     // اللمس: بلا تكبير، المتصفح لا يُكبّر الصفحة بإصبعين ولا بلمستين
@@ -413,6 +423,8 @@ export function openSmartReader(deps, ctx) {
 
   /** فتحٌ من الصفر: أول فصل، أو قفزة (الفصل السابق من الشريط، مصدر آخر، إعادة المحاولة). */
   async function openChapter(row, { startAt = null } = {}) {
+    followMotion.suspend();
+    loadingChapter = Number(row.number);
     tickActive();
     flushProgress();
     state.token += 1;
@@ -421,6 +433,7 @@ export function openSmartReader(deps, ctx) {
     const leaving = new Set(segs.map((x) => chapterId(x.row)));
     scheduler.cancel((key, job) => leaving.has(key.split('#')[0]) && job.priority < PRIORITY.NEXT_CHAPTER);
     observer?.disconnect();
+    followResize?.disconnect();
     segs.length = 0;
     state.seg = null;
     tickActive();
@@ -436,16 +449,19 @@ export function openSmartReader(deps, ctx) {
       if (token !== state.token) return;
       // الفصل ما انفتح من مصدره: نجرّب مصدرًا ثانيًا عنده نفس الفصل قبل أي رسالة
       if (switchSource({ row }, startAt ?? 0)) return;
+      loadingChapter = null;
       scroll.replaceChildren(chapterError(row, error));
       setChrome(true);
       return;
     }
     if (token !== state.token) return;
+    loadingChapter = null;
     const seg = makeSegment(row, pages);
     segs.push(seg);
     scroll.replaceChildren(seg.el);
     observePages();
-    const requested = startAt ?? savedPage(row, pages.length);
+    const latest = following() && pendingFollow?.chapter === Number(row.number) ? pendingFollow.index : startAt;
+    const requested = latest ?? savedPage(row, pages.length);
     const start = Math.min(Math.floor(requested), pages.length - 1);
     requestSegment(seg, start);
     seg.current = start;
@@ -454,8 +470,8 @@ export function openSmartReader(deps, ctx) {
     // فصلٌ يحتاج ترجمة: ننتظر أقل جاهز يكفي، أو «اقرأ الآن»
     // الترجمة ثابتة من أول صفحة حتى لو دخل القارئ في المنتصف.
     tl.openGate(seg, 0);
-    if (following() && startAt != null) {
-      requestAnimationFrame(() => followScroll(requested, true));
+    if (following() && latest != null) {
+      followScroll(requested, true, Number(row.number));
     } else if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);
@@ -508,6 +524,7 @@ export function openSmartReader(deps, ctx) {
       followResize?.observe(frame);
       return { page, frame, loaded: false };
     });
+    seg.frames = seg.slots.map(s => s.frame);
     seg.end = el('section', 'rd-end');
     seg.el.append(seg.end);
     paintBoundary(seg);
@@ -1006,8 +1023,12 @@ export function openSmartReader(deps, ctx) {
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
   scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
   scroll.addEventListener('scroll', () => {
-    if (!tg || !state.seg || scrollReportFrame) return;
-    scrollReportFrame = requestAnimationFrame(() => { scrollReportFrame = 0; if (state.seg) tgPage(state.seg, state.seg.current ?? 0); });
+    if (!tg || !state.seg || !hub?.session?.room.isHost || scrollReportFrame || scrollReportTimer != null) return;
+    const delay = Math.max(0, 80 - (performance.now() - lastScrollReport));
+    scrollReportTimer = setTimeout(() => {
+      scrollReportTimer = null;
+      scrollReportFrame = requestAnimationFrame(() => { scrollReportFrame = 0; lastScrollReport = performance.now(); if (state.seg) tgPage(state.seg, state.seg.current ?? 0); });
+    }, delay);
   }, { passive: true });
   scroll.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button, a, input')) return;
@@ -1579,7 +1600,8 @@ export function openSmartReader(deps, ctx) {
   document.addEventListener('keydown', onKey);
   const onVisibility = () => {
     tickActive();
-    if (document.visibilityState === 'hidden') flushProgress();
+    if (document.visibilityState === 'hidden') { flushProgress(); followMotion.suspend(); }
+    else if (followAnchor && following()) followMotion.update(true);
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -1601,8 +1623,10 @@ export function openSmartReader(deps, ctx) {
   stopNativeLifecycle = listenFollowForeground((e) => {
     nativeForeground = e?.active !== false;
     tickActive();
-    if (e?.active === false) flushProgress();
+    if (e?.active === false) { flushProgress(); followMotion.suspend(); }
+    else if (followAnchor && following()) followMotion.update(true);
   });
+  const followReportTimer = setInterval(() => { if (tg && following() && state.seg && document.visibilityState !== 'hidden') tgPage(state.seg, state.seg.current ?? 0); }, 1000);
   activeTimer = setInterval(() => {
     afterProgress();
     if (document.visibilityState === 'visible') flushProgress();
@@ -1626,10 +1650,13 @@ export function openSmartReader(deps, ctx) {
     if (activeTimer != null) clearInterval(activeTimer);
     try { stopNativeLifecycle(); } catch {}
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
+    state.token++; // pending chapter requests cannot paint a closed reader
     activeClock.sample(null);
     observer?.disconnect();
     followResize?.disconnect();
-    cancelAnimationFrame(followFrame);
+    followMotion.destroy();
+    clearInterval(followReportTimer);
+    clearTimeout(scrollReportTimer);
     cancelAnimationFrame(scrollReportFrame);
     document.removeEventListener('keydown', onKey);
     taps.reset();
@@ -1644,5 +1671,5 @@ export function openSmartReader(deps, ctx) {
     releaseSurface?.();
   }
 
-  return { root, handleBack, destroy: () => !exited && (exited = true, tickActive(), flushProgress(), destroy()) };
+  return { root, handleBack, syncStats: () => ({ ...followMotion.stats(), rttMs: hub?.session?.room.clock.rtt ?? null, clockUncertaintyMs: hub?.session?.room.clock.uncertainty ?? null }), destroy: () => !exited && (exited = true, tickActive(), flushProgress(), destroy()) };
 }

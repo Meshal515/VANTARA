@@ -226,3 +226,19 @@ it('لا يعيد النسخة المضمّنة إذا حذفها المستخد
   expect(runtime.addons.registry.list()).toHaveLength(3);
   expect(task.statuses()[0].state).toBe('skipped');
 });
+it('does not treat a different addon on the same host as the default provider', async () => {
+  const unrelated='https://torrentio.strem.fun/other/manifest.json';
+  const {runtime,requests}=setup(async url=>url===unrelated?{...manifest('https://torrentio.strem.fun/manifest.json'),id:'org.other.streams',name:'Other'}:manifest(url));
+  await runtime.addons.ready;const installed=await runtime.addons.registry.install(await runtime.addons.registry.inspect(unrelated));
+  const task=startDesktopDefaultAddons({runtime});await task.done;
+  expect(requests).toContain('https://torrentio.strem.fun/manifest.json');
+  expect(runtime.addons.registry.list()).toHaveLength(5);
+  expect(runtime.addons.registry.connection(installed.key).manifestUrl).toBe(unrelated);
+  expect(task.statuses()[0].state).toBe('installed');
+});
+it('rejects a fetched manifest with another provider ID without marking its default installed', async () => {
+  const {runtime}=setup(async url=>({...manifest(url),...(url.includes('opensubtitles')?{id:'org.other.subtitles'}:{})}));
+  const task=startDesktopDefaultAddons({runtime});await task.done;
+  expect(task.statuses()[2].state).toBe('failed');
+  expect(runtime.addons.registry.list().some(row=>row.id==='org.other.subtitles')).toBe(false);
+});

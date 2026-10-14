@@ -68,3 +68,13 @@ it('renders profile avatars and +N only, and updates overflow when people leave'
   room.roster=room.roster.slice(0,2); room.emit('roster',room.roster); expect(strip.querySelectorAll('img')).toHaveLength(2); expect(strip.querySelector('.tg-more')).toBeNull();
   hub.leave();
 });
+it('never follows unrelated media or non-finite anchors',()=>{
+  const room=roomOf(),onFollow=vi.fn();const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow});
+  for(const update of [{media:{key:'anime:other#1',kind:'anime'},pos:40000,seq:2},{media:{key:'manga:solo#bad',kind:'manga'},pos:3,seq:3},{pos:NaN,seq:4}])room.emit('state',{state:{...room.timeline,...update},by:'host'});
+  expect(onFollow).not.toHaveBeenCalled();bridge.destroy();
+});
+it('cancels pending room startup when a reader is closed before welcome callback',()=>{
+  vi.useFakeTimers();const room=roomOf();room.isHost=true;room.timeline.started=false;
+  const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow:vi.fn()});bridge.page({chapter:1,index:0,pages:10});room.command.mockClear();
+  room.emit('welcome',{state:room.timeline});bridge.destroy();vi.runAllTimers();expect(room.command).not.toHaveBeenCalled();
+});

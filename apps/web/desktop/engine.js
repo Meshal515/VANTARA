@@ -198,9 +198,23 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       return { candidate: c?.id ?? null, route: c?.route ?? null, code: c?.code ?? null };
     },
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
+    async playerState({session}) {
+      const s=sessionOf(session);
+      return {title:s.playArgs?.title??'VANTARA',candidate:s.playArgs?.candidate,position:s.progress.position??0,
+        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')}))};
+    },
+    async playerCommand({session,command,value}) {
+      const s=sessionOf(session);
+      if(command==='pause'&&s.together?.playPause(!value))return;
+      if(command==='seek'&&s.together?.seek(value))return;
+      return bridge.playbackCommand({session,command,value});
+    },
+    async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
+    openPlayerRoom({session}){sessionOf(session).playArgs?.together?.hub?.openPanel?.();},
     async play(args) {
       const s = sessionOf(args.session), c = s.candidates.get(args.candidate);
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
+      s.playArgs={...args};
       s.subtitleController?.abort(); s.subtitleController = new AbortController();
       const generation = s.playGeneration = (s.playGeneration ?? 0) + 1;
       s.context = { animeId: args.animeId, episode: args.episode ?? s.episode, code: c.code };

@@ -13,17 +13,40 @@ env:
   WIN_TAG: windows-v0.1.0-preview.4
 
 jobs:
+  video-host:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile embedded video host
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
   build:
+    needs: video-host
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-video-host
+          path: ${{ runner.temp }}/video-host
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - run: pnpm install --frozen-lockfile
       - name: Test updater and version manifest
         run: |
-          node --test apps/web/desktop/update-check.test.js tools/unified-windows-manifest.test.mjs
+          node --test tools/unified-windows-manifest.test.mjs tools/release-manifest-validation.test.mjs
+          pnpm exec vitest run apps/web/desktop/update-check.test.js apps/web/lib/updater.test.js
           node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/services.test.mjs apps/desktop/src/resource.test.mjs
           node --check apps/desktop/main.cjs
           node --check apps/web/desktop/boot.js
@@ -48,7 +71,7 @@ jobs:
           path=pathlib.Path('apps/web/lib/config.js')
           path.write_text(path.read_text().replace('__VANTARA_VERSION__',version))
           PY
-          node tools/build-windows.mjs --output="$RUNNER_TEMP/vantara-build"
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --output="$RUNNER_TEMP/vantara-build"
           test -s "$RUNNER_TEMP/vantara-build/VANTARA-$WIN_VERSION-Windows-x64-Setup.exe"
           (cd "$RUNNER_TEMP/vantara-build" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
