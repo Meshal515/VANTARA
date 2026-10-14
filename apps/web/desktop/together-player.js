@@ -1,7 +1,7 @@
 import { createDriftController, targetAt } from '../lib/together/sync.js';
 
 /** MPV يتبع جلسة الغرفة الأصلية؛ المواضع والأوامر كلها بالمللي ثانية. */
-export function createDesktopTogetherPlayer({ together, bridge, session, episode, source = () => null, onEpisode = () => {}, onDetach = () => {}, onLobby = () => {}, message = () => {} }) {
+export function createDesktopTogetherPlayer({ together, bridge, session, episode, source = () => null, keepPlayingWhileRoomStarts = false, onEpisode = () => {}, onDetach = () => {}, onLobby = () => {}, message = () => {} }) {
   const room = together.session.room;
   const controller = createDriftController();
   const native = { position: 0, duration: null, paused: null, buffering: false, rate: 1 };
@@ -54,13 +54,13 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   }
   function lobby() {
     if (closed) return;
-    onLobby({ visible: synced() && (!room.timeline?.started || !prepared), prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ visible: synced() && ((!room.timeline?.started && !keepPlayingWhileRoomStarts) || !prepared), prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
       roster: room.roster, start: () => api.playPause(true), openPanel: () => together.hub.openPanel() });
   }
   function align(force = false) {
     const t = room.timeline, now = room.clock.serverNow();
     if (closed || !prepared || !synced() || !live() || !t || t.media?.key !== key()) return;
-    if (!t.started) { pause(true); return; }
+    if (!t.started) { if (!keepPlayingWhileRoomStarts) pause(true); return; }
     if (now < t.at) return;
     if (native.buffering) return;
     const decision = controller.step({ timeline: t, pos: native.position, at: now, buffering: native.buffering, offsetMs: videoOffsetMs, durationMs: native.duration });
