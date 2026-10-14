@@ -12,7 +12,7 @@ vi.mock('../lib/extension-engine.js', () => ({
 import engine from '../lib/extension-engine.js';
 import { _reset, noteEditionChapters } from '../lib/manga-evidence.js';
 import { _reset as resetAliases } from '../lib/manga-alias-store.js';
-import { browse, resetSources } from './works.js';
+import { browse, mergeWorkPages, resetSources } from './works.js';
 
 const P = 'eu.kanade.tachiyomi.extension';
 const DEX = '53f1ec5e-058b-4d18-a23b-2a7dbca5669f';
@@ -112,6 +112,27 @@ describe('manga listing: one work = one card', () => {
     expect(aliasLoads).toBe(1);
     expect(items).toHaveLength(1);
     expect(items[0]._work.editions.map((edition) => edition.sourceId.split('.').pop()).sort()).toEqual(['mangalek', 'mangaswat']);
+  });
+
+
+  it('deduplicates the same manga across separate source pages without losing either edition', async () => {
+    engine.popular.mockImplementation(async (sourceId, page) => ({
+      mangas: page === 1 && sourceId.endsWith('.mangalek')
+        ? [{ title: 'Demonic Emperor', url: '/demonic', altNames: ['Magic Emperor'] }]
+        : page === 2 && sourceId.endsWith('.mangaswat')
+          ? [{ title: 'Magic Emperor', url: '/magic' }]
+          : [],
+      hasNextPage: page === 1,
+    }));
+    const first = await browse({ kind: 'popular', page: 1 });
+    const second = await browse({ kind: 'popular', page: 2 });
+    expect(first.items).toHaveLength(1);
+    expect(second.items).toHaveLength(1);
+    expect(first.items[0].id).not.toBe(second.items[0].id);
+    const merged = mergeWorkPages([...first.items, ...second.items]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]._work.editions.map((e) => e.sourceId.split('.').pop()).sort()).toEqual(['mangalek', 'mangaswat']);
+    expect(mergeWorkPages(merged)).toHaveLength(1);
   });
 
   it('MangaDex unreachable: the listing still renders, never merges by guessing', async () => {
