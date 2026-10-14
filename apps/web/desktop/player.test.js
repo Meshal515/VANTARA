@@ -29,3 +29,20 @@ it('audio, subtitle, delay and fullscreen controls use only constrained bridge c
  const audio=panel.querySelector('[data-control="audio"]');audio.dispatchEvent(new f.document.defaultView.Event('change'));
  panel.querySelector('[data-action="fullscreen"]').click();await Promise.resolve();expect(f.commands).toContainEqual({session:'one',command:'audio-select',value:2});expect(f.bridge.playerFullscreen).toHaveBeenCalledWith({enabled:true});
 });
+
+it('manual video timing appears above subtitle delay and changes only local room offset',async()=>{
+ const f=fixture();
+ f.engine.playerState=async()=>({candidate:'source-1',sources:[],together:true,videoOffsetMs:-30000});
+ f.engine.setVideoOffset=vi.fn(async()=>({videoOffsetMs:-31000}));
+ f.event({type:'playback/preparing',session:'one',title:'فيلم'});
+ await Promise.resolve();await Promise.resolve();
+ const panel=f.document.querySelector('.desktop-player');
+ const timing=panel.querySelector('[data-control="video-offset"]');
+ const subtitles=panel.querySelector('[data-control="subtitle-delay"]');
+ expect(timing).toBeTruthy();expect(subtitles).toBeTruthy();
+ expect(panel.textContent.indexOf('توقيت الفيديو')).toBeLessThan(panel.textContent.indexOf('تأخير الترجمة'));
+ timing.value='-31';timing.dispatchEvent(new f.document.defaultView.Event('change'));
+ await Promise.resolve();
+ expect(f.engine.setVideoOffset).toHaveBeenCalledWith({session:'one',ms:-31000});
+ expect(f.commands.some(c=>c.command==='seek')).toBe(false);
+});
