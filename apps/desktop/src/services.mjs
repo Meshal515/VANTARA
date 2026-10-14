@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs, { mkdir, rm } from 'node:fs/promises';
 import { join, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, freemem } from 'node:os';
 import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom, TORRENT_FREE_RESERVE } from './torrent-cache.mjs';
 
 const secret = () => randomBytes(24).toString('hex');
@@ -412,7 +412,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
     if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=15','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    // Keep MPV's *packet* cache in RAM, separate from rqbit's disk cache.
+    // Target about a minute ahead, but cap bytes to protect low-memory PCs.
+    const freeMemory=freemem();
+    const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
+    const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
