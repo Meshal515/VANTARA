@@ -1512,7 +1512,7 @@ export function createCinema(deps) {
     const hub = deps.together?.() ?? null;
     const togetherRef = `cinema:${playKey(m, season)}`;
     const togetherEp = m.type === 'movie' ? 1 : n;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp));
+    sheet.autoTogether = false; // Friends choose a source or smart playback themselves.
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
@@ -1537,7 +1537,7 @@ export function createCinema(deps) {
       const best = el('button', 'an-pick-best');
       best.type = 'button';
       foot.append(best);
-      if (hub && !sheet.autoTogether) {
+      if (hub && !hub.matches(togetherRef, togetherEp)) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'cinema',
@@ -1548,7 +1548,7 @@ export function createCinema(deps) {
             cover: m.poster ?? null,
             episode: togetherEp,
             season: m.type === 'series' ? season : null,
-          }, { onStarted: () => { sheet.autoTogether = true; withFriends.remove(); queuePaint(); } });
+          }, { onStarted: () => { withFriends.remove(); queuePaint(); } });
         }, 'شاهد مع أصدقائك');
         foot.append(withFriends);
       }
