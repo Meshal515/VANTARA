@@ -210,6 +210,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       return bridge.playbackCommand({session,command,value});
     },
     async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
+    roomHub({session}){const s=sessionOf(session);return s.playArgs?.roomHub??s.playArgs?.together?.hub??null;},
     openPlayerRoom({session}){
       const s=sessionOf(session),args=s.playArgs,hub=args?.roomHub??args?.together?.hub;
       if(!hub) {emit('desktopNotice',{session,message:'الغرفة غير متاحة لهذا التشغيل'});return false;}
@@ -239,7 +240,6 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         const offWelcome=room.on('welcome',begin);
         begin();
         const offState=room.on('state',()=>{if(room.timeline?.started){off();offWelcome();offState();}});
-        emit('desktopTogether',{session:s.id,attached:true});
       }});
       return true;
     },
