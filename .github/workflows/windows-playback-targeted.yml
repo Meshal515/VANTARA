@@ -6,6 +6,7 @@ on:
       - 'apps/desktop/**'
       - 'apps/web/desktop/**'
       - 'apps/web/v35/together.js'
+      - 'tools/build-video-host.ps1'
       - '.github/workflows/windows-playback-targeted.yml'
   workflow_dispatch:
 permissions:
