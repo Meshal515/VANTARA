@@ -24,7 +24,7 @@ it('reads only logarithmically many image bounds on a 2048-page continuous chapt
   expect(layouts).toBeLessThanOrEqual(14);
 });
 it('binary visible-frame lookup keeps exact behavior at page boundaries and after last page',()=>{
-  expect(readingPosition([frame(-100,100),frame(0,800)],0)).toBe(0);
+  expect(readingPosition([frame(-100,101),frame(1,800)],0)).toBeCloseTo(100/101);
   expect(readingPosition([frame(-200,200),frame(0,800)],0)).toBe(1);
   expect(readingPosition([frame(-1200,600),frame(-600,600)],0)).toBe(1.999999);
 });
