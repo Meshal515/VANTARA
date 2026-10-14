@@ -256,7 +256,7 @@ test('سياسة البث تتحقق من هامش آمن دون اشتراط م
 test('الملف المجهول يُرفض قبل أي تنزيل أو تشغيل mpv',async t=>{
   const {services,events,dir}=await fixture(t,'unknown');
   await assert.rejects(services.startPlayback({session:'unknown',candidate:{infoHash:hash,fileIdx:0}}),/حجم.*غير/);
-  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\\n').map(JSON.parse);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(requests.some(r=>r.url.includes('list_only=true')));
   assert.ok(!requests.some(r=>r.url.includes('only_files=')));
   await assert.rejects(readFile(join(dir,'mpv-log')),{code:'ENOENT'});
@@ -278,7 +278,8 @@ test('تهيئة العميل تنظف cache المتروك قبل تشغيل ج
   await writeFile(join(dir,'user-preferences.json'),'keep');
   const services=createDesktopServices({userData:dir,binaries});t.after(()=>services.close());
   await services.startPlayback({session:'after-crash',candidate:{infoHash:hash,fileIdx:0}});
-  const entries=await readdir(join(dir,'torrent-cache'));assert.equal(entries.length,1);assert.notEqual(entries[0],'a'.repeat(48));
+  const {cacheNamespace}=await import('./torrent-cache.mjs');
+  const entries=await readdir(join(dir,cacheNamespace(dir)));assert.equal(entries.length,1);assert.notEqual(entries[0],'a'.repeat(48));
   assert.equal(await readFile(join(dir,'user-preferences.json'),'utf8'),'keep');
 });
 
