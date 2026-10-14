@@ -46,3 +46,21 @@ it('manual video timing appears above subtitle delay and changes only local room
  expect(f.engine.setVideoOffset).toHaveBeenCalledWith({session:'one',ms:-31000});
  expect(f.commands.some(c=>c.command==='seek')).toBe(false);
 });
+
+it('يعرض ورقة دعوة الأصدقاء فوق المشغل دون إغلاق الفيديو أو تغيير المصدر',async()=>{
+  const f=fixture();let surface;
+  f.engine.roomHub=()=>({useSurface:ui=>{surface=ui;return()=>{};}});
+  f.engine.openPlayerRoom=vi.fn(()=>surface.openSheet(body=>{
+    const text=f.document.createElement('p');text.textContent='ادع منصور إلى الحلقة';body.append(text);
+  }));
+  f.event({type:'playback/preparing',session:'one',title:'مسلسل'});
+  f.event({type:'playback/ready',session:'one',embedded:true});
+  f.document.querySelector('[data-action="room"]').click();
+  expect(f.engine.openPlayerRoom).toHaveBeenCalledWith({session:'one'});
+  expect(f.document.querySelector('.desktop-room-layer')?.textContent).toContain('ادع منصور');
+  expect(f.document.querySelector('.desktop-player')).toBeTruthy();
+  expect(f.bridge.stopPlayback).not.toHaveBeenCalled();
+  f.document.querySelector('[data-action="room-close"]').click();
+  expect(f.document.querySelector('.desktop-room-layer')).toBeNull();
+  expect(f.document.querySelector('.desktop-player')).toBeTruthy();
+});
