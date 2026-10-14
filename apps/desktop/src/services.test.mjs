@@ -207,7 +207,8 @@ test('فشل callback الأحداث لا يمنع إنهاء العمليات �
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
   await services.stopPlayback({session:'callback'});
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
-  const {readdir}=await import('node:fs/promises');assert.deepEqual(await readdir(join(dir,'torrent-cache')),[]);
+  const {readdir}=await import('node:fs/promises');const {cacheNamespace}=await import('./torrent-cache.mjs');
+  await assert.rejects(readdir(join(dir,cacheNamespace(dir))),{code:'ENOENT'});
 });
 
 test('فشل mpv قبل الفيديو يطلق error واضحًا دون ready أو closed ناجح',async t=>{
