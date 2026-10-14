@@ -1,6 +1,6 @@
 import { subtitleRequest } from "./subtitles.js";
 import { createAnimeIdentityResolver, kitsuVideoRequest } from "./anime-mapping.js";
-import { isNative, webPlugin } from "../pwa/platform.js";
+import { isNative, webPlugin, desktopPlugin } from "../pwa/platform.js";
 import { createAddonCache } from "./cache.js";
 import { createAddonRegistry } from "./registry.js";
 import { createTransport } from "./transport.js";
@@ -26,11 +26,11 @@ export function createAddonRuntime({
   pulse = createSourcePulse(),
 } = {}) {
   if (!store) throw new Error("مخزن الإضافات غير متاح");
-  const runtimeName = r.native ? "apk" : "pwa";
+  const runtimeName = r.runtimeName === "desktop" ? "desktop" : r.native ? "apk" : "pwa";
   const capabilitiesFor = m => supportedCapabilities(m, runtimeName)
     .filter(cap => cap !== "streams" || runtimeName !== "apk" || r.addonStreams !== false);
   const streamRouteSupported = stream => (!stream.status || stream.status === "RESOLVED") &&
-    (runtimeName === "apk" ? stream.type !== "torrent" || r.torrentSupported === true : stream.type !== "dash" && stream.type !== "torrent");
+    (["apk", "desktop"].includes(runtimeName) ? stream.type !== "torrent" || r.torrentSupported === true : stream.type !== "dash" && stream.type !== "torrent");
   const core = [],
     registry = createAddonRegistry({
       store,
@@ -493,6 +493,8 @@ export function createAddonRuntime({
 }
 export async function getAddonRuntime(r) {
   if (r?.addons) return r.addons;
+  const desktop = desktopPlugin("AddonFabric");
+  if (desktop) return (await desktop.runtime()).getRuntime().addons;
   if (isNative())
     return (await import("./native-runtime.js")).getNativeAddonRuntime();
   const gate = webPlugin("AddonFabric");

@@ -13,11 +13,11 @@
 import { addonCopies } from '../addons/video.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
-import { isNative, webPlugin } from '../pwa/platform.js';
+import { isNative, webPlugin, desktopPlugin } from '../pwa/platform.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
-const bridge = () => globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('AnimeEngine');
+const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('AnimeEngine');
 
 export const available = () => bridge() !== null;
 

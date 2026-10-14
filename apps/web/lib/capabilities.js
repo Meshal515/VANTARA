@@ -10,7 +10,7 @@
  */
 
 import { RELEASE } from './release.js';
-import { isNative } from '../pwa/platform.js';
+import { isNative, isDesktop } from '../pwa/platform.js';
 
 let account = null;
 
@@ -26,7 +26,7 @@ function storedUsername() {
 
 /** 'apk' داخل التطبيق الأصلي، و'pwa' في المتصفح. */
 export function currentPlatform(g = globalThis) {
-  return isNative(g) ? 'apk' : 'pwa';
+  return isDesktop(g) ? 'desktop' : isNative(g) ? 'apk' : 'pwa';
 }
 
 /** الحساب الحالي (اسم المستخدم) لمفاتيح الحسابات. يضبطه app.js بعد الدخول. */

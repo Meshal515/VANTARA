@@ -12,11 +12,11 @@
  * و`isAvailable()` تُسأل أولًا كما كانت.
  */
 
-import { webPlugin } from '../pwa/platform.js';
+import { webPlugin, desktopPlugin } from '../pwa/platform.js';
 
 /** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
 function bridge() {
-	return globalThis.Capacitor?.Plugins?.ExtensionEngine ?? webPlugin('ExtensionEngine');
+	return globalThis.Capacitor?.Plugins?.ExtensionEngine ?? webPlugin('ExtensionEngine') ?? desktopPlugin('ExtensionEngine');
 }
 
 /** هل المحرّك موجود أصلًا؟ تُسأل قبل عرض أي واجهة مصادر. */

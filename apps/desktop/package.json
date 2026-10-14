@@ -1,0 +1,13 @@
+{
+  "name": "@vantara/desktop",
+  "productName": "VANTARA",
+  "version": "0.1.0-preview.3",
+  "private": true,
+  "main": "main.cjs",
+  "description": "عميل VANTARA لويندوز مع إضافات Stremio ومحرك تورنت ومشغل مرفقين",
+  "scripts": {
+    "test": "node --test",
+    "dev": "electron ."
+  },
+  "engines": { "node": ">=22" }
+}

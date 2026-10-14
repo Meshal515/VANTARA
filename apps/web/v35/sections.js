@@ -7,6 +7,8 @@
  * بتركيبها: المانجا أغلفة طولية، والأنمي بانرات عريضة وحلقات.
  */
 
+import { isDesktop } from '../pwa/platform.js';
+
 export const SECTIONS = {
   manga: { id: 'manga', word: 'MANGA', sub: 'مانجا · مانهوا', ready: true, unit: 'فصل', verb: 'اقرأ', theme: '#08070c' },
   anime: { id: 'anime', word: 'ANIME', sub: 'مسلسلات · أفلام', ready: true, unit: 'حلقة', verb: 'شاهد', theme: '#05070d' },
@@ -15,13 +17,14 @@ export const SECTIONS = {
 
 const KEY = 'vantara.section';
 
-/** القسم المحفوظ، والمانجا إن لم يُحفظ شيء أو حُفظ قسم لم يجهز. */
-export function readSection(storage = globalThis.localStorage) {
+/** القسم المحفوظ؛ السينما لويندوز عند أول دخول، والمانجا للمنصتين الحاليتين. */
+export function readSection(storage = globalThis.localStorage, g = globalThis) {
+  const initial = isDesktop(g) ? 'cinema' : 'manga';
   try {
     const id = storage?.getItem(KEY);
-    return SECTIONS[id]?.ready ? id : 'manga';
+    return SECTIONS[id]?.ready ? id : initial;
   } catch {
-    return 'manga';
+    return initial;
   }
 }
 

@@ -89,3 +89,12 @@ it('accepts a valid magnet result natively and preserves the selected file index
  const hash='0123456789abcdef0123456789abcdef01234567';
  expect(normalizeStreams([{url:`magnet:?xt=urn:btih:${hash}&tr=udp%3A%2F%2Ftracker.example.com%3A80`,fileIdx:0}],{addonKey:'a',runtimeName:'apk',torrentSupported:true})[0]).toMatchObject({type:'torrent',status:'RESOLVED',infoHash:hash,fileIdx:0});
 });
+it.each([
+ {url:'https://cdn.test/movie.mpd?token=keep'},
+ {url:'https://cdn.test/manifest?token=keep',type:'dash'},
+])('refuses DASH on desktop preview while preserving the native and PWA contracts %#', raw => {
+ const desktop=normalizeStreams([raw],{addonKey:'a',runtimeName:'desktop'})[0];
+ expect(desktop).toMatchObject({type:'dash',url:raw.url,status:'UNSUPPORTED',reason:'تشغيل DASH غير مدعوم في نسخة ويندوز التجريبية الحالية'});
+ expect(normalizeStreams([raw],{addonKey:'a',runtimeName:'apk'})[0]).toMatchObject({type:'dash',status:'RESOLVED',reason:null});
+ expect(normalizeStreams([raw],{addonKey:'a',runtimeName:'pwa'})[0]).toMatchObject({type:'dash',status:'RESOLVED',reason:null});
+});
