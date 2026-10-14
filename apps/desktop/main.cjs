@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -88,6 +88,16 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
+  register('open-update-page', async ({ url } = {}) => {
+    let parsed;
+    try { parsed = new URL(url); } catch { throw new Error('رابط تحديث غير صالح'); }
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' ||
+        parsed.username || parsed.password || parsed.search || parsed.hash ||
+        !/^\/Meshal515\/VANTARA\/releases\/download\/stable-\d+\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(parsed.pathname))
+      throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور');
+    await shell.openExternal(parsed.href);
+    return true;
+  });
   register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
   register('show-app',()=>{window.show();window.focus();return true;});
   register('show-player',()=>{window.minimize();return true;});
