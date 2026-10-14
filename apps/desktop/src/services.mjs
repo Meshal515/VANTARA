@@ -505,7 +505,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
       for(const subtitle of embedded)void loadSubtitle(state,subtitle).catch(()=>{});
       return {started:true};
-    }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
+    }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
   }
   async function stopPlayback({session}={}) {
     const state=current;if(!state||state.session!==session)return;
