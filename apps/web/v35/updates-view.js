@@ -8,6 +8,7 @@
 
 import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
+import { loadAliases } from '../lib/manga-alias-store.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -200,6 +201,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     state.loading = true;
     refresh.disabled = true;
     if (!state.events.length) list.replaceChildren(...Array.from({ length: 6 }, () => el('div', 'up-skel')));
+    if (section === 'manga') await loadAliases();
     const page = await timeline(section, { before: state.next });
     if (token !== state.token) return;
     state.loading = false;
@@ -231,6 +233,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!state.polled || polling || state.loading || !visible() || document.hidden) return;
     polling = true;
     try {
+      if (section === 'manga') await loadAliases();
       const page = await timeline(section, { limit: 100 });
       if (token !== state.token || !page) return;
       const next = mergeTimelineEvents(state.events, page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
@@ -247,7 +250,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       refresh.disabled = true;
       refresh.textContent = 'جارٍ التحديث…';
       try {
-        const page = await timeline(section, { limit: 100 });
+        if (section === 'manga') await loadAliases();
+      const page = await timeline(section, { limit: 100 });
         if (token !== state.token || !page) return false;
         state.events = reconcileTimelineRefresh(state.events, page.events, page.snapshotAt ?? Date.now());
         if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
@@ -270,6 +274,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
 
 /** أول N تحديثات (لشريط الرئيسية)، مجمّعة. */
 export async function latestGroups(section, n = 14, canonical = null) {
+  if (section === 'manga') await loadAliases();
   const page = await timeline(section, { limit: 40 });
   return page ? groupEvents(page.events, canonical?.(page.events) ?? null).slice(0, n) : null;
 }
