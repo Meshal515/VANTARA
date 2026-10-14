@@ -113,6 +113,14 @@ export function selectTorrentFile(files, candidate) {
     if (matches.length === 1) return matches[0][1];
   }
   if (files.length === 1) return 0;
+  // ملفات subtitles / nfo / screenshots ليست حلقات. اختر تلقائيًا فقط
+  // حين يوجد فيديو واحد لا لبس فيه؛ وجود حلقتين يظل يحتاج fileIdx صريحًا.
+  const videos = files.map((file,index) => ({file,index})).filter(({file}) =>
+    Number.isSafeInteger(file?.length) && file.length > 0 &&
+    /\.(?:mkv|mp4|m4v|webm|avi|mov|wmv|mpeg|mpg)$/i.test(String(file.name ?? '')));
+  const nonSamples = videos.filter(({file}) => !/(?:^|[/\\])sample(?:s)?(?:[/\\]|[ ._(-])/i.test(String(file.name)));
+  const unambiguous = nonSamples.length === 1 ? nonSamples : videos.length === 1 ? videos : [];
+  if (unambiguous.length === 1) return unambiguous[0].index;
   throw new Error(`يلزم اختيار ملف محدد: ${files.slice(0,100).map((f,i)=>`${i}: ${String(f.name).slice(0,160)}`).join(' | ')}`);
 }
 function bounded(value, fallback, low, high) {
@@ -148,10 +156,32 @@ async function secureResponse(url, {headers={},signal,timeout=15000,method='GET'
 async function localJSON(base,path,{body,signal,timeout=15000,auth}={}) {
   return new Promise((resolve,reject) => {
     const req=http.request(new URL(path,base),{method:body==null?'GET':'POST',signal,headers:{Authorization:`Basic ${Buffer.from(auth).toString('base64')}`,'content-type':'text/plain','x-req-timeout-ms':String(timeout)}}, async res => {
-      try { const text=await readResponse(res,4*1024*1024); if (res.statusCode>=400) throw new Error('رفض محرك التورنت الطلب');resolve(JSON.parse(text)); } catch(e) {reject(e);} });
+      try { const text=await readResponse(res,4*1024*1024); if (res.statusCode>=400) {const error=new Error('رفض محرك التورنت الطلب');error.status=res.statusCode;throw error;}resolve(JSON.parse(text)); } catch(e) {reject(e);} });
     req.setTimeout(timeout,()=>req.destroy(new Error('انتهت مهلة بيانات التورنت')));req.on('error',reject);req.end(body);
   });
 }
+// list_only لا يبدأ تنزيل الفيلم: إعادة محاولة قصيرة ومحدودة تمنع
+// سقوط الجلسة بسبب 502/503 أو reset مؤقت أثناء جلب بيانات المغناطيس.
+export function retryableMetadataFailure(error) {
+  const code=String(error?.code ?? '');
+  const status=Number(error?.status);
+  return status===408 || status===429 || status>=500 && status<600 ||
+    ['ECONNRESET','ECONNREFUSED','EPIPE','ETIMEDOUT','EAI_AGAIN'].includes(code) ||
+    /انقطع نقل|رفض محرك التورنت الطلب|مهلة بيانات التورنت/.test(String(error?.message ?? ''));
+}
+async function getTorrentMetadata(request, sleepFor, isCurrent) {
+  let last;
+  for(let attempt=0;attempt<3;attempt++) {
+    isCurrent();
+    try {return await request();} catch(error) {
+      last=error;
+      if(attempt===2 || !retryableMetadataFailure(error)) throw error;
+      await sleepFor((attempt+1)*600);
+    }
+  }
+  throw last;
+}
+
 async function port() {
   const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const result=server.address().port;await new Promise(resolve=>server.close(resolve));return result;
@@ -318,7 +348,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const deadline=Date.now()+15000;
     for(;;){assertSession(state);try{await localJSON(state.api,'/',{...options,timeout:1000});break;}catch(e){if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');await sleep(50,state.controller.signal);}}
     const metadataDeadline=Date.now()+120000;
-    const metadata=await localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:120000});assertSession(state);
+    const metadata=await getTorrentMetadata(
+      ()=>localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:45000}),
+      ms=>sleep(ms,state.controller.signal),()=>assertSession(state));assertSession(state);
     if(metadata.details?.info_hash?.toLowerCase()!==candidate.infoHash)throw new Error('هوية التورنت لا تطابق النتيجة');
     const index=selectTorrentFile(metadata.details.files,candidate);
     let storage;
@@ -349,7 +381,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function player(state,url,title,position,pause) {
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=15','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     child(state,binaries.mpv,args,cleanEnv(),(message,code)=>{if(message==='أغلق البرنامج المرفق'&&code===0&&state.ready){emit(state,{type:'playback/closed',...state.progress});cleanup(state).then(()=>{if(current===state)current=null;});}else fail(state,message);});
     state.socket=await connectIPC(state,state.ipc);assertSession(state);
     let buffer='';
