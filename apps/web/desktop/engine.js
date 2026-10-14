@@ -133,8 +133,15 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     try {
       const runtime = await getRuntime(); await runtime.addons.ready;
       if (!current(s) || generation !== s.playGeneration) return;
-      const context = { ...identity, ...Object.fromEntries(Object.entries(candidate.identity ?? {}).filter(([key, value]) => value != null && key !== 'externalIds')), externalIds: { ...identity?.externalIds, ...candidate.identity?.externalIds } };
+      let context = { ...identity, ...Object.fromEntries(Object.entries(candidate.identity ?? {}).filter(([key, value]) => value != null && key !== 'externalIds')), externalIds: { ...identity?.externalIds, ...candidate.identity?.externalIds } };
       if (!['movie', 'series', 'anime'].includes(context.kind)) context.kind = identity?.kind;
+      // Anime subtitle providers often index Kitsu/IMDb, not the visible title.
+      // Enrich exact MAL/AniList mappings in the background; failure never blocks video.
+      if (context.kind === 'anime' && !context.externalIds?.kitsu && typeof runtime.addons.enrichAnimeIdentity === 'function') {
+        try { context = await runtime.addons.enrichAnimeIdentity(context, { signal: s.subtitleController.signal }); }
+        catch { /* Keep existing identity when exact ID service is unavailable. */ }
+      }
+      if (!current(s) || generation !== s.playGeneration || s.subtitleController.signal.aborted) return;
       await discoverSubtitles({ identity: context, stream: candidate, providers: runtime.addons.subtitleProviders?.() ?? [], signal: s.subtitleController.signal,
         onHealth: (key, ok) => { if (!current(s) || generation !== s.playGeneration) return; const health = runtime.addons.registry.health; if (ok) health?.success?.(key, 'subtitles', 'desktop'); else health?.failure?.(key, 'subtitles', 'desktop'); },
         onResult: result => {
