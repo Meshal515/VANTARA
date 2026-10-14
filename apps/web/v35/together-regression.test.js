@@ -78,3 +78,16 @@ it('cancels pending room startup when a reader is closed before welcome callback
   const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow:vi.fn()});bridge.page({chapter:1,index:0,pages:10});room.command.mockClear();
   room.emit('welcome',{state:room.timeline});bridge.destroy();vi.runAllTimers();expect(room.command).not.toHaveBeenCalled();
 });
+
+it('a repeated room notification while watching opens the panel without navigating the player away',()=>{
+  const {document}=parseHTML('<html class="pwa-playing"><body><div id="player"></div></body></html>');
+  vi.stubGlobal('document',document);
+  const openMedia=vi.fn(),openSheet=vi.fn(),room=roomOf();
+  const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia,openSheet,toast:vi.fn()});
+  const row={media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',episode:1,key:'anime:42#1'}),mode:'sync'};
+  hub.joinByCode('ABCDEF',row);expect(openMedia).toHaveBeenCalledTimes(1);
+  hub.joinByCode('ABCDEF',row);
+  expect(openMedia).toHaveBeenCalledTimes(1);
+  expect(openSheet).toHaveBeenCalledTimes(1);
+  hub.leave();
+});
