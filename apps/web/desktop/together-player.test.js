@@ -61,6 +61,31 @@ describe('مشاهدة ويندوز المشتركة تستخدم الغرفة �
     f.event('pause', { paused: true }); expect(f.room.command).toHaveBeenLastCalledWith('pause', { pos: 0 });
     f.event('seek', { position: 55000 }); expect(f.room.command).toHaveBeenLastCalledWith('seek', { pos: 55000 }); f.player.close();
   });
+  it('إزاحة الفيديو تصحح اختلاف المقدمة للمشاهد محليًا دون تغيير ساعة الغرفة', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, {started:true,playing:true,pos:40000,seq:1});
+    f.event('ready');
+    f.bridge.playbackCommand.mockClear();
+    expect(f.player.setVideoOffset(10000)).toBe(true);
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({session:'mpv-session',command:'seek',value:50000});
+    f.event('progress',{position:50000});
+    expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({pos:40000,driftMs:0}));
+    f.player.seek(70000);
+    expect(f.room.command).toHaveBeenLastCalledWith('seek',{pos:60000});
+    f.player.playPause(false);
+    expect(f.room.command).toHaveBeenLastCalledWith('pause',{pos:40000});
+    expect(f.hooks.onLobby.mock.lastCall[0]).toMatchObject({videoOffsetMs:10000});
+    expect(f.player.setVideoOffset(200000)).toBe(false);
+    f.player.close();
+  });
+  it('إزاحة الفيديو تتصفر عند تبديل الحلقة ولا تنتقل إلى فيديو آخر',()=>{
+    vi.useFakeTimers();
+    const f=fixture(false,{started:true,playing:true,pos:40000,seq:1});
+    f.event('ready');f.player.setVideoOffset(-10000);
+    f.state({media:{key:'cinema:tt123#2',kind:'cinema'},pos:5000,seq:2});
+    expect(f.hooks.onLobby.mock.lastCall[0].videoOffsetMs).toBe(0);
+    f.player.close();
+  });
   it('تحكم الضيف الأصلي لا يحرك الغرفة ويعود إلى وقت المضيف', () => {
     vi.useFakeTimers(); const f = fixture(false, { started: true, playing: true, pos: 40000, seq: 1 }); f.event('ready');
     f.event('seek', { position: 80000 });
