@@ -26,8 +26,9 @@ export function desktopUpdateFromManifest(manifest, installed) {
     !Number.isSafeInteger(manifest.versionCode) || manifest.versionCode<=0) return null;
   let url;
   try {url = new URL(entry.url);} catch{return null;}
-  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password ||
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.search || url.hash || url.username || url.password ||
       !/^\/Meshal515\/VANTARA\/releases\/download\/stable-\d+\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(url.pathname)) return null;
+  if (!url.pathname.endsWith(`/VANTARA-${entry.version}-Windows-x64-Setup.exe`)) return null;
   const tag=Number(url.pathname.match(/\/stable-(\d+)\//)?.[1]);
   if(tag!==manifest.versionCode) return null;
   return {version:entry.version,url:url.href,sha256:entry.sha256,size:entry.size,notes:Array.isArray(manifest.changelog)?manifest.changelog.slice(0,4).map(String):[]};
