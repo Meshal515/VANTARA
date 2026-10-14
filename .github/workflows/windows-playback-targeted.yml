@@ -1,0 +1,70 @@
+name: VANTARA Windows Playback Targeted Checks
+on:
+  push:
+    branches: ['chatgpt/windows-playback-sync-20261015']
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/web/desktop/**'
+      - 'apps/web/v35/together.js'
+      - '.github/workflows/windows-playback-targeted.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-playback-targeted-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux-services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Parse and test torrent storage and engine services
+        run: |
+          node --check apps/desktop/src/torrent-cache.mjs
+          node --check apps/desktop/src/services.mjs
+          node --test apps/desktop/src/torrent-cache.test.mjs apps/desktop/src/services.test.mjs
+  windows-cache:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test Windows drive selection and actual statfs access
+        shell: pwsh
+        run: |
+          node --test apps/desktop/src/torrent-cache.test.mjs
+          @'
+          import {selectTorrentCacheRoot} from './apps/desktop/src/torrent-cache.mjs';
+          import os from 'node:os';
+          import fs from 'node:fs/promises';
+          const dir = await fs.mkdtemp(os.tmpdir() + '/vantara-win-cache-');
+          try {
+            const result = await selectTorrentCacheRoot({userData:dir,platform:'win32'});
+            if (!result.root || result.available < 512n*1024n*1024n) throw new Error('No writable Windows volume detected');
+            console.log('Writable fixed-volume cache detection OK:',result.root);
+          } finally {await fs.rm(dir,{recursive:true,force:true});}
+          '@ | Set-Content -Encoding utf8 "$env:RUNNER_TEMP\cache-smoke.mjs"
+          Copy-Item "$env:RUNNER_TEMP\cache-smoke.mjs" "./cache-smoke.mjs"
+          node ./cache-smoke.mjs
+  renderer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test Windows player, offset, and invitations
+        run: pnpm exec vitest run apps/web/desktop/engine.test.js apps/web/desktop/player.test.js apps/web/desktop/together-player.test.js apps/web/v35/together-regression.test.js
