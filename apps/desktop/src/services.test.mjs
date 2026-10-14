@@ -260,7 +260,7 @@ test('بيانات ملف 90GiB تتجاوز فحص المساحة دون تخص
   const {dir,services,events}=await fixture(t,'oversize');
   await services.startPlayback({session:'big-metadata',candidate:{infoHash:hash,fileIdx:0}});
   assert.ok(events.some(event=>event.type==='playback/stage'&&event.stage==='file-selected'&&event.bytes===90*1024**3));
-  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\\n').map(JSON.parse);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(requests.some(r=>r.url.includes('only_files=0')),'large file should reach the torrent engine');
 });
 test('سياسة البث تتحقق من هامش آمن دون اشتراط مساحة ملف 90 GiB كاملة',()=>{
