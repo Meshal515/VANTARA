@@ -201,7 +201,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     async playerState({session}) {
       const s=sessionOf(session);
       return {title:s.playArgs?.title??'VANTARA',candidate:s.playArgs?.candidate,position:s.progress.position??0,
-        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')}))};
+        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },
     async playerCommand({session,command,value}) {
       const s=sessionOf(session);
@@ -211,6 +211,12 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     },
     async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
     openPlayerRoom({session}){sessionOf(session).playArgs?.together?.hub?.openPanel?.();},
+    setVideoOffset({session,ms}) {
+      const s=sessionOf(session);
+      if(!s.together)throw new Error('توقيت الفيديو متاح فقط أثناء المشاهدة مع الأصدقاء');
+      if(!s.together.setVideoOffset(ms))throw new Error('قيمة توقيت الفيديو غير صالحة');
+      return {videoOffsetMs:s.together.getVideoOffset()};
+    },
     async play(args) {
       const s = sessionOf(args.session), c = s.candidates.get(args.candidate);
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
