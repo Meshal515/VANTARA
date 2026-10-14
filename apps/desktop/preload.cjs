@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   stopPlayback: call('stop-playback'),
   playbackCommand: call('playback-command'),
   openExternal: call('open-external'),
+  openUpdatePage: call('open-update-page'),
   onEvent(callback) {
     if (typeof callback !== 'function') throw new TypeError('مستمع غير صالح');
     const receive = (_event, value) => callback(value);
