@@ -1,0 +1,114 @@
+name: VANTARA Windows preview with shared updates
+on:
+  push:
+    branches: [codex/unified-updates-20261014]
+    paths: ['.github/workflows/windows-unified-preview.yml']
+permissions:
+  contents: write
+concurrency:
+  group: windows-unified-preview4
+  cancel-in-progress: false
+env:
+  WIN_VERSION: 0.1.0-preview.4
+  WIN_TAG: windows-v0.1.0-preview.4
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test updater and version manifest
+        run: |
+          node --test apps/web/desktop/update-check.test.js tools/unified-windows-manifest.test.mjs
+          node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/services.test.mjs apps/desktop/src/resource.test.mjs
+          node --check apps/desktop/main.cjs
+          node --check apps/web/desktop/boot.js
+      - name: Stamp preview version and build native Windows package
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis 7zip
+          python3 - <<'PY'
+          import os,json,pathlib,re
+          version=os.environ['WIN_VERSION']
+          path=pathlib.Path('apps/desktop/package.json')
+          data=json.loads(path.read_text())
+          data['version']=version
+          path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          path=pathlib.Path('apps/desktop/preload.cjs')
+          path.write_text(re.sub(r"version: '[^']+'", "version: '"+version+"'", path.read_text(),count=1))
+          path=pathlib.Path('apps/desktop/windows.nsi')
+          text=path.read_text()
+          text=re.sub(r'VIProductVersion "[^"]+"', 'VIProductVersion "0.1.0.4"', text, count=1)
+          text=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',r'\g<1>"'+version+'"',text,count=1)
+          text=re.sub(r'("DisplayVersion" )"[^"]+"',r'\g<1>"'+version+'"',text,count=1)
+          path.write_text(text)
+          path=pathlib.Path('apps/web/lib/config.js')
+          path.write_text(path.read_text().replace('__VANTARA_VERSION__',version))
+          PY
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/vantara-build"
+          test -s "$RUNNER_TEMP/vantara-build/VANTARA-$WIN_VERSION-Windows-x64-Setup.exe"
+          (cd "$RUNNER_TEMP/vantara-build" && sha256sum -c SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview4-windows
+          path: |
+            ${{ runner.temp }}/vantara-build/*-Setup.exe
+            ${{ runner.temp }}/vantara-build/*-x64.zip
+            ${{ runner.temp }}/vantara-build/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview4-windows
+          path: ${{ runner.temp }}/vantara-build
+      - name: Verify installation and playback on real Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'vantara-build'
+          $installer=Join-Path $dir 'VANTARA-0.1.0-preview.4-Windows-x64-Setup.exe'
+          $target=Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview4-Test'
+          $process=Start-Process -FilePath $installer -ArgumentList "/S /D=$target" -PassThru
+          if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Installer timed out' }
+          if ($process.ExitCode -ne 0) { throw "Installer exit $($process.ExitCode)" }
+          if (-not (Test-Path (Join-Path $target 'VANTARA.exe'))) { throw 'VANTARA.exe not found' }
+          node tools/windows-native-smoke.mjs (Join-Path $target 'resources\app\native') (Join-Path $dir 'windows-playback-report.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Player validation failed' }
+
+  publish:
+    needs: [build, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview4-windows
+          path: ${{ runner.temp }}/vantara-build
+      - name: Publish verified preview build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/vantara-build"
+          sha256sum -c SHA256SUMS.txt
+          gh release create "$WIN_TAG" \
+            "VANTARA-$WIN_VERSION-Windows-x64-Setup.exe" \
+            "VANTARA-$WIN_VERSION-Windows-x64.zip" \
+            "SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "VANTARA Windows $WIN_VERSION — connected update checks" \
+            --notes "Windows preview: shared stable-release update checks, manual official installer download, existing player and torrent engines. No in-app silent installs. APK/PWA release coordination begins with future stable releases after merging its workflow into main." \
+            --prerelease --latest=false
