@@ -42,10 +42,23 @@ export async function flush() {
     works.push(work); units += count;
   }
   for (const w of works) queue.delete(keyOf(w));
+  let accepted = false;
   try {
-    await transport('/v1/updates/observe', { method: 'POST', body: { works } });
+    const res = await transport('/v1/updates/observe', { method: 'POST', body: { works } });
+    accepted = res?.status >= 200 && res?.status < 300;
   } catch {
-    // مجسّ لا يُفشل شيئًا: ما ضاع يُرى في المسح التالي
+    // Failed requests must never silently discard observed updates.
+  }
+  if (!accepted) {
+    for (const work of works) {
+      const key = keyOf(work);
+      const newer = queue.get(key);
+      if (!newer) { queue.set(key, work); continue; }
+      // Observations can arrive during the request: retain both, preferring newer fields.
+      const units = new Map((work.units ?? []).map((unit) => [unitKey(unit), unit]));
+      for (const unit of newer.units ?? []) units.set(unitKey(unit), { ...units.get(unitKey(unit)), ...unit });
+      queue.set(key, { ...work, ...newer, units: [...units.values()].sort(order).slice(0, MAX_UNITS) });
+    }
   }
   if (queue.size) schedule();
 }
