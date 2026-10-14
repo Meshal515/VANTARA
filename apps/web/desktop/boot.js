@@ -3,6 +3,7 @@ import { createDesktopEngine } from './engine.js';
 import { getRuntime as runtimeFor } from './runtime.js';
 import { startDesktopDefaultAddons } from './default-addons.js';
 import { installFirstPartyTransport } from './first-party.js';
+import { startDesktopUpdateWatch } from './update-check.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -114,6 +115,7 @@ export function installDesktopBridges(g = globalThis) {
       g.document.body.append(panel);
     })().catch(error => show(message(error), true));
   });
+  g.VantaraDesktopUpdates = startDesktopUpdateWatch({ bridge: g.VantaraDesktop, doc: g.document });
   return g.VantaraDesktopBridges;
 }
 installDesktopBridges();
