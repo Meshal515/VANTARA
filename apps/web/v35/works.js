@@ -480,6 +480,7 @@ export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editi
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
+  await loadAliases(); // The first page must use the shipped aliases.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
@@ -541,6 +542,7 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}, {
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
+  await loadAliases(); // Streaming first paint must resolve canonical names too.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   const index = workIndex();
   const positions = new Map();
