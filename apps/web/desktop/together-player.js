@@ -54,7 +54,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   }
   function lobby() {
     if (closed) return;
-    onLobby({ visible: synced() && ((!room.timeline?.started && !keepPlayingWhileRoomStarts) || !prepared), prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared), prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
       roster: room.roster, start: () => api.playPause(true), openPanel: () => together.hub.openPanel() });
   }
   function align(force = false) {
