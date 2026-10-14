@@ -108,6 +108,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       else { message('المضيف يتحكم بالتقديم'); align(true); }
       return true;
     },
+    getVideoOffset() { return videoOffsetMs; },
     setVideoOffset(value) {
       if (closed || !synced() || !Number.isFinite(value) || Math.abs(value) > 120000) return false;
       videoOffsetMs = Math.round(value / 250) * 250;
