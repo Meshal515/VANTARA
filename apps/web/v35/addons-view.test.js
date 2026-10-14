@@ -190,6 +190,37 @@ it("configure opens only an HTTPS provider page in a new protected tab", () => {
   expect(link.rel).toContain("noopener");
   expect(view.querySelector("iframe")).toBeNull();
 });
+it("explains how to bring a provider's Stremio install link back into VANTARA beside configuration", () => {
+  setup();
+  const addon = row("Torrentio", {
+    bundled: false,
+    configuration: { required: true, configurable: true, configured: false },
+  });
+  const view = renderAddonDetails({
+    addon,
+    registry: { configurationUrl: () => "https://torrentio.test/configure" },
+  });
+  const help = view.querySelector(".addon-configure-help");
+  expect(help).not.toBeNull();
+  expect(help?.textContent).toContain("تثبيت في Stremio");
+  expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+  expect(help?.textContent).toContain("إضافة جديدة");
+  expect(help?.textContent).toContain("stremio://");
+  expect(help?.previousElementSibling).toBe(view.querySelector(".addon-actions"));
+});
+it("shows the same Stremio handoff instructions on discovery cards that open provider setup", () => {
+  setup();
+  const view = renderAddons({ registry: { list: () => [] } });
+  click(view, "استكشاف");
+  for (const card of view.querySelectorAll(".addon-card")) {
+    const help = card.querySelector(".addon-configure-help");
+    if (card.querySelector("[data-configure]")) {
+      expect(help).not.toBeNull();
+      expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+      expect(help?.textContent).toContain("stremio://");
+    } else expect(help).toBeNull();
+  }
+});
 it("keeps network permissions and diagnostics collapsed and shows supplied assessment", () => {
   setup();
   const addon = row("Addon", {

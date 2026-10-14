@@ -25,8 +25,19 @@ export function isNative(g = globalThis) {
   }
 }
 
-/** هل هذه نسخة المتصفح (PWA)؟ عكس [isNative] تمامًا، ولا حالة ثالثة. */
-export const isWeb = (g = globalThis) => !isNative(g);
+/** ويندوز يعلن منصته من preload المعزول، لا من user-agent أو عنوان الصفحة. */
+export function isDesktop(g = globalThis) {
+  const bridge = g?.VantaraDesktop;
+  return bridge?.platform === 'windows' && typeof bridge.requestResource === 'function' &&
+    typeof bridge.startPlayback === 'function' && typeof bridge.onEvent === 'function';
+}
+
+export const isWeb = (g = globalThis) => !isNative(g) && !isDesktop(g);
+
+/** جسور desktop المستقلة؛ لا تنشئ Capacitor ولا محركات PWA. */
+export function desktopPlugin(name, g = globalThis) {
+  return isDesktop(g) ? g?.VantaraDesktopBridges?.[name] ?? null : null;
+}
 
 /**
  * إضافة الويب البديلة لإضافة Capacitor بالاسم (`ExtensionEngine`، `AnimeEngine`)،
@@ -34,5 +45,6 @@ export const isWeb = (g = globalThis) => !isNative(g);
  */
 export function webPlugin(name, g = globalThis) {
   if (isNative(g)) return null;
+  if (isDesktop(g)) return null;
   return g?.VantaraWeb?.[name] ?? null;
 }
