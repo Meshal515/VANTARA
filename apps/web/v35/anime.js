@@ -1600,6 +1600,7 @@ export function createAnime(deps) {
         presenceUserId: presence?.userId ?? null,
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
+        ...(globalThis.VantaraDesktop && hub ? { roomHub:hub } : {}),
         ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
       });
     }
