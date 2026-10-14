@@ -1512,7 +1512,7 @@ export function createCinema(deps) {
     const hub = deps.together?.() ?? null;
     const togetherRef = `cinema:${playKey(m, season)}`;
     const togetherEp = m.type === 'movie' ? 1 : n;
-    sheet.autoTogether = false; // Friends choose a source or smart playback themselves.
+    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
@@ -1548,7 +1548,7 @@ export function createCinema(deps) {
             cover: m.poster ?? null,
             episode: togetherEp,
             season: m.type === 'series' ? season : null,
-          }, { onStarted: () => { withFriends.remove(); queuePaint(); } });
+          }, { onStarted: () => { sheet.autoTogether = !globalThis.VantaraDesktop; withFriends.remove(); queuePaint(); } });
         }, 'شاهد مع أصدقائك');
         foot.append(withFriends);
       }
