@@ -32,6 +32,10 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     const s = sessions.get(event.session);
     if (!s || !s.playing || !current(s)) return;
     if (event.type === 'playback/closed' && s.ignorePreviousClose) { s.ignorePreviousClose = false; return; }
+    if(event.type==='playback/ready'){
+      s.nativeReady=true;
+      if(s.resumeAfterDetach){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}
+    }
     s.together?.progressEvent(event);
     emit('desktopPlayback', event);
     if (event.type === 'playback/progress') {
@@ -194,7 +198,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const generation = s.playGeneration = (s.playGeneration ?? 0) + 1;
       s.context = { animeId: args.animeId, episode: args.episode ?? s.episode, code: c.code };
       s.ignorePreviousClose = s.playing;
-      s.playing = true;
+      s.playing = true;s.nativeReady=false;s.resumeAfterDetach=false;
       try {
         s.together?.close();s.together=null;
         if(args.together?.session?.room){
@@ -203,6 +207,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
             onLobby:lobby=>emit('desktopTogether',{session:s.id,...lobby}),message:message=>emit('desktopNotice',{session:s.id,message}),
             onDetach:()=>{
               if(s.together!==coordinator)return;
+              if(!s.nativeReady||!args.together.session.room.timeline?.started){s.resumeAfterDetach=true;if(s.nativeReady){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}}
               s.transitionGeneration=(s.transitionGeneration??0)+1;s.prepareGeneration=(s.prepareGeneration??0)+1;
               s.controller.abort();s.controller=new AbortController();s.running=0;s.done=true;s.together=null;
               emit('desktopTogether',{session:s.id,closed:true});

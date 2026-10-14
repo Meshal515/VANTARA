@@ -11,7 +11,7 @@ function fixture({ startError = null, replayClose = false } = {}) {
   const source = { episodes: async () => [{ number: 1, season: 2, url: 'tt123:2:1', type: 'series' }], servers: async ep => [{ name: 'Torrentio', url: ep.url }], streams: async () => [stream] };
   const addons = { ready: Promise.resolve(), registry: { snapshot: () => ({ release: () => release++ }), list: () => [] }, sources: { source: () => source, def: () => ({ label: 'Torrentio' }), list: () => [] } };
   const engine = createDesktopEngine({ bridge, getRuntime: () => ({ addons, ready: Promise.resolve() }) });
-  return { engine, starts, stops, stream, emit: e => event(e), release: () => release };
+  return { engine, bridge, starts, stops, stream, emit: e => event(e), release: () => release };
 }
 async function prepared(f) {
   const done = new Promise(resolve => f.engine.addListener('prepared', resolve));
@@ -196,4 +196,11 @@ it('تعطل مزود الترجمة لا يطلق playerError ولا يغلق �
 });
 it('cooling core لا يرسل طلب بحث ويصدر skipped واضحًا',async()=>{
   const f=coreFixture();f.runtime.addons.sources.cooling=()=>true;await f.engine.searchStream({searchId:'cooled',query:'عمل',content:'cinema'});await tick();expect(f.calls).toEqual([]);expect(f.events).toContainEqual(expect.objectContaining({name:'searchHit',searchId:'cooled',skipped:true,items:[]}));
+});
+
+it('مغادرة الغرفة قبل أول إطار تتيح مشاهدة الفيديو المختار فرديًا دون انتظار المضيف',async()=>{
+ const f=fixture(),commands=[],listeners=new Map();f.bridge.playbackCommand=async command=>commands.push(command);
+ const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>Date.now()},timeline:{started:false,playing:false,pos:0,at:Date.now(),media:{key:'anime:owned#1'}},on:(name,fn)=>{listeners.set(name,fn);return()=>listeners.delete(name);},report(){},command(){}};
+ await prepared(f);const best=await f.engine.best({session:'s'});
+ try {await f.engine.play({session:'s',candidate:best.candidate,episode:1,together:{mediaPrefix:'anime:owned',session:{room,mode:'sync'},hub:{openPanel(){}}}});room.status='closed';listeners.get('connection')();f.emit({type:'playback/ready',session:'s'});expect(commands).toContainEqual({session:'s',command:'pause',value:false});}finally{await f.engine.closeSession({session:'s'});}
 });
