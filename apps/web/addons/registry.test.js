@@ -156,6 +156,35 @@ it('changed configuration or raw manifest is still blocked by active sessions',a
  set('2.0.0');await expect(r.install(await r.inspect(url))).rejects.toThrow('انتهاء الجلسة');
  expect(r.list()[0].cacheEpoch).toBe(first.cacheEpoch);session.release();
 });
+it('يتحقق من عدم الاستبدال داخل صف التثبيت ويحفظ رابط المستخدم الخاص',async()=>{
+ const {registry:r}=setup();await r.ready;
+ const privateUrl='https://addon.test/private-config/manifest.json?key=private';
+ const custom=await r.inspect(privateUrl),defaultPreview=await r.inspect('https://addon.test/manifest.json');
+ const first=r.install(custom);
+ const disable=r.enable(custom.manifest.key,false);
+ const preserve=r.install(defaultPreview,{replace:false});
+ const [installed,,preserved]=await Promise.all([first,disable,preserve]);
+ expect(preserved.cacheEpoch).toBe(installed.cacheEpoch);
+ expect(preserved.enabled).toBe(false);
+ await r.enable(installed.key,true);
+ expect(r.connection(installed.key).manifestUrl).toBe(privateUrl);
+ expect(r.list()).toHaveLength(1);
+});
+it('يحمي تبديل نسخة متوقعة من رابط المستخدم الجديد داخل صف التثبيت',async()=>{
+ const {registry:r}=setup();await r.ready;
+ const old=await r.install(await r.inspect('https://addon.test/manifest.json'));
+ const update=await r.inspect('https://addon.test/manifest.json');
+ const custom=await r.inspect('https://addon.test/private-config/manifest.json');
+ await Promise.all([r.install(custom),r.install(update,{expectedCacheEpoch:old.cacheEpoch})]);
+ expect(r.connection(old.key).manifestUrl).toBe('https://addon.test/private-config/manifest.json');
+});
+it('لا يعيد إضافة حذفت في أثناء تحديث نسخة متوقعة',async()=>{
+ const {registry:r}=setup();await r.ready;
+ const old=await r.install(await r.inspect('https://addon.test/manifest.json'));
+ const update=await r.inspect('https://addon.test/manifest.json');
+ await Promise.all([r.remove(old.key),r.install(update,{expectedCacheEpoch:old.cacheEpoch})]);
+ expect(r.list()).toEqual([]);
+});
 it('does not trust mutated public preview and can retry failed persistence',async()=>{
  const store=createStore({indexedDB:null});let fail=false;const r=createAddonRegistry({store:{get:store.get,set:async(...args)=>fail?false:store.set(...args)},transport:{json:async()=>raw()}});await r.ready;
  const p=await r.inspect('https://addon.test/manifest.json');p.manifest.name='Tampered';p.manifest.permissions.networkHosts.push('evil.test');

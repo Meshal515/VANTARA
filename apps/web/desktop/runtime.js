@@ -1,6 +1,8 @@
 import { createAddonRuntime } from '../addons/runtime.js';
 import { publicUrl } from '../addons/manifest.js';
 import { LIMITS } from '../addons/contracts.js';
+import { loadDesktopSources } from '../pwa/platform.js';
+import { createDesktopFetcher } from './source-fetcher.js';
 
 /** تخزين دائم تحت أصل vantara://app الثابت، بلا حساب أو token ضمن النقل. */
 export function createDesktopStore(storage = globalThis.localStorage) {
@@ -27,6 +29,7 @@ export function createDesktopStore(storage = globalThis.localStorage) {
       if (storage) storage.removeItem(id);
       memory.delete(id);
     },
+
   };
 }
 
@@ -46,11 +49,18 @@ export function createDesktopTransport(bridge = globalThis.VantaraDesktop) {
   } };
 }
 
-export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, storage = globalThis.localStorage } = {}) {
+export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, storage = globalThis.localStorage, definitions = null } = {}) {
   const store = createDesktopStore(storage);
-  // مصادر Android تتطلب محركها الأصلي؛ Desktop يبدأ بالإضافات المثبتة وحدها.
-  const registry = { list: () => [], def: () => null, source: () => null };
-  const runtime = { runtimeName: 'desktop', native: false, torrentSupported: true, addonStreams: true, registry, store, ready: Promise.resolve() };
+  const fetcher=createDesktopFetcher(bridge);
+  const runtime = { runtimeName:'desktop',native:false,torrentSupported:true,addonStreams:true,registry:{list:()=>[],def:()=>null,source:()=>null},store,addonStore:store,fetcher,ensureMedia:async()=>null };
+  runtime.ready=(async()=>{
+    const modules=await loadDesktopSources({VantaraDesktop:bridge});
+    if(!modules)return;
+    const defs=definitions ?? await fetch('/pwa/sources/defs.json').then(r=>r.ok?r.json():{sources:[]}).then(d=>d.sources ?? []).catch(()=>[]);
+    runtime.store=modules.createStore({name:'vantara-desktop-sources'});
+    runtime.registry=modules.createRegistry({engines:modules.engines,store:runtime.store,ctx:{fetch:fetcher,hosts:modules.createHostResolver(fetcher)}});
+    await runtime.registry.init(defs.map(def=>def.edge==='challenge'?{...def,edge:undefined}:def));
+  })();
   runtime.addons = createAddonRuntime({ runtime, store, transport: createDesktopTransport(bridge) });
   return runtime;
 }

@@ -6,7 +6,7 @@ const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
 test('local assets keep their fixed app origin and cannot read outside the bundle', () => {
   const root = path.resolve('/tmp/vantara-assets');
   assert.equal(assetPath(root, 'vantara://app/desktop/index.html'), path.join(root, 'desktop/index.html'));
-  assert.equal(assetPath(root, 'vantara://app/'), path.join(root, 'desktop/index.html'));
+  assert.equal(assetPath(root, 'vantara://app/'), path.join(root, 'index.html'));
   for (const url of ['file:///etc/passwd', 'vantara://other/app.js', 'vantara://app/%2e%2e%2fsecret', 'vantara://app/%5c..%5csecret', 'vantara://app/%00x']) {
     assert.throws(() => assetPath(root, url));
   }

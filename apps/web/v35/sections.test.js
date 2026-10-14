@@ -33,3 +33,16 @@ describe('sections', () => {
     for (const s of Object.values(SECTIONS)) expect(s.unit && s.verb && s.word).toBeTruthy();
   });
 });
+
+it('desktop يبدأ cinema بلا تفضيل ويحافظ على اختيار المستخدم المحفوظ', () => {
+  const desktop = { VantaraDesktop: { platform: 'windows', requestResource() {}, startPlayback() {}, onEvent() {} } };
+  const s = memory();
+  expect(readSection(s, desktop)).toBe('cinema');
+  expect(s.getItem('vantara.section')).toBeNull();
+  writeSection('manga', s);
+  expect(readSection(s, desktop)).toBe('manga');
+  writeSection('anime', s);
+  expect(readSection(s, desktop)).toBe('anime');
+  expect(readSection(memory(), {})).toBe('manga');
+  expect(readSection(memory(), { Capacitor: { isNativePlatform: () => true } })).toBe('manga');
+});

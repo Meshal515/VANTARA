@@ -39,7 +39,7 @@ export const RELEASE = Object.freeze({
     progress: ['apk', 'pwa', 'desktop'],
     history: ['apk', 'pwa', 'desktop'],
     recommendations: ['apk', 'pwa', 'desktop'],
-    manga: ['apk', 'pwa'],
+    manga: ['apk', 'pwa', 'desktop'],
     anime: ['apk', 'pwa', 'desktop'],
     cinema: ['apk', 'pwa', 'desktop'],
     updates: ['apk', 'pwa', 'desktop'],
@@ -67,7 +67,7 @@ export const RELEASE = Object.freeze({
   flags: Object.freeze({
     animeWebSources: { enabled: true, platforms: ['pwa'] },
     pwaCinema: { enabled: true, platforms: ['pwa'] },
-    mangaWebSources: { enabled: true, platforms: ['pwa'] },
+    mangaWebSources: { enabled: true, platforms: ['pwa', 'desktop'] },
   }),
 
   releases: Object.freeze([

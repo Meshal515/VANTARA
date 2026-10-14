@@ -39,6 +39,16 @@ export function desktopPlugin(name, g = globalThis) {
   return isDesktop(g) ? g?.VantaraDesktopBridges?.[name] ?? null : null;
 }
 
+/** المحركات مشتركة، وتُحمّل من بوابة المنصة داخل ويندوز وحده. */
+export async function loadDesktopSources(g = globalThis) {
+  if (!isDesktop(g)) return null;
+  const [registry, engines, hosts, manga, cache] = await Promise.all([
+    import('./sources/registry.js'), import('./sources/engines/index.js'),
+    import('./sources/hosts.js'), import('./bridges/manga.js'),import('./cache/store.js'),
+  ]);
+  return {createRegistry:registry.createRegistry,engines:engines.ENGINES,createHostResolver:hosts.createHostResolver,MangaEngine:manga.MangaEngine,createStore:cache.createStore};
+}
+
 /**
  * إضافة الويب البديلة لإضافة Capacitor بالاسم (`ExtensionEngine`، `AnimeEngine`)،
  * أو `null`. داخل الـAPK دائمًا `null`: الإضافة الأصلية وحدها.

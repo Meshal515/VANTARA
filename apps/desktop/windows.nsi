@@ -7,10 +7,10 @@ InstallDir "$LOCALAPPDATA\Programs\VANTARA"
 InstallDirRegKey HKCU "Software\VANTARA" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID zlib
-VIProductVersion "0.1.0.1"
+VIProductVersion "0.1.0.2"
 VIAddVersionKey "ProductName" "VANTARA"
 VIAddVersionKey "FileDescription" "VANTARA Windows Preview"
-VIAddVersionKey "FileVersion" "0.1.0-preview.1"
+VIAddVersionKey "FileVersion" "0.1.0-preview.2"
 VIAddVersionKey "LegalCopyright" "VANTARA"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\VANTARA.exe"
@@ -41,7 +41,7 @@ Section "VANTARA" SEC_MAIN
   CreateShortcut "$SMPROGRAMS\VANTARA\إزالة VANTARA.lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\VANTARA" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayName" "VANTARA"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayVersion" "0.1.0-preview.1"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayVersion" "0.1.0-preview.2"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "NoModify" 1

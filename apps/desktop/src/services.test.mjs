@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText } from './services.mjs';
 
 const hash = 'a'.repeat(40);
 test('HTTPS يرفض الأهداف الداخلية وكل DNS يحتوي عنوانًا داخليًا', async () => {
@@ -37,8 +37,8 @@ async function fixture(t, mode='normal') {
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
-const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?3*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
-  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?{w:320,h:180}:undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?2:m.command[2]==='video-out-params'?{w:320,h:180}:false})+'\\n');if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
+const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?65*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
+  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:tracks.length+1,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform});
   t.after(()=>services.close());return {dir,services,events,binaries:{rqbit,mpv}};
@@ -99,7 +99,7 @@ test('تبديل جلسة أثناء metadata يترك فقط المشغل ال�
   await services.stopPlayback({session:'old'});
   await services.playbackCommand({session:'new',command:'pause',value:true});
 });
-test('نقل الإضافات يحد حجم الاستجابة ويرفض إعادة التوجيه ولا يرسل auth',async t=>{
+test('نقل الإضافات يحد حجم الاستجابة ويرفض التوجيه الداخلي ولا يرسل auth',async t=>{
   const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
   const requests=[];
   const server=http.createServer((req,res)=>{requests.push(req.headers);if(req.url==='/redirect'){res.writeHead(302,{location:'https://127.0.0.1/'});return res.end();}res.end(req.url==='/large'?'x'.repeat(1000):'{"fixture":true}');});
@@ -109,9 +109,9 @@ test('نقل الإضافات يحد حجم الاستجابة ويرفض إعا
   t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
   t.mock.method(https,'request',(url,options,callback)=>http.request(`http://127.0.0.1:${server.address().port}${url.pathname}`,{...options,lookup:undefined},callback));
   const {services}=await fixture(t);
-  assert.deepEqual(await services.requestResource({url:'https://example.com/json',json:true,limit:100}),{text:'{"fixture":true}',status:200});
+  const resource=await services.requestResource({url:'https://example.com/json',json:true,limit:100});assert.equal(resource.text,'{"fixture":true}');assert.equal(resource.status,200);
   await assert.rejects(services.requestResource({url:'https://example.com/large',limit:20}),/حجم/);
-  await assert.rejects(services.requestResource({url:'https://example.com/redirect'}),/توجيه/);
+  await assert.rejects(services.requestResource({url:'https://example.com/redirect'}),/توجيه|داخلي/);
   assert.equal(requests[0].accept,'application/json');assert.equal(requests[0].authorization,undefined);
 });
 
@@ -169,19 +169,14 @@ test('فشل mpv قبل الفيديو يطلق error واضحًا دون ready 
 });
 
 test('file-loaded وtime-pos لا يكفيان لإعلان فيديو جاهز قبل playback-restart وإطار ذي أبعاد',async t=>{
-  const {services,events,binaries}=await fixture(t);
-  let source=await readFile(binaries.mpv,'utf8');
-  source=source.replace("c.write(JSON.stringify({event:'playback-restart'})+'\\n');",'');
-  await writeFile(binaries.mpv,source);
+  const {services,events}=await fixture(t,'not-decoded');
   await services.startPlayback({session:'not-decoded',candidate:{url:'https://example.com/clip.mp4'}});
   await new Promise(r=>setTimeout(r,60));
   assert.equal(events.filter(e=>e.type==='playback/ready').length,0);
 });
 
 test('مصدر صوت فقط لا يعلن ready ويقدم خطأ إطار الفيديو',async t=>{
-  const {services,events,binaries}=await fixture(t);
-  const source=(await readFile(binaries.mpv,'utf8')).replace("m.command[0]==='get_property'?{w:320,h:180}:undefined", "m.command[0]==='get_property'?null:undefined");
-  await writeFile(binaries.mpv,source);
+  const {services,events}=await fixture(t,'audio-only');
   await services.startPlayback({session:'audio-only',candidate:{url:'https://example.com/audio.mp4'}});
   await new Promise(r=>setTimeout(r,60));
   assert.equal(events.filter(e=>e.type==='playback/ready').length,0);
@@ -200,16 +195,16 @@ test('انقطاع upstream أثناء الفيديو ينهي النقل دون
   await services.playbackCommand({session:'broken-stream',command:'pause',value:true});
 });
 
-test('سياسة التخزين ترفض أكبر من 2GiB وحجمًا مجهولًا ومساحة بلا احتياط 64MiB',()=>{
-  const cap=2*1024**3,overhead=64*1024**2;
+test('سياسة التخزين ترفض أكبر من 64GiB وحجمًا مجهولًا ومساحة بلا احتياط 64MiB',()=>{
+  const cap=64*1024**3,overhead=64*1024**2;
   assert.equal(validateTorrentStorage({length:cap},BigInt(cap+overhead)),cap);
-  assert.throws(()=>validateTorrentStorage({length:cap+1},BigInt(9*cap)),/أكبر من 2 غيغابايت.*أصغر/);
+  assert.throws(()=>validateTorrentStorage({length:cap+1},BigInt(9*cap)),/أكبر من 64 غيغابايت.*أصغر/);
   for(const length of [undefined,null,'200',0,-1,Infinity,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>validateTorrentStorage({length},BigInt(9*cap)),/حجم.*غير/);
   assert.throws(()=>validateTorrentStorage({length:100},BigInt(100+overhead-1)),/المساحة لا تكفي/);
   assert.equal(validateTorrentStorage({length:100},BigInt(100+overhead)),100);
 });
 test('رفض الحجم الكبير أو المجهول قبل أي POST تنزيل أو تشغيل mpv',async t=>{
-  for(const [mode,message] of [['oversize',/أكبر من 2 غيغابايت/],['unknown',/حجم.*غير/]]){
+  for(const [mode,message] of [['oversize',/أكبر من 64 غيغابايت/],['unknown',/حجم.*غير/]]){
     const {services,events,dir}=await fixture(t,mode);
     await assert.rejects(services.startPlayback({session:mode,candidate:{infoHash:hash,fileIdx:0}}),message);
     const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
@@ -238,4 +233,87 @@ test('تهيئة العميل تنظف cache المتروك قبل تشغيل ج
   await services.startPlayback({session:'after-crash',candidate:{infoHash:hash,fileIdx:0}});
   const entries=await readdir(join(dir,'torrent-cache'));assert.equal(entries.length,1);assert.notEqual(entries[0],'a'.repeat(48));
   assert.equal(await readFile(join(dir,'user-preferences.json'),'utf8'),'keep');
+});
+
+test('ملف ترجمة مقبول SRT/VTT/ASS فقط، محدود دون HTML أو binary أو playlist',()=>{
+  assert.equal(validateSubtitleText('1\n00:00:00,000 --> 00:00:02,000\nمرحبًا\n').extension,'srt');
+  assert.equal(validateSubtitleText('WEBVTT\n\n00:00.000 --> 00:02.000\nمرحبا\n').extension,'vtt');
+  assert.equal(validateSubtitleText('[Script Info]\nTitle: Owned\n[Events]\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,مرحبا').extension,'ass');
+  for(const text of ['<html>not subtitles</html>','#EXTM3U\nhttps://private.local','PK\u0003\u0004bytes','random text','x'.repeat(2*1024*1024+1),'1\n00:00:00,000 --> 00:00:02,000\nhi\u0000'])assert.throws(()=>validateSubtitleText(text),/ترجمة|الحد/);
+});
+async function subtitleSource(t,{slow=false,invalid=false,oversize=false,redirect=false}={}){
+  const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
+  const body=oversize?'x'.repeat(2*1024*1024+1):invalid?'<html>upstream failed</html>':'1\n00:00:00,000 --> 00:00:02,000\nترجمة مؤلفة\n';
+  const source=http.createServer((req,res)=>{if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
+  t.after(()=>new Promise(r=>source.close(r)));t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
+  t.mock.method(https,'request',(url,options,cb)=>http.request(`http://127.0.0.1:${source.address().port}${url.pathname}`,{...options,lookup:undefined},cb));return body;
+}
+test('subtitle-load ينزل ملفًا محليًا محققًا ويفضل العربية ويتيح off/select/delay/size فقط',async t=>{
+  const body=await subtitleSource(t),{services,dir,events}=await fixture(t);await services.startPlayback({session:'sub-control',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await services.playbackCommand({session:'sub-control',command:'subtitle-load',value:{url:'https://subs.example.com/english.srt',lang:'en',label:'English'}});
+  await services.playbackCommand({session:'sub-control',command:'subtitle-load',value:{url:'https://subs.example.com/arabic.srt',lang:'ara',label:'عربية'}});
+  await new Promise(r=>setTimeout(r,30));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse),adds=commands.filter(m=>m.command[0]==='sub-add');
+  assert.equal(adds.length,2);for(const item of adds){assert.ok(!item.command[1].startsWith('http'));assert.equal(await readFile(item.command[1],'utf8'),body);}assert.equal(adds[1].command[2],'select');
+  assert.ok(events.some(e=>e.type==='playback/subtitles'&&e.tracks.some(track=>track.lang==='ar'&&track.selected)));
+  await services.playbackCommand({session:'sub-control',command:'subtitle-off'});await services.playbackCommand({session:'sub-control',command:'subtitle-select',value:1});
+  await services.playbackCommand({session:'sub-control',command:'subtitle-delay',value:1500});await services.playbackCommand({session:'sub-control',command:'subtitle-size',value:44});
+  for(const [command,value] of [['subtitle-select',999],['subtitle-delay',60001],['subtitle-size',100],['loadfile','https://evil.example/']])await assert.rejects(services.playbackCommand({session:'sub-control',command,value}));
+  await services.stopPlayback({session:'sub-control'});for(const item of adds)await assert.rejects(readFile(item.command[1]),{code:'ENOENT'});
+});
+test('subtitle غير صالح يفشل بلا قطع الفيديو ولا sub-add ولا ready وهمي',async t=>{
+  await subtitleSource(t,{invalid:true});const {services,events,dir}=await fixture(t);await services.startPlayback({session:'bad-sub',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await assert.rejects(services.playbackCommand({session:'bad-sub',command:'subtitle-load',value:{url:'https://subs.example.com/error.srt',lang:'ar'}}),/ترجمة/);
+  await services.playbackCommand({session:'bad-sub',command:'pause',value:true});
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
+  assert.ok(events.some(e=>e.type==='playback/subtitles'&&e.message));assert.ok(!events.some(e=>e.type==='playback/error'));
+});
+test('تنزيل ترجمة متأخر لا يضاف لمشغل جديد يحمل نفس session',async t=>{
+  await subtitleSource(t,{slow:true});const {services,dir}=await fixture(t);await services.startPlayback({session:'same-sub',candidate:{url:'https://video.example.com/first.mp4'}});
+  const pending=services.playbackCommand({session:'same-sub',command:'subtitle-load',value:{url:'https://subs.example.com/late.srt',lang:'ar'}});const rejected=assert.rejects(pending);
+  await new Promise(r=>setTimeout(r,20));await services.startPlayback({session:'same-sub',candidate:{url:'https://video.example.com/second.mp4'}});await rejected;await new Promise(r=>setTimeout(r,170));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
+});
+
+test('ترجمات candidate تنزل في الخلفية بأولوية العربية دون تأخير startPlayback',async t=>{
+  await subtitleSource(t,{slow:true});const {services,dir}=await fixture(t);
+  await services.startPlayback({session:'embedded',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[{url:'https://subs.example.com/en.srt',lang:'en'},{url:'https://subs.example.com/ar.srt',lang:'ar'}]}});
+  let commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
+  await new Promise(r=>setTimeout(r,380));commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);const adds=commands.filter(m=>m.command[0]==='sub-add');
+  assert.equal(adds.length,2);assert.equal(adds[0].command[4],'ar');assert.equal(adds[0].command[2],'select');assert.equal(adds[1].command[2],'auto');
+});
+test('subtitle-load يرفض هدفًا داخليًا والتوجيه الداخلي والملف فوق 2MiB دون تمرير URL إلى mpv',async t=>{
+  const {services,dir}=await fixture(t);await services.startPlayback({session:'sub-security',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await assert.rejects(services.playbackCommand({session:'sub-security',command:'subtitle-load',value:{url:'https://127.0.0.1/private.srt'}}),/ترجمة/);
+  await subtitleSource(t,{oversize:true});await assert.rejects(services.playbackCommand({session:'sub-security',command:'subtitle-load',value:{url:'https://subs.example.com/large.srt'}}),/الحد/);
+  t.mock.restoreAll();await subtitleSource(t,{redirect:true});await assert.rejects(services.playbackCommand({session:'sub-security',command:'subtitle-load',value:{url:'https://subs.example.com/redirect.srt'}}),/ترجمة/);
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
+});
+
+test('تنزيل ترجمة يتبع HTTPS CDN عام محققًا دون إعطاء رابط mpv',async t=>{
+  const body=await subtitleSource(t,{redirect:'public'}),{services,dir}=await fixture(t);await services.startPlayback({session:'sub-cdn',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await services.playbackCommand({session:'sub-cdn',command:'subtitle-load',value:{url:'https://subs.example.com/redirect.srt',lang:'ar'}});
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse),add=commands.find(m=>m.command[0]==='sub-add');assert.ok(add);assert.equal(await readFile(add.command[1],'utf8'),body);assert.ok(!add.command[1].startsWith('http'));
+});
+
+test('حد 8 ترجمات يحجز للعربية نصف المسارات ولا يكرر تنزيل URL',async t=>{
+  await subtitleSource(t);const {services,dir}=await fixture(t);await services.startPlayback({session:'subtitle-limit',candidate:{url:'https://video.example.com/owned.mp4'}});
+  for(let i=0;i<4;i++)await services.playbackCommand({session:'subtitle-limit',command:'subtitle-load',value:{url:`https://subs.example.com/en-${i}.srt`,lang:'en'}});
+  await assert.rejects(services.playbackCommand({session:'subtitle-limit',command:'subtitle-load',value:{url:'https://subs.example.com/en-excess.srt',lang:'en'}}),/الحد/);
+  for(let i=0;i<4;i++)await services.playbackCommand({session:'subtitle-limit',command:'subtitle-load',value:{url:`https://subs.example.com/ar-${i}.srt`,lang:'ar'}});
+  await services.playbackCommand({session:'subtitle-limit',command:'subtitle-load',value:{url:'https://subs.example.com/ar-0.srt',lang:'ar'}});
+  await assert.rejects(services.playbackCommand({session:'subtitle-limit',command:'subtitle-load',value:{url:'https://subs.example.com/ar-excess.srt',lang:'ar'}}),/الحد/);
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(commands.filter(m=>m.command[0]==='sub-add').length,8);
+});
+
+test('MPV يبدأ pause=true ويصدر pause/seek/state ms ويقيد rate للغرفة',async t=>{
+  const {services,events,dir}=await fixture(t);await services.startPlayback({session:'room',candidate:{url:'https://video.example.com/owned.mp4'},pause:true});await new Promise(r=>setTimeout(r,30));
+  const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));assert.ok(args.includes('--pause=yes'));
+  assert.ok(events.some(e=>e.type==='playback/state'&&e.paused===true&&e.position===2000&&e.duration===60000));
+  await services.playbackCommand({session:'room',command:'pause',value:false});await services.playbackCommand({session:'room',command:'seek',value:4500});await new Promise(r=>setTimeout(r,30));
+  assert.ok(events.some(e=>e.type==='playback/pause'&&e.paused===false));assert.ok(events.some(e=>e.type==='playback/seek'&&e.position===4500));
+  assert.ok(events.some(e=>e.type==='playback/progress'&&e.paused===false&&e.buffering===false));
+  await services.playbackCommand({session:'room',command:'rate',value:0.95});await services.playbackCommand({session:'room',command:'rate',value:1.05});
+  for(const value of [0.94,1.06,'1',Infinity])await assert.rejects(services.playbackCommand({session:'room',command:'rate',value}));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(commands.some(m=>JSON.stringify(m.command)==='["set_property","speed",0.95]'));
 });

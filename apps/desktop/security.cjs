@@ -13,7 +13,7 @@ function assetPath(root, value) {
   const relative = decodeURIComponent(u.pathname).replaceAll('\\', '/');
   if (relative.includes('\0') || relative.split('/').includes('..')) throw new Error('مسار ملف غير مسموح');
   const base = path.resolve(root);
-  const result = path.resolve(base, `.${relative === '/' ? '/desktop/index.html' : relative}`);
+  const result = path.resolve(base, `.${relative === '/' ? '/index.html' : relative}`);
   if (!result.startsWith(base + path.sep)) throw new Error('مسار خارج الحزمة');
   return result;
 }

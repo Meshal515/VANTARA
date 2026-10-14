@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-preview-0.1.0-preview.1
+  group: windows-preview-0.1.0-preview.2
   cancel-in-progress: false
 
 jobs:
@@ -26,13 +26,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nsis 7zip
       - name: التحقق من قشرة التطبيق والخدمات
         run: |
-          node --test apps/desktop/security.test.cjs apps/desktop/src/services.test.mjs
+          node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/services.test.mjs apps/desktop/src/resource.test.mjs
           node --check apps/desktop/main.cjs
           node --check tools/build-windows.mjs
       - name: بناء المثبت والحزمة المحمولة من المصادر المثبتة بالبصمات
         run: |
           node tools/build-windows.mjs --output="$RUNNER_TEMP/windows-preview"
-          test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64-Setup.exe"
+          test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe"
           cd "$RUNNER_TEMP/windows-preview"
           sha256sum -c SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
@@ -44,14 +44,77 @@ jobs:
             ${{ runner.temp }}/windows-preview/SHA256SUMS.txt
           compression-level: 0
           if-no-files-found: error
-      - name: إرفاق الحزم وإتاحة تنزيل المعاينة
+
+  windows:
+    needs: preview
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: VANTARA-Windows-x64-preview
+          path: ${{ runner.temp }}/windows-preview
+      - name: تثبيت حقيقي وفحص جميع الملفات وإقلاع الواجهة الأصلية
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'windows-preview'
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview2-Check'
+          $installer = Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe'
+          $process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -PassThru
+          if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'انتهت مهلة المثبت' }
+          if ($process.ExitCode -ne 0) { throw "فشل المثبت: $($process.ExitCode)" }
+          $portableDir = Join-Path $packageDir 'portable'
+          Expand-Archive -Path (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64.zip') -DestinationPath $portableDir
+          $sourceDir = Join-Path $portableDir 'VANTARA-Windows-x64'
+          $count = 0
+          Get-ChildItem $sourceDir -File -Recurse | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($sourceDir, $_.FullName)
+            $installed = Join-Path $installDir $relative
+            if (-not (Test-Path -LiteralPath $installed)) { throw "ملف مفقود: $relative" }
+            if ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $installed).Hash) { throw "ملف مختلف: $relative" }
+            $count++
+          }
+          Write-Output "مطابقة ملفات المثبت: $count"
+          $uiReport = Join-Path $packageDir 'windows-ui-report.json'
+          $application = Start-Process -FilePath (Join-Path $sourceDir 'VANTARA.exe') -ArgumentList "--smoke-report=$uiReport" -PassThru
+          if (-not $application.WaitForExit(90000)) { $application.Kill(); throw 'انتهت مهلة الواجهة' }
+          if (-not (Test-Path $uiReport)) { throw 'لم يصل تقرير الواجهة' }
+          $report = Get-Content $uiReport | ConvertFrom-Json
+          if ($report.url -ne 'vantara://app/index.html' -or -not $report.hasBridge -or -not $report.gate) { throw 'لم تقلع واجهة الحسابات الأصلية' }
+          if ($report.sourceCount -lt 20) { throw 'المصادر الأصلية لم تُحمّل' }
+          if ($report.failedLoads.Count -or $report.assetFailures.Count -or $report.rendererExits.Count) { throw 'أخطاء إقلاع الواجهة' }
+          if ($report.text -match 'تعذّر الوصول إلى الخادم') { throw 'فشل نقل الحسابات' }
+          if (-not (Test-Path (Join-Path $sourceDir 'VANTARA-data'))) { throw 'بيانات portable ليست بجانب البرنامج' }
+          $report.text = 'بوابة اختيار الحسابات الأصلية؛ النص الشخصي محذوف من تقرير الاختبار'
+          $report | ConvertTo-Json -Depth 8 | Set-Content $uiReport
+          $report | ConvertTo-Json -Depth 8
+      - name: إطار فيديو وترجمة عربية وnamed pipe حقيقيان في ويندوز
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'windows-preview'
+          $native = Join-Path $packageDir 'portable\VANTARA-Windows-x64\resources\app\native'
+          node tools/windows-native-smoke.mjs "$native" (Join-Path $packageDir 'windows-native-report.json')
+          if ($LASTEXITCODE -ne 0) { throw 'فشل إثبات المشغل والترجمة على ويندوز' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-preview2-evidence
+          path: |
+            ${{ runner.temp }}/windows-preview/*report.json
+          if-no-files-found: warn
+      - name: نشر المعاينة بعد نجاح فحص ويندوز
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload windows-v0.1.0-preview.1 \
-            "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64-Setup.exe" \
-            "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.1-Windows-x64.zip" \
-            "$RUNNER_TEMP/windows-preview/SHA256SUMS.txt" \
-            --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit windows-v0.1.0-preview.1 --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --draft=false --prerelease --latest=false
+          $release = gh release view windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --json isDraft | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) { throw 'الإصدار ليس مسودة؛ لا تُستبدل حزم منشورة. ارفع رقم الإصدار.' }
+          $packageDir = Join-Path $env:RUNNER_TEMP 'windows-preview'
+          gh release upload windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --clobber (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe') (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64.zip') (Join-Path $packageDir 'SHA256SUMS.txt')
+          if ($LASTEXITCODE -ne 0) { throw 'فشل رفع المرفقات' }
+          gh release edit windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'فشل نشر المعاينة' }

@@ -9,6 +9,14 @@ import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const secret = () => randomBytes(24).toString('hex');
+export function validateResourceRequest({url,method='GET',body=null,headers={},binary=false,follow=true}={}) {
+  const checked=publicURL(url);
+  if(!['GET','POST'].includes(method)||body!=null&&(typeof body!=='string'||Buffer.byteLength(body)>65536)||method==='GET'&&body!=null)throw new Error('طلب المصدر غير صالح');
+  const out=checkedHeaders(headers);
+  const allowed=new Set(['accept','accept-language','content-type','referer','user-agent','x-requested-with','x-csrf-token']);
+  for(const key of Object.keys(out))if(!allowed.has(key.toLowerCase()))throw new Error('ترويسة المصدر غير مسموحة');
+  return {url:checked.href,method,body,headers:out,binary:binary===true,follow:follow!==false};
+}
 const cancelled = () => new Error('ألغيت جلسة التشغيل');
 const plain = v => v && typeof v === 'object' && !Array.isArray(v);
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -47,7 +55,7 @@ export async function resolvePublicURL(input, lookup = host => dns.lookup(host, 
   const url = publicURL(input), host = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = net.isIP(host) ? [{address:host,family:net.isIP(host)}] : await lookup(host);
   if (!addresses.length || addresses.some(x => !publicAddress(x.address))) throw new Error('رابط يشير إلى هدف داخلي');
-  return { url, ...addresses[0] };
+  return { url, ...(addresses.find(address=>address.family===4)??addresses[0]) };
 }
 function checkedHeaders(value = {}) {
   if (!plain(value) || Object.keys(value).length > 32) throw new Error('رؤوس الفيديو غير صالحة');
@@ -121,7 +129,7 @@ function readResponse(response, limit) {
     response.on('aborted',()=>reject(new Error('انقطع نقل الاستجابة')));
   });
 }
-async function secureResponse(url, {headers={},signal,timeout=15000}={}) {
+async function secureResponse(url, {headers={},signal,timeout=15000,method='GET',body=null}={}) {
   if (signal?.aborted) throw cancelled();
   const pinned = await new Promise((resolve,reject) => {
     const abort = () => reject(cancelled());
@@ -131,10 +139,10 @@ async function secureResponse(url, {headers={},signal,timeout=15000}={}) {
   if (signal?.aborted) throw cancelled();
   return new Promise((resolve,reject) => {
     // Pin the validated DNS answer for this connection to prevent rebinding.
-    const request=https.request(pinned.url,{method:'GET',headers,signal,agent:false,
+    const request=https.request(pinned.url,{method,headers,signal,agent:false,
       lookup:(_host, options, cb) => options?.all ? cb(null,[{address:pinned.address,family:pinned.family}]) : cb(null,pinned.address,pinned.family)},resolve);
     request.setTimeout(timeout,()=>request.destroy(new Error('انتهت مهلة HTTPS')));
-    request.on('error',reject); request.end();
+    request.on('error',reject); request.end(body);
   });
 }
 async function localJSON(base,path,{body,signal,timeout=15000,auth}={}) {
@@ -187,14 +195,18 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   const states=new Set(), resourceControllers=new Set();
   // Electron owns the single-instance lock before constructing services.
   // This directory contains only disposable session downloads.
-  const startup=rm(join(userData,'torrent-cache'),{recursive:true,force:true})
+  const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
     .then(()=>null,()=>new Error('تعذر تنظيف ملفات التورنت المتروكة؛ أغلق المحركات القديمة ثم حاول مجددًا'));
   const publish = event => { try { onEvent(event); } catch {} };
   function emit(state,event) { if (!state.stopped && current===state) publish({...event,session:state.session}); }
+  function playbackState(state) {
+    return {position:state.progress.position??0,duration:state.progress.duration??0,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true};
+  }
+  function emitPlaybackState(state) {if(state.ready)emit(state,{type:'playback/state',...playbackState(state)});}
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.controller.abort();clearInterval(state.statsTimer);
+    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -202,6 +214,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await Promise.all([...state.children].map(kill));
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
+      await state.subtitleQueue;
+      if(state.subtitleDir)await rm(state.subtitleDir,{recursive:true,force:true}).catch(()=>{});
       states.delete(state);
     })();
     return state.cleanup;
@@ -210,14 +224,37 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(state.stopped||current!==state)return;
     state.failure=message;emit(state,{type:'playback/error',message});await cleanup(state);if(current===state)current=null;
   }
-  async function requestResource({url,json=false,limit,timeout}={}) {
+  async function requestResource({url,json=false,limit,timeout,...options}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
     limit=bounded(limit,4*1024*1024,1,8*1024*1024);timeout=bounded(timeout,15000,100,60000);
     const controller=new AbortController();resourceControllers.add(controller);const timer=setTimeout(()=>controller.abort(),timeout);
     try {
-      const response=await secureResponse(url,{headers:{Accept:json?'application/json':'*/*'},signal:controller.signal,timeout});
-      if(response.statusCode>=300&&response.statusCode<400){response.destroy();throw new Error('إعادة توجيه طلب الإضافة غير مسموحة');}
-      return {text:await readResponse(response,limit),status:response.statusCode};
+      let request=validateResourceRequest({url,...options});
+      request.headers={accept:json?'application/json':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
+      for(let redirects=0;redirects<6;redirects++) {
+        const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout});
+        const status=response.statusCode;
+        if(status>=300&&status<400&&response.headers.location&&request.follow) {
+          response.destroy();
+          const next=publicURL(new URL(response.headers.location,request.url).href);
+          if(next.origin!==new URL(request.url).origin) {
+            if([307,308].includes(status)&&request.body)throw new Error('توجيه بيانات المصدر لمضيف آخر غير مسموح');
+            request.headers={accept:request.headers.accept,'user-agent':request.headers['user-agent']};
+          }
+          if(status===303||[301,302].includes(status)&&request.method==='POST'){request.method='GET';request.body=null;delete request.headers['content-type'];}
+          request.url=next.href;continue;
+        }
+        const headers=Object.fromEntries(['content-type','x-videa-xs','location'].filter(k=>typeof response.headers[k]==='string').map(k=>[k,response.headers[k]]));
+        if(request.binary) {
+          const chunks=[];let size=0;
+          for await(const chunk of response){size+=chunk.length;if(size>limit){response.destroy();throw new Error('حجم الصورة أكبر من الحد');}chunks.push(chunk);}
+          const type=String(headers['content-type']??'').split(';')[0];
+          if(!/^image\/(png|jpeg|webp|gif|avif)$/.test(type))throw new Error('المورد ليس صورة مدعومة');
+          return {base64:Buffer.concat(chunks).toString('base64'),contentType:type,status,url:request.url,headers};
+        }
+        return {text:await readResponse(response,limit),status,url:request.url,headers,location:response.headers.location??null};
+      }
+      throw new Error('عدد إعادة التوجيه أكبر من الحد');
     } catch(e) {if(e.message?.includes('رابط')||e.message?.includes('حد')||e.message?.includes('حجم')||e.message?.includes('توجيه'))throw e;throw new Error('تعذر جلب مورد HTTPS أو انتهت المهلة');}
     finally{clearTimeout(timer);resourceControllers.delete(controller);}
   }
@@ -310,20 +347,27 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       state.socket.write(JSON.stringify({command,request_id})+'\n',error=>{if(error){clearTimeout(timer);state.pending.delete(request_id);reject(new Error('تعذر إرسال أمر المشغل'));}});
     });
   }
-  async function player(state,url,title,position) {
+  async function player(state,url,title,position,pause) {
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--input-default-bindings=yes',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     child(state,binaries.mpv,args,cleanEnv(),(message,code)=>{if(message==='أغلق البرنامج المرفق'&&code===0&&state.ready){emit(state,{type:'playback/closed',...state.progress});cleanup(state).then(()=>{if(current===state)current=null;});}else fail(state,message);});
     state.socket=await connectIPC(state,state.ipc);assertSession(state);
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;emit(state,{type:'playback/ready',...state.progress});};
+    const ready=()=>{if(state.ready)return;state.ready=true;state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
         const end=buffer.indexOf('\n'),line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line);}catch{continue;}
         if(event.request_id!=null){const pending=state.pending.get(event.request_id);if(pending){state.pending.delete(event.request_id);clearTimeout(pending.timer);event.error==='success'?pending.resolve(event.data):pending.reject(new Error('رفض المشغل الأمر'));}}
+        if(event.event==='seek')state.seekRevision=(state.seekRevision??0)+1;
+        if(event.event==='playback-restart'&&state.ready&&state.seekRevision!==state.publishedSeekRevision) {
+          const revision=state.seekRevision;state.publishedSeekRevision=revision;
+          ipcCommand(state,['get_property','time-pos']).then(seconds=>{
+            if(Number.isFinite(seconds)&&seconds>=0&&state.seekRevision===revision)emit(state,{type:'playback/seek',position:Math.round(seconds*1000)});
+          }).catch(()=>{});
+        }
         if(event.event==='playback-restart'&&!state.ready) {
           state.restarted=true;
           ipcCommand(state,['get_property','video-out-params']).then(params=>{
@@ -337,36 +381,111 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         }
         if(event.event==='end-file'&&event.reason==='error')fail(state,'تعذر فتح الفيديو في المشغل');
         if(event.event==='property-change'){
-          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);emit(state,{type:'playback/progress',...state.progress});}
+          if(event.name==='track-list'&&Array.isArray(event.data)) {
+            state.subtitleTracks=event.data.filter(t=>t.type==='sub'&&Number.isSafeInteger(t.id)&&t.id>=0).slice(0,200)
+              .map(t=>({id:t.id,lang:subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'ترجمة'),selected:t.selected===true}));
+            const selected=state.subtitleTracks.find(t=>t.selected),selectedId=selected?.id??null;
+            const expected=state.subtitleExpectedSelection;
+            if(expected&&selected?.lang===expected.lang&&selected?.label===expected.label)state.subtitleExpectedSelection=null;
+            else if(!expected&&state.lastSubtitleSelection!=null&&state.lastSubtitleSelection!==selectedId)state.subtitleManual=true;
+            state.lastSubtitleSelection=selectedId;
+            emit(state,{type:'playback/subtitles',tracks:state.subtitleTracks});
+          }
+          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
+          if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
+          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;emitPlaybackState(state);}
 
         }
       }
     });
-    await Promise.all(['time-pos','duration','video-out-params'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
+    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     await ipcCommand(state,['loadfile',url]);assertSession(state);
   }
-  async function startPlayback({session,candidate,title,position=0}={}) {
+  async function startPlayback({session,candidate,title,position=0,pause=false}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
-    if(typeof session!=='string'||!session||session.length>200||!Number.isFinite(position)||position<0)throw new Error('جلسة أو موضع تشغيل غير صالح');
+    if(typeof session!=='string'||!session||session.length>200||!Number.isFinite(position)||position<0||typeof pause!=='boolean')throw new Error('جلسة أو موضع تشغيل غير صالح');
     candidate=validateCandidate(candidate);
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
+    state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
+    state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     current=state;states.add(state);
     try{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
       emit(state,{type:'playback/preparing'});
       const url=candidate.infoHash?await engine(state,candidate):await makeProxy(state,candidate.url,candidate.headers);
-      assertSession(state);await player(state,url,title,position);assertSession(state);return {started:true};
+      assertSession(state);await player(state,url,title,position,pause);assertSession(state);
+      const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
+      for(const subtitle of embedded)void loadSubtitle(state,subtitle).catch(()=>{});
+      return {started:true};
     }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
   }
   async function stopPlayback({session}={}) {
     const state=current;if(!state||state.session!==session)return;
     publish({type:'playback/closed',session:state.session,...state.progress});await cleanup(state);if(current===state)current=null;
   }
+  async function downloadSubtitle(state,value) {
+    const controller=new AbortController(),abort=()=>controller.abort();
+    state.controller.signal.addEventListener('abort',abort,{once:true});
+    const timer=setTimeout(abort,15000);let response;
+    try {
+      let url=value.url;
+      for(let redirects=0;;redirects++) {
+        response=await secureResponse(url,{headers:{Accept:'text/plain,application/x-subrip,text/vtt,text/x-ssa'},signal:controller.signal,timeout:15000});
+        if(response.statusCode<300||response.statusCode>=400)break;
+        if(redirects>=4||typeof response.headers.location!=='string')throw new Error('توجيه الترجمة تجاوز الحد أو أعاد رابطًا غير صالح');
+        try { url=publicURL(new URL(response.headers.location,url).href).href; }
+        catch { throw new Error('توجيه الترجمة إلى عنوان غير مسموح'); }
+        response.destroy();
+      }
+      if(response.statusCode<200||response.statusCode>=300)throw new Error('تعذر تنزيل الترجمة؛ استجابة غير ناجحة');
+      const validated=validateSubtitleText(await readResponse(response,2*1024*1024));assertSession(state);
+      const storage=await fs.statfs(userData,{bigint:true});assertSession(state);
+      if(storage.bavail*storage.bsize<BigInt(Buffer.byteLength(validated.text))+8n*1024n**2n)throw new Error('المساحة لا تكفي لتنزيل الترجمة؛ حرر 8 ميغابايت على الأقل');
+      if(!state.subtitleDir){state.subtitleDir=join(userData,'subtitle-cache',secret());await mkdir(state.subtitleDir,{recursive:true});assertSession(state);}
+      const path=join(state.subtitleDir,`${secret()}.${validated.extension}`);
+      await fs.writeFile(path,validated.text,{encoding:'utf8',flag:'wx',mode:0o600});assertSession(state);
+      return path;
+    } finally { clearTimeout(timer);state.controller.signal.removeEventListener('abort',abort);response?.destroy(); }
+  }
+  function loadSubtitle(state,value) {
+    assertSession(state);
+    if(!plain(value)||typeof value.url!=='string'||value.select!=null&&typeof value.select!=='boolean')return Promise.reject(new Error('طلب ترجمة غير صالح'));
+    let url;try{url=publicURL(value.url).href;}catch{return Promise.reject(new Error('رابط ترجمة غير مسموح'));}
+    if(state.subtitleJobs.has(url))return state.subtitleJobs.get(url);
+    const subtitle={url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة'),select:value.select};
+    const job=state.subtitleQueue.then(async()=>{
+      assertSession(state);
+      const loaded=[...state.subtitleFiles.values()];
+      if(loaded.length>=8||subtitle.lang!=='ar'&&loaded.filter(s=>s.lang!=='ar').length>=4)throw new Error('وصلت الترجمات إلى الحد؛ يمكن تحميل 8 مسارات منها 4 بغير العربية');
+      const path=await downloadSubtitle(state,subtitle);
+      try {
+        if(!await state.whenReady)throw cancelled();assertSession(state);
+        const selected=state.subtitleTracks.find(t=>t.selected);
+        const automatic=!state.subtitleManual&&(!selected||subtitle.lang==='ar'&&selected.lang!=='ar');
+        const select=subtitle.select===true||subtitle.select!==false&&automatic;
+        if(select)state.subtitleExpectedSelection={lang:subtitle.lang,label:subtitle.label};
+        await ipcCommand(state,['sub-add',path,select?'select':'auto',subtitle.label,subtitle.lang]);assertSession(state);
+        state.subtitleFiles.set(url,{...subtitle,path});
+        if(subtitle.select===true)state.subtitleManual=true;
+      } catch(error){state.subtitleExpectedSelection=null;await rm(path,{force:true}).catch(()=>{});throw error;}
+    }).catch(error=>{
+      if(!state.stopped&&current===state)emit(state,{type:'playback/subtitles',tracks:state.subtitleTracks,message:error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو'});
+      throw error;
+    });
+    state.subtitleJobs.set(url,job);state.subtitleQueue=job.catch(()=>{});
+    return job;
+  }
   async function playbackCommand({session,command,value}={}) {
     const state=current;if(!state||state.session!==session||state.stopped)throw new Error('جلسة تشغيل قديمة');
     if(command==='pause'&&typeof value==='boolean')await ipcCommand(state,['set_property','pause',value]);
     else if(command==='seek'&&Number.isFinite(value)&&value>=0)await ipcCommand(state,['seek',value/1000,'absolute']);
+    else if(command==='rate'&&Number.isFinite(value)&&value>=0.95&&value<=1.05)await ipcCommand(state,['set_property','speed',value]);
+    else if(command==='subtitle-load')await loadSubtitle(state,value);
+    else if(command==='subtitle-off') {state.subtitleManual=true;await ipcCommand(state,['set_property','sid','no']);}
+    else if(command==='subtitle-select'&&Number.isSafeInteger(value)&&state.subtitleTracks.some(t=>t.id===value)) {state.subtitleManual=true;await ipcCommand(state,['set_property','sid',value]);}
+    else if(command==='subtitle-delay'&&Number.isFinite(value)&&Math.abs(value)<=60000)await ipcCommand(state,['set_property','sub-delay',value/1000]);
+    else if(command==='subtitle-size'&&Number.isFinite(value)&&value>=20&&value<=80)await ipcCommand(state,['set_property','sub-font-size',value]);
     else throw new Error('أمر مشغل غير مسموح');
   }
   async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));current=null;}
@@ -376,8 +495,24 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
 export function validateTorrentStorage(file,availableBytes) {
   const length=file?.length;
   if(!Number.isSafeInteger(length)||length<=0)throw new Error('حجم ملف التورنت غير معروف أو غير صالح؛ اختر مصدرًا آخر');
-  if(length>2*1024**3)throw new Error('هذا المصدر أكبر من 2 غيغابايت، وهو حد التخزين في النسخة التجريبية؛ اختر مصدرًا أصغر');
+  if(length>64*1024**3)throw new Error('هذا المصدر أكبر من 64 غيغابايت، وهو حد التخزين في النسخة التجريبية؛ اختر مصدرًا أصغر');
   if(typeof availableBytes!=='bigint'||availableBytes<0n)throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت');
   if(availableBytes<BigInt(length)+64n*1024n**2n)throw new Error('المساحة لا تكفي لملف التورنت واحتياط 64 ميغابايت؛ حرر مساحة أو اختر مصدرًا أصغر');
   return length;
+}
+
+function subtitleLanguage(value) {
+  const text=typeof value==='string'?value.slice(0,40):'und';
+  return /^(ar|ara|arabic)(?:-|$)/i.test(text)?'ar':/^(en|eng|english)(?:-|$)/i.test(text)?'en':/^[a-z]{2,3}(?:-[a-z0-9]{1,8})*$/i.test(text)?text:'und';
+}
+function subtitleLabel(value) {return String(value).replace(/[\x00-\x1f\x7f]/g,' ').slice(0,200);}
+export function validateSubtitleText(text) {
+  if(typeof text!=='string'||Buffer.byteLength(text)>2*1024*1024)throw new Error('ملف الترجمة أكبر من الحد 2 ميغابايت');
+  text=text.replace(/^\uFEFF/,'');
+  if(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)||/^(?:\s*<(?:!doctype|html|\?xml)|#EXTM3U|PK\x03\x04)/i.test(text)||text.includes('\uFFFD'))throw new Error('ملف الترجمة ليس نصًا UTF-8 صالحًا');
+  const cues=text.match(/^\s*(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s*-->\s*(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}/gm)??[];
+  if(cues.length>20000)throw new Error('عدد أسطر الترجمة أكبر من الحد');
+  if(cues.length)return {text,extension:/^WEBVTT(?:\s|$)/.test(text)?'vtt':'srt'};
+  if(/^\[Script Info\]/mi.test(text)&&/^\[Events\]/mi.test(text)&&/^Dialogue:/mi.test(text))return {text,extension:'ass'};
+  throw new Error('لا توجد ترجمة SRT/VTT/ASS صالحة في الاستجابة');
 }

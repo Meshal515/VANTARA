@@ -3,10 +3,19 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
 const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
+const { firstPartyRequest } = require('./first-party.cjs');
+const { migratePortableProfile } = require('./profile.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 app.setName('VANTARA');
 if (!app.requestSingleInstanceLock()) app.exit(0);
+const previousProfile=app.getPath('userData');
+const executableFolder=path.dirname(app.getPath('exe'));
+const portable=process.platform==='win32'&&app.isPackaged&&!require('node:fs').existsSync(path.join(executableFolder,'Uninstall.exe'));
+const portableProfile=path.join(executableFolder,'VANTARA-data');
+// يكتمل النقل قبل اختيار userData وقبل أول session/BrowserWindow.
+const profileReady=portable?migratePortableProfile(previousProfile,portableProfile)
+  .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
 let window;
 let services;
 let quitting = false;
@@ -58,7 +67,7 @@ function register(channel, handler) {
   });
 }
 
-app.whenReady().then(async () => {
+Promise.all([app.whenReady(),profileReady]).then(async () => {
   protocol.handle('vantara', async request => {
     try {
       const file = assetPath(assets, request.url);
@@ -79,28 +88,52 @@ app.whenReady().then(async () => {
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
+  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
+  register('show-app',()=>{window.show();window.focus();return true;});
+  register('show-player',()=>{window.minimize();return true;});
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: path.join(assets, 'icons/icon-512.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
+  window.webContents.session?.webRequest?.onHeadersReceived?.({urls:['https://vantara-sync.ngm-309.workers.dev/*']},(details,callback)=>{
+    const headers=Object.fromEntries(Object.entries(details.responseHeaders??{}).filter(([key])=>key.toLowerCase()!=='access-control-allow-origin'));
+    callback({responseHeaders:{...headers,'Access-Control-Allow-Origin':['vantara://app']}});
+  });
+  const smokeDiagnostics = { consoleErrors: [], failedLoads: [], assetFailures: [], rendererExits: [] };
+  if (reportOption) {
+    const safeText = value => String(value ?? '').replace(/(?:(?:https?|wss?):\/\/|stremio:\/\/)[^\s]+/gi, '[رابط خارجي]').slice(0, 2000);
+    const safeURL = value => { try { const u = new URL(value); if (!isAppFrame(u.href)) return '[أصل خارجي]'; u.search = ''; u.hash = ''; return u.href; } catch { return '[رابط غير صالح]'; } };
+    const append = (list, row) => { if (list.length < 200) list.push(row); };
+    window.webContents.on('console-message', event => {
+      const details = event.details ?? event;
+      if (details.level >= 2) append(smokeDiagnostics.consoleErrors, { level: details.level, message: safeText(details.message), line: details.lineNumber, source: safeURL(details.sourceId) });
+    });
+    window.webContents.on('did-fail-load', (_event, code, message, url, mainFrame) => append(smokeDiagnostics.failedLoads, { code, message: safeText(message), url: safeURL(url), mainFrame }));
+    window.webContents.on('render-process-gone', (_event, details) => append(smokeDiagnostics.rendererExits, { reason: details.reason, exitCode: details.exitCode }));
+    window.webContents.session?.webRequest?.onErrorOccurred(details => {
+      if (isAppFrame(details.url)) append(smokeDiagnostics.assetFailures, { url: safeURL(details.url), error: safeText(details.error), resourceType: details.resourceType });
+    });
+    window.webContents.session?.webRequest?.onCompleted(details => {
+      if (isAppFrame(details.url) && details.statusCode >= 400) append(smokeDiagnostics.assetFailures, { url: safeURL(details.url), status: details.statusCode, resourceType: details.resourceType });
+    });
+  }
   window.webContents.setWindowOpenHandler(({ url }) => { if (/^https:/i.test(url)) void openSettings(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!isAppFrame(url)) { event.preventDefault(); if (/^https:/i.test(url)) void openSettings(url); } });
   window.once('ready-to-show', () => window.show());
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'VANTARA', submenu: [
-      { label: 'السينما والإضافات', click: () => void window.loadURL('vantara://app/desktop/index.html') },
-      { label: 'المكتبة والحسابات', click: () => void window.loadURL('vantara://app/index.html') },
+      { label: 'الواجهة الرئيسية', click: () => void window.loadURL('vantara://app/index.html') },
       { type: 'separator' }, { label: 'خروج', role: 'quit' },
     ] },
     { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', role: 'togglefullscreen' }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
   ]));
-  await window.loadURL('vantara://app/desktop/index.html');
+  await window.loadURL('vantara://app/index.html');
   if (reportOption) {
     setTimeout(async () => {
       try {
-        const report = await window.webContents.executeJavaScript('({title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,hasBridge:!!window.VantaraDesktopBridges})');
-        await fs.writeFile(reportOption.slice('--smoke-report='.length), JSON.stringify(report, null, 2));
+        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
+        await fs.writeFile(reportOption.slice('--smoke-report='.length), JSON.stringify({ ...report, ...smokeDiagnostics }, null, 2));
         const image = await window.webContents.capturePage();
         await fs.writeFile(reportOption.slice('--smoke-report='.length) + '.png', image.toPNG());
         app.quit();

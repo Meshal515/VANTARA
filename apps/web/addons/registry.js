@@ -151,13 +151,21 @@ export function createAddonRegistry({
     }));
     return results;
   }
-  function install(preview) {
+  function install(preview, { replace = true, expectedCacheEpoch } = {}) {
     return mutate(async () => {
       const hidden = previews.get(preview);
       if (!hidden) throw new Error("عاين الإضافة أولًا");
       const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
       if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
       const m = checked.manifest, before = entries.get(m.key);
+      if (expectedCacheEpoch !== undefined && before?.cacheEpoch !== expectedCacheEpoch) {
+        previews.delete(preview);
+        return null;
+      }
+      if (before && replace === false) {
+        previews.delete(preview);
+        return view(before);
+      }
       if (before && before.url === hidden.url && canonicalData(before.manifestRaw) === canonicalData(hidden.raw)) {
         previews.delete(preview);
         return view(before);

@@ -49,7 +49,7 @@ const child=spawn(${JSON.stringify(binary)},args,{env:process.env,stdio:'ignore'
 const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://local');if(req.method==='POST'&&u.pathname==='/torrents')u.searchParams.set('initial_peers','127.0.0.1:${peer}');fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},u.pathname+u.search+'\\n');const forward=http.request('http://127.0.0.1:${backend}'+u.pathname+u.search,{method:req.method,headers:req.headers},back=>{res.writeHead(back.statusCode,back.headers);back.pipe(res);});forward.on('error',()=>{res.writeHead(503);res.end('{}');});req.pipe(forward);});server.listen(Number(external),'127.0.0.1');
 process.on('SIGTERM',()=>{server.closeAllConnections();server.close();child.kill();});child.once('exit',()=>process.exit());`);
   await writeFile(player,`#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),socket=args.find(x=>x.startsWith('--input-ipc-server=')).slice(19);let url;
-net.createServer(c=>{let buf='';c.on('data',b=>{buf+=b;while(buf.includes('\\n')){const i=buf.indexOf('\\n'),m=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?{w:320,h:180}:undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?5:m.command[2]==='time-pos'?1:m.command[2]==='video-out-params'?{w:320,h:180}:false})+'\\n');if(m.command[0]==='loadfile'){url=m.command[1];c.write(JSON.stringify({event:'playback-restart'})+'\\n');fetch(url,{headers:{Range:'bytes=0-127'}}).then(async r=>{fs.writeFileSync(${JSON.stringify(join(dir,'range-body'))},Buffer.from(await r.arrayBuffer()));fs.writeFileSync(${JSON.stringify(join(dir,'range-status'))},String(r.status));});}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
+net.createServer(c=>{let buf='';c.on('data',b=>{buf+=b;while(buf.includes('\\n')){const i=buf.indexOf('\\n'),m=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?{w:320,h:180}:undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?5:m.command[2]==='time-pos'?1:m.command[2]==='video-out-params'?{w:320,h:180}:m.command[2]==='track-list'?[]:false})+'\\n');if(m.command[0]==='loadfile'){url=m.command[1];c.write(JSON.stringify({event:'playback-restart'})+'\\n');fetch(url,{headers:{Range:'bytes=0-127'}}).then(async r=>{fs.writeFileSync(${JSON.stringify(join(dir,'range-body'))},Buffer.from(await r.arrayBuffer()));fs.writeFileSync(${JSON.stringify(join(dir,'range-status'))},String(r.status));});}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(wrapper,0o755);await chmod(player,0o755);
   const events=[],userData=join(dir,'client');await mkdir(userData);
   const services=createDesktopServices({userData,binaries:{rqbit:wrapper,mpv:player},onEvent:event=>events.push(event)});t.after(()=>services.close());
@@ -65,13 +65,14 @@ net.createServer(c=>{let buf='';c.on('data',b=>{buf+=b;while(buf.includes('\\n')
 });
 
 const mpvBinary=process.env.VANTARA_MPV_LINUX;
-test('mpv الحقيقي يفك فيديو مؤلف 320×180 ثم يقدم IPC pause/seek وتنظيفًا', {skip:!mpvBinary,timeout:25000},async t=>{
+test('mpv الحقيقي يفك فيديو مؤلف وترجمة عربية ويتتبع OSC/seek/rate وينظف العمليات', {skip:!mpvBinary,timeout:25000},async t=>{
   const dir=await mkdtemp(join(tmpdir(),'vantara-owned-video-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const video=join(dir,'owned.mp4');
   const ffmpeg=spawn('/usr/bin/ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=320x180:rate=24','-t','8','-c:v','mpeg4','-q:v','3','-movflags','+faststart',video],{stdio:'pipe'});
   let stderr='';ffmpeg.stderr.on('data',b=>stderr+=b);assert.equal(await new Promise(r=>ffmpeg.once('exit',r)),0,stderr);
   const contents=await readFile(video);
   const source=http.createServer((req,res)=>{
+    if(req.url.endsWith('.srt')){res.setHeader('content-type','application/x-subrip');return res.end('1\n00:00:00,000 --> 00:00:08,000\nترجمة عربية مؤلفة للاختبار\n');}
     const match=/^bytes=(\d+)-(\d*)$/.exec(req.headers.range??'');
     const start=match?Number(match[1]):0,end=match&&match[2]?Math.min(Number(match[2]),contents.length-1):contents.length-1;
     if(start>=contents.length){res.writeHead(416,{'content-range':`bytes */${contents.length}`});return res.end();}
@@ -84,16 +85,41 @@ test('mpv الحقيقي يفك فيديو مؤلف 320×180 ثم يقدم IPC p
   await writeFile(wrapper,`#!${process.execPath}\nimport {spawn} from 'node:child_process';import fs from 'node:fs';const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(join(dir,'args'))},JSON.stringify(args));const child=spawn(${JSON.stringify(mpvBinary)},args,{env:process.env,stdio:'ignore'});fs.writeFileSync(${JSON.stringify(join(dir,'pid'))},String(child.pid));process.on('SIGTERM',()=>{child.kill();setTimeout(()=>child.kill('SIGKILL'),300);});child.once('exit',code=>process.exit(code??0));`);
   const {chmod}=await import('node:fs/promises');await chmod(wrapper,0o755);
   const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit:binary??'/not-used',mpv:wrapper},onEvent:e=>events.push(e)});t.after(()=>services.close());
-  assert.deepEqual(await services.startPlayback({session:'real-video',candidate:{url:'https://fixture.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',position:1000}),{started:true});
+  assert.deepEqual(await services.startPlayback({session:'real-video',candidate:{url:'https://fixture.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',position:1000,pause:true}),{started:true});
   await until(()=>events.some(e=>e.type==='playback/ready'));
   const args=JSON.parse(await readFile(join(dir,'args'),'utf8')),path=args.find(x=>x.startsWith('--input-ipc-server=')).slice(19);
   const socket=net.createConnection(path);t.after(()=>socket.destroy());await new Promise((r,j)=>{socket.once('connect',r);socket.once('error',j);});
   const params=await new Promise((resolve,reject)=>{let buffer='';const timer=setTimeout(()=>reject(new Error('IPC timeout')),2000);socket.on('data',chunk=>{buffer+=chunk;for(const line of buffer.split('\n').slice(0,-1)){const message=JSON.parse(line);if(message.request_id===99){clearTimeout(timer);resolve(message.data);}}buffer=buffer.split('\n').at(-1);});socket.write(JSON.stringify({command:['get_property','video-out-params'],request_id:99})+'\n');});
   assert.equal(params.w,320);assert.equal(params.h,180);
+  assert.ok(events.some(e=>e.type==='playback/state'&&e.paused===true));
+  // Native pause controls must reach the room driver just like bridge calls.
+  socket.write(JSON.stringify({command:['set_property','pause',false],request_id:501})+'\n');
+  await until(()=>events.some(e=>e.type==='playback/pause'&&e.paused===false));
+  await services.playbackCommand({session:'real-video',command:'subtitle-load',value:{url:'https://subs.example.com/arabic.srt',lang:'ara',label:'العربية المؤلفة'}});
+  await until(()=>events.some(e=>e.type==='playback/subtitles'&&e.tracks.some(track=>track.lang==='ar'&&track.selected)));
+  const subText=await new Promise((resolve,reject)=>{let buffer='';const timer=setTimeout(()=>reject(new Error('subtitle IPC timeout')),2000);const receive=chunk=>{buffer+=chunk;for(const line of buffer.split('\n').slice(0,-1)){const message=JSON.parse(line);if(message.request_id===100){clearTimeout(timer);socket.removeListener('data',receive);resolve(message.data);}}buffer=buffer.split('\n').at(-1);};socket.on('data',receive);socket.write(JSON.stringify({command:['get_property','sub-text'],request_id:100})+'\n');});
+  assert.match(subText,/ترجمة عربية مؤلفة/);
+  await services.playbackCommand({session:'real-video',command:'subtitle-load',value:{url:'https://subs.example.com/english.srt',lang:'en',label:'اختيار يدوي'}});
+  await until(()=>events.findLast(e=>e.type==='playback/subtitles')?.tracks.some(track=>track.lang==='en'));
+  const englishId=events.findLast(e=>e.type==='playback/subtitles').tracks.find(track=>track.lang==='en').id;
+  // Another IPC client represents a native OSC/keyboard selection, outside
+  // the renderer's playbackCommand path.
+  socket.write(JSON.stringify({command:['set_property','sid',englishId],request_id:101})+'\n');
+  await until(()=>events.findLast(e=>e.type==='playback/subtitles')?.tracks.some(track=>track.id===englishId&&track.selected));
+  await services.playbackCommand({session:'real-video',command:'subtitle-load',value:{url:'https://subs.example.com/late-arabic.srt',lang:'ar',label:'عربية متأخرة'}});
+  await new Promise(r=>setTimeout(r,30));
+  assert.equal(events.findLast(e=>e.type==='playback/subtitles').tracks.find(track=>track.selected)?.id,englishId);
+  await services.playbackCommand({session:'real-video',command:'subtitle-delay',value:500});
+  await services.playbackCommand({session:'real-video',command:'subtitle-size',value:46});
+  await services.playbackCommand({session:'real-video',command:'subtitle-off'});
+  await services.playbackCommand({session:'real-video',command:'subtitle-select',value:events.findLast(e=>e.type==='playback/subtitles'&&e.tracks.length)?.tracks[0].id});
   await until(()=>events.some(e=>e.type==='playback/progress'&&e.position>=1000&&e.duration>=7900));
   await services.playbackCommand({session:'real-video',command:'pause',value:true});
   await services.playbackCommand({session:'real-video',command:'seek',value:4000});
   await until(()=>events.some(e=>e.position>=3900));
+  await until(()=>events.some(e=>e.type==='playback/seek'&&e.position>=3900));
+  await services.playbackCommand({session:'real-video',command:'rate',value:0.98});
+  await services.playbackCommand({session:'real-video',command:'rate',value:1});
   await services.stopPlayback({session:'real-video'});
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
   const pid=Number(await readFile(join(dir,'pid'),'utf8'));assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});

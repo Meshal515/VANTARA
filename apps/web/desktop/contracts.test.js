@@ -17,7 +17,8 @@ describe('عقود منصة ويندوز', () => {
     expect(desktopPlugin('AnimeEngine', g)).toBe(g.VantaraDesktopBridges.AnimeEngine);
     expect(currentPlatform(g)).toBe('desktop');
     expect(supports('nativePlayer', { platform: 'desktop' })).toBe(true);
-    for (const capability of ['nativeSources', 'manga', 'rafiq', 'webSources', 'webInstall'])
+    expect(supports('manga', {platform:'desktop'})).toBe(true);
+    for (const capability of ['nativeSources', 'rafiq', 'webSources', 'webInstall'])
       expect(supports(capability, { platform: 'desktop' })).toBe(false);
   });
   it('يقبل تورنت desktop فقط مع القدرة ويحفظ fileIdx صفر دون تخفيف PWA', () => {

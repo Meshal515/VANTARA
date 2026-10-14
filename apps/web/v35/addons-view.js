@@ -408,6 +408,18 @@ export function renderAddons({
     summary,
   );
   header.append(mark, heading);
+  const defaults=globalThis.VantaraDesktopDefaults;
+  const defaultStatus=defaults?node('div','addon-chips'):null;
+  function paintDefaults(){
+    if(!defaultStatus)return;
+    defaultStatus.replaceChildren();
+    for(const status of defaults.statuses()){
+      const label=['installed','preserved','skipped'].includes(status.state)?'محفوظة':status.state==='loading'||status.state==='pending'?'جارٍ التجهيز':status.state==='setup'?'يحتاج إعداد':'تعذر الاتصال';
+      defaultStatus.append(node('span','addon-chip',`${status.name} · ${label}`));
+      if(['failed','timeout'].includes(status.state))defaultStatus.append(button(`إعادة محاولة ${status.name}`,()=>void defaults.retry(status.id),'addon-button addon-button-quiet'));
+    }
+  }
+  if(defaultStatus){heading.append(defaultStatus);paintDefaults();}
   if (onProbe) header.append(checkAll);
   // «تعذّر» الحقيقي من هواتفكم (آخر 7 أيام): الهدف ≤ 1% من محاولات فتح الحلقات
   if (playbackHealth && (filter === "anime" || filter === "cinema")) {
@@ -1088,6 +1100,8 @@ export function renderAddons({
     search.value = "";
     revealPending = false;
   }
+  const defaultsChanged=()=>{paintDefaults();if(!closed&&root.isConnected&&!busy&&!activeDetail)paint();};
+  if(defaults)document.addEventListener('vantara:addons-changed',defaultsChanged);
   root.close = () => {
     closed = true;
     clearTimeout(probeTimer);
@@ -1097,9 +1111,11 @@ export function renderAddons({
     probing = new Set();
     clearPreview({ force: true });
     activeDetail?.close?.();
+    if(defaults)document.removeEventListener('vantara:addons-changed',defaultsChanged);
   };
   root.reload = () => {
     closed = false;
+    if(defaults){document.removeEventListener('vantara:addons-changed',defaultsChanged);document.addEventListener('vantara:addons-changed',defaultsChanged);paintDefaults();}
     if (revealPending) revealInstalled();
     cancelButton.disabled = installing;
     paint();
