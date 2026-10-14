@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-preview-0.1.0-preview.2
+  group: windows-preview-0.1.0-preview.3
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
       - name: بناء المثبت والحزمة المحمولة من المصادر المثبتة بالبصمات
         run: |
           node tools/build-windows.mjs --output="$RUNNER_TEMP/windows-preview"
-          test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe"
+          test -s "$RUNNER_TEMP/windows-preview/VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe"
           cd "$RUNNER_TEMP/windows-preview"
           sha256sum -c SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
@@ -63,12 +63,12 @@ jobs:
         run: |
           $packageDir = Join-Path $env:RUNNER_TEMP 'windows-preview'
           $installDir = Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview2-Check'
-          $installer = Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe'
+          $installer = Join-Path $packageDir 'VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe'
           $process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -PassThru
           if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'انتهت مهلة المثبت' }
           if ($process.ExitCode -ne 0) { throw "فشل المثبت: $($process.ExitCode)" }
           $portableDir = Join-Path $packageDir 'portable'
-          Expand-Archive -Path (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64.zip') -DestinationPath $portableDir
+          Expand-Archive -Path (Join-Path $packageDir 'VANTARA-0.1.0-preview.3-Windows-x64.zip') -DestinationPath $portableDir
           $sourceDir = Join-Path $portableDir 'VANTARA-Windows-x64'
           $count = 0
           Get-ChildItem $sourceDir -File -Recurse | ForEach-Object {
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-preview2-evidence
+          name: windows-preview3-evidence
           path: |
             ${{ runner.temp }}/windows-preview/*report.json
           if-no-files-found: warn
@@ -111,10 +111,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $release = gh release view windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --json isDraft | ConvertFrom-Json
+          $release = gh release view windows-v0.1.0-preview.3 --repo "$env:GITHUB_REPOSITORY" --json isDraft | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) { throw 'الإصدار ليس مسودة؛ لا تُستبدل حزم منشورة. ارفع رقم الإصدار.' }
           $packageDir = Join-Path $env:RUNNER_TEMP 'windows-preview'
-          gh release upload windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --clobber (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64-Setup.exe') (Join-Path $packageDir 'VANTARA-0.1.0-preview.2-Windows-x64.zip') (Join-Path $packageDir 'SHA256SUMS.txt')
+          gh release upload windows-v0.1.0-preview.3 --repo "$env:GITHUB_REPOSITORY" --clobber (Join-Path $packageDir 'VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe') (Join-Path $packageDir 'VANTARA-0.1.0-preview.3-Windows-x64.zip') (Join-Path $packageDir 'SHA256SUMS.txt')
           if ($LASTEXITCODE -ne 0) { throw 'فشل رفع المرفقات' }
-          gh release edit windows-v0.1.0-preview.2 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --draft=false --prerelease --latest=false
+          gh release edit windows-v0.1.0-preview.3 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --draft=false --prerelease --latest=false
           if ($LASTEXITCODE -ne 0) { throw 'فشل نشر المعاينة' }
