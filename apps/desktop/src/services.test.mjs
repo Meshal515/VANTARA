@@ -245,33 +245,30 @@ test('انقطاع upstream أثناء الفيديو ينهي النقل دون
   await services.playbackCommand({session:'broken-stream',command:'pause',value:true});
 });
 
-test('سياسة التخزين ترفض أكبر من 64GiB وحجمًا مجهولًا ومساحة بلا احتياط 64MiB',()=>{
-  const cap=64*1024**3,overhead=64*1024**2;
-  assert.equal(validateTorrentStorage({length:cap},BigInt(cap+overhead)),cap);
-  assert.throws(()=>validateTorrentStorage({length:cap+1},BigInt(9*cap)),/أكبر من 64 غيغابايت.*أصغر/);
-  for(const length of [undefined,null,'200',0,-1,Infinity,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>validateTorrentStorage({length},BigInt(9*cap)),/حجم.*غير/);
-  assert.throws(()=>validateTorrentStorage({length:100},BigInt(100+overhead-1)),/المساحة لا تكفي/);
-  assert.equal(validateTorrentStorage({length:100},BigInt(100+overhead)),100);
+test('سياسة البث تتحقق من هامش آمن دون اشتراط مساحة ملف 90 GiB كاملة',()=>{
+  const large=90*1024**3,reserve=512n*1024n**2n;
+  assert.equal(validateTorrentStorage({length:large},reserve+1n),large);
+  for(const length of [undefined,null,'200',0,-1,Infinity,Number.MAX_SAFE_INTEGER+1])
+    assert.throws(()=>validateTorrentStorage({length},reserve+1n),/حجم.*غير/);
+  assert.throws(()=>validateTorrentStorage({length:100},reserve-1n),/المساحة/);
+  assert.equal(validateTorrentStorage({length:100},reserve),100);
 });
-test('رفض الحجم الكبير أو المجهول قبل أي POST تنزيل أو تشغيل mpv',async t=>{
-  for(const [mode,message] of [['oversize',/أكبر من 64 غيغابايت/],['unknown',/حجم.*غير/]]){
-    const {services,events,dir}=await fixture(t,mode);
-    await assert.rejects(services.startPlayback({session:mode,candidate:{infoHash:hash,fileIdx:0}}),message);
-    const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
-    assert.ok(requests.some(r=>r.url.includes('list_only=true')));
-    assert.ok(!requests.some(r=>r.url.includes('only_files=')));
-    await assert.rejects(readFile(join(dir,'mpv-log')),{code:'ENOENT'});
-    assert.ok(!events.some(e=>e.type==='playback/ready'));
-  }
+test('الملف المجهول يُرفض قبل أي تنزيل أو تشغيل mpv',async t=>{
+  const {services,events,dir}=await fixture(t,'unknown');
+  await assert.rejects(services.startPlayback({session:'unknown',candidate:{infoHash:hash,fileIdx:0}}),/حجم.*غير/);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\\n').map(JSON.parse);
+  assert.ok(requests.some(r=>r.url.includes('list_only=true')));
+  assert.ok(!requests.some(r=>r.url.includes('only_files=')));
+  await assert.rejects(readFile(join(dir,'mpv-log')),{code:'ENOENT'});
+  assert.ok(!events.some(e=>e.type==='playback/ready'));
 });
-test('statfs مساحة منخفضة يمنع POST تنزيل ويعرض الخطأ المحدد',async t=>{
+test('اختيار الكاش يرفض مساحة منخفضة قبل POST ويعرض رسالة واضحة',async t=>{
   const {default:fs}=await import('node:fs/promises');
   t.mock.method(fs,'statfs',async()=>({bavail:1n,bsize:4096n}));
   const {services,events,dir}=await fixture(t);
-  await assert.rejects(services.startPlayback({session:'no-space',candidate:{infoHash:hash,fileIdx:0}}),/المساحة لا تكفي/);
-  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
-  assert.ok(!requests.some(r=>r.url.includes('only_files=')));
-  assert.ok(events.some(e=>e.type==='playback/error'&&e.message.includes('المساحة لا تكفي')));
+  await assert.rejects(services.startPlayback({session:'no-space',candidate:{infoHash:hash,fileIdx:0}}),/مساحة/);
+  await assert.rejects(readFile(join(dir,'mpv-log')),{code:'ENOENT'});
+  assert.ok(events.some(e=>e.type==='playback/error'&&e.message.includes('مساحة')));
 });
 
 test('تهيئة العميل تنظف cache المتروك قبل تشغيل جديد ولا تمس بيانات المستخدم الأخرى',async t=>{
