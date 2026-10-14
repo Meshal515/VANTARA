@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createDesktopEngine } from './engine.js';
 import { createDesktopRuntime } from './runtime.js';
 
