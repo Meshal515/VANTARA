@@ -61,6 +61,7 @@ class TogetherClient(
     private var closed = false
     private var attempt = 0
     private var live = false
+    val isConnected get() = live && !closed
 
     var me: String? = null; private set
     var hostUserId: String? = null; private set
@@ -82,6 +83,7 @@ class TogetherClient(
         ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 main.post {
+                    if (closed || ws !== webSocket) return@post
                     attempt = 0
                     for (i in 0 until 8) main.postDelayed({ ping() }, i * 150L)
                     main.postDelayed(resync, RESYNC_MS)
@@ -89,14 +91,14 @@ class TogetherClient(
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
-                main.post { handle(msg) }
+                main.post { if (!closed && ws === webSocket) handle(msg) }
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Complete the server's close handshake so onClosed can schedule reconnect.
                 webSocket.close(code, reason)
             }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { dropped(code) }.let {}
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { dropped(response?.code ?: 1006) }.let {}
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { if (!closed && ws === webSocket) dropped(code) }.let {}
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { if (!closed && ws === webSocket) dropped(response?.code ?: 1006) }.let {}
         })
     }
 
@@ -141,7 +143,7 @@ class TogetherClient(
                 me = m.optString("you")
                 room(m.optJSONObject("room"))
                 if (!clock.ready && m.has("now")) { val t = SystemClock.elapsedRealtime().toDouble(); clock.sample(t, m.getDouble("now"), t) }
-                parseTimeline(m.optJSONObject("state"))?.let { timeline = it }
+                parseTimeline(m.optJSONObject("state"))?.let { if (timeline == null || it.seq > timeline!!.seq) timeline = it }
                 roster = parseRoster(m.optJSONArray("roster"))
                 setLive(true)
                 listener.onWelcome()
@@ -149,7 +151,7 @@ class TogetherClient(
                 timeline?.let { listener.onState(it, null) }
             }
             "state" -> parseTimeline(m.optJSONObject("state"))?.let { t ->
-                if ((timeline?.seq ?: -1) > t.seq) return
+                if ((timeline?.seq ?: -1) >= t.seq) return
                 timeline = t
                 listener.onState(t, m.optString("by").takeIf { it.isNotEmpty() && it != "null" })
             }

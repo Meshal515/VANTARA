@@ -1250,10 +1250,10 @@ export function createAnime(deps) {
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
-    // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
+    // دخول الغرفة يحفظ الحلقة والجلسة؛ اختيار السيرفر أو التشغيل الذكي قرار المستخدم.
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, n));
+    sheet.inTogether = Boolean(hub?.matches(togetherRef, n));
     let paintQueued = false;
     let off = [];
 
@@ -1302,7 +1302,7 @@ export function createAnime(deps) {
       const bestBtn = el('button', 'an-pick-best');
       bestBtn.type = 'button';
       foot.append(bestBtn);
-      if (hub && !sheet.autoTogether) {
+      if (hub && !sheet.inTogether) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'anime',
@@ -1317,7 +1317,7 @@ export function createAnime(deps) {
             episode: n,
           }, {
             onStarted: () => {
-              sheet.autoTogether = true;
+              sheet.inTogether = true;
               withFriends.remove();
               queuePaint();
             },
@@ -1387,11 +1387,6 @@ export function createAnime(deps) {
         paintQueued = false;
         if (sheet.closed) return;
         paintBest();
-        // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some((r) => r.state === 'READY')) {
-          sheet.autoTogether = false;
-          queueMicrotask(() => bestBtn.onclick());
-        }
         paintFilters();
         const ready = sheet.routes.filter((r) => r.state === 'READY').length;
         if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.searchError ? 'تعذّر البحث في المصادر — أعد المحاولة' : sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
