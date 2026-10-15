@@ -50,8 +50,11 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     if (blocked || !video.paused) return;
     video.play().catch(() => { if (destroyed) return; blocked = true; message('اضغط «تابع معهم» للسماح بتشغيل الفيديو'); paintLobby(); });
   }
+  // العدّ التنازلي المشترك: الغرفة بدأت لكن لحظة البدء لم تأتِ بعد — الشاشة تبقى بالعدّ
+  const countdownTo = () => (synced() && room.timeline?.started && room.timeline.at - room.clock.serverNow() > 400 ? room.timeline.at : null);
   function paintLobby() {
-    onLobby({ visible: synced() && (!room.timeline?.started || blocked), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(),
+    const cd = countdownTo();
+    onLobby({ visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(),
       start: () => api.playPause(true), resume: () => { blocked = false; play(); paintLobby(); } });
   }
   function align(force = false) {
@@ -88,7 +91,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       align(true);
       if (state?.at > room.clock.serverNow()) {
         const seq = state.seq;
-        scheduled = setTimeout(() => { if (!destroyed && room.timeline?.seq === seq) { align(true); report(true); } }, state.at - room.clock.serverNow());
+        scheduled = setTimeout(() => { if (!destroyed && room.timeline?.seq === seq) { align(true); report(true); paintLobby(); } }, state.at - room.clock.serverNow());
       }
     }
     paintLobby(); report(true);
@@ -126,7 +129,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     playPause(playing) {
       if (!synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
-      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? position() : 0 });
+      // أول بدء من غرفة الانتظار: عدّ 3-2-1 مشترك عند الجميع
+      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? position() : 0, ...(playing && !room.timeline?.started ? { countdownMs: 3000 } : {}) });
       else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');
       return true;
     },

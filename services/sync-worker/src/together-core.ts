@@ -304,7 +304,9 @@ export class RoomCore {
   private command(conn: string, msg: Record<string, unknown>, now: number): Out[] {
     if (!this.canControl(conn)) return this.denied(conn);
     const op = msg['op'];
-    const at = now + LEAD_MS;
+    // أول «ابدأ» في غرفة الانتظار: عدّ تنازلي مشترك (حتى 5 ث) فيبدأ الكل في اللحظة نفسها
+    const countdown = op === 'play' && !this.timeline.started ? Math.min(5000, Math.max(0, finite(msg['countdownMs']) ?? 0)) : 0;
+    const at = now + Math.max(LEAD_MS, countdown);
     const given = finite(msg['pos']);
     const t = this.timeline;
     let next: Timeline;
