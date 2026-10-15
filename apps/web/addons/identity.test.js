@@ -42,3 +42,9 @@ it("isolates repeated chapter slugs by source work and memo without progress sch
     chapterIdentity({ ...c, memo: { mangaPath: "/different" } }),
   );
 });
+it('retains explicit Kitsu anime identity without changing established canonical IDs', () => {
+ const value=normalize({id:'local',externalIds:{anilist:'21',kitsu:'12'}},'anime');
+ expect(value.externalIds).toEqual({anilist:'21',kitsu:'12'});
+ expect(value.canonicalId).toContain('anilist:21');
+ expect(normalize({id:'local',externalIds:{kitsu:'../12'}},'anime').externalIds.kitsu).toBeUndefined();
+});

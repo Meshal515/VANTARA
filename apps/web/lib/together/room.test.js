@@ -81,3 +81,19 @@ describe('Together room client', () => {
     expect(parseInvite('#together=ABC')).toBeNull();
   });
 });
+
+it('does not notify players twice for a duplicate sequence or regress on reconnect welcome', () => {
+  const {room,sockets,run}=harness(); const seen=[]; room.on('state',({state})=>seen.push(state.pos));
+  sockets[0].open(); sockets[0].receive(welcome);
+  sockets[0].receive({t:'state',state:{...welcome.state,pos:20,seq:5}});
+  sockets[0].receive({t:'state',state:{...welcome.state,pos:2,seq:5}});
+  sockets[0].drop(); run(); sockets[1].open(); sockets[1].receive(welcome);
+  expect(room.timeline.pos).toBe(20); expect(seen).toEqual([0,20]); room.close();
+});
+it('ignores messages and close callbacks belonging to a replaced socket',()=>{
+  const {room,sockets,run}=harness(); sockets[0].open(); sockets[0].receive(welcome); sockets[0].drop(); run();
+  sockets[1].open(); sockets[1].receive({...welcome,state:{...welcome.state,pos:20,seq:5}});
+  sockets[0].receive({t:'state',state:{...welcome.state,pos:2,seq:6}}); sockets[0].drop();
+  expect(room.timeline.pos).toBe(20); expect(room.status).toBe('live');
+  expect(room.command('seek',{pos:30})).toBe(true); room.close();
+});

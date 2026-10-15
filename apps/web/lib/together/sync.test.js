@@ -170,3 +170,11 @@ describe('Together panel helpers', () => {
     expect(clockLabel(3_729_000)).toBe('1:02:09');
   });
 });
+
+it('defers a new host seek while buffering and follows it as soon as ready',()=>{
+  const controller=createDriftController();
+  const timeline={playing:true,pos:0,at:0,seq:1};controller.step({timeline,pos:0,at:0});
+  const changed={...timeline,pos:60000,seq:2};
+  expect(controller.step({timeline:changed,pos:0,at:500,buffering:true})).toMatchObject({reason:'buffering',seekTo:null,rate:1});
+  expect(controller.step({timeline:changed,pos:0,at:1000,bufferedAhead:100000})).toMatchObject({reason:'host-command',seekTo:61000});
+});

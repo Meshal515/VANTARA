@@ -1,0 +1,76 @@
+name: فحص تثبيت معاينة ويندوز الفعلية
+
+on:
+  push:
+    branches: [codex/windows-torrentio-design-20261014]
+    paths: ['.github/workflows/windows-installer-check.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: تنزيل نفس المثبت الذي استلمه المستخدم
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'vantara-install-check'
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          gh release download windows-v0.1.0-preview.1 --repo "$env:GITHUB_REPOSITORY" --dir "$packageDir" --pattern '*-Setup.exe' --pattern '*-x64.zip' --pattern 'SHA256SUMS.txt'
+          if ($LASTEXITCODE -ne 0) { throw 'تعذر تنزيل حزمة المعاينة' }
+          Get-Content (Join-Path $packageDir 'SHA256SUMS.txt') | ForEach-Object {
+            $parts = $_ -split '\s+', 2
+            $hash = (Get-FileHash (Join-Path $packageDir $parts[1]) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -ne $parts[0]) { throw "بصمة غير مطابقة: $($parts[1])" }
+          }
+      - name: تثبيت صامت والتحقق من mpv وجميع ملفات الحزمة
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'vantara-install-check'
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Install-Check'
+          $installer = Join-Path $packageDir 'VANTARA-0.1.0-preview.1-Windows-x64-Setup.exe'
+          $report = [ordered]@{ installedOn = 'Windows Server 2022'; freeBytes = (Get-PSDrive C).Free; exitCode = $null; fileCount = 0; mpvHash = $null; mpvExitCode = $null }
+          $process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -PassThru
+          if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'انتهت مهلة المثبت' }
+          $report.exitCode = $process.ExitCode
+          if ($process.ExitCode -ne 0) { throw "فشل المثبت: $($process.ExitCode)" }
+          $portableDir = Join-Path $packageDir 'portable'
+          Expand-Archive -Path (Join-Path $packageDir 'VANTARA-0.1.0-preview.1-Windows-x64.zip') -DestinationPath $portableDir
+          $sourceDir = Join-Path $portableDir 'VANTARA-Windows-x64'
+          Get-ChildItem $sourceDir -File -Recurse | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($sourceDir, $_.FullName)
+            $installed = Join-Path $installDir $relative
+            if (-not (Test-Path -LiteralPath $installed)) { throw "ملف لم يُثبت: $relative" }
+            if ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $installed).Hash) { throw "ملف مثبت مختلف: $relative" }
+            $report.fileCount++
+          }
+          $mpv = Join-Path $installDir 'resources\app\native\mpv.exe'
+          $report.mpvHash = (Get-FileHash $mpv).Hash
+          $mpvProcess = Start-Process -FilePath $mpv -ArgumentList '--version' -Wait -PassThru -RedirectStandardOutput (Join-Path $packageDir 'mpv-version.txt')
+          $report.mpvExitCode = $mpvProcess.ExitCode
+          Get-Content (Join-Path $packageDir 'mpv-version.txt')
+          $report | ConvertTo-Json | Set-Content (Join-Path $packageDir 'installer-report.json')
+          $report | ConvertTo-Json
+          if ($report.mpvExitCode -ne 0) { throw 'المشغل لا يعمل بعد التثبيت' }
+      - name: جمع نتائج الفحص ومعلومات الحماية
+        if: always()
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'vantara-install-check'
+          Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Install-Check\resources\app\native') -ErrorAction Continue | Format-List Name,Length,Attributes | Out-File (Join-Path $packageDir 'native-files.txt')
+          try { Get-MpThreatDetection -ErrorAction Stop | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $packageDir 'defender.json') } catch { $_.Exception.Message | Set-Content (Join-Path $packageDir 'defender-unavailable.txt') }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-evidence
+          path: |
+            ${{ runner.temp }}/vantara-install-check/*.json
+            ${{ runner.temp }}/vantara-install-check/native-files.txt
+            ${{ runner.temp }}/vantara-install-check/mpv-version.txt
+            ${{ runner.temp }}/vantara-install-check/defender-unavailable.txt
+          if-no-files-found: warn

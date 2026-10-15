@@ -39,7 +39,7 @@ export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName 
     };
     if (!plainObject(s)) return { ...base, reason: "بيانات Stream غير صالحة" };
     if (s.externalUrl) return { ...base, reason: "هذه النتيجة تفتح موقعًا خارجيًا ولا توفر رابط فيديو مباشرًا" };
-    const native = runtimeName === "apk";
+    const native = runtimeName === "apk" || runtimeName === "desktop";
     const torrent = s.infoHash != null || typeof s.url === "string" && s.url.startsWith("magnet:");
     if (s.ytId || s.nzbUrl || s.archiveUrl || (!native && s.behaviorHints?.notWebReady && !torrent))
       return base;
@@ -91,7 +91,9 @@ export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName 
     const needsResponseTransform = native && responseHeaders != null &&
       (!plainObject(responseHeaders) || Object.keys(responseHeaders).some(key => !/^access-control-/i.test(key)));
     const unavailableTorrent = torrent && !(native && torrentSupported);
-    const unsupported = unavailableTorrent || needsResponseTransform || (!native && needsHeaders);
+    const unavailableDesktopDash = runtimeName === "desktop" && !torrent &&
+      (s.type === "dash" || /\.mpd(?:\?|$)/i.test(url.href));
+    const unsupported = unavailableTorrent || unavailableDesktopDash || needsResponseTransform || (!native && needsHeaders);
     return {
       ...base,
       ...(torrentData ?? { url: url.href }),
@@ -122,6 +124,7 @@ export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName 
             : "RESOLVED",
       reason: unavailableTorrent
         ? native ? "محرك التورنت غير متاح في هذه النسخة؛ استخدم رابطًا مباشرًا أو حدّث APK" : "تشغيل التورنت المباشر يحتاج APK أو خدمة تحولّه إلى فيديو مباشر"
+        : unavailableDesktopDash ? "تشغيل DASH غير مدعوم في نسخة ويندوز التجريبية الحالية"
         : needsResponseTransform ? "هذه النتيجة تحتاج تعديل استجابة الفيديو غير المدعوم في المشغل الحالي"
         : !native && needsHeaders
         ? "هذا Stream يتطلب رؤوس HTTP لا يدعمها تشغيل PWA الحالي"

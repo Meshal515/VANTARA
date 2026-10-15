@@ -14,6 +14,8 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -51,6 +53,10 @@ data class TogetherLaunch(
 
 @Serializable
 data class Invitee(val userId: String, val displayName: String = "صديق", val avatarKey: String? = null)
+
+/** A live profile photo wins; otherwise retain the matching invitee photo supplied by the app. */
+internal fun roomAvatarKey(userId: String, avatarKey: String?, invitees: List<Invitee>): String? =
+    avatarKey?.takeIf { it.isNotBlank() } ?: invitees.firstOrNull { it.userId == userId }?.avatarKey
 
 /**
  * Together داخل المشغّل الأصلي:
@@ -423,7 +429,7 @@ class TogetherPlayer(
             ).apply { shape = GradientDrawable.OVAL; setStroke(stroke, strokeColor) }
             alpha = when (state) { "pending" -> 0.45f; "preparing", "buffering" -> if (ring) 0.85f else 0.6f; else -> 1f }
             tag = userId
-            images.load(avatarKey, context.dp(size) * 2) { bmp ->
+            images.load(roomAvatarKey(userId, avatarKey, launch.invitees), context.dp(size) * 2) { bmp ->
                 if (bmp == null || tag != userId) return@load
                 val ringDrawable = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(stroke, strokeColor) }
                 background = images.circle(bmp, ringDrawable)
@@ -588,7 +594,7 @@ class TogetherPlayer(
             setOnClickListener { setOffset(offsetMs + delta) }
         }
         step.addView(stepBtn("−", -500, "أخّر فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(34), context.dp(34)))
-        step.addView(context.label(offsetText(v), 13.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER; minWidth = context.dp(64) })
+        step.addView(context.label(offsetText(v), 13.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER; minWidth = context.dp(64); textDirection = View.TEXT_DIRECTION_LTR; layoutDirection = View.LAYOUT_DIRECTION_LTR })
         step.addView(stepBtn("+", 500, "قدّم فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(34), context.dp(34)))
         addView(step)
     }
@@ -689,8 +695,45 @@ class TogetherPlayer(
                 setPadding(context.dp(28), context.dp(12), context.dp(20), context.dp(14))
             }
             lobbyBar = bar
-            root.addView(View(context).apply { setBackgroundColor(0x12FFFFFF) }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1, Gravity.BOTTOM).apply { bottomMargin = context.dp(70) })
-            root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(70), Gravity.BOTTOM))
+            val divider = View(context).apply { setBackgroundColor(0x12FFFFFF) }
+            root.addView(divider, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1, Gravity.BOTTOM))
+            // Measure the complete two-line status and buttons: a fixed 70dp row clipped
+            // Arabic descenders and the server link once padding/font metrics were included.
+            root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+            fun positionContent() {
+                val portrait = root.height > root.width
+                if ((bar.orientation == LinearLayout.VERTICAL) != portrait && lobby != null) paintLobby()
+                val heroParams = hero.layoutParams as FrameLayout.LayoutParams
+                val safeBottom = (bar.layoutParams as FrameLayout.LayoutParams).bottomMargin
+                val heroWidth = if (portrait) root.width - context.dp(40) else (root.width * 0.44f).toInt()
+                val heroBottom = bar.height + safeBottom + context.dp(24)
+                val heroStart = context.dp(if (portrait) 20 else 28)
+                if (heroParams.width != heroWidth || heroParams.bottomMargin != heroBottom || heroParams.marginStart != heroStart) {
+                    heroParams.width = heroWidth; heroParams.bottomMargin = heroBottom; heroParams.marginStart = heroStart
+                    hero.layoutParams = heroParams
+                }
+                val moreParams = more.layoutParams as FrameLayout.LayoutParams
+                val moreWidth = minOf(context.dp(380), root.width - context.dp(40))
+                val moreBottom = bar.height + safeBottom + context.dp(10)
+                if (moreParams.width != moreWidth || moreParams.bottomMargin != moreBottom) {
+                    moreParams.width = moreWidth; moreParams.bottomMargin = moreBottom; more.layoutParams = moreParams
+                }
+                val dividerParams = divider.layoutParams as FrameLayout.LayoutParams
+                if (dividerParams.bottomMargin != bar.height + safeBottom) {
+                    dividerParams.bottomMargin = bar.height + safeBottom; divider.layoutParams = dividerParams
+                }
+            }
+            root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionContent() }
+            bar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionContent() }
+            ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+                val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                bar.setPadding(maxOf(context.dp(28), safe.left), context.dp(12), maxOf(context.dp(20), safe.right), context.dp(18))
+                val params = bar.layoutParams as FrameLayout.LayoutParams
+                if (params.bottomMargin != safe.bottom) { params.bottomMargin = safe.bottom; bar.layoutParams = params }
+                top.setPadding(maxOf(context.dp(22), safe.left), maxOf(context.dp(12), safe.top), maxOf(context.dp(16), safe.right), 0)
+                insets
+            }
+            ViewCompat.requestApplyInsets(root)
 
             lobby = root
             hooks.overlayHost().addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -757,6 +800,12 @@ class TogetherPlayer(
         val bar = lobbyBar ?: return
         if (lobbyCount != null) return
         bar.removeAllViews()
+        val root = lobby
+        val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
+            (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
+        bar.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        val details = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        bar.addView(details, LinearLayout.LayoutParams(if (portrait) ViewGroup.LayoutParams.MATCH_PARENT else 0, ViewGroup.LayoutParams.WRAP_CONTENT, if (portrait) 0f else 1f))
         lobbyConn?.text = if (connected) "●  مشاهدة معًا" else "●  جاري الاتصال…"
         lobbyConn?.setTextColor(if (connected) 0xDBFFFFFF.toInt() else 0xFFF5C76A.toInt())
 
@@ -777,7 +826,7 @@ class TogetherPlayer(
             }).start()
             faces.addView(box, LinearLayout.LayoutParams(context.dp(42), context.dp(42)).apply { if (i > 0) marginStart = -context.dp(10) })
         }
-        bar.addView(faces)
+        details.addView(faces)
 
         // جملة الحالة الواحدة + سطر السيرفر
         val info = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(context.dp(14), 0, context.dp(14), 0) }
@@ -788,16 +837,12 @@ class TogetherPlayer(
         val (stText, stColor) = when { failedSource != null -> "تعذّر" to 0xFFFF8B8E.toInt(); ready -> "جاهز" to 0xFF6FE3A1.toInt(); else -> "يتجهّز…" to 0xFFF5C76A.toInt() }
         server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
         server.addView(context.label(stText, 12.5f, stColor, bold = true))
-        server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
-        server.addView(context.label("غيّر", 12.5f, Color.WHITE, bold = true).apply {
-            paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
-            setPadding(context.dp(2), context.dp(6), context.dp(6), context.dp(6))
-            setOnClickListener { hooks.openServers() }
-        })
         info.addView(server)
-        bar.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        details.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        // «⋯» ثم البدء
+        // Keep choosing a server visible beside Start, with matching pill geometry.
+        val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        bar.addView(actions, LinearLayout.LayoutParams(if (portrait) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (portrait) topMargin = context.dp(14) })
         val moreBtn = ImageView(context).apply {
             setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.MORE, Color.WHITE))
             rotation = 90f
@@ -810,13 +855,22 @@ class TogetherPlayer(
                 else { m.removeAllViews(); m.addView(offsetRow()); m.visibility = View.VISIBLE }
             }
         }
-        bar.addView(moreBtn, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(10) })
+        actions.addView(moreBtn, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(10) })
+        val choose = context.label("اختر السيرفر", 14f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+            setPadding(context.dp(18), 0, context.dp(18), 0)
+            background = rounded(0x1AFFFFFF, context.dp(24).toFloat(), context.dp(1), 0x38FFFFFF)
+            contentDescription = "اختر السيرفر"
+            setOnClickListener { hooks.openServers() }
+        }
+        actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
         val action: View = if (client.isHost) LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(context.dp(24), 0, context.dp(24), 0)
-            background = rounded(accent, context.dp(12).toFloat())
+            background = rounded(accent, context.dp(24).toFloat())
             alpha = if (ready && connected) 1f else 0.45f
             contentDescription = "ابدأ للجميع"
             addView(ImageView(context).apply { setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, Color.WHITE)) }, LinearLayout.LayoutParams(context.dp(18), context.dp(18)).apply { marginEnd = context.dp(8) })
@@ -824,7 +878,7 @@ class TogetherPlayer(
             // أول بدء: عدّ 3-2-1 مشترك عند الجميع
             setOnClickListener { if (ready && connected) client.command("play", 0.0, countdownMs = 3000L) else hooks.message("نجهّز فيديوك…") }
         } else context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) }
-        bar.addView(action, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)))
+        actions.addView(action, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f))
         if ((lobbyMore as? FrameLayout)?.visibility == View.VISIBLE) { (lobbyMore as FrameLayout).removeAllViews(); (lobbyMore as FrameLayout).addView(offsetRow()) }
     }
 

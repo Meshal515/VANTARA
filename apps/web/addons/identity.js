@@ -25,6 +25,8 @@ export function normalizeWork(raw, { addonKey, type }) {
     const v = cleanId(raw.externalIds?.[k]);
     if (v && /^[a-zA-Z0-9-]+$/.test(v)) externalIds[k] = v;
   }
+  const kitsu = cleanId(raw.externalIds?.kitsu);
+  if (type === "anime" && /^[1-9]\d*$/.test(kitsu ?? "") && Number.isSafeInteger(Number(kitsu))) externalIds.kitsu = kitsu;
   const season = Number.isInteger(raw.season) ? raw.season : null,
     part = Number.isInteger(raw.part) ? raw.part : null;
   const chosen = ["imdb", "tmdb", "mal", "anilist", "mangadex"].find(

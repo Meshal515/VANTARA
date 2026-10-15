@@ -148,3 +148,8 @@ it.each([
     expect(result.errors.length).toBeGreaterThan(0);
   },
 );
+it('declares desktop compatibility and refuses interactive Remote verification there', () => {
+  expect(check(native()).compatibility.desktop).toBe(true);
+  const blocked = check({ ...native(), permissions: { networkHosts: ['demo.test'], verification: true } });
+  expect(blocked.compatibility.desktop).toBe(false);
+});

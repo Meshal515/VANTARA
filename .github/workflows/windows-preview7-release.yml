@@ -1,0 +1,166 @@
+name: Publish verified VANTARA Windows 0.1.0-preview.7
+on:
+  push:
+    branches: ['chatgpt/windows-playback-sync-20261015']
+    paths: ['.github/workflows/windows-preview7-release.yml']
+permissions:
+  contents: write
+concurrency:
+  group: windows-preview7-release
+  cancel-in-progress: false
+env:
+  VERSION: '0.1.0-preview.7'
+  TAG: 'windows-v0.1.0-preview.7'
+jobs:
+  checks:
+    name: Safety, torrent, rooms, and player tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Repository safety and PWA shell digest
+        run: pnpm test:safety
+      - name: Windows desktop torrent and cache integration
+        run: node --test apps/desktop/src/services.test.mjs apps/desktop/src/torrent-cache.test.mjs apps/desktop/video-host.test.cjs
+      - name: Renderer, video timing, and invitation regression tests
+        run: pnpm exec vitest run apps/web/desktop/player.test.js apps/web/desktop/engine.test.js apps/web/desktop/together-player.test.js apps/web/v35/together-regression.test.js
+  video-host:
+    name: Compile native Windows video host
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify video host
+        shell: pwsh
+        run: |
+          ./tools/build-video-host.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows video-host compilation failed' }
+          node --test apps/desktop/video-host.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows video-host unit tests failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview7-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
+  package:
+    name: Create unsigned Windows installer and portable ZIP
+    needs: [checks,video-host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-preview7-video-host
+          path: ${{ runner.temp }}/video-host
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install NSIS and 7-Zip
+        run: sudo apt-get update && sudo apt-get install -y nsis 7zip
+      - name: Stamp unique preview version in packaged files (not committed)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json,pathlib,re
+          v=os.environ['VERSION']
+          p=pathlib.Path('apps/desktop/package.json'); j=json.loads(p.read_text()); j['version']=v; p.write_text(json.dumps(j,indent=2,ensure_ascii=False)+'\n')
+          p=pathlib.Path('apps/desktop/preload.cjs'); s=p.read_text(); s2=re.sub(r"version: '[^']+'", "version: '"+v+"'",s,count=1); assert s2!=s; p.write_text(s2)
+          p=pathlib.Path('apps/desktop/windows.nsi');s=p.read_text()
+          s2=re.sub(r'VIProductVersion "[^"]+"','VIProductVersion "0.1.0.7"',s,count=1)
+          s2=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',lambda m:m.group(1)+'"'+v+'"',s2,count=1)
+          s2=re.sub(r'("DisplayVersion" )"[^"]+"',lambda m:m.group(1)+'"'+v+'"',s2,count=1)
+          assert s2!=s;p.write_text(s2)
+          PY
+      - name: Build versioned installer and ZIP with pinned checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --output="$RUNNER_TEMP/windows-preview7"
+          cd "$RUNNER_TEMP/windows-preview7"
+          sha256sum -c SHA256SUMS.txt
+          test -s "VANTARA-$VERSION-Windows-x64-Setup.exe"
+          test -s "VANTARA-$VERSION-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview7-release-candidate
+          path: |
+            ${{ runner.temp }}/windows-preview7/*-Setup.exe
+            ${{ runner.temp }}/windows-preview7/*-x64.zip
+            ${{ runner.temp }}/windows-preview7/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+  verify:
+    name: Install and play actual MPV on Windows
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-preview7-release-candidate
+          path: ${{ runner.temp }}/windows-preview7
+      - name: Install exactly the candidate to be published
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'windows-preview7'
+          $setup=Join-Path $dir "VANTARA-$env:VERSION-Windows-x64-Setup.exe"
+          $target=Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-Preview7-CI'
+          $proc=Start-Process -FilePath $setup -ArgumentList "/S /D=$target" -PassThru
+          if(-not $proc.WaitForExit(180000)){$proc.Kill();throw 'Installer timed out'}
+          if($proc.ExitCode -ne 0){throw "Installer exit code $($proc.ExitCode)"}
+          $exe=Join-Path $target 'VANTARA.exe'
+          if(-not(Test-Path $exe)){throw 'Missing installed VANTARA.exe'}
+          $native=Join-Path $target 'resources\app\native'
+          node tools/windows-native-smoke.mjs "$native" (Join-Path $dir 'native-report.json')
+          if($LASTEXITCODE -ne 0){throw 'Native MPV real playback smoke failed'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-preview7-verify-evidence
+          path: ${{ runner.temp }}/windows-preview7/native-report.json
+          if-no-files-found: warn
+  publish:
+    name: Publish verified preview 7
+    needs: [checks,video-host,package,verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-preview7-release-candidate
+          path: ${{ runner.temp }}/windows-preview7
+      - name: Release only tested version; do not replace existing assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/windows-preview7"
+          sha256sum -c SHA256SUMS.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version $TAG already exists. Refusing to overwrite release." >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            "VANTARA-$VERSION-Windows-x64-Setup.exe" \
+            "VANTARA-$VERSION-Windows-x64.zip" \
+            SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "VANTARA Windows $VERSION — torrent and rooms preview" \
+            --notes "Windows-only evaluation prerelease based on PR #195. Includes automatic selection of the largest writable fixed drive for temporary torrent data, low-space protection, MPV RAM prebuffer tuning, in-player room invitations and per-person manual video timing. Caveats: rqbit does NOT yet guarantee bounded circular disk caching; a 90GB movie may use more cache than available during playback, and playback will stop if disk reserve is threatened. Live Torrentio 4K/90GB end-to-end and cross-device real-time rooms were NOT proven by these automated checks. This is unsigned testing software, not a stable update. The stable release and Android installation remain unchanged." \
+            --prerelease --latest=false

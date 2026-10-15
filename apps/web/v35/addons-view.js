@@ -39,6 +39,7 @@ const message = (error) => {
 const configuration = (a) => a.configuration ?? a.manifest?.configuration ?? {};
 const needsConfiguration = (a) =>
   configuration(a).required && !configuration(a).configured;
+const configureInstructions = (registry) => (registry.runtimeName === "desktop" ? "في نافذة إعداد VANTARA، تفتح روابط stremio:// معاينة داخل VANTARA قبل الحفظ. " : "لا تضمن الخدمة العودة التلقائية من المتصفح أو APK. ") + "أكمل الإعداد في موقع الخدمة. إذا ظهر زر «تثبيت في Stremio»، انسخ رابط هذا الزر ثم ارجع إلى «إضافة جديدة» ← «رابط» والصقه للمعاينة. يقبل VANTARA روابط stremio:// وHTTPS المعدّة.";
 const canOpen = (a, registry) =>
   a.enabled !== false &&
   !needsConfiguration(a) &&
@@ -177,12 +178,13 @@ export function renderAddonDetails({
     config
   ) {
     actions.append(config);
-    root.append(
+    root.insertBefore(
       node(
         "p",
-        "addon-muted",
-        "يفتح الإعداد في موقع الخدمة. بعد الانتهاء، ارجع وأضف الرابط الجديد من «إضافة جديدة».",
+        "addon-muted addon-configure-help",
+        configureInstructions(registry),
       ),
+      status,
     );
   }
   if (canOpen(addon, registry))
@@ -204,10 +206,13 @@ export function renderAddonDetails({
     );
   let busy = false,
     closed = false,
-    checkController;
+    checkController, configurationController;
+  let configurationGeneration = 0;
   root.close = () => {
     closed = true;
     checkController?.abort();
+    configurationController?.abort();
+    configurationGeneration++;
   };
   const action = (label, fn, container = actions) => {
     const b = button(label, async () => {
@@ -252,6 +257,79 @@ export function renderAddonDetails({
     container.append(b);
     return b;
   };
+  if (config && (configuration(addon).configurable || needsConfiguration(addon)) && !addon.bundled && registry.inspect && registry.install) {
+    const returned = node("details", "addon-import addon-configure-return"),
+      input = node("input", "addon-input"),
+      result = node("div", "addon-preview"),
+      controls = node("div", "addon-actions");
+    returned.append(node("summary", null, "العودة برابط الإعداد إلى VANTARA"));
+    input.type = "url";
+    input.placeholder = "https://…/manifest.json أو stremio://…";
+    input.setAttribute("aria-label", "رابط الإضافة المعدّة");
+    input.dataset.configuredUrl = "";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.dir = "ltr";
+    const clear = () => {
+      configurationGeneration++;
+      configurationController?.abort();
+      result.replaceChildren();
+      previewButton.disabled = false;
+    };
+    input.oninput = clear;
+    const previewButton = button("معاينة رابط الإعداد", async () => {
+      if (closed || busy) return;
+      clear();
+      configurationController = new AbortController();
+      const run = configurationGeneration;
+      previewButton.disabled = true;
+      result.textContent = "جارٍ معاينة الإعداد…";
+      try {
+        const preview = await registry.inspect(input.value.trim(), { signal: configurationController.signal });
+        if (closed || run !== configurationGeneration) return;
+        if (!addon.id || preview.manifest.id !== addon.id) throw new Error("هوية الإضافة مختلفة؛ استخدم إضافة جديدة لمعاينتها.");
+        const hostChanged = preview.manifest.key !== addon.key;
+        if (needsConfiguration(preview.manifest)) throw new Error("ما زالت الخدمة تطلب إعدادًا؛ انسخ رابط التثبيت المعدّ بعد حفظ الخيارات.");
+        const save = button("حفظ الإعداد", async () => {
+          if (closed || busy || run !== configurationGeneration) return;
+          busy = true;
+          input.disabled = previewButton.disabled = save.disabled = true;
+          try {
+            await registry.install(preview, { replaceKey: addon.key });
+            if (closed) return;
+            input.value = "";
+            result.textContent = "حُفظت الإعدادات؛ حالة التشغيل تُحدد من الفحص الفعلي.";
+            onBack();
+          } catch (error) {
+            if (!closed) result.textContent = message(error);
+          } finally {
+            busy = false;
+            input.disabled = previewButton.disabled = false;
+          }
+        }, "addon-button addon-button-primary");
+        result.replaceChildren(
+          ...(hostChanged ? [node("p", "addon-notice", `مضيف الإضافة سيتغير إلى ${(preview.manifest.permissions?.networkHosts ?? []).join("، ")}. حفظ الإعداد يستبدل اتصال الإضافة الحالية؛ راجع الخدمة قبل الحفظ.`)] : []),
+          node("strong", null, preview.manifest.name),
+          node("p", "addon-muted", `صلاحية شبكة: ${(preview.manifest.permissions?.networkHosts ?? []).join("، ")}`),
+          save,
+        );
+      } catch (error) {
+        if (!closed && run === configurationGeneration) result.textContent = message(error);
+      } finally {
+        if (!closed && run === configurationGeneration) previewButton.disabled = false;
+      }
+    });
+    const cancel = button("إلغاء معاينة الإعداد", () => {
+      if (busy) return;
+      clear();
+      previewButton.disabled = false;
+      returned.open = false;
+    });
+    returned.addEventListener("toggle", () => { if (!returned.open && !busy) clear(); });
+    controls.append(previewButton, cancel);
+    returned.append(input, controls, result);
+    root.insertBefore(returned, status);
+  }
   if (onCheck)
     action("فحص الإضافة", () => {
       checkController?.abort();
@@ -428,6 +506,18 @@ export function renderAddons({
   if (onProbe) headActions.append(checkAll);
   headActions.append(addLink);
   header.append(heading, headActions);
+  const defaults=globalThis.VantaraDesktopDefaults;
+  const defaultStatus=defaults?node('div','addon-chips'):null;
+  function paintDefaults(){
+    if(!defaultStatus)return;
+    defaultStatus.replaceChildren();
+    for(const status of defaults.statuses()){
+      const label=['installed','preserved','skipped'].includes(status.state)?'محفوظة':status.state==='loading'||status.state==='pending'?'جارٍ التجهيز':status.state==='setup'?'يحتاج إعداد':'تعذر الاتصال';
+      defaultStatus.append(node('span','addon-chip',`${status.name} · ${label}`));
+      if(['failed','timeout'].includes(status.state))defaultStatus.append(button(`إعادة محاولة ${status.name}`,()=>void defaults.retry(status.id),'addon-button addon-button-quiet'));
+    }
+  }
+  if(defaultStatus){heading.append(defaultStatus);paintDefaults();}
   // «تعذّر» الحقيقي من هواتفكم (آخر 7 أيام): الهدف ≤ 1% من محاولات فتح الحلقات
   if (playbackHealth && (filter === "anime" || filter === "cinema")) {
     const health = node("p", "addon-summary addon-playback-health");
@@ -740,6 +830,8 @@ export function renderAddons({
       }
       foot.append(actions);
       card.append(foot);
+      if (actions.querySelector("[data-configure]"))
+        card.append(node("p", "addon-muted addon-configure-help", configureInstructions(registry)));
       cards.append(card);
     }
     if (!entries.length) {
@@ -1142,6 +1234,8 @@ export function renderAddons({
     search.value = "";
     revealPending = false;
   }
+  const defaultsChanged=()=>{paintDefaults();if(!closed&&root.isConnected&&!busy&&!activeDetail)paint();};
+  if(defaults)document.addEventListener('vantara:addons-changed',defaultsChanged);
   root.close = () => {
     closed = true;
     clearTimeout(probeTimer);
@@ -1151,9 +1245,11 @@ export function renderAddons({
     probing = new Set();
     clearPreview({ force: true });
     activeDetail?.close?.();
+    if(defaults)document.removeEventListener('vantara:addons-changed',defaultsChanged);
   };
   root.reload = () => {
     closed = false;
+    if(defaults){document.removeEventListener('vantara:addons-changed',defaultsChanged);document.addEventListener('vantara:addons-changed',defaultsChanged);paintDefaults();}
     if (revealPending) revealInstalled();
     cancelButton.disabled = installing;
     paint();

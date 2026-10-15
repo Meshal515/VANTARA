@@ -26,6 +26,9 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   let loadingEpisode = null;
   let destroyed = false;
   let scheduled = null;
+  const localPosition = () => (video.currentTime || 0) * 1000;
+  const durationMs = () => Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : null;
+  const localTarget = (t, at) => Math.min(durationMs() ?? Infinity, targetAt(t, at, syncOffset()));
   const synced = () => (room.info?.mode ?? mode) === 'sync';
   const mediaKey = () => `${mediaPrefix}#${episode()}`;
   const live = () => room.status === 'live';
@@ -34,37 +37,38 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   let offsetFor = offsetKey();
   const syncOffset = () => { if (offsetFor !== offsetKey()) { offsetFor = offsetKey(); offset = readOffset(offsetFor); } return offset; };
   // موضع الفيديو بوقت الغرفة: ما تراه الغرفة وما يرسله المضيف بلا ديلاي أحد
-  const position = () => Math.max(0, (video.currentTime || 0) * 1000 - syncOffset());
-  const toLocal = (roomMs) => Math.max(0, roomMs + syncOffset());
+  const position = () => Math.max(0, localPosition() - syncOffset());
   const stateNow = () => failed ? 'failed' : !prepared ? 'preparing' : synced() && !room.timeline?.started ? 'ready' : video.readyState < 3 ? 'buffering' : video.paused ? 'paused' : 'playing';
   function report(force = false) {
+    if (destroyed) return;
     const now = room.clock.serverNow();
     const state = stateNow();
     if (!force && state === lastState && now - lastReport < 2000) return;
     lastState = state; lastReport = now;
     room.report({ pos: position(), at: now, state, source: source(), mediaKey: mediaKey(),
       version: { durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null },
-      driftMs: synced() && prepared && room.timeline?.started ? Math.round(position() - targetAt(room.timeline, now)) : null, driftP95: controller.stats().p95 });
+      driftMs: synced() && prepared && room.timeline?.started ? Math.round(localPosition() - localTarget(room.timeline, now)) : null, driftP95: controller.stats().p95 });
   }
   function play() {
-    if (blocked || !video.paused) return;
+    if (destroyed || blocked || !video.paused) return;
     video.play().catch(() => { if (destroyed) return; blocked = true; message('اضغط «تابع معهم» للسماح بتشغيل الفيديو'); paintLobby(); });
   }
   // العدّ التنازلي المشترك: الغرفة بدأت لكن لحظة البدء لم تأتِ بعد — الشاشة تبقى بالعدّ
   const countdownTo = () => (synced() && room.timeline?.started && room.timeline.at - room.clock.serverNow() > 400 ? room.timeline.at : null);
   function paintLobby() {
+    if (destroyed) return;
     const cd = countdownTo();
-    onLobby({ visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(),
+    onLobby({ visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(), videoOffsetMs: syncOffset(), setVideoOffset: ms => api.setVideoOffset(ms),
       start: () => api.playPause(true), resume: () => { blocked = false; play(); paintLobby(); } });
   }
   function align(force = false) {
     const t = room.timeline;
-    if (!prepared || !synced() || !live() || !t || t.media?.key !== mediaKey()) return;
+    if (destroyed || !prepared || !synced() || !live() || !t || t.media?.key !== mediaKey()) return;
     const now = room.clock.serverNow();
     // قبل البدء: الفيديو مجهّز ومتوقف عند نقطة البداية (مع ديلايك)، فيبدأ الكل فورًا
     if (!t.started) {
       if (!video.paused) video.pause();
-      const start = toLocal(targetAt(t, now)) / 1000;
+      const start = localTarget(t, now) / 1000;
       if (video.readyState >= 1 && Math.abs(video.currentTime - start) > 0.3) video.currentTime = start;
       return;
     }
@@ -76,13 +80,14 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
         behind = (video.currentTime - video.buffered.start(i)) * 1000;
       }
     }
-    const d = controller.step({ timeline: t, pos: position(), at: now, buffering: video.readyState < 3, bufferedAhead: ahead, bufferedBehind: behind });
-    const seek = force && video.readyState >= 3 ? targetAt(t, now) : d.seekTo;
-    if (seek != null && Math.abs(position() - seek) > 100) { video.currentTime = toLocal(seek) / 1000; seekingAt = now; }
+    const d = controller.step({ timeline: t, pos: localPosition(), at: now, offsetMs: syncOffset(), durationMs: durationMs(), buffering: video.readyState < 3, bufferedAhead: ahead, bufferedBehind: behind });
+    const seek = force && video.readyState >= 3 ? localTarget(t, now) : d.seekTo;
+    if (seek != null && Math.abs(localPosition() - seek) > 100) { video.currentTime = seek / 1000; seekingAt = now; }
     video.playbackRate = d.rate;
     if (d.playing) play(); else if (!video.paused) video.pause();
   }
   function receive({ state }) {
+    if (destroyed) return;
     clearTimeout(scheduled);
     const n = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
     if (state?.media?.key?.startsWith(`${mediaPrefix}#`) && n > 0 && n !== episode() && loadingEpisode !== n) {
@@ -106,28 +111,33 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   }, 500);
   const api = {
     // Welcome can arrive while the shell is preparing the invitation's source.
-    ready() { prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
-    preparing() { prepared = false; failed = false; report(true); paintLobby(); },
-    failed() { prepared = false; failed = true; report(true); paintLobby(); },
+    ready() { if (destroyed) return; prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
+    preparing() { if (destroyed) return; prepared = false; failed = false; report(true); paintLobby(); },
+    failed() { if (destroyed) return; prepared = false; failed = true; report(true); paintLobby(); },
     /** الغرفة المتزامنة لم تبدأ بعد: التجهيز يتم بصمت ويقف عند البداية. */
     waiting() { return synced() && !room.timeline?.started; },
     repaint() { paintLobby(); },
     offset() { return syncOffset(); },
     /** يغيّر ديلايك أنت فقط ويطبّقه فورًا بلا إعادة تحميل. */
     setOffset(ms) {
+      if (destroyed) return syncOffset();
       const next = clampOffset(ms);
       const delta = next - syncOffset();
       offset = next;
       writeOffset(offsetKey(), next);
       if (delta && prepared) {
         if (synced() && room.timeline) align(true);
-        else video.currentTime = Math.max(0, video.currentTime + delta / 1000);
+        else video.currentTime = Math.min((durationMs() ?? Infinity) / 1000, Math.max(0, video.currentTime + delta / 1000));
       }
       paintLobby(); report(true);
       return next;
     },
+    setVideoOffset(ms) {
+      if (destroyed || !synced() || !Number.isFinite(ms) || Math.abs(ms) > OFFSET_LIMIT_MS) return false;
+      api.setOffset(ms); return true;
+    },
     playPause(playing) {
-      if (!synced()) return false;
+      if (destroyed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       // أول بدء من غرفة الانتظار: عدّ 3-2-1 مشترك عند الجميع
       if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? position() : 0, ...(playing && !room.timeline?.started ? { countdownMs: 3000 } : {}) });
@@ -135,14 +145,14 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       return true;
     },
     // pos بوقت فيديوك؛ الغرفة تستلمه بوقتها (بلا ديلايك)
-    seek(pos) { if (!synced()) return false; if (live() && room.canControl && prepared) room.command('seek', { pos: Math.max(0, pos - syncOffset()) }); else message('المضيف يتحكم بالتقديم'); return true; },
+    seek(pos) { if (destroyed || !synced()) return false; if (live() && room.canControl && prepared) room.command('seek', { pos: Math.max(0, pos - syncOffset()) }); else message('المضيف يتحكم بالتقديم'); return true; },
     changeEpisode(n) {
-      if (!synced()) return false;
+      if (destroyed || !synced()) return false;
       if (!live() || !room.canControl) { message('بانتظار المضيف للحلقة التالية…'); return true; }
       room.command('load', { media: { key: `${mediaPrefix}#${n}`, kind: room.timeline?.media?.kind ?? 'anime', label: `الحلقة ${n}` }, pos: 0 });
       return true;
     },
-    destroy() { destroyed = true; clearInterval(timer); clearTimeout(scheduled); for (const off of offs) off(); video.playbackRate = 1; },
+    destroy() { if (destroyed) return; destroyed = true; clearInterval(timer); clearTimeout(scheduled); for (const off of offs) off(); video.playbackRate = 1; },
   };
   paintLobby(); report(true);
   return api;
