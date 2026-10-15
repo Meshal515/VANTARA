@@ -144,6 +144,9 @@ class TogetherPlayer(
     fun start() {
         client.connect()
         main.post(tick)
+        // غرفة متزامنة: شاشة الغرفة من أول لحظة (الأصدقاء، سيرفرك وزر «غيّر»)، لا شاشة سوداء
+        // تنتظر الإطار الأول. إن كانت الغرفة بدأت فعلًا يخفيها الترحيب ويقفز للثانية الحالية.
+        if (launch.mode == "sync") showLobby()
     }
 
     fun destroy() {
@@ -176,7 +179,7 @@ class TogetherPlayer(
     fun onPreparing() {
         ready = false
         failedSource = null
-        if (synced && client.timeline?.started != true) mute(true)
+        if (synced && client.timeline?.started != true) { mute(true); showLobby() }
         report("preparing", force = true)
         paintLobby()
     }
@@ -186,8 +189,9 @@ class TogetherPlayer(
         if (!ready) {
             ready = true
             preparedEpisode = hooks.episode()
-            if (synced && t != null && !t.started) {
-                // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ»
+            if (synced && t?.started != true) {
+                // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ».
+                // حالة الغرفة لم تصل بعد (السيرفر أسرع من الاتصال)؟ نفس الشيء؛ الترحيب يقفز إن كانت بدأت.
                 withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
                 mute(false)
                 report("ready", force = true)
@@ -246,11 +250,12 @@ class TogetherPlayer(
     override fun onWelcome() {
         // A fast local source can become ready before the WebSocket welcome.
         // Reconcile that first frame with the room instead of playing behind the lobby.
-        if (synced && ready) client.timeline?.let { t ->
-            if (!t.started) {
-                withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
-                showLobby()
-            } else jumpToRoom(t)
+        val t = client.timeline
+        // دخول متأخر (الغرفة بدأت) أو غرفة منفصلة: لا شاشة انتظار
+        if (!synced || t?.started == true) hideLobby() else showLobby()
+        if (synced && ready && t != null) {
+            if (!t.started) withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
+            else jumpToRoom(t)
         }
         paintStrip()
         report(stateNow(), force = true)
@@ -271,7 +276,7 @@ class TogetherPlayer(
     override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
     override fun onMode(mode: String) {
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
-        if (mode != "sync") withApplying { hooks.player.setPlaybackSpeed(1f) }
+        if (mode != "sync") { hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
     }
     override fun onStatus(userId: String, name: String, state: String, source: String?) {
         if (userId == client.me) return
