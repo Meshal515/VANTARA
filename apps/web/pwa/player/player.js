@@ -387,7 +387,6 @@ export function openPlayer(args) {
         const c = state.current;
         renderLobby(lobby, {
           ...l,
-          roster: l.roster.map(r => ({ ...r, avatarKey: r.avatarKey || hub.person(r.userId)?.avatarKey || null })),
           art,
           kindText: mediaKind(media),
           // لون القسم: أحمر السينما، بنفسجي المانجا، ولون الأنمي للأنمي
