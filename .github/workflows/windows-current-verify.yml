@@ -12,7 +12,7 @@ concurrency:
 env:
   VERSION: '0.2.3'
   TAG: 'windows-v0.2.3'
-  CANDIDATE_SHA: '4b62f0b7'
+  CANDIDATE_SHA: '4b62f0b739d202e7d6d962966be0d8904524e2d6'
 jobs:
   verify:
     name: Verify the already built installer on actual Windows
