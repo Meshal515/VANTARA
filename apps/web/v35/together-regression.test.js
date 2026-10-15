@@ -80,3 +80,19 @@ it('hands Android the room screen art and the invitees with their pictures', asy
   expect(cfg).toMatchObject({ kindText: 'أنمي', title: 'Frieren', banner: 'https://img/5.jpg', logo: 'https://logo.png', episodeTitle: 'Ep' });
   expect(cfg.invitees).toEqual([{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }, { userId: 'u3', displayName: 'صديق', avatarKey: null }]);
 });
+
+it('hands Android the verified pending friend avatar before profile sync and preserves custom photos', () => {
+  vi.stubGlobal('Capacitor', { isNativePlatform: () => true });
+  const mansourId = '9e4b51d9-4ca0-4da2-9b1f-2205e67134ed';
+  for (const friends of [[], [{ userId: mansourId, displayName: 'منصور الجديد', avatarKey: 'https://example.com/mansour-custom.webp' }]]) {
+    const room = roomOf();
+    room.info = { mode: 'sync', invited: [mansourId, 'unknown'] };
+    const hub = createTogether({ sync: {}, baseUrl: () => 'https://sync.test', joinRoomImpl: () => room, openMedia: vi.fn(), friends: () => friends });
+    hub.joinByCode('ABCDEF', { media_json: JSON.stringify({ seriesRef: 'anime:42', kind: 'anime' }), mode: 'sync' });
+    expect(hub.person(mansourId)).toEqual(friends[0] ?? { userId: mansourId, displayName: 'Man', avatarKey: '/avatars/man.webp' });
+    expect(hub.handOff('anime:42').invitees).toEqual([
+      friends[0] ?? { userId: mansourId, displayName: 'Man', avatarKey: '/avatars/man.webp' },
+      { userId: 'unknown', displayName: 'صديق', avatarKey: null },
+    ]);
+  }
+});

@@ -11,6 +11,7 @@
  */
 
 import { glyph } from './icons.js';
+import { identityFor } from '../lib/identity.js';
 import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
 import { isNative } from '../pwa/platform.js';
@@ -124,8 +125,9 @@ export function createTogether(deps) {
   const personOf = (r) => ({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey });
   /** صديق بمعرّفه (للمدعوين الذين لم يدخلوا بعد). */
   function personById(userId) {
-    const f = deps.friends().find((x) => x.userId === userId);
-    return f ? { userId, displayName: f.displayName, avatarKey: f.avatarKey ?? null } : { userId, displayName: 'صديق', avatarKey: null };
+    const f = deps.friends?.().find((x) => x.userId === userId);
+    const identity = identityFor(userId);
+    return { userId, displayName: f?.displayName || identity?.displayName || 'صديق', avatarKey: f?.avatarKey || identity?.avatar || null };
   }
 
   /** كبسولة صغيرة أعلى الشاشة: وجه الشخص ينزلق مع «دحمي دخل»، ثم تختفي وحدها. */

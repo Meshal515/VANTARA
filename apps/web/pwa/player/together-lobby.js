@@ -12,6 +12,7 @@
  */
 
 import { stateLabel } from '../../v35/together.js';
+import { accountWithIdentity, identityFor } from '../../lib/identity.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -38,11 +39,18 @@ const ICON = {
 /** «+10.0 ث» / «0 ث». */
 export const offsetLabel = (ms) => (ms ? `${ms > 0 ? '+' : '−'}${(Math.abs(ms) / 1000).toFixed(1)} ث` : '0 ث');
 
+/** Resolve only verified account IDs, preserving any image or name chosen by the person. */
+const lobbyPerson = (person) => identityFor(person.userId) ? accountWithIdentity({
+  ...person,
+  displayName: person.displayName === 'صديق' ? null : person.displayName,
+}) : person;
+
 /** المدعوون الذين لم يدخلوا بعد (الدعوة «للكل» لا تُعدّ أسماءً). */
 export function pendingInvitees(invited, roster, me, personOf) {
   if (!Array.isArray(invited)) return [];
   const inside = new Set(roster.map((r) => r.userId));
-  return invited.filter((id) => id !== me && !inside.has(id)).map((id) => personOf(id));
+  return [...new Set(invited)].filter((id) => typeof id === 'string' && id !== me && !inside.has(id))
+    .map((id) => lobbyPerson({ ...personOf(id), userId: id }));
 }
 
 /** أسماء قصيرة: «منصور» / «منصور ودحمي» / «منصور ودحمي و2 غيرهم». */
@@ -124,7 +132,7 @@ export function renderLobby(host, m, a) {
     const face = el('span', `pl-face is-${f.state}${f.host ? ' is-host' : ''}`);
     face.title = f.label;
     face.setAttribute('aria-label', f.label);
-    face.append(a.avatar(f.person, 44));
+    face.append(a.avatar(lobbyPerson(f.person), 44));
     faces.append(face);
   }
   if (shown.length > 5) faces.append(el('span', 'pl-face pl-more-count', `+${shown.length - 5}`));
@@ -135,13 +143,13 @@ export function renderLobby(host, m, a) {
   const server = el('p', 'pl-server');
   const code = el('bdi', null, m.server?.code ? `${m.server.code}${m.server.quality ? ` · ${m.server.quality}` : ''}` : 'سيرفرك');
   const state = el('span', `pl-server-state is-${m.failed ? 'bad' : m.prepared ? 'ok' : 'warn'}`, m.failed ? 'تعذّر' : m.prepared ? 'جاهز' : 'يتجهّز…');
-  server.append(code, el('span', 'pl-dot', '·'), state, btn('pl-link', 'غيّر', a.changeServer, 'غيّر السيرفر'));
+  server.append(code, el('span', 'pl-dot', '·'), state);
   info.append(status, server);
 
   const cta = el('div', 'pl-cta');
   const moreBtn = btn('pl-icon', ICON.more, () => { more.hidden = !more.hidden; moreBtn.setAttribute('aria-expanded', String(!more.hidden)); }, 'المزيد');
   moreBtn.setAttribute('aria-expanded', String(moreOpen));
-  cta.append(moreBtn);
+  cta.append(moreBtn, btn('pl-go pl-choose-server', `${ICON.server}<span>اختر السيرفر</span>`, a.changeServer, 'اختر السيرفر'));
   if (m.blocked) cta.append(btn('pl-go', `${ICON.play}<span>تابع معهم</span>`, a.resume));
   else if (m.host) {
     const go = btn('pl-go', `${ICON.play}<span>ابدأ</span>`, a.start, 'ابدأ للجميع');
