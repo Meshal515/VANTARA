@@ -1068,7 +1068,7 @@ html.pwa-playing body {
   .pwa-player .pl-hero { position: relative; inset: auto; margin-top: -44px; padding: 0 20px; align-items: center; text-align: center; }
   .pwa-player .pl-logo { max-width: 76vw; max-height: 15vh; object-position: center bottom; }
   .pwa-player .pl-title { max-width: 90vw; font-size: 32px; }
-  /* الأشخاص والحالة تحت الشعار مباشرة، و«ابدأ» وحده في الأسفل — لا فراغ في الوسط */
+  /* الأشخاص والحالة في منتصف المساحة بين الشعار و«ابدأ» (الذي يبقى في الأسفل) */
   .pwa-player .pl-bar {
     position: relative;
     inset: auto;
@@ -1079,6 +1079,7 @@ html.pwa-playing body {
     padding: 28px 20px max(20px, env(safe-area-inset-bottom));
     border-top: 0;
   }
+  .pwa-player .pl-faces { margin-top: auto; }
   .pwa-player .pl-face { width: 54px; height: 54px; margin-inline-start: -10px; }
   .pwa-player .pl-info { flex: none; text-align: center; justify-items: center; }
   .pwa-player .pl-status { white-space: normal; font-size: 17px; }
