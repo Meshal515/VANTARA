@@ -13,7 +13,7 @@ vi.mock('../lib/anime-engine.js', async (original) => ({
 }));
 const { createAnime } = await import('./anime.js');
 afterEach(() => { state.listeners.clear(); state.open.mockClear(); state.best.mockClear(); state.addons.mockReset().mockResolvedValue([]); state.extend.mockClear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
-it('APK server events and completed preparation keep the selector open until the user chooses', async () => {
+it.each([false, true])('APK selector waits for user choice, including room entry=%s', async (inRoom) => {
   vi.useFakeTimers();
   const { window, document } = parseHTML('<html><body><main></main></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document);
@@ -23,7 +23,9 @@ it('APK server events and completed preparation keep the selector open until the
   let cleanup;
   const body = document.querySelector('main');
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
-  const deps = { root: body, q: () => null, el, toast() {}, genreAr: (s) => s, openSheet: (fn) => { cleanup = fn(body); }, closeSheet: vi.fn(() => cleanup?.()), currentPage: () => 'anime' };
+  const handOff = vi.fn(() => ({ code: 'ABCDEF', mediaPrefix: 'anime:1' }));
+  const hub = { matches: () => inRoom, handOff };
+  const deps = { together: () => hub, root: body, q: () => null, el, toast() {}, genreAr: (s) => s, openSheet: (fn) => { cleanup = fn(body); }, closeSheet: vi.fn(() => cleanup?.()), currentPage: () => 'anime' };
   const anime = createAnime(deps);
   anime.play({ id: 1, title: 'Re:ZERO Season 4', episodes: 19, poster: 'https://image.test/x.jpg' }, 3);
   await vi.advanceTimersByTimeAsync(0);
@@ -36,6 +38,7 @@ it('APK server events and completed preparation keep the selector open until the
   await body.querySelectorAll('.an-srv')[1].onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.open).toHaveBeenCalledWith(expect.objectContaining({ candidate: 'stream-480', episode: 3 }));
+  expect(handOff).toHaveBeenCalledTimes(inRoom ? 1 : 0);
   cleanup?.();
 });
 

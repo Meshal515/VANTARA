@@ -12,7 +12,6 @@ import android.util.LruCache
 import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,22 +28,21 @@ class TogetherImages(private val context: Context, http: OkHttpClient) {
     private val cache = object : LruCache<String, Bitmap>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
-    private val io = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
+    private val jobs = RoomImageJobs<Bitmap>({ main.post(it) })
     private val missing = HashSet<String>()
+    private var closed = false
 
     /** [done] على الخيط الرئيسي؛ null إن تعذّر. [maxPx] يحدّ الحجم المفكوك. */
     fun load(key: String?, maxPx: Int, done: (Bitmap?) -> Unit) {
+        if (closed) return
         if (key.isNullOrBlank()) return done(null)
         val id = "$key@$maxPx"
         cache.get(id)?.let { return done(it) }
         if (id in missing) return done(null)
-        io.execute {
-            val bmp = runCatching { decode(bytesOf(key), maxPx) }.getOrNull()
-            main.post {
-                if (bmp != null) cache.put(id, bmp) else missing += id
-                done(bmp)
-            }
+        jobs.load({ decode(bytesOf(key), maxPx) }) { bmp ->
+            if (bmp != null) cache.put(id, bmp) else missing += id
+            done(bmp)
         }
     }
 
@@ -72,7 +70,7 @@ class TogetherImages(private val context: Context, http: OkHttpClient) {
         return if (ring == null) round else LayerDrawable(arrayOf(round, ring))
     }
 
-    fun close() { io.shutdownNow() }
+    fun close() { closed = true; jobs.close(); cache.evictAll(); missing.clear() }
 
     companion object {
         private const val MAX_BYTES = 4 * 1024 * 1024
