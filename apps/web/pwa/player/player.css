@@ -1026,41 +1026,65 @@ html.pwa-playing body {
 @keyframes pl-tick { from { transform: scale(1.35); opacity: 0; } 30% { opacity: 1; } to { transform: scale(1); opacity: 1; } }
 .pwa-player .pp-lobby.is-counting .pl-bar, .pwa-player .pp-lobby.is-counting .pl-more { visibility: hidden; }
 
-/* الجوال أفقيًا: نفس التخطيط بأحجام أصغر */
+/* الجوال أفقيًا: البنر كاملًا بنسبته (16:9) في جهة ويذوب طرفه في الخلفية — لا قصّ —
+   والشعار والمعلومات في الجهة الأخرى، كصفحات الأفلام */
 @media (max-height: 500px) {
+  .pwa-player .pl-bg img {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: auto;
+    height: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    animation: none;
+    -webkit-mask-image: linear-gradient(to right, #000 58%, transparent 100%);
+    mask-image: linear-gradient(to right, #000 58%, transparent 100%);
+  }
+  .pwa-player .pl-shade { background: linear-gradient(to top, rgba(5, 5, 7, 0.92) 0%, rgba(5, 5, 7, 0.4) 22%, rgba(5, 5, 7, 0) 40%), linear-gradient(to bottom, rgba(5, 5, 7, 0.4) 0%, rgba(5, 5, 7, 0) 20%); }
   .pwa-player .pl-top { padding-top: max(10px, env(safe-area-inset-top)); }
-  .pwa-player .pl-hero { inset-block-end: 92px; gap: 6px; }
-  .pwa-player .pl-logo { max-height: 26vh; max-width: 40vw; }
+  .pwa-player .pl-hero { inset-block-end: 96px; inset-inline-end: auto; max-width: 44%; gap: 6px; }
+  .pwa-player .pl-logo { max-height: 30vh; max-width: 100%; }
   .pwa-player .pl-title { font-size: 28px; }
   .pwa-player .pl-meta { font-size: 13px; }
-  .pwa-player .pl-bar { gap: 12px; padding-top: 10px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  .pwa-player .pl-face { width: 36px; height: 36px; }
+  .pwa-player .pl-bar { gap: 12px; padding-top: 10px; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-top: 0; }
+  .pwa-player .pl-face { width: 38px; height: 38px; }
   .pwa-player .pl-status { font-size: 14.5px; }
-  .pwa-player .pl-go { height: 42px; padding: 0 20px; font-size: 15px; }
-  .pwa-player .pl-icon { width: 40px; height: 40px; }
-  .pwa-player .pl-more { inset-block-end: 70px; }
+  .pwa-player .pl-go { height: 44px; padding: 0 22px; font-size: 15px; }
+  .pwa-player .pl-icon { width: 42px; height: 42px; }
+  .pwa-player .pl-more { inset-block-end: 72px; }
 }
-/* الجوال عموديًا: البنر يملأ الأعلى، والشريط عمودي مرتب، و«ابدأ» بعرض الشاشة في الأسفل */
+/* الجوال عموديًا: البنر كاملًا بعرض الشاشة في الأعلى (16:9)، الشعار على حافته، والباقي تحته مرتبًا */
 @media (max-width: 760px) and (min-height: 501px) {
-  .pwa-player .pl-bg img { height: 62%; }
-  .pwa-player .pl-shade { background: linear-gradient(to top, #050507 0%, #050507 40%, rgba(5, 5, 7, 0.55) 52%, rgba(5, 5, 7, 0) 66%), linear-gradient(to bottom, rgba(5, 5, 7, 0.5), rgba(5, 5, 7, 0) 16%); }
+  .pwa-player .pp-lobby { display: flex; flex-direction: column; overflow-y: auto; }
+  .pwa-player .pl-bg { position: relative; inset: auto; flex: none; aspect-ratio: 16 / 9; }
+  .pwa-player .pl-bg img {
+    animation: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 64%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 64%, transparent 100%);
+  }
+  .pwa-player .pl-shade { background: linear-gradient(to bottom, rgba(5, 5, 7, 0.5), rgba(5, 5, 7, 0) 30%); }
   .pwa-player .pl-top { padding-inline: 16px; }
-  .pwa-player .pl-hero { inset: auto 20px 230px; align-items: center; text-align: center; }
-  .pwa-player .pl-logo { max-width: 78vw; max-height: 18vh; object-position: center bottom; }
-  .pwa-player .pl-title { max-width: 90vw; font-size: 34px; }
+  .pwa-player .pl-hero { position: relative; inset: auto; margin-top: -44px; padding: 0 20px; align-items: center; text-align: center; }
+  .pwa-player .pl-logo { max-width: 76vw; max-height: 15vh; object-position: center bottom; }
+  .pwa-player .pl-title { max-width: 90vw; font-size: 32px; }
+  /* الأشخاص والحالة تحت الشعار مباشرة، و«ابدأ» وحده في الأسفل — لا فراغ في الوسط */
   .pwa-player .pl-bar {
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 14px;
-    padding: 18px 20px max(20px, env(safe-area-inset-bottom));
+    position: relative;
+    inset: auto;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 28px 20px max(20px, env(safe-area-inset-bottom));
     border-top: 0;
   }
-  .pwa-player .pl-faces { order: 1; }
-  .pwa-player .pl-info { order: 2; flex-basis: 100%; text-align: center; justify-items: center; }
-  .pwa-player .pl-status { white-space: normal; }
-  .pwa-player .pl-cta { order: 3; flex-basis: 100%; }
-  .pwa-player .pl-go, .pwa-player .pl-wait { flex: 1; justify-content: center; text-align: center; height: 52px; }
-  .pwa-player .pl-wait { display: grid; place-items: center; border-radius: 12px; background: rgba(255, 255, 255, 0.07); }
+  .pwa-player .pl-face { width: 54px; height: 54px; margin-inline-start: -10px; }
+  .pwa-player .pl-info { flex: none; text-align: center; justify-items: center; }
+  .pwa-player .pl-status { white-space: normal; font-size: 17px; }
+  .pwa-player .pl-cta { margin-top: auto; width: 100%; padding-top: 18px; }
+  .pwa-player .pl-go, .pwa-player .pl-wait { flex: 1; justify-content: center; text-align: center; height: 52px; border-radius: 14px; }
+  .pwa-player .pl-wait { display: grid; place-items: center; background: rgba(255, 255, 255, 0.07); }
   .pwa-player .pl-more { inset: auto 16px 150px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
