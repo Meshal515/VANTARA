@@ -3691,7 +3691,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
+      const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
+      const latestOf = async (addon) => {
+        if (!addon.bundled || !addon.sourceId) return [];
+        const value = (await shots).get(addon.sourceId);
+        const list = value?.mangas ?? value?.items ?? (Array.isArray(value) ? value : []);
+        const out = [];
+        for (const item of list) {
+          if (out.length >= 5) break;
+          try { out.push({ work: sourceWorkModel(item, { addon, episodes: [] }) }); } catch { /* عمل بلا نوع مؤكد */ }
+        }
+        return out;
+      };
+      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
