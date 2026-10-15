@@ -38,6 +38,7 @@ import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
+import { createFollower } from '../lib/together/follow.js';
 import { readingPosition, readingTop } from './reader-scroll.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
@@ -173,31 +174,43 @@ export function openSmartReader(deps, ctx) {
   let followFrame = 0;
   let scrollReportFrame = 0;
   const following = () => hub?.session && !hub.session.room.isHost && (hub.session.room.info?.mode ?? hub.session.mode) === 'sync';
-  function followScroll(position, immediate = false) {
-    followAnchor = { chapter: Number(state.row?.number), position };
+  // الضيف يعرض حركة المضيف متأخرة ~150ms ومستكملة بين مواضعه الفعلية بأوقاتها (follow.js):
+  // نفس سرعته وسلاسته إطارًا بإطار، بدل مطاردة كل تحديث لحظة وصوله
+  const follower = createFollower();
+  function placeAt(position) {
+    const target = readingTop(state.slots.map(s => s.frame), position, scroll.getBoundingClientRect().top, scroll.scrollTop);
+    if (target == null) return;
+    const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    scroll.scrollTop = Math.max(0, Math.min(max, target));
+  }
+  function followScroll(position, immediate = false, at = null) {
+    const chapter = Number(state.row?.number);
+    if (followAnchor?.chapter !== chapter) follower.reset();
+    followAnchor = { chapter, position };
     if (settings.mode === 'paged') return jumpTo(Math.floor(position), !immediate);
-    cancelAnimationFrame(followFrame);
+    const jumped = at == null ? (follower.reset(), true) : follower.push(at, position, performance.now());
+    if (immediate || jumped) placeAt(position);
+    if (followFrame) return;
     const move = () => {
       followFrame = 0;
       if (!following() || !followAnchor || Number(state.row?.number) !== followAnchor.chapter) return;
-      const target = readingTop(state.slots.map(s => s.frame), followAnchor.position, scroll.getBoundingClientRect().top, scroll.scrollTop);
-      if (target == null) return;
-      const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-      const delta = Math.max(0, Math.min(max, target)) - scroll.scrollTop;
-      scroll.scrollTop += immediate || Math.abs(delta) < 1 ? delta : delta * .35;
-      if (!immediate && Math.abs(delta) >= 1) followFrame = requestAnimationFrame(move);
+      const shown = follower.position(performance.now());
+      if (!shown) return;
+      placeAt(shown.pos);
+      if (!shown.settled) followFrame = requestAnimationFrame(move);
     };
-    move();
+    followFrame = requestAnimationFrame(move);
   }
   const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-    if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number)) followScroll(followAnchor.position);
+    // صور تكمل تحميلها فتتغير الأطوال: نعيد وضع الموضع المعروض فقط (الحركة الجارية تحسبه كل إطار)
+    if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number) && !followFrame) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
   }) : null;
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
       seriesRef: ref,
-      onFollow: ({ chapter, index }) => {
-        if (state.row && Number(state.row.number) === chapter) followScroll(index);
+      onFollow: ({ chapter, index, at }) => {
+        if (state.row && Number(state.row.number) === chapter) followScroll(index, false, at);
         else {
           const row = sequence.find((r) => Number(r.number) === chapter);
           if (row) void openChapter(row, { startAt: index });
