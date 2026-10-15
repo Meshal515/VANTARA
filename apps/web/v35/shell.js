@@ -2244,10 +2244,72 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function readNow() {
     if (state.current && state.nextRow) openChapter(state.current, state.nextRow);
   }
-  function openChapter(w, row) {
+  function openChapter(w, row, { inviteTogether = false } = {}) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource) });
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
+  }
+
+  /**
+   * «اقرأ مع أصدقائك» من صفحة العمل: اختر الفصل (تابع / الأول / الأحدث / أي رقم)،
+   * فيفتح القارئ عليه وتظهر ورقة الدعوة مباشرة (من تدعو، متزامنة أو منفصلة).
+   * في المنفصلة كل واحد يقرأ بمصدره وفصله؛ في المتزامنة الكل على صفحة المضيف.
+   */
+  function readTogetherCurrent() {
+    const w = state.current;
+    if (!w) return;
+    const rows = (state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters) ?? [];
+    if (!rows.length) return toast('الفصول ما وصلت بعد، لحظة');
+    if (together.session) return toast('أنت في غرفة الآن؛ اطلع منها أولًا');
+    const byNumber = [...rows].filter((r) => Number.isFinite(Number(r.number))).sort((a, b) => Number(a.number) - Number(b.number));
+    const go = (row) => { closeSheet(); openChapter(w, row, { inviteTogether: true }); };
+    openSheet((body) => {
+      body.classList.add('rt-sheet');
+      const head = el('div', 'rt-head');
+      head.append(el('h3', null, 'اقرأ مع أصدقائك'), el('p', null, 'اختر الفصل، ثم من تدعو وطريقة القراءة'));
+      body.append(head);
+      const quick = el('div', 'rt-quick');
+      const pick = (label, sub, row, primary = false) => {
+        if (!row) return;
+        const b = el('button', `rt-pick${primary ? ' is-primary' : ''}`);
+        b.type = 'button';
+        b.append(el('b', null, label), el('span', null, sub));
+        b.onclick = () => go(row);
+        quick.append(b);
+      };
+      const next = state.nextRow;
+      pick('تابع', next ? `الفصل ${next.number}` : '', next, true);
+      if (byNumber[0] && byNumber[0] !== next) pick('من البداية', `الفصل ${byNumber[0].number}`, byNumber[0]);
+      const latest = byNumber.at(-1);
+      if (latest && latest !== next) pick('الأحدث', `الفصل ${latest.number}`, latest);
+      body.append(quick);
+      // أي فصل: رقم مباشر، أو من الشبكة
+      const form = el('form', 'rt-number');
+      const input = el('input', 'search-input');
+      input.type = 'number';
+      input.inputMode = 'decimal';
+      input.placeholder = 'رقم الفصل';
+      input.setAttribute('aria-label', 'رقم الفصل');
+      const goBtn = el('button', 'btn btn-primary', 'افتح');
+      goBtn.type = 'submit';
+      form.append(input, goBtn);
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        const n = Number(input.value);
+        const row = byNumber.find((r) => Number(r.number) === n);
+        if (!row) return toast(`ما لقينا الفصل ${input.value}`);
+        go(row);
+      };
+      body.append(form);
+      const grid = el('div', 'rt-grid');
+      for (const row of byNumber.slice().reverse()) {
+        const b = el('button', `rt-ch${row === next ? ' is-next' : ''}`, String(row.number));
+        b.type = 'button';
+        b.onclick = () => go(row);
+        grid.append(b);
+      }
+      body.append(grid);
+    });
   }
 
   // ── الأنمي من المجلس والملف ──
@@ -4924,6 +4986,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openUtility: (_e, t) => void deps.go({ name: t.dataset.arg }),
     openWorkMenu,
     shareCurrent: () => state.current && openShare(state.current),
+    readTogetherCurrent: () => readTogetherCurrent(),
     markPreviousReading,
     toggleTranslateCurrent,
     readNow,
