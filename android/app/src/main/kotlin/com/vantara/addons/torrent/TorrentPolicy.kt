@@ -108,3 +108,63 @@ object TorrentPolicy {
         return (first..minOf(last, first + count - 1)).toList()
     }
 }
+
+/**
+ * نافذة التورنت المتحركة على القرص (نفس نسخة الويندوز):
+ *  - ورا موضع المشاهدة: 50 ثانية فقط (32MB على الأقل)؛ ما قبلها يُفرَّغ من القرص (hole punch).
+ *  - قدّام: حتى 10 دقائق بقدر ما تسمح المساحة الحرة (نصف الفائض عن احتياط 1GB)، و12 قطعة دائمًا.
+ *  - الرجوع لمنطقة فُرّغت: libtorrent ما زال يظن القطعة عنده ويقرأ أصفارًا (ثبت باختبار حقيقي)،
+ *    فيُعاد بناء التورنت ببيانات الاستئناف مع حذف القطع المفرّغة منها — بلا فحص كامل للملف.
+ * رأس الملف وآخر قطعتين (فهرس MKV/MP4) لا تُفرَّغ أبدًا.
+ */
+object TorrentWindow {
+    const val BEHIND_MS = 50_000L
+    const val MIN_BEHIND_BYTES = 32L * 1024 * 1024
+    const val MIN_EVICT_BYTES = 64L * 1024 * 1024
+    const val AHEAD_MS = 10 * 60_000L
+    const val RESERVE_FREE_BYTES = 1024L * 1024 * 1024
+    const val MIN_AHEAD_PIECES = 12
+    const val MAX_AHEAD_PIECES = 4096
+
+    fun bytesPerSecond(size: Long, durationMs: Long): Double =
+        if (durationMs > 30_000 && size > 0) size * 1000.0 / durationMs else 1.5 * 1024 * 1024
+
+    /** أول قطعة يجب أن تبقى على القرص؛ null = لا تفريغ بعد (المدة مجهولة أو ما زلنا في البداية). */
+    fun keepFrom(file: TorrentFile, pieceLength: Int, positionMs: Long, durationMs: Long): Int? {
+        if (durationMs <= 0 || positionMs <= 0 || file.size <= 0) return null
+        val bps = bytesPerSecond(file.size, durationMs)
+        val byTime = minOf(1.0, positionMs.toDouble() / durationMs) * file.size
+        // معدل البت متغيّر: هامش 3% من الحجم وبحد أقصى دقيقتين من الفيديو
+        val margin = minOf(file.size * 0.03, 120 * bps)
+        val target = byTime - margin - maxOf(MIN_BEHIND_BYTES.toDouble(), BEHIND_MS / 1000.0 * bps)
+        if (target <= 0) return null
+        return ((file.offset + target.toLong()) / pieceLength).toInt()
+    }
+
+    /** القطع التي تُفرَّغ الآن: بعد قطعة الرأس وقبل آخر قطعتين، من حيث وقف التفريغ السابق، بدفعة لا تقل عن 64MB. */
+    fun evictRange(file: TorrentFile, pieceLength: Int, keepFrom: Int, evictedUntil: Int): IntRange? {
+        if (file.size <= 0) return null
+        val head = (file.offset / pieceLength).toInt()
+        val last = ((file.offset + file.size - 1) / pieceLength).toInt()
+        val start = maxOf(head + 1, evictedUntil)
+        val end = minOf(keepFrom, last - 1)
+        if (end <= start || (end - start).toLong() * pieceLength < MIN_EVICT_BYTES) return null
+        return start until end
+    }
+
+    /** النطاق داخل الملف (إزاحة، طول) لقطع متتالية، مقصوصًا بحدود الملف. */
+    fun fileSpan(file: TorrentFile, pieceLength: Int, pieces: IntRange): Pair<Long, Long> {
+        val start = maxOf(0L, pieces.first.toLong() * pieceLength - file.offset)
+        val end = minOf(file.size, (pieces.last + 1).toLong() * pieceLength - file.offset)
+        return start to maxOf(0L, end - start)
+    }
+
+    /** كم قطعة قدّام موضع القراءة: 12 دائمًا، وحتى 10 دقائق بقدر نصف المساحة الفائضة عن 1GB. */
+    fun aheadPieces(file: TorrentFile, pieceLength: Int, durationMs: Long, freeBytes: Long): Int {
+        if (durationMs <= 0) return MIN_AHEAD_PIECES
+        val want = AHEAD_MS / 1000.0 * bytesPerSecond(file.size, durationMs)
+        val room = maxOf(0L, freeBytes - RESERVE_FREE_BYTES) / 2.0
+        val pieces = kotlin.math.ceil(minOf(want, room) / pieceLength).toInt()
+        return pieces.coerceIn(MIN_AHEAD_PIECES, MAX_AHEAD_PIECES)
+    }
+}

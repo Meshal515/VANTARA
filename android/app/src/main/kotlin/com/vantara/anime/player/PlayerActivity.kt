@@ -429,6 +429,7 @@ class PlayerActivity : Activity() {
     private val usageTick = object : Runnable {
         override fun run() {
             sampleUsage()
+            torrentWindow()
             main.postDelayed(this, 5_000)
         }
     }
@@ -1597,6 +1598,13 @@ class PlayerActivity : Activity() {
     }
 
     // ───────────── الشبكة ─────────────
+
+    /** تورنت: موضع المشاهدة للمحرّك فيفرّغ ما خلف آخر 50 ثانية وينزّل قدّام حسب المساحة. */
+    private fun torrentWindow() {
+        val url = current?.url?.takeIf { it.startsWith("vantara-torrent:") } ?: return
+        val duration = player.duration.takeIf { it > 0 && it != androidx.media3.common.C.TIME_UNSET } ?: return
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).playback(android.net.Uri.parse(url), player.currentPosition, duration) }
+    }
 
     private fun torrentStats() = current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let {
         runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).stats(android.net.Uri.parse(it)) }.getOrNull()
