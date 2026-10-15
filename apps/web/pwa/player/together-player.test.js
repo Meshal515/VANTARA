@@ -64,4 +64,26 @@ describe('web Together player uses Android room protocol', () => {
     f.receive({...f.room.timeline,playing:false,pos:3000,at:1500,seq:3});
     now=1700;vi.advanceTimersByTime(400);expect(f.video.paused).toBe(true);expect(f.video.currentTime).toBe(3);f.bridge.destroy();
   });
+  it('prepares silently at the room start point before the host starts', () => {
+    vi.useFakeTimers(); const f = fixture(); f.video.currentTime = 3.4; f.video.paused = false;
+    expect(f.bridge.waiting()).toBe(true);
+    f.bridge.ready();
+    expect(f.video.paused).toBe(true); expect(f.video.currentTime).toBe(0); f.bridge.destroy();
+  });
+  it('per-user video offset is local: my video shifts, the room keeps its own time', () => {
+    vi.useFakeTimers();
+    const store = new Map(); globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const h = fixture(true); h.bridge.ready();
+    expect(h.bridge.setOffset(10_049)).toBe(10_000);
+    expect(h.video.currentTime).toBe(10);
+    h.bridge.playPause(true); expect(h.room.command).toHaveBeenLastCalledWith('play', { pos: 0 });
+    h.bridge.seek(70_000); expect(h.room.command).toHaveBeenLastCalledWith('seek', { pos: 60_000 });
+    h.receive({ ...h.room.timeline, started: true, playing: false, pos: 60_000, seq: 2 });
+    expect(h.video.currentTime).toBe(70);
+    expect(h.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ pos: 60_000 }));
+    h.bridge.destroy();
+    // نفس الحلقة والسيرفر: الديلاي محفوظ
+    const again = fixture(true); expect(again.bridge.offset()).toBe(10_000); again.bridge.destroy();
+    delete globalThis.localStorage;
+  });
 });

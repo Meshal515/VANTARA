@@ -1524,7 +1524,8 @@ export function createCinema(deps) {
       bar.append(back, head);
       const scroll = el('div', 'an-pick-scroll');
       const hero = el('div', 'an-pick-hero');
-      const thumb = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n)?.thumb;
+      const epMeta = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n);
+      const thumb = epMeta?.thumb;
       hero.append(image(thumb ?? m.background ?? m.poster, 'an-img loaded', { eager: true }));
       const cap = el('div', 'an-pick-cap');
       cap.append(el('span', 'an-pick-no', heading));
@@ -1546,6 +1547,10 @@ export function createCinema(deps) {
             seriesRef: togetherRef,
             title: displayTitle(m),
             cover: m.poster ?? null,
+            format: m.type === 'series' ? 'series' : 'movie',
+            banner: thumb ?? m.background ?? null,
+            logo: m.logo ?? null,
+            episodeTitle: m.type === 'series' ? epMeta?.title ?? null : null,
             episode: togetherEp,
             season: m.type === 'series' ? season : null,
           }, { onStarted: () => { sheet.autoTogether = true; withFriends.remove(); queuePaint(); } });

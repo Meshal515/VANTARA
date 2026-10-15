@@ -1,5 +1,19 @@
 import { createDriftController, targetAt } from '../../lib/together/sync.js';
 
+const OFFSET_PREFIX = 'vantara.tg.offset.';
+export const OFFSET_LIMIT_MS = 120_000;
+/**
+ * ديلاي الفيديو الشخصي: يخصّك وحدك. مصدرك فيه مقدمة 10 ث زيادة؟ +10 ث تجعل فيديوك
+ * متقدّمًا عن وقت الغرفة بـ10 ث، فتشوفون نفس المشهد. يُحفظ لكل حلقة وسيرفر.
+ */
+export const clampOffset = (ms) => Math.max(-OFFSET_LIMIT_MS, Math.min(OFFSET_LIMIT_MS, Math.round(Number(ms) / 100) * 100 || 0));
+function readOffset(key) {
+  try { return clampOffset(Number(localStorage.getItem(OFFSET_PREFIX + key)) || 0); } catch { return 0; }
+}
+function writeOffset(key, ms) {
+  try { if (ms) localStorage.setItem(OFFSET_PREFIX + key, String(ms)); else localStorage.removeItem(OFFSET_PREFIX + key); } catch { /* تفضيل محلي */ }
+}
+
 /** Bind the existing HTML video to the same millisecond room protocol as Android. */
 export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, source, onEpisode, onLobby, message }) {
   const controller = createDriftController();
@@ -15,7 +29,13 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   const synced = () => (room.info?.mode ?? mode) === 'sync';
   const mediaKey = () => `${mediaPrefix}#${episode()}`;
   const live = () => room.status === 'live';
-  const position = () => (video.currentTime || 0) * 1000;
+  const offsetKey = () => `${mediaKey()}|${source() ?? ''}`;
+  let offset = readOffset(offsetKey());
+  let offsetFor = offsetKey();
+  const syncOffset = () => { if (offsetFor !== offsetKey()) { offsetFor = offsetKey(); offset = readOffset(offsetFor); } return offset; };
+  // موضع الفيديو بوقت الغرفة: ما تراه الغرفة وما يرسله المضيف بلا ديلاي أحد
+  const position = () => Math.max(0, (video.currentTime || 0) * 1000 - syncOffset());
+  const toLocal = (roomMs) => Math.max(0, roomMs + syncOffset());
   const stateNow = () => failed ? 'failed' : !prepared ? 'preparing' : synced() && !room.timeline?.started ? 'ready' : video.readyState < 3 ? 'buffering' : video.paused ? 'paused' : 'playing';
   function report(force = false) {
     const now = room.clock.serverNow();
@@ -31,14 +51,20 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     video.play().catch(() => { if (destroyed) return; blocked = true; message('اضغط «تابع معهم» للسماح بتشغيل الفيديو'); paintLobby(); });
   }
   function paintLobby() {
-    onLobby({ visible: synced() && (!room.timeline?.started || blocked), prepared, blocked, host: room.isHost, connection: room.status, roster: room.roster,
+    onLobby({ visible: synced() && (!room.timeline?.started || blocked), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(),
       start: () => api.playPause(true), resume: () => { blocked = false; play(); paintLobby(); } });
   }
   function align(force = false) {
     const t = room.timeline;
     if (!prepared || !synced() || !live() || !t || t.media?.key !== mediaKey()) return;
     const now = room.clock.serverNow();
-    if (!t.started) { if (!video.paused) video.pause(); return; }
+    // قبل البدء: الفيديو مجهّز ومتوقف عند نقطة البداية (مع ديلايك)، فيبدأ الكل فورًا
+    if (!t.started) {
+      if (!video.paused) video.pause();
+      const start = toLocal(targetAt(t, now)) / 1000;
+      if (video.readyState >= 1 && Math.abs(video.currentTime - start) > 0.3) video.currentTime = start;
+      return;
+    }
     if (now < t.at) return;
     let ahead = 0, behind = 0;
     for (let i = 0; i < video.buffered.length; i++) {
@@ -49,7 +75,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     }
     const d = controller.step({ timeline: t, pos: position(), at: now, buffering: video.readyState < 3, bufferedAhead: ahead, bufferedBehind: behind });
     const seek = force && video.readyState >= 3 ? targetAt(t, now) : d.seekTo;
-    if (seek != null && Math.abs(position() - seek) > 100) { video.currentTime = seek / 1000; seekingAt = now; }
+    if (seek != null && Math.abs(position() - seek) > 100) { video.currentTime = toLocal(seek) / 1000; seekingAt = now; }
     video.playbackRate = d.rate;
     if (d.playing) play(); else if (!video.paused) video.pause();
   }
@@ -80,6 +106,23 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     ready() { prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
     preparing() { prepared = false; failed = false; report(true); paintLobby(); },
     failed() { prepared = false; failed = true; report(true); paintLobby(); },
+    /** الغرفة المتزامنة لم تبدأ بعد: التجهيز يتم بصمت ويقف عند البداية. */
+    waiting() { return synced() && !room.timeline?.started; },
+    repaint() { paintLobby(); },
+    offset() { return syncOffset(); },
+    /** يغيّر ديلايك أنت فقط ويطبّقه فورًا بلا إعادة تحميل. */
+    setOffset(ms) {
+      const next = clampOffset(ms);
+      const delta = next - syncOffset();
+      offset = next;
+      writeOffset(offsetKey(), next);
+      if (delta && prepared) {
+        if (synced() && room.timeline) align(true);
+        else video.currentTime = Math.max(0, video.currentTime + delta / 1000);
+      }
+      paintLobby(); report(true);
+      return next;
+    },
     playPause(playing) {
       if (!synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
@@ -87,7 +130,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');
       return true;
     },
-    seek(pos) { if (!synced()) return false; if (live() && room.canControl && prepared) room.command('seek', { pos }); else message('المضيف يتحكم بالتقديم'); return true; },
+    // pos بوقت فيديوك؛ الغرفة تستلمه بوقتها (بلا ديلايك)
+    seek(pos) { if (!synced()) return false; if (live() && room.canControl && prepared) room.command('seek', { pos: Math.max(0, pos - syncOffset()) }); else message('المضيف يتحكم بالتقديم'); return true; },
     changeEpisode(n) {
       if (!synced()) return false;
       if (!live() || !room.canControl) { message('بانتظار المضيف للحلقة التالية…'); return true; }

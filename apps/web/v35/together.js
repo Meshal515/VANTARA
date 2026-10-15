@@ -14,6 +14,7 @@ import { glyph } from './icons.js';
 import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
 import { isNative } from '../pwa/platform.js';
+import { mediaKind } from '../lib/together/art.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -31,6 +32,22 @@ const button = (cls, html, run, label) => {
 };
 
 /** نوع الغرفة كما يظهر في بطاقة الشات وعنوان اللوحة. */
+/**
+ * وسائط الدعوة من حالة الغرفة نفسها (المفتاح يحمل مرجع العمل والحلقة):
+ * `anime:154587#5` · `cinema:tt0903747:2#3` · `manga:<ref>#12`.
+ */
+export function mediaFromRoom(info) {
+  const m = info?.state?.media ?? info?.media ?? null;
+  const at = m?.key?.lastIndexOf('#') ?? -1;
+  if (!m || at < 0 || !['anime', 'cinema', 'manga'].includes(m.kind)) return null;
+  const prefix = m.key.slice(0, at);
+  const n = Number(m.key.slice(at + 1));
+  const title = String(m.label ?? '').split(' — ')[0] || null;
+  if (m.kind === 'manga') return { kind: 'manga', key: m.key, label: m.label, seriesRef: prefix.replace(/^manga:/, ''), title, chapter: Number.isFinite(n) ? n : null };
+  const season = m.kind === 'cinema' ? Number(prefix.split(':')[2]) || null : null;
+  return { kind: m.kind, key: m.key, label: m.label, seriesRef: prefix, title, episode: Number.isFinite(n) ? n : null, ...(season ? { season, format: 'series' } : {}) };
+}
+
 export function kindLabel(media, mode) {
   const reading = media?.kind === 'manga';
   const verb = reading ? 'قراءة معًا' : 'مشاهدة معًا';
@@ -264,7 +281,7 @@ export function createTogether(deps) {
     icon.innerHTML = reading
       ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z"/></svg>'
       : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor"/></svg>';
-    const kind = el('span', 'tg-card-kind', kindLabel(media, row.mode));
+    const kind = el('span', 'tg-card-kind', `${mediaKind(media)} · ${kindLabel(media, row.mode)}`);
     const live = el('span', 'tg-live', '…');
     top.append(icon, kind, live);
     // غلاف العمل بجانب العنوان
@@ -327,7 +344,9 @@ export function createTogether(deps) {
       status.textContent = !r.people.length
         ? 'ما فيه أحد داخل الحين'
         : `${names}${r.people.length > 2 ? ` و${r.people.length - 2} غيرهم` : ''} ${started ? (reading ? 'يقرؤون الحين' : 'يشاهدون الحين') : 'يتجهّزون'}`;
-      if (session?.code === row.code || (mine && !session)) enter.querySelector('span').textContent = 'ارجع للغرفة';
+      // داخل الغرفة أصلًا؟ لا «دخول» ثانية: الزر يفتحها كما هي
+      if (session?.code === row.code) { enter.querySelector('span').textContent = 'أنت في الغرفة · افتحها'; wrap.classList.add('is-mine'); }
+      else if (mine && !session) enter.querySelector('span').textContent = 'ارجع للغرفة';
     }).catch(() => { live.textContent = ''; });
     return wrap;
   }
@@ -445,6 +464,13 @@ export function createTogether(deps) {
       return () => { const i = surfaces.lastIndexOf(surface); if (i >= 0) surfaces.splice(i, 1); };
     },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    /** صورة الشخص الحقيقية (أو حرفه) — نفس أفاتارات التطبيق. */
+    avatar: (person, size) => deps.avatarNode(person, size),
+    /** صديق بمعرّفه (للمدعوين الذين لم يدخلوا بعد). */
+    person(userId) {
+      const f = deps.friends().find((x) => x.userId === userId);
+      return f ? { userId, displayName: f.displayName, avatarKey: f.avatarKey ?? null } : { userId, displayName: 'صديق', avatarKey: null };
+    },
     openInvite,
     card,
     mountStrip,
@@ -474,11 +500,19 @@ export function createTogether(deps) {
       return cfg;
     },
     /** يُستدعى من رابط/إشعار «#together=CODE». */
-    joinByCode(code, row) {
+    async joinByCode(code, row) {
       if (session?.code === code) return deps.openMedia(session.media, session);
-      const media = row ? (() => { try { return JSON.parse(row.media_json); } catch { return null; } })() : null;
+      let media = row ? (() => { try { return JSON.parse(row.media_json); } catch { return null; } })() : null;
+      let mode = row?.mode;
+      // الدعوة لم تصل بعد بالمزامنة؟ الغرفة نفسها تعرف العمل والحلقة
+      if (!media) {
+        const r = await info({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
+        if (!r) return ui().toast('انتهت الغرفة أو ما عاد لها وجود');
+        media = mediaFromRoom(r);
+        mode = r.mode ?? r.room?.mode ?? 'sync';
+      }
       if (!media) return ui().toast('ما لقينا الدعوة، افتحها من المجلس');
-      deps.openMedia(media, start(code, media, row.mode));
+      deps.openMedia(media, start(code, media, mode ?? 'sync'));
     },
   };
 }

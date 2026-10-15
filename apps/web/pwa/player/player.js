@@ -21,7 +21,9 @@ import { createSubtitleSession } from './subtitles.js';
 import { nextEpisodeCopies } from '../../addons/video.js';
 import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
 import { createTogetherPlayer } from './together-player.js';
-import { connectionLabel, stateLabel } from '../../v35/together.js';
+import { connectionLabel } from '../../v35/together.js';
+import { renderLobby, pendingInvitees } from './together-lobby.js';
+import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
 import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
 
 const START_TIMEOUT_MS = 15_000;
@@ -356,20 +358,49 @@ export function openPlayer(args) {
       sheetCleanup?.(); sheetCleanup = null;
       openSheet('مشاهدة معًا', null, body => { sheetCleanup = build(body); });
     }, closeSheet, toast: message });
+    // البنر والشعار وعنوان الحلقة: ما جاء مع الدعوة فورًا، ثم ما يُكمَّل من ani.zip/metahub.
+    // الحلقة تتغيّر في الغرفة؟ يتغيّر البنر والعنوان معها.
+    const inviteMedia = together.session.media ?? {};
+    let art = { banner: inviteMedia.banner ?? inviteMedia.cover ?? args.poster ?? null, logo: inviteMedia.logo ?? null, title: inviteMedia.title ?? args.title ?? '', episodeTitle: inviteMedia.episodeTitle ?? null };
+    let artEpisode = null;
+    const refreshArt = () => {
+      if (artEpisode === state.episode) return;
+      artEpisode = state.episode;
+      const same = Number(inviteMedia.episode) === state.episode;
+      const media = { ...inviteMedia, episode: state.episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
+      if (!same) art = { ...art, banner: inviteMedia.cover ?? args.poster ?? art.banner, episodeTitle: null };
+      void resolveArt(media).then((a) => {
+        if (artEpisode !== media.episode || state.closed) return;
+        art = { ...a, banner: a.banner ?? art.banner };
+        tg?.repaint();
+      });
+    };
     tg = createTogetherPlayer({ room: together.session.room, mode: together.session.mode, mediaPrefix: together.mediaPrefix, video,
       episode: () => state.episode, source: () => state.current?.code ?? null,
       onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
-      onLobby: ({ visible, prepared, blocked, host, connection, roster, start, resume }) => {
-        lobby.hidden = !visible; lobby.replaceChildren();
-        if (!visible) return;
-        lobby.append(el('strong', null, 'مشاهدة معًا'), el('p', null, connectionLabel(connection)));
-        const people = el('div', 'pp-lobby-people');
-        for (const m of roster) people.append(el('div', 'pp-lobby-person', `${m.name}${m.host ? ' · المضيف' : ''} · ${stateLabel(m.state)}`));
-        lobby.append(people);
-        const hint = blocked ? 'المتصفح يحتاج ضغطة منك لتشغيل الفيديو' : !prepared ? 'جاري تجهيز الفيديو من سيرفرك…' : host ? 'ابدأ عندما تكون جاهزًا؛ من يتأخر يلحق بكم' : 'فيديوك جاهز · بانتظار المضيف يبدأ…';
-        lobby.append(el('p', null, hint));
-        const b = el('button', 'pp-pill-btn pp-pill-btn--primary', blocked ? 'تابع معهم' : host ? 'ابدأ' : 'افتح لوحة الغرفة');
-        b.type = 'button'; b.disabled = !blocked && host && (!prepared || connection !== 'live'); b.onclick = blocked ? resume : host ? start : () => hub.openPanel(); lobby.append(b);
+      onLobby: (l) => {
+        lobby.hidden = !l.visible;
+        root.classList.toggle('pp--lobby', l.visible);
+        if (!l.visible) return;
+        refreshArt();
+        const media = together.session.media ?? {};
+        const c = state.current;
+        renderLobby(lobby, {
+          ...l,
+          art,
+          kindText: mediaKind(media),
+          episodeText: episodeLine(media, state.episode),
+          connectionText: connectionLabel(l.connection),
+          pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),
+          server: c ? { code: c.code, quality: fmtQ(c.quality ?? currentHeight()) } : null,
+        }, {
+          avatar: (p, size) => hub.avatar(p, size),
+          start: l.start,
+          resume: l.resume,
+          changeServer: () => showServers(),
+          leave: () => closePlayer(),
+          setOffset: (ms) => { const v = tg?.setOffset(ms) ?? 0; message(v ? `ديلاي فيديوك ${v > 0 ? '+' : '−'}${Math.abs(v / 1000).toFixed(1)} ث` : 'بدون ديلاي', 1200); },
+        });
       },
     });
     const off = hub.onChange(s => { if (s === together.session) return; tg?.destroy(); tg = null; lobby.remove(); strip.remove(); });
@@ -1082,8 +1113,40 @@ export function openPlayer(args) {
     });
   }
 
+  /** ديلاي فيديوك في الغرفة: لك وحدك، يتطبّق فورًا وتشوف الفرق وأنت تعدّل. */
+  function showOffset() {
+    if (!tg) return;
+    openSheet('ديلاي فيديوك', 'لك وحدك · ما يتغيّر شيء عند الباقين', (body) => {
+      const value = el('output', 'pp-offset__value');
+      value.setAttribute('aria-live', 'polite');
+      const paint = () => {
+        const v = tg?.offset() ?? 0;
+        value.textContent = v ? `${v > 0 ? '+' : '−'}${(Math.abs(v) / 1000).toFixed(1)} ث` : '0 ث';
+      };
+      const row = el('div', 'pp-offset');
+      row.dir = 'ltr';
+      for (const [label, delta] of [['−5', -5000], ['−0.5', -500], [null, 0], ['+0.5', 500], ['+5', 5000]]) {
+        if (label == null) { row.append(value); continue; }
+        const b = el('button', 'pp-offset__btn', label);
+        b.type = 'button';
+        b.setAttribute('aria-label', `${delta > 0 ? 'قدّم' : 'أخّر'} فيديوك ${Math.abs(delta) / 1000} ث`);
+        b.onclick = () => { tg?.setOffset((tg?.offset() ?? 0) + delta); paint(); };
+        row.append(b);
+      }
+      body.append(row);
+      body.append(el('p', 'pp-note', 'مصدرك فيه مقدمة أو مشهد زيادة عن الباقين؟ زِد (+) حتى تشوفون نفس اللحظة. أقل منهم؟ نقّص (−). يُحفظ لهذه الحلقة وهذا السيرفر.'));
+      const reset = sheetRow('بدون ديلاي', null, { onClick: () => { tg?.setOffset(0); paint(); } });
+      body.append(reset);
+      paint();
+    });
+  }
+
   function showMore() {
     openSheet('المزيد', null, (body) => {
+      if (tg) {
+        const v = tg.offset();
+        body.append(sheetRow('ديلاي فيديوك', v ? `${v > 0 ? '+' : '−'}${(Math.abs(v) / 1000).toFixed(1)} ث · لك وحدك` : 'لو مصدرك فيه مقدمة زيادة عن الباقين', { onClick: () => { closeSheet(); showOffset(); } }));
+      }
       if (subtitleSession.available()) body.append(sheetRow('الترجمة', null, { onClick: () => { closeSheet(); showSubtitles(); } }));
       if (isAnime) body.append(sheetRow('تخطي المقدمة والنهاية', skipStatusText(state.skip.result, state.skip.pending, clock), { onClick: () => { closeSheet(); showSkips(); } }));
       body.append(sheetRow('السرعة', state.speed === 1 ? 'عادية' : `${state.speed}×`, { onClick: () => { closeSheet(); showSpeed(); } }));
@@ -1291,31 +1354,38 @@ export function openPlayer(args) {
     if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
     if(addonMedia(c))video.crossOrigin="anonymous";else video.removeAttribute("crossorigin");
     let reason = null;
-    for (const [via, url] of paths) {
-      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
-      const out = await attempt(url, c.type);
-      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
-      if (out.ok) {
-        state.via = via;
-        state.started = true;
-        state.lastProgressAt = Date.now();
-        state.lastTime = video.currentTime;
-        if (seek > 0 && Number.isFinite(video.duration) && seek < video.duration * 1000 - 5000) video.currentTime = seek / 1000;
-        video.playbackRate = state.speed;
-        setBusy(false);
-        paint();
-        showControls();
-        subsBtn.hidden = !subtitleSession.available();
-        maybeLoadSkips();
-        mediaSession();
-        emit('server', { animeId: args.animeId ?? null, code: c.code, sourceId: c.sourceId, server: c.server, quality: c.quality ?? currentHeight() ?? null });
-        report();
-        tg?.ready();
-        return true;
+    // غرفة متزامنة لم تبدأ: الفيديو يُجهَّز بصمت ويقف عند البداية (لا صوت مفاجئ)
+    const quiet = tg?.waiting() ? video.muted : null;
+    if (quiet !== null) video.muted = true;
+    try {
+      for (const [via, url] of paths) {
+        if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
+        const out = await attempt(url, c.type);
+        if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
+        if (out.ok) {
+          state.via = via;
+          state.started = true;
+          state.lastProgressAt = Date.now();
+          state.lastTime = video.currentTime;
+          if (seek > 0 && Number.isFinite(video.duration) && seek < video.duration * 1000 - 5000) video.currentTime = seek / 1000;
+          video.playbackRate = state.speed;
+          setBusy(false);
+          paint();
+          showControls();
+          subsBtn.hidden = !subtitleSession.available();
+          maybeLoadSkips();
+          mediaSession();
+          emit('server', { animeId: args.animeId ?? null, code: c.code, sourceId: c.sourceId, server: c.server, quality: c.quality ?? currentHeight() ?? null });
+          report();
+          tg?.ready();
+          return true;
+        }
+        reason = out.reason;
+        // صورة «غير متاح» هي نفسها عبر الجالب: لا داعي للطريق الثاني
+        if (reason === 'placeholder') break;
       }
-      reason = out.reason;
-      // صورة «غير متاح» هي نفسها عبر الجالب: لا داعي للطريق الثاني
-      if (reason === 'placeholder') break;
+    } finally {
+      if (quiet !== null) video.muted = quiet;
     }
     state.failed.set(c.route, REASON[reason] ?? 'فشل التشغيل');
     return false;
