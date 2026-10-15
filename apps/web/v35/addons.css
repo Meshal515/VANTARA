@@ -975,3 +975,73 @@
 
 .addon-playback-health { font-size: 12.5px; opacity: 0.85; }
 .addon-playback-health.is-bad { color: #ffb070; opacity: 1; }
+
+/* ───── متجر المصادر: رأس مختصر، وبطاقة لكل مصدر بشعار موقعه ومعاينة من آخر ما نزل فيه ───── */
+.addon-store-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 14px;
+}
+.addon-store-title { flex: 1; min-width: 0; }
+.addon-store-title h2 { margin: 0; font-size: 22px; font-weight: 800; line-height: 1.35; letter-spacing: 0; color: var(--text, #f4f1fa); }
+.addon-store-actions { display: flex; gap: 8px; flex: none; }
+.addon-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  color: var(--text-2, #c9c3d8);
+  background: var(--surface-1, #121019);
+  cursor: pointer;
+}
+.addon-icon-btn:active { transform: scale(0.96); }
+.addon-icon-btn:disabled { opacity: 0.45; }
+.addon-add-link { color: var(--accent-text, #bba2ff); background: var(--accent-soft, rgba(143, 92, 255, 0.14)); border-color: transparent; }
+.addon-store[data-section-hub] .addon-group-head { display: none; }
+.addon-store .addon-group { display: grid; gap: 10px; }
+
+.addon-row.addon-src {
+  display: block;
+  padding: 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.065));
+  border-radius: 16px;
+  background: var(--surface-1, #121019);
+}
+.addon-row.addon-src:last-child { border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.065)); }
+.addon-row.addon-src:active { background: var(--surface-2, #19161f); }
+.addon-row.addon-src:focus-visible { outline: 2px solid var(--accent, #8f5cff); outline-offset: 2px; }
+.addon-src-top {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.addon-src .addon-logo { width: 46px; height: 46px; border-radius: 12px; font-size: 15px; }
+.addon-logo.has-image { background: #fff; border-color: transparent; color: transparent; }
+.addon-logo.has-image img { background: #fff; padding: 6px; box-sizing: border-box; }
+.addon-src-details { font-size: 12px; }
+.addon-src-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.addon-src-tile {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  background: var(--surface-2, #1b1823);
+}
+.addon-src-tile > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.addon-src-tile.is-loading { animation: addon-src-shimmer 1.2s ease-in-out infinite alternate; }
+@keyframes addon-src-shimmer { from { opacity: 0.55; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .addon-src-tile.is-loading { animation: none; } }
+.addon-row.addon-src[data-level="failed"] .addon-src-strip { opacity: 0.5; filter: grayscale(0.6); }
+/* اسم لاتيني (Team-X) في صفحة عربية: يبقى في بداية السطر لا يطفو لليسار */
+.addon-src .addon-row-main h3 { text-align: right; }

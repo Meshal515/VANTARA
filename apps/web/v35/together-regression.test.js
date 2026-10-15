@@ -34,10 +34,10 @@ it('keeps launch routing metadata when the server sends its minimal timeline med
 it('follows within a page, rejects older updates and catches up after separate mode', () => {
   const room=roomOf(), onFollow=vi.fn(); const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow});
   expect(bridge.initial()).toEqual({chapter:1,index:4.25});
-  room.emit('state',{state:{...room.timeline,pos:4.75,seq:2},by:'host'}); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:4.75});
+  room.emit('state',{state:{...room.timeline,pos:4.75,seq:2,at:5000},by:'host'}); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:4.75,at:5000}); // وقت الخادم يصل للضيف للاستكمال السلس
   room.emit('state',{state:{...room.timeline,pos:4.1,seq:1},by:'host'}); expect(onFollow).toHaveBeenCalledTimes(1);
   room.info.mode='free'; room.emit('state',{state:{...room.timeline,pos:6.2,seq:3},by:'host'}); expect(onFollow).toHaveBeenCalledTimes(1);
-  room.timeline={...room.timeline,pos:6.2,seq:3}; room.info.mode='sync'; room.emit('room',room.info); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:6.2}); bridge.destroy();
+  room.timeline={...room.timeline,pos:6.2,seq:3}; room.info.mode='sync'; room.emit('room',room.info); expect(onFollow).toHaveBeenLastCalledWith(expect.objectContaining({chapter:1,index:6.2})); bridge.destroy();
 });
 it('sends continuous scroll while the host keeps moving instead of debouncing indefinitely', () => {
   vi.useFakeTimers(); const room=roomOf(); room.isHost=room.canControl=true;

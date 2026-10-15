@@ -564,7 +564,7 @@ export function readerBridge(session, { seriesRef, onFollow }) {
     lastAppliedSeq = state.seq;
     const chapter = /#([^#]+)$/.exec(state.media?.key ?? '')?.[1];
     if (chapter == null) return;
-    onFollow({ chapter: Number(chapter), index: Math.max(0, state.pos) });
+    onFollow({ chapter: Number(chapter), index: Math.max(0, state.pos), at: Number.isFinite(state.at) ? state.at : null });
   }
   const offWelcome = room.on('welcome', (w) => { if (!room.isHost) apply(w.state, null); });
   const offMode = room.on('room', () => { if (synced()) { lastAppliedSeq = -1; apply(room.timeline, null); } });
