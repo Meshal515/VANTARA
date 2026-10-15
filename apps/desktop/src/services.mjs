@@ -5,8 +5,10 @@ import dns from 'node:dns/promises';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs, { mkdir, rm } from 'node:fs/promises';
-import { join, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { join, basename, resolve, sep } from 'node:path';
+import { tmpdir, freemem } from 'node:os';
+import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom } from './torrent-cache.mjs';
+import { planWindow, readNeedsRebuild, rangeStart, createHolePuncher } from './torrent-window.mjs';
 
 const secret = () => randomBytes(24).toString('hex');
 export function validateResourceRequest({url,method='GET',body=null,headers={},binary=false,follow=true}={}) {
@@ -164,6 +166,41 @@ async function localJSON(base,path,{body,signal,timeout=15000,auth}={}) {
     req.setTimeout(timeout,()=>req.destroy(new Error('انتهت مهلة بيانات التورنت')));req.on('error',reject);req.end(body);
   });
 }
+/** حقل القطع المنزّلة من rqbit (Msb0). */
+async function localBitfield(base,path,{signal,timeout=5000,auth}={}) {
+  return new Promise((resolve,reject) => {
+    const req=http.request(new URL(path,base),{method:'GET',signal,headers:{Authorization:`Basic ${Buffer.from(auth).toString('base64')}`,Accept:'application/octet-stream'}},res=>{
+      const chunks=[];let size=0;
+      res.on('data',c=>{size+=c.length;if(size>8*1024*1024){res.destroy();reject(new Error('حقل القطع كبير'));}else chunks.push(c);});
+      res.on('end',()=>res.statusCode>=400?reject(new Error('رفض محرك التورنت الطلب')):resolve({bits:Buffer.concat(chunks),length:Number(res.headers['x-bitfield-len'])}));
+      res.on('error',reject);
+    });
+    req.setTimeout(timeout,()=>req.destroy(new Error('انتهت مهلة حقل القطع')));req.on('error',reject);req.end();
+  });
+}
+/** هل المسار داخل المجلد فعلًا (بعد التطبيع)؟ */
+export function insideDir(file,dir,platform=process.platform) {
+  const norm=v=>{const r=resolve(String(v));return platform==='win32'?r.toLowerCase():r;};
+  const f=norm(file),d=norm(dir);
+  return f.startsWith(d.endsWith(sep)?d:d+sep);
+}
+const hasPiece=(bits,i)=>i>=0&&(i>>3)<bits.length&&((bits[i>>3]>>(7-(i&7)))&1)===1;
+/** نهاية المنزّل المتصل من موضع المشاهدة (بايت داخل الملف)، أو null. */
+export function contiguousEndFrom(bits,{fileOffset,fileLength,pieceLength,totalPieces},fromByte) {
+  if(!(pieceLength>0)||!Number.isFinite(fromByte))return null;
+  let piece=Math.floor((fileOffset+fromByte)/pieceLength);
+  const last=Math.min(totalPieces-1,Math.floor((fileOffset+fileLength-1)/pieceLength));
+  while(piece<=last&&hasPiece(bits,piece))piece++;
+  return Math.min(fileLength,Math.max(0,piece*pieceLength-fileOffset));
+}
+/** طول القطعة من عددها وحجم التورنت: قوة اثنين (المعيار)؛ وإلا القسمة المقرّبة لأعلى. */
+export function pieceLengthOf(totalBytes,totalPieces) {
+  if(!(totalPieces>0)||!(totalBytes>0))return 0;
+  const raw=Math.ceil(totalBytes/totalPieces);
+  const power=2**Math.ceil(Math.log2(raw));
+  return Math.ceil(totalBytes/power)===totalPieces?power:raw;
+}
+
 // list_only لا يبدأ تنزيل الفيلم: إعادة محاولة قصيرة ومحدودة تمنع
 // سقوط الجلسة بسبب 502/503 أو reset مؤقت أثناء جلب بيانات المغناطيس.
 export function retryableMetadataFailure(error) {
@@ -224,9 +261,10 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
+  const puncher=holePuncher??createHolePuncher(platform);
   const states=new Set(), resourceControllers=new Set();
   // Electron owns the single-instance lock before constructing services.
   // This directory contains only disposable session downloads.
@@ -241,7 +279,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearTimeout(state.firstFrameWatchdog);
+    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -250,6 +288,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
+      if(state.cacheParent)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
       if(state.subtitleDir)await rm(state.subtitleDir,{recursive:true,force:true}).catch(()=>{});
       states.delete(state);
@@ -303,6 +342,13 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const match=new RegExp(`^/${token}/(\\d+)$`).exec(req.url);
       if(!match||!mapping.has(match[1])){res.writeHead(404);return res.end();}
       let url=mapping.get(match[1]), upstream;
+      // التورنت: الرابط الحالي للمحرك (يتغيّر بعد إعادة البناء). قراءة من منطقة فُرّغت من القرص
+      // تنتظر إعادة بناء التورنت من تلك النقطة، فلا تصل للمشغّل أصفار أبدًا.
+      const start=rangeStart(req.headers.range);
+      if(torrent){
+        if(readNeedsRebuild(start,state.win?.evictedTo??0)){try{await rebuild(state);}catch{if(!res.headersSent)res.writeHead(503);return res.end();}}
+        url=state.streamUrl;
+      }
       const abort=new AbortController();req.once('close',()=>{if(!req.complete)abort.abort();});res.once('close',()=>abort.abort());
       const parentAbort=()=>abort.abort();state.controller.signal.addEventListener('abort',parentAbort,{once:true});
       try {
@@ -334,7 +380,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           const responseHeaders={'content-type':contentType,'cache-control':'no-store'};
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
           res.writeHead(upstream.statusCode,responseHeaders);
-          if(req.method==='HEAD'){upstream.destroy();res.end();}else { upstream.once('error',()=>res.destroy());upstream.once('aborted',()=>res.destroy());upstream.pipe(res); }
+          if(req.method==='HEAD'){upstream.destroy();res.end();}else {
+            if(torrent&&state.win){const token={};state.win.reader=token;let sent=0;upstream.on('data',c=>{sent+=c.length;if(state.win.reader===token)state.win.readPos=start+sent;});}
+            upstream.once('error',()=>res.destroy());upstream.once('aborted',()=>res.destroy());upstream.pipe(res);
+          }
         }
       }catch{upstream?.destroy();if(!res.headersSent)res.writeHead(502);res.end();}
       finally{state.controller.signal.removeEventListener('abort',parentAbort);}
@@ -346,7 +395,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function engine(state,candidate) {
     emit(state,{type:'playback/stage',stage:'engine-start'});
     const apiPort=await port();assertSession(state);
-    const dir=join(userData,'torrent-cache',secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
+    const chosen=await selectTorrentCacheRoot({userData,platform});assertSession(state);
+    state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
+    const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
+    emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
     state.auth=`vantara:${secret()}`;state.api=`http://127.0.0.1:${apiPort}`;
     const env=cleanEnv();env.RQBIT_HTTP_BASIC_AUTH_USERPASS=state.auth;
     const args=['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-upnp-port-forward','--disable-lsd','--disable-dht-persistence','--listen-port','0','server','start',dir,'--disable-persistence'];
@@ -363,23 +415,92 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const index=selectTorrentFile(metadata.details.files,candidate);
     emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
     let storage;
-    try { storage=await fs.statfs(userData,{bigint:true}); }
+    try { storage=await fs.statfs(dir,{bigint:true}); }
     catch { throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت؛ اختر مصدرًا آخر'); }
     assertSession(state);
     validateTorrentStorage(metadata.details.files[index],storage.bavail*storage.bsize);
+    // نافذة متحركة: قدّام بقدر المساحة، 50 ث ورا، والباقي يُفرّغ من القرص (torrent-window.mjs)
+    const files=metadata.details.files;
+    const fileOffset=files.slice(0,index).reduce((sum,f)=>sum+(Number(f.length)||0),0);
+    const totalBytes=files.reduce((sum,f)=>sum+(Number(f.length)||0),0);
+    const totalPieces=Number(metadata.details.total_pieces)||0;
+    state.win={index,magnet:candidate.magnet,fileLength:Number(files[index].length),fileOffset,totalPieces,pieceLength:pieceLengthOf(totalBytes,totalPieces),evictedTo:0,paused:false,readPos:null,filePath:null};
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
     const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:120000});assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
-    state.torrentId=added.id;
+    adopt(state,added);
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
-      if(state.statsPending||state.stopped)return;state.statsPending=true;
-      try{const stats=await localJSON(state.api,`/torrents/${added.id}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
+      if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
+      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
       }catch{}finally{state.statsPending=false;}
     },1000);
-    return makeProxy(state,`${state.api}/torrents/${added.id}/stream/${index}`,{},true);
+    state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
+    return makeProxy(state,state.streamUrl,{},true);
+  }
+  /** يسجّل تورنتًا مضافًا: رقمه ورابط بثه ومسار ملفه على القرص. */
+  function adopt(state,added) {
+    const w=state.win;
+    state.torrentId=added.id;
+    state.streamUrl=`${state.api}/torrents/${added.id}/stream/${w.index}`;
+    const folder=added.details?.output_folder??added.output_folder;
+    const file=added.details?.files?.[w.index];
+    const parts=Array.isArray(file?.components)&&file.components.length?file.components:file?.name?[file.name]:null;
+    w.filePath=folder&&parts?join(String(folder).replace(/^\\\\\?\\/,''),...parts.map(String)):null;
+    // لا نفرّغ خارج مجلد الجلسة أبدًا (ويندوز: لا فرق بين الحروف الكبيرة والصغيرة)
+    if(w.filePath&&!insideDir(w.filePath,state.cacheDir,platform))w.filePath=null;
+    w.evictedTo=0;w.paused=false;w.readPos=null;
+  }
+  /**
+   * رجوع لجزء فُرّغ: نحذف التورنت (وملفه) ونضيفه من جديد، فيبدأ rqbit من موضع القراءة
+   * بأولوية البث. يُستدعى من الوكيل قبل الرد على الطلب؛ طلبات متزامنة تنتظر نفس البناء.
+   */
+  function rebuild(state) {
+    if(state.rebuilding)return state.rebuilding;
+    const options={auth:state.auth,signal:state.controller.signal};
+    state.rebuilding=(async()=>{
+      emit(state,{type:'playback/retrying',message:'رجعت لجزء حُذف من الكاش لتوفير المساحة؛ نعيد تنزيله من هنا'});
+      await localJSON(state.api,`/torrents/${state.torrentId}/delete`,{...options,body:'',timeout:15000}).catch(()=>{});
+      assertSession(state);
+      const added=await localJSON(state.api,`/torrents?only_files=${state.win.index}&overwrite=true`,{...options,body:state.win.magnet,timeout:120000});
+      assertSession(state);
+      if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
+      adopt(state,added);
+    })().finally(()=>{state.rebuilding=null;});
+    return state.rebuilding;
+  }
+  /** نبضة النافذة: تفريغ ما خلف المشاهدة، وإيقاف/استئناف التنزيل حسب المساحة الحرة. */
+  async function windowTick(state) {
+    const w=state.win;
+    if(!w||state.stopped||state.windowBusy||state.rebuilding)return;
+    state.windowBusy=true;
+    const options={auth:state.auth,signal:state.controller.signal};
+    try {
+      const freeBytes=Number(await cacheFreeBytes(state.cacheDir));
+      let forwardCacheBytes=null;
+      if(state.ready&&state.socket&&!state.socket.destroyed){
+        try{const cache=await ipcCommand(state,['get_property','demuxer-cache-state']);const fw=Number(cache?.['fw-bytes']);if(Number.isFinite(fw))forwardCacheBytes=fw;}catch{}
+      }
+      const positionSeconds=Number.isFinite(state.progress.position)?state.progress.position/1000:null;
+      const durationSeconds=Number.isFinite(state.progress.duration)?state.progress.duration/1000:null;
+      let contiguousEnd=null;
+      try{
+        const {bits}=await localBitfield(state.api,`/torrents/${state.torrentId}/haves`,options);
+        const from=w.readPos!=null&&forwardCacheBytes!=null?Math.max(0,w.readPos-forwardCacheBytes):positionSeconds!=null&&durationSeconds>0?positionSeconds/durationSeconds*w.fileLength:null;
+        contiguousEnd=contiguousEndFrom(bits,w,from);
+      }catch{}
+      if(state.stopped||state.rebuilding)return;
+      const plan=planWindow({fileLength:w.fileLength,fileOffset:w.fileOffset,pieceLength:w.pieceLength,durationSeconds,positionSeconds,
+        readPos:w.readPos,forwardCacheBytes,contiguousEnd,evictedTo:w.evictedTo,freeBytes,paused:w.paused,buffering:state.mediaBuffering===true,limits:windowLimits});
+      if(plan.evictTo!=null&&w.filePath&&await puncher.punch(w.filePath,0,plan.evictTo))w.evictedTo=Math.max(w.evictedTo,plan.evictTo);
+      if(plan.action==='pause'&&!w.paused){await localJSON(state.api,`/torrents/${state.torrentId}/pause`,{...options,body:'',timeout:5000});w.paused=true;}
+      else if(plan.action==='resume'&&w.paused){await localJSON(state.api,`/torrents/${state.torrentId}/start`,{...options,body:'',timeout:5000});w.paused=false;}
+      if(plan.fail)return void fail(state,plan.fail);
+      emit(state,{type:'playback/cache',freeBytes,evictedBytes:w.evictedTo,downloadPaused:w.paused,...(plan.aheadSeconds!=null?{aheadSeconds:Math.round(plan.aheadSeconds)}:{})});
+    } catch { /* نبضة فاشلة لا تُسقط المشاهدة؛ التالية تحاول */ }
+    finally {state.windowBusy=false;}
   }
   function ipcCommand(state,command) {
     assertSession(state);
@@ -395,7 +516,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
     if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=15','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    // Keep MPV's *packet* cache in RAM, separate from rqbit's disk cache.
+    // Target about a minute ahead, but cap bytes to protect low-memory PCs.
+    const freeMemory=freemem();
+    const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
+    const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -488,7 +614,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
       for(const subtitle of embedded)void loadSubtitle(state,subtitle).catch(()=>{});
       return {started:true};
-    }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
+    }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
   }
   async function stopPlayback({session}={}) {
     const state=current;if(!state||state.session!==session)return;
@@ -565,12 +691,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
 }
 
 export function validateTorrentStorage(file,availableBytes) {
-  const length=file?.length;
-  if(!Number.isSafeInteger(length)||length<=0)throw new Error('حجم ملف التورنت غير معروف أو غير صالح؛ اختر مصدرًا آخر');
-  if(length>64*1024**3)throw new Error('هذا المصدر أكبر من 64 غيغابايت، وهو حد التخزين في النسخة التجريبية؛ اختر مصدرًا أصغر');
-  if(typeof availableBytes!=='bigint'||availableBytes<0n)throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت');
-  if(availableBytes<BigInt(length)+64n*1024n**2n)throw new Error('المساحة لا تكفي لملف التورنت واحتياط 64 ميغابايت؛ حرر مساحة أو اختر مصدرًا أصغر');
-  return length;
+  return validateStreamingHeadroom(file,availableBytes);
 }
 
 function subtitleLanguage(value) {

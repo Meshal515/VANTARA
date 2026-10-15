@@ -1,0 +1,108 @@
+name: VANTARA Windows PR195 evaluation package
+on:
+  push:
+    branches: ['chatgpt/windows-playback-sync-20261015']
+    paths: ['.github/workflows/windows-195-preview.yml']
+permissions:
+  contents: read
+concurrency:
+  group: vantara-windows-pr195-eval
+  cancel-in-progress: false
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify repository safety and fresh PWA shell digest
+        run: pnpm test:safety
+      - name: Test native torrent service and cache
+        run: node --test apps/desktop/src/services.test.mjs apps/desktop/src/torrent-cache.test.mjs
+      - name: Test Windows player and real-time invite behavior
+        run: pnpm exec vitest run apps/web/desktop/player.test.js apps/web/desktop/engine.test.js apps/web/desktop/together-player.test.js apps/web/v35/together-regression.test.js
+  host:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile video-host with Windows C# compiler
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-pr195-video-host
+          path: apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: error
+  package:
+    needs: [checks,host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-pr195-video-host
+          path: ${{ runner.temp }}/native
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install packagers
+        run: sudo apt-get update && sudo apt-get install -y nsis 7zip
+      - name: Build unprivileged installer and portable ZIP, both unsigned
+        run: |
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/native/vantara-video-host.exe" --output="$RUNNER_TEMP/pr195"
+          cd "$RUNNER_TEMP/pr195"
+          sha256sum -c SHA256SUMS.txt
+          test -s "VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-pr195-evaluation-unsigned
+          path: |
+            ${{ runner.temp }}/pr195/*-Setup.exe
+            ${{ runner.temp }}/pr195/*-x64.zip
+            ${{ runner.temp }}/pr195/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+  verify:
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-pr195-evaluation-unsigned
+          path: ${{ runner.temp }}/pr195
+      - name: Verify unsigned installer and real MPV binary on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'pr195'
+          $installer=Join-Path $root 'VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe'
+          $target=Join-Path $env:LOCALAPPDATA 'Programs\VANTARA-PR195-Evaluation'
+          $process=Start-Process -FilePath $installer -ArgumentList "/S /D=$target" -PassThru
+          if (-not $process.WaitForExit(180000)) {$process.Kill();throw 'Installer timeout'}
+          if ($process.ExitCode -ne 0) {throw "Installer exit $($process.ExitCode)"}
+          $exe=Join-Path $target 'VANTARA.exe'
+          if (-not (Test-Path $exe)) {throw 'Missing installed Electron exe'}
+          $native=Join-Path $target 'resources\app\native'
+          node tools/windows-native-smoke.mjs $native (Join-Path $root 'native-smoke.json')
+          if ($LASTEXITCODE -ne 0) {throw 'Real native MPV smoke failed'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-pr195-test-evidence
+          path: ${{ runner.temp }}/pr195/*smoke.json
+          if-no-files-found: warn

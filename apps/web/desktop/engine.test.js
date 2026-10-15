@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createDesktopEngine } from './engine.js';
 import { createDesktopRuntime } from './runtime.js';
 
@@ -215,4 +215,40 @@ it('مغادرة الغرفة قبل أول إطار تتيح مشاهدة ال�
  const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>Date.now()},timeline:{started:false,playing:false,pos:0,at:Date.now(),media:{key:'anime:owned#1'}},on:(name,fn)=>{listeners.set(name,fn);return()=>listeners.delete(name);},report(){},command(){}};
  await prepared(f);const best=await f.engine.best({session:'s'});
  try {await f.engine.play({session:'s',candidate:best.candidate,episode:1,together:{mediaPrefix:'anime:owned',session:{room,mode:'sync'},hub:{openPanel(){}}}});room.status='closed';listeners.get('connection')();f.emit({type:'playback/ready',session:'s'});expect(commands).toContainEqual({session:'s',command:'pause',value:false});}finally{await f.engine.closeSession({session:'s'});}
+});
+
+it('انقطاع الغرفة بعد التشغيل لا يوقف الفيديو أو يلغي مصادره',async()=>{
+ const f=fixture(),listeners=new Map(),commands=[];f.bridge.playbackCommand=async args=>{commands.push(args);};
+ const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>Date.now()},timeline:{started:true,playing:true,pos:2000,at:Date.now(),media:{key:'anime:owned#1'}},on:(name,fn)=>{listeners.set(name,fn);return()=>listeners.delete(name);},report(){},command(){}};
+ await prepared(f);const best=await f.engine.best({session:'s'});
+ try{
+   await f.engine.play({session:'s',candidate:best.candidate,episode:1,together:{mediaPrefix:'anime:owned',session:{room,mode:'sync'},hub:{openPanel(){}}}});
+   f.emit({type:'playback/ready',session:'s',position:2000});
+   room.status='closed';listeners.get('connection')();
+   expect((await f.engine.playerState({session:'s'})).together).toBe(false);
+   expect((await f.engine.routes({session:'s'})).routes.some(r=>r.state==='READY')).toBe(true);
+   await f.engine.playerCommand({session:'s',command:'pause',value:true});
+   expect(commands).toContainEqual({session:'s',command:'pause',value:true});
+ }finally{await f.engine.closeSession({session:'s'});}
+});
+
+it('دعوة الأصدقاء أثناء تشغيل الحلقة تلحق الغرفة بالمصدر نفسه وتبدأ من موضع المضيف',async()=>{
+  const f=fixture(),started=[],listeners=new Map();
+  const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>Date.now()},
+    timeline:{media:{key:'anime:owned#1'},started:false,playing:false,pos:0,at:Date.now()},
+    on(name,fn){const set=listeners.get(name)??new Set();set.add(fn);listeners.set(name,set);return()=>set.delete(fn);},
+    report(){},command(op,args){started.push({op,args});}};
+  const joined={room,mode:'sync'},hub={session:null,openPanel:vi.fn(),openInvite:vi.fn((media,{onStarted})=>{expect(media).toMatchObject({seriesRef:'anime:owned',episode:1});hub.session=joined;onStarted(joined);}),onChange:()=>()=>{}};
+  await prepared(f);const best=await f.engine.best({session:'s'});
+  try{
+    await f.engine.play({session:'s',candidate:best.candidate,animeId:'owned',episode:1,title:'حلقة اختبار',roomHub:hub});
+    f.emit({type:'playback/ready',session:'s'});
+    f.emit({type:'playback/progress',session:'s',position:23000,duration:120000,paused:false});
+    expect(f.engine.openPlayerRoom({session:'s'})).toBe(true);
+    expect(hub.openInvite).toHaveBeenCalledOnce();
+    expect(started).toEqual([{op:'play',args:{pos:23000}}]);
+    expect(f.starts).toHaveLength(1);
+    expect((await f.engine.playerState({session:'s'})).together).toBe(true);
+    f.engine.openPlayerRoom({session:'s'});expect(hub.openPanel).toHaveBeenCalledOnce();
+  }finally{await f.engine.closeSession({session:'s'});}
 });

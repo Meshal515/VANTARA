@@ -101,6 +101,8 @@ export function createTogether(deps) {
   // القارئ والمشغّل شاشات فوق الواجهة لها أوراقها وتنبيهاتها: ما يُفتح يظهر في الشاشة الظاهرة
   const surfaces = [];
   const ui = () => surfaces.at(-1) ?? deps;
+  const playerOnScreen = () => typeof document !== 'undefined' &&
+    (document.documentElement?.classList?.contains('pwa-playing') || !!document.querySelector('.desktop-player'));
 
   const emit = () => { for (const fn of listeners) try { fn(session); } catch { /* */ } };
   const personOf = (r) => ({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey });
@@ -293,7 +295,9 @@ export function createTogether(deps) {
       if (alive === false) return;
       // في الغرفة أصلًا: نفس الجلسة، بلا إعادة اتصال
       if (session?.code === row.code) {
-        deps.openMedia(session.media, session);
+        // Clicking the current invitation must not reopen an active player.
+        if(playerOnScreen()) openPanel();
+        else deps.openMedia(session.media, session);
         return;
       }
       const s = start(row.code, media, row.mode);
@@ -475,7 +479,7 @@ export function createTogether(deps) {
     },
     /** يُستدعى من رابط/إشعار «#together=CODE». */
     joinByCode(code, row) {
-      if (session?.code === code) return deps.openMedia(session.media, session);
+      if (session?.code === code) return playerOnScreen() ? openPanel() : deps.openMedia(session.media, session);
       const media = row ? (() => { try { return JSON.parse(row.media_json); } catch { return null; } })() : null;
       if (!media) return ui().toast('ما لقينا الدعوة، افتحها من المجلس');
       deps.openMedia(media, start(code, media, row.mode));

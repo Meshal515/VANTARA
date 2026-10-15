@@ -15,6 +15,9 @@ const styles=`
 .desktop-player-seek{flex:1}.desktop-player-time{direction:ltr;font-variant-numeric:tabular-nums;font-size:13px}
 .desktop-player-status{min-height:20px;color:#c5bdd5;font-size:13px}.desktop-player-status[data-error=true]{color:#ff8899}
 .desktop-player-url{display:flex;gap:8px;margin-top:8px}.desktop-player-url input{flex:1;min-width:160px;direction:ltr}
+.desktop-room-layer{position:fixed;inset:0;z-index:10005;background:#000a;display:grid;place-items:center;padding:20px;overflow:auto}
+.desktop-room-body{box-sizing:border-box;width:min(540px,95vw);max-height:85vh;overflow:auto;background:#15121c;border:1px solid #433651;border-radius:16px;padding:18px;color:#f3f4f8;direction:rtl}
+.desktop-room-close{display:block;margin:0 0 12px auto}
 @media(max-height:650px){.desktop-player header{min-height:48px;padding:8px 16px}.desktop-player-controls{padding:8px 16px;gap:6px}.desktop-player button,.desktop-player select{padding:5px 9px}}
 `;
 /** Real native video occupies .desktop-player-video. Chromium controls live in
@@ -22,7 +25,7 @@ const styles=`
 export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engine}={}) {
   if(!g.document?.body||typeof bridge?.playerViewport!=='function')return null;
   const doc=g.document;
-  let panel,video,status,seek,time,pause,subtitles,audio,source,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0;
+  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0;
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}};
   const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
@@ -34,10 +37,16 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     void bridge.playerViewport({session,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden}).catch(error=>tell(error.message,true));
   };
   const update=()=>{if(!panel)return;pause.textContent=paused?'تشغيل':'إيقاف مؤقت';pause.setAttribute('aria-label',paused?'تشغيل الفيديو':'إيقاف الفيديو مؤقتًا');seek.max=String(duration||1);seek.value=String(Math.min(position,duration||position));seek.disabled=!ready||!duration;time.textContent=`${clock(position)} / ${clock(duration)}`;};
-  const dismiss=()=>{observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
+  const closeRoomSheet=()=>{
+    const cleanup=roomModalCleanup;roomModalCleanup=null;roomModal?.remove();roomModal=null;
+    try{cleanup?.();}catch{}
+  };
+  const dismiss=()=>{closeRoomSheet();releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
   const close=async()=>{const id=session;if(!id)return;viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action});b.onclick=fn;return b;};
-  async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;}catch{}}
+  async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;
+      if(timing){timing.disabled=!state.together||typeof engine.setVideoOffset!=='function';timing.value=String((state.videoOffsetMs??0)/1000);}
+    }catch{}}
   function open(event){
     if(panel&&session===event.session){ready=false;tell('يجهز المصدر الجديد…');void sources();return;}
     dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;
@@ -55,12 +64,39 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     source=select('المصدر والجودة','source');source.onchange=async()=>{const id=session;source.disabled=true;try{await engine.switchSource({session:id,candidate:source.value,position});}catch(error){tell(error.message,true);}finally{if(session===id)void sources();}};
     audio=select('الصوت','audio');audio.onchange=()=>void command('audio-select',Number(audio.value));
     subtitles=select('الترجمة','subtitle');subtitles.append(node('option','إيقاف الترجمة',{value:'off'}));subtitles.onchange=()=>void command(subtitles.value==='off'?'subtitle-off':'subtitle-select',subtitles.value==='off'?undefined:Number(subtitles.value));
+    const timingLabel=node('label','توقيت الفيديو (ث)');
+    timing=node('input',null,{type:'number',min:-120,max:120,step:.25,value:0,'aria-label':'تقديم أو تأخير نسختي مع الأصدقاء بالثواني','data-control':'video-offset'});
+    timing.disabled=true;
+    timing.onchange=async()=>{const id=session;const ms=Number(timing.value)*1000;
+      if(!Number.isFinite(ms)||Math.abs(ms)>120000){tell('توقيت الفيديو من −120 إلى +120 ثانية',true);return;}
+      try {await engine.setVideoOffset({session:id,ms});if(session===id)void sources();}
+      catch(error){tell(error.message,true);if(session===id)void sources();}
+    };
+    timingLabel.append(timing);tracks.append(timingLabel);
     const delayLabel=node('label','تأخير الترجمة (ث)'),delay=node('input',null,{type:'number',min:-60,max:60,step:.25,value:0,'aria-label':'تأخير الترجمة بالثواني','data-control':'subtitle-delay'});delay.onchange=()=>void command('subtitle-delay',Number(delay.value)*1000);delayLabel.append(delay);tracks.append(delayLabel);
     const volumeLabel=node('label','الصوت'),volume=node('input',null,{type:'range',min:0,max:100,value:100,'aria-label':'مستوى الصوت'});volume.onchange=()=>void command('volume',Number(volume.value));volumeLabel.append(volume);tracks.append(volumeLabel);controls.append(tracks);
     const external=node('details'),summary=node('summary','تحميل ترجمة خارجية');external.append(summary);
     const form=node('form',null,{class:'desktop-player-url'}),url=node('input',null,{type:'url',required:'',placeholder:'https://…/subtitles.srt','aria-label':'رابط ترجمة HTTPS'}),submit=node('button','تحميل',{type:'submit'});form.append(url,submit);form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{await command('subtitle-load',{url:url.value,lang:'ar',label:'ترجمة خارجية',select:true});}finally{submit.disabled=false;}};external.append(form);external.ontoggle=()=>viewport();controls.append(external);
     status=node('div','يبدأ المحرك ويجهز بيانات الفيديو…',{class:'desktop-player-status',role:'status','aria-live':'polite'});controls.append(status);
-    panel.append(header,video,controls);doc.body.append(panel);update();void sources();
+    panel.append(header,video,controls);doc.body.append(panel);
+    const hub=engine.roomHub?.({session});
+    if(hub?.useSurface){
+      releaseRoomSurface=hub.useSurface({
+        openSheet:build=>{
+          closeRoomSheet();
+          const layer=node('section',null,{class:'desktop-room-layer',role:'dialog','aria-modal':'true'});
+          const body=node('div',null,{class:'desktop-room-body'});
+          const closeButton=button('إغلاق','room-close',closeRoomSheet);
+          closeButton.classList.add('desktop-room-close');
+          body.append(closeButton);layer.append(body);panel.append(layer);roomModal=layer;
+          roomModalCleanup=build(body)??null;
+          return closeRoomSheet;
+        },
+        closeSheet:closeRoomSheet,
+        toast:message=>tell(message),
+      });
+    }
+    update();void sources();
     if(g.ResizeObserver){observer=new g.ResizeObserver(()=>viewport());observer.observe(video);}
     viewport();header.querySelector('button')?.focus?.();
   }
@@ -71,7 +107,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='playback/ready'){ready=true;video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')void close();}
     if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
-    if(event.type==='playback/stage'){const text={'engine-start':'يبدأ محرك التورنت…',metadata:'يجلب بيانات المغناطيس…','file-selected':'حدد ملف الفيديو المطلوب','downloading':'يتصل بالسرب وينزل الفيديو…','player-start':'يفتح المشغل داخل VANTARA…','first-frame':'يفك ترميز أول إطار…'}[event.stage];if(text)tell(text);}
+    if(event.type==='playback/stage'){const text={'engine-start':'يبدأ محرك التورنت…',metadata:'يجلب بيانات المغناطيس…','file-selected':'حدد ملف الفيديو المطلوب','downloading':'يتصل بالسرب وينزل الفيديو…','player-start':'يفتح المشغل داخل VANTARA…','first-frame':'يفك ترميز أول إطار…'}[event.stage];if(text)tell(text);if(event.stage==='cache-selected')tell('مكان كاش التورنت: '+String(event.volume??'قرص مناسب'));}
     if(event.type==='playback/retrying')tell(event.message);
     if(event.type==='playback/subtitles'){tracks(subtitles,event.tracks??[],true);if(event.message)tell(event.message,true);}
     if(event.type==='playback/audio')tracks(audio,event.tracks??[]);
@@ -79,7 +115,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='playback/closed'){viewport(true);dismiss();if(fullscreen){fullscreen=false;void bridge.playerFullscreen({enabled:false});}}
   });
   const routeListener=engine.addListener?.('route',()=>void sources());
+  const togetherListener=engine.addListener?.('desktopTogether',event=>{if(event.session===session)void sources();});
   const keyboard=e=>{if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','Escape'].includes(e.key))e.preventDefault();if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
   g.addEventListener?.('keydown',keyboard);g.addEventListener?.('resize',viewport);
-  return {close,dispose(){void close();off?.();void routeListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
+  return {close,dispose(){void close();off?.();void routeListener?.remove?.();void togetherListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
 }

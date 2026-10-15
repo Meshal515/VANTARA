@@ -201,7 +201,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     async playerState({session}) {
       const s=sessionOf(session);
       return {title:s.playArgs?.title??'VANTARA',candidate:s.playArgs?.candidate,position:s.progress.position??0,
-        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')}))};
+        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },
     async playerCommand({session,command,value}) {
       const s=sessionOf(session);
@@ -210,7 +210,45 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       return bridge.playbackCommand({session,command,value});
     },
     async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
-    openPlayerRoom({session}){sessionOf(session).playArgs?.together?.hub?.openPanel?.();},
+    roomHub({session}){const s=sessionOf(session);return s.playArgs?.roomHub??s.playArgs?.together?.hub??null;},
+    openPlayerRoom({session}){
+      const s=sessionOf(session),args=s.playArgs,hub=args?.roomHub??args?.together?.hub;
+      if(!hub) {emit('desktopNotice',{session,message:'الغرفة غير متاحة لهذا التشغيل'});return false;}
+      if(s.together){hub.openPanel();return true;}
+      if(!s.nativeReady){emit('desktopNotice',{session,message:'انتظر بدء الفيديو أولًا قبل دعوة أصدقائك'});return false;}
+      const isCinema=args.section==='cinema';
+      const mediaPrefix=(isCinema?'cinema:':'anime:')+String(args.animeId);
+      const episode=Number(args.episode??s.episode)||1;
+      const media={kind:isCinema?'cinema':'anime',seriesRef:mediaPrefix,key:`${mediaPrefix}#${episode}`,
+        title:args.title??'VANTARA',cover:args.poster??null,label:`${args.title??'VANTARA'} — ${isCinema&&args.subtitleIdentity?.kind==='movie'?'فيلم':'الحلقة '+episode}`,
+        episode,...(isCinema&&args.subtitleIdentity?.season?{season:args.subtitleIdentity.season}:{})};
+      hub.openInvite(media,{onStarted:joined=>{
+        if(!current(s)||!s.nativeReady||!joined?.room)return;
+        const together={hub,session:joined,mediaPrefix};
+        s.playArgs={...s.playArgs,together};
+        s.bindTogether(together,true);
+        const room=joined.room;
+        let started=false;
+        const begin=()=>{
+          if(started||!current(s)||s.together==null||room.status!=='live'||!room.isHost)return;
+          if((room.info?.mode??joined.mode)!=='sync')return;
+          if(room.timeline?.started){started=true;return;}
+          started=true;
+          room.command('play',{pos:Math.max(0,s.progress.position??args.position??0)});
+        };
+        const off=room.on('connection',begin);
+        const offWelcome=room.on('welcome',begin);
+        begin();
+        const offState=room.on('state',()=>{if(room.timeline?.started){off();offWelcome();offState();}});
+      }});
+      return true;
+    },
+    setVideoOffset({session,ms}) {
+      const s=sessionOf(session);
+      if(!s.together)throw new Error('توقيت الفيديو متاح فقط أثناء المشاهدة مع الأصدقاء');
+      if(!s.together.setVideoOffset(ms))throw new Error('قيمة توقيت الفيديو غير صالحة');
+      return {videoOffsetMs:s.together.getVideoOffset()};
+    },
     async play(args) {
       const s = sessionOf(args.session), c = s.candidates.get(args.candidate);
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
@@ -222,19 +260,28 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       s.playing = true;s.nativeReady=false;s.resumeAfterDetach=false;
       try {
         s.together?.close();s.together=null;
-        if(args.together?.session?.room){
+        s.bindTogether=(together,keepPlayingWhileRoomStarts=false)=>{
+          if(!together?.session?.room)return false;
           let coordinator;
-          coordinator=createDesktopTogetherPlayer({together:args.together,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,
+          coordinator=createDesktopTogetherPlayer({together,keepPlayingWhileRoomStarts,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,
             onLobby:lobby=>emit('desktopTogether',{session:s.id,...lobby}),message:message=>emit('desktopNotice',{session:s.id,message}),
             onDetach:()=>{
               if(s.together!==coordinator)return;
-              if(!s.nativeReady||!args.together.session.room.timeline?.started){s.resumeAfterDetach=true;if(s.nativeReady){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}}
-              s.transitionGeneration=(s.transitionGeneration??0)+1;s.prepareGeneration=(s.prepareGeneration??0)+1;
-              s.controller.abort();s.controller=new AbortController();s.running=0;s.done=true;s.together=null;
+              if(!s.nativeReady||!together.session.room.timeline?.started){s.resumeAfterDetach=true;if(s.nativeReady){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}}
+              s.transitionGeneration=(s.transitionGeneration??0)+1;
+              // Room teardown must NEVER cancel or navigate an already-playing video.
+              // Only cancel a pending next-episode handoff whose result is now obsolete.
+              if(s.episodeTransitioning){
+                s.prepareGeneration=(s.prepareGeneration??0)+1;
+                s.controller.abort();s.controller=new AbortController();s.running=0;s.done=true;
+                s.episodeTransitioning=false;
+              }
+              s.together=null;
               emit('desktopTogether',{session:s.id,closed:true});
             },
             onEpisode:async n=>{
               const transition=s.transitionGeneration=(s.transitionGeneration??0)+1;
+              s.episodeTransitioning=true;
               const owned=()=>current(s)&&s.together===coordinator&&s.transitionGeneration===transition;
               s.episodeCopies??=[...s.copies.values()];
               const copies=s.episodeCopies.map(copy=>({...copy,episode:n,identity:copy.identity?{...copy.identity,episode:n}:copy.identity}));
@@ -244,11 +291,18 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
                 s.episode=n;s.copies.clear();s.routes.clear();s.candidates.clear();s.done=false;await startCopies(s,copies);
                 if(!owned())return;const next=choices(s).find(next=>next.sourceId===c.sourceId)??choices(s)[0];
                 if(!next)throw new Error('لا يوجد مصدر للحلقة الجديدة؛ اختر مصدرًا من التطبيق');
-                await engine.play({...args,candidate:next.id,episode:n,position:0,subtitleIdentity:args.subtitleIdentity?{...args.subtitleIdentity,episode:n}:null});
+                await engine.play({...args,together,candidate:next.id,episode:n,position:0,subtitleIdentity:args.subtitleIdentity?{...args.subtitleIdentity,episode:n}:null});
               }catch(error){if(owned()){coordinator.failed();emit('desktopNotice',{session:s.id,message:error.message});}}
+              finally{if(s.transitionGeneration===transition)s.episodeTransitioning=false;}
             }});
           s.together=coordinator;
-        }
+          if(s.nativeReady){
+            coordinator.progressEvent({session:s.id,type:'playback/progress',position:s.progress.position??args.position??0,duration:s.progress.duration,paused:false,buffering:false});
+            coordinator.ready();
+          }
+          return true;
+        };
+        if(args.together?.session?.room)s.bindTogether(args.together);
         const synced=args.together?.session?.room&&(args.together.session.room.info?.mode??args.together.session.mode)==='sync';
         const out = await bridge.startPlayback({ session: s.id, candidate: c, title: args.title ?? 'VANTARA', position: args.position ?? 0,...(synced?{pause:true}:{}) });
         if (!out?.started) throw new Error('لم يبدأ المشغل');
