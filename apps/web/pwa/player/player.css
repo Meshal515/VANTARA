@@ -1018,7 +1018,7 @@ html.pwa-playing body {
 .pwa-player .pl-row + .pl-row { box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.07); }
 .pwa-player .pl-row-icon { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 11px; background: var(--accent-soft); color: var(--accent-text); }
 .pwa-player .pl-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.pwa-player .pl-row-text small { font-size: 11.5px; font-weight: 700; color: var(--text-3); }
+.pwa-player .pl-row-text small { font-size: 11.5px; font-weight: 700; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pwa-player .pl-row-text b { font-size: 14.5px; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pwa-player .pl-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
 .pwa-player .pl-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
@@ -1077,36 +1077,128 @@ html.pwa-playing body {
 }
 .pwa-player .pl-wait i { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); animation: pp-pulse 1.2s ease-in-out infinite; }
 
-/* جوال أفقي (قصير): عمودان مضغوطان */
+/* ───── الجوال أفقي: البنر يملأ الشاشة، الشعار يمين، وعمود تحكم مضغوط يسار بلا تمرير ───── */
 @media (max-height: 500px) {
-  .pwa-player .pl-top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); }
-  .pwa-player .pl-main { gap: 18px; padding-top: 10px; padding-bottom: 14px; min-height: calc(100% - 50px); padding-inline: max(20px, env(safe-area-inset-left, 0px)); }
-  .pwa-player .pl-logo { max-height: 84px; }
-  .pwa-player .pl-title { font-size: 26px; }
-  .pwa-player .pl-ep { font-size: 14px; }
-  .pwa-player .pl-side { padding: 14px; gap: 10px; border-radius: 20px; }
-  .pwa-player .pl-person { width: 58px; }
-  .pwa-player .pl-face, .pwa-player .pl-face > :first-child { width: 46px !important; height: 46px !important; }
-  .pwa-player .pl-row { min-height: 44px; padding: 3px 6px; }
-  .pwa-player .pl-row-icon { display: none; }
-  .pwa-player .pl-hint { display: none; }
+  .pwa-player .pp-lobby { overflow: hidden; }
+  .pwa-player .pl-shade {
+    background:
+      linear-gradient(to left, rgba(7, 8, 12, 0.15) 0%, rgba(7, 8, 12, 0.35) 40%, rgba(7, 8, 12, 0.92) 64%, #07080c 100%),
+      linear-gradient(to top, rgba(7, 8, 12, 0.85), transparent 50%);
+  }
+  .pwa-player .pl-top {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+  }
+  .pwa-player .pl-chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+  .pwa-player .pl-leave { width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 50%; }
+  .pwa-player .pl-leave span { display: none; }
+  .pwa-player .pl-main {
+    box-sizing: border-box;
+    height: 100%;
+    min-height: 0;
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 46%);
+    gap: 22px;
+    padding: calc(env(safe-area-inset-top, 0px) + 56px) max(18px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 14px) max(18px, env(safe-area-inset-left, 0px));
+    align-items: end;
+  }
+  .pwa-player .pl-hero { align-self: end; padding-bottom: 6px; gap: 8px; }
+  .pwa-player .pl-logo { max-height: 78px; max-width: 100%; }
+  .pwa-player .pl-title { font-size: 24px; -webkit-line-clamp: 2; }
+  .pwa-player .pl-ep { font-size: 13px; gap: 8px; }
+  .pwa-player .pl-ep b { font-size: 14px; }
+  .pwa-player .pl-ep bdi { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pwa-player .pl-side {
+    align-self: stretch;
+    align-content: end;
+    gap: 9px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .pwa-player .pl-people { flex-wrap: nowrap; gap: 10px; overflow-x: auto; scrollbar-width: none; padding: 10px 2px 2px; }
+  .pwa-player .pl-person { width: 54px; flex: none; gap: 3px; }
+  .pwa-player .pl-face, .pwa-player .pl-face > :first-child { width: 44px !important; height: 44px !important; }
+  .pwa-player .pl-face::after { inset: -3px; box-shadow: 0 0 0 2.5px var(--ring, rgba(255, 255, 255, 0.18)); }
+  .pwa-player .pl-crown { font-size: 9px; top: -8px; padding: 0 5px; }
+  .pwa-player .pl-person b { font-size: 11.5px; margin-top: 2px; }
+  .pwa-player .pl-person small { font-size: 10.5px; }
+  .pwa-player .pl-headline { font-size: 13px; line-height: 1.35; }
+  .pwa-player .pl-card { gap: 0; padding: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+  .pwa-player .pl-row { min-height: 42px; padding: 2px 10px; gap: 8px; }
+  .pwa-player .pl-row-icon, .pwa-player .pl-hint, .pwa-player .pl-long, .pwa-player .pl-chip:first-child { display: none; }
+  .pwa-player .pl-row-text small { font-size: 10.5px; }
+  .pwa-player .pl-row-text b { font-size: 13px; }
+  .pwa-player .pl-mini { height: 28px; padding: 0 11px; font-size: 12px !important; }
+  .pwa-player .pl-step-btn { width: 28px; height: 28px; font-size: 16px !important; }
+  .pwa-player .pl-step output { min-width: 50px; font-size: 12.5px; }
   .pwa-player .pl-go, .pwa-player .pl-wait { height: 44px; font-size: 14.5px !important; }
-  .pwa-player .pl-chip:first-child { display: none; }
-  .pwa-player .pl-long { display: none; }
+  .pwa-player .pl-go { box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent); }
 }
-/* جوال عمودي / نافذة ضيقة: عمود واحد */
+
+/* ───── الجوال عمودي: بنر أعلى الشاشة والشعار على حافته، قائمة نظيفة، و«ابدأ» مثبّت أسفل ───── */
 @media (max-width: 760px) and (min-height: 501px) {
-  .pwa-player .pl-main { grid-template-columns: 1fr; align-content: start; gap: 22px; padding-inline: 18px; }
-  .pwa-player .pl-hero { justify-items: center; text-align: center; }
-  .pwa-player .pl-logo { object-position: center; max-height: 110px; }
-  .pwa-player .pl-ep { justify-content: center; }
-  .pwa-player .pl-shade { background: linear-gradient(to top, rgba(7, 8, 12, 0.98) 30%, rgba(7, 8, 12, 0.5) 75%, rgba(7, 8, 12, 0.75)); }
-  .pwa-player .pl-top { padding-inline: 16px; align-items: flex-start; }
-  .pwa-player .pl-side { padding: 16px; }
-  .pwa-player .pl-row { padding-inline: 4px; gap: 8px; }
-  .pwa-player .pl-row-icon { display: none; }
+  .pwa-player .pp-lobby { --banner: min(46vh, 380px); }
+  .pwa-player .pl-bg { inset: 0 0 auto; height: var(--banner); }
+  .pwa-player .pl-bg img { animation-duration: 30s; }
+  .pwa-player .pl-shade { background: linear-gradient(to top, #07080c 0%, rgba(7, 8, 12, 0.72) 30%, rgba(7, 8, 12, 0.05) 65%, rgba(7, 8, 12, 0.55) 100%); }
+  .pwa-player .pl-top {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
+    align-items: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 0;
+  }
+  .pwa-player .pl-chips { flex-wrap: nowrap; overflow: hidden; }
+  .pwa-player .pl-chip { height: 28px; font-size: 11.5px; background: rgba(7, 8, 12, 0.45); }
+  .pwa-player .pl-leave { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; background: rgba(7, 8, 12, 0.45) !important; }
+  .pwa-player .pl-leave span { display: none; }
+  .pwa-player .pl-main {
+    display: block;
+    min-height: 100%;
+    max-width: 560px;
+    padding: calc(var(--banner) - 118px) 18px 0;
+  }
+  .pwa-player .pl-hero { justify-items: center; text-align: center; gap: 10px; margin-bottom: 22px; }
+  .pwa-player .pl-logo { object-position: center; max-height: 96px; max-width: 86%; }
+  .pwa-player .pl-title { font-size: 30px; text-align: center; }
+  .pwa-player .pl-ep { justify-content: center; font-size: 14px; }
+  .pwa-player .pl-ep bdi { opacity: 0.85; }
+  .pwa-player .pl-side {
+    display: block;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  /* الأشخاص: وجوه كبيرة في صف يتمرّر أفقيًا */
+  .pwa-player .pl-people { flex-wrap: nowrap; justify-content: center; gap: 16px; overflow-x: auto; scrollbar-width: none; padding: 12px 4px 4px; margin-inline: -18px; padding-inline: 18px; }
+  .pwa-player .pl-people::-webkit-scrollbar { display: none; }
+  .pwa-player .pl-person { width: 70px; flex: none; }
+  .pwa-player .pl-face, .pwa-player .pl-face > :first-child { width: 60px !important; height: 60px !important; }
+  .pwa-player .pl-headline { margin: 14px 0 18px; text-align: center; font-size: 14.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.82); }
+  /* الإعدادات: قائمة مجمّعة */
+  .pwa-player .pl-card { gap: 0; padding: 0; border-radius: 18px; background: #12141c; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+  .pwa-player .pl-row { min-height: 60px; padding: 6px 14px; gap: 12px; }
+  .pwa-player .pl-row-icon { width: 34px; height: 34px; border-radius: 10px; }
   .pwa-player .pl-long { display: none; }
+  .pwa-player .pl-hint { padding: 0 14px 12px; font-size: 11.5px; }
   .pwa-player .pl-step output { min-width: 52px; }
+  /* «ابدأ» مثبّت أسفل الشاشة فوق تدرّج، بمسافة الحافة السفلية */
+  .pwa-player .pl-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin: 18px -18px 0;
+    padding: 18px 18px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    background: linear-gradient(to top, #07080c 60%, rgba(7, 8, 12, 0));
+  }
+  .pwa-player .pl-go, .pwa-player .pl-wait { height: 56px; border-radius: 18px; font-size: 16.5px !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pwa-player .pl-bg img { animation: none; }

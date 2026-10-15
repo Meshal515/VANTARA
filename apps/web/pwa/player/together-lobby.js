@@ -146,7 +146,7 @@ export function renderLobby(host, m, a) {
   const dIcon = el('span', 'pl-row-icon');
   dIcon.innerHTML = ICON.clock;
   const dText = el('span', 'pl-row-text');
-  dText.append(el('small', null, 'ديلاي فيديوك (لك وحدك)'), el('b', null, m.offset ? 'مضبوط على مصدرك' : 'بدون'));
+  dText.append(el('small', null, 'ديلاي فيديوك · لك وحدك'), el('b', null, m.offset ? 'مضبوط على مصدرك' : 'بدون'));
   const step = el('div', 'pl-step');
   step.dir = 'ltr';
   const out = el('output', null, offsetLabel(m.offset));
