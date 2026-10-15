@@ -551,7 +551,7 @@ class TogetherPlayer(
         background = rounded(0x0DFFFFFF, context.dp(16).toFloat())
         val v = offsetMs
         val text = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        text.addView(context.label("ديلاي فيديوك (لك وحدك)", 11.5f, Tone.TEXT_3, bold = true))
+        text.addView(context.label("ديلاي فيديوك · لك وحدك", 11.5f, Tone.TEXT_3, bold = true).apply { maxLines = 1 })
         text.addView(context.label(if (v == 0L) "بدون" else "مضبوط على مصدرك", 14f, Color.WHITE, bold = true))
         addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (v != 0L) addView(button("صفّر", primary = false) { setOffset(0) }.apply { setPadding(context.dp(12), context.dp(6), context.dp(12), context.dp(6)); textSize = 12.5f },
@@ -598,9 +598,13 @@ class TogetherPlayer(
             val banner = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0f }
             root.addView(banner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp -> if (bmp != null) { banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start() } }
+            // معتم تحت عمود التحكم (يسار) وشفاف فوق البنر، وتعتيم سفلي تحت الشعار
             root.addView(View(context).apply {
-                background = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, intArrayOf(0xF507080C.toInt(), 0xDB07080C.toInt(), 0x7007080C, 0xA607080C.toInt()))
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF07080C.toInt(), 0xEB07080C.toInt(), 0x5907080C, 0x2607080C))
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            root.addView(View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xD907080C.toInt(), 0x0007080C))
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(170), Gravity.BOTTOM))
 
             // الأعلى: نوع الغرفة والاتصال · اطلع من الغرفة
             val top = LinearLayout(context).apply {
@@ -619,10 +623,10 @@ class TogetherPlayer(
             // المحتوى: البطل (يمين) + البطاقة (يسار)
             val main = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+                gravity = Gravity.BOTTOM
                 setPadding(context.dp(28), context.dp(58), context.dp(28), context.dp(14))
             }
-            val hero = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL or Gravity.START }
+            val hero = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM or Gravity.START }
             val title = context.label(launch.title ?: "مشاهدة معًا", 26f, Color.WHITE, bold = true).apply {
                 maxLines = 3
                 setShadowLayer(context.dp(12).toFloat(), 0f, context.dp(3).toFloat(), 0x99000000.toInt())
@@ -643,12 +647,11 @@ class TogetherPlayer(
             ep.addView(context.label(episodeText(), 16f, Tone.ACCENT_TEXT, bold = true))
             launch.episodeTitle?.let { ep.addView(context.label(it, 14.5f, 0xC8FFFFFF.toInt()).apply { setPadding(context.dp(10), 0, 0, 0); maxLines = 1; textDirection = View.TEXT_DIRECTION_FIRST_STRONG }) }
             hero.addView(ep)
-            main.addView(hero, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = context.dp(24) })
+            main.addView(hero, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = context.dp(24); bottomMargin = context.dp(4) })
 
             val side = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
-                background = rounded(0xB30D0F16.toInt(), context.dp(24).toFloat(), context.dp(1), 0x17FFFFFF)
+                gravity = Gravity.BOTTOM
             }
             lobbySide = side
             val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false; isFillViewport = false; addView(side) }
