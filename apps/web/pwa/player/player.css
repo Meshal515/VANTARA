@@ -718,3 +718,137 @@ html.pwa-playing body {
 .pwa-player:has(.pp-together) .pp-scrim { z-index: 20; }
 .pwa-player:has(.pp-together) .pp-sheet { z-index: 21; }
 @media (max-width: 600px) { .pwa-player .pp-together { top: 68px; right: 8px; } .pwa-player:has(.pp-together) .pp-top { padding-inline-end: max(20px, env(safe-area-inset-right, 0px)); } }
+
+/* ───────── الكمبيوتر (ويندوز): ماوس، صوت، ملء الشاشة، لوحات جانبية ───────── */
+.pwa-player .pp-desk[hidden] { display: none; }
+@media not all and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-desk { display: none !important; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-touch { display: none !important; }
+  /* المؤشر يختفي مع التحكم أثناء المشاهدة */
+  .pwa-player:not(.pp--shown):not(.pp--sheet) { cursor: none; }
+  .pwa-player .pp-icon:hover { background: rgba(255, 255, 255, 0.12); }
+  .pwa-player .pp-play:hover { background: rgba(255, 255, 255, 0.14) !important; }
+  .pwa-player .pp-bar:hover .pp-track { height: 5px; }
+  .pwa-player .pp-bar:hover .pp-thumb { width: 14px; height: 14px; margin: -7px 0 0 -7px; }
+  .pwa-player .pp-row-item:hover,
+  .pwa-player .pp-tile:hover,
+  .pwa-player .pp-ep:hover { filter: brightness(1.18); }
+}
+.pwa-player .pp-icon.is-on { color: var(--accent-text); background: var(--accent-soft); }
+
+/* الصوت: الزر والشريط يتمدّد عند المرور */
+.pwa-player .pp-volume { display: flex; align-items: center; }
+.pwa-player .pp-volume__range {
+  --level: 100%;
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, #fff var(--level), rgba(255, 255, 255, 0.28) var(--level));
+  cursor: pointer;
+  transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease;
+}
+.pwa-player .pp-volume:hover .pp-volume__range,
+.pwa-player .pp-volume:focus-within .pp-volume__range { width: 88px; opacity: 1; margin: 0 10px 0 2px; }
+.pwa-player .pp-volume__range::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+.pwa-player .pp-volume__range::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+
+/* معاينة الوقت فوق الشريط + علامات المقدمة والنهاية */
+.pwa-player .pp-hover {
+  position: absolute;
+  bottom: 34px;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.92);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pwa-player .pp-hover[hidden] { display: none; }
+.pwa-player .pp-marks { position: absolute; inset-inline: 0; top: 50%; height: 3px; margin-top: -1.5px; pointer-events: none; }
+.pwa-player .pp-marks i { position: absolute; inset-block: 0; background: rgba(251, 191, 36, 0.75); border-radius: 2px; }
+
+/* زر التخطي: ظاهر وحده فوق شريط التحكم، كالـAPK */
+.pwa-player .pp-skip {
+  position: absolute;
+  z-index: 6;
+  right: max(28px, env(safe-area-inset-right, 0px));
+  bottom: 150px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #0a0c12 !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.pwa-player .pp-skip svg { width: 16px; height: 16px; }
+.pwa-player .pp-skip[hidden] { display: none; }
+.pwa-player:not(.pp--shown) .pp-skip { bottom: 40px; }
+
+/* لوحتا الشبكة والاختصارات */
+.pwa-player .pp-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13.5px;
+}
+.pwa-player .pp-metric span { color: var(--text-2); }
+.pwa-player .pp-metric b { font-variant-numeric: tabular-nums; text-align: end; }
+.pwa-player .pp-metric--ok b { color: var(--ok); }
+.pwa-player .pp-metric--warn b { color: var(--warn); }
+.pwa-player .pp-metric--bad b { color: var(--bad); }
+.pwa-player kbd {
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--surface-3);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--line);
+  font: 700 12.5px/1.2 ui-monospace, 'Vantara Sans', monospace;
+  white-space: nowrap;
+}
+.pwa-player .pp-clip p { direction: ltr; }
+
+/* شاشة عريضة: اللوحات جانبية يمينية بدل ورقة تغطي الفيديو (مثل لوحات الـAPK) */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-scrim { background: linear-gradient(to left, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.08) 60%); }
+  .pwa-player .pp-sheet,
+  .pwa-player .pp-sheet--subtitle-adjust {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: 400px;
+    max-height: none;
+    padding: 24px 22px;
+    border-radius: 0;
+    box-shadow: inset 1px 0 0 var(--line), -30px 0 80px rgba(0, 0, 0, 0.45);
+    transform: translateX(100%);
+  }
+  .pwa-player.pp--sheet .pp-sheet,
+  .pwa-player.pp--sheet .pp-sheet--subtitle-adjust { transform: translateX(0); }
+  .pwa-player .pp-sheet__grip { display: none; }
+  .pwa-player .pp-sheet__head strong { font-size: 19px; }
+  .pwa-player .pp-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pwa-player .pp-episodes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .pwa-player .pp-titles strong { font-size: 18px; }
+  .pwa-player .pp-titles small { font-size: 13.5px; }
+}
