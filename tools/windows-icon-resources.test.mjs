@@ -65,3 +65,22 @@ test('rejects malformed icon offsets', () => {
   damaged.writeUInt32LE(ico.length, 18);
   assert.throws(() => iconFrames(damaged), /Invalid ICO image/);
 });
+
+
+test('accepts a moved unchanged relocation table only when its PE loader directory follows it', () => {
+  const upstream = executable();
+  upstream.writeUInt16LE(3, 134);
+  upstream.write('.reloc', 472);
+  upstream.writeUInt32LE(512, 480); upstream.writeUInt32LE(0x12000, 484);
+  upstream.writeUInt32LE(512, 488); upstream.writeUInt32LE(62000, 492);
+  upstream.writeUInt32LE(0x12000, 304); upstream.writeUInt32LE(12, 308);
+  upstream.writeUInt32LE(0x1000, 62000); upstream.writeUInt32LE(12, 62004);
+  upstream.writeUInt16LE(0xa008, 62008);
+  const branded = Buffer.from(upstream);
+  branded.writeUInt32LE(0x13000, 484); branded.writeUInt32LE(0x13000, 304);
+  assert.equal(verifyElectronPayload(branded, upstream), true);
+  branded.writeUInt32LE(0x12000, 304);
+  assert.throws(() => verifyElectronPayload(branded, upstream), /altered Electron section .reloc/);
+  branded.writeUInt32LE(0x13000, 304); branded[62008] ^= 1;
+  assert.throws(() => verifyElectronPayload(branded, upstream), /altered Electron section .reloc/);
+});

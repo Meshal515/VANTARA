@@ -81,13 +81,18 @@ export function verifyElectronPayload(branded, upstream) {
       const raw = bytes.readUInt32LE(offset + 20), size = bytes.readUInt32LE(offset + 16);
       sections.set(name, { rva: bytes.readUInt32LE(offset + 12), bytes: bytes.subarray(raw, raw + size) });
     }
-    return { machine: bytes.readUInt16LE(pe + 4), entryPoint: bytes.readUInt32LE(optional + 16), sections };
+    const directories = optional + (bytes.readUInt16LE(optional) === 0x20b ? 112 : 96);
+    return { machine: bytes.readUInt16LE(pe + 4), entryPoint: bytes.readUInt32LE(optional + 16), relocationRva: bytes.readUInt32LE(directories + 40), relocationSize: bytes.readUInt32LE(directories + 44), sections };
   }
   const original = payload(upstream), changed = payload(branded);
   if (original.machine !== 0x8664 || changed.machine !== original.machine || changed.entryPoint !== original.entryPoint || changed.sections.size !== original.sections.size) throw new Error('Branded executable differs from pinned Electron payload');
   for (const [name, originalSection] of original.sections) {
     const changedSection = changed.sections.get(name);
-    if (!changedSection || originalSection.rva !== changedSection.rva || !originalSection.bytes.equals(changedSection.bytes)) throw new Error(`Branded executable altered Electron section ${name}`);
+    // UpdateResource may move the trailing relocation table when .rsrc shrinks.
+    // Its bytes must remain identical and the loader directory must point to it.
+    const movedRelocations = name === '.reloc' && original.relocationRva === originalSection.rva &&
+      changed.relocationRva === changedSection?.rva && original.relocationSize === changed.relocationSize;
+    if (!changedSection || (!movedRelocations && originalSection.rva !== changedSection.rva) || !originalSection.bytes.equals(changedSection.bytes)) throw new Error(`Branded executable altered Electron section ${name}`);
   }
   if (!original.sections.has('.text')) throw new Error('Electron code section missing');
   return true;

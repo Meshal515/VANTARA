@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.3
+name: Publish verified VANTARA Windows 0.2.3 # branded resource layout verified
 on:
   push:
     branches: ['codex/windows-current-installer-20261016']
