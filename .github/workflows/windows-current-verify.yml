@@ -1,4 +1,4 @@
-name: Verify and publish immutable Windows 0.2.3 candidate
+name: Verify and publish immutable Windows 0.2.3 candidate # locale-independent shortcut reader
 on:
   push:
     branches: ['codex/windows-current-installer-20261016']

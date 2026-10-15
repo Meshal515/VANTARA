@@ -36,12 +36,17 @@ foreach ($linkPath in @(
   (Join-Path ([Environment]::GetFolderPath('Programs')) 'VANTARA\إزالة VANTARA.lnk')
 )) {
   if (-not (Test-Path -LiteralPath $linkPath)) { throw "Missing installed shortcut: $linkPath" }
-  $link = $shell.CreateShortcut($linkPath)
+  # Read identical shortcut bytes through an ASCII filename: WSH's filename
+  # lookup can depend on the runner locale for an Arabic .lnk name.
+  $readPath = Join-Path $env:RUNNER_TEMP ("vantara-link-" + [Guid]::NewGuid().ToString('N') + '.lnk')
+  Copy-Item -LiteralPath $linkPath -Destination $readPath
+  $link = $shell.CreateShortcut($readPath)
   $expectedExe = if ([IO.Path]::GetFileName($linkPath) -eq 'إزالة VANTARA.lnk') { 'Uninstall.exe' } else { 'VANTARA.exe' }
   $expectedTarget = Join-Path $InstallDir $expectedExe
   @{shortcut=$linkPath;target=$link.TargetPath;icon=$link.IconLocation;expected=$expectedTarget;targetExists=(Test-Path -LiteralPath $link.TargetPath)} | ConvertTo-Json -Compress | Write-Host
   if ([VantaraShortcutPath]::Long($link.TargetPath) -ne [VantaraShortcutPath]::Long($expectedTarget)) { throw "Incorrect shortcut target: $linkPath actual=$($link.TargetPath) expected=$expectedTarget" }
   if ([VantaraShortcutPath]::Long(($link.IconLocation -replace '\s*,\s*0$', '')) -ne [VantaraShortcutPath]::Long($expectedTarget)) { throw "Shortcut does not use the branded executable icon: $linkPath" }
+  Remove-Item -LiteralPath $readPath
   $links += @{ name = [IO.Path]::GetFileName($linkPath); desktop = ([IO.Path]::GetDirectoryName($linkPath) -eq [Environment]::GetFolderPath('Desktop')); brandedIcon = $true }
 }
 $entry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA'
