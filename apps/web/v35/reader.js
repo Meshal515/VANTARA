@@ -1596,7 +1596,12 @@ export function openSmartReader(deps, ctx) {
   const follow = tg?.initial() ?? null;
   const followRow = follow ? sequence.find((r) => Number(r.number) === follow.chapter) : null;
   if (followRow) void openChapter(followRow, { startAt: follow.index });
+  // من زر «اقرأ مع أصدقائك» في صفحة العمل: الفصل المختار يفتح ثم ورقة الدعوة مباشرة
   else void openChapter(ctx.row);
+  if (!followRow && ctx.inviteTogether && hub && !tg) {
+    const waitRow = setInterval(() => { if (state.row) { clearInterval(waitRow); if (!tg) openTogetherInvite(); } }, 150);
+    setTimeout(() => clearInterval(waitRow), 15000);
+  }
 
   stopNativeLifecycle = listenFollowForeground((e) => {
     nativeForeground = e?.active !== false;
