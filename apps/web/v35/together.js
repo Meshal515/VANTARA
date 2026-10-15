@@ -146,10 +146,10 @@ export function createTogether(deps) {
     return r ? personOf(r) : { displayName: name, avatarKey: null };
   };
 
-  function start(code, media, mode) {
+  function start(code, media, mode, invited = null) {
     leave();
     const room = join({ baseUrl: deps.baseUrl(), code, getToken: token });
-    const s = { code, media, mode, room, strips: new Set(), offs: [], art: null };
+    const s = { code, media, mode, room, invited, strips: new Set(), offs: [], art: null };
     session = s;
     // فن شاشة الغرفة يُجهَّز من الآن، فيصل للمشغّل الأصلي جاهزًا عند التسليم
     const artOf = deps.resolveArtImpl ?? (typeof window !== 'undefined' ? resolveArt : null);
@@ -257,7 +257,7 @@ export function createTogether(deps) {
           ui().closeSheet();
           const n = everyone ? 'الكل' : picked.size === 1 ? deps.friends().find((f) => picked.has(f.userId))?.displayName : `${picked.size} أشخاص`;
           ui().toast(`انرسلت الدعوة لـ${n}`);
-          start(code, media, mode);
+          start(code, media, mode, everyone ? deps.friends().map(f => f.userId) : invitees);
           if (onStarted) onStarted(session);
           else deps.openMedia(media, session);
         } catch (error) {
@@ -501,7 +501,7 @@ export function createTogether(deps) {
       if (!isNative()) return { hub: this, session, mediaPrefix: seriesRef };
       const media = session.media ?? {};
       const art = session.art ?? {};
-      const invited = session.room.info?.invited;
+      const invited = session.room.info?.invited ?? session.invited;
       const cfg = {
         baseUrl: deps.baseUrl(), code: session.code, token: token(), mode: session.room.info?.mode ?? session.mode, mediaPrefix: seriesRef,
         // شاشة الغرفة في المشغّل الأصلي: نفس بنر الويب وشعاره وعنوانه
