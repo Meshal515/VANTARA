@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.3 # branded resource layout verified
+name: Publish verified VANTARA Windows 0.2.3 # verify long shortcut paths after NSIS installation
 on:
   push:
     branches: ['codex/windows-current-installer-20261016']
