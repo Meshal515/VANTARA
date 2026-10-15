@@ -38,7 +38,7 @@ it('a late initial layout cannot overwrite the newest host position',async()=>{
   expect(document.querySelector('#rdScroll').scrollTop).toBeCloseTo(100,0);
   reader.destroy();expect([...events.values()].every(set=>!set.size)).toBe(true);
 });
-it('host scrolling never broadcasts fractions measured from an unloaded skeleton',async()=>{
+it.each([true,false])('reports decoded positions, never placeholder fractions (host=%s)',async(isHost)=>{
   vi.useFakeTimers();vi.resetModules();
   const {window,document}=parseHTML('<html><body></body></html>');
   document.visibilityState='visible';
@@ -58,7 +58,7 @@ it('host scrolling never broadcasts fractions measured from an unloaded skeleton
   Object.defineProperty(window.HTMLElement.prototype,'clientHeight',{get:()=>500,configurable:true});
   let id=0;const frames=new Map();vi.stubGlobal('requestAnimationFrame',fn=>{frames.set(++id,fn);return id;});vi.stubGlobal('cancelAnimationFrame',i=>frames.delete(i));
   const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();const tasks=[...frames.values()];frames.clear();tasks.forEach(fn=>fn(1000));};
-  const room={isHost:true,me:'host',status:'live',info:{mode:'sync'},clock:{serverNow:()=>1000},
+  const room={isHost,me:isHost?'host':'guest',status:'live',info:{mode:'sync'},clock:{serverNow:()=>1000},
     timeline:{media:{key:'manga:solo#1',kind:'manga'},started:true,pos:0,seq:1},report:vi.fn(),command:vi.fn(),on:()=>()=>{}};
   const session={room,mode:'sync',media:{kind:'manga',seriesRef:'solo'}};
   const hub={session,useSurface:()=>()=>{},mountStrip:()=>()=>{}};
@@ -67,10 +67,12 @@ it('host scrolling never broadcasts fractions measured from an unloaded skeleton
   const reader=openSmartReader({sync:{user:{userId:'h'},rows:()=>[],enqueue:vi.fn()},engine:{pages:async()=>Array.from({length:8},(_,i)=>({url:`/${i}`})),pageImage:async()=>({src:'fixture'})},together:hub,mount:n=>document.body.append(n),exit(){}},
     {title:'Manga',seriesRef:'solo',rows:[row],row});
   await flush();
-  const scroll=document.querySelector('#rdScroll');scroll.scrollTop=100;scroll.dispatchEvent(new window.Event('scroll'));
+  const scroll=document.querySelector('#rdScroll');
+  if(isHost){scroll.scrollTop=100;scroll.dispatchEvent(new window.Event('scroll'));}
   await flush();
   expect(room.command).not.toHaveBeenCalled();
   decode();await flush();await flush();
-  expect(room.command).toHaveBeenLastCalledWith('seek',{pos:100/6000});
+  if(isHost)expect(room.command).toHaveBeenLastCalledWith('seek',{pos:100/6000});
+  else {expect(room.command).not.toHaveBeenCalled();expect(room.report).toHaveBeenCalledWith(expect.objectContaining({pos:0,state:'playing'}));}
   reader.destroy();
 });

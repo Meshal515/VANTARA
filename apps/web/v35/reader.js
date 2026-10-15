@@ -205,7 +205,7 @@ export function openSmartReader(deps, ctx) {
     // صور تكمل تحميلها فتتغير الأطوال: نعيد وضع الموضع المعروض فقط (الحركة الجارية تحسبه كل إطار)
     if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number) && !followFrame) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
     // Loading an image changes the host's fractional anchor even without scrolling.
-    if (!following()) reportScroll();
+    reportScroll();
   }) : null;
   function reportScroll() {
     if (exited || !tg || !state.seg || scrollReportFrame) return;
@@ -780,7 +780,7 @@ export function openSmartReader(deps, ctx) {
     slot.frame.replaceChildren(img);
     tickActive();
     slot.loaded = true;
-    if (!following()) reportScroll();
+    reportScroll();
     tickActive();
     slot.src = src;
   }
