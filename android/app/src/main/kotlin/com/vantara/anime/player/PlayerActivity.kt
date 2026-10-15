@@ -47,7 +47,6 @@ import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import com.vantara.addons.*
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
@@ -483,9 +482,9 @@ class PlayerActivity : Activity() {
 
         MediaCache.acquire(this)
         player = ExoPlayer.Builder(this)
-            // آخر 40 ثانية تبقى في الذاكرة: معاينة المقطع (حتى 35 ث قبل اللحظة)
-            // والعودة للحظة بعد إغلاقه بلا تنزيل ولا انتظار
-            .setLoadControl(DefaultLoadControl.Builder().setBackBuffer(BACK_BUFFER_MS, true).build())
+            // الهدف 50–120 ثانية أمامك، مع ميزانية ذاكرة حسب الجهاز.
+            // الرجوع والمقاطع يستفيدان أيضًا من كاش القرص، ولا يزاحمان الأمام بـ40ث RAM ثابتة.
+            .setLoadControl(PlaybackBuffering.create(Runtime.getRuntime().maxMemory()))
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
             .build()
@@ -2079,7 +2078,6 @@ class PlayerActivity : Activity() {
         const val SEEK_MS = 10_000L
         const val STREAK_MS = 800L
         const val BEST_WAIT_MS = 45_000L
-        const val BACK_BUFFER_MS = 40_000
         const val WAIT_NEXT_MS = 60_000L
 
         private val json = Json { encodeDefaults = true }
