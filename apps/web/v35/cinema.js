@@ -1553,7 +1553,9 @@ export function createCinema(deps) {
             episodeTitle: m.type === 'series' ? epMeta?.title ?? null : null,
             episode: togetherEp,
             season: m.type === 'series' ? season : null,
-          }, { onStarted: () => { sheet.autoTogether = true; withFriends.remove(); queuePaint(); } });
+          // ورقة الدعوة أغلقت ورقة السيرفرات (طبقة أوراق واحدة) وأوقفت تجهيزها: نعيد فتحها،
+          // والغرفة الآن نشطة فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
+          }, { onStarted: () => play(m, season, n) });
         }, 'شاهد مع أصدقائك');
         foot.append(withFriends);
       }

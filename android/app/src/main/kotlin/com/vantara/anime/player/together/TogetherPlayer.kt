@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.vantara.anime.player.Glyph
 import com.vantara.anime.player.Tone
 import com.vantara.anime.player.dp
 import com.vantara.anime.player.label
@@ -53,7 +54,7 @@ data class Invitee(val userId: String, val displayName: String = "صديق", val
 
 /**
  * Together داخل المشغّل الأصلي:
- *  - غرفة الانتظار قبل البداية (المتزامن): أفاتاراتكم جنب بعض و«جاري التجهيز… جاهز ✓»، والمضيف يضغط «ابدأ».
+ *  - غرفة الانتظار قبل البداية (المتزامن): أفاتاراتكم جنب بعض و«جاري التجهيز… جاهز»، والمضيف يضغط «ابدأ».
  *  - من يدخل بعد البداية يدخل على طول عند الثانية الحالية.
  *  - كل 500ms: متحكّم الانحراف (سرعة متناسبة أو قفز)، ولا تصحيح أثناء التحميل.
  *  - تشغيل/إيقاف/تقديم المضيف أوامر للغرفة؛ غيره في المتزامن لا يحرّك أحدًا.
@@ -144,6 +145,9 @@ class TogetherPlayer(
     fun start() {
         client.connect()
         main.post(tick)
+        // غرفة متزامنة: شاشة الغرفة من أول لحظة (الأصدقاء، سيرفرك وزر «غيّر»)، لا شاشة سوداء
+        // تنتظر الإطار الأول. إن كانت الغرفة بدأت فعلًا يخفيها الترحيب ويقفز للثانية الحالية.
+        if (launch.mode == "sync") showLobby()
     }
 
     fun destroy() {
@@ -176,7 +180,7 @@ class TogetherPlayer(
     fun onPreparing() {
         ready = false
         failedSource = null
-        if (synced && client.timeline?.started != true) mute(true)
+        if (synced && client.timeline?.started != true) { mute(true); showLobby() }
         report("preparing", force = true)
         paintLobby()
     }
@@ -186,8 +190,9 @@ class TogetherPlayer(
         if (!ready) {
             ready = true
             preparedEpisode = hooks.episode()
-            if (synced && t != null && !t.started) {
-                // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ»
+            if (synced && t?.started != true) {
+                // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ».
+                // حالة الغرفة لم تصل بعد (السيرفر أسرع من الاتصال)؟ نفس الشيء؛ الترحيب يقفز إن كانت بدأت.
                 withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
                 mute(false)
                 report("ready", force = true)
@@ -246,11 +251,12 @@ class TogetherPlayer(
     override fun onWelcome() {
         // A fast local source can become ready before the WebSocket welcome.
         // Reconcile that first frame with the room instead of playing behind the lobby.
-        if (synced && ready) client.timeline?.let { t ->
-            if (!t.started) {
-                withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
-                showLobby()
-            } else jumpToRoom(t)
+        val t = client.timeline
+        // دخول متأخر (الغرفة بدأت) أو غرفة منفصلة: لا شاشة انتظار
+        if (!synced || t?.started == true) hideLobby() else showLobby()
+        if (synced && ready && t != null) {
+            if (!t.started) withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
+            else jumpToRoom(t)
         }
         paintStrip()
         report(stateNow(), force = true)
@@ -271,7 +277,7 @@ class TogetherPlayer(
     override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
     override fun onMode(mode: String) {
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
-        if (mode != "sync") withApplying { hooks.player.setPlaybackSpeed(1f) }
+        if (mode != "sync") { hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
     }
     override fun onStatus(userId: String, name: String, state: String, source: String?) {
         if (userId == client.me) return
@@ -730,9 +736,17 @@ class TogetherPlayer(
         side.addView(offsetRow(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6) })
 
         // الأفعال
-        val action = if (client.isHost) button("▶  ابدأ للجميع", primary = true) { if (ready) client.command("play", 0.0) else hooks.message("نجهّز فيديوك…") }.apply {
-            textSize = 15.5f
+        // أيقونة التشغيل مرسومة (Glyph) لا رمز نصي: الجوال يعرض «▶» إيموجي
+        val action = if (client.isHost) LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            background = rounded(Tone.ACCENT, context.dp(22).toFloat())
             alpha = if (ready) 1f else 0.5f
+            contentDescription = "ابدأ للجميع"
+            addView(ImageView(context).apply { setImageDrawable(Glyph(Glyph.Kind.PLAY, Color.WHITE)) }, LinearLayout.LayoutParams(context.dp(20), context.dp(20)).apply { marginEnd = context.dp(8) })
+            addView(context.label("ابدأ للجميع", 15.5f, Color.WHITE, bold = true))
+            setOnClickListener { if (ready) client.command("play", 0.0) else hooks.message("نجهّز فيديوك…") }
         } else context.label("●  بانتظار المضيف يبدأ", 14.5f, 0xD9FFFFFF.toInt(), bold = true).apply {
             gravity = Gravity.CENTER
             setPadding(0, context.dp(13), 0, context.dp(13))

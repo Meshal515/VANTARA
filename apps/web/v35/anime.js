@@ -1316,11 +1316,9 @@ export function createAnime(deps) {
             episodeTitle: state.malTitles?.[n] ?? m.thumbs?.[n]?.title ?? null,
             episode: n,
           }, {
-            onStarted: () => {
-              sheet.autoTogether = true;
-              withFriends.remove();
-              queuePaint();
-            },
+            // ورقة الدعوة أغلقت ورقة السيرفرات وأوقفت تجهيزها: نعيد فتحها والغرفة نشطة،
+            // فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
+            onStarted: () => playEpisode(m, n),
           });
         }, 'شاهد مع أصدقائك');
         foot.append(withFriends);
