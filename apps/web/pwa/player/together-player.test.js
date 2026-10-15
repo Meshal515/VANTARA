@@ -40,7 +40,7 @@ describe('web Together player uses Android room protocol', () => {
   });
   it('keeps host controls on the wire and guest controls out of it', () => {
     vi.useFakeTimers(); const h = fixture(true); h.bridge.ready(); h.bridge.playPause(true); h.bridge.seek(80000);
-    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });
+    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0, countdownMs: 3000 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });
     const g = fixture(); g.bridge.ready(); g.bridge.playPause(true); g.bridge.seek(80000); expect(g.room.command).not.toHaveBeenCalled();
     h.bridge.destroy(); g.bridge.destroy();
   });
@@ -76,7 +76,7 @@ describe('web Together player uses Android room protocol', () => {
     const h = fixture(true); h.bridge.ready();
     expect(h.bridge.setOffset(10_049)).toBe(10_000);
     expect(h.video.currentTime).toBe(10);
-    h.bridge.playPause(true); expect(h.room.command).toHaveBeenLastCalledWith('play', { pos: 0 });
+    h.bridge.playPause(true); expect(h.room.command).toHaveBeenLastCalledWith('play', { pos: 0, countdownMs: 3000 });
     h.bridge.seek(70_000); expect(h.room.command).toHaveBeenLastCalledWith('seek', { pos: 60_000 });
     h.receive({ ...h.room.timeline, started: true, playing: false, pos: 60_000, seq: 2 });
     expect(h.video.currentTime).toBe(70);

@@ -1,10 +1,12 @@
 /**
  * شاشة الغرفة («مشاهدة معًا» قبل البدء) داخل المشغّل — للكمبيوتر والجوال.
  *
- *   بنر الحلقة خلفية · شعار العمل أو اسمه · الحلقة وعنوانها
- *   الأفاتارات بحالاتها (جاهز / يجهّز / تعذّر) والمدعوون الذين لم يدخلوا «بانتظار…»
- *   سيرفرك وحالته (جاهز ومتوقف عند البداية) وزر تغييره · ديلاي فيديوك أنت
- *   المضيف: «ابدأ للجميع» · الضيف: «بانتظار المضيف» · «اطلع من الغرفة»
+ *   خلفية: بنر العمل صافيًا بلا ضبابية، وتعتيم من الأسفل فقط.
+ *   أعلى: «مشاهدة معًا» ونقطة الاتصال، وزر خروج.
+ *   الشعار (أو الاسم) كبيرًا وتحته سطر واحد: النوع · الحلقة · عنوانها.
+ *   شريط سفلي واحد: الوجوه متراكبة (المدعو ينبض حتى يدخل) · جملة حالة واحدة حيّة ·
+ *   سطر السيرفر «KWM · 720p · جاهز · غيّر» · «⋯» (فيه ديلاي فيديوك) · زر البدء بلون القسم.
+ *   عند «ابدأ»: عدّ 3-2-1 مشترك يبدأ بعده الكل في اللحظة نفسها.
  *
  * عرض فقط: كل القرارات عند together-player.js والمشغّل.
  */
@@ -26,7 +28,8 @@ const btn = (cls, html, onClick, label) => {
   return b;
 };
 const ICON = {
-  leave: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 8l-4 4 4 4M5 12h10"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  more: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>',
   play: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5.5 19 12 8 18.5Z"/></svg>',
   server: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M12 7.25h5M12 16.75h5"/></svg>',
   clock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
@@ -42,27 +45,40 @@ export function pendingInvitees(invited, roster, me, personOf) {
   return invited.filter((id) => id !== me && !inside.has(id)).map((id) => personOf(id));
 }
 
-/** سطر الحالة الكبير تحت الأشخاص. */
-export function lobbyHeadline({ host, prepared, failed, blocked, connection, roster, pending }) {
+/** أسماء قصيرة: «منصور» / «منصور ودحمي» / «منصور ودحمي و2 غيرهم». */
+const names = (list) => `${list.slice(0, 2).join(' و')}${list.length > 2 ? ` و${list.length - 2} غيرهم` : ''}`;
+
+/** جملة الحالة الواحدة في الشريط — حيّة وبلا تكرار. */
+export function lobbyHeadline({ host, me = null, prepared, failed, blocked, connection, roster = [], pending = [] }) {
   if (connection !== 'live') return connection === 'reconnecting' ? 'انقطع الاتصال · نعيد الاتصال…' : 'جاري الاتصال بالغرفة…';
   if (blocked) return 'المتصفح يحتاج ضغطة منك لتشغيل الفيديو';
-  if (failed) return 'تعذّر تشغيل سيرفرك · اختر سيرفرًا آخر';
-  if (!prepared) return 'نجهّز فيديوك من سيرفرك…';
-  const waitingFor = pending.length ? `بانتظار ${pending.slice(0, 2).map((p) => p.displayName).join(' و')}${pending.length > 2 ? ` و${pending.length - 2} غيرهم` : ''}…` : '';
-  const notReady = roster.filter((r) => r.state === 'preparing' || r.state === 'failed').length;
-  if (host) return waitingFor || (notReady ? `${roster.length - notReady} من ${roster.length} جاهزين · ابدأ متى ما تبي` : 'الكل جاهز · ابدأ متى ما تبي');
-  return waitingFor ? `فيديوك جاهز · ${waitingFor}` : 'فيديوك جاهز ومتوقف عند البداية · بانتظار المضيف';
+  if (failed) return 'تعذّر سيرفرك · اختر سيرفرًا آخر';
+  if (!prepared) return 'نجهّز فيديوك…';
+  const others = roster.filter((r) => r.userId !== me);
+  const waiting = pending.map((p) => p.displayName);
+  const broken = others.filter((r) => r.state === 'failed').map((r) => r.name);
+  const preparing = others.filter((r) => r.state === 'preparing').map((r) => r.name);
+  if (waiting.length) return `${names(waiting)} ${waiting.length > 1 ? 'ما دخلوا' : 'ما دخل'} بعد`;
+  if (broken.length) return `سيرفر ${names(broken)} تعذّر`;
+  if (preparing.length) return `${names(preparing)} ${preparing.length > 1 ? 'يجهّزون' : 'يجهّز'}…`;
+  if (!others.length) return host ? 'فيديوك جاهز · ابدأ متى ما تبي' : 'فيديوك جاهز · بانتظار المضيف';
+  return host ? 'الكل جاهز' : 'الكل جاهز · بانتظار المضيف';
 }
 
 /**
  * @param {HTMLElement} host
- * @param {object} m النموذج
- * @param {object} a الأفعال
+ * @param {object} m النموذج: art, kindText, episodeText, roster, pending, me, host, prepared, failed, blocked,
+ *   connection, server{code,quality}, offset, accent, countdownTo, now()
+ * @param {object} a الأفعال: avatar, start, resume, changeServer, leave, setOffset
  */
 export function renderLobby(host, m, a) {
+  clearInterval(host._countdown);
+  const moreOpen = host.querySelector('.pl-more')?.hidden === false;
   host.replaceChildren();
   host.classList.toggle('is-host', m.host);
-  // الخلفية: بنر الحلقة
+  if (m.accent) host.style.setProperty('--pl-accent', m.accent);
+
+  // الخلفية: البنر صافيًا، وتعتيم من الأسفل فقط حيث النص
   const bg = el('div', 'pl-bg');
   if (m.art.banner) {
     const img = new Image();
@@ -74,16 +90,13 @@ export function renderLobby(host, m, a) {
   }
   bg.append(el('i', 'pl-shade'));
 
-  // الأعلى: اطلع · نوع الغرفة والاتصال
+  // الأعلى: «مشاهدة معًا» ونقطة الاتصال · خروج
   const top = el('div', 'pl-top');
-  const chips = el('div', 'pl-chips');
-  chips.append(el('span', 'pl-chip', `${m.kindText} · مشاهدة معًا · متزامنة`));
-  const conn = el('span', `pl-chip pl-conn is-${m.connection === 'live' ? 'ok' : 'warn'}`);
-  conn.append(el('i'), el('span', null, m.connectionText));
-  chips.append(conn);
-  top.append(chips, btn('pl-leave', `${ICON.leave}<span>اطلع من الغرفة</span>`, a.leave));
+  const live = el('span', `pl-live is-${m.connection === 'live' ? 'ok' : 'warn'}`);
+  live.append(el('i'), el('span', null, m.connection === 'live' ? 'مشاهدة معًا' : (m.connectionText ?? 'جاري الاتصال…')));
+  top.append(live, btn('pl-close', ICON.close, a.leave, 'اطلع من الغرفة'));
 
-  // البطل: الشعار أو الاسم + الحلقة
+  // الشعار أو الاسم، وسطر واحد تحته
   const hero = el('div', 'pl-hero');
   const name = el('h1', 'pl-title', m.art.title);
   name.dir = 'auto';
@@ -92,87 +105,82 @@ export function renderLobby(host, m, a) {
     logo.className = 'pl-logo';
     logo.alt = m.art.title;
     logo.src = m.art.logo;
-    // لا شعار؟ الاسم الطبيعي
-    logo.onload = () => { if (logo.naturalWidth > 1) name.replaceWith(logo); };
+    logo.onload = () => { if (logo.naturalWidth > 1 && name.isConnected) name.replaceWith(logo); };
   }
   hero.append(name);
-  if (m.episodeText || m.art.episodeTitle) {
-    const ep = el('p', 'pl-ep');
-    if (m.episodeText) ep.append(el('b', null, m.episodeText));
-    if (m.art.episodeTitle) { const t = el('bdi', null, m.art.episodeTitle); ep.append(t); }
-    hero.append(ep);
+  const meta = [...new Set([m.kindText, m.episodeText].filter(Boolean))];
+  if (m.art.episodeTitle) meta.push(m.art.episodeTitle);
+  if (meta.length) { const line = el('p', 'pl-meta', meta.join(' · ')); line.dir = 'auto'; hero.append(line); }
+
+  // الشريط: الوجوه · الحالة والسيرفر · ⋯ والبدء
+  const bar = el('div', 'pl-bar');
+  const faces = el('div', 'pl-faces');
+  const people = [...m.roster].sort((x, y) => Number(y.host) - Number(x.host));
+  const shown = [
+    ...people.map((r) => ({ person: { userId: r.userId, displayName: r.name, avatarKey: r.avatarKey ?? null }, state: r.state, host: r.host, label: `${r.userId === m.me ? 'أنت' : r.name} · ${r.state === 'failed' ? 'تعذّر السيرفر' : r.state === 'preparing' ? 'يجهّز' : stateLabel(r.state)}` })),
+    ...m.pending.map((p) => ({ person: p, state: 'pending', host: false, label: `${p.displayName} · ما دخل بعد` })),
+  ];
+  for (const f of shown.slice(0, 5)) {
+    const face = el('span', `pl-face is-${f.state}${f.host ? ' is-host' : ''}`);
+    face.title = f.label;
+    face.setAttribute('aria-label', f.label);
+    face.append(a.avatar(f.person, 44));
+    faces.append(face);
   }
+  if (shown.length > 5) faces.append(el('span', 'pl-face pl-more-count', `+${shown.length - 5}`));
 
-  // الأشخاص
-  const people = el('div', 'pl-people');
-  for (const r of m.roster) {
-    const p = el('div', `pl-person is-${r.state}`);
-    const face = el('span', 'pl-face');
-    face.append(a.avatar({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey ?? null }, 64));
-    if (r.host) face.append(el('em', 'pl-crown', 'المضيف'));
-    p.append(face, el('b', null, r.userId === m.me ? 'أنت' : r.name), el('small', null, r.state === 'failed' ? 'تعذّر السيرفر' : r.state === 'preparing' ? 'يجهّز…' : stateLabel(r.state)));
-    people.append(p);
-  }
-  for (const person of m.pending) {
-    const p = el('div', 'pl-person is-pending');
-    const face = el('span', 'pl-face');
-    face.append(a.avatar(person, 64));
-    p.append(face, el('b', null, person.displayName), el('small', null, 'بانتظاره…'));
-    people.append(p);
-  }
+  const info = el('div', 'pl-info');
+  const status = el('p', `pl-status${m.failed ? ' is-bad' : ''}`, lobbyHeadline(m));
+  status.setAttribute('role', 'status');
+  const server = el('p', 'pl-server');
+  const code = el('bdi', null, m.server?.code ? `${m.server.code}${m.server.quality ? ` · ${m.server.quality}` : ''}` : 'سيرفرك');
+  const state = el('span', `pl-server-state is-${m.failed ? 'bad' : m.prepared ? 'ok' : 'warn'}`, m.failed ? 'تعذّر' : m.prepared ? 'جاهز' : 'يتجهّز…');
+  server.append(code, el('span', 'pl-dot', '·'), state, btn('pl-link', 'غيّر', a.changeServer, 'غيّر السيرفر'));
+  info.append(status, server);
 
-  const headline = el('p', `pl-headline${m.failed ? ' is-bad' : ''}`, lobbyHeadline(m));
-  headline.setAttribute('role', 'status');
+  const cta = el('div', 'pl-cta');
+  const moreBtn = btn('pl-icon', ICON.more, () => { more.hidden = !more.hidden; moreBtn.setAttribute('aria-expanded', String(!more.hidden)); }, 'المزيد');
+  moreBtn.setAttribute('aria-expanded', String(moreOpen));
+  cta.append(moreBtn);
+  if (m.blocked) cta.append(btn('pl-go', `${ICON.play}<span>تابع معهم</span>`, a.resume));
+  else if (m.host) {
+    const go = btn('pl-go', `${ICON.play}<span>ابدأ</span>`, a.start, 'ابدأ للجميع');
+    go.disabled = !m.prepared || m.connection !== 'live';
+    cta.append(go);
+  } else cta.append(el('span', 'pl-wait', 'بانتظار المضيف'));
+  bar.append(faces, info, cta);
 
-  // سيرفرك + ديلاي فيديوك
-  const card = el('div', 'pl-card');
-  const server = el('div', 'pl-row');
-  const sIcon = el('span', 'pl-row-icon');
-  sIcon.innerHTML = ICON.server;
-  const sText = el('span', 'pl-row-text');
-  sText.append(el('small', null, 'سيرفرك'));
-  const sVal = el('b');
-  sVal.dir = 'ltr';
-  sVal.textContent = m.server?.code ? `${m.server.code}${m.server.quality ? ` · ${m.server.quality}` : ''}` : '—';
-  sText.append(sVal);
-  const sState = el('span', `pl-state is-${m.failed ? 'bad' : m.prepared ? 'ok' : 'warn'}`);
-  const sLabel = el('span', null, m.failed ? 'تعذّر' : m.prepared ? 'جاهز' : 'يتجهّز…');
-  if (m.prepared && !m.failed) sLabel.append(el('span', 'pl-long', ' · متوقف عند البداية'));
-  sState.append(el('i'), sLabel);
-  server.append(sIcon, sText, sState, btn('pl-mini', 'غيّر', a.changeServer, 'غيّر السيرفر'));
-  card.append(server);
-
-  const delay = el('div', 'pl-row');
-  const dIcon = el('span', 'pl-row-icon');
-  dIcon.innerHTML = ICON.clock;
-  const dText = el('span', 'pl-row-text');
-  dText.append(el('small', null, 'ديلاي فيديوك · لك وحدك'), el('b', null, m.offset ? 'مضبوط على مصدرك' : 'بدون'));
+  // «⋯»: ديلاي فيديوك (نادر الاستعمال، فمكانه هنا لا في الواجهة)
+  const more = el('div', 'pl-more');
+  more.hidden = !moreOpen;
+  const row = el('div', 'pl-more-row');
+  const label = el('span', 'pl-more-label');
+  label.append(el('b', null, 'ديلاي فيديوك'), el('small', null, 'لك وحدك · إذا مصدرك متقدّم أو متأخر عنهم'));
   const step = el('div', 'pl-step');
   step.dir = 'ltr';
   const out = el('output', null, offsetLabel(m.offset));
   out.setAttribute('aria-live', 'polite');
   step.append(btn('pl-step-btn', '−', () => a.setOffset(m.offset - 500), 'أخّر فيديوك نصف ثانية'), out, btn('pl-step-btn', '+', () => a.setOffset(m.offset + 500), 'قدّم فيديوك نصف ثانية'));
-  delay.append(dIcon, dText, step);
-  if (m.offset) delay.append(btn('pl-mini', 'صفّر', () => a.setOffset(0), 'إلغاء الديلاي'));
-  card.append(delay);
-  card.append(el('p', 'pl-hint', 'مصدرك فيه مقدمة زيادة؟ زِد الديلاي (+) حتى تشوفون نفس المشهد. ما يتغيّر شيء عند الباقين.'));
+  row.append(label, step);
+  if (m.offset) row.append(btn('pl-link', 'صفّر', () => a.setOffset(0), 'إلغاء الديلاي'));
+  more.append(row);
 
-  // الأفعال
-  const actions = el('div', 'pl-actions');
-  if (m.blocked) actions.append(btn('pl-go', `${ICON.play}<span>تابع معهم</span>`, a.resume));
-  else if (m.host) {
-    const go = btn('pl-go', `${ICON.play}<span>ابدأ للجميع</span>`, a.start);
-    go.disabled = !m.prepared || m.connection !== 'live';
-    actions.append(go);
-  } else {
-    const wait = el('div', 'pl-wait');
-    wait.append(el('i'), el('span', null, 'بانتظار المضيف يبدأ'));
-    actions.append(wait);
-  }
+  host.append(bg, top, hero, more, bar);
 
-  const main = el('div', 'pl-main');
-  const side = el('div', 'pl-side');
-  side.append(people, headline, card, actions);
-  main.append(hero, side);
-  host.append(bg, top, main);
+  // العدّ التنازلي المشترك: رقم كبير فوق كل شيء حتى لحظة البدء
+  if (m.countdownTo && m.now) {
+    const count = el('div', 'pl-count');
+    count.setAttribute('role', 'timer');
+    const num = el('b');
+    count.append(num, el('span', null, 'نبدأ مع بعض'));
+    host.append(count);
+    host.classList.add('is-counting');
+    const tick = () => {
+      const left = Math.ceil((m.countdownTo - m.now()) / 1000);
+      if (left <= 0) { clearInterval(host._countdown); count.remove(); host.classList.remove('is-counting'); return; }
+      if (num.textContent !== String(left)) { num.textContent = String(left); num.classList.remove('is-tick'); void num.offsetWidth; num.classList.add('is-tick'); }
+    };
+    tick();
+    host._countdown = setInterval(tick, 100);
+  } else host.classList.remove('is-counting');
 }
