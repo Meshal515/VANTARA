@@ -39,6 +39,7 @@ foreach ($linkPath in @(
   $link = $shell.CreateShortcut($linkPath)
   $expectedExe = if ([IO.Path]::GetFileName($linkPath) -eq 'إزالة VANTARA.lnk') { 'Uninstall.exe' } else { 'VANTARA.exe' }
   $expectedTarget = Join-Path $InstallDir $expectedExe
+  @{shortcut=$linkPath;target=$link.TargetPath;icon=$link.IconLocation;expected=$expectedTarget;targetExists=(Test-Path -LiteralPath $link.TargetPath)} | ConvertTo-Json -Compress | Write-Host
   if ([VantaraShortcutPath]::Long($link.TargetPath) -ne [VantaraShortcutPath]::Long($expectedTarget)) { throw "Incorrect shortcut target: $linkPath actual=$($link.TargetPath) expected=$expectedTarget" }
   if ([VantaraShortcutPath]::Long(($link.IconLocation -replace '\s*,\s*0$', '')) -ne [VantaraShortcutPath]::Long($expectedTarget)) { throw "Shortcut does not use the branded executable icon: $linkPath" }
   $links += @{ name = [IO.Path]::GetFileName($linkPath); desktop = ([IO.Path]::GetDirectoryName($linkPath) -eq [Environment]::GetFolderPath('Desktop')); brandedIcon = $true }
