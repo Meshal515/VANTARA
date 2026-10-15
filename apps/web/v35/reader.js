@@ -204,7 +204,16 @@ export function openSmartReader(deps, ctx) {
   const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
     // صور تكمل تحميلها فتتغير الأطوال: نعيد وضع الموضع المعروض فقط (الحركة الجارية تحسبه كل إطار)
     if (followAnchor && following() && followAnchor.chapter === Number(state.row?.number) && !followFrame) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
+    // Loading an image changes the host's fractional anchor even without scrolling.
+    if (!following()) reportScroll();
   }) : null;
+  function reportScroll() {
+    if (exited || !tg || !state.seg || scrollReportFrame) return;
+    scrollReportFrame = requestAnimationFrame(() => {
+      scrollReportFrame = 0;
+      if (state.seg) tgPage(state.seg, state.seg.current ?? 0);
+    });
+  }
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
@@ -226,6 +235,9 @@ export function openSmartReader(deps, ctx) {
   }
   function tgPage(seg, index) {
     const position = settings.mode === 'paged' ? index : readingPosition(seg.slots.map(s => s.frame), scroll.getBoundingClientRect().top);
+    // A skeleton has an invented aspect ratio. Its fraction maps to a completely
+    // different scene on a friend's decoded image, amplifying tiny scrolls.
+    if (settings.mode !== 'paged' && !seg.slots[Math.floor(position)]?.loaded) return;
     tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index: position, pages: seg.slots.length, source: seg.row.sourceId ?? null });
   }
 
@@ -468,7 +480,14 @@ export function openSmartReader(deps, ctx) {
     // الترجمة ثابتة من أول صفحة حتى لو دخل القارئ في المنتصف.
     tl.openGate(seg, 0);
     if (following() && startAt != null) {
-      requestAnimationFrame(() => followScroll(requested, true));
+      requestAnimationFrame(() => {
+        if (exited || token !== state.token || state.seg !== seg || !following()) return;
+        // A room update may arrive after the chapter is built but before its first
+        // layout. Start at that latest anchor, never overwrite it with the join snapshot.
+        const latest = tg?.initial();
+        if (latest && latest.chapter !== Number(seg.row.number)) return;
+        followScroll(latest?.index ?? requested, true);
+      });
     } else if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);
@@ -761,6 +780,7 @@ export function openSmartReader(deps, ctx) {
     slot.frame.replaceChildren(img);
     tickActive();
     slot.loaded = true;
+    if (!following()) reportScroll();
     tickActive();
     slot.src = src;
   }
@@ -1018,10 +1038,7 @@ export function openSmartReader(deps, ctx) {
   });
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
   scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
-  scroll.addEventListener('scroll', () => {
-    if (!tg || !state.seg || scrollReportFrame) return;
-    scrollReportFrame = requestAnimationFrame(() => { scrollReportFrame = 0; if (state.seg) tgPage(state.seg, state.seg.current ?? 0); });
-  }, { passive: true });
+  scroll.addEventListener('scroll', reportScroll, { passive: true });
   scroll.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button, a, input')) return;
     taps.down(pointer(e));
