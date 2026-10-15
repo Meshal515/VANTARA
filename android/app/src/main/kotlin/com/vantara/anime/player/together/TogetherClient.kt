@@ -27,6 +27,8 @@ data class Member(
     val source: String?,
     val driftMs: Long?,
     val sameVersion: Boolean?,
+    /** نفس مفتاح الويب: `/avatars/x.webp` أو رابط. */
+    val avatarKey: String? = null,
 )
 
 class TogetherClient(
@@ -64,6 +66,8 @@ class TogetherClient(
     var hostUserId: String? = null; private set
     var mode = "sync"; private set
     var control = "host"; private set
+    /** المدعوون بالمعرّف؛ null = الدعوة للكل. */
+    var invited: List<String>? = null; private set
     var timeline: Timeline? = null; private set
     var roster: List<Member> = emptyList(); private set
     val isHost get() = me != null && me == hostUserId
@@ -164,6 +168,7 @@ class TogetherClient(
         hostUserId = r.optString("hostUserId", hostUserId ?: "")
         mode = r.optString("mode", mode)
         control = r.optString("control", control)
+        r.optJSONArray("invited")?.let { a -> invited = (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } }
     }
 
     fun send(o: JSONObject): Boolean = ws?.send(o.toString()) ?: false
@@ -223,6 +228,7 @@ class TogetherClient(
                     source = o.optString("source").takeIf { !o.isNull("source") && it.isNotEmpty() },
                     driftMs = if (o.isNull("driftMs")) null else o.optLong("driftMs"),
                     sameVersion = if (o.isNull("sameVersion") || !o.has("sameVersion")) null else o.optBoolean("sameVersion"),
+                    avatarKey = o.optString("avatarKey").takeIf { !o.isNull("avatarKey") && it.isNotEmpty() },
                 )
             }
         }

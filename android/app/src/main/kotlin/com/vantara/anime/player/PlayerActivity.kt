@@ -537,6 +537,12 @@ class PlayerActivity : Activity() {
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
             override fun overlayHost() = root
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
+            override fun leaveRoom() = finish()
+            override fun openServers() = showServers()
+            override fun serverLabel() = current?.let { c ->
+                val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality)?.let { "${bucket(it)}p" }
+                listOfNotNull(codeOf(c) ?: c.server, q).joinToString(" · ")
+            }
         })
         together = t
         t.mountStrip(topBar)
