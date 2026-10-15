@@ -30,3 +30,16 @@ describe('Together UI copy', () => {
     expect(positionLabel({ pos: null }, { kind: 'anime' }, 0)).toBe('');
   });
 });
+
+describe('joining from a notification before the invite row syncs', () => {
+  it('rebuilds the invite media from the room key (manga stays manga)', async () => {
+    const { mediaFromRoom } = await import('./together.js');
+    expect(mediaFromRoom({ state: { media: { key: 'anime:154587#5', kind: 'anime', label: 'Frieren — الحلقة 5' } } }))
+      .toEqual({ kind: 'anime', key: 'anime:154587#5', label: 'Frieren — الحلقة 5', seriesRef: 'anime:154587', title: 'Frieren', episode: 5 });
+    expect(mediaFromRoom({ state: { media: { key: 'cinema:tt0903747:2#3', kind: 'cinema', label: 'Breaking Bad — م2 ح3' } } }))
+      .toMatchObject({ kind: 'cinema', seriesRef: 'cinema:tt0903747:2', season: 2, episode: 3, format: 'series' });
+    expect(mediaFromRoom({ state: { media: { key: 'manga:mangadex:abc#12', kind: 'manga', label: 'X — الفصل 12' } } }))
+      .toMatchObject({ kind: 'manga', seriesRef: 'mangadex:abc', chapter: 12 });
+    expect(mediaFromRoom({ state: { media: null } })).toBeNull();
+  });
+});

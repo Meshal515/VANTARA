@@ -711,10 +711,510 @@ html.pwa-playing body {
 /* Together stays visible while ordinary playback controls are hidden. */
 .pwa-player .pp-together { position: absolute; z-index: 15; top: max(12px, env(safe-area-inset-top)); right: 14px; color: #fff; font: inherit; }
 .pwa-player:has(.pp-together) .pp-top { padding-inline-end: 130px; }
-.pwa-player .pp-lobby { position: absolute; inset: 0; z-index: 12; background: #09070de8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 30px; color: #fff; text-align: center; }
-.pwa-player .pp-lobby[hidden] { display: none; }
-.pwa-player .pp-lobby-people { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-.pwa-player .pp-lobby-person { border: 1px solid #514366; padding: 12px; border-radius: 16px; }
 .pwa-player:has(.pp-together) .pp-scrim { z-index: 20; }
 .pwa-player:has(.pp-together) .pp-sheet { z-index: 21; }
 @media (max-width: 600px) { .pwa-player .pp-together { top: 68px; right: 8px; } .pwa-player:has(.pp-together) .pp-top { padding-inline-end: max(20px, env(safe-area-inset-right, 0px)); } }
+
+/* ───────── الكمبيوتر (ويندوز): ماوس، صوت، ملء الشاشة، لوحات جانبية ───────── */
+.pwa-player .pp-desk[hidden] { display: none; }
+@media not all and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-desk { display: none !important; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-touch { display: none !important; }
+  /* المؤشر يختفي مع التحكم أثناء المشاهدة */
+  .pwa-player:not(.pp--shown):not(.pp--sheet) { cursor: none; }
+  .pwa-player .pp-icon:hover { background: rgba(255, 255, 255, 0.12); }
+  .pwa-player .pp-play:hover { background: rgba(255, 255, 255, 0.14) !important; }
+  .pwa-player .pp-bar:hover .pp-track { height: 5px; }
+  .pwa-player .pp-bar:hover .pp-thumb { width: 14px; height: 14px; margin: -7px 0 0 -7px; }
+  .pwa-player .pp-row-item:hover,
+  .pwa-player .pp-tile:hover,
+  .pwa-player .pp-ep:hover { filter: brightness(1.18); }
+}
+.pwa-player .pp-icon.is-on { color: var(--accent-text); background: var(--accent-soft); }
+
+/* الصوت: الزر والشريط يتمدّد عند المرور */
+.pwa-player .pp-volume { display: flex; align-items: center; }
+.pwa-player .pp-volume__range {
+  --level: 100%;
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, #fff var(--level), rgba(255, 255, 255, 0.28) var(--level));
+  cursor: pointer;
+  transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease;
+}
+.pwa-player .pp-volume:hover .pp-volume__range,
+.pwa-player .pp-volume:focus-within .pp-volume__range { width: 88px; opacity: 1; margin: 0 10px 0 2px; }
+.pwa-player .pp-volume__range::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+.pwa-player .pp-volume__range::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+
+/* معاينة الوقت فوق الشريط + علامات المقدمة والنهاية */
+.pwa-player .pp-hover {
+  position: absolute;
+  bottom: 34px;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.92);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pwa-player .pp-hover[hidden] { display: none; }
+.pwa-player .pp-marks { position: absolute; inset-inline: 0; top: 50%; height: 3px; margin-top: -1.5px; pointer-events: none; }
+.pwa-player .pp-marks i { position: absolute; inset-block: 0; background: rgba(251, 191, 36, 0.75); border-radius: 2px; }
+
+/* زر التخطي: ظاهر وحده فوق شريط التحكم، كالـAPK */
+.pwa-player .pp-skip {
+  position: absolute;
+  z-index: 6;
+  right: max(28px, env(safe-area-inset-right, 0px));
+  bottom: 150px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #0a0c12 !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.pwa-player .pp-skip svg { width: 16px; height: 16px; }
+.pwa-player .pp-skip[hidden] { display: none; }
+.pwa-player:not(.pp--shown) .pp-skip { bottom: 40px; }
+
+/* لوحتا الشبكة والاختصارات */
+.pwa-player .pp-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13.5px;
+}
+.pwa-player .pp-metric span { color: var(--text-2); }
+.pwa-player .pp-metric b { font-variant-numeric: tabular-nums; text-align: end; }
+.pwa-player .pp-metric--ok b { color: var(--ok); }
+.pwa-player .pp-metric--warn b { color: var(--warn); }
+.pwa-player .pp-metric--bad b { color: var(--bad); }
+.pwa-player kbd {
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--surface-3);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--line);
+  font: 700 12.5px/1.2 ui-monospace, 'Vantara Sans', monospace;
+  white-space: nowrap;
+}
+.pwa-player .pp-clip p { direction: ltr; }
+
+/* شاشة عريضة: اللوحات جانبية يمينية بدل ورقة تغطي الفيديو (مثل لوحات الـAPK) */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-scrim { background: linear-gradient(to left, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.08) 60%); }
+  .pwa-player .pp-sheet,
+  .pwa-player .pp-sheet--subtitle-adjust {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: 400px;
+    max-height: none;
+    padding: 24px 22px;
+    border-radius: 0;
+    box-shadow: inset 1px 0 0 var(--line), -30px 0 80px rgba(0, 0, 0, 0.45);
+    transform: translateX(100%);
+  }
+  .pwa-player.pp--sheet .pp-sheet,
+  .pwa-player.pp--sheet .pp-sheet--subtitle-adjust { transform: translateX(0); }
+  .pwa-player .pp-sheet__grip { display: none; }
+  .pwa-player .pp-sheet__head strong { font-size: 19px; }
+  .pwa-player .pp-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pwa-player .pp-episodes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .pwa-player .pp-titles strong { font-size: 18px; }
+  .pwa-player .pp-titles small { font-size: 13.5px; }
+}
+
+/* ───────── شاشة الغرفة (مشاهدة معًا قبل البدء) ───────── */
+.pwa-player .pp-lobby {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  overflow: hidden auto;
+  color: #fff;
+  background: #07080c;
+  cursor: auto;
+}
+.pwa-player .pp-lobby[hidden] { display: none; }
+.pwa-player.pp--lobby .pp-controls,
+.pwa-player.pp--lobby .pp-spinner,
+.pwa-player.pp--lobby .pp-skip,
+.pwa-player.pp--lobby .pp-pill { visibility: hidden; }
+.pwa-player .pl-bg { position: absolute; inset: 0; overflow: hidden; }
+.pwa-player .pl-bg img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.04);
+  animation: pl-drift 24s ease-in-out infinite alternate;
+}
+@keyframes pl-drift { to { transform: scale(1.1) translate(-1.2%, -1%); } }
+.pwa-player .pl-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to left, rgba(7, 8, 12, 0.96) 0%, rgba(7, 8, 12, 0.86) 38%, rgba(7, 8, 12, 0.35) 72%, rgba(7, 8, 12, 0.55) 100%),
+    linear-gradient(to top, rgba(7, 8, 12, 0.95), transparent 45%);
+}
+.pwa-player .pl-top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) max(28px, env(safe-area-inset-right, 0px)) 0 max(28px, env(safe-area-inset-left, 0px));
+}
+.pwa-player .pl-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pwa-player .pl-chip {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.88);
+}
+.pwa-player .pl-conn i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.pwa-player .pl-conn.is-warn i { background: var(--warn); animation: pp-pulse 1.2s ease-in-out infinite; }
+.pwa-player .pl-leave {
+  flex: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 19px;
+  background: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+}
+.pwa-player .pl-leave:hover { background: rgba(248, 113, 113, 0.2) !important; }
+
+.pwa-player .pl-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 40px;
+  min-height: calc(100% - 80px);
+  padding: 24px max(40px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 32px) max(40px, env(safe-area-inset-left, 0px));
+  max-width: 1280px;
+  margin-inline: auto;
+}
+.pwa-player .pl-hero { display: grid; gap: 14px; align-content: center; justify-items: start; }
+.pwa-player .pl-logo {
+  max-width: min(100%, 420px);
+  max-height: 150px;
+  object-fit: contain;
+  object-position: right center;
+  filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.6));
+}
+.pwa-player .pl-title {
+  margin: 0;
+  font-size: clamp(28px, 3.6vw, 48px);
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pwa-player .pl-ep { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; font-size: 16px; color: rgba(255, 255, 255, 0.78); }
+.pwa-player .pl-ep b { font-size: 17px; color: var(--accent-text); }
+
+.pwa-player .pl-side {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border-radius: 26px;
+  background: rgba(13, 15, 22, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09), 0 30px 80px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+.pwa-player .pl-people { display: flex; flex-wrap: wrap; gap: 14px 18px; }
+.pwa-player .pl-person { width: 74px; display: grid; justify-items: center; gap: 5px; text-align: center; }
+.pwa-player .pl-face { position: relative; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; }
+.pwa-player .pl-face > :first-child { width: 64px !important; height: 64px !important; border-radius: 50%; overflow: hidden; font-size: 24px; }
+.pwa-player .pl-face img { width: 100%; height: 100%; object-fit: cover; }
+.pwa-player .pl-face::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--ring, rgba(255, 255, 255, 0.18));
+  pointer-events: none;
+}
+.pwa-player .pl-person.is-ready,
+.pwa-player .pl-person.is-playing,
+.pwa-player .pl-person.is-paused { --ring: var(--ok); }
+.pwa-player .pl-person.is-preparing,
+.pwa-player .pl-person.is-buffering { --ring: var(--warn); }
+.pwa-player .pl-person.is-preparing .pl-face::after { animation: pp-pulse 1.3s ease-in-out infinite; }
+.pwa-player .pl-person.is-failed { --ring: var(--bad); }
+.pwa-player .pl-person.is-pending .pl-face { opacity: 0.45; filter: grayscale(0.7); }
+.pwa-player .pl-person.is-pending .pl-face::after { box-shadow: none; border: 2px dashed rgba(255, 255, 255, 0.35); inset: -5px; }
+.pwa-player .pl-crown {
+  position: absolute;
+  z-index: 1;
+  top: -9px;
+  line-height: 16px;
+  white-space: nowrap;
+  box-shadow: 0 0 0 2px #10121a;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--accent);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+}
+.pwa-player .pl-person b { max-width: 100%; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; }
+.pwa-player .pl-person small { font-size: 11.5px; font-weight: 700; color: var(--text-3); }
+.pwa-player .pl-person.is-ready small,
+.pwa-player .pl-person.is-playing small { color: var(--ok); }
+.pwa-player .pl-person.is-preparing small { color: var(--warn); }
+.pwa-player .pl-person.is-failed small { color: var(--bad); }
+.pwa-player .pl-headline { margin: 0; font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.9); }
+.pwa-player .pl-headline.is-bad { color: var(--bad); }
+
+.pwa-player .pl-card { display: grid; gap: 4px; padding: 6px; border-radius: 18px; background: rgba(255, 255, 255, 0.05); }
+.pwa-player .pl-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 10px; }
+.pwa-player .pl-row + .pl-row { box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.07); }
+.pwa-player .pl-row-icon { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 11px; background: var(--accent-soft); color: var(--accent-text); }
+.pwa-player .pl-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.pwa-player .pl-row-text small { font-size: 11.5px; font-weight: 700; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pwa-player .pl-row-text b { font-size: 14.5px; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pwa-player .pl-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.pwa-player .pl-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.pwa-player .pl-state.is-ok { color: var(--ok); }
+.pwa-player .pl-state.is-warn i { background: var(--warn); animation: pp-pulse 1.2s ease-in-out infinite; }
+.pwa-player .pl-state.is-warn { color: var(--warn); }
+.pwa-player .pl-state.is-bad i { background: var(--bad); }
+.pwa-player .pl-state.is-bad { color: var(--bad); }
+.pwa-player .pl-mini {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.1) !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  flex: none;
+}
+.pwa-player .pl-mini:hover { background: rgba(255, 255, 255, 0.18) !important; }
+.pwa-player .pl-step { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 20px; background: rgba(255, 255, 255, 0.07); flex: none; }
+.pwa-player .pl-step-btn { width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.1) !important; font-size: 18px !important; font-weight: 700 !important; }
+.pwa-player .pl-step-btn:hover { background: rgba(255, 255, 255, 0.2) !important; }
+.pwa-player .pl-step output { min-width: 64px; text-align: center; font-size: 13.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pwa-player .pl-hint { margin: 0; padding: 2px 12px 8px; font-size: 12px; line-height: 1.55; color: var(--text-3); }
+
+.pwa-player .pl-actions { display: flex; gap: 10px; }
+.pwa-player .pl-go {
+  flex: 1;
+  height: 54px;
+  border-radius: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--accent) !important;
+  font-size: 16.5px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 14px 40px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.pwa-player .pl-go:hover:not(:disabled) { filter: brightness(1.1); }
+.pwa-player .pl-go:active:not(:disabled) { transform: scale(0.98); }
+.pwa-player .pl-go:disabled { opacity: 0.45; box-shadow: none; cursor: default; }
+.pwa-player .pl-wait {
+  flex: 1;
+  height: 54px;
+  border-radius: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+}
+.pwa-player .pl-wait i { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); animation: pp-pulse 1.2s ease-in-out infinite; }
+
+/* ───── الجوال أفقي: البنر يملأ الشاشة، الشعار يمين، وعمود تحكم مضغوط يسار بلا تمرير ───── */
+@media (max-height: 500px) {
+  .pwa-player .pp-lobby { overflow: hidden; }
+  .pwa-player .pl-shade {
+    background:
+      linear-gradient(to left, rgba(7, 8, 12, 0.15) 0%, rgba(7, 8, 12, 0.35) 40%, rgba(7, 8, 12, 0.92) 64%, #07080c 100%),
+      linear-gradient(to top, rgba(7, 8, 12, 0.85), transparent 50%);
+  }
+  .pwa-player .pl-top {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+  }
+  .pwa-player .pl-chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+  .pwa-player .pl-leave { width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 50%; }
+  .pwa-player .pl-leave span { display: none; }
+  .pwa-player .pl-main {
+    box-sizing: border-box;
+    height: 100%;
+    min-height: 0;
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 46%);
+    gap: 22px;
+    padding: calc(env(safe-area-inset-top, 0px) + 56px) max(18px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 14px) max(18px, env(safe-area-inset-left, 0px));
+    align-items: end;
+  }
+  .pwa-player .pl-hero { align-self: end; padding-bottom: 6px; gap: 8px; }
+  .pwa-player .pl-logo { max-height: 78px; max-width: 100%; }
+  .pwa-player .pl-title { font-size: 24px; -webkit-line-clamp: 2; }
+  .pwa-player .pl-ep { font-size: 13px; gap: 8px; }
+  .pwa-player .pl-ep b { font-size: 14px; }
+  .pwa-player .pl-ep bdi { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pwa-player .pl-side {
+    align-self: stretch;
+    align-content: end;
+    gap: 9px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .pwa-player .pl-people { flex-wrap: nowrap; gap: 10px; overflow-x: auto; scrollbar-width: none; padding: 10px 2px 2px; }
+  .pwa-player .pl-person { width: 54px; flex: none; gap: 3px; }
+  .pwa-player .pl-face, .pwa-player .pl-face > :first-child { width: 44px !important; height: 44px !important; }
+  .pwa-player .pl-face::after { inset: -3px; box-shadow: 0 0 0 2.5px var(--ring, rgba(255, 255, 255, 0.18)); }
+  .pwa-player .pl-crown { font-size: 9px; top: -8px; padding: 0 5px; }
+  .pwa-player .pl-person b { font-size: 11.5px; margin-top: 2px; }
+  .pwa-player .pl-person small { font-size: 10.5px; }
+  .pwa-player .pl-headline { font-size: 13px; line-height: 1.35; }
+  .pwa-player .pl-card { gap: 0; padding: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+  .pwa-player .pl-row { min-height: 42px; padding: 2px 10px; gap: 8px; }
+  .pwa-player .pl-row-icon, .pwa-player .pl-hint, .pwa-player .pl-long, .pwa-player .pl-chip:first-child { display: none; }
+  .pwa-player .pl-row-text small { font-size: 10.5px; }
+  .pwa-player .pl-row-text b { font-size: 13px; }
+  .pwa-player .pl-mini { height: 28px; padding: 0 11px; font-size: 12px !important; }
+  .pwa-player .pl-step-btn { width: 28px; height: 28px; font-size: 16px !important; }
+  .pwa-player .pl-step output { min-width: 50px; font-size: 12.5px; }
+  .pwa-player .pl-go, .pwa-player .pl-wait { height: 44px; font-size: 14.5px !important; }
+  .pwa-player .pl-go { box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent); }
+}
+
+/* ───── الجوال عمودي: بنر أعلى الشاشة والشعار على حافته، قائمة نظيفة، و«ابدأ» مثبّت أسفل ───── */
+@media (max-width: 760px) and (min-height: 501px) {
+  .pwa-player .pp-lobby { --banner: min(46vh, 380px); }
+  .pwa-player .pl-bg { inset: 0 0 auto; height: var(--banner); }
+  .pwa-player .pl-bg img { animation-duration: 30s; }
+  .pwa-player .pl-shade { background: linear-gradient(to top, #07080c 0%, rgba(7, 8, 12, 0.72) 30%, rgba(7, 8, 12, 0.05) 65%, rgba(7, 8, 12, 0.55) 100%); }
+  .pwa-player .pl-top {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
+    align-items: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 0;
+  }
+  .pwa-player .pl-chips { flex-wrap: nowrap; overflow: hidden; }
+  .pwa-player .pl-chip { height: 28px; font-size: 11.5px; background: rgba(7, 8, 12, 0.45); }
+  .pwa-player .pl-leave { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; background: rgba(7, 8, 12, 0.45) !important; }
+  .pwa-player .pl-leave span { display: none; }
+  .pwa-player .pl-main {
+    display: block;
+    min-height: 100%;
+    max-width: 560px;
+    padding: calc(var(--banner) - 118px) 18px 0;
+  }
+  .pwa-player .pl-hero { justify-items: center; text-align: center; gap: 10px; margin-bottom: 22px; }
+  .pwa-player .pl-logo { object-position: center; max-height: 96px; max-width: 86%; }
+  .pwa-player .pl-title { font-size: 30px; text-align: center; }
+  .pwa-player .pl-ep { justify-content: center; font-size: 14px; }
+  .pwa-player .pl-ep bdi { opacity: 0.85; }
+  .pwa-player .pl-side {
+    display: block;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  /* الأشخاص: وجوه كبيرة في صف يتمرّر أفقيًا */
+  .pwa-player .pl-people { flex-wrap: nowrap; justify-content: center; gap: 16px; overflow-x: auto; scrollbar-width: none; padding: 12px 4px 4px; margin-inline: -18px; padding-inline: 18px; }
+  .pwa-player .pl-people::-webkit-scrollbar { display: none; }
+  .pwa-player .pl-person { width: 70px; flex: none; }
+  .pwa-player .pl-face, .pwa-player .pl-face > :first-child { width: 60px !important; height: 60px !important; }
+  .pwa-player .pl-headline { margin: 14px 0 18px; text-align: center; font-size: 14.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.82); }
+  /* الإعدادات: قائمة مجمّعة */
+  .pwa-player .pl-card { gap: 0; padding: 0; border-radius: 18px; background: #12141c; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+  .pwa-player .pl-row { min-height: 60px; padding: 6px 14px; gap: 12px; }
+  .pwa-player .pl-row-icon { width: 34px; height: 34px; border-radius: 10px; }
+  .pwa-player .pl-long { display: none; }
+  .pwa-player .pl-hint { padding: 0 14px 12px; font-size: 11.5px; }
+  .pwa-player .pl-step output { min-width: 52px; }
+  /* «ابدأ» مثبّت أسفل الشاشة فوق تدرّج، بمسافة الحافة السفلية */
+  .pwa-player .pl-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin: 18px -18px 0;
+    padding: 18px 18px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    background: linear-gradient(to top, #07080c 60%, rgba(7, 8, 12, 0));
+  }
+  .pwa-player .pl-go, .pwa-player .pl-wait { height: 56px; border-radius: 18px; font-size: 16.5px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pwa-player .pl-bg img { animation: none; }
+}
+.pwa-player.pp--lobby .pp-together { display: none; }
+
+/* ديلاي الفيديو أثناء المشاهدة */
+.pwa-player .pp-offset { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0 12px; }
+.pwa-player .pp-offset__btn {
+  min-width: 52px;
+  height: 44px;
+  border-radius: 22px;
+  background: var(--surface-3) !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  font-variant-numeric: tabular-nums;
+}
+.pwa-player .pp-offset__btn:hover { filter: brightness(1.2); }
+.pwa-player .pp-offset__value { min-width: 84px; text-align: center; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }

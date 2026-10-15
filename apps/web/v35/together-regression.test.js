@@ -68,3 +68,15 @@ it('renders profile avatars and +N only, and updates overflow when people leave'
   room.roster=room.roster.slice(0,2); room.emit('roster',room.roster); expect(strip.querySelectorAll('img')).toHaveLength(2); expect(strip.querySelector('.tg-more')).toBeNull();
   hub.leave();
 });
+it('hands Android the room screen art and the invitees with their pictures', async () => {
+  vi.stubGlobal('Capacitor', {isNativePlatform:()=>true}); const room=roomOf();
+  room.info = { mode: 'sync', invited: ['u2', 'u3'] };
+  const friends = () => [{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }];
+  const resolveArtImpl = async (m) => ({ banner: 'https://img/5.jpg', logo: 'https://logo.png', title: m.title, episodeTitle: 'Ep' });
+  const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia:vi.fn(),toast:vi.fn(),friends,resolveArtImpl});
+  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',title:'Frieren',episode:5}),mode:'sync'});
+  await Promise.resolve(); await Promise.resolve();
+  const cfg = hub.handOff('anime:42');
+  expect(cfg).toMatchObject({ kindText: 'أنمي', title: 'Frieren', banner: 'https://img/5.jpg', logo: 'https://logo.png', episodeTitle: 'Ep' });
+  expect(cfg.invitees).toEqual([{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }, { userId: 'u3', displayName: 'صديق', avatarKey: null }]);
+});

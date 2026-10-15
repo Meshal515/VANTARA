@@ -3366,7 +3366,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       case 'TOGETHER': {
         const code = /#together=([A-Z0-9]{6})/.exec(row.link ?? '')?.[1] ?? null;
         const invite = code ? sync.rows('together_invites', (x) => x.code === code)[0] : null;
-        const reading = invite?.kind === 'manga';
+        // الدعوة قد تصل قبل صفها بالمزامنة: نوعها من مرجع العمل (الأنمي والسينما لهما بادئة)
+        const reading = invite ? invite.kind === 'manga' : !/^(anime|cinema):/.test(row.series_ref ?? '');
         return {
           text: `يدعوك ${reading ? 'تقرأ' : 'تشاهد'} معه`,
           title: row.body ?? null,
