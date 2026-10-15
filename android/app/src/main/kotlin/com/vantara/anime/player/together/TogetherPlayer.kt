@@ -606,12 +606,25 @@ class TogetherPlayer(
                 layoutDirection = View.LAYOUT_DIRECTION_RTL
                 swallowTouches()
             }
+            // البنر كاملًا بنسبته (16:9) بارتفاع الشاشة في جهة (لا قصّ في الجوال العريض)، ويذوب
+            // طرفه في الخلفية؛ الشعار والمعلومات في الجهة الأخرى — كصفحات الأفلام
+            val bannerBox = FrameLayout(context)
             val banner = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0f }
-            root.addView(banner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            bannerBox.addView(banner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            bannerBox.addView(View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x00050507, 0x00050507, 0x00050507, 0x8C050507.toInt(), 0xFF050507.toInt()))
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            root.addView(bannerBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+            root.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                val h = v.height
+                val w = minOf(v.width, h * 16 / 9)
+                val lp = bannerBox.layoutParams as FrameLayout.LayoutParams
+                if (h > 0 && (lp.width != w || lp.height != h)) bannerBox.post { lp.width = w; lp.height = h; bannerBox.layoutParams = lp }
+            }
             images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp -> if (bmp != null) { banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start() } }
-            // تعتيم من الأسفل فقط حيث الشعار والشريط، وخفيف أعلى لزر الخروج
+            // تعتيم خفيف من الأسفل حيث الشريط فقط
             root.addView(View(context).apply {
-                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF5050507.toInt(), 0xB8050507.toInt(), 0x1F050507, 0x00050507, 0x00050507))
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xEB050507.toInt(), 0x66050507, 0x00050507, 0x00050507, 0x00050507))
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(View(context).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x73050507, 0x00050507))
@@ -655,8 +668,8 @@ class TogetherPlayer(
             }
             val meta = listOfNotNull(launch.kindText, episodeText().takeIf { it != launch.kindText }, launch.episodeTitle).distinct().joinToString(" · ")
             if (meta.isNotEmpty()) hero.addView(context.label(meta, 14.5f, 0xC7FFFFFF.toInt(), bold = true).apply { setPadding(0, context.dp(8), 0, 0); maxLines = 1; textDirection = View.TEXT_DIRECTION_FIRST_STRONG })
-            root.addView(hero, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
-                marginStart = context.dp(28); marginEnd = context.dp(28); bottomMargin = context.dp(92)
+            root.addView(hero, FrameLayout.LayoutParams((context.resources.displayMetrics.widthPixels * 0.44f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+                marginStart = context.dp(28); bottomMargin = context.dp(92)
             })
 
             // «⋯»: الديلاي (فوق زر «⋯» في نهاية السطر)
