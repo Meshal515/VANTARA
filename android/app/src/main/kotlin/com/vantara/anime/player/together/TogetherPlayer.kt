@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.vantara.anime.player.Glyph
 import com.vantara.anime.player.Tone
 import com.vantara.anime.player.dp
 import com.vantara.anime.player.label
@@ -53,7 +54,7 @@ data class Invitee(val userId: String, val displayName: String = "صديق", val
 
 /**
  * Together داخل المشغّل الأصلي:
- *  - غرفة الانتظار قبل البداية (المتزامن): أفاتاراتكم جنب بعض و«جاري التجهيز… جاهز ✓»، والمضيف يضغط «ابدأ».
+ *  - غرفة الانتظار قبل البداية (المتزامن): أفاتاراتكم جنب بعض و«جاري التجهيز… جاهز»، والمضيف يضغط «ابدأ».
  *  - من يدخل بعد البداية يدخل على طول عند الثانية الحالية.
  *  - كل 500ms: متحكّم الانحراف (سرعة متناسبة أو قفز)، ولا تصحيح أثناء التحميل.
  *  - تشغيل/إيقاف/تقديم المضيف أوامر للغرفة؛ غيره في المتزامن لا يحرّك أحدًا.
@@ -735,9 +736,17 @@ class TogetherPlayer(
         side.addView(offsetRow(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(6) })
 
         // الأفعال
-        val action = if (client.isHost) button("▶  ابدأ للجميع", primary = true) { if (ready) client.command("play", 0.0) else hooks.message("نجهّز فيديوك…") }.apply {
-            textSize = 15.5f
+        // أيقونة التشغيل مرسومة (Glyph) لا رمز نصي: الجوال يعرض «▶» إيموجي
+        val action = if (client.isHost) LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            background = rounded(Tone.ACCENT, context.dp(22).toFloat())
             alpha = if (ready) 1f else 0.5f
+            contentDescription = "ابدأ للجميع"
+            addView(ImageView(context).apply { setImageDrawable(Glyph(Glyph.Kind.PLAY, Color.WHITE)) }, LinearLayout.LayoutParams(context.dp(20), context.dp(20)).apply { marginEnd = context.dp(8) })
+            addView(context.label("ابدأ للجميع", 15.5f, Color.WHITE, bold = true))
+            setOnClickListener { if (ready) client.command("play", 0.0) else hooks.message("نجهّز فيديوك…") }
         } else context.label("●  بانتظار المضيف يبدأ", 14.5f, 0xD9FFFFFF.toInt(), bold = true).apply {
             gravity = Gravity.CENTER
             setPadding(0, context.dp(13), 0, context.dp(13))
