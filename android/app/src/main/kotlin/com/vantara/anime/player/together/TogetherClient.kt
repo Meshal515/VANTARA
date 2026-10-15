@@ -173,8 +173,9 @@ class TogetherClient(
 
     fun send(o: JSONObject): Boolean = ws?.send(o.toString()) ?: false
 
-    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
+    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null, countdownMs: Long? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
         pos?.let { put("pos", it) }
+        countdownMs?.let { put("countdownMs", it) }
         if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", "anime").put("label", mediaLabel ?: mediaKey))
     })
 
