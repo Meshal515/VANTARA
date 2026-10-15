@@ -1,8 +1,5 @@
-/** فحص نسخة ويندوز من نفس بيان Android المستقر.
- * لا يُعرَض تحديث حتى تنجح حزمة ويندوز في بناء الإصدار ويرفعها CI بملف SHA-256.
- * زر التحديث يفتح رابط GitHub الرسمي بالمتصفح؛ التثبيت قرار المستخدم.
- */
-export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/latest/download/vantara-update.json';
+/** قناة ويندوز مستقلة: لا تختلط بإصدارات APK التي لا تحتوي مثبت ويندوز. */
+export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/download/windows-channel/desktop-update.json';
 export const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 
 export function newerVersion(candidate, installed) {
@@ -16,24 +13,29 @@ export function newerVersion(candidate, installed) {
   return false;
 }
 
-export function desktopUpdateFromManifest(manifest, installed) {
-  if (!manifest || manifest.format !== 2 || manifest.versionName !== manifest.desktop?.version ||
-      manifest.desktop?.platform !== 'win32-x64' || manifest.desktop?.installer !== 'nsis' ||
-      !/^\d+\.\d+\.\d+$/.test(manifest.desktop?.version ?? '')) return null;
-  const entry=manifest.desktop;
-  const previewToStable = /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
-  if (!(previewToStable || newerVersion(entry.version,installed)) ||
-    !/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '') ||
-    !Number.isSafeInteger(entry.size) || entry.size<=0 ||
-    !Number.isSafeInteger(manifest.versionCode) || manifest.versionCode<=0) return null;
+function validatedRelease(manifest) {
+  const channel = manifest?.format === 1 && manifest.product === 'VANTARA';
+  const legacy = manifest?.format === 2 && manifest.versionName === manifest.desktop?.version;
+  if (!channel && !legacy) return null;
+  const entry = channel ? manifest : manifest.desktop;
+  if (entry?.platform !== 'win32-x64' || entry.installer !== 'nsis' ||
+      !/^\d+\.\d+\.\d+$/.test(entry.version ?? '') ||
+      !/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '') ||
+      !Number.isSafeInteger(entry.size) || entry.size <= 0) return null;
   let url;
-  try {url = new URL(entry.url);} catch{return null;}
-  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.search || url.hash || url.username || url.password ||
-      !/^\/Meshal515\/VANTARA\/releases\/download\/stable-\d+\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(url.pathname)) return null;
-  if (!url.pathname.endsWith(`/VANTARA-${entry.version}-Windows-x64-Setup.exe`)) return null;
-  const tag=Number(url.pathname.match(/\/stable-(\d+)\//)?.[1]);
-  if(tag!==manifest.versionCode) return null;
-  return {version:entry.version,url:url.href,sha256:entry.sha256,size:entry.size,notes:Array.isArray(manifest.changelog)?manifest.changelog.slice(0,4).map(String):[]};
+  try { url = new URL(entry.url); } catch { return null; }
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.search || url.hash || url.username || url.password) return null;
+  const tag = channel ? `windows-v${entry.version}` : `stable-${manifest.versionCode}`;
+  if (!channel && (!Number.isSafeInteger(manifest.versionCode) || manifest.versionCode <= 0)) return null;
+  if (url.pathname !== `/Meshal515/VANTARA/releases/download/${tag}/VANTARA-${entry.version}-Windows-x64-Setup.exe`) return null;
+  return {version:entry.version,url:url.href,sha256:entry.sha256,size:entry.size,
+    notes:(Array.isArray(channel ? entry.notes : manifest.changelog) ? (channel ? entry.notes : manifest.changelog) : []).slice(0,4).map(String)};
+}
+
+export function desktopUpdateFromManifest(manifest, installed) {
+  const entry = validatedRelease(manifest);
+  const legacyPreview = manifest?.format === 2 && /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
+  return entry && (newerVersion(entry.version, installed) || legacyPreview) ? entry : null;
 }
 
 export async function checkDesktopUpdate(bridge, {url=MANIFEST_URL} = {}) {
@@ -42,6 +44,7 @@ export async function checkDesktopUpdate(bridge, {url=MANIFEST_URL} = {}) {
   if(result.status!==200||typeof result.text!=='string')throw new Error('تعذر قراءة تحديث فانتارا');
   let data;
   try {data=JSON.parse(result.text);} catch{throw new Error('بيان التحديث غير صالح');}
+  if (!validatedRelease(data)) throw new Error('بيان تحديث ويندوز غير متاح أو غير صالح');
   return desktopUpdateFromManifest(data,bridge.version);
 }
 

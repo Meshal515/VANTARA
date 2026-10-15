@@ -6,7 +6,10 @@ import android.system.Os
 import androidx.media3.datasource.DataSource
 import com.frostwire.jlibtorrent.*
 import com.frostwire.jlibtorrent.alerts.*
+import com.frostwire.jlibtorrent.swig.add_torrent_params
+import com.frostwire.jlibtorrent.swig.error_code
 import com.frostwire.jlibtorrent.swig.ip_filter
+import com.frostwire.jlibtorrent.swig.torrent_handle
 import com.frostwire.jlibtorrent.swig.settings_pack
 import java.io.File
 import java.io.IOException
@@ -87,6 +90,16 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
             state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers())
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
+    /**
+     * موضع المشاهدة من المشغّل (كل بضع ثوانٍ): يحرّك النافذة على القرص — يفرّغ ما خلف آخر
+     * 50 ثانية ويحدد كم يُنزَّل قدّام حسب المساحة الحرة.
+     */
+    fun playback(uri: Uri, positionMs: Long, durationMs: Long) {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
+        val state = states[hash] ?: return
+        // خارج خيط الواجهة: التفريغ قراءة/كتابة على القرص
+        if (!shutdown.get()) runCatching { pruner.execute { runCatching { state.playback(positionMs, durationMs) } } }
+    }
 
     internal fun acquire(uri: Uri, cancelled: () -> Boolean): Lease {
         if (uri.scheme != SCHEME || uri.path != "/file") throw IOException("Invalid torrent playback ticket")
@@ -150,6 +163,14 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         private var selected: Int? = null
         private var torrent: TorrentHandle? = null
         private var window = emptyList<Int>()
+        // النافذة المتحركة: الملف المختار، القطع المطلوبة قدّام النافذة، والمدى المفرّغ من القرص
+        private var file: TorrentFile? = null
+        private var pieceLength = 0
+        private var ahead = TorrentWindow.MIN_AHEAD_PIECES
+        private var aheadRange = IntRange.EMPTY
+        private var evictedFrom = Int.MAX_VALUE
+        private var evictedUntil = 0
+        private fun evicted(piece: Int) = piece in evictedFrom until evictedUntil
         private val pieces = LinkedHashMap<Int, ByteArray>(8, 0.75f, true)
         private val reading = HashSet<Int>()
         private val failed = HashSet<Int>()
@@ -177,8 +198,9 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
             torrent?.takeIf { it.isValid }?.let { handle ->
                 handle.pause(); handle.clearPieceDeadlines()
                 window.forEach { handle.piecePriority(it, Priority.IGNORE) }
+                aheadRange.forEach { handle.piecePriority(it, Priority.IGNORE) }
             }
-            window = emptyList()
+            window = emptyList(); aheadRange = IntRange.EMPTY
             pieces.clear(); reading.clear(); failed.clear(); memoryBytes = 0
         }
         fun unused() = synchronized(monitor) { refs == 0 }
@@ -214,13 +236,16 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
                 // Container index lives at the head or the tail: fetch both before the extractor asks.
                 for (piece in TorrentPolicy.edges(file, info.pieceLength())) handle.piecePriority(piece, Priority.SIX)
-                selected = file.index; initialized = true; window = emptyList()
+                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY
+                this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }
             }
         }
         fun prioritize(file: TorrentFile, position: Long, pieceLength: Int) = synchronized(monitor) {
             val next = TorrentPolicy.window(file, position, pieceLength)
+            // رجوع لمنطقة فُرّغت من القرص: libtorrent يقرأها أصفارًا، فنعيد البناء أولًا
+            if (next.isNotEmpty() && evicted(next.first())) rebuild()
             if (next == window) return@synchronized
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             val handle = torrent ?: throw IOException("Torrent session ended")
@@ -230,7 +255,72 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                 handle.piecePriority(piece, if (index == 0) Priority.SEVEN else Priority.SIX)
                 handle.setPieceDeadline(piece, index * 200)
             }
+            extendAhead(handle, file, pieceLength, next)
             window = next
+        }
+
+        /** ما بعد النافذة حتى [ahead] قطعة: أولوية عادية بلا مواعيد، فيُنزَّل قدّام بقدر المساحة. */
+        private fun extendAhead(handle: TorrentHandle, file: TorrentFile, pieceLength: Int, next: List<Int>) {
+            if (next.isEmpty()) return
+            val last = ((file.offset + file.size - 1) / pieceLength).toInt()
+            val range = (next.last() + 1) until minOf(last + 1, next.first() + maxOf(ahead, next.size))
+            for (p in aheadRange) if (p !in range && p !in next) handle.piecePriority(p, Priority.IGNORE)
+            for (p in range) if (p !in aheadRange) handle.piecePriority(p, Priority.FOUR)
+            aheadRange = range
+        }
+
+        fun playback(positionMs: Long, durationMs: Long) = synchronized(monitor) {
+            val file = file ?: return@synchronized
+            if (refs == 0 || pieceLength <= 0 || durationMs <= 0) return@synchronized
+            ahead = TorrentWindow.aheadPieces(file, pieceLength, durationMs, directory.usableSpace)
+            val keep = TorrentWindow.keepFrom(file, pieceLength, positionMs, durationMs) ?: return@synchronized
+            // لا نقترب أبدًا مما يقرؤه المشغّل الآن
+            val guard = window.firstOrNull()?.let { minOf(keep, it) } ?: keep
+            val range = TorrentWindow.evictRange(file, pieceLength, guard, evictedUntil) ?: return@synchronized
+            val (offset, length) = TorrentWindow.fileSpan(file, pieceLength, range)
+            if (length <= 0) return@synchronized
+            if (!runCatching { NativePieceBytes.punch(File(folder, file.path).path, offset, length) }.getOrDefault(false)) return@synchronized
+            evictedFrom = minOf(evictedFrom, range.first); evictedUntil = range.last + 1
+            for (p in range) pieces.remove(p)?.let { memoryBytes -= it.size }
+        }
+
+        /**
+         * إعادة بناء بعد الرجوع لمنطقة مفرّغة: بيانات الاستئناف مع حذف القطع المفرّغة من «عندي»،
+         * ثم إزالة التورنت (الملفات باقية) وإضافته بها — libtorrent يعرف بالضبط ما ينقصه ولا يفحص
+         * الملف كاملًا. ثبت باختبار حقيقي على libtorrent 2.0.12.9: القطعة تعود صحيحة والباقي سليم.
+         */
+        private fun rebuild() {
+            val old = torrent?.takeIf { it.isValid } ?: throw IOException("Torrent session ended")
+            val params: add_torrent_params = runCatching { old.swig().get_resume_data(torrent_handle.save_info_dict) }.getOrNull()
+                ?: throw IOException("Torrent rebuild failed")
+            val have = params.get_have_pieces()
+            for (p in evictedFrom until minOf(evictedUntil, have.size())) have.clear_bit(p)
+            params.set_have_pieces(have)
+            val verified = params.get_verified_pieces()
+            if (verified.size() > 0) { for (p in evictedFrom until minOf(evictedUntil, verified.size())) verified.clear_bit(p); params.set_verified_pieces(verified) }
+            manager.remove(old)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (manager.find(Sha1Hash(hash))?.isValid == true) {
+                if (System.nanoTime() > deadline) throw IOException("Torrent rebuild timed out")
+                try { Thread.sleep(20) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent rebuild interrupted") }
+            }
+            val error = error_code()
+            val added = manager.swig().add_torrent(params, error)
+            if (error.value() != 0 || !added.is_valid) { torrent = null; throw IOException("Torrent rebuild failed") }
+            val handle = TorrentHandle(added)
+            handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
+            handle.unsetFlags(TorrentFlags.STOP_WHEN_READY)
+            val info = handle.torrentFile()
+            if (info != null && info.isValid) {
+                handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
+                file?.let { f -> for (piece in TorrentPolicy.edges(f, info.pieceLength())) handle.piecePriority(piece, Priority.SIX) }
+            }
+            handle.resume()
+            torrent = handle
+            window = emptyList(); aheadRange = IntRange.EMPTY
+            reading.clear(); failed.clear()
+            for (p in evictedFrom until evictedUntil) pieces.remove(p)?.let { memoryBytes -= it.size }
+            evictedFrom = Int.MAX_VALUE; evictedUntil = 0
         }
         fun piece(piece: Int, cancelled: () -> Boolean): ByteArray {
             val start = System.nanoTime()
@@ -242,6 +332,7 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                     checkCancelled(cancelled)
                     pieces[piece]?.let { return it }
                     if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
+                    if (evicted(piece)) rebuild()
                     if (failed.remove(piece)) throw IOException("Torrent piece read failed")
                     val handle = torrent ?: throw IOException("Torrent session ended")
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
@@ -272,7 +363,8 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         }
         fun readFailed(piece: Int) = synchronized(monitor) { reading.remove(piece); failed.add(piece); monitor.notifyAll() }
         fun remove() = synchronized(monitor) {
-            torrent?.takeIf { it.isValid }?.let { manager.remove(it) }
+            // بعد إغلاق الفيديو: الملفات تُحذف ويبقى metadata.torrent فقط (كاش صغير جدًا)
+            torrent?.takeIf { it.isValid }?.let { manager.remove(it, SessionHandle.DELETE_FILES) }
             torrent = null; pieces.clear(); reading.clear(); failed.clear(); memoryBytes = 0
             monitor.notifyAll()
         }
@@ -302,7 +394,7 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
         private const val MAX_ACTIVE_BYTES = 8L * 1024 * 1024 * 1024
-        private const val MAX_IDLE_BYTES = 1024L * 1024 * 1024
+        private const val MAX_IDLE_BYTES = 64L * 1024 * 1024
         private const val MIN_FREE_BYTES = 256L * 1024 * 1024
         private const val MAX_TICKETS = 512
         private const val MAX_ACTIVE_STATES = 2

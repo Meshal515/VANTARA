@@ -250,3 +250,25 @@
 /* زر الترجمة يبقى ظاهرًا دائمًا ولا تغطيه الأفاتارات: له مكانه الثابت، والكبسولة هي التي تصغر */
 .v35 .rd-top #rdTlBtn { flex: none; position: relative; z-index: 2; }
 .v35 .rd-top .rd-together { flex: none; }
+
+/* «اقرأ مع أصدقائك» من صفحة العمل: اختيار الفصل قبل الدعوة */
+.rt-sheet .rt-head { margin-bottom: 14px; }
+.rt-sheet .rt-head h3 { margin: 0 0 4px; font-size: 18px; }
+.rt-sheet .rt-head p { margin: 0; font-size: 13px; color: var(--text-3, #8a8f9c); }
+.rt-sheet .rt-quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.rt-sheet .rt-pick {
+  display: grid; gap: 3px; padding: 12px 14px; border-radius: 14px; text-align: start;
+  background: var(--surface-2, rgba(255,255,255,.06)); border: 1px solid var(--line, rgba(255,255,255,.08)); color: inherit; font: inherit; cursor: pointer;
+}
+.rt-sheet .rt-pick b { font-size: 15px; }
+.rt-sheet .rt-pick span { font-size: 12.5px; color: var(--text-3, #8a8f9c); }
+.rt-sheet .rt-pick.is-primary { background: var(--accent, #c1121f); border-color: transparent; color: #fff; }
+.rt-sheet .rt-pick.is-primary span { color: rgba(255,255,255,.85); }
+.rt-sheet .rt-number { display: flex; gap: 8px; margin-bottom: 12px; }
+.rt-sheet .rt-number input { flex: 1; min-width: 0; }
+.rt-sheet .rt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; max-height: 38vh; overflow-y: auto; padding-bottom: 6px; }
+.rt-sheet .rt-ch {
+  height: 42px; border-radius: 10px; background: var(--surface-2, rgba(255,255,255,.06)); border: 1px solid transparent;
+  color: inherit; font: 700 14px/1 inherit; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.rt-sheet .rt-ch.is-next { border-color: var(--accent, #c1121f); color: var(--accent-text, #f26b6b); }

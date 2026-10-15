@@ -30,6 +30,18 @@ describe('Together room core', () => {
     expect(pause.seq).toBe(2);
   });
 
+  it('أول «ابدأ» يحمل عدًّا تنازليًا مشتركًا (حتى 5 ث)، وما بعده بلا عدّ', () => {
+    const core = room();
+    const first = of(core.handle('c-host', { t: 'cmd', op: 'play', pos: 0, countdownMs: 3_000 }, 5_000), 'state')[0]!.msg['state'] as { at: number; started: boolean };
+    expect(first).toMatchObject({ started: true, at: 8_000 });
+    core.handle('c-host', { t: 'cmd', op: 'pause' }, 9_000);
+    const again = of(core.handle('c-host', { t: 'cmd', op: 'play', countdownMs: 3_000 }, 10_000), 'state')[0]!.msg['state'] as { at: number };
+    expect(again.at).toBe(10_000 + LEAD_MS);
+    const capped = room();
+    const big = of(capped.handle('c-host', { t: 'cmd', op: 'play', pos: 0, countdownMs: 60_000 }, 1_000), 'state')[0]!.msg['state'] as { at: number };
+    expect(big.at).toBe(6_000);
+  });
+
   it('only the host controls unless control=all', () => {
     const core = room();
     core.join({ conn: 'c-b', userId: 'u-b', name: 'دحمي', avatarKey: null }, 2_000);

@@ -9,6 +9,7 @@ const { createVideoHost } = require('./video-host.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 app.setName('VANTARA');
+if (process.platform === 'win32') app.setAppUserModelId('com.vantara.desktop');
 if (!app.requestSingleInstanceLock()) app.exit(0);
 const previousProfile=app.getPath('userData');
 const executableFolder=path.dirname(app.getPath('exe'));
@@ -24,6 +25,7 @@ let playbackSession=null;
 let quitting = false;
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
+const windowIcon = process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
 const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
@@ -40,7 +42,7 @@ function openSettings(url) {
   if (u.protocol !== 'https:' || u.username || u.password) throw new Error('إعداد الإضافة يحتاج رابط HTTPS');
   const popup = new BrowserWindow({
     title: 'إعداد الإضافة · VANTARA', width: 1000, height: 800, parent: window,
-    backgroundColor: '#08080a', autoHideMenuBar: true,
+    backgroundColor: '#08080a', autoHideMenuBar: true, icon: windowIcon,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'persist:vantara-addon-settings' },
   });
   settingsWindows.add(popup);
@@ -106,8 +108,8 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     let parsed;
     try { parsed = new URL(url); } catch { throw new Error('رابط تحديث غير صالح'); }
     if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' ||
-        parsed.username || parsed.password || parsed.search || parsed.hash ||
-        !/^\/Meshal515\/VANTARA\/releases\/download\/stable-\d+\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(parsed.pathname))
+        parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
+        !/^\/Meshal515\/VANTARA\/releases\/download\/(?:stable-\d+|windows-v\d+\.\d+\.\d+)\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(parsed.pathname))
       throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور');
     await shell.openExternal(parsed.href);
     return true;
@@ -119,7 +121,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   register('player-fullscreen',({enabled}={})=>{if(typeof enabled!=='boolean')throw new Error('طلب ملء الشاشة غير صالح');window.setFullScreen(enabled);return true;});
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
-    backgroundColor: '#08080a', show: false, icon: path.join(assets, 'icons/icon-512.png'),
+    backgroundColor: '#08080a', show: false, icon: windowIcon,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
   window.on?.('resize',()=>videoHost?.resize());

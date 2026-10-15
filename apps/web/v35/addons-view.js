@@ -71,18 +71,27 @@ function logo(a) {
     "addon-logo",
     a.name?.trim().slice(0, 2).toUpperCase() || "✦",
   );
-  if (a.logo)
+  // شعار الإضافة إن أعلنته، وإلا أيقونة موقع المصدر نفسه (نطاقه المسموح فقط)؛ الحرفان يبقيان عند الفشل
+  const host = a.permissions?.networkHosts?.[0];
+  const candidates = a.logo ? [a.logo]
+    : a.bundled && host && /^[a-z0-9.-]+$/i.test(host) ? [`https://${host}/apple-touch-icon.png`, `https://${host}/favicon.ico`] : [];
+  const next = () => {
+    const raw = candidates.shift();
+    if (!raw) return;
     try {
-      const u = publicUrl(a.logo);
-      if (u.protocol !== "https:") return box;
+      const u = publicUrl(raw);
+      if (u.protocol !== "https:") return next();
       const img = node("img");
-      img.src = u.href;
       img.alt = "";
       img.loading = "lazy";
       img.referrerPolicy = "no-referrer";
-      img.onerror = () => img.remove();
+      img.onload = () => { if (img.naturalWidth >= 16) box.classList.add("has-image"); else { img.remove(); next(); } };
+      img.onerror = () => { img.remove(); next(); };
+      img.src = u.href;
       box.append(img);
-    } catch {}
+    } catch { next(); }
+  };
+  next();
   return box;
 }
 function chips(a) {
@@ -467,23 +476,36 @@ export function renderAddons({
   pulse = null,
   onProbe = null,
   playbackHealth = null,
+  /** آخر أعمال المصدر (من لقطة «آخر التحديثات» المشتركة): [{ work }] — معاينة في بطاقته. */
+  latestOf = null,
+  /** يركّب غلاف عمل في حاوية (نفس أغلفة التطبيق: الكاش وترويسات المصدر). */
+  mountCover = null,
 }) {
-  const root = node("div", "addon-hub");
+  const root = node("div", "addon-hub addon-store");
+  const sectionHub = ["manga", "anime", "cinema"].includes(filter);
+  if (sectionHub) root.dataset.sectionHub = filter;
   root.dir = "rtl";
-  // رأس حي: كم مصدرًا يعمل الآن، لا شعار تسويقي
-  const header = node("section", "addon-hero addon-hero--status"),
-    heading = node("div"),
-    mark = node("span", "addon-hero-mark"),
+  // رأس المتجر: اسم القسم وحالته الحية في سطر، وزرّا «إضافة برابط» و«افحص الكل» صغيران
+  const header = node("section", "addon-store-head"),
+    heading = node("div", "addon-store-title"),
     summary = node("p", "addon-summary"),
-    checkAll = button("افحص الكل", () => probeAll({ force: true }), "addon-button addon-button-quiet addon-check-all");
-  mark.append(glyphNode("puzzle", { size: 40 }));
+    headActions = node("div", "addon-store-actions"),
+    checkAll = button("", () => probeAll({ force: true }), "addon-icon-btn addon-check-all"),
+    addLink = button("", () => revealImport(), "addon-icon-btn addon-add-link");
   summary.setAttribute("role", "status");
   heading.append(
-    node("p", "addon-eyebrow", "VANTARA · المصادر والإضافات"),
-    node("h2", null, "مصادرك"),
+    node("h2", null, { manga: "مصادر المانجا", anime: "مصادر الأنمي", cinema: "الأفلام والمسلسلات" }[filter] ?? "المصادر والإضافات"),
     summary,
   );
-  header.append(mark, heading);
+  checkAll.append(glyphNode("refresh", { size: 20 }));
+  checkAll.setAttribute("aria-label", "افحص الكل");
+  checkAll.title = "افحص الكل";
+  addLink.append(glyphNode("plus", { size: 22 }));
+  addLink.setAttribute("aria-label", "إضافة برابط");
+  addLink.title = "إضافة برابط";
+  if (onProbe) headActions.append(checkAll);
+  headActions.append(addLink);
+  header.append(heading, headActions);
   const defaults=globalThis.VantaraDesktopDefaults;
   const defaultStatus=defaults?node('div','addon-chips'):null;
   function paintDefaults(){
@@ -496,7 +518,6 @@ export function renderAddons({
     }
   }
   if(defaultStatus){heading.append(defaultStatus);paintDefaults();}
-  if (onProbe) header.append(checkAll);
   // «تعذّر» الحقيقي من هواتفكم (آخر 7 أيام): الهدف ≤ 1% من محاولات فتح الحلقات
   if (playbackHealth && (filter === "anime" || filter === "cinema")) {
     const health = node("p", "addon-summary addon-playback-health");
@@ -554,8 +575,17 @@ export function renderAddons({
     tabs.append(b);
   }
   toolbar.append(tabs, search);
+  // صفحة قسم (مانجا/أنمي/سينما): مصادر هذا القسم فقط، بلا شرائح الفلاتر
+  filters.hidden = sectionHub;
   root.append(header, toolbar, filters, states);
   const panel = node("details", "addon-import");
+  // الاستيراد برابط/JSON/ملف: مخفي حتى يُطلب من زر «+» أو «تثبيت»
+  panel.hidden = true;
+  function revealImport() {
+    panel.hidden = false;
+    panel.open = true;
+    panel.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }
   panel.append(node("summary", null, "إضافة جديدة"));
   const importTabs = node("div", "addon-import-tabs"),
     form = node("form", "addon-import-form"),
@@ -634,6 +664,7 @@ export function renderAddons({
     if (installing) return;
     clearPreview();
     panel.open = false;
+    panel.hidden = true;
   });
   controls.append(submitButton, cancelButton);
   form.append(url, json, file, serviceWrap, controls);
@@ -754,7 +785,7 @@ export function renderAddons({
             button(
               "تثبيت",
               () => {
-                panel.open = true;
+                revealImport();
                 mode = "link";
                 paintModes();
                 url.value = a.url;
@@ -865,7 +896,8 @@ export function renderAddons({
     line.closest?.(".addon-row")?.setAttribute("data-level", st.level);
   }
   function addonRow(a) {
-    const row = node("article", "addon-row"),
+    const row = node("article", "addon-row addon-src"),
+      top = node("div", "addon-src-top"),
       main = node("div", "addon-row-main"),
       line = node("p", "addon-pulse"),
       actions = node("div", "addon-row-actions");
@@ -876,9 +908,21 @@ export function renderAddons({
     const config = needsConfiguration(a) ? configureLink(a, registry) : null;
     const open = canOpen(a, registry);
     if (config) actions.append(config);
-    else if (open) actions.append(button("فتح", () => onOpenSource(a), "addon-button addon-button-primary addon-row-open"));
-    actions.append(button("تفاصيل", () => showDetails(a), "addon-button addon-button-quiet"));
-    row.append(logo(a), main, actions);
+    actions.append(button("تفاصيل", () => showDetails(a), "addon-button addon-button-quiet addon-src-details"));
+    top.append(logo(a), main, actions);
+    row.append(top);
+    if (open) {
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      row.setAttribute("aria-label", `افتح ${a.name}`);
+      row.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSource(a); } };
+      // معاينة: آخر ما نزل في المصدر، من اللقطة المشتركة (بلا طلب جديد على المصدر)
+      if (latestOf && mountCover) {
+        const strip = node("div", "addon-src-strip");
+        row.append(strip);
+        void fillStrip(a, strip);
+      }
+    }
     // الصف كله يفتح المصدر (كبطاقة عمل)، والأزرار تبقى لعملها
     row.onclick = (e) => {
       if (e.target.closest?.("button, a")) return;
@@ -887,6 +931,19 @@ export function renderAddons({
     paintPulse(a, line);
     rowNodes.set(a.key, { row, line, addon: a });
     return row;
+  }
+  async function fillStrip(a, strip) {
+    strip.append(...Array.from({ length: 5 }, () => node("span", "addon-src-tile is-loading")));
+    let items = [];
+    try { items = (await latestOf(a)) ?? []; } catch { items = []; }
+    if (closed || !strip.isConnected) return;
+    if (!items.length) { strip.remove(); return; }
+    strip.replaceChildren();
+    for (const item of items.slice(0, 5)) {
+      const tile = node("span", "addon-src-tile");
+      strip.append(tile);
+      try { void mountCover(tile, item.work); } catch { /* الغلاف ليس شرطًا */ }
+    }
   }
   function paintRows(entries) {
     rowNodes.clear();
@@ -996,6 +1053,7 @@ export function renderAddons({
     const run = ++generation;
     busy = true;
     submitButton.disabled = true;
+    panel.hidden = false;
     panel.open = true;
     preview.replaceChildren(node("p", "addon-muted", "جارٍ فحص الإضافة…"));
     try {

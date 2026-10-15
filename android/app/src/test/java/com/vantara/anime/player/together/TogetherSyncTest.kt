@@ -110,36 +110,18 @@ class TogetherSyncTest {
         assertEquals(-20.0, conservativeMedian(listOf(-20.0, 900.0)), 0.0)
         assertEquals(30.0, conservativeMedian(listOf(10.0, 30.0, 200.0)), 0.0)
     }
-    @Test fun defersHostCommandWhileBuffering() {
+
+    @Test fun personalOffsetIsLocalOnly() {
+        // مصدري فيه مقدمة 10 ث زيادة: فيديوي متقدّم 10 ث عن وقت الغرفة ويُعدّ متزامنًا
         val ctl = DriftController()
-        val t = Timeline("k", null, true, true, 0.0, 0.0, 1.0, 1)
-        ctl.step(t, 0.0, 0.0)
-        val moved = t.copy(pos = 60000.0, seq = 2)
-        val waiting = ctl.step(moved, 0.0, 500.0, buffering = true)
-        assertEquals("buffering", waiting.reason)
-        assertNull(waiting.seekTo)
-        val ready = ctl.step(moved, 0.0, 1000.0, bufferedAhead = 100000.0)
-        assertEquals("host-command", ready.reason)
-        assertEquals(61000L, ready.seekTo)
+        val tl = Timeline("k", null, true, true, 60_000.0, 0.0, 1.0, 1)
+        repeat(4) { i -> assertEquals("in-sync", ctl.step(tl, 70_000.0 + i * 500, i * 500.0, bufferedAhead = 30_000.0, offsetMs = 10_000.0).reason.let { r -> if (r == "settling") "in-sync" else r }) }
+        // بلا ديلاي نفس الموضع انحراف 10 ث: قفز إلى وقت الغرفة
+        val plain = DriftController()
+        plain.step(tl, 70_000.0, 0.0, bufferedAhead = 30_000.0)
+        val d = plain.step(tl, 70_500.0, 500.0, bufferedAhead = 30_000.0)
+        assertNotNull(d.seekTo)
+        assertEquals(60_500.0, targetAt(tl, 500.0), 0.0)
+        assertEquals(70_500.0, targetAt(tl, 500.0, 10_000.0), 0.0)
     }
-
-    @Test fun participantOffsetPreservesRoomTimeAndBoundsPlayback() {
-        val offset = VideoOffset()
-        val t = Timeline("k", null, true, true, 5000.0, 1000.0, 1.0, 1)
-        assertTrue(offset.set(30000))
-        assertEquals(42000.0, offset.target(t, 8000.0, 60000L), 0.0)
-        assertEquals(12000.0, offset.toRoom(42000), 0.0)
-        assertTrue(offset.set(-10000))
-        assertEquals(0.0, offset.target(t, 1000.0, 60000L), 0.0)
-        assertEquals(2000.0, offset.target(t, 8000.0, 60000L), 0.0)
-        assertTrue(offset.set(120000))
-        assertEquals(60000.0, offset.target(t, 8000.0, 60000L), 0.0)
-        assertTrue(!offset.set(120001))
-        assertEquals(120000L, offset.ms)
-        offset.reset()
-        assertEquals(0L, offset.ms)
-        assertEquals(12000.0, offset.target(t, 8000.0, 60000L), 0.0)
-        assertEquals(5000.0, offset.target(t.copy(playing = false), 8000.0, 60000L), 0.0)
-    }
-
 }

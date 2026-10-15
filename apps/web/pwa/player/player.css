@@ -711,10 +711,409 @@ html.pwa-playing body {
 /* Together stays visible while ordinary playback controls are hidden. */
 .pwa-player .pp-together { position: absolute; z-index: 15; top: max(12px, env(safe-area-inset-top)); right: 14px; color: #fff; font: inherit; }
 .pwa-player:has(.pp-together) .pp-top { padding-inline-end: 130px; }
-.pwa-player .pp-lobby { position: absolute; inset: 0; z-index: 12; background: #09070de8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 30px; color: #fff; text-align: center; }
-.pwa-player .pp-lobby[hidden] { display: none; }
-.pwa-player .pp-lobby-people { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-.pwa-player .pp-lobby-person { border: 1px solid #514366; padding: 12px; border-radius: 16px; }
 .pwa-player:has(.pp-together) .pp-scrim { z-index: 20; }
 .pwa-player:has(.pp-together) .pp-sheet { z-index: 21; }
 @media (max-width: 600px) { .pwa-player .pp-together { top: 68px; right: 8px; } .pwa-player:has(.pp-together) .pp-top { padding-inline-end: max(20px, env(safe-area-inset-right, 0px)); } }
+
+/* ───────── الكمبيوتر (ويندوز): ماوس، صوت، ملء الشاشة، لوحات جانبية ───────── */
+.pwa-player .pp-desk[hidden] { display: none; }
+@media not all and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-desk { display: none !important; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-touch { display: none !important; }
+  /* المؤشر يختفي مع التحكم أثناء المشاهدة */
+  .pwa-player:not(.pp--shown):not(.pp--sheet) { cursor: none; }
+  .pwa-player .pp-icon:hover { background: rgba(255, 255, 255, 0.12); }
+  .pwa-player .pp-play:hover { background: rgba(255, 255, 255, 0.14) !important; }
+  .pwa-player .pp-bar:hover .pp-track { height: 5px; }
+  .pwa-player .pp-bar:hover .pp-thumb { width: 14px; height: 14px; margin: -7px 0 0 -7px; }
+  .pwa-player .pp-row-item:hover,
+  .pwa-player .pp-tile:hover,
+  .pwa-player .pp-ep:hover { filter: brightness(1.18); }
+}
+.pwa-player .pp-icon.is-on { color: var(--accent-text); background: var(--accent-soft); }
+
+/* الصوت: الزر والشريط يتمدّد عند المرور */
+.pwa-player .pp-volume { display: flex; align-items: center; }
+.pwa-player .pp-volume__range {
+  --level: 100%;
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, #fff var(--level), rgba(255, 255, 255, 0.28) var(--level));
+  cursor: pointer;
+  transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease;
+}
+.pwa-player .pp-volume:hover .pp-volume__range,
+.pwa-player .pp-volume:focus-within .pp-volume__range { width: 88px; opacity: 1; margin: 0 10px 0 2px; }
+.pwa-player .pp-volume__range::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+.pwa-player .pp-volume__range::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 0; }
+
+/* معاينة الوقت فوق الشريط + علامات المقدمة والنهاية */
+.pwa-player .pp-hover {
+  position: absolute;
+  bottom: 34px;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.92);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pwa-player .pp-hover[hidden] { display: none; }
+.pwa-player .pp-marks { position: absolute; inset-inline: 0; top: 50%; height: 3px; margin-top: -1.5px; pointer-events: none; }
+.pwa-player .pp-marks i { position: absolute; inset-block: 0; background: rgba(251, 191, 36, 0.75); border-radius: 2px; }
+
+/* زر التخطي: ظاهر وحده فوق شريط التحكم، كالـAPK */
+.pwa-player .pp-skip {
+  position: absolute;
+  z-index: 6;
+  right: max(28px, env(safe-area-inset-right, 0px));
+  bottom: 150px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #0a0c12 !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.pwa-player .pp-skip svg { width: 16px; height: 16px; }
+.pwa-player .pp-skip[hidden] { display: none; }
+.pwa-player:not(.pp--shown) .pp-skip { bottom: 40px; }
+
+/* لوحتا الشبكة والاختصارات */
+.pwa-player .pp-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13.5px;
+}
+.pwa-player .pp-metric span { color: var(--text-2); }
+.pwa-player .pp-metric b { font-variant-numeric: tabular-nums; text-align: end; }
+.pwa-player .pp-metric--ok b { color: var(--ok); }
+.pwa-player .pp-metric--warn b { color: var(--warn); }
+.pwa-player .pp-metric--bad b { color: var(--bad); }
+.pwa-player kbd {
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--surface-3);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--line);
+  font: 700 12.5px/1.2 ui-monospace, 'Vantara Sans', monospace;
+  white-space: nowrap;
+}
+.pwa-player .pp-clip p { direction: ltr; }
+
+/* شاشة عريضة: اللوحات جانبية يمينية بدل ورقة تغطي الفيديو (مثل لوحات الـAPK) */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .pwa-player .pp-scrim { background: linear-gradient(to left, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.08) 60%); }
+  .pwa-player .pp-sheet,
+  .pwa-player .pp-sheet--subtitle-adjust {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: 400px;
+    max-height: none;
+    padding: 24px 22px;
+    border-radius: 0;
+    box-shadow: inset 1px 0 0 var(--line), -30px 0 80px rgba(0, 0, 0, 0.45);
+    transform: translateX(100%);
+  }
+  .pwa-player.pp--sheet .pp-sheet,
+  .pwa-player.pp--sheet .pp-sheet--subtitle-adjust { transform: translateX(0); }
+  .pwa-player .pp-sheet__grip { display: none; }
+  .pwa-player .pp-sheet__head strong { font-size: 19px; }
+  .pwa-player .pp-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pwa-player .pp-episodes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .pwa-player .pp-titles strong { font-size: 18px; }
+  .pwa-player .pp-titles small { font-size: 13.5px; }
+}
+
+/* ───────── شاشة الغرفة (مشاهدة معًا قبل البدء) ─────────
+   خلفية سينمائية صافية، شعار كبير، وشريط واحد هادئ في الأسفل. لا بطاقات زجاجية ولا تكرار. */
+.pwa-player .pp-lobby {
+  --pl-accent: #c1121f;
+  --pl-bottom: max(18px, env(safe-area-inset-bottom));
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  overflow: hidden;
+  color: #fff;
+  background: #050507;
+  cursor: auto;
+  font-family: inherit;
+}
+.pwa-player .pp-lobby[hidden] { display: none; }
+.pwa-player.pp--lobby .pp-controls,
+.pwa-player.pp--lobby .pp-spinner,
+.pwa-player.pp--lobby .pp-skip,
+.pwa-player.pp--lobby .pp-pill { visibility: hidden; }
+
+.pwa-player .pl-bg { position: absolute; inset: 0; overflow: hidden; }
+.pwa-player .pl-bg img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; animation: pl-drift 30s ease-in-out infinite alternate; }
+@keyframes pl-drift { from { transform: scale(1.02); } to { transform: scale(1.08); } }
+/* تعتيم من الأسفل فقط (حيث الشعار والشريط)، وخفيف جدًا من الأعلى لزر الخروج */
+.pwa-player .pl-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, rgba(5, 5, 7, 0.96) 0%, rgba(5, 5, 7, 0.72) 26%, rgba(5, 5, 7, 0.12) 58%, rgba(5, 5, 7, 0) 72%),
+    linear-gradient(to bottom, rgba(5, 5, 7, 0.45) 0%, rgba(5, 5, 7, 0) 18%);
+}
+
+.pwa-player .pl-top {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(18px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) 0 max(24px, env(safe-area-inset-left));
+}
+.pwa-player .pl-live { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; color: rgba(255, 255, 255, 0.86); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
+.pwa-player .pl-live i { width: 8px; height: 8px; border-radius: 50%; background: #5fd49a; box-shadow: 0 0 0 3px rgba(95, 212, 154, 0.18); }
+.pwa-player .pl-live.is-warn i { background: #f2b75b; box-shadow: 0 0 0 3px rgba(242, 183, 91, 0.18); }
+.pwa-player .pl-close {
+  display: grid; place-items: center; width: 40px; height: 40px; padding: 0;
+  border: 0; border-radius: 50%; color: #fff; background: rgba(0, 0, 0, 0.38); cursor: pointer;
+}
+.pwa-player .pl-close:hover { background: rgba(0, 0, 0, 0.6); }
+
+.pwa-player .pl-hero {
+  position: absolute;
+  z-index: 2;
+  inset: auto max(40px, env(safe-area-inset-right)) 132px max(40px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.pwa-player .pl-logo { max-width: min(46vw, 520px); max-height: 22vh; object-fit: contain; object-position: right bottom; filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55)); }
+.pwa-player .pl-title { margin: 0; max-width: 60vw; font-size: clamp(30px, 4.4vw, 56px); font-weight: 800; line-height: 1.12; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
+.pwa-player .pl-meta { margin: 0; font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.78); }
+
+/* الشريط السفلي الواحد */
+.pwa-player .pl-bar {
+  position: absolute;
+  z-index: 3;
+  inset: auto 0 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px max(40px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left));
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.pwa-player .pl-faces { display: flex; flex: none; padding-inline-start: 8px; }
+.pwa-player .pl-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-inline-start: -8px;
+  border-radius: 50%;
+  border: 2px solid #050507;
+  background: #1a1a22;
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.8);
+}
+.pwa-player .pl-face > * { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; overflow: hidden; }
+.pwa-player .pl-face.is-host::after {
+  content: "";
+  position: absolute;
+  inset-block-end: -1px;
+  inset-inline-start: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #050507;
+  background: var(--pl-accent);
+}
+/* المدعو الذي لم يدخل، ومن يجهّز: نبض هادئ بدل الإطار المنقّط */
+.pwa-player .pl-face.is-pending > *, .pwa-player .pl-face.is-preparing > * { opacity: 0.55; }
+.pwa-player .pl-face.is-pending::before, .pwa-player .pl-face.is-preparing::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  animation: pl-pulse 1.8s ease-out infinite;
+}
+.pwa-player .pl-face.is-failed > * { filter: grayscale(1); opacity: 0.5; }
+@keyframes pl-pulse { from { transform: scale(0.92); opacity: 0.9; } to { transform: scale(1.22); opacity: 0; } }
+.pwa-player .pl-more-count { font-size: 12.5px; }
+
+.pwa-player .pl-info { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pwa-player .pl-status { margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pwa-player .pl-status.is-bad { color: #ff8b8e; }
+.pwa-player .pl-server { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: rgba(255, 255, 255, 0.62); white-space: nowrap; }
+.pwa-player .pl-server bdi { font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+.pwa-player .pl-server-state.is-ok { color: #6fe3a1; }
+.pwa-player .pl-server-state.is-warn { color: #f5c76a; }
+.pwa-player .pl-server-state.is-bad { color: #ff8b8e; }
+.pwa-player .pl-dot { opacity: 0.5; }
+.pwa-player .pl-link { padding: 0 2px; border: 0; background: none; color: #fff; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 255, 255, 0.4); cursor: pointer; }
+
+.pwa-player .pl-cta { display: flex; align-items: center; gap: 10px; flex: none; }
+.pwa-player .pl-cta > * { flex-shrink: 0; }
+.pwa-player .pl-icon { display: grid; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 50%; color: #fff; background: rgba(255, 255, 255, 0.06); cursor: pointer; }
+.pwa-player .pl-icon[aria-expanded="true"] { background: rgba(255, 255, 255, 0.16); }
+.pwa-player .pl-go {
+  display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 28px;
+  box-sizing: border-box; white-space: nowrap;
+  border: 1px solid transparent; border-radius: 999px; color: #fff; background: var(--pl-accent);
+  font: inherit; font-size: 16px; font-weight: 800; cursor: pointer;
+}
+.pwa-player .pl-choose-server { padding-inline: 20px; border-color: rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.1); }
+.pwa-player .pl-go:hover { filter: brightness(1.1); }
+.pwa-player .pl-go:disabled { opacity: 0.45; cursor: default; filter: none; }
+.pwa-player .pl-wait { font-size: 14.5px; font-weight: 700; color: rgba(255, 255, 255, 0.7); padding: 0 6px; }
+
+/* «⋯»: الديلاي */
+.pwa-player .pl-more {
+  position: absolute;
+  z-index: 4;
+  /* فوق زر «⋯» (نهاية السطر في العربية = يسار) */
+  inset-block-end: 100px;
+  inset-inline-end: 40px;
+  width: min(420px, calc(100% - 48px));
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #121218;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.pwa-player .pl-more[hidden] { display: none; }
+.pwa-player .pl-more, .pwa-player .pl-bar { box-sizing: border-box; }
+.pwa-player .pl-more-row { display: flex; align-items: center; gap: 12px; }
+.pwa-player .pl-more-label { min-width: 0; }
+.pwa-player .pl-step { flex-shrink: 0; }
+.pwa-player .pl-more-label { flex: 1; display: grid; gap: 2px; }
+.pwa-player .pl-more-label b { font-size: 14.5px; }
+.pwa-player .pl-more-label small { font-size: 12px; color: rgba(255, 255, 255, 0.55); }
+.pwa-player .pl-step { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 22px; background: rgba(255, 255, 255, 0.07); }
+.pwa-player .pl-step-btn { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; color: #fff; background: rgba(255, 255, 255, 0.1); font: inherit; font-size: 18px; font-weight: 800; cursor: pointer; }
+.pwa-player .pl-step output { direction: ltr; unicode-bidi: isolate; min-width: 58px; text-align: center; font-size: 13.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* العدّ التنازلي المشترك */
+.pwa-player .pl-count {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  background: rgba(5, 5, 7, 0.55);
+}
+.pwa-player .pl-count b { font-size: clamp(96px, 16vw, 180px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.pwa-player .pl-count b.is-tick { animation: pl-tick 0.9s ease-out both; }
+.pwa-player .pl-count span { font-size: 16px; font-weight: 700; color: rgba(255, 255, 255, 0.75); }
+@keyframes pl-tick { from { transform: scale(1.35); opacity: 0; } 30% { opacity: 1; } to { transform: scale(1); opacity: 1; } }
+.pwa-player .pp-lobby.is-counting .pl-bar, .pwa-player .pp-lobby.is-counting .pl-more { visibility: hidden; }
+
+/* الجوال أفقيًا: البنر كاملًا بنسبته (16:9) في جهة ويذوب طرفه في الخلفية — لا قصّ —
+   والشعار والمعلومات في الجهة الأخرى، كصفحات الأفلام */
+@media (max-height: 500px) {
+  .pwa-player .pl-bg img {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: auto;
+    height: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    animation: none;
+    -webkit-mask-image: linear-gradient(to right, #000 58%, transparent 100%);
+    mask-image: linear-gradient(to right, #000 58%, transparent 100%);
+  }
+  .pwa-player .pl-shade { background: linear-gradient(to top, rgba(5, 5, 7, 0.92) 0%, rgba(5, 5, 7, 0.4) 22%, rgba(5, 5, 7, 0) 40%), linear-gradient(to bottom, rgba(5, 5, 7, 0.4) 0%, rgba(5, 5, 7, 0) 20%); }
+  .pwa-player .pl-top { padding-top: max(10px, env(safe-area-inset-top)); }
+  .pwa-player .pl-hero { inset-block-end: 96px; inset-inline-end: auto; max-width: 44%; gap: 6px; }
+  .pwa-player .pl-logo { max-height: 30vh; max-width: 100%; }
+  .pwa-player .pl-title { font-size: 28px; }
+  .pwa-player .pl-meta { font-size: 13px; }
+  .pwa-player .pl-bar { gap: 12px; padding-top: 10px; padding-bottom: var(--pl-bottom); padding-inline: max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-left)); border-top: 0; }
+  .pwa-player .pl-face { width: 38px; height: 38px; }
+  .pwa-player .pl-status { font-size: 14.5px; }
+  .pwa-player .pl-go { height: 44px; padding: 0 22px; font-size: 15px; }
+  .pwa-player .pl-icon { width: 42px; height: 42px; }
+  .pwa-player .pl-more { inset-block-end: calc(64px + var(--pl-bottom)); inset-inline-end: max(24px, env(safe-area-inset-left)); }
+}
+/* الجوال عموديًا: البنر كاملًا بعرض الشاشة في الأعلى (16:9)، الشعار على حافته، والباقي تحته مرتبًا */
+@media (max-width: 760px) and (min-height: 501px) {
+  .pwa-player .pp-lobby { display: flex; flex-direction: column; overflow-y: auto; }
+  .pwa-player .pl-bg { position: relative; inset: auto; flex: none; aspect-ratio: 16 / 9; }
+  .pwa-player .pl-bg img {
+    animation: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 64%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 64%, transparent 100%);
+  }
+  .pwa-player .pl-shade { background: linear-gradient(to bottom, rgba(5, 5, 7, 0.5), rgba(5, 5, 7, 0) 30%); }
+  .pwa-player .pl-top { padding-inline: 16px; }
+  .pwa-player .pl-hero { position: relative; inset: auto; margin-top: -44px; padding: 0 20px; align-items: center; text-align: center; }
+  .pwa-player .pl-logo { max-width: 76vw; max-height: 15vh; object-position: center bottom; }
+  .pwa-player .pl-title { max-width: 90vw; font-size: 32px; }
+  /* الأشخاص والحالة في منتصف المساحة بين الشعار و«ابدأ» (الذي يبقى في الأسفل) */
+  .pwa-player .pl-bar {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 28px 20px max(20px, env(safe-area-inset-bottom));
+    border-top: 0;
+  }
+  .pwa-player .pl-faces { margin-top: auto; }
+  .pwa-player .pl-face { width: 54px; height: 54px; margin-inline-start: -10px; }
+  .pwa-player .pl-info { flex: none; text-align: center; justify-items: center; }
+  .pwa-player .pl-status { white-space: normal; font-size: 17px; }
+  .pwa-player .pl-cta { margin-top: auto; width: 100%; padding-top: 18px; }
+  .pwa-player .pl-go, .pwa-player .pl-wait { flex: 1; justify-content: center; text-align: center; height: 52px; border-radius: 999px; padding-inline: 12px; gap: 6px; }
+  .pwa-player .pl-wait { display: grid; place-items: center; background: rgba(255, 255, 255, 0.07); }
+  .pwa-player .pl-more { inset: auto 16px calc(84px + var(--pl-bottom)); width: auto; }
+  .pwa-player .pl-more-row { flex-wrap: wrap; }
+  .pwa-player .pl-more-label { flex-basis: 100%; }
+  .pwa-player .pl-icon { width: 44px; height: 44px; }
+  .pwa-player .pl-cta { gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pwa-player .pl-bg img, .pwa-player .pl-face::before, .pwa-player .pl-count b.is-tick { animation: none; }
+}
+.pwa-player.pp--lobby .pp-together { display: none; }
+
+/* ديلاي الفيديو أثناء المشاهدة */
+.pwa-player .pp-offset { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0 12px; }
+.pwa-player .pp-offset__btn {
+  min-width: 52px;
+  height: 44px;
+  border-radius: 22px;
+  background: var(--surface-3) !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  font-variant-numeric: tabular-nums;
+}
+.pwa-player .pp-offset__btn:hover { filter: brightness(1.2); }
+.pwa-player .pp-offset__value { min-width: 84px; text-align: center; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }

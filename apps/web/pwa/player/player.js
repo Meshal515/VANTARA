@@ -22,7 +22,10 @@ import { nextEpisodeCopies } from '../../addons/video.js';
 import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
 import { createTogetherPlayer } from './together-player.js';
 import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
-import { connectionLabel, stateLabel } from '../../v35/together.js';
+import { connectionLabel } from '../../v35/together.js';
+import { renderLobby, pendingInvitees } from './together-lobby.js';
+import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
+import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
 
 const START_TIMEOUT_MS = 15_000;
 const REPORT_EVERY_MS = 5_000;
@@ -32,6 +35,38 @@ export const MIN_REAL_DURATION_S = 45;
 const STALL_MS = 15_000;
 const HIDE_AFTER_MS = 3_500;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+/** روابط الاستضافة تنتهي سريعًا: الحلقة التالية تُجهَّز في آخر 4 دقائق فقط (NextEpisodeWarmup.kt). */
+const WARMUP_WINDOW_MS = 4 * 60_000;
+const VOLUME_KEY = 'vantara.player.volume';
+
+/** يجهّز الحلقة التالية الآن؟ نفس شرط الـAPK. */
+export const shouldWarmNext = (durationMs, positionMs) => durationMs > 0 && positionMs >= 0 && positionMs < durationMs && durationMs - positionMs <= WARMUP_WINDOW_MS;
+
+/** اختصارات الكيبورد في الكمبيوتر — مصدر واحد للتنفيذ ولورقة «الاختصارات». */
+export const SHORTCUTS = [
+  ['مسافة / K', 'تشغيل وإيقاف'],
+  ['→ / L', 'تقديم 10 ثوانٍ (مع Shift: 30)'],
+  ['← / J', 'رجوع 10 ثوانٍ (مع Shift: 30)'],
+  ['↑ / ↓', 'رفع وخفض الصوت'],
+  ['M', 'كتم الصوت'],
+  ['F / نقرتان', 'ملء الشاشة'],
+  ['S', 'تخطي المقدمة أو النهاية'],
+  ['N', 'الحلقة التالية'],
+  ['C', 'الترجمة'],
+  ['< / >', 'إبطاء وتسريع'],
+  ['0 – 9', 'انتقل إلى 0%–90% من الحلقة'],
+  ['Esc', 'إغلاق اللوحة أو المشغّل'],
+];
+
+const readVolume = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? 'null');
+    return { volume: Math.max(0, Math.min(1, Number(v?.volume ?? 1))), muted: v?.muted === true };
+  } catch { return { volume: 1, muted: false }; }
+};
+const saveVolume = (volume, muted) => {
+  try { localStorage.setItem(VOLUME_KEY, JSON.stringify({ volume, muted })); } catch { /* تفضيل محلي فقط */ }
+};
 
 let active = null;
 
@@ -115,6 +150,15 @@ const ICON = {
   spark: svg('<path d="M12 3 14 10l7 2-7 2-2 7-2-7-7-2 7-2Z"/>', { fill: true }),
   pip: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><rect x="12" y="11" width="7" height="5.5" rx="1.2" fill="currentColor"/>'),
   full: svg('<path d="M3 9V5h4M17 5h4v4M21 15v4h-4M7 19H3v-4"/>'),
+  crop: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6 12h3M15 12h3M7.5 10.2 5.8 12l1.7 1.8M16.5 10.2l1.7 1.8-1.7 1.8"/>'),
+  fullExit: svg('<path d="M8 3v4H4M16 3v4h4M16 21v-4h4M8 21v-4H4"/>'),
+  volume: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
+  volumeLow: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6"/>'),
+  mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+  subtitles: svg('<rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M6.5 13.5h4M13 13.5h4.5M6.5 16h7"/>'),
+  skip: svg('<path d="M4 6 11 12 4 18Z M12 6l7 6-7 6Z"/>', { fill: true }),
+  network: svg('<path d="M4 18h2.5v-4H4ZM9 18h2.5V10H9ZM14 18h2.5V7H14ZM19 18h2.5V4H19Z" fill="currentColor"/>'),
+  keyboard: svg('<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/>'),
 };
 
 function iconButton(name, label, onClick, cls = '') {
@@ -165,7 +209,15 @@ export function openPlayer(args) {
     lastProgressAt: 0,
     lastTime: 0,
     healing: false,
+    // الحلقة التالية مجهّزة مسبقًا: { episode, prep, best }
+    warm: null,
+    skip: { key: null, result: null, pending: false, controller: null },
+    // «شاهد اللقطة»: تشغيل المدى فقط ثم بطاقة الإعادة
+    clip: Number(args.clipEnd) > Number(args.clipStart) && Number(args.clipStart) >= 0 ? { start: Number(args.clipStart), end: Number(args.clipEnd) } : null,
+    clipLast: -1,
   };
+  const isAnime = args.section !== 'cinema';
+  const previousTitle = document.title;
 
   // لا Referer لمضيفات الفيديو: كثير منها يرفض مرجعًا غريبًا ويقبل الغياب
   const meta = document.createElement('meta');
@@ -201,8 +253,9 @@ export function openPlayer(args) {
   const titleEl = el('strong', null, args.title || '');
   const subEl = el('small', null, '');
   titles.append(titleEl, subEl);
-  const fitBtn = iconButton('fill', 'ملء الشاشة', () => toggleFill());
-  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, fitBtn, iconButton('more', 'المزيد', () => showMore()));
+  const fitBtn = iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => toggleFill());
+  const fullBtn = iconButton('full', 'ملء الشاشة (F)', () => toggleFullscreen(), 'pp-desk');
+  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, fitBtn, fullBtn, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -219,7 +272,10 @@ export function openPlayer(args) {
   const played = el('i', 'pp-played');
   const thumb = el('b', 'pp-thumb');
   track.append(buffered, played);
-  bar.append(track, thumb);
+  const hoverTip = el('span', 'pp-hover');
+  hoverTip.hidden = true;
+  const skipMarks = el('span', 'pp-marks');
+  bar.append(track, skipMarks, thumb, hoverTip);
 
   const row = el('div', 'pp-row');
   const left = el('div', 'pp-group');
@@ -243,13 +299,38 @@ export function openPlayer(args) {
     e.stopPropagation();
     showQuality();
   };
-  right.append(qualityBtn, iconButton('speed', 'السرعة', () => showSpeed()), iconButton('lock', 'قفل الشاشة', () => setLocked(true)));
+  const volume = el('div', 'pp-volume pp-desk');
+  const volBtn = iconButton('volume', 'كتم الصوت (M)', () => setMuted(!video.muted));
+  const volRange = el('input', 'pp-volume__range');
+  volRange.type = 'range';
+  volRange.min = '0';
+  volRange.max = '100';
+  volRange.step = '1';
+  volRange.setAttribute('aria-label', 'مستوى الصوت');
+  volRange.addEventListener('input', () => setVolume(Number(volRange.value) / 100));
+  volRange.addEventListener('pointerdown', (e) => e.stopPropagation());
+  volume.append(volBtn, volRange);
+  const fullBtnBottom = iconButton('full', 'ملء الشاشة (F)', () => toggleFullscreen(), 'pp-desk');
+  const subsBtn = iconButton('subtitles', 'الترجمة (C)', () => showSubtitles(), 'pp-desk');
+  subsBtn.hidden = true;
+  right.append(qualityBtn, subsBtn, iconButton('speed', 'السرعة', () => showSpeed()), iconButton('lock', 'قفل الشاشة', () => setLocked(true), 'pp-touch'), fullBtnBottom);
+  // الصوت في الطرف الأيسر بجانب أزرار الحلقات، كمشغلات الكمبيوتر
+  left.prepend(volume);
   row.append(left, center, right);
   bottom.append(times, bar, row);
   controls.append(el('div', 'pp-shade pp-shade--top'), el('div', 'pp-shade pp-shade--bottom'), top, bottom);
 
   const unlockBtn = iconButton('unlock', 'فتح القفل', () => setLocked(false), 'pp-unlock');
   unlockBtn.hidden = true;
+
+  // زر «تخطي المقدمة/النهاية» يظهر وحده حتى والتحكم مخفي، كالـAPK
+  const skipBtn = el('button', 'pp-skip');
+  skipBtn.type = 'button';
+  skipBtn.hidden = true;
+  skipBtn.onclick = (e) => {
+    e.stopPropagation();
+    skipSegment();
+  };
 
   // ── الأوراق ──
   const sheetScrim = el('div', 'pp-scrim');
@@ -263,7 +344,7 @@ export function openPlayer(args) {
   errorCard.dir = 'rtl';
   errorCard.hidden = true;
 
-  root.append(video, gestures, seekLeft, seekRight, spinner, controls, pill, unlockBtn, errorCard, sheetScrim, sheet);
+  root.append(video, gestures, seekLeft, seekRight, spinner, controls, skipBtn, pill, unlockBtn, errorCard, sheetScrim, sheet);
   document.body.append(root);
   if (together) {
     root.classList.add('v35');
@@ -274,32 +355,64 @@ export function openPlayer(args) {
     const hub = together.hub;
     const unmount = hub.mountStrip(strip);
     let sheetCleanup = null;
-    let localOffset = 0, setLocalOffset = null, offsetControls = null;
+    let offsetControls = null;
     const surface = hub.useSurface({ openSheet: build => {
       sheetCleanup?.(); sheetCleanup = null;
       openSheet('مشاهدة معًا', null, body => {
         sheetCleanup = build(body);
-        if ((together.session.room.info?.mode ?? together.session.mode) === 'sync' && setLocalOffset) {
-          offsetControls = createVideoOffsetControls({ getOffset: () => localOffset, setOffset: ms => setLocalOffset(ms) });
+        if ((together.session.room.info?.mode ?? together.session.mode) === 'sync' && tg) {
+          offsetControls = createVideoOffsetControls({ getOffset: () => tg?.offset() ?? 0, setOffset: ms => tg?.setOffset(ms) });
           body.append(offsetControls);
         }
       });
     }, closeSheet, toast: message });
+    // البنر والشعار وعنوان الحلقة: ما جاء مع الدعوة فورًا، ثم ما يُكمَّل من ani.zip/metahub.
+    // الحلقة تتغيّر في الغرفة؟ يتغيّر البنر والعنوان معها.
+    const inviteMedia = together.session.media ?? {};
+    let art = { banner: inviteMedia.banner ?? inviteMedia.cover ?? args.poster ?? null, logo: inviteMedia.logo ?? null, title: inviteMedia.title ?? args.title ?? '', episodeTitle: inviteMedia.episodeTitle ?? null };
+    let artEpisode = null;
+    const refreshArt = () => {
+      if (artEpisode === state.episode) return;
+      artEpisode = state.episode;
+      const same = Number(inviteMedia.episode) === state.episode;
+      const media = { ...inviteMedia, episode: state.episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
+      if (!same) art = { ...art, banner: inviteMedia.cover ?? args.poster ?? art.banner, episodeTitle: null };
+      void resolveArt(media).then((a) => {
+        if (artEpisode !== media.episode || state.closed) return;
+        art = { ...a, banner: a.banner ?? art.banner };
+        tg?.repaint();
+      });
+    };
     tg = createTogetherPlayer({ room: together.session.room, mode: together.session.mode, mediaPrefix: together.mediaPrefix, video,
       episode: () => state.episode, source: () => state.current?.code ?? null,
       onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
-      onLobby: ({ visible, prepared, blocked, host, connection, roster, start, resume, videoOffsetMs, setVideoOffset }) => {
-        localOffset = videoOffsetMs; setLocalOffset = setVideoOffset; offsetControls?.refresh();
-        lobby.hidden = !visible; lobby.replaceChildren();
-        if (!visible) return;
-        lobby.append(el('strong', null, 'مشاهدة معًا'), el('p', null, connectionLabel(connection)));
-        const people = el('div', 'pp-lobby-people');
-        for (const m of roster) people.append(el('div', 'pp-lobby-person', `${m.name}${m.host ? ' · المضيف' : ''} · ${stateLabel(m.state)}`));
-        lobby.append(people);
-        const hint = blocked ? 'المتصفح يحتاج ضغطة منك لتشغيل الفيديو' : !prepared ? 'جاري تجهيز الفيديو من سيرفرك…' : host ? 'ابدأ عندما تكون جاهزًا؛ من يتأخر يلحق بكم' : 'فيديوك جاهز · بانتظار المضيف يبدأ…';
-        lobby.append(el('p', null, hint));
-        const b = el('button', 'pp-pill-btn pp-pill-btn--primary', blocked ? 'تابع معهم' : host ? 'ابدأ' : 'افتح لوحة الغرفة');
-        b.type = 'button'; b.disabled = !blocked && host && (!prepared || connection !== 'live'); b.onclick = blocked ? resume : host ? start : () => hub.openPanel(); lobby.append(b);
+      onLobby: (l) => {
+        offsetControls?.refresh();
+        lobby.hidden = !l.visible;
+        root.classList.toggle('pp--lobby', l.visible);
+        if (!l.visible) return;
+        refreshArt();
+        const media = together.session.media ?? {};
+        const c = state.current;
+        renderLobby(lobby, {
+          ...l,
+          roster: l.roster.map(r => ({ ...r, avatarKey: r.avatarKey || hub.person(r.userId)?.avatarKey || null })),
+          art,
+          kindText: mediaKind(media),
+          // لون القسم: أحمر السينما، بنفسجي المانجا، ولون الأنمي للأنمي
+          accent: media.kind === 'manga' ? '#8f5cff' : media.kind === 'anime' ? '#3b82f6' : '#c1121f',
+          episodeText: episodeLine(media, state.episode),
+          connectionText: connectionLabel(l.connection),
+          pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),
+          server: c ? { code: c.code, quality: fmtQ(c.quality ?? currentHeight()) } : null,
+        }, {
+          avatar: (p, size) => hub.avatar(p, size),
+          start: l.start,
+          resume: l.resume,
+          changeServer: () => showServers(),
+          leave: () => closePlayer(),
+          setOffset: (ms) => { const v = tg?.setOffset(ms) ?? 0; message(v ? `ديلاي فيديوك ${v > 0 ? '+' : '−'}${Math.abs(v / 1000).toFixed(1)} ث` : 'بدون ديلاي', 1200); },
+        });
       },
     });
     const off = hub.onChange(s => { if (s === together.session) return; tg?.destroy(); tg = null; lobby.remove(); strip.remove(); });
@@ -351,8 +464,21 @@ export function openPlayer(args) {
     }
     root.classList.add('pp--shown');
     clearTimeout(hideTimer);
-    if (!stay && !video.paused) hideTimer = setTimeout(() => root.classList.remove('pp--shown'), HIDE_AFTER_MS);
+    if (!stay && !video.paused) hideTimer = setTimeout(() => { if (!overControls) root.classList.remove('pp--shown'); }, HIDE_AFTER_MS);
   }
+  // الماوس فوق الأزرار يُبقيها ظاهرة؛ وخارجها تختفي بعد 3.5 ث مع المؤشر
+  let overControls = false;
+  for (const part of [top, bottom]) {
+    part.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { overControls = true; if (sheet.hidden) showControls(true); } });
+    part.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { overControls = false; if (sheet.hidden) showControls(); } });
+  }
+  let lastMove = { x: -1, y: -1 };
+  root.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || (e.clientX === lastMove.x && e.clientY === lastMove.y)) return;
+    lastMove = { x: e.clientX, y: e.clientY };
+    if (sheet.hidden) showControls();
+  });
+  root.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !video.paused) { overControls = false; hideControls(); } });
   const hideControls = () => {
     clearTimeout(hideTimer);
     root.classList.remove('pp--shown');
@@ -397,10 +523,177 @@ export function openPlayer(args) {
     }, 700);
     paintTime();
   }
+  // ── الصوت (الكمبيوتر): زر + شريط + عجلة الماوس + الأسهم، ويُحفظ بين الجلسات ──
+  function paintVolume() {
+    const level = video.muted ? 0 : video.volume;
+    volBtn.innerHTML = level === 0 ? ICON.mute : level < 0.5 ? ICON.volumeLow : ICON.volume;
+    volRange.value = String(Math.round(level * 100));
+    volRange.style.setProperty('--level', `${Math.round(level * 100)}%`);
+  }
+  function setVolume(v, announce = false) {
+    const next = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+    video.volume = next;
+    video.muted = next === 0;
+    saveVolume(next || video.volume, video.muted);
+    paintVolume();
+    if (announce) message(next === 0 ? 'الصوت مكتوم' : `الصوت ${Math.round(next * 100)}%`, 900);
+  }
+  function setMuted(on) {
+    video.muted = on;
+    if (!on && video.volume === 0) video.volume = 0.5;
+    saveVolume(video.volume, on);
+    paintVolume();
+    message(on ? 'الصوت مكتوم' : `الصوت ${Math.round(video.volume * 100)}%`, 900);
+  }
+  {
+    const saved = readVolume();
+    video.volume = saved.volume;
+    video.muted = saved.muted;
+    paintVolume();
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else root.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => message('المتصفح منع ملء الشاشة'));
+  }
+  const paintFullscreen = () => {
+    const on = Boolean(document.fullscreenElement);
+    for (const b of [fullBtn, fullBtnBottom]) {
+      b.innerHTML = on ? ICON.fullExit : ICON.full;
+      b.setAttribute('aria-label', on ? 'خروج من ملء الشاشة (F)' : 'ملء الشاشة (F)');
+      b.title = b.getAttribute('aria-label');
+    }
+  };
+  document.addEventListener('fullscreenchange', paintFullscreen);
+
+  // ── تخطي المقدمة والنهاية (نفس SkipRepository في الـAPK) ──
+  function maybeLoadSkips(force = false) {
+    if (!isAnime || !state.started || !(video.duration > 0) || !Number.isFinite(video.duration)) return;
+    const durationMs = Math.round(video.duration * 1000);
+    const key = `${state.session}|${state.episode}|${state.current?.id}|${Math.trunc(durationMs / 1000)}`;
+    if (!force && state.skip.key === key) return;
+    state.skip.controller?.abort();
+    const controller = new AbortController();
+    state.skip = { key, result: null, pending: true, controller };
+    const anilistId = Number(args.subtitleIdentity?.externalIds?.anilist ?? args.animeId) || null;
+    loadSkipTimes({ malId: Number(args.malId) || null, anilistId, episode: state.episode, durationMs, force, signal: controller.signal })
+      .then((result) => {
+        if (state.skip.controller !== controller) return;
+        state.skip = { ...state.skip, result, pending: false };
+        paintSkipMarks();
+        paintSkip();
+      })
+      .catch(() => { if (state.skip.controller === controller) state.skip = { ...state.skip, pending: false }; });
+  }
+  function clearSkips() {
+    state.skip.controller?.abort();
+    state.skip = { key: null, result: null, pending: false, controller: null };
+    skipBtn.hidden = true;
+    skipMarks.replaceChildren();
+  }
+  function paintSkip() {
+    const seg = state.started && !state.clip ? activeSegment(state.skip.result?.timings, (video.currentTime || 0) * 1000) : null;
+    skipBtn.hidden = !seg;
+    if (seg) {
+      const label = seg.opening ? 'تخطي المقدمة' : 'تخطي النهاية';
+      if (skipBtn.dataset.label !== label) {
+        skipBtn.dataset.label = label;
+        skipBtn.innerHTML = `<span>${label}</span>${ICON.skip}`;
+        skipBtn.setAttribute('aria-label', `${label} (S)`);
+      }
+    }
+  }
+  /** علامات المقدمة والنهاية على شريط التقدّم. */
+  function paintSkipMarks() {
+    skipMarks.replaceChildren();
+    const t = state.skip.result?.timings;
+    const d = video.duration * 1000;
+    if (!t || !(d > 0)) return;
+    for (const i of [t.opening, t.ending].filter(Boolean)) {
+      const m = el('i');
+      m.style.left = `${(i.startMs / d) * 100}%`;
+      m.style.width = `${((i.endMs - i.startMs) / d) * 100}%`;
+      skipMarks.append(m);
+    }
+  }
+  function skipSegment() {
+    const seg = activeSegment(state.skip.result?.timings, (video.currentTime || 0) * 1000);
+    if (!seg) return false;
+    skipBtn.hidden = true;
+    if (!tg?.seek(seg.interval.endMs)) video.currentTime = seg.interval.endMs / 1000;
+    message(seg.opening ? 'تخطّينا المقدمة' : 'تخطّينا النهاية', 1200);
+    return true;
+  }
+
+  // ── الحلقة التالية تُجهَّز في آخر 4 دقائق (NextEpisodeWarmup في الـAPK) ──
+  function maybeWarmNext() {
+    if (state.warm || !state.started || isLast() || tg || !Number.isFinite(video.duration)) return;
+    if (!shouldWarmNext(video.duration * 1000, (video.currentTime || 0) * 1000)) return;
+    const n = state.episode + 1;
+    const copies = nextEpisodeCopies(args.copies, n, { ...args.subtitleIdentity, episode: n });
+    if (!copies.length || (state.total > 0 && n > state.total)) return;
+    const warm = { episode: n, prep: null, closed: false };
+    state.warm = warm;
+    warm.ready = engine.prepare({ copies, episode: n, preferredSourceId: state.current?.sourceId ?? null, preferredServer: state.current?.server ?? null })
+      .then(async (prep) => {
+        warm.prep = prep;
+        if (warm.closed) { void engine.closeSession({ session: prep.session }); return null; }
+        const best = await engine.best({ session: prep.session, prefer: args.prefer ?? null, waitMs: 45_000 }).catch(() => null);
+        return { prep, best };
+      })
+      .catch(() => null);
+  }
+  function discardWarm() {
+    const w = state.warm;
+    state.warm = null;
+    if (!w) return;
+    w.closed = true;
+    if (w.prep) void engine.closeSession({ session: w.prep.session });
+  }
+
+  // ── «شاهد اللقطة»: يقف في نهاية المدى ويعرض الإعادة ──
+  let clipCard = null;
+  function clipTick() {
+    const c = state.clip;
+    if (!c || clipCard || !state.started) return;
+    const now = (video.currentTime || 0) * 1000;
+    if (!video.paused && state.clipLast >= c.start && state.clipLast < c.end && now >= c.end) {
+      video.pause();
+      showClipEnd();
+    }
+    state.clipLast = now;
+  }
+  function showClipEnd() {
+    const c = state.clip;
+    clipCard?.remove();
+    const card = el('div', 'pp-error pp-clip');
+    card.dir = 'rtl';
+    const range = el('p', null, `${clock(c.start / 1000)} – ${clock(c.end / 1000)}`);
+    range.dir = 'ltr';
+    card.append(el('strong', null, 'انتهت اللقطة'), range);
+    const actions = el('div', 'pp-error__actions');
+    const close = () => { clipCard?.remove(); clipCard = null; };
+    const mk = (label, primary, fn) => {
+      const b = el('button', `pp-pill-btn${primary ? ' pp-pill-btn--primary' : ''}`, label);
+      b.type = 'button';
+      b.onclick = () => { close(); fn(); };
+      return b;
+    };
+    actions.append(
+      mk('إعادة اللقطة', true, () => { video.currentTime = c.start / 1000; state.clipLast = c.start; video.play().catch(() => {}); }),
+      mk('أكمل من هنا', false, () => { state.clip = null; message('الحلقة كاملة'); video.play().catch(() => {}); }),
+      mk('الحلقة من البداية', false, () => { state.clip = null; video.currentTime = 0; video.play().catch(() => {}); }),
+    );
+    card.append(actions);
+    root.append(card);
+    clipCard = card;
+    hideControls();
+  }
+
   function toggleFill() {
     state.fill = !state.fill;
     root.classList.toggle('pp--fill', state.fill);
-    fitBtn.innerHTML = state.fill ? ICON.fit : ICON.fill;
+    fitBtn.classList.toggle('is-on', state.fill);
     message(state.fill ? 'ملء الشاشة' : 'ملاءمة');
   }
   function setLocked(on) {
@@ -418,8 +711,30 @@ export function openPlayer(args) {
 
   // اللمس: لمسة تُظهر/تُخفي، ولمستان على الجانب تقدّم أو ترجع 10 ثوانٍ
   let lastTap = { t: 0, x: 0 };
+  // الماوس: نقرة = تشغيل/إيقاف، نقرتان = ملء الشاشة، العجلة = الصوت
+  let clickTimer = 0;
+  // Safari لا يذكر نوع المؤشر في click: نأخذه من pointerdown
+  let pointerKind = 'mouse';
+  gestures.addEventListener('pointerdown', (e) => { pointerKind = e.pointerType; });
+  gestures.addEventListener('click', (e) => {
+    if (pointerKind !== 'mouse' || !sheet.hidden) return;
+    if (e.detail > 1) return;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => togglePlay(), 220);
+  });
+  gestures.addEventListener('dblclick', (e) => {
+    clearTimeout(clickTimer);
+    if (pointerKind !== 'mouse') return;
+    toggleFullscreen();
+  });
+  gestures.addEventListener('wheel', (e) => {
+    if (state.locked || !sheet.hidden || !e.deltaY) return;
+    e.preventDefault();
+    setVolume((video.muted ? 0 : video.volume) + (e.deltaY < 0 ? 0.05 : -0.05), true);
+  }, { passive: false });
   gestures.addEventListener('pointerup', (e) => {
     if (sheet.hidden === false) return;
+    if (e.pointerType === 'mouse') return;
     const now = Date.now();
     const w = gestures.clientWidth;
     const side = e.clientX < w * 0.35 ? -1 : e.clientX > w * 0.65 ? 1 : 0;
@@ -461,6 +776,21 @@ export function openPlayer(args) {
   };
   bar.addEventListener('pointerup', endDrag);
   bar.addEventListener('pointercancel', endDrag);
+  // معاينة الوقت تحت الماوس (الكمبيوتر)، وتعرف إن كان الموضع داخل المقدمة أو النهاية
+  bar.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || !Number.isFinite(video.duration)) return;
+    const r = track.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const ms = p * video.duration * 1000;
+    const seg = activeSegment(state.skip.result?.timings, ms) ?? activeSegment(state.skip.result?.timings, ms + 1001);
+    hoverTip.textContent = `${clock(p * video.duration)}${seg ? (seg.opening ? ' · المقدمة' : ' · النهاية') : ''}`;
+    hoverTip.style.left = `${p * 100}%`;
+    hoverTip.hidden = false;
+  });
+  bar.addEventListener('pointerleave', () => { hoverTip.hidden = true; });
+  bar.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); seekBy(e.key === 'ArrowRight' ? 5 : -5); }
+  });
 
   // ───────────────────────── الأوراق ─────────────────────────
 
@@ -649,16 +979,20 @@ export function openPlayer(args) {
     });
   }
 
+  function setSpeed(sp) {
+    state.speed = sp;
+    // في الغرفة المتزامنة السرعة يملكها متحكّم المزامنة
+    if (!tg) video.playbackRate = sp;
+    message(sp === 1 ? 'سرعة عادية' : `السرعة ${sp}×`);
+  }
   function showSpeed() {
     openSheet('السرعة', null, (body) => {
       for (const sp of SPEEDS) {
         body.append(sheetRow(sp === 1 ? 'عادية' : `${sp}×`, null, {
           on: state.speed === sp,
           onClick: () => {
-            state.speed = sp;
-            video.playbackRate = sp;
             closeSheet();
-            message(sp === 1 ? 'سرعة عادية' : `السرعة ${sp}×`);
+            setSpeed(sp);
           },
         }));
       }
@@ -674,6 +1008,7 @@ export function openPlayer(args) {
       else runtime.addons?.registry.health.failure(key, 'subtitles', 'pwa', 'provider_failure');
     },
     onChange: () => {
+      subsBtn.hidden = !subtitleSession.available();
       if (subtitleSheetBody && !sheet.hidden && sheet.contains(subtitleSheetBody)) paintSubtitles(subtitleSheetBody);
       if (!sheet.hidden && sheet.classList.contains('pp-sheet--subtitle-adjust') && !Object.values(subtitleSession.adjustments.capabilities()).some(Boolean)) closeSheet();
     },
@@ -703,22 +1038,23 @@ export function openPlayer(args) {
     const caps = adjust.capabilities();
     if (!Object.values(caps).some(Boolean)) return;
     openSheet('تعديل الترجمة', null, (body) => {
-      const stepper = (key, title, label, next) => {
+      const stepper = (key, title, label, next, values = () => adjust.values()[key], set = n => adjust.set(key, n)) => {
         const group = el('div', 'pp-sub-step');
         group.append(el('small', null, title));
         const pill = el('div', 'pp-sub-step__pill'); pill.dir = 'ltr';
         const value = el('output'); value.setAttribute('aria-live', 'polite');
         const minus = el('button', null, '−'), plus = el('button', null, '+');
         const paint = () => {
-          const current = adjust.values()[key]; value.textContent = label(current);
+          const current = values(); value.textContent = label(current);
           minus.disabled = next(current, -1) === current; plus.disabled = next(current, 1) === current;
         };
         for (const [button, direction] of [[minus, -1], [plus, 1]]) {
           button.type = 'button'; button.setAttribute('aria-label', `${direction > 0 ? 'زيادة' : 'تقليل'} ${title}`);
-          button.onclick = () => { adjust.set(key, next(adjust.values()[key], direction)); paint(); };
+          button.onclick = () => { set(next(values(), direction)); paint(); };
         }
         pill.append(minus, value, plus); group.append(pill); body.append(group); paint();
       };
+      if (tg) stepper('video', 'توقيت الفيديو', n => `${n.toFixed(2)} ث`, (n, d) => Math.round(Math.max(-120, Math.min(120, n + d * 0.1)) * 10) / 10, () => (tg?.offset() ?? 0) / 1000, n => tg?.setOffset(n * 1000));
       if (caps.timing) {
         stepper('delay', 'توقيت الترجمة', n => `${n.toFixed(2)} ث`, (n, d) => Math.round(Math.max(-10, Math.min(10, n + d * 0.1)) * 10) / 10);
         body.append(el('small', 'pp-sub-hint', '+ يؤخر الترجمة، − يقدمها'));
@@ -727,12 +1063,111 @@ export function openPlayer(args) {
       if (caps.position) stepper('position', 'موضع الترجمة', n => `${n}%`, (n, d) => Math.max(0, Math.min(100, n + d)));
     }, 'pp-sheet--subtitle-adjust');
   }
+  function showSkips() {
+    const render = (body) => {
+      body.replaceChildren();
+      body.append(sheetRow('توقيت هذه الحلقة', skipStatusText(state.skip.result, state.skip.pending, clock), { on: true }));
+      body.append(el('p', 'pp-note', 'يظهر زر التخطي أثناء المقدمة أو النهاية (أو اضغط S). تخطي النهاية يُبقي المشاهد التي تأتي بعدها.'));
+      const again = sheetRow('إعادة جلب التوقيت', state.skip.pending ? 'جارٍ الجلب…' : 'جرّب مجددًا بعد عودة الاتصال', { onClick: () => { maybeLoadSkips(true); render(body); } });
+      again.disabled = state.skip.pending;
+      body.append(again);
+    };
+    const body = openSheet('تخطي المقدمة والنهاية', null, render);
+    const live = setInterval(() => { if (sheet.hidden || state.closed || !sheet.contains(body)) return clearInterval(live); render(body); }, 1000);
+  }
+
+  /** لوحة الشبكة: نفس فكرة NetStats في الـAPK، بما يكشفه المتصفح فعلًا. */
+  function networkRows() {
+    const c = state.current;
+    let ahead = 0;
+    for (let i = 0; i < video.buffered.length; i++) {
+      if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) ahead = video.buffered.end(i) - video.currentTime;
+    }
+    const q = video.getVideoPlaybackQuality?.();
+    const level = state.hls?.levels?.[state.hls.currentLevel];
+    const est = state.hls?.bandwidthEstimate;
+    let host = '';
+    try { host = new URL(c?.url ?? '').hostname; } catch { host = ''; }
+    const mbps = (bps) => `${(bps / 1e6).toFixed(1)} Mbps`;
+    return [
+      ['السيرفر', c ? `${c.code}${host ? ` · ${host}` : ''}` : '—'],
+      ['الطريق', state.via === 'edge' ? 'عبر جالب VANTARA' : state.via === 'direct' ? 'مباشر من المضيف' : '—'],
+      ['الصورة', video.videoHeight ? `${video.videoWidth}×${video.videoHeight}` : '—'],
+      ['المخزَّن أمامك', `${ahead.toFixed(1)} ث`, ahead < 5 ? 'bad' : ahead < 15 ? 'warn' : 'ok'],
+      ...(est ? [['سرعة اتصالك (تقدير)', mbps(est), est < 3e6 ? 'warn' : 'ok']] : []),
+      ...(level?.bitrate ? [['معدّل البث', mbps(level.bitrate)]] : []),
+      ...(q ? [['إطارات ساقطة', `${q.droppedVideoFrames} من ${q.totalVideoFrames}`, q.totalVideoFrames && q.droppedVideoFrames / q.totalVideoFrames > 0.02 ? 'warn' : 'ok']] : []),
+    ];
+  }
+  function showNetwork() {
+    const render = (body) => {
+      body.replaceChildren();
+      for (const [name, value, tone] of networkRows()) {
+        const r = el('div', `pp-metric${tone ? ` pp-metric--${tone}` : ''}`);
+        const v = el('b', null, value);
+        v.dir = 'auto';
+        r.append(el('span', null, name), v);
+        body.append(r);
+      }
+    };
+    const body = openSheet('الشبكة', 'تتحدّث كل ثانية', render);
+    const live = setInterval(() => { if (sheet.hidden || state.closed || !sheet.contains(body)) return clearInterval(live); render(body); }, 1000);
+  }
+
+  function showShortcuts() {
+    openSheet('اختصارات الكيبورد', null, (body) => {
+      for (const [keys, what] of SHORTCUTS) {
+        const r = el('div', 'pp-metric');
+        const k = el('kbd', null, keys);
+        k.dir = 'ltr';
+        r.append(el('span', null, what), k);
+        body.append(r);
+      }
+    });
+  }
+
+  /** ديلاي فيديوك في الغرفة: لك وحدك، يتطبّق فورًا وتشوف الفرق وأنت تعدّل. */
+  function showOffset() {
+    if (!tg) return;
+    openSheet('ديلاي فيديوك', 'لك وحدك · ما يتغيّر شيء عند الباقين', (body) => {
+      const value = el('output', 'pp-offset__value');
+      value.setAttribute('aria-live', 'polite');
+      const paint = () => {
+        const v = tg?.offset() ?? 0;
+        value.textContent = v ? `${v > 0 ? '+' : '−'}${(Math.abs(v) / 1000).toFixed(1)} ث` : '0 ث';
+      };
+      const row = el('div', 'pp-offset');
+      row.dir = 'ltr';
+      for (const [label, delta] of [['−5', -5000], ['−0.5', -500], [null, 0], ['+0.5', 500], ['+5', 5000]]) {
+        if (label == null) { row.append(value); continue; }
+        const b = el('button', 'pp-offset__btn', label);
+        b.type = 'button';
+        b.setAttribute('aria-label', `${delta > 0 ? 'قدّم' : 'أخّر'} فيديوك ${Math.abs(delta) / 1000} ث`);
+        b.onclick = () => { tg?.setOffset((tg?.offset() ?? 0) + delta); paint(); };
+        row.append(b);
+      }
+      body.append(row);
+      body.append(el('p', 'pp-note', 'مصدرك فيه مقدمة أو مشهد زيادة عن الباقين؟ زِد (+) حتى تشوفون نفس اللحظة. أقل منهم؟ نقّص (−). يُحفظ لهذه الحلقة وهذا السيرفر.'));
+      const reset = sheetRow('بدون ديلاي', null, { onClick: () => { tg?.setOffset(0); paint(); } });
+      body.append(reset);
+      paint();
+    });
+  }
+
   function showMore() {
     openSheet('المزيد', null, (body) => {
+      if (tg) {
+        const v = tg.offset();
+        body.append(sheetRow('ديلاي فيديوك', v ? `${v > 0 ? '+' : '−'}${(Math.abs(v) / 1000).toFixed(1)} ث · لك وحدك` : 'لو مصدرك فيه مقدمة زيادة عن الباقين', { onClick: () => { closeSheet(); showOffset(); } }));
+      }
       if (subtitleSession.available()) body.append(sheetRow('الترجمة', null, { onClick: () => { closeSheet(); showSubtitles(); } }));
+      if (isAnime) body.append(sheetRow('تخطي المقدمة والنهاية', skipStatusText(state.skip.result, state.skip.pending, clock), { onClick: () => { closeSheet(); showSkips(); } }));
       body.append(sheetRow('السرعة', state.speed === 1 ? 'عادية' : `${state.speed}×`, { onClick: () => { closeSheet(); showSpeed(); } }));
-      body.append(sheetRow('قفل الشاشة', 'يمنع اللمس الخاطئ أثناء المشاهدة', { onClick: () => { closeSheet(); setLocked(true); } }));
-      body.append(sheetRow(state.fill ? 'ملاءمة الصورة' : 'ملء الشاشة', 'قصّ الحواف لملء الشاشة أو إظهار الصورة كاملة', { onClick: () => { closeSheet(); toggleFill(); } }));
+      body.append(sheetRow('الشبكة', 'السيرفر، الطريق، المخزَّن، والإطارات', { onClick: () => { closeSheet(); showNetwork(); } }));
+      const desktop = matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (desktop) body.append(sheetRow('اختصارات الكيبورد', 'مسافة، الأسهم، F، M، S…', { onClick: () => { closeSheet(); showShortcuts(); } }));
+      else body.append(sheetRow('قفل الشاشة', 'يمنع اللمس الخاطئ أثناء المشاهدة', { onClick: () => { closeSheet(); setLocked(true); } }));
+      body.append(sheetRow(state.fill ? 'إظهار الصورة كاملة' : 'ملء الصورة (قصّ الحواف)', state.fill ? 'بلا قصّ، مع أشرطة سوداء إن لزم' : 'تختفي الأشرطة السوداء ويُقصّ طرف الصورة', { onClick: () => { closeSheet(); toggleFill(); } }));
       if (document.pictureInPictureEnabled || video.webkitSupportsPresentationMode) {
         body.append(sheetRow('صورة داخل صورة', 'تابع المشاهدة فوق التطبيقات الأخرى', {
           onClick: () => {
@@ -780,6 +1215,28 @@ export function openPlayer(args) {
   }
 
   // ───────────────────────── التشغيل ─────────────────────────
+
+  /**
+   * أزرار الوسائط في الكيبورد ولوحة الوسائط في ويندوز (والجوال): العنوان والحلقة
+   * والغلاف، وتشغيل/إيقاف/تقديم/التالية.
+   */
+  function mediaSession() {
+    const label = movie ? args.title : `${args.title} · الحلقة ${state.episode}`;
+    document.title = label || previousTitle;
+    if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: label, artist: 'VANTARA', artwork: args.poster ? [{ src: args.poster, sizes: '512x512' }] : [] });
+      const on = (a, fn) => { try { navigator.mediaSession.setActionHandler(a, fn); } catch { /* غير مدعوم */ } };
+      on('play', () => { if (video.paused) togglePlay(); });
+      on('pause', () => { if (!video.paused) togglePlay(); });
+      on('seekbackward', () => seekBy(-10));
+      on('seekforward', () => seekBy(10));
+      on('seekto', (d) => { if (Number.isFinite(d.seekTime) && !tg?.seek(d.seekTime * 1000)) video.currentTime = d.seekTime; });
+      on('nexttrack', isLast() ? null : () => void goEpisode(state.episode + 1));
+    } catch {
+      // متصفح بلا Media Session كاملة
+    }
+  }
 
   function report(final = false) {
     const c = state.current;
@@ -900,6 +1357,7 @@ export function openPlayer(args) {
     state.current = c;
     subtitleSession.setStream(c);
     state.started = false;
+    clearSkips();
     tg?.preparing();
     state.tried.add(c.id);
     errorCard.hidden = true;
@@ -909,28 +1367,38 @@ export function openPlayer(args) {
     if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
     if(addonMedia(c))video.crossOrigin="anonymous";else video.removeAttribute("crossorigin");
     let reason = null;
-    for (const [via, url] of paths) {
-      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
-      const out = await attempt(url, c.type);
-      if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
-      if (out.ok) {
-        state.via = via;
-        state.started = true;
-        state.lastProgressAt = Date.now();
-        state.lastTime = video.currentTime;
-        if (seek > 0 && Number.isFinite(video.duration) && seek < video.duration * 1000 - 5000) video.currentTime = seek / 1000;
-        video.playbackRate = state.speed;
-        setBusy(false);
-        paint();
-        showControls();
-        emit('server', { animeId: args.animeId ?? null, code: c.code, sourceId: c.sourceId, server: c.server, quality: c.quality ?? currentHeight() ?? null });
-        report();
-        tg?.ready();
-        return true;
+    // غرفة متزامنة لم تبدأ: الفيديو يُجهَّز بصمت ويقف عند البداية (لا صوت مفاجئ)
+    const quiet = tg?.waiting() ? video.muted : null;
+    if (quiet !== null) video.muted = true;
+    try {
+      for (const [via, url] of paths) {
+        if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
+        const out = await attempt(url, c.type);
+        if (state.closed || generation !== state.mediaGeneration || state.current !== c) return false;
+        if (out.ok) {
+          state.via = via;
+          state.started = true;
+          state.lastProgressAt = Date.now();
+          state.lastTime = video.currentTime;
+          if (seek > 0 && Number.isFinite(video.duration) && seek < video.duration * 1000 - 5000) video.currentTime = seek / 1000;
+          video.playbackRate = state.speed;
+          setBusy(false);
+          paint();
+          showControls();
+          subsBtn.hidden = !subtitleSession.available();
+          maybeLoadSkips();
+          mediaSession();
+          emit('server', { animeId: args.animeId ?? null, code: c.code, sourceId: c.sourceId, server: c.server, quality: c.quality ?? currentHeight() ?? null });
+          report();
+          tg?.ready();
+          return true;
+        }
+        reason = out.reason;
+        // صورة «غير متاح» هي نفسها عبر الجالب: لا داعي للطريق الثاني
+        if (reason === 'placeholder') break;
       }
-      reason = out.reason;
-      // صورة «غير متاح» هي نفسها عبر الجالب: لا داعي للطريق الثاني
-      if (reason === 'placeholder') break;
+    } finally {
+      if (quiet !== null) video.muted = quiet;
     }
     state.failed.set(c.route, REASON[reason] ?? 'فشل التشغيل');
     return false;
@@ -1007,14 +1475,24 @@ export function openPlayer(args) {
     setBusy(true, `نجهّز الحلقة ${n}…`);
     errorCard.hidden = true;
     const previous = state.current;
+    if (previous && state.started && Number.isFinite(video.duration) && video.currentTime > 5 && video.currentTime < video.duration - 60) {
+      args.resume = { ...(args.resume ?? {}), [state.episode]: Math.round(video.currentTime * 1000) };
+    }
     state.current = null;
     state.started = false;
     teardownSource();
     args.subtitleIdentity = {...args.subtitleIdentity, episode:n};
     subtitleSession.setIdentity(args.subtitleIdentity);
     void engine.closeSession({ session: state.session });
-    let prep;
-    try {
+    clearSkips();
+    // الحلقة التالية جُهّزت في آخر 4 دقائق؟ تبدأ فورًا بلا انتظار
+    const warm = state.warm?.episode === n ? state.warm : null;
+    if (!warm) discardWarm();
+    state.warm = null;
+    const warmed = warm ? await warm.ready : null;
+    if (warm && !warmed?.best?.candidate && warmed?.prep) void engine.closeSession({ session: warmed.prep.session });
+    let prep = warmed?.best?.candidate ? warmed.prep : null;
+    if (!prep) try {
       prep = await engine.prepare({ copies, episode: n, preferredSourceId: previous?.sourceId ?? null, preferredServer: previous?.server ?? null });
     } catch (error) {
       if (state.closed || generation !== state.mediaGeneration) return;
@@ -1032,9 +1510,12 @@ export function openPlayer(args) {
     state.current = null;
     paint();
     emit('episode', { animeId: args.animeId ?? null, session: state.session, episode: n });
-    const best = await engine.best({ session: state.session, prefer: args.prefer ?? null, waitMs: 45_000 }).catch(() => null);
+    mediaSession();
+    const best = prep === warmed?.prep ? warmed.best : await engine.best({ session: state.session, prefer: args.prefer ?? null, waitMs: 45_000 }).catch(() => null);
     if (state.closed || generation !== state.mediaGeneration) return;
-    await playFrom(best?.candidate ?? null);
+    // كل حلقة تكمل من حيث وقفت فيها (كالـAPK)، وفي الغرفة من الصفر دائمًا
+    const resumeAt = !tg && Number(args.resume?.[n]) > 0 ? Number(args.resume[n]) : 0;
+    await playFrom(best?.candidate ?? null, resumeAt);
   }
 
   // بطاقة «الحلقة التالية» بعدّ تنازلي، كالـAPK
@@ -1080,6 +1561,14 @@ export function openPlayer(args) {
     releaseTogether();
     clearInterval(countdown);
     clearInterval(watchdog);
+    clearSkips();
+    discardWarm();
+    document.removeEventListener('fullscreenchange', paintFullscreen);
+    document.title = previousTitle;
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = null;
+      for (const a of ['play', 'pause', 'seekbackward', 'seekforward', 'seekto', 'nexttrack']) try { navigator.mediaSession.setActionHandler(a, null); } catch { /* غير مدعوم */ }
+    }
     subtitleSession.close();
     teardownSource();
     root.remove();
@@ -1096,13 +1585,39 @@ export function openPlayer(args) {
     if (active?.root === root) active = null;
   }
 
+  // الحروف بـe.code لا e.key: تعمل والكيبورد على العربي
   const onKey = (e) => {
-    if (e.key === 'Escape') return sheet.hidden ? closePlayer() : closeSheet();
-    if (e.target?.tagName === 'INPUT') return;
-    if (e.key === ' ' || e.key === 'k') togglePlay();
-    else if (e.key === 'ArrowRight') seekBy(10);
-    else if (e.key === 'ArrowLeft') seekBy(-10);
-    else if (e.key === 'f') root.requestFullscreen?.().catch(() => {});
+    if (e.key === 'Escape') {
+      if (!sheet.hidden) return closeSheet();
+      if (document.fullscreenElement) return;
+      return closePlayer();
+    }
+    const t = e.target;
+    if (t?.isContentEditable || t?.tagName === 'TEXTAREA' || (t?.tagName === 'INPUT' && t.type !== 'range')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!sheet.hidden && e.code !== 'Space') return;
+    const big = e.shiftKey ? 30 : 10;
+    const code = e.code;
+    if (code === 'Space' || code === 'KeyK' || e.key === 'MediaPlayPause') togglePlay();
+    else if (code === 'ArrowRight' || code === 'KeyL') seekBy(big);
+    else if (code === 'ArrowLeft' || code === 'KeyJ') seekBy(-big);
+    else if (code === 'ArrowUp') setVolume((video.muted ? 0 : video.volume) + 0.05, true);
+    else if (code === 'ArrowDown') setVolume((video.muted ? 0 : video.volume) - 0.05, true);
+    else if (code === 'KeyM') setMuted(!video.muted);
+    else if (code === 'KeyF') toggleFullscreen();
+    else if (code === 'KeyS') { if (!skipSegment()) return; }
+    else if (code === 'KeyN') { if (isLast()) return message('هذه آخر حلقة'); void goEpisode(state.episode + 1); }
+    else if (code === 'KeyC') { if (!subtitleSession.available()) return message('لا ترجمة لهذا الفيديو'); showSubtitles(); }
+    else if (e.key === '>' || e.key === '<' || (e.shiftKey && (code === 'Period' || code === 'Comma'))) {
+      const up = e.key === '>' || code === 'Period';
+      const i = SPEEDS.indexOf(state.speed);
+      const next = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + (up ? 1 : -1)))];
+      setSpeed(next);
+    } else if (/^Digit[0-9]$/.test(code) && !e.shiftKey && Number.isFinite(video.duration)) {
+      const target = (Number(code.slice(5)) / 10) * video.duration * 1000;
+      if (!tg?.seek(target)) video.currentTime = target / 1000;
+      showControls();
+    } else if (e.key === '?' ) showShortcuts();
     else return;
     e.preventDefault();
   };
@@ -1110,6 +1625,9 @@ export function openPlayer(args) {
 
   video.addEventListener('timeupdate', () => {
     paintTime();
+    paintSkip();
+    clipTick();
+    maybeWarmNext();
     if (video.currentTime !== state.lastTime) {
       state.lastTime = video.currentTime;
       state.lastProgressAt = Date.now();
@@ -1121,7 +1639,7 @@ export function openPlayer(args) {
     }
   });
   video.addEventListener('progress', paintTime);
-  video.addEventListener('durationchange', paintTime);
+  video.addEventListener('durationchange', () => { paintTime(); maybeLoadSkips(); paintSkipMarks(); });
   video.addEventListener('play', () => {
     playBtn.innerHTML = ICON.pause;
     playBtn.setAttribute('aria-label', 'إيقاف مؤقت');

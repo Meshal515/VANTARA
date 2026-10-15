@@ -2246,10 +2246,72 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function readNow() {
     if (state.current && state.nextRow) openChapter(state.current, state.nextRow);
   }
-  function openChapter(w, row) {
+  function openChapter(w, row, { inviteTogether = false } = {}) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource) });
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
+  }
+
+  /**
+   * «اقرأ مع أصدقائك» من صفحة العمل: اختر الفصل (تابع / الأول / الأحدث / أي رقم)،
+   * فيفتح القارئ عليه وتظهر ورقة الدعوة مباشرة (من تدعو، متزامنة أو منفصلة).
+   * في المنفصلة كل واحد يقرأ بمصدره وفصله؛ في المتزامنة الكل على صفحة المضيف.
+   */
+  function readTogetherCurrent() {
+    const w = state.current;
+    if (!w) return;
+    const rows = (state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters) ?? [];
+    if (!rows.length) return toast('الفصول ما وصلت بعد، لحظة');
+    if (together.session) return toast('أنت في غرفة الآن؛ اطلع منها أولًا');
+    const byNumber = [...rows].filter((r) => Number.isFinite(Number(r.number))).sort((a, b) => Number(a.number) - Number(b.number));
+    const go = (row) => { closeSheet(); openChapter(w, row, { inviteTogether: true }); };
+    openSheet((body) => {
+      body.classList.add('rt-sheet');
+      const head = el('div', 'rt-head');
+      head.append(el('h3', null, 'اقرأ مع أصدقائك'), el('p', null, 'اختر الفصل، ثم من تدعو وطريقة القراءة'));
+      body.append(head);
+      const quick = el('div', 'rt-quick');
+      const pick = (label, sub, row, primary = false) => {
+        if (!row) return;
+        const b = el('button', `rt-pick${primary ? ' is-primary' : ''}`);
+        b.type = 'button';
+        b.append(el('b', null, label), el('span', null, sub));
+        b.onclick = () => go(row);
+        quick.append(b);
+      };
+      const next = state.nextRow;
+      pick('تابع', next ? `الفصل ${next.number}` : '', next, true);
+      if (byNumber[0] && byNumber[0] !== next) pick('من البداية', `الفصل ${byNumber[0].number}`, byNumber[0]);
+      const latest = byNumber.at(-1);
+      if (latest && latest !== next) pick('الأحدث', `الفصل ${latest.number}`, latest);
+      body.append(quick);
+      // أي فصل: رقم مباشر، أو من الشبكة
+      const form = el('form', 'rt-number');
+      const input = el('input', 'search-input');
+      input.type = 'number';
+      input.inputMode = 'decimal';
+      input.placeholder = 'رقم الفصل';
+      input.setAttribute('aria-label', 'رقم الفصل');
+      const goBtn = el('button', 'btn btn-primary', 'افتح');
+      goBtn.type = 'submit';
+      form.append(input, goBtn);
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        const n = Number(input.value);
+        const row = byNumber.find((r) => Number(r.number) === n);
+        if (!row) return toast(`ما لقينا الفصل ${input.value}`);
+        go(row);
+      };
+      body.append(form);
+      const grid = el('div', 'rt-grid');
+      for (const row of byNumber.slice().reverse()) {
+        const b = el('button', `rt-ch${row === next ? ' is-next' : ''}`, String(row.number));
+        b.type = 'button';
+        b.onclick = () => go(row);
+        grid.append(b);
+      }
+      body.append(grid);
+    });
   }
 
   // ── الأنمي من المجلس والملف ──
@@ -3370,7 +3432,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       case 'TOGETHER': {
         const code = /#together=([A-Z0-9]{6})/.exec(row.link ?? '')?.[1] ?? null;
         const invite = code ? sync.rows('together_invites', (x) => x.code === code)[0] : null;
-        const reading = invite?.kind === 'manga';
+        // الدعوة قد تصل قبل صفها بالمزامنة: نوعها من مرجع العمل (الأنمي والسينما لهما بادئة)
+        const reading = invite ? invite.kind === 'manga' : !/^(anime|cinema):/.test(row.series_ref ?? '');
         return {
           text: `يدعوك ${reading ? 'تقرأ' : 'تشاهد'} معه`,
           title: row.body ?? null,
@@ -3632,7 +3695,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
-      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
+      const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
+      const latestOf = async (addon) => {
+        if (!addon.bundled || !addon.sourceId) return [];
+        const value = (await shots).get(addon.sourceId);
+        const list = value?.mangas ?? value?.items ?? (Array.isArray(value) ? value : []);
+        const out = [];
+        for (const item of list) {
+          if (out.length >= 5) break;
+          try { out.push({ work: sourceWorkModel(item, { addon, episodes: [] }) }); } catch { /* عمل بلا نوع مؤكد */ }
+        }
+        return out;
+      };
+      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
@@ -4506,7 +4582,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
       row('info', 'الإصدار', currentPlatform() === 'pwa' ? 'نسخة PWA المثبتة على هذا الجهاز' : apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
-      row('spark', 'ما الجديد', `${RELEASE.product} ${RELEASE.version}`, { run: openWhatsNew }),
+      row('spark', 'ما الجديد', `${RELEASE.product} ${globalThis.VantaraDesktop?.version ?? RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {
@@ -4927,6 +5003,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openUtility: (_e, t) => void deps.go({ name: t.dataset.arg }),
     openWorkMenu,
     shareCurrent: () => state.current && openShare(state.current),
+    readTogetherCurrent: () => readTogetherCurrent(),
     markPreviousReading,
     toggleTranslateCurrent,
     readNow,

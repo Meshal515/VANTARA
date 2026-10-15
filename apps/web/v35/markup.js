@@ -105,6 +105,7 @@ export const SHELL_HTML = `<div class="app">
       ${iconButton('back', 'رجوع', { act: 'backFromDetail' })}
       <div class="detail-top-title" id="detailTopTitle"></div>
       <div class="detail-actions">
+        ${iconButton('users', 'اقرأ مع أصدقائك', { act: 'readTogetherCurrent' })}
         ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
         <button class="icon-btn detail-tl" type="button" id="detailTlBtn" data-act="toggleTranslateCurrent" aria-pressed="false" aria-label="ترجمة تلقائية للفصول الإنجليزية" title="ترجمة تلقائية" hidden>${glyph('translateAr', { size: 22 })}</button>
         ${iconButton('eye', 'قراءتي السابقة', { act: 'markPreviousReading' })}

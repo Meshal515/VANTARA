@@ -193,8 +193,8 @@ export function joinRoom({
       listeners.get(event).add(fn);
       return () => listeners.get(event)?.delete(fn);
     },
-    command(op, { pos, media } = {}) {
-      return send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}) });
+    command(op, { pos, media, countdownMs } = {}) {
+      return send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
     },
     report(r) {
       return send({ t: 'report', ...r });

@@ -38,7 +38,8 @@ import { readNetwork } from '../lib/netpolicy.js';
 import { MAX_FRAME_PAGES, buildFramePayload } from '../lib/frame.js';
 import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
-import { readingPosition, readingTop, createReadingFollower } from './reader-scroll.js';
+import { createFollower } from '../lib/together/follow.js';
+import { readingPosition, readingTop } from './reader-scroll.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 
@@ -176,34 +177,66 @@ export function openSmartReader(deps, ctx) {
   let scrollReportTimer = null;
   let lastScrollReport = -Infinity;
   const following = () => hub?.session && !hub.session.room.isHost && (hub.session.room.info?.mode ?? hub.session.mode) === 'sync';
-  const followMotion = createReadingFollower({
-    active: () => following() && document.visibilityState !== 'hidden' && nativeForeground && settings.mode !== 'paged',
-    getPosition: () => scroll.scrollTop,
-    setPosition: top => { scroll.scrollTop = top; },
-    readTarget: () => {
-      const seg = followAnchor && segs.find(s => Number(s.row.number) === followAnchor.chapter);
-      if (!seg) return null;
-      const target = readingTop(seg.frames, followAnchor.position, scroll.getBoundingClientRect().top, scroll.scrollTop);
-      return target == null ? null : Math.max(0, Math.min(Math.max(0, scroll.scrollHeight - scroll.clientHeight), target));
+  // Buffer timestamped host positions so guests follow the same motion at a small fixed delay.
+  const follower = createFollower();
+  let followFrame = 0, followDestroyed = false, followReceivedAt = null, followLastAt = null, followStartedAt = null;
+  const followStats = { updates: 0, frames: 0, geometryReads: 0, firstFrameDelayMs: null, maxFrameGapMs: 0, settledMs: null };
+  const followActive = () => !followDestroyed && following() && document.visibilityState !== 'hidden' && nativeForeground && settings.mode !== 'paged';
+  function placeAt(position) {
+    const seg = followAnchor && segs.find(s => Number(s.row.number) === followAnchor.chapter);
+    if (!seg) return;
+    const target = readingTop(seg.frames, position, scroll.getBoundingClientRect().top, scroll.scrollTop);
+    followStats.geometryReads++;
+    if (target == null) return;
+    scroll.scrollTop = Math.max(0, Math.min(Math.max(0, scroll.scrollHeight - scroll.clientHeight), target));
+  }
+  function moveFollow() {
+    followFrame = 0;
+    if (!followActive() || !followAnchor) return;
+    const now = performance.now();
+    const shown = follower.position(now);
+    if (!shown) return;
+    if (followLastAt == null) followStats.firstFrameDelayMs = Math.max(0, now - (followReceivedAt ?? now));
+    else followStats.maxFrameGapMs = Math.max(followStats.maxFrameGapMs, now - followLastAt);
+    followLastAt = now;
+    followStats.frames++;
+    placeAt(shown.pos);
+    if (!shown.settled) followFrame = requestAnimationFrame(moveFollow);
+    else { followStats.settledMs = now - (followStartedAt ?? now); followLastAt = null; }
+  }
+  const followMotion = {
+    suspend() { cancelAnimationFrame(followFrame); followFrame = 0; followLastAt = null; },
+    update(immediate = false) {
+      if (!followActive() || !followAnchor) return;
+      if (immediate) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
+      if (!followFrame) followFrame = requestAnimationFrame(moveFollow);
     },
-  });
-  function followScroll(position, immediate = false, chapter = Number(state.row?.number)) {
-    if (!Number.isFinite(position)) return;
-    followAnchor = { chapter, position };
+    destroy() { this.suspend(); followDestroyed = true; follower.reset(); },
+    stats() { return { ...followStats }; },
+  };
+  function followScroll(position, immediate = false, at = null, chapter = Number(state.row?.number)) {
+    if (followDestroyed || !Number.isFinite(position)) return;
+    if (followAnchor?.chapter !== chapter) { followMotion.suspend(); follower.reset(); }
+    followAnchor = { chapter, position, at };
     if (settings.mode === 'paged') { followMotion.suspend(); return jumpTo(Math.floor(position), !immediate); }
-    followMotion.update(immediate);
+    followReceivedAt = performance.now();
+    followStartedAt = followReceivedAt;
+    followStats.updates++;
+    const jumped = at == null ? (follower.reset(), true) : follower.push(at, position, followReceivedAt);
+    if ((immediate || jumped) && followActive()) placeAt(position);
+    followMotion.update();
   }
   const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-    if (followAnchor && following()) followMotion.update();
+    if (followAnchor && followActive() && !followFrame) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
   }) : null;
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
       seriesRef: ref,
-      onFollow: ({ chapter, index }) => {
-        pendingFollow = { chapter, index };
+      onFollow: ({ chapter, index, at }) => {
+        pendingFollow = { chapter, index, at };
         const seg = segs.find(s => Number(s.row.number) === chapter);
-        if (seg) { enterSegment(seg); followScroll(index, false, chapter); }
+        if (seg) { enterSegment(seg); followScroll(index, false, at, chapter); }
         else if (loadingChapter !== chapter) {
           const row = sequence.find((r) => Number(r.number) === chapter);
           if (row) void openChapter(row, { startAt: index });
@@ -254,7 +287,7 @@ export function openSmartReader(deps, ctx) {
 
   function applySettings() {
     root.dataset.mode = settings.mode;
-    if (followAnchor && following()) followScroll(followAnchor.position, true, followAnchor.chapter);
+    if (followAnchor && following()) followScroll(followAnchor.position, true, followAnchor.at, followAnchor.chapter);
     root.dataset.fit = settings.fit;
     root.style.setProperty('--rd-gap', `${settings.gap}px`);
     // اللمس: بلا تكبير، المتصفح لا يُكبّر الصفحة بإصبعين ولا بلمستين
@@ -471,7 +504,7 @@ export function openSmartReader(deps, ctx) {
     // الترجمة ثابتة من أول صفحة حتى لو دخل القارئ في المنتصف.
     tl.openGate(seg, 0);
     if (following() && latest != null) {
-      followScroll(requested, true, Number(row.number));
+      followScroll(requested, true, pendingFollow?.chapter === Number(row.number) ? pendingFollow.at : null, Number(row.number));
     } else if (start > 0) {
       requestAnimationFrame(() => {
         jumpTo(start, false);
@@ -1618,7 +1651,12 @@ export function openSmartReader(deps, ctx) {
   const follow = tg?.initial() ?? null;
   const followRow = follow ? sequence.find((r) => Number(r.number) === follow.chapter) : null;
   if (followRow) void openChapter(followRow, { startAt: follow.index });
+  // من زر «اقرأ مع أصدقائك» في صفحة العمل: الفصل المختار يفتح ثم ورقة الدعوة مباشرة
   else void openChapter(ctx.row);
+  if (!followRow && ctx.inviteTogether && hub && !tg) {
+    const waitRow = setInterval(() => { if (state.row) { clearInterval(waitRow); if (!tg) openTogetherInvite(); } }, 150);
+    setTimeout(() => clearInterval(waitRow), 15000);
+  }
 
   stopNativeLifecycle = listenFollowForeground((e) => {
     nativeForeground = e?.active !== false;

@@ -1038,8 +1038,11 @@ const SEARCH_TIMEOUT_MS = 15_000;
 const LISTING_TIMEOUT_MS = 20_000;
 const discovered = new Map();
 
-const withTimeout = (promise, ms) =>
-  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+const withTimeout = (promise, ms) => {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), ms); })])
+    .finally(() => clearTimeout(timer));
+};
 
 /** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
 function titleVariants(v35work) {

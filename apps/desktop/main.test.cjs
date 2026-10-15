@@ -12,10 +12,10 @@ test('أول إقلاع portable يرحل الحساب والإضافات قبل
   const old = path.join(dir, 'old-profile'), target = path.join(dir, 'VANTARA-data');
   await fs.mkdir(old);
   await fs.writeFile(path.join(old, 'account-and-addons.json'), 'previous-profile');
-  let userData = old, finish, reject;
+  let userData = old, finish, reject, appUserModelId, windowOptions;
   const loaded = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
   const electron = {
-    app: { isPackaged: true, setName() {}, requestSingleInstanceLock: () => true, on() {},
+    app: { isPackaged: true, setName() {}, setAppUserModelId(value) { appUserModelId = value; }, requestSingleInstanceLock: () => true, on() {},
       getPath: name => name === 'exe' ? path.join(dir, 'VANTARA.exe') : userData,
       setPath: (_name, value) => { userData = value; },
       whenReady: async () => { require('node:fs').mkdirSync(userData, { recursive: true }); },
@@ -23,7 +23,8 @@ test('أول إقلاع portable يرحل الحساب والإضافات قبل
     protocol: { registerSchemesAsPrivileged() {}, handle() {} }, ipcMain: { handle() {} }, net: {},
     Menu: { buildFromTemplate: value => value, setApplicationMenu() {} },
     BrowserWindow: class {
-      constructor() {
+      constructor(options) {
+        windowOptions = options;
         this.webContents = { setWindowOpenHandler() {}, on() {}, send() {} };
       }
       once() {}
@@ -37,6 +38,8 @@ test('أول إقلاع portable يرحل الحساب والإضافات قبل
   try { require('./main.cjs'); }
   finally { Module._load = previous; Object.defineProperty(process, 'platform', platform); }
   await loaded;
+  assert.equal(appUserModelId, 'com.vantara.desktop');
+  assert.equal(windowOptions.icon, path.join(__dirname, 'assets/vantara.ico'));
   assert.equal(userData, target);
   assert.equal(await fs.readFile(path.join(target, 'account-and-addons.json'), 'utf8'), 'previous-profile');
   assert.equal(await fs.readFile(path.join(old, 'account-and-addons.json'), 'utf8'), 'previous-profile');

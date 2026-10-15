@@ -11,11 +11,11 @@ function fixture(host = false, existingTimeline = null) {
   if (existingTimeline) room.timeline = {...room.timeline, ...existingTimeline};
   const video = { currentTime: 0, duration: 1200, readyState: 4, paused: false, playbackRate: 1,
     buffered: { length: 1, start: () => 0, end: () => 1200 }, play: vi.fn(function () { this.paused = false; return Promise.resolve(); }), pause: vi.fn(function () { this.paused = true; }) };
-  let episode = 1;
-  const hooks = { episode: () => episode, source: () => 'local-server', onEpisode: vi.fn(n => { episode = n; }), onLobby: vi.fn(), message: vi.fn() };
+  let episode = 1, source = 'local-server';
+  const hooks = { episode: () => episode, source: () => source, onEpisode: vi.fn(n => { episode = n; }), onLobby: vi.fn(), message: vi.fn() };
   const bridge = createTogetherPlayer({ room, mode: 'sync', mediaPrefix: 'anime:42', video, ...hooks });
   const receive = state => { room.timeline = state; for (const fn of events.get('state') ?? []) fn({ state, by: 'host' }); };
-  return { room, video, bridge, hooks, receive, events };
+  return { room, video, bridge, hooks, receive, events, setSource: value => { source = value; } };
 }
 afterEach(() => vi.useRealTimers());
 describe('web Together player uses Android room protocol', () => {
@@ -40,7 +40,7 @@ describe('web Together player uses Android room protocol', () => {
   });
   it('keeps host controls on the wire and guest controls out of it', () => {
     vi.useFakeTimers(); const h = fixture(true); h.bridge.ready(); h.bridge.playPause(true); h.bridge.seek(80000);
-    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });
+    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0, countdownMs: 3000 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });
     const g = fixture(); g.bridge.ready(); g.bridge.playPause(true); g.bridge.seek(80000); expect(g.room.command).not.toHaveBeenCalled();
     h.bridge.destroy(); g.bridge.destroy();
   });
@@ -63,6 +63,28 @@ describe('web Together player uses Android room protocol', () => {
     f.receive({...f.room.timeline,playing:true,pos:4000,at:1600,seq:2});
     f.receive({...f.room.timeline,playing:false,pos:3000,at:1500,seq:3});
     now=1700;vi.advanceTimersByTime(400);expect(f.video.paused).toBe(true);expect(f.video.currentTime).toBe(3);f.bridge.destroy();
+  });
+  it('prepares silently at the room start point before the host starts', () => {
+    vi.useFakeTimers(); const f = fixture(); f.video.currentTime = 3.4; f.video.paused = false;
+    expect(f.bridge.waiting()).toBe(true);
+    f.bridge.ready();
+    expect(f.video.paused).toBe(true); expect(f.video.currentTime).toBe(0); f.bridge.destroy();
+  });
+  it('per-user video offset is local: my video shifts, the room keeps its own time', () => {
+    vi.useFakeTimers();
+    const store = new Map(); globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const h = fixture(true); h.bridge.ready();
+    expect(h.bridge.setOffset(10_049)).toBe(10_000);
+    expect(h.video.currentTime).toBe(10);
+    h.bridge.playPause(true); expect(h.room.command).toHaveBeenLastCalledWith('play', { pos: 0, countdownMs: 3000 });
+    h.bridge.seek(70_000); expect(h.room.command).toHaveBeenLastCalledWith('seek', { pos: 60_000 });
+    h.receive({ ...h.room.timeline, started: true, playing: false, pos: 60_000, seq: 2 });
+    expect(h.video.currentTime).toBe(70);
+    expect(h.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ pos: 60_000 }));
+    h.bridge.destroy();
+    // نفس الحلقة والسيرفر: الديلاي محفوظ
+    const again = fixture(true); expect(again.bridge.offset()).toBe(10_000); again.bridge.destroy();
+    delete globalThis.localStorage;
   });
 });
 
@@ -91,4 +113,35 @@ it('ignores a source ready callback arriving after the player has been destroyed
   f.bridge.destroy();f.room.report.mockClear();f.hooks.onLobby.mockClear();f.video.play.mockClear();
   f.bridge.ready();f.bridge.preparing();f.bridge.failed();
   expect(f.video.currentTime).toBe(0);expect(f.video.play).not.toHaveBeenCalled();expect(f.room.report).not.toHaveBeenCalled();expect(f.hooks.onLobby).not.toHaveBeenCalled();expect(vi.getTimerCount()).toBe(0);
+});
+
+
+it('shares one persisted offset across both APIs and restores it per source', () => {
+  vi.useFakeTimers();
+  const store = new Map();
+  vi.stubGlobal('localStorage', { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) });
+  try {
+    const f = fixture(true, { started: true, playing: false, pos: 40_000, seq: 1 });
+    f.bridge.ready();
+    expect(f.bridge.setVideoOffset(10_000)).toBe(true);
+    expect(f.bridge.offset()).toBe(10_000);
+    expect(f.video.currentTime).toBe(50);
+    f.setSource('second-server'); f.bridge.preparing(); f.bridge.ready();
+    expect(f.bridge.offset()).toBe(0); expect(f.video.currentTime).toBe(40);
+    f.bridge.setOffset(-5000);
+    expect(f.hooks.onLobby.mock.lastCall[0].videoOffsetMs).toBe(-5000);
+    f.setSource('local-server'); f.bridge.preparing(); f.bridge.ready();
+    expect(f.bridge.offset()).toBe(10_000); expect(f.video.currentTime).toBe(50);
+    expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ pos: 40_000, driftMs: 0 }));
+    f.bridge.destroy();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('keeps periodic drift correction at normal speed at the bounded local end', () => {
+  vi.useFakeTimers();
+  const f = fixture(false, { started: true, playing: true, pos: 1_190_000, seq: 1 });
+  f.bridge.ready(); f.bridge.setOffset(30_000); vi.advanceTimersByTime(12_000);
+  expect(f.video.currentTime).toBe(1200); expect(f.video.playbackRate).toBe(1);
+  expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ driftMs: 0 }));
+  f.bridge.destroy();
 });

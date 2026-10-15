@@ -1985,12 +1985,12 @@ async function checkUpdates({ force = false } = {}) {
       return null;
     }
   }
-  // نسخة ويندوز تقرأ نفس بيان الإصدار المستقر؛ لا تعرض رابطًا قبل وجود مثبت موثق.
+  // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
   if (globalThis.VantaraDesktopUpdates) {
     const result = await globalThis.VantaraDesktopUpdates.check({ force });
     if (force && !result.update) {
       showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
-        ? 'لا يوجد إصدار ويندوز مستقر أحدث متاح الآن' : 'تعذر التحقق من تحديث ويندوز' });
+        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
     }
     return result.update ? { desktop: result.update } : null;
   }

@@ -1311,13 +1311,14 @@ export function createAnime(deps) {
             seriesRef: togetherRef,
             title: m.title,
             cover: m.posterSmall ?? m.poster ?? null,
+            // شاشة الغرفة: بنر الحلقة (أو بنر العمل) وعنوانها؛ الشعار يُكمَّل من ani.zip
+            banner: m.thumbs?.[n]?.thumbnail ?? m.banner ?? null,
+            episodeTitle: state.malTitles?.[n] ?? m.thumbs?.[n]?.title ?? null,
             episode: n,
           }, {
-            onStarted: () => {
-              sheet.autoTogether = !globalThis.VantaraDesktop;
-              withFriends.remove();
-              queuePaint();
-            },
+            // ورقة الدعوة أغلقت ورقة السيرفرات وأوقفت تجهيزها: نعيد فتحها والغرفة نشطة،
+            // فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
+            onStarted: () => playEpisode(m, n),
           });
         }, 'شاهد مع أصدقائك');
         foot.append(withFriends);

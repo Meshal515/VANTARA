@@ -34,10 +34,10 @@ it('keeps launch routing metadata when the server sends its minimal timeline med
 it('follows within a page, rejects older updates and catches up after separate mode', () => {
   const room=roomOf(), onFollow=vi.fn(); const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow});
   expect(bridge.initial()).toEqual({chapter:1,index:4.25});
-  room.emit('state',{state:{...room.timeline,pos:4.75,seq:2},by:'host'}); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:4.75});
+  room.emit('state',{state:{...room.timeline,pos:4.75,seq:2,at:5000},by:'host'}); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:4.75,at:5000}); // وقت الخادم يصل للضيف للاستكمال السلس
   room.emit('state',{state:{...room.timeline,pos:4.1,seq:1},by:'host'}); expect(onFollow).toHaveBeenCalledTimes(1);
   room.info.mode='free'; room.emit('state',{state:{...room.timeline,pos:6.2,seq:3},by:'host'}); expect(onFollow).toHaveBeenCalledTimes(1);
-  room.timeline={...room.timeline,pos:6.2,seq:3}; room.info.mode='sync'; room.emit('room',room.info); expect(onFollow).toHaveBeenLastCalledWith({chapter:1,index:6.2}); bridge.destroy();
+  room.timeline={...room.timeline,pos:6.2,seq:3}; room.info.mode='sync'; room.emit('room',room.info); expect(onFollow).toHaveBeenLastCalledWith(expect.objectContaining({chapter:1,index:6.2})); bridge.destroy();
 });
 it('sends continuous scroll while the host keeps moving instead of debouncing indefinitely', () => {
   vi.useFakeTimers(); const room=roomOf(); room.isHost=room.canControl=true;
@@ -90,4 +90,32 @@ it('a repeated room notification while watching opens the panel without navigati
   expect(openMedia).toHaveBeenCalledTimes(1);
   expect(openSheet).toHaveBeenCalledTimes(1);
   hub.leave();
+});
+it('hands Android the room screen art and the invitees with their pictures', async () => {
+  vi.stubGlobal('Capacitor', {isNativePlatform:()=>true}); const room=roomOf();
+  room.info = { mode: 'sync', invited: ['u2', 'u3'] };
+  const friends = () => [{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }];
+  const resolveArtImpl = async (m) => ({ banner: 'https://img/5.jpg', logo: 'https://logo.png', title: m.title, episodeTitle: 'Ep' });
+  const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia:vi.fn(),toast:vi.fn(),friends,resolveArtImpl});
+  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',title:'Frieren',episode:5}),mode:'sync'});
+  await Promise.resolve(); await Promise.resolve();
+  const cfg = hub.handOff('anime:42');
+  expect(cfg).toMatchObject({ kindText: 'أنمي', title: 'Frieren', banner: 'https://img/5.jpg', logo: 'https://logo.png', episodeTitle: 'Ep' });
+  expect(cfg.invitees).toEqual([{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }, { userId: 'u3', displayName: 'صديق', avatarKey: null }]);
+});
+
+it('hands Android the verified pending friend avatar before profile sync and preserves custom photos', () => {
+  vi.stubGlobal('Capacitor', { isNativePlatform: () => true });
+  const mansourId = '9e4b51d9-4ca0-4da2-9b1f-2205e67134ed';
+  for (const friends of [[], [{ userId: mansourId, displayName: 'منصور الجديد', avatarKey: 'https://example.com/mansour-custom.webp' }]]) {
+    const room = roomOf();
+    room.info = { mode: 'sync', invited: [mansourId, 'unknown'] };
+    const hub = createTogether({ sync: {}, baseUrl: () => 'https://sync.test', joinRoomImpl: () => room, openMedia: vi.fn(), friends: () => friends });
+    hub.joinByCode('ABCDEF', { media_json: JSON.stringify({ seriesRef: 'anime:42', kind: 'anime' }), mode: 'sync' });
+    expect(hub.person(mansourId)).toEqual(friends[0] ?? { userId: mansourId, displayName: 'Man', avatarKey: '/avatars/man.webp' });
+    expect(hub.handOff('anime:42').invitees).toEqual([
+      friends[0] ?? { userId: mansourId, displayName: 'Man', avatarKey: '/avatars/man.webp' },
+      { userId: 'unknown', displayName: 'صديق', avatarKey: null },
+    ]);
+  }
 });

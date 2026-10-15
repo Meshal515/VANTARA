@@ -27,6 +27,8 @@ data class Member(
     val source: String?,
     val driftMs: Long?,
     val sameVersion: Boolean?,
+    /** نفس مفتاح الويب: `/avatars/x.webp` أو رابط. */
+    val avatarKey: String? = null,
 )
 
 class TogetherClient(
@@ -59,12 +61,13 @@ class TogetherClient(
     private var closed = false
     private var attempt = 0
     private var live = false
-    val isConnected get() = live && !closed
 
     var me: String? = null; private set
     var hostUserId: String? = null; private set
     var mode = "sync"; private set
     var control = "host"; private set
+    /** المدعوون بالمعرّف؛ null = الدعوة للكل. */
+    var invited: List<String>? = null; private set
     var timeline: Timeline? = null; private set
     var roster: List<Member> = emptyList(); private set
     val isHost get() = me != null && me == hostUserId
@@ -79,7 +82,6 @@ class TogetherClient(
         ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 main.post {
-                    if (closed || ws !== webSocket) return@post
                     attempt = 0
                     for (i in 0 until 8) main.postDelayed({ ping() }, i * 150L)
                     main.postDelayed(resync, RESYNC_MS)
@@ -87,14 +89,14 @@ class TogetherClient(
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
-                main.post { if (!closed && ws === webSocket) handle(msg) }
+                main.post { handle(msg) }
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Complete the server's close handshake so onClosed can schedule reconnect.
                 webSocket.close(code, reason)
             }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { if (!closed && ws === webSocket) dropped(code) }.let {}
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { if (!closed && ws === webSocket) dropped(response?.code ?: 1006) }.let {}
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { dropped(code) }.let {}
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { dropped(response?.code ?: 1006) }.let {}
         })
     }
 
@@ -139,7 +141,7 @@ class TogetherClient(
                 me = m.optString("you")
                 room(m.optJSONObject("room"))
                 if (!clock.ready && m.has("now")) { val t = SystemClock.elapsedRealtime().toDouble(); clock.sample(t, m.getDouble("now"), t) }
-                parseTimeline(m.optJSONObject("state"))?.let { if (timeline == null || it.seq > timeline!!.seq) timeline = it }
+                parseTimeline(m.optJSONObject("state"))?.let { timeline = it }
                 roster = parseRoster(m.optJSONArray("roster"))
                 setLive(true)
                 listener.onWelcome()
@@ -147,7 +149,7 @@ class TogetherClient(
                 timeline?.let { listener.onState(it, null) }
             }
             "state" -> parseTimeline(m.optJSONObject("state"))?.let { t ->
-                if ((timeline?.seq ?: -1) >= t.seq) return
+                if ((timeline?.seq ?: -1) > t.seq) return
                 timeline = t
                 listener.onState(t, m.optString("by").takeIf { it.isNotEmpty() && it != "null" })
             }
@@ -166,12 +168,14 @@ class TogetherClient(
         hostUserId = r.optString("hostUserId", hostUserId ?: "")
         mode = r.optString("mode", mode)
         control = r.optString("control", control)
+        r.optJSONArray("invited")?.let { a -> invited = (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } }
     }
 
     fun send(o: JSONObject): Boolean = ws?.send(o.toString()) ?: false
 
-    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
+    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null, countdownMs: Long? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
         pos?.let { put("pos", it) }
+        countdownMs?.let { put("countdownMs", it) }
         if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", "anime").put("label", mediaLabel ?: mediaKey))
     })
 
@@ -225,6 +229,7 @@ class TogetherClient(
                     source = o.optString("source").takeIf { !o.isNull("source") && it.isNotEmpty() },
                     driftMs = if (o.isNull("driftMs")) null else o.optLong("driftMs"),
                     sameVersion = if (o.isNull("sameVersion") || !o.has("sameVersion")) null else o.optBoolean("sameVersion"),
+                    avatarKey = o.optString("avatarKey").takeIf { !o.isNull("avatarKey") && it.isNotEmpty() },
                 )
             }
         }

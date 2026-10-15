@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { verifyWindowsIcon, verifyElectronPayload } from './windows-icon-resources.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argument = (name, fallback) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -15,6 +16,8 @@ const portable = path.join(output, 'VANTARA-Windows-x64');
 const app = path.join(portable, 'resources', 'app');
 const native = path.join(app, 'native');
 const videoHost = path.resolve(argument('video-host',path.join(repo,'apps/desktop/native/vantara-video-host.exe')));
+const brandedExe = argument('branded-exe');
+const icon = path.join(repo, 'apps/desktop/assets/vantara.ico');
 // A Windows build must contain the real child-window host; never fall back to
 // an external mpv window when CI forgot its Windows-compiled companion.
 await fs.access(videoHost).catch(()=>{throw new Error('Missing native video host: compile tools/build-video-host.ps1 on Windows and supply --video-host=path');});
@@ -57,9 +60,19 @@ async function pe64(filename) {
 await fs.mkdir(cache, { recursive: true });
 await fs.mkdir(output, { recursive: true });
 const downloaded = await Promise.all(artifacts.map(download));
+// This is build staging, never an installed/profile directory. Reusing a prior
+// smoke run here could package its VANTARA-data or stale application files.
+await fs.rm(portable, { recursive: true, force: true });
 await fs.mkdir(portable, { recursive: true });
 run('python3', ['-c', 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', downloaded[0], portable]);
-await fs.rename(path.join(portable, 'electron.exe'), path.join(portable, 'VANTARA.exe'));
+const upstreamExe = path.join(portable, 'electron.exe');
+const applicationExe = path.join(portable, 'VANTARA.exe');
+if (brandedExe) await fs.copyFile(path.resolve(brandedExe), applicationExe);
+else if (process.platform === 'win32') run('pwsh', ['-NoProfile', '-File', path.join(repo, 'tools/brand-windows-executable.ps1'), '-InputExe', upstreamExe, '-OutputExe', applicationExe, '-Icon', icon]);
+else throw new Error('Missing --branded-exe: run tools/brand-windows-executable.ps1 on Windows with the pinned Electron executable first');
+const iconProof = verifyWindowsIcon(await fs.readFile(applicationExe), await fs.readFile(icon));
+verifyElectronPayload(await fs.readFile(applicationExe), await fs.readFile(upstreamExe));
+await fs.unlink(upstreamExe);
 await fs.mkdir(native, { recursive: true });
 run(sevenzip, ['x', '-y', `-o${native}`, downloaded[2]]);
 await fs.copyFile(downloaded[1], path.join(native, 'rqbit.exe'));
@@ -116,14 +129,26 @@ await fs.writeFile(path.join(portable, 'THIRD-PARTY-NOTICES.txt'), `VANTARA Wind
 await fs.writeFile(path.join(portable, 'ابدأ-هنا.txt'), `VANTARA لويندوز — نسخة معاينة ${version}\n\nشغّل VANTARA.exe من هذا المجلد؛ لا تنقل الملف التنفيذي وحده. النسخة المحمولة تحفظ بياناتها وملفات التورنت في VANTARA-data بجوار البرنامج، لذلك فكها على القرص ذي المساحة الكافية مثل E.\nمن الإضافات أضف رابط Torrentio المعدّ. يمكن إكمال الإعداد داخل نافذة التطبيق؛ زر تثبيت Stremio يعيد رابط الإضافة إلى VANTARA.\nاختر الفيلم أو الحلقة ثم اختر مصدر التشغيل بنفسك.\nمحرك التورنت والمشغل مرفقان؛ لا يلزم تثبيت برامج منفصلة.\nيفحص VANTARA الأقراص الثابتة القابلة للكتابة ويختار القرص صاحب المساحة الفارغة الأكبر لكاش التورنت تلقائيًا. الكاش نافذة متحركة: يحمّل قدّام بقدر المساحة الحرة، ويبقي 50 ثانية ورا فقط ويفرّغ ما قبلها من القرص، ويوقف التنزيل مؤقتًا إذا اقتربت المساحة من الحد ثم يستأنف مع تقدّم المشاهدة. الرجوع لجزء مفرَّغ يعيد تنزيله من نفس اللحظة. كل ملفات الجلسة تُحذف بعد إغلاق المشغل. فيلم 40GB لا يحتاج 40GB فاضية.\nالمكتبة والحسابات متاحة من قائمة VANTARA، والدخول يتبع اقتران الجهاز الحالي.\nالرفيق والترجمة بالذكاء الاصطناعي خارج نسخة ويندوز؛ ترجمات الفيديو العادية مدعومة. استخدم واجهة الغرفة الأصلية للمشاهدة المشتركة واختيار مصدرك؛ وجود مزود لا يضمن توفر كل حلقة.\nهذه حزمة معاينة غير موقعة، ولم يدع الفريق تجربة جهاز ويندوز دون دليل مرفق.\n`);
 const configFile=path.join(app,'web/lib/config.js');
 await fs.writeFile(configFile,(await fs.readFile(configFile,'utf8')).replace('__VANTARA_VERSION__',version));
-await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: 'VANTARA', version, platform: 'win32-x64', builtAt: new Date().toISOString(), signed: false, artifacts, binaries, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
+await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: 'VANTARA', version, platform: 'win32-x64', builtAt: new Date().toISOString(), signed: false, artifacts, binaries, icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
 const zip = path.join(output, `VANTARA-${version}-Windows-x64.zip`);
 run('python3', ['-c', 'import sys,zipfile,pathlib; root=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED,compresslevel=6); [z.write(p, str(pathlib.Path(root.name)/p.relative_to(root))) for p in sorted(root.rglob("*")) if p.is_file()]; z.close()', portable, zip]);
 const installer = path.join(output, `VANTARA-${version}-Windows-x64-Setup.exe`);
 const compiler = spawnSync(makensis, ['-VERSION'], { encoding: 'utf8', env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
 if (!compiler.error && compiler.status === 0) {
-  run(makensis, [`-DDIST=${portable}`, `-DOUTFILE=${installer}`, path.join(repo, 'apps/desktop/windows.nsi')], { env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
-} else console.log('المثبت غير مبني؛ portable ZIP جاهز، ومصدر NSIS موجود.');
+  // Delete only files supplied by this build. In particular, never recursively
+  // remove the install directory: it may also contain an old portable profile.
+  const installed = await fs.readdir(portable, { recursive: true, withFileTypes: true });
+  const relative = entry => path.relative(portable, path.join(entry.parentPath ?? entry.path, entry.name)).split(path.sep).join('\\');
+  const quote = name => name.replaceAll('$', '$$').replaceAll('"', '$\\"');
+  const files = installed.filter(entry => entry.isFile()).map(relative).sort();
+  const directories = installed.filter(entry => entry.isDirectory()).map(relative).sort((a, b) => b.length - a.length || a.localeCompare(b));
+  const uninstallFiles = path.join(output, 'uninstall-files.nsh');
+  await fs.writeFile(uninstallFiles, [...files.map(name => `Delete "$INSTDIR\\${quote(name)}"`), ...directories.map(name => `RMDir "$INSTDIR\\${quote(name)}"`)].join('\n') + '\n');
+  const numbers = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$/);
+  if (!numbers) throw new Error(`Unsupported Windows version: ${version}`);
+  const productVersion = numbers.slice(1).map(value => value ?? '0').join('.');
+  run(makensis, [`-DDIST=${portable}`, `-DOUTFILE=${installer}`, `-DICON=${icon}`, `-DAPP_VERSION=${version}`, `-DPRODUCT_VERSION=${productVersion}`, `-DUNINSTALL_FILES=${uninstallFiles}`, path.join(repo, 'apps/desktop/windows.nsi')], { env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
+} else throw new Error('NSIS compiler is required: refusing to publish a Windows build without its installer');
 const outputs = [zip];
 if (await fs.access(installer).then(() => true, () => false)) outputs.push(installer);
 const checksums = await Promise.all(outputs.map(async filename => `${sha256(await fs.readFile(filename))}  ${path.basename(filename)}`));
