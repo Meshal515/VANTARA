@@ -14,7 +14,7 @@ import { glyph } from './icons.js';
 import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
 import { isNative } from '../pwa/platform.js';
-import { mediaKind } from '../lib/together/art.js';
+import { mediaKind, resolveArt } from '../lib/together/art.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -106,6 +106,7 @@ export function stripPeople(roster, max = 3) {
  *   joinRoomImpl?: typeof joinRoom,
  *   createRoomImpl?: typeof createRoom,
  *   roomInfoImpl?: typeof roomInfo,
+ *   resolveArtImpl?: typeof resolveArt,
  * }} deps
  */
 export function createTogether(deps) {
@@ -121,6 +122,11 @@ export function createTogether(deps) {
 
   const emit = () => { for (const fn of listeners) try { fn(session); } catch { /* */ } };
   const personOf = (r) => ({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey });
+  /** صديق بمعرّفه (للمدعوين الذين لم يدخلوا بعد). */
+  function personById(userId) {
+    const f = deps.friends().find((x) => x.userId === userId);
+    return f ? { userId, displayName: f.displayName, avatarKey: f.avatarKey ?? null } : { userId, displayName: 'صديق', avatarKey: null };
+  }
 
   /** كبسولة صغيرة أعلى الشاشة: وجه الشخص ينزلق مع «دحمي دخل»، ثم تختفي وحدها. */
   function pop(person, text, tone = '') {
@@ -141,8 +147,11 @@ export function createTogether(deps) {
   function start(code, media, mode) {
     leave();
     const room = join({ baseUrl: deps.baseUrl(), code, getToken: token });
-    const s = { code, media, mode, room, strips: new Set(), offs: [] };
+    const s = { code, media, mode, room, strips: new Set(), offs: [], art: null };
     session = s;
+    // فن شاشة الغرفة يُجهَّز من الآن، فيصل للمشغّل الأصلي جاهزًا عند التسليم
+    const artOf = deps.resolveArtImpl ?? (typeof window !== 'undefined' ? resolveArt : null);
+    if (artOf && media && media.kind !== 'manga') void artOf(media).then((a) => { s.art = a; }).catch(() => {});
     const kind = () => (s.room.timeline?.media ?? s.media)?.kind ?? 'anime';
     s.offs.push(room.on('joined', (m) => pop({ displayName: m.name, avatarKey: m.avatarKey ?? null }, `${m.name} دخل`, 'in')));
     s.offs.push(room.on('left', (m) => pop(personByName(s, m.name), `${m.name} طلع`)));
@@ -467,10 +476,7 @@ export function createTogether(deps) {
     /** صورة الشخص الحقيقية (أو حرفه) — نفس أفاتارات التطبيق. */
     avatar: (person, size) => deps.avatarNode(person, size),
     /** صديق بمعرّفه (للمدعوين الذين لم يدخلوا بعد). */
-    person(userId) {
-      const f = deps.friends().find((x) => x.userId === userId);
-      return f ? { userId, displayName: f.displayName, avatarKey: f.avatarKey ?? null } : { userId, displayName: 'صديق', avatarKey: null };
-    },
+    person: personById,
     openInvite,
     card,
     mountStrip,
@@ -491,7 +497,21 @@ export function createTogether(deps) {
     handOff(seriesRef) {
       if (!session || session.media?.seriesRef !== seriesRef) return null;
       if (!isNative()) return { hub: this, session, mediaPrefix: seriesRef };
-      const cfg = { baseUrl: deps.baseUrl(), code: session.code, token: token(), mode: session.room.info?.mode ?? session.mode, mediaPrefix: seriesRef };
+      const media = session.media ?? {};
+      const art = session.art ?? {};
+      const invited = session.room.info?.invited;
+      const cfg = {
+        baseUrl: deps.baseUrl(), code: session.code, token: token(), mode: session.room.info?.mode ?? session.mode, mediaPrefix: seriesRef,
+        // شاشة الغرفة في المشغّل الأصلي: نفس بنر الويب وشعاره وعنوانه
+        kindText: mediaKind(media),
+        title: art.title ?? media.title ?? null,
+        banner: art.banner ?? media.banner ?? media.cover ?? null,
+        logo: art.logo ?? media.logo ?? null,
+        episodeTitle: art.episodeTitle ?? media.episodeTitle ?? null,
+        season: media.season ?? null,
+        // المدعوون بأسمائهم وصورهم: من لم يدخل يظهر «بانتظاره…»
+        invitees: Array.isArray(invited) ? invited.map(personById) : [],
+      };
       const s = session;
       session = null;
       for (const off of s.offs) off();
