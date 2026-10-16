@@ -54,6 +54,7 @@ import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
+import { blockKey } from '../lib/adult-filter.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -747,6 +748,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!a.isConnected) return;
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
+        // AniList يعرف العمل للكبار (هنتاي، إيتشي…): يُحجب ويختفي من هنا ومن كل قائمة بعدها
+        if (rated.adult) { for (const k of [work._work?.key, ...(work._work?.keys ?? [])]) blockKey(k); a.remove(); return; }
         score.innerHTML = `${glyph('star', { size: 11, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);

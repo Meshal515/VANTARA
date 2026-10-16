@@ -1,5 +1,6 @@
 /** تقييم المانجا من AniList فقط عند مطابقة عنوان العمل نفسه بثقة. */
 import { normalizeTitle } from './catalog.js';
+import { adultGenre } from './adult-filter.js';
 
 /** Global readership, cached by the caller as a stable ranking snapshot. */
 export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
@@ -16,7 +17,7 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
     if (!response.ok) throw new Error(`anilist_${response.status}`);
     const data = (await response.json())?.data?.Page;
     if (!data?.media) throw new Error('anilist_no_popularity');
-    const items = data.media.filter((m) => !m.isAdult).map((m) => {
+    const items = data.media.filter((m) => !m.isAdult && !adultGenre(m.genres)).map((m) => {
       const title = m.title?.english || m.title?.romaji || m.title?.native;
       const key = normalizeTitle(title);
       return {
@@ -48,9 +49,12 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
 export function matchMangaRating(title, candidates) {
   const key = normalizeTitle(title);
   if (!key) return null;
-  const matches = (candidates ?? []).filter((m) => !m.isAdult &&
+  const named = (candidates ?? []).filter((m) =>
     [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])]
       .some((candidate) => normalizeTitle(candidate) === key));
+  // العمل نفسه (بالاسم، بلا لبس) للكبار في AniList: البطاقة تُحجب لا تُقيَّم
+  if (named.length === 1 && (named[0].isAdult || adultGenre(named[0].genres))) return { id: named[0].id, adult: true };
+  const matches = named.filter((m) => !m.isAdult);
   if (matches.length !== 1) return null;
   const m = matches[0];
   const score = Number(m.averageScore);
@@ -65,7 +69,8 @@ export async function fetchMangaRatings(titles, { fetchImpl = globalThis.fetch, 
   if (!names.length) return output;
   const variables = Object.fromEntries(names.map((name, i) => [`q${i}`, name]));
   const args = names.map((_, i) => `$q${i}: String!`).join(', ');
-  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA, isAdult: false) { id title { romaji english native } synonyms averageScore isAdult } }`).join(' ');
+  // بلا isAdult:false: عمل للكبار يجب أن يُعرف فيُحجب، لا أن يختفي من البحث فيبقى في القائمة
+  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id title { romaji english native } synonyms averageScore isAdult genres } }`).join(' ');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

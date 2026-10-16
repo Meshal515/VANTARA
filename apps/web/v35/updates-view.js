@@ -8,6 +8,7 @@
 
 import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
+import { adultTitle, isBlockedKey } from '../lib/adult-filter.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -73,6 +74,8 @@ export function groupEvents(events, canonical = null) {
   const byWork = new Map();
   for (const raw of events) {
     let e = canonicalEvent(raw);
+    // محتوى للكبار (بعنوانه، أو بما كشفته صفحته سابقًا) لا يظهر في آخر التحديثات
+    if (e.section === 'manga' && (adultTitle(e.title) || isBlockedKey(e.work))) continue;
     // نفس العمل بأسماء مختلفة («Magic Emperor» و«Demonic Emperor»): مفتاح الهوية الواحدة
     const same = canonical?.get(e.work);
     if (same && same !== e.work) e = { ...e, work: same };

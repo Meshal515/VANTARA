@@ -21,8 +21,8 @@ describe('server manga sites', () => {
     const cards = madaraCards(fixture('madara-archive.html'), 'https://3asq.online');
     expect(cards.length).toBeGreaterThan(0);
     expect(cards.every((c) => c.title && c.url.startsWith('/') && c.units.length > 0 && c.units.length <= 2)).toBe(true);
-    // شارة «18+» قبل العنوان ترتبط بحساب على X: لا تصير هي العمل
-    expect(cards[0]).toMatchObject({ title: 'Kimi wa Yotsuba no Clover', url: '/manga/kimi-wa-yotsuba-no-clover/', units: [{ number: 106 }, { number: 105 }] });
+    // العمل الأول عليه شارة «18+» في الموقع نفسه: محتوى للكبار لا يُبلَّغ، ولا تصير الشارة (رابط X) عملًا
+    expect(cards.some((c) => c.title === 'Kimi wa Yotsuba no Clover' || c.url.includes('x.com'))).toBe(false);
   });
   it('reads Iken and MangaSwat JSON with exact upload times', () => {
     const raw = JSON.parse(fixture('iken-latest.json'));
@@ -81,5 +81,17 @@ describe('top chapters for duplicate detection', () => {
     await handleUpdatesObserve(new Request('https://x/v1/updates/observe', { method: 'POST', body: JSON.stringify({ works }) }), env, NOW);
     const body = await (await handleUpdatesTwins(env, NOW)).json() as { works: Array<[string, number]> };
     expect(body.works.sort()).toEqual([[normalizeTitle('City Of Sin'), 37], [normalizeTitle('City of Sins'), 37]].sort());
+  });
+});
+
+describe('adult content never reaches the timeline from the server', () => {
+  it('skips Madara cards with the 18+ badge and Iken/MangaSwat works tagged adult', () => {
+    const card = (badge: string, title: string) => `<div class="page-item-detail manga"><div class="post-title"><h3>${badge}<a href="/manga/${title.toLowerCase().replace(/ /g, '-')}/">${title}</a></h3></div><div class="list-chapter"><span class="chapter"><a href="/manga/x/5/">5</a></span></div></div>`;
+    const html = card('<span class="manga-title-badges custom adult badge-round"><span class="text">18+</span></span>', 'Hidden Work') + card('', 'Clean Work') + card('', 'Night [NSFW]');
+    expect(madaraCards(html, 'https://s.test').map((c) => c.title)).toEqual(['Clean Work']);
+    const iken = ikenWorks({ posts: [{ id: 1, slug: 'a', postTitle: 'A', genres: [{ name: 'Yaoi' }], chapters: [{ number: 9 }] }, { id: 2, slug: 'b', postTitle: 'B', genres: [{ name: 'Action' }], chapters: [{ number: 9 }] }] }, NOW);
+    expect(iken.map((w) => w.title)).toEqual(['B']);
+    const swat = swatWorks({ results: [{ serie_id: 1, title: 'S1', genres: [{ name: 'إيتشي' }], chapters: [{ chapter: '3' }] }, { serie_id: 2, title: 'S2', genres: [{ name: 'أكشن' }], chapters: [{ chapter: '3' }] }] }, NOW);
+    expect(swat.map((w) => w.title)).toEqual(['S2']);
   });
 });
