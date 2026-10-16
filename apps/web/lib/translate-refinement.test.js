@@ -119,3 +119,16 @@ it('bounds cached repairs and counts them inside a one-page resident window',asy
  const waiting=analyses;release();for(let i=0;i<300;i++)await Promise.resolve();
  expect(waiting).toBe(1);
 });
+
+it('queued repairs use live reader distance after completing the current repair',async()=>{
+ const test=setup();let byte=0;globalThis.fetch=async()=>new Response(new Uint8Array([91,byte++,82]));
+ const indices=[1,8,9,10];const meta=i=>({seriesRef:'repair-order',sourceId:'s',chapterKey:'repair-order',pageIndex:i});
+ for(const i of indices) await translatePage(test.deps,`file:/repair-order-${i}.jpg`,meta(i));
+ for(const row of kv.values()) row.value={...row.value,incomplete:true,tries:0};
+ let release;const held=new Promise(resolve=>{release=resolve;});const order=[];
+ const analyze=globalThis.Capacitor.Plugins.Translation.analyzePage;
+ globalThis.Capacitor.Plugins.Translation.analyzePage=async args=>{order.push(args.pageIndex);if(order.length===1)await held;return analyze();};
+ for(const i of indices) await translatePage({...test.deps,isInteractive:()=>i===9,schedulingPriority:()=>i===9?0:i>9?i-9:1000+9-i},`file:/repair-order-${i}.jpg`,meta(i));
+ release();for(let i=0;i<400;i++)await Promise.resolve();
+ expect(order).toEqual([1,9,10,8]);
+});

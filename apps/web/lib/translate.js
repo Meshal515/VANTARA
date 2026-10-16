@@ -678,8 +678,13 @@ const repairWaiters = new Set();
 function pumpRepairs() {
   if (backgroundRepairActive || !repairQueue.length) return;
   if ([...residentWindows].some(window => window.count() >= window.limit)) return;
-  const index = repairQueue.findIndex(task => interactiveOf(task.deps));
-  const selected = index >= 0 ? index : 0;
+  let selected = 0;
+  for (let i = 1; i < repairQueue.length; i++) {
+    const a = repairQueue[i].deps; const b = repairQueue[selected].deps;
+    const urgency = Number(interactiveOf(b)) - Number(interactiveOf(a));
+    const distance = (a.schedulingPriority?.() ?? Infinity) - (b.schedulingPriority?.() ?? Infinity);
+    if (urgency < 0 || (urgency === 0 && distance < 0)) selected = i;
+  }
   const task = repairQueue[selected];
   const limits = runtimeCapacity.queueLimits({lane: interactiveOf(task.deps) ? 'reader' : 'job'});
   if (limits.prepareConcurrency <= 0) return;
