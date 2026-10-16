@@ -33,7 +33,11 @@ describe('AniList manga rating', () => {
   it('hides ambiguous, adult, missing and unscored matches', () => {
     const row = { id: 2, title: { romaji: 'Nano Machine' }, averageScore: 84 };
     expect(matchMangaRating('Nano Machine', [row, { ...row, id: 3 }])).toBeNull();
-    expect(matchMangaRating('Nano Machine', [{ ...row, isAdult: true }])).toBeNull();
+    // عمل للكبار بالاسم نفسه: لا تقييم، بل علامة حجب
+    expect(matchMangaRating('Nano Machine', [{ ...row, isAdult: true }])).toEqual({ id: row.id, adult: true });
+    expect(matchMangaRating('Nano Machine', [{ ...row, genres: ['Romance', 'Hentai'] }])).toEqual({ id: row.id, adult: true });
+    // الإيتشي يبقى: يُقيَّم كأي عمل
+    expect(matchMangaRating('Nano Machine', [{ ...row, genres: ['Romance', 'Ecchi'] }])).toEqual({ id: 2, score: 8.4 });
     expect(matchMangaRating('Nano Machine', [{ ...row, averageScore: null }])).toBeNull();
   });
   it('requests manga in a batch and leaves an unmatched title unrated', async () => {
