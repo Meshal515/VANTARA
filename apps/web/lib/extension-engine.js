@@ -161,8 +161,26 @@ export async function clearImageCache() {
 	return required().clearImageCache();
 }
 
+/**
+ * مستودعات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi). داخل التطبيق وحده:
+ * الإضافة كود DEX يعمل في الجهاز، والمتصفح لا يشغّله. `null` حيث لا تتوفر.
+ */
+export function repositories() {
+	const plugin = bridge();
+	if (typeof plugin?.addRepo !== 'function') return null;
+	return {
+		list: () => plugin.repos(),
+		add: (url) => plugin.addRepo({ url }),
+		remove: (url) => plugin.removeRepo({ url }),
+		extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],
+		install: (repo, pkg) => plugin.installExtension({ repo, pkg }),
+		uninstall: (pkg) => plugin.uninstallExtension({ pkg }),
+	};
+}
+
 export default {
 	cover,
+	repositories,
 	isAvailable,
 	sources,
 	prepare,
