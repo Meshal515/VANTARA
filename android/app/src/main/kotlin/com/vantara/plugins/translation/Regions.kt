@@ -33,6 +33,10 @@ class Region(
     var cleanMode: String? = null
     var fillColor: IntArray? = null
     var reconstruction: Cleaner.Reconstruction? = null
+    /** E2b evidence window (see [SmoothFill]); only set when cleanMode == "smooth". */
+    var smooth: SmoothFill.Support? = null
+    /** Why a cheaper erase tier was refused (telemetry only). */
+    var eraseNote: String? = null
     var layout: TextLayout? = null
 }
 
@@ -124,7 +128,13 @@ object Regions {
         val sources: Map<String, List<Detection>>,
         val features: Map<String, FastRoiRouter.Features> = emptyMap(),
         val rejectionReasons: Map<Detection, String> = emptyMap(),
+        /** Which flat-paper test failed for a "background" rejection (telemetry only). */
+        val backgroundDetail: Map<Detection, String> = emptyMap(),
     )
+
+    /** Last reason [fastBubbleEvidence] returned null, per thread (pipelines run on several). */
+    private val evidenceMiss = ThreadLocal<String?>()
+    private fun miss(reason: String): FastBubbleEvidence? { evidenceMiss.set(reason); return null }
 
     internal data class FastBubbleEvidence(
         val mask: ByteMask,
@@ -147,10 +157,12 @@ object Regions {
         val sources = LinkedHashMap<String, List<Detection>>()
         val features = LinkedHashMap<String, FastRoiRouter.Features>()
         val rejections = LinkedHashMap<Detection, String>()
+        val backgroundDetail = LinkedHashMap<Detection, String>()
 
         fun reject(ds: List<Detection>, reason: String) {
             heavy.addAll(ds)
             for (d in ds) rejections.putIfAbsent(d, reason)
+            if (reason == "background") for (d in ds) backgroundDetail.putIfAbsent(d, evidenceMiss.get() ?: "unknown")
         }
 
         for (d in texts) {
@@ -167,6 +179,7 @@ object Regions {
                     // unclaimed ink; otherwise CTD owns this ROI.
                     val pad=HeavyRoi.DEFAULT_PAD
                     val context=Box(maxOf(0,d.box.x1-pad),maxOf(0,d.box.y1-pad),minOf(img.width,d.box.x2+pad),minOf(img.height,d.box.y2+pad))
+                    evidenceMiss.set(null)
                     val flat=fastBubbleEvidence(img,context,d.box)
                     val glyph=flat?.let {fastGlyphEvidence(img,it.mask,d.box,it.color)}
                     if(flat!=null && glyph!=null && glyph.mask.count()>=MIN_GLYPH_PIXELS) {
@@ -204,6 +217,7 @@ object Regions {
             // a holder when RT-DETR says another item inside may be free/SFX art.
             if (group.any { it.label == "text_free" }) { reject(group,"mixed_holder_label"); continue }
             val textBox = group.map { it.box }.reduce { a, b -> a.union(b) }
+            evidenceMiss.set(null)
             val flat = fastBubbleEvidence(img, holder.box, textBox)
             if(flat==null) {reject(group,"background");continue}
             if(!fastSpeechEnvelopeSafe(flat.mask,holder.box)) {reject(group,"holder_mask");continue}
@@ -239,7 +253,7 @@ object Regions {
             sources[id] = group
             features[id] = f
         }
-        return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources, features, rejections)
+        return FastFlatPlan(out.sortedWith(compareBy({ it.box.y1 / 60 }, { -it.box.x1 })), heavy, sources, features, rejections, backgroundDetail)
     }
 
     data class TrustedHolderPlan(
@@ -451,7 +465,7 @@ object Regions {
     private fun fastBubbleEvidence(img: RgbImage, bubbleBox: Box, textBox: Box): FastBubbleEvidence? {
         val x0 = maxOf(0, bubbleBox.x1); val y0 = maxOf(0, bubbleBox.y1)
         val x1 = minOf(img.width, bubbleBox.x2); val y1 = minOf(img.height, bubbleBox.y2)
-        if (x1 - x0 < 24 || y1 - y0 < 24) return null
+        if (x1 - x0 < 24 || y1 - y0 < 24) return miss("tiny")
 
         val rs = ArrayList<Int>(); val gs = ArrayList<Int>(); val bs = ArrayList<Int>()
         val stride = maxOf(1, minOf(x1 - x0, y1 - y0) / 96)
@@ -459,7 +473,7 @@ object Regions {
             if (x in (textBox.x1 - 3)..(textBox.x2 + 3) && y in (textBox.y1 - 3)..(textBox.y2 + 3)) continue
             rs.add(img.r(x, y)); gs.add(img.g(x, y)); bs.add(img.b(x, y))
         }
-        if (rs.size < 80) return null
+        if (rs.size < 80) return miss("samples")
         rs.sort(); gs.sort(); bs.sort()
         val color = intArrayOf(rs[rs.size / 2], gs[gs.size / 2], bs[bs.size / 2])
 
@@ -475,24 +489,24 @@ object Regions {
             )
             if (d <= 20) { close[x, y] = 1; closeN++ }
         }
-        if (closeN < total * 0.42) return null
+        if (closeN < total * 0.42) return miss("paper_share")
 
         val paper = close.close(1).largestComponent().filledHoles()
-        val pb = paper.bounds() ?: return null
-        if (pb[2] - pb[0] < textBox.w || pb[3] - pb[1] < textBox.h) return null
+        val pb = paper.bounds() ?: return miss("paper_empty")
+        if (pb[2] - pb[0] < textBox.w || pb[3] - pb[1] < textBox.h) return miss("paper_small")
 
         var inside = 0; var tn = 0
         for (y in maxOf(0, textBox.y1) until minOf(img.height, textBox.y2)) for (x in maxOf(0, textBox.x1) until minOf(img.width, textBox.x2)) {
             tn++
             if (paper[x, y].toInt() != 0) inside++
         }
-        if (tn == 0) return null
+        if (tn == 0) return miss("text_empty")
         val maskConfidence=inside.toFloat()/tn
-        if (maskConfidence < FastRoiRouter.MASK_CONFIDENCE_MIN) return null
+        if (maskConfidence < FastRoiRouter.MASK_CONFIDENCE_MIN) return miss("text_not_on_paper")
 
         var spread = 0.0; var sn = 0
         var edge = 0.0; var en = 0
-        val pw = paper.scanWindow() ?: return null
+        val pw = paper.scanWindow() ?: return miss("paper_empty")
         fun luma(x:Int,y:Int)= (299*img.r(x,y)+587*img.g(x,y)+114*img.b(x,y))/1000
         for (y in pw[1] until pw[3] step 2) for (x in pw[0] until pw[2] step 2) {
             if (paper[x, y].toInt() == 0) continue
@@ -507,9 +521,9 @@ object Regions {
             if(x+1<pw[2] && paper[x+1,y].toInt()!=0) {edge+=Math.abs(luma(x+1,y)-here)/255.0;en++}
             if(y+1<pw[3] && paper[x,y+1].toInt()!=0) {edge+=Math.abs(luma(x,y+1)-here)/255.0;en++}
         }
-        if (sn < 40) return null
+        if (sn < 40) return miss("samples")
         val backgroundSpread=(spread/sn).toFloat()
-        if (backgroundSpread > FastRoiRouter.BACKGROUND_SPREAD_MAX) return null
+        if (backgroundSpread > FastRoiRouter.BACKGROUND_SPREAD_MAX) return miss("spread")
         val edgeDensity=if(en==0) 1f else (edge/en).toFloat()
         return FastBubbleEvidence(paper,color,backgroundSpread,edgeDensity,maskConfidence)
     }

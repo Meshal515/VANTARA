@@ -342,6 +342,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         var invocations=0
         var hits=0
         var inferenceRoiPixels=0
+        var inputPixels=0L
         for(box in crops) {
             val key=bubbleRoiKey(hash,box)
             val cached=bubbleRois[key]
@@ -353,6 +354,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             val bs=segmenter ?: bubbles(perf).also {segmenter=it}
             val found=perf.time("bubbles") {bs.segmentRoi(img,listOf(box))}
             invocations += bs.tiles
+            inputPixels += bs.lastInputPixels
             inferenceRoiPixels += box.area
             bubbleRois[key]=found.map {cacheBubble(it)}
             out.addAll(found)
@@ -360,7 +362,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("bubbleInvocations",invocations)
         perf.count("bubbleCacheHits",hits)
         perf.count("bubbleInferenceRoiPixels",inferenceRoiPixels)
-        perf.count("bubbleInputPixels",invocations*BubbleSegmenter.INPUT_SIZE*BubbleSegmenter.INPUT_SIZE)
+        perf.count("bubbleInputPixels",minOf(Int.MAX_VALUE.toLong(),inputPixels).toInt())
+        if(BubbleSegmenter.nativeRoi && invocations>0) perf.count("bubbleNativeRoi",invocations)
         if(invocations>0) perf.count("bubblePagesInvoked")
         if(invocations==0 && hits>0) perf.count("bubbleCacheOnly")
         return out
@@ -403,6 +406,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             ) else Regions.fastFlatPlan(img, gray, hash, dets,allowFlatFree=true)
         }
         for (reason in plan.rejectionReasons.values) perf.count("fastReject:$reason")
+        for (detail in plan.backgroundDetail.values) perf.count("fastBackground:$detail")
         val fast = ArrayList<Region>()
         val texts = ArrayList(plan.heavy)
         if (plan.fast.isNotEmpty()) {
@@ -463,8 +467,14 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         } else {
             val gs=glyphs(perf)
             val before=perf.nanos["glyphs"] ?: 0L
-            val mask=perf.time("glyphs") {gs.maskRoi(img,crops,.3f)}
+            val atlas=RoiAtlas.enabled
+            val mask=perf.time("glyphs") {if(atlas) gs.maskAtlas(img,crops,.3f) else gs.maskRoi(img,crops,.3f)}
             val elapsed=(perf.nanos["glyphs"] ?: 0L)-before
+            if(atlas) {
+                perf.count("ctdAtlas")
+                perf.count(if(gs.lastMode=="stripes") "ctdStripeCalls" else "ctdAtlasCalls",gs.tiles)
+                perf.count("ctdAtlasOccupancyPermille",(gs.lastOccupancy*1000).toInt())
+            }
             perf.count("glyphTiles",gs.tiles)
             perf.count("ctdCalls",gs.tiles)
             perf.count("ctdTensorPixels",gs.tiles*gs.inputPixelsPerTile)
@@ -626,6 +636,25 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         perf.count("lamaInvocations", s.inpaintRegions)
         perf.count("eraseNoOpRegions", s.noOpRegions)
         perf.count("inpaintScaledRegions", s.scaledInpaintRegions)
+        perf.count("smoothMaskPixels", s.smoothMaskPixels)
+        perf.count("smoothChangedPixels", s.smoothChangedPixels)
+        perf.count("smoothRegions", s.smoothRegions)
+        if (s.smoothFailed > 0) perf.count("smoothFailed", s.smoothFailed)
+    }
+
+    /** Per-tier region counts and why cheaper tiers were refused (telemetry for the v3 erase ladder). */
+    private fun recordPlan(perf: Perf, regions: List<Region>) {
+        val t = regions.filter { it.status == "translated" }
+        perf.count("fill", t.count { it.cleanMode == "fill" })
+        perf.count("reconstruct", t.count { it.cleanMode == "reconstruct" })
+        perf.count("smooth", t.count { it.cleanMode == "smooth" })
+        perf.count("inpaint", t.count { it.cleanMode == "lama" && it.eraseMask?.any() == true })
+        perf.count("eraseE0", t.count { it.eraseMask?.any() != true || it.cleanMode == null })
+        perf.count("eraseE1", t.count { it.cleanMode == "fill" })
+        perf.count("eraseE2", t.count { it.cleanMode == "reconstruct" })
+        perf.count("eraseE2b", t.count { it.cleanMode == "smooth" })
+        perf.count("eraseE3", t.count { it.cleanMode == "lama" })
+        for (r in t) r.eraseNote?.let { perf.count("eraseNote:$it") }
     }
 
     /**
@@ -665,13 +694,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         }
         keepWholeBubbles(regions, sibs, leave, perf)
         perf.time("plan") { for (r in regions) if (r.status == "translated") Cleaner.planErase(img, r, sibs[r.id]) }
-        perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
-        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
-        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
-        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
+        recordPlan(perf, regions)
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
@@ -772,13 +795,7 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
         // لم يُكتب في img شيء بعد: الأصل هو المفكوك نفسه (بلا نسخة ثالثة بحجم الصفحة)
         val original = decoded.img
         val lama = if (Cleaner.needsInpaint(regions)) inpainter(perf) else null
-        perf.count("fill", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("reconstruct", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
-        perf.count("inpaint", regions.count { it.status == "translated" && it.cleanMode == "lama" && it.eraseMask?.any() == true })
-        perf.count("eraseE0", regions.count { it.status == "translated" && (it.eraseMask?.any() != true || it.cleanMode == null) })
-        perf.count("eraseE1", regions.count { it.status == "translated" && it.cleanMode == "fill" })
-        perf.count("eraseE2", regions.count { it.status == "translated" && it.cleanMode == "reconstruct" })
-        perf.count("eraseE3", regions.count { it.status == "translated" && it.cleanMode == "lama" })
+        recordPlan(perf, regions)
         val eraseStats = perf.time("erase") { Cleaner.applyErase(img, regions, lama) }
         recordErase(perf, eraseStats)
         // Cheap colour gate first. OCR sees only known text lines before Arabic is drawn.
@@ -976,6 +993,17 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                         big.data[i] = color[0].toByte(); big.data[i + 1] = color[1].toByte(); big.data[i + 2] = color[2].toByte()
                     }
                 }
+            } else if (r.cleanMode == "smooth") {
+                val support = r.smooth ?: continue
+                val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
+                for (y in y0 until y1) {
+                    Ort.checkBudget()
+                    val my = minOf(sh - 1, (y / ky).toInt())
+                    for (x in x0 until x1) mask[x, y] = m[minOf(sw - 1, (x / kx).toInt()), my]
+                }
+                val bigSupport = SmoothFill.scaled(support, kx, ky, big.width, big.height)
+                if (SmoothFill.apply(big, mask, bigSupport) < 0 && lama != null) lama.inpaint(big, mask, Box(x0, y0, x1, y1))
+                mask.fillRect(x0, y0, x1, y1, 0)
             } else if (r.cleanMode == "lama" && lama != null) {
                 val mask = inpaintMask ?: ByteMask(big.width, big.height).also { inpaintMask = it }
                 for (y in y0 until y1) {
@@ -1085,6 +1113,27 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                         a!=null && b!=null && a.mask.data.contentEquals(b.mask.data)
                     }
                     out.add(EngineResult("roi-candidate",(t1-t0)/1_000_000,(t3-t2)/1_000_000,(t4-t3)/1_000_000,diff,pixels,same,roiB.size))
+                    // v3 A/B on the same crops: one CTD call per atlas vs one per crop,
+                    // and BubbleSeg at native ROI size vs the 1024² upscale.
+                    val nativeBefore=BubbleSegmenter.nativeRoi
+                    try {
+                        val a0=System.nanoTime();val perCrop=gs.maskRoi(img,crops,.3f);val a1=System.nanoTime()
+                        val atlas=gs.maskAtlas(img,crops,.3f);val atlasCalls=gs.tiles;val a2=System.nanoTime()
+                        var atlasDiff=0;var atlasPixels=0
+                        for(i in perCrop.data.indices) {
+                            if(perCrop.data[i]!=atlas.data[i]) atlasDiff++
+                            if(atlas.data[i].toInt()!=0) atlasPixels++
+                        }
+                        out.add(EngineResult("ctd-per-crop×${crops.size}",0,(a1-a0)/1_000_000,0,0,perCrop.count(),true,0))
+                        out.add(EngineResult("ctd-atlas×$atlasCalls",0,(a2-a1)/1_000_000,0,atlasDiff,atlasPixels,true,0))
+                        BubbleSegmenter.nativeRoi=false
+                        val b0=System.nanoTime();val up=bs.segmentRoi(img,crops);val b1=System.nanoTime()
+                        BubbleSegmenter.nativeRoi=true
+                        val native=bs.segmentRoi(img,crops);val b2=System.nanoTime()
+                        val sameBubbles=up.size==native.size && up.zip(native).all {(p,q)->p.box.iou(q.box)>=.9f}
+                        out.add(EngineResult("bubble-1024",0,0,(b1-b0)/1_000_000,0,0,true,up.size))
+                        out.add(EngineResult("bubble-native",0,0,(b2-b1)/1_000_000,0,0,sameBubbles,native.size))
+                    } finally {BubbleSegmenter.nativeRoi=nativeBefore}
                 }
             }
         }

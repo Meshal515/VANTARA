@@ -88,5 +88,42 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
         return RoiMaskComposer.threshold(img.width,img.height,crops,local,threshold)
     }
 
+    /** Fraction of the last atlas tensors that carried crop pixels (telemetry). */
+    var lastOccupancy = 0f
+        private set
+    /** "atlas" or "stripes": which v3 path the last [maskAtlas] used. */
+    var lastMode = ""
+        private set
+
+    /**
+     * v3 production path. Crops are packed at the reference glyph scale
+     * ([RoiAtlas.referenceScale]) into as few 1024² canvases as possible — one CTD call
+     * per canvas instead of one per crop. A dense page whose text needs no more
+     * full-width stripes than canvases takes the stripes instead: same cost or less,
+     * and exactly the reference geometry. Same threshold/averaging downstream.
+     */
+    fun maskAtlas(img: RgbImage, crops: List<Box>, threshold: Float = .3f): ByteMask {
+        val plan = RoiAtlas.plan(crops, size, scale = RoiAtlas.referenceScale(img.width, size))
+        val spans = RoiAtlas.stripes(img.width, img.height, crops)
+        val local = if (spans.size <= plan.atlases) {
+            lastMode = "stripes"
+            tiles = spans.size
+            lastOccupancy = 1f
+            RoiAtlas.stripeProbabilities(img, crops, spans) { strip -> inferMapped(strip) }
+        } else {
+            lastMode = "atlas"
+            tiles = plan.atlases
+            lastOccupancy = plan.occupancy()
+            RoiAtlas.probabilities(img, crops, plan) { chw ->
+                val input = Ort.tensor(chw, 1, 3, size.toLong(), size.toLong())
+                Ort.run(session, mapOf("images" to input)).use { res ->
+                    @Suppress("UNCHECKED_CAST")
+                    (res.get("seg").get().value as Array<Array<Array<FloatArray>>>)[0][0]
+                }
+            }
+        }
+        return RoiMaskComposer.threshold(img.width, img.height, crops, local, threshold)
+    }
+
     override fun close() = session.close()
 }
