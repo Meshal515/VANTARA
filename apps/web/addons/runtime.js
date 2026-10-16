@@ -259,7 +259,8 @@ export function createAddonRuntime({
               },
             ];
           const kitsu = String(work.id ?? work.url).startsWith("kitsu:") && kitsuVideoRequest(work.identity);
-          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: kitsu.type, externalIds: work.externalIds, identity: work.identity }];
+          // إضافة تعلن بثّ Kitsu تحت anime وحده تُطلب بنوعها (اختارته addonCopies)
+          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: work.type === "anime" ? "anime" : kitsu.type, externalIds: work.externalIds, identity: work.identity }];
           if (
             Number.isInteger(work.requestedSeason) &&
             Number.isInteger(work.episode)

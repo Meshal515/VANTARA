@@ -98,3 +98,8 @@ it.each([
  expect(normalizeStreams([raw],{addonKey:'a',runtimeName:'apk'})[0]).toMatchObject({type:'dash',status:'RESOLVED',reason:null});
  expect(normalizeStreams([raw],{addonKey:'a',runtimeName:'pwa'})[0]).toMatchObject({type:'dash',status:'RESOLVED',reason:null});
 });
+it('lets the Windows player (mpv) take direct streams that are not web-ready', () => {
+ const raw=[{url:'https://cdn.test/movie.mkv',name:'1080p',behaviorHints:{notWebReady:true}}];
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'desktop'})[0].status).toBe('RESOLVED');
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'pwa'})[0].status).toBe('UNSUPPORTED');
+});

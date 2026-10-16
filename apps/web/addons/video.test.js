@@ -59,3 +59,11 @@ it('does not retain a previous episode private video ID when advancing addon cop
  const [next]=nextEpisodeCopies([{sourceId:'addon|origin',identity:{kind:'series',addonKey:'origin',videoId:'private:first',episode:1,season:2}}],2,{kind:'series',season:2});
  expect(next.identity.episode).toBe(2);expect(next.identity.videoId).toBeUndefined();
 });
+it('reaches anime add-ons that declare Kitsu streams only under the anime type', () => {
+ const only={...m,resources:[{name:'stream',types:['anime'],idPrefixes:['kitsu:']}]};
+ const identity={kind:'anime',format:'TV',externalIds:{kitsu:'12'},episode:3};
+ expect(addonCopies({list:()=>[only]},identity,'apk')[0]).toMatchObject({url:'kitsu:12',type:'anime'});
+ const both={...m,resources:[{name:'stream',types:['series','anime'],idPrefixes:['kitsu:']}]};
+ expect(addonCopies({list:()=>[both]},identity,'apk')[0].type).toBe('series');
+ expect(addonCopies({list:()=>[{...m,resources:[{name:'stream',types:['anime'],idPrefixes:['tt']}]}]},{kind:'series',externalIds:{imdb:'tt1'},season:1,episode:1})).toEqual([]);
+});

@@ -12,7 +12,9 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
   }
   function canonicalRequest(copy) {
     const imdb = copy.identity?.externalIds?.imdb ?? copy.externalIds?.imdb ?? (/^tt\d+$/.test(copy.id ?? copy.url ?? '') ? copy.id ?? copy.url : null);
-    return subtitleRequest({ ...copy.identity, kind: copy.identity?.kind ?? copy.type, externalIds: { ...copy.externalIds, ...copy.identity?.externalIds, ...(imdb ? { imdb } : {}) }, season: copy.requestedSeason ?? copy.identity?.season, episode: Number(episode) });
+    const request = subtitleRequest({ ...copy.identity, kind: copy.identity?.kind ?? copy.type, externalIds: { ...copy.externalIds, ...copy.identity?.externalIds, ...(imdb ? { imdb } : {}) }, season: copy.requestedSeason ?? copy.identity?.season, episode: Number(episode) });
+    // إضافة أنمي تعلن بثّ Kitsu تحت anime وحده: نطلبها بالنوع الذي اختارته addonCopies
+    return request && copy.type === 'anime' && request.videoId.startsWith('kitsu:') ? { ...request, type: 'anime' } : request;
   }
   function descriptor(entry, input, episodes) {
     if (!runtime.registry.connection) return null;

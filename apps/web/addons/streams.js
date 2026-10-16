@@ -39,6 +39,7 @@ export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName 
     };
     if (!plainObject(s)) return { ...base, reason: "بيانات Stream غير صالحة" };
     if (s.externalUrl) return { ...base, reason: "هذه النتيجة تفتح موقعًا خارجيًا ولا توفر رابط فيديو مباشرًا" };
+    // مشغّل التطبيق (Media3) والويندوز (mpv) يشغّلان ما ليس «جاهزًا للويب» (notWebReady)
     const native = runtimeName === "apk" || runtimeName === "desktop";
     const torrent = s.infoHash != null || typeof s.url === "string" && s.url.startsWith("magnet:");
     if (s.ytId || s.nzbUrl || s.archiveUrl || (!native && s.behaviorHints?.notWebReady && !torrent))

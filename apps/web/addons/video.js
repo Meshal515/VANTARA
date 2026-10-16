@@ -13,6 +13,14 @@ export function nextEpisodeCopies(copies = [], episode, identity = {}) {
     return next;
   });
 }
+/**
+ * نوع الطلب الذي تقبله الإضافة لهذا العمل. إضافات الأنمي تختلف: أغلبها (Torrentio وComet)
+ * تأخذ معرّف Kitsu تحت `series`/`movie`، وبعضها يعلن `anime` وحده. فنجرّب الأول ثم `anime`.
+ */
+export function streamType(manifest, input, identity) {
+  const types = identity?.kind === "anime" ? [input.type, "anime"] : [input.type];
+  return types.find((type) => matchesStremioResource(manifest, "stream", type, input.videoId)) ?? null;
+}
 export function addonCopies(registry, identity, runtimeName = "pwa") {
   // Cross-provider video fan-out needs a canonical work ID, not just one
   // provider's private episode ID. Its own source copy already retains that ID.
@@ -31,14 +39,15 @@ export function addonCopies(registry, identity, runtimeName = "pwa") {
         !(m.configuration?.required && !m.configuration.configured),
     )
     .flatMap((m) => {
-      const input = requests.find(request => matchesStremioResource(m, "stream", request.type, request.videoId));
+      let type = null;
+      const input = requests.find(request => (type = streamType(m, request, identity)));
       if (!input) return [];
       const workId = input.videoId.startsWith("kitsu:") ? `kitsu:${identity.externalIds.kitsu}` : identity.externalIds.imdb;
       return [{
       sourceId: `addon|${m.key}`,
       url: workId,
       id: workId,
-      type: input.type,
+      type,
       title: m.name,
       requestedSeason: identity.season,
       episode: identity.episode,
