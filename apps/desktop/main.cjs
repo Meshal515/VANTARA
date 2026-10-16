@@ -6,6 +6,7 @@ const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
 const { firstPartyRequest } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
+const updater = require('./updater.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 app.setName('VANTARA');
@@ -23,6 +24,15 @@ let services;
 let videoHost;
 let playbackSession=null;
 let quitting = false;
+// تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
+let pendingUpdate = null;
+function scheduleUpdateInstall(relaunch) {
+  if (!pendingUpdate || pendingUpdate.scheduled || process.platform !== 'win32') return false;
+  const { file, args } = updater.installCommand({ installer: pendingUpdate.file, exe: app.getPath('exe'), relaunch });
+  require('node:child_process').spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  pendingUpdate.scheduled = true;
+  return true;
+}
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
 const windowIcon = process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
@@ -114,6 +124,23 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     await shell.openExternal(parsed.href);
     return true;
   });
+  // النسخة المحمولة (ZIP) لا مثبّت لها: تبقى على فتح صفحة التنزيل
+  register('download-update', async (update) => {
+    if (portable || process.platform !== 'win32') return { ready: false, manual: true };
+    if (pendingUpdate?.version === update?.version) return { ready: true, version: pendingUpdate.version };
+    const file = await updater.downloadUpdate({
+      update, dir: path.join(app.getPath('userData'), 'updates'),
+      fetch: (url, options) => net.fetch(url, options),
+      onProgress: (p) => publish({ type: 'update/progress', ...p }),
+    });
+    pendingUpdate = { version: String(update.version), file, scheduled: false };
+    return { ready: true, version: pendingUpdate.version };
+  });
+  register('apply-update', () => {
+    if (!scheduleUpdateInstall(true)) throw new Error('لا يوجد تحديث جاهز للتثبيت');
+    setTimeout(() => app.quit(), 50);
+    return true;
+  });
   register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
   register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
   register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
@@ -186,6 +213,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
+  scheduleUpdateInstall(false);
   if (quitting || !services) return;
   event.preventDefault(); quitting = true;
   for (const popup of settingsWindows) popup.destroy();

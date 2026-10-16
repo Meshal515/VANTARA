@@ -50,25 +50,49 @@ export async function checkDesktopUpdate(bridge, {url=MANIFEST_URL} = {}) {
 
 export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=globalThis.document} = {}) {
   if(!bridge?.requestResource||!bridge?.openUpdatePage||!doc?.body)return null;
-  let pending=null,interval=null,checking=null,disposed=false;
+  let pending=null,interval=null,checking=null,disposed=false,downloading=null,offProgress=null,settled=null;
+  const mb=n=>`${Math.round(n/1048576)}MB`;
+  // شريط واحد بحالاته: يُنزَّل ← جاهز (أعد التشغيل / عند الإغلاق) ← أو تنزيل يدوي إن تعذر
+  const bar=()=>{
+    let el=doc.querySelector('[data-vantara-desktop-update]');
+    if(el)return el;
+    el=doc.createElement('aside');
+    el.dataset.vantaraDesktopUpdate='1';
+    Object.assign(el.style,{position:'fixed',bottom:'18px',right:'18px',maxWidth:'440px',zIndex:10050,direction:'rtl',padding:'16px 20px',borderRadius:'14px',background:'#18161f',color:'#fff',boxShadow:'0 10px 30px #0009'});
+    el.setAttribute('role','status');
+    const title=doc.createElement('strong'),description=doc.createElement('p'),actions=doc.createElement('div');
+    title.dataset.updateTitle='';description.dataset.updateDescription='';actions.dataset.updateActions='';
+    el.append(title,description,actions);doc.body.append(el);
+    return el;
+  };
+  const render=(title,description,buttons=[])=>{
+    if(disposed)return;
+    const el=bar();
+    el.querySelector('[data-update-title]').textContent=title;
+    el.querySelector('[data-update-description]').textContent=description;
+    const actions=el.querySelector('[data-update-actions]');
+    actions.replaceChildren(...buttons.map(([label,run])=>{const b=doc.createElement('button');b.type='button';b.textContent=label;b.style.margin='6px';b.onclick=run;return b;}));
+  };
+  const manual=(update,note='حمّل المثبت ثم ثبّته بعد إغلاق التطبيق.')=>render('تحديث VANTARA متاح: '+update.version,note,[
+    ['تحميل تحديث ويندوز',()=>void bridge.openUpdatePage({url:update.url}).catch(()=>render('تحديث VANTARA متاح: '+update.version,'تعذر فتح التحميل. افتح إصدارات VANTARA على GitHub.'))],
+    ['لاحقًا',()=>{settled=update.version;doc.querySelector('[data-vantara-desktop-update]')?.remove();}],
+  ]);
+  // نسخة جهزت (أو أجّلها المستخدم): الفحص الدوري لا يعيد إظهار الشريط لها
+  const ready=update=>(settled=update.version,render('تحديث VANTARA جاهز: '+update.version,'نُزّل وتحققنا من بصمته. أعد التشغيل الآن، أو يُثبَّت وحده عند إغلاقك التطبيق.',[
+    ['أعد التشغيل وحدّث',()=>void bridge.applyUpdate().catch(()=>manual(update,'تعذر بدء التثبيت. حمّل المثبت يدويًا.'))],
+    ['عند الإغلاق',()=>doc.querySelector('[data-vantara-desktop-update]')?.remove()],
+  ]));
   const show=(update)=>{
-    if(!update||disposed)return;
+    if(!update||disposed||settled===update.version)return;
     pending=update;
-    let bar=doc.querySelector('[data-vantara-desktop-update]');
-    if(!bar) {
-      bar=doc.createElement('aside');
-      bar.dataset.vantaraDesktopUpdate='1';
-      Object.assign(bar.style,{position:'fixed',bottom:'18px',right:'18px',maxWidth:'440px',zIndex:10050,direction:'rtl',padding:'16px 20px',borderRadius:'14px',background:'#18161f',color:'#fff',boxShadow:'0 10px 30px #0009'});
-      bar.setAttribute('role','status');
-      const title=doc.createElement('strong'),description=doc.createElement('p'),button=doc.createElement('button'),later=doc.createElement('button');
-      title.dataset.updateTitle='';description.dataset.updateDescription='';button.textContent='تحميل تحديث ويندوز';later.textContent='لاحقًا';
-      button.type='button';later.type='button';button.style.margin='6px';later.style.margin='6px';
-      button.onclick=()=>{if(pending)void bridge.openUpdatePage({url:pending.url}).catch(()=>{description.textContent='تعذر فتح التحميل. افتح إصدارات VANTARA على GitHub.';});};
-      later.onclick=()=>bar.remove();
-      bar.append(title,description,button,later);doc.body.append(bar);
-    }
-    bar.querySelector('[data-update-title]').textContent='تحديث VANTARA متاح: '+update.version;
-    bar.querySelector('[data-update-description]').textContent='تم تجهيز مثبت ويندوز والتحقق من بصمته في البناء. حمّله ثم ثبّته بعد إغلاق التطبيق.';
+    if(!bridge.downloadUpdate)return manual(update);
+    if(downloading)return;
+    render('يُنزَّل تحديث VANTARA '+update.version,`0 / ${mb(update.size)}`);
+    offProgress??=bridge.onEvent?.(e=>{if(e?.type==='update/progress'&&downloading)render('يُنزَّل تحديث VANTARA '+pending.version,`${mb(e.received)} / ${mb(e.total)}`);})??null;
+    downloading=Promise.resolve(bridge.downloadUpdate(update)).then(result=>{
+      if(result?.ready)ready(update);
+      else manual(update);
+    }).catch(()=>manual(update,'تعذر تنزيل التحديث تلقائيًا. حمّل المثبت يدويًا.')).finally(()=>{downloading=null;});
   };
   const check=({force=false}={})=>{
     if(checking)return checking;
@@ -82,5 +106,5 @@ export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=gl
   interval=setInterval(()=>void check(),CHECK_EVERY_MS);
   const visible=()=>{if(doc.visibilityState==='visible')void check();};
   doc.addEventListener('visibilitychange',visible);
-  return {check,close(){disposed=true;clearInterval(interval);doc.removeEventListener('visibilitychange',visible);doc.querySelector('[data-vantara-desktop-update]')?.remove();}};
+  return {check,close(){disposed=true;offProgress?.();clearInterval(interval);doc.removeEventListener('visibilitychange',visible);doc.querySelector('[data-vantara-desktop-update]')?.remove();}};
 }

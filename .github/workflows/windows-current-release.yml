@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.4
+name: Publish verified VANTARA Windows 0.2.5
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.2.4'
-  TAG: 'windows-v0.2.4'
+  VERSION: '0.2.5'
+  TAG: 'windows-v0.2.5'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -127,7 +127,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.2.4
+    name: Publish verified Windows 0.2.5
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -154,7 +154,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "نسخة ويندوز تجمع أحدث واجهة main (حتى #210: تصميم الغرفة الجديد وعدّ 3-2-1 والبنر الكامل، تموضع الغرفة واختيار السيرفر، وسلاسة متابعة القراءة) مع مشغل ويندوز المدمج والتورنت ذي النافذة المتحركة، وتوقيت الفيديو المحلي، وإصلاح تموضع الغرفة واختيار السيرفر وصور المدعوين. مثبت يحمل شعار فانتارا ويضيف اختصارات سطح المكتب وابدأ، مع قناة تحديثات مستقلة لويندوز. اختُبر في Windows CI: التثبيت والتحديث وإزالة التطبيق مع حفظ الملفات الشخصية، الشعار والاختصارات، إقلاع الواجهة، وتشغيل فيديو وترجمة مؤلفين داخل نافذة التطبيق باستخدام MPV الحقيقي. لم يختبر على جهاز المالك أو جلسة أصدقاء فعلية أو Torrentio حي. نسخة غير موقعة." \
+            --notes "تحديثات تلقائية: البرنامج ينزّل التحديث في الخلفية ويتحقق من بصمته، ثم يثبّته بإعادة التشغيل أو بصمت عند الإغلاق. وإصلاح القراءة معًا (#211). نسخة ويندوز تجمع أحدث واجهة main (حتى #211: تصميم الغرفة الجديد وعدّ 3-2-1 والبنر الكامل، تموضع الغرفة واختيار السيرفر، وسلاسة متابعة القراءة) مع مشغل ويندوز المدمج والتورنت ذي النافذة المتحركة، وتوقيت الفيديو المحلي، وإصلاح تموضع الغرفة واختيار السيرفر وصور المدعوين. مثبت يحمل شعار فانتارا ويضيف اختصارات سطح المكتب وابدأ، مع قناة تحديثات مستقلة لويندوز. اختُبر في Windows CI: التثبيت والتحديث وإزالة التطبيق مع حفظ الملفات الشخصية، الشعار والاختصارات، إقلاع الواجهة، وتشغيل فيديو وترجمة مؤلفين داخل نافذة التطبيق باستخدام MPV الحقيقي. لم يختبر على جهاز المالك أو جلسة أصدقاء فعلية أو Torrentio حي. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
@@ -166,7 +166,7 @@ jobs:
           python3 - <<'PYMANIFEST'
           import os,json,pathlib,hashlib
           version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
-          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['تصميم الغرفة الجديد وعدّ 3-2-1 مشترك','متابعة القراءة بسلاسة المضيف','أحدث واجهة التطبيق']}
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['التحديثات تُنزَّل وتُثبَّت تلقائيًا مثل التطبيق','القراءة معًا لا تتجمد عند انقطاع الشبكة']}
           pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
           PYMANIFEST
           if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

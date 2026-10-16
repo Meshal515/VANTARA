@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const call = channel => args => ipcRenderer.invoke(`vantara:${channel}`, args);
 contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   platform: 'windows',
-  version: '0.2.4',
+  version: '0.2.5',
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
   showApp:call('show-app'),
@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   playbackCommand: call('playback-command'),
   openExternal: call('open-external'),
   openUpdatePage: call('open-update-page'),
+  downloadUpdate: call('download-update'),
+  applyUpdate: call('apply-update'),
   onEvent(callback) {
     if (typeof callback !== 'function') throw new TypeError('مستمع غير صالح');
     const receive = (_event, value) => callback(value);
