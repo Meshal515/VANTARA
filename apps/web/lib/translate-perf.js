@@ -199,11 +199,17 @@ const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).to
 export function roiRouting(entries = []) {
   const totals = { fastRoi: 0, ctdRoi: 0, bubbleRoi: 0, rescueRoi: 0 };
   const rejectionReasons = {};
+  const backgroundDetail = {};
   for (const e of entries) {
     const counts = e?.native?.analyze?.counts;
     if (!counts) continue;
     for (const k of Object.keys(totals)) totals[k] += Number(counts[k] ?? 0) || 0;
     for (const [k, v] of Object.entries(counts)) {
+      if (k.startsWith('fastBackground:')) {
+        const detail = k.slice('fastBackground:'.length) || 'unknown';
+        backgroundDetail[detail] = (backgroundDetail[detail] ?? 0) + (Number(v) || 0);
+        continue;
+      }
       if (!k.startsWith('fastReject:')) continue;
       const reason = k.slice('fastReject:'.length) || 'unknown';
       rejectionReasons[reason] = (rejectionReasons[reason] ?? 0) + (Number(v) || 0);
@@ -219,7 +225,81 @@ export function roiRouting(entries = []) {
     bubblePct: pct(totals.bubbleRoi),
     rescuePct: pct(totals.rescueRoi),
     rejectionReasons,
+    backgroundDetail,
   };
+}
+
+/**
+ * Reader stall: time spent on a page that needs translation while it was still
+ * English (`from: 'stall'` entries from the reader). Page-size independent.
+ */
+export function readerStall(entries = []) {
+  const xs = entries.filter(e => e?.from === 'stall' && Number.isFinite(e.stallMs) && e.stallMs > 0);
+  const totalMs = xs.reduce((a, e) => a + e.stallMs, 0);
+  return {
+    views: xs.length,
+    totalMs: Math.round(totalMs),
+    maxMs: xs.length ? Math.max(...xs.map(e => e.stallMs)) : 0,
+    medianMs: median(xs.map(e => e.stallMs)) ?? 0,
+    failed: xs.filter(e => e.outcome === 'failed').length,
+  };
+}
+
+/** Device work actually attributed to one page (route + analyze + render), ms. */
+const deviceWorkOf = e => (Number(e?.stages?.['prepare.route']) || 0) +
+  (Number(e?.stages?.analyze ?? e?.stages?.['prepare.analyze']) || 0) + (Number(e?.stages?.render) || 0);
+
+/**
+ * «الصفحة» ليست وحدة عادلة (شريط بمئة فقاعة مقابل صورة صغيرة أو فارغة): زمن الفصل
+ * الفعلي وعمل الجهاز مقسومين على مناطق النص وعلى الميغابكسلات.
+ */
+export function sizeIndependent(fresh = [], chapters = []) {
+  const regions = fresh.reduce((a, e) => a + (Number(e?.regions) || 0), 0);
+  const pixels = fresh.reduce((a, e) => a + (Number(e?.native?.pagePixels) || 0), 0);
+  const wall = chapters.reduce((a, c) => a + (Number(c.wallMs) || 0), 0);
+  const work = fresh.reduce((a, e) => a + deviceWorkOf(e), 0);
+  if (!regions && !pixels) return null;
+  const mp = pixels / 1e6;
+  const parts = [`${regions} منطقة نص`, mp ? `${mp.toFixed(1)} ميغابكسل` : null];
+  if (wall && regions) parts.push(`زمن الفصل ${sec(wall * 1000 / regions)}/1000 منطقة (${sec(wall / regions)}/فقاعة)`);
+  if (wall && mp) parts.push(`${sec(wall / mp)}/ميغابكسل`);
+  if (work && regions) parts.push(`عمل الجهاز ${sec(work / regions)}/فقاعة`);
+  if (work && mp) parts.push(`${sec(work / mp)}/ميغابكسل`);
+  return `مقاييس مستقلة عن حجم الصفحة: ${parts.filter(Boolean).join(' · ')}`;
+}
+
+/** Sum of the reasons that made each partial page partial (see `incompleteReasonsOf`). */
+export function incompleteReasonTotals(entries = []) {
+  const out = {};
+  for (const e of entries) {
+    if (!e?.incomplete || !e.incompleteReasons) continue;
+    for (const [k, v] of Object.entries(e.incompleteReasons)) out[k] = (out[k] ?? 0) + (Number(v) || 0);
+  }
+  return out;
+}
+
+/**
+ * v3 throughput evidence line: CTD calls per text page (atlas packs all ROIs of a
+ * page into one 1024² call), atlas occupancy, BubbleSeg native-size calls and
+ * how often the image-less Luna probe was skipped. Null when nothing measured.
+ */
+export function v3Throughput(entries = []) {
+  const analyzed = entries.filter(e => e?.native?.analyze?.counts && !e.textless);
+  if (!analyzed.length) return null;
+  const c = k => analyzed.reduce((a, e) => a + (Number(e.native.analyze.counts[k] ?? 0) || 0), 0);
+  const ctdPages = analyzed.filter(e => (e.native.analyze.counts.ctdCalls ?? 0) > 0).length;
+  const atlasPages = c('ctdAtlas');
+  const occupancy = atlasPages ? Math.round(c('ctdAtlasOccupancyPermille') / atlasPages / 10) : null;
+  const probes = analyzed.filter(e => e.stages?.cacheProbe != null).length;
+  const skipped = analyzed.filter(e => e.native?.probeSkipped).length;
+  const parts = [
+    `CTD calls/صفحة نص ${(c('ctdCalls') / analyzed.length).toFixed(2)}`,
+    ctdPages ? `CTD calls/صفحة فيها CTD ${(c('ctdCalls') / ctdPages).toFixed(2)}` : null,
+    atlasPages ? `أطلس ${atlasPages}/${ctdPages} صفحة · امتلاء ${occupancy}%` : 'أطلس غير مفعّل في هذا APK',
+    c('bubbleNativeRoi') ? `BubbleSeg بمقاس ROI ${c('bubbleNativeRoi')} نداء · ${(c('bubbleInputPixels') / 1e6).toFixed(2)}M بكسل موتّر` : null,
+    probes || skipped ? `فحص كاش Luna بلا صورة ${probes} · تُخطّي ${skipped}` : null,
+  ].filter(Boolean);
+  return `v3: ${parts.join(' · ')}`;
 }
 
 /**
@@ -274,6 +354,13 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
   const repairs = uniqueFreshPages(scoped.filter((e) => e.from === 'repair'));
   const fresh = overlayAcceptedRepairs(initialFresh, repairs);
   const lines = [`أداء الترجمة — ${s.complete} مكتملة، ${s.partial} جزئية، ${s.cached} من المحفوظ، ${s.errors} فشل، ${s.repairs} إصلاح`];
+  const stall = readerStall(scoped);
+  if (stall.views > 0) lines.push(`انتظار القارئ (المعيار الأول، الهدف صفر): ${sec(stall.totalMs)} إجمالًا · ${stall.views} مرة وقفتَ على صفحة لم تجهز · أطول ${sec(stall.maxMs)} · وسيط ${sec(stall.medianMs)}${stall.failed ? ` · فشل ${stall.failed}` : ''}`);
+  else if (scoped.some(e => e.from === 'stall')) lines.push('انتظار القارئ: 0 ث');
+  const size = sizeIndependent(fresh, s.chapters);
+  if (size) lines.push(size);
+  const why = incompleteReasonTotals(fresh);
+  if (Object.keys(why).length) lines.push(`أسباب الجزئية: ${Object.entries(why).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
   if (Object.keys(s.errorCodes).length) lines.push(`الأخطاء: ${Object.entries(s.errorCodes).map(([k, v]) => `${k}×${v}`).join(' · ')}`);
   const modelPages = initialFresh.filter((e) => e.from === 'model' && !e.textless);
   const serverCachedPages = initialFresh.filter((e) => e.from === 'friends' && !e.textless);
@@ -312,7 +399,11 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     if (rejects.length) lines.push(`رفض Fast: ${rejects.map(([k,v]) => `${k}×${v}`).join(' · ')}`);
     const demand = roiServiceDemand(roi);
     lines.push(`طلب الخدمة المحلي التقديري ${(demand.meanPrimaryRoiMs / 1000).toFixed(2)} ث/ROI · أقل ${demand.savedVsHeavyPct}% من افتراض CTD+Bubble لكل ROI (نموذج تكلفة S23، وليس wall time).`);
+    const bg = Object.entries(roi.backgroundDetail).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+    if (bg.length) lines.push(`تفصيل رفض background: ${bg.map(([k,v]) => `${k}×${v}`).join(' · ')}`);
   }
+  const v3 = v3Throughput(fresh);
+  if (v3) lines.push(v3);
   const barrierPages = analyzed.filter((e) => (e.native.analyze.counts?.renderBarrierWait ?? 0) > 0).length;
   if (barrierPages) lines.push(`أولوية العرض: ${barrierPages} صفحة انتظرت Render الجاهز بدل بدء Analyze ثقيل جديد.`);
 
@@ -327,12 +418,18 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
     const eraseRegions = sumRender('eraseRegions');
     const eraseMs = rendered.reduce((a, e) => a + (e.native.render.stages?.erase ?? 0) + (e.native.render.stages?.eraseRepair ?? 0), 0);
     const msPerRoi = eraseRegions > 0 ? eraseMs / eraseRegions : null;
-    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · E1 تعبئة ${sumRender('fillChangedPixels')} · E2 إعادة بناء ${sumRender('reconstructChangedPixels')} · E3 LaMa ${sumRender('inpaintChangedPixels')} (${lamaPixels} بكسل / ${lamaPct}% من القناع) · no-op ${sumRender('eraseNoOpRegions')}`);
-    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E3 ${sumRender('eraseE3')} · LaMa calls ${sumRender('lamaInvocations')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
+    lines.push(`التبييض الفعلي: قناع ${eraseMask} بكسل · تغيّر ${eraseChanged} (${pct}%) · E1 تعبئة ${sumRender('fillChangedPixels')} · E2 إعادة بناء ${sumRender('reconstructChangedPixels')} · E2b غشاء ${sumRender('smoothChangedPixels')} · E3 LaMa ${sumRender('inpaintChangedPixels')} (${lamaPixels} بكسل / ${lamaPct}% من القناع) · no-op ${sumRender('eraseNoOpRegions')}`);
+    lines.push(`طبقات المسح: E0 ${sumRender('eraseE0')} · E1 ${sumRender('eraseE1')} · E2 ${sumRender('eraseE2')} · E2b ${sumRender('eraseE2b')} · E3 ${sumRender('eraseE3')} · LaMa calls ${sumRender('lamaInvocations')} · erase/ROI ${sec(msPerRoi)} · تغيّر خارج القناع ${sumRender('outsideMaskChanges')}`);
     if (sumRender('outsideMaskChanges') > 0) lines.push('⚠️ رُصد تغيّر قبل الاستعادة خارج قناع المسح/حدود العربي؛ الناتج النهائي أُعيد للأصل هناك لكن يلزم التحقيق.');
     if (sumRender('inpaint') > 0 && sumRender('inpaintChangedPixels') === 0) lines.push('⚠️ LaMa استُدعي لكن لم يغيّر أي بكسل في السجل.');
     if (sumRender('reconstruct') > 0 && sumRender('reconstructChangedPixels') === 0) lines.push('⚠️ E2 استُدعي لكنه لم يغيّر أي بكسل.');
     if (sumRender('fill') > 0 && sumRender('fillChangedPixels') === 0) lines.push('⚠️ مسار التعبئة استُدعي لكن لم يغيّر أي بكسل في السجل.');
+    const notes = {};
+    for (const e of rendered) for (const [k, v] of Object.entries(e.native.render.counts ?? {})) {
+      if (k.startsWith('eraseNote:')) notes[k.slice('eraseNote:'.length)] = (notes[k.slice('eraseNote:'.length)] ?? 0) + (Number(v) || 0);
+    }
+    const noteList = Object.entries(notes).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (noteList.length) lines.push(`لماذا لم يكفِ مسح أرخص من LaMa: ${noteList.map(([k, v]) => `${k}×${v}`).join(' · ')}`);
   }
   // الترجمة المقدّمة مقابل القارئ: ما بقي من كل صفحة بلا عربي، ولماذا
   for (const via of ['reader', 'job']) {
@@ -412,7 +509,7 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
 
   if (s.chapters.length) {
     lines.push('', 'الفصول (الزمن الفعلي من أول صفحة لآخرها):');
-    for (const c of s.chapters.slice(-10)) lines.push(`  ${c.chapterKey}: ${c.pages} صفحة · ${sec(c.wallMs)}`);
+    for (const c of s.chapters.slice(-10)) lines.push(`  ${c.chapterKey}: ${c.pages} صفحة · ${sec(c.wallMs)}${c.pages > 0 ? ` · ${sec(c.wallMs / c.pages)}/صفحة مستدام` : ''}`);
   }
   for (const b of benchmarks) {
     lines.push('', `القديم مقابل الجديد (${b.page}): ${b.identical ? 'الناتج متطابق بكسلًا بكسلًا' : 'الناتج مختلف!'}`);
