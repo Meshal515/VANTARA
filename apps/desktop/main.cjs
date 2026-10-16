@@ -26,12 +26,28 @@ let playbackSession=null;
 let quitting = false;
 // تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
 let pendingUpdate = null;
+const appVersion = require('./package.json').version;
+const updatesDir = () => path.join(app.getPath('userData'), 'updates');
+const attemptFile = () => path.join(updatesDir(), 'attempt.json');
+function readAttempt() {
+  try { return JSON.parse(require('node:fs').readFileSync(attemptFile(), 'utf8')); } catch { return null; }
+}
 function scheduleUpdateInstall(relaunch) {
   if (!pendingUpdate || pendingUpdate.scheduled || process.platform !== 'win32') return false;
-  const { file, args } = updater.installCommand({ installer: pendingUpdate.file, exe: app.getPath('exe'), relaunch });
-  require('node:child_process').spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  // المحاولة الصامتة السابقة لهذا الإصدار لم تكتمل (ما زلنا على الإصدار الأقدم): المثبّت بواجهته هذه المرة
+  const attempt = readAttempt();
+  const interactive = attempt?.version === pendingUpdate.version && updater.attemptFailed(attempt, appVersion);
+  const { file, args, options } = updater.installCommand({ installer: pendingUpdate.file, exe: app.getPath('exe'), relaunch, interactive });
+  try { require('node:fs').writeFileSync(attemptFile(), JSON.stringify({ version: pendingUpdate.version, from: appVersion, at: Date.now(), interactive })); } catch {}
+  require('node:child_process').spawn(file, args, options).unref();
   pendingUpdate.scheduled = true;
   return true;
+}
+// بعد تحديث اكتمل: المثبّت وسجل المحاولة لا يبقيان على القرص
+function clearFinishedUpdate() {
+  const attempt = readAttempt();
+  if (!attempt || updater.attemptFailed(attempt, appVersion)) return;
+  require('node:fs').promises.rm(updatesDir(), { recursive: true, force: true }).catch(() => {});
 }
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
@@ -86,6 +102,7 @@ function register(channel, handler) {
 }
 
 Promise.all([app.whenReady(),profileReady]).then(async () => {
+  clearFinishedUpdate();
   protocol.handle('vantara', async request => {
     try {
       const file = assetPath(assets, request.url);

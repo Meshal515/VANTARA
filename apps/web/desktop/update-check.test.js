@@ -13,6 +13,9 @@ test('Windows previews may migrate to one stable release channel',()=>{
   assert.equal(newerVersion('0.0.140','0.0.140'),false);
   assert.ok(desktopUpdateFromManifest(release,'0.1.0-preview.3'));
   assert.ok(desktopUpdateFromManifest(release,'0.0.139'));
+  // إصدار مجهول لا يعرض «التحديث جاهز» بعد كل تثبيت
+  assert.equal(desktopUpdateFromManifest(release,'0.0.0'),null);
+  assert.equal(desktopUpdateFromManifest(release,undefined),null);
   assert.equal(desktopUpdateFromManifest(release,'0.0.140'),null);
 });
 test('Missing assets and mismatched metadata never offer update',()=>{

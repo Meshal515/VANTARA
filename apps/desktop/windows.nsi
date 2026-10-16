@@ -1,6 +1,8 @@
 Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
+!include "LogicLib.nsh"
 Name "VANTARA"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\VANTARA"
@@ -28,17 +30,64 @@ VIAddVersionKey "LegalCopyright" "VANTARA"
 !insertmacro MUI_LANGUAGE "Arabic"
 !insertmacro MUI_LANGUAGE "English"
 
+Var Relaunch
+
+; تحديث من داخل التطبيق: التطبيق يغلق ثم يشغّل المثبّت مباشرة. قبل أي كتابة ننتظر أن يتحرر كل
+; ملف تنفيذي يعمل (الواجهة، محرك التورنت، المشغّل)؛ الكتابة فوق ملف مقفول كانت تُفشل التثبيت
+; الصامت فيبقى الإصدار القديم ويعرض «التحديث جاهز» من جديد.
+Function WaitUnlocked
+  Exch $0
+  Push $1
+  Push $2
+  StrCpy $1 0
+  wait_loop:
+    IfFileExists "$0" 0 wait_done
+    ClearErrors
+    FileOpen $2 "$0" a
+    IfErrors 0 wait_open
+    IntOp $1 $1 + 1
+    IntCmp $1 300 wait_done
+    Sleep 200
+    Goto wait_loop
+  wait_open:
+    FileClose $2
+  wait_done:
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+!macro WaitUnlocked FILE
+  Push "${FILE}"
+  Call WaitUnlocked
+!macroend
+
 Function .onInit
   SetShellVarContext current
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP "هذه النسخة تتطلب ويندوز 64 بت."
     Abort
   ${EndIf}
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/RELAUNCH" $R1
+  ${IfNot} ${Errors}
+    StrCpy $Relaunch 1
+  ${EndIf}
+FunctionEnd
+
+Function .onInstSuccess
+  ${If} $Relaunch == 1
+    Exec '"$INSTDIR\VANTARA.exe"'
+  ${EndIf}
 FunctionEnd
 
 Section "VANTARA" SEC_MAIN
   SetShellVarContext current
   SetRegView 64
+  !insertmacro WaitUnlocked "$INSTDIR\VANTARA.exe"
+  !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\rqbit.exe"
+  !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\mpv.exe"
+  !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\vantara-video-host.exe"
   SetOutPath "$INSTDIR"
   File /r "${DIST}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"

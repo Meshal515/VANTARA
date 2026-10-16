@@ -1,7 +1,7 @@
 'use strict';
 /**
  * تحديث ويندوز كما في الـAPK: ينزّل المثبّت الرسمي في الخلفية ويتحقق من بايتاته، ثم
- * يثبّته بصمت (/S) بعد خروج كل عمليات VANTARA ويعيد تشغيله.
+ * يثبّته بصمت (/S) — المثبّت ينتظر خروج كل عمليات VANTARA — ويعيد تشغيله.
  *
  * لا يُنزَّل إلا مثبّت VANTARA المنشور على GitHub (نفس قاعدة open-update-page)، ولا
  * يُشغَّل ملف لم تطابق بصمته SHA-256 وحجمه ما في بيان القناة.
@@ -50,7 +50,7 @@ async function downloadUpdate({ update, dir, fetch, onProgress = () => {} }) {
   const stat = await fs.promises.stat(target).catch(() => null);
   if (stat?.size === u.size && (await hashFile(target)) === u.sha256) return target;
   // ملفات تحديث قديمة أو ناقصة لا تبقى تأكل المساحة
-  for (const name of await fs.promises.readdir(dir).catch(() => [])) await fs.promises.rm(path.join(dir, name), { force: true }).catch(() => {});
+  for (const name of await fs.promises.readdir(dir).catch(() => [])) if (name !== 'attempt.json') await fs.promises.rm(path.join(dir, name), { force: true }).catch(() => {});
   const res = await fetch(u.url, { redirect: 'follow' });
   if (!res?.ok || !res.body) throw new Error(`تعذر تنزيل التحديث (${res?.status ?? 'لا اتصال'})`);
   const partial = `${target}.part`;
@@ -81,26 +81,33 @@ async function downloadUpdate({ update, dir, fetch, onProgress = () => {} }) {
 }
 
 /**
- * أمر PowerShell منفصل: ينتظر خروج كل عمليات مجلد VANTARA (الواجهة والمشغّل والتورنت)
- * حتى لا يبقى ملف مقفول، ثم يثبّت بصمت، ثم يعيد التشغيل إن طُلب. يُمرَّر مرمّزًا
- * (EncodedCommand) فلا تكسره المسارات العربية أو الفواصل.
+ * أمر التثبيت: المثبّت نفسه، بلا PowerShell. الأمر السابق (powershell مخفي + EncodedCommand +
+ * ExecutionPolicy Bypass + SilentlyContinue) هو النمط الذي يحجبه مضاد الفيروسات بصمت من تطبيق غير
+ * موقّع، ويبتلع أي فشل: لا يُثبَّت شيء، ويعود التطبيق القديم فيعرض «التحديث جاهز» مرة أخرى للأبد.
+ *
+ * المثبّت (windows.nsi) يفهم /UPDATE: ينتظر تحرر VANTARA.exe والمحرّكات المرفقة قبل الكتابة، ثم
+ * /RELAUNCH يعيد التشغيل. /D= يثبّت فوق المجلد الذي يعمل منه التطبيق فعلًا (آخر معامل، بلا علامات
+ * تنصيص كما يشترط NSIS)، فالنسخة التي تُفتح بعد التحديث هي المحدَّثة نفسها.
+ * `interactive`: إعادة محاولة بعد تحديث لم يكتمل — المثبّت بواجهته، فيرى المستخدم أي خطأ.
  */
-function installCommand({ installer, exe, relaunch }) {
-  const q = (s) => `'${String(s).replaceAll("'", "''")}'`;
+function installCommand({ installer, exe, relaunch, interactive = false }) {
   const folder = path.win32.dirname(exe);
-  const script = [
-    "$ErrorActionPreference='SilentlyContinue'",
-    `$dir=${q(folder + path.win32.sep)}`,
-    'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) } | Wait-Process -Timeout 60',
-    `Start-Process -FilePath ${q(installer)} -ArgumentList '/S' -Wait`,
-    relaunch ? `Start-Process -FilePath ${q(exe)}` : null,
-    `Remove-Item -LiteralPath ${q(installer)} -Force`,
-  ].filter(Boolean).join('; ');
-  return {
-    file: 'powershell.exe',
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    script,
-  };
+  if (/["\r\n]/.test(folder) || /["\r\n]/.test(installer)) throw new Error('مسار التثبيت غير صالح');
+  const flags = [interactive ? null : '/S', '/UPDATE', relaunch ? '/RELAUNCH' : null, `/D=${folder}`].filter(Boolean);
+  // سطر أوامر حرفي: Node كان سيضع /D=... بين علامات تنصيص عند وجود مسافة، وNSIS يرفضها
+  return { file: installer, args: [flags.join(' ')], options: { detached: true, stdio: 'ignore', windowsVerbatimArguments: true, argv0: `"${installer}"` } };
 }
 
-module.exports = { officialInstallerUrl, validUpdate, downloadUpdate, installCommand, hashFile };
+/** هل يحمل الإصدار المثبّت تحديثًا حاول التطبيق تثبيته ولم يكتمل؟ */
+function newer(candidate, installed) {
+  const parse = (value) => /^(\d+)\.(\d+)\.(\d+)/.exec(String(value ?? ''))?.slice(1).map(Number) ?? null;
+  const a = parse(candidate), b = parse(installed);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+function attemptFailed(attempt, installed) {
+  return !!attempt && typeof attempt.version === 'string' && newer(attempt.version, installed);
+}
+
+module.exports = { officialInstallerUrl, validUpdate, downloadUpdate, installCommand, attemptFailed, newer, hashFile };

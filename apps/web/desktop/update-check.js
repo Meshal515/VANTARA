@@ -34,6 +34,8 @@ function validatedRelease(manifest) {
 
 export function desktopUpdateFromManifest(manifest, installed) {
   const entry = validatedRelease(manifest);
+  // إصدار مجهول (0.0.0 حين لا يصل رقم الإصدار للواجهة) ليس «أقدم»: كان سيعرض التحديث نفسه بعد كل تثبيت
+  if (!/^\d+\.\d+\.\d+(?:-preview\.\d+)?$/.test(installed ?? '') || installed === '0.0.0') return null;
   const legacyPreview = manifest?.format === 2 && /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
   return entry && (newerVersion(entry.version, installed) || legacyPreview) ? entry : null;
 }

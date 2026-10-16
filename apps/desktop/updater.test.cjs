@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { validUpdate, downloadUpdate, installCommand } = require('./updater.cjs');
+const { validUpdate, downloadUpdate, installCommand, attemptFailed } = require('./updater.cjs');
 
 const bytes = Buffer.from('VANTARA installer bytes '.repeat(5000));
 const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
@@ -43,16 +43,33 @@ test('a tampered or truncated download is rejected and leaves nothing runnable',
   assert.deepEqual(fs.readdirSync(dir), []);
 });
 
-test('install command waits for every VANTARA process, installs silently, and relaunches only when asked', () => {
+test('install command runs the NSIS installer itself (no PowerShell) over the running folder, relaunching only when asked', () => {
   const exe = 'C:\\Users\\مشعل\\AppData\\Local\\Programs\\VANTARA\\VANTARA.exe';
-  const installer = "C:\\Users\\O'Neil\\AppData\\Roaming\\VANTARA\\updates\\VANTARA-0.2.5-Setup.exe";
+  const installer = "C:\\Users\\O'Neil Smith\\AppData\\Roaming\\VANTARA\\updates\\VANTARA-0.2.5-Setup.exe";
   const now = installCommand({ installer, exe, relaunch: true });
-  assert.equal(now.file, 'powershell.exe');
-  assert.match(now.script, /Wait-Process/);
-  assert.match(now.script, /-ArgumentList '\/S' -Wait/);
-  assert.match(now.script, /Start-Process -FilePath 'C:\\Users\\مشعل\\AppData\\Local\\Programs\\VANTARA\\VANTARA\.exe'/);
-  assert.match(now.script, /O''Neil/);
-  assert.equal(Buffer.from(now.args.at(-1), 'base64').toString('utf16le'), now.script);
-  const onQuit = installCommand({ installer, exe, relaunch: false });
-  assert.doesNotMatch(onQuit.script, /Start-Process -FilePath 'C:\\Users\\مشعل/);
+  assert.equal(now.file, installer);
+  assert.deepEqual(now.args, ['/S /UPDATE /RELAUNCH /D=C:\\Users\\مشعل\\AppData\\Local\\Programs\\VANTARA']);
+  assert.equal(now.options.windowsVerbatimArguments, true);
+  assert.equal(now.options.argv0, `"${installer}"`);
+  assert.equal(now.options.detached, true);
+  assert.doesNotMatch(JSON.stringify(now), /powershell|EncodedCommand|Bypass/i);
+  assert.deepEqual(installCommand({ installer, exe, relaunch: false }).args, ['/S /UPDATE /D=C:\\Users\\مشعل\\AppData\\Local\\Programs\\VANTARA']);
+  assert.deepEqual(installCommand({ installer, exe, relaunch: true, interactive: true }).args, ['/UPDATE /RELAUNCH /D=C:\\Users\\مشعل\\AppData\\Local\\Programs\\VANTARA']);
+  assert.throws(() => installCommand({ installer, exe: 'C:\\bad"dir\\VANTARA.exe', relaunch: true }));
+});
+
+test('an update that did not take effect is detected, so the next attempt is visible instead of looping silently', () => {
+  assert.equal(attemptFailed({ version: '0.3.0' }, '0.2.9'), true);
+  assert.equal(attemptFailed({ version: '0.3.0' }, '0.3.0'), false);
+  assert.equal(attemptFailed({ version: '0.3.0' }, '0.3.1'), false);
+  assert.equal(attemptFailed(null, '0.2.9'), false);
+  assert.equal(attemptFailed({ version: 7 }, '0.2.9'), false);
+});
+
+test('a new download keeps the attempt record that drives the visible retry', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'attempt.json'), '{"version":"0.2.5"}');
+  fs.writeFileSync(path.join(dir, 'VANTARA-0.2.4-Setup.exe'), 'old');
+  await downloadUpdate({ update, dir, fetch: fetchOf(bytes) });
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['VANTARA-0.2.5-Setup.exe', 'attempt.json']);
 });
