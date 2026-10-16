@@ -15,7 +15,7 @@
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
-import { parseRelease, releaseScore, specLine, swarmText, swarmTier } from '../addons/release-info.js';
+import { addonName, createServerSheet } from './server-sheet.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
@@ -37,7 +37,7 @@ const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDe
 /** Display metadata stays separate from the internal routing key/configured URL. */
 export const routeSourceLabel = (route) => SOURCE_NAMES[route.sourceId]
   ?? route.sourceName
-  ?? (String(route.sourceId ?? '').startsWith('addon|') ? 'إضافة' : route.sourceId);
+  ?? (String(route.sourceId ?? '').startsWith('addon|') ? addonName(route.sourceId) : route.sourceId);
 /** Native runtime selection is separate from a successful HTTP probe. */
 export const routeSelectable = (r) => r.state === 'READY' && (r.probed === true || r.runtimeReady === true);
 export const routePending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null && r.runtimeReady !== true);
@@ -1516,28 +1516,17 @@ export function createCinema(deps) {
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
-      body.classList.add('an-pick');
-      const bar = el('header', 'an-pick-bar');
-      const back = button('an-pick-back', glyph('back', { size: 22 }), () => deps.closeSheet(), 'رجوع');
-      const head = el('div', 'an-pick-heading');
-      head.append(el('b', null, heading), text('span', 'an-pick-anime', displayTitle(m)));
-      bar.append(back, head);
-      const scroll = el('div', 'an-pick-scroll');
       const hero = el('div', 'an-pick-hero');
       const epMeta = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n);
       const thumb = epMeta?.thumb;
       hero.append(image(thumb ?? m.background ?? m.poster, 'an-img loaded', { eager: true }));
       const cap = el('div', 'an-pick-cap');
       cap.append(el('span', 'an-pick-no', heading));
+      if (m.type === 'series' && epMeta?.title) cap.append(text('b', 'an-pick-title', epMeta.title));
+      else if (m.type !== 'series') cap.append(text('b', 'an-pick-title', displayTitle(m)));
       if (position > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(position)}`));
       hero.append(cap);
-      const status = el('div', 'an-srv-status');
-      const list = el('div', 'an-srv-list');
-      scroll.append(hero, status, list);
-      const foot = el('footer', 'an-pick-foot');
-      const best = el('button', 'an-pick-best');
-      best.type = 'button';
-      foot.append(best);
+      const extraFoot = [];
       if (hub && !sheet.autoTogether) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
@@ -1557,149 +1546,9 @@ export function createCinema(deps) {
           // والغرفة الآن نشطة فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
           }, { onStarted: () => play(m, season, n) });
         }, 'شاهد مع أصدقائك');
-        foot.append(withFriends);
+        extraFoot.push(withFriends);
       }
-      body.append(bar, scroll, foot);
 
-      const tileNodes = new Map();
-      const releases = new Map();
-      const isAddonRoute = (r) => String(r.sourceId ?? '').startsWith('addon|');
-      const releaseOf = (r) => {
-        if (!isAddonRoute(r) || !r.label) return null;
-        if (!releases.has(r.id)) releases.set(r.id, parseRelease(r.sourceName ?? r.server ?? '', r.label));
-        return releases.get(r.id);
-      };
-      const groupNodes = new Map();
-      const groupMore = new Map();
-      const routeGroups = new Map();
-      const deadFold = el('details', 'cn-srv-dead');
-      const deadSummary = el('summary');
-      const deadGrid = el('div', 'an-srv-grid');
-      deadFold.append(deadSummary, deadGrid);
-      // بعد أول سيرفر جاهز: ما زال يُفحص (غالبًا عبر المتصفح المخفي، بطيء) يُطوى
-      // فلا تمتلئ الورقة بانتظار لا يُعرف آخره
-      const waitFold = el('details', 'cn-srv-dead cn-srv-wait');
-      const waitSummary = el('summary');
-      const waitGrid = el('div', 'an-srv-grid');
-      waitFold.append(waitSummary, waitGrid);
-      const paint = () => {
-        queued = false;
-        if (sheet.closed) return;
-        const ready = sheet.routes.filter(routeSelectable).length;
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.session && ready) {
-          sheet.autoTogether = false;
-          queueMicrotask(() => best.onclick());
-        }
-        // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
-        // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
-        const pendingRoute = sheet.routes.some(routePending);
-        const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
-        if (sheet.missing) status.textContent = m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا';
-        else if (!sheet.session) status.innerHTML = '<i class="an-sources-spin"></i><span>نبحث في المصادر العربية…</span>';
-        else if (!settled && !ready) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
-        else status.textContent = ready ? `${ready} ${sheet.routes.some(r => r.runtimeReady === true) ? 'خيار متاح · التورنت يبدأ عند اختيارك' : ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${settled ? '' : ' · البقية تصل بالخلفية'}` : 'لم يجهز أي سيرفر الآن';
-        best.disabled = sheet.busy || sheet.missing || (!ready && settled);
-        best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${sheet.busy ? 'نجهّز أفضل سيرفر…' : 'شغّل الأفضل'}</span>`;
-        best.classList.toggle('waiting', !ready && !settled && !sheet.missing);
-        // الحيّ أولًا، والسيرفرات التي فشلت هنا مؤخرًا في آخر مجموعتها، والميت مطويّ
-        const live = sheet.routes.filter((r) => r.state !== 'UNAVAILABLE' && r.state !== 'FAILED' && r.probed !== false);
-        const dead = sheet.routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false);
-        const tile = (r) => {
-          let b = tileNodes.get(r.id);
-          if (!b) {
-            b = el('button'); b.type = 'button';
-            b.innerHTML = '<span class="an-srv-top"><b class="an-srv-code"></b><span class="an-srv-tag"></span></span><span class="an-srv-release" dir="auto"></span><span class="an-srv-state"><i class="an-srv-dot"></i><span></span></span>';
-            tileNodes.set(r.id, b);
-          }
-          const selectable = routeSelectable(r);
-          const pending = routePending(r);
-          const info = releaseOf(r);
-          const tier = info ? swarmTier(info.seeders) : null;
-          b.className = `an-srv an-srv--${pending ? 'resolving' : r.state.toLowerCase()}${info ? ' an-srv--release' : ''}${tier ? ` an-srv--swarm-${tier}` : ''}`;
-          b.disabled = pending;
-          // صف النسخة: الإضافة والموقع سطر صغير، لا اسم يتكرر بخط كبير في كل بطاقة
-          b.querySelector('.an-srv-code').textContent = info ? [info.provider ?? serverName(r), info.site].filter(Boolean).join(' · ') : serverName(r);
-          // نسخة إضافة (Torrentio وأشباهه): ما قالته عن نفسها بدل اسم الملف الخام
-          const tag = info && ([...info.hdr, info.source === 'CAM' ? 'CAM' : info.source].filter(Boolean).join(' · ') || null);
-          b.querySelector('.an-srv-tag').textContent = tag ?? (r.runtimeReady === true ? 'تورنت' : routeSourceLabel(r));
-          b.querySelector('.an-srv-tag').classList.toggle('an-srv-tag--cam', info?.source === 'CAM');
-          const release = b.querySelector('.an-srv-release');
-          const spec = info ? specLine(info) : '';
-          release.textContent = spec || (r.label ?? '');
-          release.hidden = !release.textContent;
-          let langs = b.querySelector('.an-srv-langs');
-          const langText = info ? [info.arabic ? 'عربي' : null, info.multiAudio ? 'صوت متعدد' : null, info.multiSubs ? 'ترجمات متعددة' : null].filter(Boolean) : [];
-          if (langText.length) {
-            if (!langs) { langs = el('span', 'an-srv-langs'); release.after(langs); }
-            langs.replaceChildren(...langText.map((t) => el('i', t === 'عربي' ? 'an-srv-lang an-srv-lang--ar' : 'an-srv-lang', t)));
-          } else langs?.remove();
-          b.title = info?.filename ?? r.label ?? '';
-          const stateText = b.querySelector('.an-srv-state > span');
-          if (info && selectable && tier && !pending) {
-            // الرقم كبيرًا والوصف تحته: «412» ثم «مشارك · قوي»
-            const [count, rest] = swarmText(info).split(' مشارك');
-            stateText.replaceChildren(...(tier === 'dead' ? [el('small', null, 'لا مشاركين معلنين')] : [el('b', 'an-srv-seeds', count), el('small', null, `مشارك معلن${rest}`)]));
-          } else stateText.textContent = pending ? 'نفحص التشغيل…' : r.runtimeReady === true && selectable ? 'يبدأ عند الاختيار' : r.probed === false ? 'غير متاح' : STATE_AR_ROUTE[r.state] ?? '';
-          b.onclick = () => selectable ? void playRoute(r) : toast(routeFailureMessage(r.reason), 5000);
-          return b;
-        };
-        const isPending = routePending;
-        const waiting = ready ? live.filter(isPending) : [];
-        const addonCounts = new Map();
-        // نسخ الإضافات داخل الجودة: الأقوى سربًا أولًا، وبلا مشاركين/CAM في «نسخ إضافية»
-        const ordered = [...live.filter((r) => !isAddonRoute(r)), ...live.filter(isAddonRoute).sort((a, b) => releaseScore(releaseOf(b)) - releaseScore(releaseOf(a)))];
-        const placed = new Map();
-        for (const r of ordered) {
-          if (ready && isPending(r)) continue;
-          let group = routeGroups.get(r.id);
-          if (!group) { group = engine.groupRoutes([r])[0]?.[0] ?? 'السيرفرات'; routeGroups.set(r.id, group); }
-          if (!groupNodes.has(group)) {
-            const g = el('section', 'an-srv-group');
-            const grid = el('div', 'an-srv-grid');
-            const more = el('details', 'cn-srv-dead an-srv-more');
-            const summary = el('summary');
-            const moreGrid = el('div', 'an-srv-grid');
-            more.append(summary, moreGrid);
-            g.append(el('h4', 'an-srv-q', group), grid, more);
-            groupMore.set(group, {more, summary, grid:moreGrid});
-            groupNodes.set(group, grid);
-            list.insertBefore(g, deadFold.parentNode === list ? deadFold : null);
-          }
-          const isAddon = isAddonRoute(r);
-          const info = isAddon ? releaseOf(r) : null;
-          const weak = info && (swarmTier(info.seeders) === 'dead' || info.source === 'CAM');
-          const count = (addonCounts.get(group) ?? 0) + (isAddon && !weak ? 1 : 0);
-          addonCounts.set(group, count);
-          const grid = isAddon && (weak || count > 6) ? groupMore.get(group).grid : groupNodes.get(group);
-          const b = tile(r);
-          // الترتيب يتبع القوة؛ لا تُحرَّك إلا بطاقة خرجت عن مكانها
-          const prev = placed.get(grid) ?? null;
-          if (b.parentNode !== grid || b.previousElementSibling !== prev) prev ? prev.after(b) : grid.prepend(b);
-          placed.set(grid, b);
-        }
-        for (const r of waiting) { const b = tile(r); if (b.parentNode !== waitGrid) waitGrid.append(b); }
-        if (waiting.length) {
-          waitSummary.textContent = `تُجهَّز بالخلفية (${waiting.length})`;
-          if (waitFold.parentNode !== list) list.insertBefore(waitFold, deadFold.parentNode === list ? deadFold : null);
-        } else if (waitFold.parentNode === list) waitFold.remove();
-        if (dead.length) {
-          deadSummary.textContent = `غير متاح (${dead.length})`;
-          for (const r of dead) { const b = tile(r); if (b.parentNode !== deadGrid) deadGrid.append(b); }
-          if (deadFold.parentNode !== list) list.append(deadFold);
-        }
-        // مجموعة جودة صار كل ما فيها مطويًا: لا عنوان فوق شبكة فارغة
-        for (const [group, grid] of groupNodes) {
-          const extra = groupMore.get(group);
-          extra.more.hidden = !extra.grid.children.length;
-          extra.summary.textContent = `نسخ إضافية (${extra.grid.children.length})`;
-          grid.parentNode.hidden = !grid.children.length && !extra.grid.children.length;
-        }
-      };
-      const queuePaint = () => {
-        if (queued) return;
-        queued = true;
-        requestAnimationFrame(paint);
-      };
       const playRoute = async (r) => {
         if (sheet.busy) return;
         sheet.busy = true;
@@ -1715,7 +1564,7 @@ export function createCinema(deps) {
           queuePaint();
         }
       };
-      best.onclick = async () => {
+      const playBest = async () => {
         if (sheet.busy || !sheet.session) return;
         sheet.busy = true;
         queuePaint();
@@ -1731,6 +1580,57 @@ export function createCinema(deps) {
           queuePaint();
         }
       };
+
+      // نفس ورقة الأنمي (server-sheet.js): «الأفضل لك»، المباشر ثم التورنت، والمتعذّر مطويّ
+      const ui = createServerSheet(body, {
+        el,
+        kicker: heading,
+        title: displayTitle(m),
+        hero,
+        extraFoot,
+        directLang: 'ترجمة عربية',
+        sourceName: (r) => routeSourceLabel(r),
+        selectable: routeSelectable,
+        pending: routePending,
+        dead: (r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false,
+        onBack: () => deps.closeSheet(),
+        onPick: (r) => playRoute(r),
+        onBest: () => playBest(),
+        onUnavailable: (r) => toast(routeFailureMessage(r.reason), 5000),
+      });
+      const status = ui.status;
+      const best = ui.best;
+      const paint = () => {
+        queued = false;
+        if (sheet.closed) return;
+        const ready = sheet.routes.filter(routeSelectable).length;
+        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.session && ready) {
+          sheet.autoTogether = false;
+          queueMicrotask(() => best.onclick());
+        }
+        // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
+        // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
+        const pendingRoute = sheet.routes.some(routePending);
+        const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
+        const torrents = sheet.routes.filter((r) => routeSelectable(r) && r.runtimeReady === true).length;
+        let line;
+        if (sheet.missing) line = { text: m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا' };
+        else if (!sheet.session) line = { text: 'نبحث في المصادر العربية والإضافات…', spin: true };
+        else if (!settled && !ready) line = { text: 'نجهّز السيرفرات…', spin: true };
+        else if (!ready) line = { text: 'لم يجهز أي سيرفر الآن' };
+        else {
+          const direct = ready - torrents;
+          const parts = [direct ? `${direct} مباشر` : null, torrents ? `${torrents} تورنت` : null].filter(Boolean).join(' · ');
+          line = { text: `${parts} جاهز${settled ? '' : ' · البقية تصل'}`, spin: !settled };
+        }
+        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, status: line });
+        if (sheet.error && !sheet.routes.length) status.textContent = `تعذّر تجهيز السيرفرات: ${sheet.error}`;
+      };
+      const queuePaint = () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(paint);
+      };
       paint();
 
       // الورقة تتبنّى الجلسة الدافئة (بدأت مع فتح العمل)، أو تبدأها الآن
@@ -1743,7 +1643,7 @@ export function createCinema(deps) {
         sheet.done = w.done;
         sheet.missing = w.missing;
         sheet.found = w.handle.found;
-        if (w.error && !w.routes.length) status.textContent = `تعذّر تجهيز السيرفرات: ${w.error}`;
+        sheet.error = w.error;
         queuePaint();
       };
       w.listeners.add(sync);
