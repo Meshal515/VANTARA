@@ -1,10 +1,14 @@
 package com.vantara.addons
 
+import android.app.Activity
 import android.app.Application
+import android.content.Intent
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.vantara.plugins.ensureEngineInjekt
 import kotlinx.coroutines.CoroutineScope
@@ -27,5 +31,16 @@ class AddonEnginePlugin : Plugin() {
         }
     }
     @PluginMethod fun cancel(call: PluginCall) { call.getString("requestId")?.let(client::cancel); call.resolve() }
+    /** يفتح صفحة إعداد الإضافة داخل التطبيق؛ يرجع رابط manifest المُعدّ حين يضغط المستخدم Install. */
+    @PluginMethod fun configure(call: PluginCall) {
+        val url = call.getString("url")
+        if (url == null || !url.startsWith("https://", ignoreCase = true)) return call.reject("إعداد الإضافة يحتاج رابط HTTPS")
+        startActivityForResult(call, Intent(context, AddonConfigureActivity::class.java).putExtra(AddonConfigureActivity.EXTRA_URL, url), "configured")
+    }
+    @ActivityCallback private fun configured(call: PluginCall?, result: ActivityResult) {
+        val manifest = result.data?.getStringExtra(AddonConfigureActivity.EXTRA_MANIFEST)
+        if (result.resultCode == Activity.RESULT_OK && manifest != null) call?.resolve(JSObject().put("url", manifest))
+        else call?.resolve(JSObject().put("cancelled", true))
+    }
     override fun handleOnDestroy() { client.cancelPrefix(""); scope.cancel() }
 }
