@@ -1,0 +1,12 @@
+@font-face{font-family:Vantara;src:url('/fonts/NotoSansArabic.var.woff2') format('woff2');font-weight:400 800;font-display:swap}
+body{margin:0;background:#08070c;color:#f3f4f8;font-family:Vantara,sans-serif}
+.desktop-shell{min-height:100vh}.desktop-shell .app{padding:20px 24px 60px;max-width:1500px;margin:auto}
+.desktop-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 24px;border-bottom:1px solid #211e2b;background:#0c0b12;position:sticky;top:0;z-index:40}
+.desktop-brand{display:flex;align-items:center;gap:10px;color:inherit;font-weight:800;text-decoration:none}.desktop-brand small{color:#85809a;font-size:12px}
+.desktop-header nav,.desktop-pages{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.desktop-pages{max-width:1452px;margin:16px auto 0;padding:0 24px}
+.desktop-shell button,.desktop-header a[data-desktop-accounts]{cursor:pointer;font:inherit}.desktop-header button,.desktop-pages button,.desktop-header a[data-desktop-accounts]{background:#18161f;border:1px solid #211e2b;border-radius:10px;padding:8px 14px;color:inherit;text-decoration:none}
+.desktop-pages button[aria-current=page]{border-color:#8f5cff;color:#bba2ff}.desktop-shell :focus-visible{outline:2px solid #bba2ff;outline-offset:3px}
+.desktop-shell #utilityTitle{font-size:24px;margin:0 0 20px}.desktop-toast{position:fixed;bottom:24px;left:24px;max-width:560px;background:#211e2b;border:1px solid #8f5cff;border-radius:12px;padding:16px;z-index:10010}
+.desktop-shell .sheet-backdrop{z-index:1000}.desktop-shell .page{min-height:50vh}.desktop-shell .home-view{min-width:0}
+.desktop-install button{font:inherit;color:inherit;background:#211e2b;border:1px solid #8f5cff;border-radius:8px;padding:8px 14px;margin:8px;cursor:pointer}
+@media(max-width:720px){.desktop-header{align-items:flex-start;flex-direction:column;padding:14px 16px}.desktop-shell .app{padding:16px}.desktop-pages{padding:0 16px}.desktop-header nav{gap:6px}.desktop-toast{right:16px;left:16px}}

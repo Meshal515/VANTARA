@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '71b0d883d81ae9be5c4f052da12ad8434757ec63056e7eb7668894c7ca9c6595';
+const SHELL_DIGEST = 'e9a0f4b3020b0c9cb8b01329033b88d59aedc0fe91be0b55fb4a306baea8f3fa';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -71,6 +71,7 @@ const SHELL = [
   '/pwa/player/together-player.js',
   '/pwa/player/together-lobby.js',
   '/pwa/player/skip-times.js',
+  '/lib/skip-times.js',
   '/icons/pwa-icon-192.png',
   '/icons/pwa-icon-512.png',
   '/icons/pwa-maskable-192.png',
@@ -202,6 +203,7 @@ const SHELL = [
   '/v35/together.js',
   '/v35/together.css',
   '/lib/together/room.js',
+  '/lib/together/lobby.js',
   '/lib/together/sync.js',
   '/lib/together/art.js',
   '/lib/together/follow.js',

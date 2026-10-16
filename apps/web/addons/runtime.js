@@ -1,6 +1,6 @@
 import { subtitleRequest } from "./subtitles.js";
 import { createAnimeIdentityResolver, kitsuVideoRequest } from "./anime-mapping.js";
-import { isNative, webPlugin } from "../pwa/platform.js";
+import { isNative, webPlugin, desktopPlugin } from "../pwa/platform.js";
 import { createAddonCache } from "./cache.js";
 import { createAddonRegistry } from "./registry.js";
 import { createTransport } from "./transport.js";
@@ -64,6 +64,7 @@ export function createAddonRuntime({
   const cache = createAddonCache({ store });
   const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
+    key = registry.resolveKey(key);
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
@@ -512,7 +513,7 @@ export async function getAddonRuntime(r) {
   if (r?.addons) return r.addons;
   if (isNative())
     return (await import("./native-runtime.js")).getNativeAddonRuntime();
-  const gate = webPlugin("AddonFabric");
+  const gate = desktopPlugin("AddonFabric") ?? webPlugin("AddonFabric");
   if (!gate) throw new Error("جسر الإضافات غير متاح");
   return (await gate.runtime()).getRuntime().addons;
 }

@@ -1512,7 +1512,7 @@ export function createCinema(deps) {
     const hub = deps.together?.() ?? null;
     const togetherRef = `cinema:${playKey(m, season)}`;
     const togetherEp = m.type === 'movie' ? 1 : n;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp));
+    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
@@ -1527,7 +1527,7 @@ export function createCinema(deps) {
       if (position > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(position)}`));
       hero.append(cap);
       const extraFoot = [];
-      if (hub && !sheet.autoTogether) {
+      if (hub && !hub.matches(togetherRef, togetherEp)) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'cinema',
@@ -1701,6 +1701,7 @@ export function createCinema(deps) {
         total: m.type === 'series' ? eps.length : 1,
         position,
         poster: m.poster ?? null,
+        ...(globalThis.VantaraDesktop ? { banner: m.banner ?? m.background ?? null, logo: m.logo ?? null } : {}),
         friends: [],
         copies: sheet.warm?.copies ?? sheet.found.copies,
         resume,
@@ -1709,6 +1710,7 @@ export function createCinema(deps) {
         presenceUserId: presence?.userId ?? null,
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
+        ...(globalThis.VantaraDesktop && hub ? { roomHub:hub } : {}),
         ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
       });
     }

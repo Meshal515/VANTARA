@@ -4622,7 +4622,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
       row('info', 'الإصدار', currentPlatform() === 'pwa' ? 'نسخة PWA المثبتة على هذا الجهاز' : apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
-      row('spark', 'ما الجديد', `${RELEASE.product} ${RELEASE.version}`, { run: openWhatsNew }),
+      row('spark', 'ما الجديد', `${RELEASE.product} ${globalThis.VantaraDesktop?.version ?? RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {

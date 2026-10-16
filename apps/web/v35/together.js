@@ -14,7 +14,7 @@ import { glyph } from './icons.js';
 import { identityFor } from '../lib/identity.js';
 import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
-import { isNative } from '../pwa/platform.js';
+import { isNative, desktopPlugin } from '../pwa/platform.js';
 import { mediaKind, resolveArt } from '../lib/together/art.js';
 
 const el = (tag, cls, text) => {
@@ -534,7 +534,12 @@ export function createTogether(deps) {
         mode = r.mode ?? r.room?.mode ?? 'sync';
       }
       if (!media) return ui().toast('ما لقينا الدعوة، افتحها من المجلس');
-      deps.openMedia(media, start(code, media, mode ?? 'sync'));
+      const joined = start(code, media, mode ?? 'sync');
+      const desktop = desktopPlugin('AnimeEngine');
+      if (desktop?.presentRoom && media.kind !== 'manga') {
+        desktop.presentRoom({ together: { hub: this, session: joined, mediaPrefix: media.seriesRef }, media,
+          chooseServer: () => { if (session === joined) deps.openMedia(media, joined); } });
+      } else deps.openMedia(media, joined);
     },
   };
 }

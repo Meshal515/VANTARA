@@ -124,3 +124,15 @@ it('retains selected invitee photos during native handoff before WebSocket welco
   await document.querySelector('.tg-send').onclick();
   expect(cfg.invitees).toEqual([person]);
 });
+
+it('Windows invitation opens the room first and waits for choosing a source before navigating',async()=>{
+ const room=roomOf(),openMedia=vi.fn(),presentRoom=vi.fn();
+ vi.stubGlobal('VantaraDesktop',{platform:'windows',requestResource(){},startPlayback(){},onEvent(){}});
+ vi.stubGlobal('VantaraDesktopBridges',{AnimeEngine:{presentRoom}});
+ const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia,toast:vi.fn()});
+ const media={seriesRef:'anime:42',kind:'anime',episode:1,key:'anime:42#1'};
+ await hub.joinByCode('ABCDEF',{media_json:JSON.stringify(media),mode:'sync'});
+ expect(presentRoom).toHaveBeenCalledOnce();expect(openMedia).not.toHaveBeenCalled();
+ presentRoom.mock.calls[0][0].chooseServer();
+ expect(openMedia).toHaveBeenCalledWith(media,hub.session);expect(room.close).not.toHaveBeenCalled();hub.leave();
+});

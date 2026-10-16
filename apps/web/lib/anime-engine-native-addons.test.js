@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 const fixtures=vi.hoisted(()=>({runtime:null,pwaPlugin:null}));
-vi.mock('../pwa/platform.js',()=>({isNative:()=>globalThis.Capacitor?.isNativePlatform?.()===true,webPlugin:()=>fixtures.pwaPlugin}));
+vi.mock('../pwa/platform.js',async original=>({...await original(),isNative:()=>globalThis.Capacitor?.isNativePlatform?.()===true,webPlugin:()=>fixtures.pwaPlugin}));
 vi.mock('../addons/runtime.js',()=>({getAddonRuntime:async()=>fixtures.runtime}));
 afterEach(()=>{fixtures.pwaPlugin=null;vi.unstubAllGlobals();vi.resetModules();});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
