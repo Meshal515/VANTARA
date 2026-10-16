@@ -70,8 +70,12 @@ it.each([true,false])('reports decoded positions, never placeholder fractions (h
   const scroll=document.querySelector('#rdScroll');
   if(isHost){scroll.scrollTop=100;scroll.dispatchEvent(new window.Event('scroll'));}
   await flush();
-  expect(room.command).not.toHaveBeenCalled();
+  // Before decoding the host may only send a page start (identical on every device), never a placeholder fraction.
+  for(const [,arg] of room.command.mock.calls)expect(Number.isInteger(arg.pos)).toBe(true);
+  if(!isHost)expect(room.command).not.toHaveBeenCalled();
   decode();await flush();await flush();
+  // The decoded fraction follows the page start within the 80ms send window.
+  vi.advanceTimersByTime(100);
   if(isHost)expect(room.command).toHaveBeenLastCalledWith('seek',{pos:100/6000});
   else {expect(room.command).not.toHaveBeenCalled();expect(room.report).toHaveBeenCalledWith(expect.objectContaining({pos:0,state:'playing'}));}
   reader.destroy();
