@@ -31,9 +31,11 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
   bridge?.onEvent?.(event => {
     const s = sessions.get(event.session);
     if (!s || !s.playing || !current(s)) return;
+    if (event.type === 'playback/closed' && s.recoverableError) return;
     if (event.type === 'playback/closed' && s.ignorePreviousClose) { s.ignorePreviousClose = false; return; }
     if(event.type==='playback/ready'){
       s.nativeReady=true;
+      for(const [command,value]of Object.entries(s.playerPreferences??{})){if(command==='speed'&&s.together)continue;void bridge.playbackCommand({session:s.id,command,value}).catch(()=>{});}
       if(s.resumeAfterDetach){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}
     }
     s.together?.progressEvent(event);
@@ -43,7 +45,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       emit('playback', { ...s.context, ...s.progress, session: s.id, final: false });
     } else if (event.type === 'playback/error') {
       emit('playerError', { session: s.id, message: event.message ?? 'تعذر تشغيل الفيديو' });
-      void finish(s);
+      if(s.together){s.nativeReady=false;s.recoverableError=true;}else void finish(s);
     } else if (event.type === 'playback/closed') void finish(s);
   });
   const sourceCall = (runtime, id, fn) => runtime.addons.sources.call
@@ -150,6 +152,23 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         } });
     } catch { /* تعطل مزود الترجمة لا يوقف الفيديو */ }
   }
+  async function transitionEpisode(s,n) {
+    const args=s.playArgs,c=s.candidates.get(args.candidate),coordinator=s.together,together=args.together;
+    const transition=s.transitionGeneration=(s.transitionGeneration??0)+1;
+    s.episodeTransitioning=true;
+    const owned=()=>current(s)&&s.together===coordinator&&s.transitionGeneration===transition;
+    s.episodeCopies??=[...s.copies.values()];
+    const copies=s.episodeCopies.map(copy=>({...copy,episode:n,identity:copy.identity?{...copy.identity,episode:n}:copy.identity}));
+    s.prepareGeneration=(s.prepareGeneration??0)+1;s.controller.abort();s.controller=new AbortController();s.running=0;
+    try{
+      s.subtitleController?.abort();s.ignorePreviousClose=true;await bridge.stopPlayback({session:s.id});if(!owned())return;
+      s.episode=n;s.copies.clear();s.routes.clear();s.candidates.clear();s.done=false;await startCopies(s,copies);
+      if(!owned())return;const next=choices(s).find(next=>next.sourceId===c?.sourceId)??choices(s)[0];
+      if(!next)throw new Error('لا يوجد مصدر للحلقة الجديدة؛ اختر مصدرًا من التطبيق');
+      await engine.play({...args,together,candidate:next.id,episode:n,position:0,subtitleIdentity:args.subtitleIdentity?{...args.subtitleIdentity,episode:n}:null});
+    }catch(error){if(owned()){coordinator?.failed();emit('desktopNotice',{session:s.id,message:error.message});}throw error;}
+    finally{if(s.transitionGeneration===transition)s.episodeTransitioning=false;}
+  }
   const engine = {
     async configure() { return { ok: true, errors: [] }; },
     async sources() { const r = await getRuntime(); await r.addons.ready; return { sources: r.addons.sources.list().filter(d => d.content !== 'manga').map(d => ({ id: d.id, name: d.label, content: d.content, enabled: true })) }; },
@@ -200,16 +219,33 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
     async playerState({session}) {
       const s=sessionOf(session);
-      return {title:s.playArgs?.title??'VANTARA',candidate:s.playArgs?.candidate,position:s.progress.position??0,
+      return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
+        total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
         sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },
     async playerCommand({session,command,value}) {
       const s=sessionOf(session);
+      if(command==='speed'&&s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync')throw new Error('السرعة تتبع مزامنة الغرفة');
       if(command==='pause'&&s.together?.playPause(!value))return;
       if(command==='seek'&&s.together?.seek(value))return;
-      return bridge.playbackCommand({session,command,value});
+      const result=await bridge.playbackCommand({session,command,value});
+      if(['speed','volume','video-fit','subtitle-delay','subtitle-size','subtitle-position'].includes(command))(s.playerPreferences??={})[command]=value;
+      return result;
+    },
+    async changeEpisode({session,episode}) {
+      const s=sessionOf(session),total=Number(s.playArgs?.total)||0;
+      if(!Number.isSafeInteger(episode)||episode<1||(total&&episode>total))throw new Error('رقم الحلقة غير صالح');
+      if(episode===s.context?.episode)return;
+      if(s.together){
+        const t=s.playArgs.together,room=t.session.room;
+        if(room.status!=='live'||!room.canControl)throw new Error('المضيف يتحكم بتغيير الحلقة');
+        room.command('load',{media:{...room.timeline?.media,key:`${t.mediaPrefix}#${episode}`,label:`الحلقة ${episode}`},pos:0});return;
+      }
+      return transitionEpisode(s,episode);
     },
     async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
+    presentRoom(args){emit('desktopRoomEntry',args);return true;},
+    leavePlayerRoom({session}){const t=sessions.get(session)?.playArgs?.together;if(t?.hub?.session===t?.session)t?.hub?.leave?.();},
     roomHub({session}){const s=sessionOf(session);return s.playArgs?.roomHub??s.playArgs?.together?.hub??null;},
     openPlayerRoom({session}){
       const s=sessionOf(session),args=s.playArgs,hub=args?.roomHub??args?.together?.hub;
@@ -220,7 +256,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const mediaPrefix=(isCinema?'cinema:':'anime:')+String(args.animeId);
       const episode=Number(args.episode??s.episode)||1;
       const media={kind:isCinema?'cinema':'anime',seriesRef:mediaPrefix,key:`${mediaPrefix}#${episode}`,
-        title:args.title??'VANTARA',cover:args.poster??null,label:`${args.title??'VANTARA'} — ${isCinema&&args.subtitleIdentity?.kind==='movie'?'فيلم':'الحلقة '+episode}`,
+        title:args.title??'VANTARA',cover:args.poster??null,banner:args.banner??args.poster??null,logo:args.logo??null,...(isCinema?{format:args.subtitleIdentity?.kind??null}:{}),label:`${args.title??'VANTARA'} — ${isCinema&&args.subtitleIdentity?.kind==='movie'?'فيلم':'الحلقة '+episode}`,
         episode,...(isCinema&&args.subtitleIdentity?.season?{season:args.subtitleIdentity.season}:{})};
       hub.openInvite(media,{onStarted:joined=>{
         if(!current(s)||!s.nativeReady||!joined?.room)return;
@@ -252,6 +288,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     async play(args) {
       const s = sessionOf(args.session), c = s.candidates.get(args.candidate);
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
+      const previousOffset=s.context?.episode===(args.episode??s.episode)?s.together?.getVideoOffset()??0:0;
       s.playArgs={...args};
       s.subtitleController?.abort(); s.subtitleController = new AbortController();
       const generation = s.playGeneration = (s.playGeneration ?? 0) + 1;
@@ -263,8 +300,8 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         s.bindTogether=(together,keepPlayingWhileRoomStarts=false)=>{
           if(!together?.session?.room)return false;
           let coordinator;
-          coordinator=createDesktopTogetherPlayer({together,keepPlayingWhileRoomStarts,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,
-            onLobby:lobby=>emit('desktopTogether',{session:s.id,...lobby}),message:message=>emit('desktopNotice',{session:s.id,message}),
+          coordinator=createDesktopTogetherPlayer({together,keepPlayingWhileRoomStarts,initialVideoOffsetMs:previousOffset,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,
+            onLobby:lobby=>emit('desktopTogether',{session:s.id,...lobby,media:together.session.media}),message:message=>emit('desktopNotice',{session:s.id,message}),
             onDetach:()=>{
               if(s.together!==coordinator)return;
               if(!s.nativeReady||!together.session.room.timeline?.started){s.resumeAfterDetach=true;if(s.nativeReady){s.resumeAfterDetach=false;void bridge.playbackCommand({session:s.id,command:'pause',value:false}).catch(()=>{});}}
@@ -279,24 +316,10 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
               s.together=null;
               emit('desktopTogether',{session:s.id,closed:true});
             },
-            onEpisode:async n=>{
-              const transition=s.transitionGeneration=(s.transitionGeneration??0)+1;
-              s.episodeTransitioning=true;
-              const owned=()=>current(s)&&s.together===coordinator&&s.transitionGeneration===transition;
-              s.episodeCopies??=[...s.copies.values()];
-              const copies=s.episodeCopies.map(copy=>({...copy,episode:n,identity:copy.identity?{...copy.identity,episode:n}:copy.identity}));
-              s.prepareGeneration=(s.prepareGeneration??0)+1;s.controller.abort();s.controller=new AbortController();s.running=0;
-              try{
-                s.subtitleController?.abort();s.ignorePreviousClose=true;await bridge.stopPlayback({session:s.id});if(!owned())return;
-                s.episode=n;s.copies.clear();s.routes.clear();s.candidates.clear();s.done=false;await startCopies(s,copies);
-                if(!owned())return;const next=choices(s).find(next=>next.sourceId===c.sourceId)??choices(s)[0];
-                if(!next)throw new Error('لا يوجد مصدر للحلقة الجديدة؛ اختر مصدرًا من التطبيق');
-                await engine.play({...args,together,candidate:next.id,episode:n,position:0,subtitleIdentity:args.subtitleIdentity?{...args.subtitleIdentity,episode:n}:null});
-              }catch(error){if(owned()){coordinator.failed();emit('desktopNotice',{session:s.id,message:error.message});}}
-              finally{if(s.transitionGeneration===transition)s.episodeTransitioning=false;}
-            }});
+            onEpisode:n=>{void transitionEpisode(s,n).catch(()=>{});}});
           s.together=coordinator;
           if(s.nativeReady){
+            if((together.session.room.info?.mode??together.session.mode)==='sync')void bridge.playbackCommand({session:s.id,command:'rate',value:1}).catch(()=>{});
             coordinator.progressEvent({session:s.id,type:'playback/progress',position:s.progress.position??args.position??0,duration:s.progress.duration,paused:false,buffering:false});
             coordinator.ready();
           }
@@ -307,7 +330,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         const out = await bridge.startPlayback({ session: s.id, candidate: c, title: args.title ?? 'VANTARA', position: args.position ?? 0,...(synced?{pause:true}:{}) });
         if (!out?.started) throw new Error('لم يبدأ المشغل');
         if (!current(s) || generation !== s.playGeneration) throw new Error('انتهى تشغيل الجلسة');
-        s.ignorePreviousClose = false;
+        s.ignorePreviousClose = false;s.recoverableError=false;
         void startSubtitles(s, c, args.subtitleIdentity, generation);
         return out;
       } catch (error) {

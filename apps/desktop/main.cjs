@@ -149,7 +149,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: windowIcon,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--vantara-version=${require('./package.json').version}`], sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
   window.on?.('resize',()=>videoHost?.resize());
   window.on?.('move',()=>videoHost?.resize());
@@ -201,7 +201,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   if (reportOption) {
     setTimeout(async () => {
       try {
-        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
+        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,desktopVersion:window.VantaraDesktop?.version,hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
         await fs.writeFile(reportOption.slice('--smoke-report='.length), JSON.stringify({ ...report, ...smokeDiagnostics }, null, 2));
         const image = await window.webContents.capturePage();
         await fs.writeFile(reportOption.slice('--smoke-report='.length) + '.png', image.toPNG());

@@ -47,6 +47,24 @@ async function runEmbeddedVideoSmoke({window,videoHost,native,fixture,reportPath
     await until(()=>window.isFullScreen());report.fullscreen=true;
     await window.webContents.executeJavaScript("document.querySelector('[data-action=\"fullscreen\"]').click()");
     await until(()=>!window.isFullScreen());report.rendererControls=true;report.arabicSubtitleSelected=true;
+    // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
+    await window.webContents.executeJavaScript('window.VantaraVideoSmoke.enterRoom()');
+    await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".pp-lobby .pl-choose-server")'));
+    await until(async()=>!(await videoHost.inspect()).visible);report.sharedRoomRenderer=true;report.roomHidesNativeVideo=true;
+    await fs.writeFile(reportPath+'.room.png',(await window.webContents.capturePage()).toPNG());
+    await window.webContents.executeJavaScript('document.querySelector(".pl-choose-server").click()');
+    await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".an-pick.ss")'));
+    assert.equal((await videoHost.inspect()).visible,false);report.sharedServerPicker=true;
+    await window.webContents.executeJavaScript('document.querySelector(".an-pick-back").click();document.querySelector(".pp-lobby .pl-go:not(.pl-choose-server)").click()');
+    await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".pl-count")'));
+    assert.equal((await videoHost.inspect()).visible,false);
+    await until(async()=>{const gone=await window.webContents.executeJavaScript('document.querySelector(".pp-lobby").hidden');return gone&&(await videoHost.inspect()).visible;});report.sharedCountdown=true;
+    await window.webContents.executeJavaScript('document.querySelector("[data-action=settings]").click()');
+    await until(async()=>!(await videoHost.inspect()).visible);
+    const roomCommands=await window.webContents.executeJavaScript('window.VantaraVideoSmoke.commands.length');
+    await window.webContents.executeJavaScript('const t=document.querySelector("[data-control=video-offset]");t.value="0.5";t.dispatchEvent(new Event("change"));');
+    assert.equal(await window.webContents.executeJavaScript('window.VantaraVideoSmoke.commands.length'),roomCommands);report.localVideoTiming=true;
+    await window.webContents.executeJavaScript('document.querySelector("[data-action=settings-close]").click()');
     await window.webContents.executeJavaScript("document.querySelector('[data-action=\"close\"]').click()");
     await until(()=>!videoHost.snapshot().embedded&&events.some(e=>e.type==='playback/closed'));report.cleanup=true;
     assert(!events.some(e=>e.type==='playback/error'));

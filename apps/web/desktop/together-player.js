@@ -1,14 +1,14 @@
 import { createDriftController, targetAt } from '../lib/together/sync.js';
 
 /** MPV يتبع جلسة الغرفة الأصلية؛ المواضع والأوامر كلها بالمللي ثانية. */
-export function createDesktopTogetherPlayer({ together, bridge, session, episode, source = () => null, keepPlayingWhileRoomStarts = false, onEpisode = () => {}, onDetach = () => {}, onLobby = () => {}, message = () => {} }) {
+export function createDesktopTogetherPlayer({ together, bridge, session, episode, source = () => null, keepPlayingWhileRoomStarts = false, initialVideoOffsetMs = 0, onEpisode = () => {}, onDetach = () => {}, onLobby = () => {}, message = () => {} }) {
   const room = together.session.room;
   const controller = createDriftController();
   const native = { position: 0, duration: null, paused: null, buffering: false, rate: 1 };
   const expected = { pause: [], seek: [] };
   let prepared = false, failed = false, closed = false, loadingEpisode = null, scheduled = null;
   // Local media timelines can differ by an intro or recap, even when the room clock is exact.
-  let videoOffsetMs = 0;
+  let videoOffsetMs = Number.isFinite(initialVideoOffsetMs) && Math.abs(initialVideoOffsetMs) <= 120000 ? initialVideoOffsetMs : 0;
   const localToRoom = value => Math.max(0,Math.round(value-videoOffsetMs));
   const clampLocal = value => Math.max(0, Math.min(native.duration ?? Infinity, Math.round(value)));
   const localTarget = (timeline, at) => clampLocal(targetAt(timeline, at, videoOffsetMs));
@@ -52,9 +52,10 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       version: { durationMs: native.duration }, driftMs: synced() && prepared && room.timeline?.started ? Math.round(native.position - localTarget(room.timeline, now)) : null,
       driftP95: controller.stats().p95 });
   }
+  const countdownTo = () => synced() && !keepPlayingWhileRoomStarts && room.timeline?.started && room.timeline.at - room.clock.serverNow() > 400 ? room.timeline.at : null;
   function lobby() {
     if (closed) return;
-    onLobby({ visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared), prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared || countdownTo() != null), countdownTo: countdownTo(), now: () => room.clock.serverNow(), me: room.me, invited: room.info?.invited ?? together.session.invited ?? null, offset: videoOffsetMs, prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
       roster: room.roster, start: () => api.playPause(true), openPanel: () => together.hub.openPanel() });
   }
   function align(force = false) {
@@ -90,7 +91,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     room.on('connection', () => { if (room.status === 'closed') return detach(); if (live()) { align(true); report(true); } lobby(); }),
     room.on('room', () => { if (synced()) align(true); else if (native.rate !== 1) { native.rate = 1; command('rate', 1); } lobby(); report(true); })];
   if (together.hub.onChange) offs.push(together.hub.onChange(() => { if (together.hub.session !== together.session) detach(); }));
-  const timer = setInterval(() => { align(); report(); }, 500);
+  const timer = setInterval(() => { align(); report(); lobby(); }, 500);
   const api = {
     ready() { if (closed) return; prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
     preparing() { prepared = false; failed = false; report(true); lobby(); },
@@ -98,7 +99,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     playPause(playing) {
       if (closed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
-      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? localToRoom(native.position) : 0 });
+      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? localToRoom(native.position) : 0, ...(playing && !room.timeline?.started ? { countdownMs: 3000 } : {}) });
       else { message(prepared ? 'المضيف يتحكم بالتشغيل' : 'جاري تجهيز الفيديو…'); align(true); }
       return true;
     },

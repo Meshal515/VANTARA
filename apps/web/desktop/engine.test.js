@@ -11,7 +11,7 @@ function fixture({ startError = null, replayClose = false } = {}) {
   const source = { episodes: async () => [{ number: 1, season: 2, url: 'tt123:2:1', type: 'series' }], servers: async ep => [{ name: 'Torrentio', url: ep.url }], streams: async () => [stream] };
   const addons = { ready: Promise.resolve(), registry: { snapshot: () => ({ release: () => release++ }), list: () => [] }, sources: { source: () => source, def: () => ({ label: 'Torrentio' }), list: () => [] } };
   const engine = createDesktopEngine({ bridge, getRuntime: () => ({ addons, ready: Promise.resolve() }) });
-  return { engine, bridge, starts, stops, stream, emit: e => event(e), release: () => release };
+  return { engine, bridge, starts, stops, stream, source, emit: e => event(e), release: () => release };
 }
 async function prepared(f) {
   const done = new Promise(resolve => f.engine.addListener('prepared', resolve));
@@ -251,4 +251,63 @@ it('دعوة الأصدقاء أثناء تشغيل الحلقة تلحق الغ
     expect((await f.engine.playerState({session:'s'})).together).toBe(true);
     f.engine.openPlayerRoom({session:'s'});expect(hub.openPanel).toHaveBeenCalledOnce();
   }finally{await f.engine.closeSession({session:'s'});}
+});
+
+it('keeps room membership and local video timing while changing the chosen source',async()=>{
+ const f=fixture();await prepared(f);const best=await f.engine.best({session:'s'});
+ const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[],clock:{serverNow:()=>1000},timeline:{started:false,playing:false,pos:0,at:1000,media:{key:'anime:owned#1'}},on:()=>()=>{},report:vi.fn(),command:vi.fn()};
+ const together={mediaPrefix:'anime:owned',session:{room,mode:'sync'},hub:{openPanel(){}}};
+ try{
+  await f.engine.play({session:'s',candidate:best.candidate,episode:1,together});
+  f.emit({type:'playback/ready',session:'s'});f.engine.setVideoOffset({session:'s',ms:7500});
+  await f.engine.switchSource({session:'s',candidate:best.candidate,position:1000});
+  expect((await f.engine.playerState({session:'s'})).videoOffsetMs).toBe(7500);
+  expect(f.starts[1].pause).toBe(true);expect(room.command).not.toHaveBeenCalled();
+ }finally{await f.engine.closeSession({session:'s'});}
+});
+it('a failed room video keeps its source choices and room until the user leaves',async()=>{
+ const f=fixture();await prepared(f);const best=await f.engine.best({session:'s'});
+ const room={status:'live',info:{mode:'sync'},isHost:false,canControl:false,roster:[],clock:{serverNow:()=>1000},timeline:{started:false,playing:false,pos:0,at:1000,media:{key:'anime:owned#1'}},on:()=>()=>{},report:vi.fn(),command:vi.fn()};
+ try{
+  await f.engine.play({session:'s',candidate:best.candidate,episode:1,together:{mediaPrefix:'anime:owned',session:{room,mode:'sync'},hub:{openPanel(){}}}});
+  f.emit({type:'playback/error',session:'s',message:'المصدر تعذر'});f.emit({type:'playback/closed',session:'s'});
+  expect((await f.engine.playerState({session:'s'})).sources.length).toBeGreaterThan(0);
+  expect(room.report).toHaveBeenCalledWith(expect.objectContaining({state:'failed'}));
+ }finally{await f.engine.closeSession({session:'s'});}
+});
+
+it('navigates standalone episodes through existing source preparation and preserves progress context',async()=>{
+ const f=fixture();await prepared(f);const choice=await f.engine.best({session:'s'});
+ await f.engine.play({session:'s',candidate:choice.candidate,animeId:'tt123:2',episode:1,total:2,title:'مسلسل'});
+ await expect(f.engine.changeEpisode({session:'s',episode:3})).rejects.toThrow();
+ await expect(f.engine.changeEpisode({session:'s',episode:2})).rejects.toThrow('لا يوجد مصدر');
+ expect((await f.engine.playerState({session:'s'})).total).toBe(2);
+ await f.engine.closeSession({session:'s'});
+});
+it('blocks a local playback speed override inside a synchronized room',async()=>{
+ const f=fixture();await prepared(f);const choice=await f.engine.best({session:'s'});
+ const room={status:'live',info:{mode:'sync'},timeline:{started:false},roster:[],clock:{serverNow:Date.now},on:()=>()=>{},report(){}};
+ await f.engine.play({session:'s',candidate:choice.candidate,episode:1,together:{mediaPrefix:'anime:1',session:{room},hub:{}}});
+ await expect(f.engine.playerCommand({session:'s',command:'speed',value:1.5})).rejects.toThrow('السرعة');await f.engine.closeSession({session:'s'});
+});
+
+it('prepares and plays the next standalone episode without leaving its player session',async()=>{
+ const f=fixture();f.source.episodes=async()=>[1,2].map(number=>({number,season:2,url:`tt123:2:${number}`,type:'series'}));
+ await prepared(f);const choice=await f.engine.best({session:'s'});
+ await f.engine.play({session:'s',candidate:choice.candidate,animeId:'tt123:2',episode:1,total:2,title:'مسلسل'});
+ await f.engine.changeEpisode({session:'s',episode:2});expect(f.starts).toHaveLength(2);expect(f.starts[1].position).toBe(0);expect((await f.engine.playerState({session:'s'})).episode).toBe(2);expect(f.release()).toBe(0);await f.engine.closeSession({session:'s'});
+});
+it('episode selection in a room goes through the room load command, never starts a separate local episode',async()=>{
+ const f=fixture(),command=vi.fn();await prepared(f);const choice=await f.engine.best({session:'s'});
+ const room={status:'live',canControl:true,info:{mode:'sync'},timeline:{started:false,media:{key:'anime:1#1',kind:'anime'}},roster:[],clock:{serverNow:Date.now},on:()=>()=>{},report(){},command};
+ await f.engine.play({session:'s',candidate:choice.candidate,episode:1,total:2,together:{mediaPrefix:'anime:1',session:{room},hub:{}}});
+ await f.engine.changeEpisode({session:'s',episode:2});expect(command).toHaveBeenCalledWith('load',{media:{key:'anime:1#2',kind:'anime',label:'الحلقة 2'},pos:0});expect(f.starts).toHaveLength(1);room.canControl=false;await expect(f.engine.changeEpisode({session:'s',episode:2})).rejects.toThrow('المضيف');await f.engine.closeSession({session:'s'});
+});
+
+it('reapplies local subtitle appearance and speed after changing source',async()=>{
+ const f=fixture(),commands=[];f.bridge.playbackCommand=async args=>commands.push(args);await prepared(f);const choice=await f.engine.best({session:'s'});
+ await f.engine.play({session:'s',candidate:choice.candidate,episode:1});
+ await f.engine.playerCommand({session:'s',command:'subtitle-size',value:46});await f.engine.playerCommand({session:'s',command:'speed',value:1.5});commands.length=0;
+ await f.engine.switchSource({session:'s',candidate:choice.candidate,position:5000});f.emit({type:'playback/ready',session:'s'});await Promise.resolve();
+ expect(commands).toContainEqual({session:'s',command:'subtitle-size',value:46});expect(commands).toContainEqual({session:'s',command:'speed',value:1.5});await f.engine.closeSession({session:'s'});
 });

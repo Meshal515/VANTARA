@@ -111,6 +111,10 @@ test('mpv الحقيقي يفك فيديو مؤلف وترجمة عربية وي
   assert.equal(events.findLast(e=>e.type==='playback/subtitles').tracks.find(track=>track.selected)?.id,englishId);
   await services.playbackCommand({session:'real-video',command:'subtitle-delay',value:500});
   await services.playbackCommand({session:'real-video',command:'subtitle-size',value:46});
+  await services.playbackCommand({session:'real-video',command:'subtitle-position',value:85});
+  await services.playbackCommand({session:'real-video',command:'video-fit',value:'fill'});
+  await services.playbackCommand({session:'real-video',command:'speed',value:1.5});
+  await services.playbackCommand({session:'real-video',command:'speed',value:1});
   await services.playbackCommand({session:'real-video',command:'subtitle-off'});
   await services.playbackCommand({session:'real-video',command:'subtitle-select',value:events.findLast(e=>e.type==='playback/subtitles'&&e.tracks.length)?.tracks[0].id});
   await until(()=>events.some(e=>e.type==='playback/progress'&&e.position>=1000&&e.duration>=7900));

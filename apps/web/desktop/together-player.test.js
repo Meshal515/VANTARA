@@ -55,7 +55,7 @@ describe('مشاهدة ويندوز المشتركة تستخدم الغرفة �
   });
   it('أزرار المضيف وأحداث التحكم الأصلية ترسل الأوامر للغرفة ولا تعيد صدى أوامرها', () => {
     vi.useFakeTimers(); const f = fixture(true); f.event('ready');
-    f.hooks.onLobby.mock.lastCall[0].start(); expect(f.room.command).toHaveBeenLastCalledWith('play', { pos: 0 });
+    f.hooks.onLobby.mock.lastCall[0].start(); expect(f.room.command).toHaveBeenLastCalledWith('play', { pos: 0, countdownMs: 3000 });
     f.state({ started: true, playing: true, pos: 0, seq: 1 });
     f.event('pause', { paused: false }); expect(f.room.command).toHaveBeenCalledTimes(1);
     f.event('pause', { paused: true }); expect(f.room.command).toHaveBeenLastCalledWith('pause', { pos: 0 });
@@ -147,4 +147,19 @@ it('clamps shifted playback and drift to the participant duration and correctly 
   expect(f.bridge.playbackCommand).toHaveBeenLastCalledWith(expect.objectContaining({command:'seek',value:2000}));
   f.player.setVideoOffset(120000); expect(f.bridge.playbackCommand).toHaveBeenCalledWith(expect.objectContaining({command:'seek',value:60000}));
   expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({driftMs:0})); f.player.close();
+});
+
+it('Windows lobby carries the shared artwork identity and three-second start clock',()=>{
+  vi.useFakeTimers();const f=fixture(true);
+  f.room.info.invited=['host','mansour'];
+  f.event('ready');
+  const lobby=f.hooks.onLobby.mock.lastCall[0];
+  expect(lobby.me).toBe('host');expect(lobby.invited).toEqual(['host','mansour']);
+  lobby.start();expect(f.room.command).toHaveBeenLastCalledWith('play',{pos:0,countdownMs:3000});
+  f.state({started:true,playing:true,pos:0,at:4000,seq:1});
+  const counting=f.hooks.onLobby.mock.lastCall[0];
+  expect(counting.visible).toBe(true);expect(counting.countdownTo).toBe(4000);
+  f.now(4000);vi.advanceTimersByTime(500);
+  expect(f.hooks.onLobby.mock.lastCall[0].visible).toBe(false);
+  f.player.close();
 });

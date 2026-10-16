@@ -383,3 +383,11 @@ test('MPV يبدأ pause=true ويصدر pause/seek/state ms ويقيد rate ل�
   for(const value of [0.94,1.06,'1',Infinity])await assert.rejects(services.playbackCommand({session:'room',command:'rate',value}));
   const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(commands.some(m=>JSON.stringify(m.command)==='["set_property","speed",0.95]'));
 });
+
+test('manual speed, fit and subtitle position are constrained MPV properties',async t=>{
+ const {services,dir}=await fixture(t);await services.startPlayback({session:'appearance',candidate:{url:'https://video.example.com/owned.mp4'}});
+ for(const [command,value] of [['speed',1.5],['video-fit','fill'],['subtitle-position',85]])await services.playbackCommand({session:'appearance',command,value});
+ for(const [command,value] of [['speed',0],['speed',Infinity],['video-fit','arbitrary'],['subtitle-position',101]])await assert.rejects(services.playbackCommand({session:'appearance',command,value}));
+ const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).map(m=>m.command);
+ for(const expected of [['set_property','speed',1.5],['set_property','panscan',1],['set_property','sub-pos',85]])assert.ok(commands.some(c=>JSON.stringify(c)===JSON.stringify(expected)));
+});

@@ -677,6 +677,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(command==='pause'&&typeof value==='boolean')await ipcCommand(state,['set_property','pause',value]);
     else if(command==='seek'&&Number.isFinite(value)&&value>=0)await ipcCommand(state,['seek',value/1000,'absolute']);
     else if(command==='rate'&&Number.isFinite(value)&&value>=0.95&&value<=1.05)await ipcCommand(state,['set_property','speed',value]);
+    else if(command==='speed'&&Number.isFinite(value)&&value>=0.25&&value<=3)await ipcCommand(state,['set_property','speed',value]);
+    else if(command==='video-fit'&&['fit','fill'].includes(value))await ipcCommand(state,['set_property','panscan',value==='fill'?1:0]);
+    else if(command==='subtitle-position'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','sub-pos',value]);
     else if(command==='volume'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','volume',value]);
     else if(command==='audio-select'&&Number.isSafeInteger(value)&&state.audioTracks?.some(t=>t.id===value))await ipcCommand(state,['set_property','aid',value]);
     else if(command==='subtitle-load')await loadSubtitle(state,value);
