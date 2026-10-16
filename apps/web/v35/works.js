@@ -138,8 +138,14 @@ export function detailFields(manga) {
 // ───────────────────────── المحرّك ─────────────────────────
 
 let sourcesPromise = null;
+const fillerIds = new Set();
 function sources() {
-  sourcesPromise ??= engine.sources().catch((error) => {
+  // إضافة مستودع للكبار لا تُستعمل أبدًا، والإضافة غير العربية تكملة فصول فقط
+  sourcesPromise ??= engine.sources().then((list) => {
+    const clean = (list ?? []).filter((s) => !(s.user && s.warning && s.warning !== 'SAFE'));
+    for (const s of clean) if (s.filler) fillerIds.add(String(s.id));
+    return clean;
+  }).catch((error) => {
     sourcesPromise = null;
     throw error;
   });
@@ -363,7 +369,7 @@ export async function cachedWorkChapterCount(v35work) {
  * العربي أولًا دائمًا. لا يبني قوائم؛ يملأ فقط فصول عملٍ له نسخة عربية، والفصل
  * العربي بنفس الرقم يغلبه متى نزل. ويظهر في المصادر بعد العربي، بوسم «إنجليزي».
  */
-export const isFiller = (sourceId) => String(sourceId ?? '').includes('@');
+export const isFiller = (sourceId) => String(sourceId ?? '').includes('@') || fillerIds.has(String(sourceId ?? ''));
 /** أسماء المصادر المعروفة حين لا يحمل المصدر اسمًا (حزمة بلا name، أو نسخة من الخادم بلا label). */
 const KNOWN_NAMES = {
   teamx: 'Team X', mangaswat: 'MangaSwat', manga3asq: '3asq', mangastarz: 'Manga Starz', mangaspark: 'MangaSpark',
