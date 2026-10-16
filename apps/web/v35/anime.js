@@ -24,6 +24,7 @@ import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
+import { createServerSheet, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -157,6 +158,29 @@ export function createAnime(deps) {
     return b;
   };
   const metaLine = (m) => [FORMAT_AR[m.format] ?? null, m.year ?? null].filter(Boolean).join(' · ');
+  /**
+   * يمرّر شريطًا أفقيًا حتى يتوسّطه العنصر، أفقيًا فقط. (scrollIntoView ولو
+   * بـ block: 'nearest' كان يحرّك الصفحة كلها للأسفل حين يكون الشريط تحت الشاشة،
+   * فتفتح صفحة الأنمي منزلقةً إلى الحلقات بدل أعلاها.)
+   */
+  const centerInStrip = (strip, node, align = 'center') => {
+    if (!strip || !node) return;
+    const s = strip.getBoundingClientRect();
+    const n = node.getBoundingClientRect();
+    const delta = align === 'start' ? n.right - s.right : n.left + n.width / 2 - (s.left + s.width / 2);
+    if (Math.abs(delta) > 1) strip.scrollBy?.({ left: delta, behavior: 'instant' });
+  };
+  /** رقم الموسم من العنوان: «Season 4» · «4th Season» · «第4期» · «S2». */
+  const seasonNumber = (r) => {
+    const t = [r?.title, r?.romaji, r?.native].filter(Boolean).join(' | ');
+    const hit = /\bseason\s*(\d{1,2})\b/i.exec(t) ?? /\b(\d{1,2})(?:st|nd|rd|th)\s+season\b/i.exec(t) ?? /第(\d{1,2})期/.exec(t) ?? /\bS(\d{1,2})\b/.exec(t);
+    return hit ? Number(hit[1]) : null;
+  };
+  const minutesLeft = (e) => {
+    if (!e?.duration || e.position >= e.duration) return null;
+    const left = Math.max(1, Math.round((e.duration - e.position) / 60_000));
+    return `باقي ${left} د`;
+  };
 
   function rail(title, { sub, cls = '', items = [], card, more } = {}) {
     const s = el('section', `an-rail ${cls}`);
@@ -221,19 +245,27 @@ export function createAnime(deps) {
     return c;
   }
 
-  /** «آخر المشاهدات»: البوستر، الحلقة، العنوان، وشريط التقدّم بنسبته. */
+  /** «آخر المشاهدات»: إطار عريض 16:9 بشريط التقدّم، العنوان سطرين، و«الحلقة 19 · باقي 22 د». */
   function continueCard(w) {
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
     const c = el('button', 'an-cw');
     c.type = 'button';
-    const art = el('div', 'an-cw-art');
-    art.append(image(w.poster));
-    const info = el('div', 'an-cw-info');
+    c.setAttribute('aria-label', `${w.title} — الحلقة ${w.episode}`);
+    tint(c, w.color);
+    const art = el('span', 'an-cw-art');
+    const src = w.banner ?? w.poster;
+    if (src) art.append(image(src, 'an-img', { position: w.banner ? 'center' : 'center 22%' }));
+    else art.append(el('b', 'an-cw-num', String(w.episode)));
+    art.append(el('span', 'an-cw-shade'));
+    const play = el('span', 'an-cw-play');
+    play.innerHTML = glyph('play', { size: 16, filled: true });
+    art.append(play);
+    if (ratio > 0 && !e.done) art.append(progress(ratio));
     const t = el('span', 'an-cw-title', w.title);
     t.dir = 'auto';
-    info.append(el('b', 'an-cw-ep', `الحلقة ${pad2(w.episode)}`), t, progress(ratio), el('span', 'an-cw-pct', `${(ratio * 100).toFixed(1)}%`));
-    c.append(art, info);
+    const sub = el('span', 'an-cw-sub', [`الحلقة ${w.episode}`, e.done ? 'شوهدت' : minutesLeft(e)].filter(Boolean).join(' · '));
+    c.append(art, t, sub);
     c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color });
     return c;
   }
@@ -324,7 +356,7 @@ export function createAnime(deps) {
       // اليوم يبدأ عند «الآن»: آخر ما نزل، وبعده القادم
       const now = Date.now();
       const at = Math.max(0, list.findIndex((m) => m.airingAt > now) - 1);
-      if (scroll) requestAnimationFrame(() => strip.children[k === today ? at : 0]?.scrollIntoView({ inline: 'start', block: 'nearest', behavior: 'instant' }));
+      if (scroll) requestAnimationFrame(() => centerInStrip(strip, strip.children[k === today ? at : 0], 'start'));
     };
     for (const k of keys) {
       const b = button(`an-day${k === current ? ' active' : ''}`, dayLabel(k, today), () => show(k));
@@ -493,12 +525,20 @@ export function createAnime(deps) {
 
   // ───────────── صفحة الأنمي ─────────────
 
-  async function openAnime(m, { episode = null, position = null, clip = null, play = false } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false } = {}) {
     const token = ++state.detailToken;
     state.episodeRange = 0;
     state.detail = m;
     deps.showPage('anime');
     renderDetail(m, { partial: true });
+    // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
+    window.scrollTo?.({ top: 0, behavior: 'instant' });
+    // لمسة أو عجلة أثناء التحميل = المستخدم يتصفّح؛ لا نعيده للأعلى بعدها
+    let userScrolled = false;
+    const touched = () => (userScrolled = true);
+    const INPUT = ['touchstart', 'wheel', 'keydown'];
+    for (const ev of INPUT) window.addEventListener?.(ev, touched, { once: true, passive: true });
+    const untouch = () => { for (const ev of INPUT) window.removeEventListener?.(ev, touched); };
     try {
       const full = String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`anime:${m.id}`, m) : m._sourceCopy ? m : await fetchAnimeDetail(m.id);
       if (token !== state.detailToken || !full) return;
@@ -510,7 +550,14 @@ export function createAnime(deps) {
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
       if (episode && (position != null || play)) playEpisode(full, episode, { position, clip });
-      if (episode) q('anime').querySelector(`[data-ep="${episode}"]`)?.scrollIntoView({ block: 'center' });
+      // الحلقة المقصودة تُعلَّم في القائمة؛ لا ننزلق إليها إلا لمن طلب قائمة الحلقات صراحة
+      const target = episode ? q('anime').querySelector(`[data-ep="${episode}"]`) : null;
+      if (target) {
+        target.classList.add('flash');
+        setTimeout(() => target.classList.remove('flash'), 2600);
+      }
+      if (target && focusEpisodes) target.scrollIntoView({ block: 'center' });
+      else if (window.scrollY > 0 && !userScrolled) window.scrollTo?.({ top: 0, behavior: 'instant' });
       // عناوين الحلقات من MAL: إضافة لا تؤخّر الصفحة
       void fetchMalEpisodes(full.idMal)
         .then(({ titles }) => {
@@ -523,6 +570,8 @@ export function createAnime(deps) {
     } catch {
       if (token !== state.detailToken) return;
       q('animeEpisodes')?.replaceChildren(el('p', 'an-note', 'تعذّر جلب تفاصيل الأنمي — تحقّق من الاتصال.'));
+    } finally {
+      untouch();
     }
   }
 
@@ -560,7 +609,8 @@ export function createAnime(deps) {
       big.append(el('small', null, 'يبدأ'), el('b', null, m.next ? relativeAr(m.next.at).replace(/^بعد /, '') : 'قريبًا'));
       side.append(el('span', 'an-onair-tag', 'قريبًا'), el('strong', null, m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : 'لم يُحدَّد'), m.next ? el('span', null, meccaTime(m.next.at)) : el('span'));
     } else if (total) {
-      big.append(el('small', null, m.status === 'FINISHED' ? 'مكتمل' : 'حلقات'), el('b', null, String(total)));
+      // الحالة («مكتمل») في الشارة بجانبه مرة واحدة؛ هنا العدد وما هو
+      big.append(el('small', null, 'حلقة'), el('b', null, String(total)));
       side.append(el('span', 'an-onair-tag', STATUS_AR[m.status] ?? 'حلقات'), el('strong', null, m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : `${total} حلقة`), el('span', null, m.duration ? `${m.duration} دقيقة للحلقة` : ''));
     } else {
       return null;
@@ -731,10 +781,13 @@ export function createAnime(deps) {
     row.dataset.ep = String(n);
     const main = el('button', 'an-er-main');
     main.type = 'button';
-    const art = el('span', 'an-er-art');
+    // صورة الحلقة نفسها إن وُجدت؛ وإلا بلاطة برقمها (كانت كل الحلقات تكرّر بنر العمل)
     const thumb = m.thumbs?.[n]?.thumbnail;
-    art.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { position: thumb || m.banner ? 'center' : 'center 25%' }));
-    art.append(el('span', 'an-er-no', String(n)));
+    const art = el('span', thumb ? 'an-er-art' : 'an-er-art an-er-art--num');
+    if (thumb) {
+      art.append(image(thumb, 'an-img', { position: 'center' }));
+      art.append(el('span', 'an-er-no', String(n)));
+    } else art.append(el('b', 'an-er-num', String(n)));
     if (ratio > 0 && !e?.done) {
       const bar = progress(ratio);
       bar.classList.add('an-er-bar');
@@ -804,7 +857,7 @@ export function createAnime(deps) {
         );
       }
       host.append(tabs);
-      requestAnimationFrame(() => tabs.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
+      requestAnimationFrame(() => centerInStrip(tabs, tabs.querySelector('.active')));
     }
     const seen = localWatch()[m.id]?.episodes ?? {};
     const list = el('div', 'an-er-list');
@@ -825,19 +878,31 @@ export function createAnime(deps) {
     const prev = (m.relations ?? []).filter((r) => r.relation === 'الجزء السابق');
     const next = (m.relations ?? []).filter((r) => r.relation === 'الجزء التالي');
     if (!prev.length && !next.length) return null;
+    // أسماء قصيرة «الموسم 4» بدل عناوين طويلة مقصوصة؛ العنوان الكامل للوصول وللتلميح
+    const own = seasonNumber(m) ?? (prev.length === 1 && seasonNumber(prev[0]) ? seasonNumber(prev[0]) + 1 : prev.length ? null : 1);
+    const label = (r, rel) => {
+      if (r.format === 'MOVIE') return 'فيلم';
+      const k = r === m ? own : seasonNumber(r) ?? (own && prev.length + next.length <= 2 ? own + rel : null);
+      const part = /\bpart\s*(\d+)/i.exec(r.title ?? '')?.[1];
+      if (k) return `الموسم ${k}${part ? ` · ج${part}` : ''}`;
+      return rel < 0 ? 'الموسم السابق' : rel > 0 ? 'الموسم التالي' : 'هذا الموسم';
+    };
     const strip = el('div', 'an-seasons');
-    const chip = (r, label, current = false) => {
+    const chip = (r, rel) => {
+      const current = r === m;
       const b = el('button', `an-season${current ? ' active' : ''}`);
       b.type = 'button';
-      const t = el('b', null, r.title);
-      t.dir = 'auto';
-      b.append(el('span', null, label), t);
+      b.title = r.title ?? '';
+      b.setAttribute('aria-label', r.title ?? label(r, rel));
+      const when = [SEASON_AR[r.season], r.year].filter(Boolean).join(' ');
+      b.append(el('b', null, label(r, rel)));
+      if (when) b.append(el('span', null, when));
       if (!current) b.onclick = () => void openAnime(r);
       else b.setAttribute('aria-current', 'true');
       return b;
     };
-    strip.append(...prev.map((r) => chip(r, 'الموسم السابق')), chip(m, [SEASON_AR[m.season], m.year].filter(Boolean).join(' ') || 'هذا الموسم', true), ...next.map((r) => chip(r, 'الموسم التالي')));
-    requestAnimationFrame(() => strip.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
+    strip.append(...prev.map((r) => chip(r, -1)), chip(m, 0), ...next.map((r) => chip(r, 1)));
+    requestAnimationFrame(() => centerInStrip(strip, strip.querySelector('.active')));
     return strip;
   }
 
@@ -1026,7 +1091,12 @@ export function createAnime(deps) {
     }
     label.textContent = 'متوفر في';
     host.append(label);
-    for (const c of state.work.copies) host.append(el('span', 'an-source-chip', c.sourceId === state.work.copies[0].sourceId ? `${sourceName(c.sourceId)} ★` : sourceName(c.sourceId)));
+    const names = [...new Set(state.work.copies.map((c) => sourceLabel(c.sourceId, { names: SOURCE_NAMES, title: c.title })))];
+    names.forEach((name, i) => {
+      const chip = el('span', `an-source-chip${i === 0 ? ' an-source-chip--main' : ''}`, name);
+      chip.dir = 'auto';
+      host.append(chip);
+    });
   }
 
   // مصدر يطلب تحقق إنسان من Cloudflare: شريحة صغيرة «تحقّق» لعشر ثوانٍ ثم تختفي،
@@ -1071,7 +1141,8 @@ export function createAnime(deps) {
   }
 
   const SOURCE_NAMES = {};
-  const sourceName = (id) => SOURCE_NAMES[id] ?? id;
+  // نسخ الإضافات تحمل اسم الإضافة في `title`؛ وإلا يُستخرج من مضيفها (torrentio ← Torrentio)
+  const sourceName = (id) => sourceLabel(id, { names: SOURCE_NAMES, title: state.work?.copies?.find((c) => c.sourceId === id)?.title ?? null });
   void engine.sources().then((list) => {
     for (const s of list ?? []) SOURCE_NAMES[s.id] = s.name;
   }).catch(() => {});
@@ -1224,13 +1295,11 @@ export function createAnime(deps) {
   });
   setTimeout(() => void flushOutbox(), 2500);
 
-  const STATE_AR = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
-
   /**
    * لمسة الحلقة: الورقة تفتح فورًا والسيرفرات تتجهّز خلفها واحدًا واحدًا.
-   * رموز قصيرة لا أسماء استضافات، مجمّعة بالجودة، بحالة كل سيرفر الآن.
-   * «شغّل الأفضل» يزن الموثوقية وسرعة البدء والجودة والفشل الأخير، ويرجّح
-   * سيرفرك السابق لهذا الأنمي دون أن يقفل عليه.
+   * الورقة نفسها في السينما (server-sheet.js): «الأفضل لك» فوق، ثم المباشر
+   * فالتورنت بأسماء بشرية وجودة ولغة وصحة سرب. الأفضل يرجّح سيرفرك السابق
+   * لهذا الأنمي دون أن يقفل عليه.
    */
   function playEpisode(m, n, { position = null, clip = null } = {}) {
     if (!engine.available()) {
@@ -1259,16 +1328,6 @@ export function createAnime(deps) {
 
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
-      body.classList.add('an-pick');
-      const bar = el('header', 'an-pick-bar');
-      const back = button('an-pick-back', glyph('back', { size: 22 }), () => deps.closeSheet(), 'رجوع');
-      const heading = el('div', 'an-pick-heading');
-      const name = el('span', 'an-pick-anime', m.title);
-      name.dir = 'auto';
-      heading.append(el('b', null, `الحلقة ${n}`), name);
-      bar.append(back, heading);
-
-      const scroll = el('div', 'an-pick-scroll');
       const hero = el('div', 'an-pick-hero');
       const thumb = m.thumbs?.[n]?.thumbnail;
       hero.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { eager: true, position: thumb || m.banner ? 'center' : 'center 25%' }));
@@ -1284,24 +1343,7 @@ export function createAnime(deps) {
       else if (startAt > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(startAt)}`));
       hero.append(cap);
 
-      const status = el('div', 'an-srv-status');
-      const filters = el('div', 'an-pick-filters');
-      const list = el('div', 'an-srv-list');
-      const routeNodes = new Map();
-      const groupNodes = new Map();
-      // أبقِ عناصر السيرفرات كما هي عند وصول نتيجة جديدة؛ غيّر موضع ما تبدّل فقط.
-      const reconcile = (parent, nodes) => {
-        nodes.forEach((node, i) => {
-          if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
-        });
-        while (parent.children.length > nodes.length) parent.lastElementChild.remove();
-      };
-      scroll.append(hero, status, filters, list);
-
-      const foot = el('footer', 'an-pick-foot');
-      const bestBtn = el('button', 'an-pick-best');
-      bestBtn.type = 'button';
-      foot.append(bestBtn);
+      const extraFoot = [];
       if (hub && !sheet.autoTogether) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
@@ -1321,105 +1363,17 @@ export function createAnime(deps) {
             onStarted: () => playEpisode(m, n),
           });
         }, 'شاهد مع أصدقائك');
-        foot.append(withFriends);
+        extraFoot.push(withFriends);
       }
-      body.append(bar, scroll, foot);
-
-      const filter = { q: 'all', v: null };
-      const visible = () => (filter.v ? sheet.routes.filter((r) => (filter.v === 'DUB') === (r.variant === 'DUB')) : sheet.routes);
-      const shownGroups = () => {
-        const groups = engine.groupRoutes(visible());
-        return filter.q === 'all' ? groups : groups.filter(([g]) => g === filter.q);
-      };
-      const filtered = () => filter.q !== 'all' || filter.v !== null;
 
       // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
       const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some((r) => r.state === 'READY');
-      const paintBest = () => {
-        const pool = filtered() ? shownGroups().flatMap(([, rs]) => rs) : sheet.routes;
-        const ready = pool.some((r) => r.state === 'READY');
-        if (exhausted()) {
-          const wait = engine.retrySeconds(sheet.retryAt);
-          bestBtn.disabled = wait > 0;
-          bestBtn.classList.remove('waiting');
-          bestBtn.innerHTML = `${glyph('refresh', { size: 20 })}<span>${wait ? `أعد المحاولة بعد ${wait} ث` : 'أعد المحاولة'}</span>`;
-          return;
-        }
-        bestBtn.disabled = sheet.busy || (!ready && (sheet.done || filtered()));
-        const label = sheet.busy ? 'نجهّز أفضل سيرفر…' : filter.q !== 'all' ? `شغّل أفضل ${filter.q}` : 'شغّل الأفضل';
-        bestBtn.innerHTML = `${glyph('play', { size: 20, filled: true })}<span>${label}</span>`;
-        bestBtn.classList.toggle('waiting', !ready && !sheet.done);
-      };
-
-      const chip = (text, on, onClick) => {
-        const c = button(`an-pick-chip${on ? ' on' : ''}`, '', () => {
-          sheet.touched = true;
-          onClick();
-        });
-        c.textContent = text;
-        c.setAttribute('aria-pressed', String(on));
-        return c;
-      };
-
-      const paintFilters = () => {
-        filters.replaceChildren();
-        const qualities = engine.groupRoutes(visible()).map(([g]) => g).filter((g) => g !== 'غير متاح');
-        if (filter.q !== 'all' && !qualities.includes(filter.q)) filter.q = 'all';
-        if (qualities.length > 1) {
-          const row = el('div', 'an-pick-row');
-          row.append(chip('الكل', filter.q === 'all', () => ((filter.q = 'all'), paint())));
-          for (const g of qualities) row.append(chip(g, filter.q === g, () => ((filter.q = g), paint())));
-          filters.append(row);
-        }
-        const dub = sheet.routes.some((r) => r.variant === 'DUB');
-        const sub = sheet.routes.some((r) => r.variant !== 'DUB');
-        if (dub && sub) {
-          const row = el('div', 'an-pick-row');
-          row.append(chip('مترجم', filter.v === 'SUB', () => ((filter.v = filter.v === 'SUB' ? null : 'SUB'), paint())));
-          row.append(chip('مدبلج', filter.v === 'DUB', () => ((filter.v = filter.v === 'DUB' ? null : 'DUB'), paint())));
-          filters.append(row);
-        }
-      };
-
-      const paint = () => {
-        paintQueued = false;
-        if (sheet.closed) return;
-        paintBest();
-        // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some((r) => r.state === 'READY')) {
-          sheet.autoTogether = false;
-          queueMicrotask(() => bestBtn.onclick());
-        }
-        paintFilters();
-        const ready = sheet.routes.filter((r) => r.state === 'READY').length;
-        if (!sheet.session) status.innerHTML = `<i class="an-sources-spin"></i><span>${sheet.searchError ? 'تعذّر البحث في المصادر — أعد المحاولة' : sheet.work === false ? 'غير متوفر في المصادر العربية حاليًا' : 'نبحث في المصادر العربية…'}</span>`;
-        else if (!sheet.done && ready) status.textContent = `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} · البقية تصل بالخلفية`;
-        else if (!sheet.done) status.innerHTML = '<i class="an-sources-spin"></i><span>نجهّز أول سيرفر…</span>';
-        else status.textContent = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن';
-        if (sheet.work === false || sheet.searchError) status.querySelector('i')?.remove();
-        const sections = [];
-        for (const [name, routes] of shownGroups()) {
-          let group = groupNodes.get(name);
-          if (!group) {
-            group = el('section', 'an-srv-group');
-            group.append(el('h4', 'an-srv-q', name), el('div', 'an-srv-grid'));
-            groupNodes.set(name, group);
-          }
-          reconcile(group.lastElementChild, routes.map(tile));
-          sections.push(group);
-        }
-        reconcile(list, sections);
-      };
-      const queuePaint = () => {
-        if (paintQueued) return;
-        paintQueued = true;
-        requestAnimationFrame(paint);
-      };
 
       const playRoute = async (r) => {
         if (sheet.busy) return;
+        sheet.touched = true;
         sheet.busy = true;
-        paintBest();
+        paint();
         try {
           const candidate = await engine.pick(sheet.session, r.id);
           if (!candidate) {
@@ -1436,51 +1390,11 @@ export function createAnime(deps) {
         }
       };
 
-      const tile = (r) => {
-        let b = routeNodes.get(r.id);
-        if (b) {
-          b.className = `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`;
-          b.disabled = r.state === 'RESOLVING';
-          b.querySelector('.an-srv-state span').textContent = STATE_AR[r.state] ?? '';
-          b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
-          b.onclick = () => ((sheet.touched = true), r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
-          return b;
-        }
-        b = el('button', `an-srv an-srv--${r.state.toLowerCase()}${r.code === prefer ? ' an-srv--prefer' : ''}`);
-        b.type = 'button';
-        b.disabled = r.state === 'RESOLVING';
-        const top = el('span', 'an-srv-top');
-        const code = el('b', 'an-srv-code', r.code);
-        code.dir = 'ltr';
-        top.append(code);
-        if (r.variant === 'DUB') top.append(el('span', 'an-srv-tag', 'مدبلج'));
-        else if (r.code === prefer) top.append(el('span', 'an-srv-tag', 'السابق'));
-        const line = el('span', 'an-srv-state');
-        line.append(el('i', 'an-srv-dot'), el('span', null, STATE_AR[r.state] ?? ''));
-        b.append(top, line);
-        b.setAttribute('aria-label', `سيرفر ${r.code}، ${STATE_AR[r.state] ?? ''}${r.reason ? `، ${r.reason}` : ''}`);
-        b.onclick = () => ((sheet.touched = true), r.state === 'READY' ? void playRoute(r) : deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000));
-        routeNodes.set(r.id, b);
-        return b;
-      };
-
-      bestBtn.onclick = async () => {
-        if (exhausted()) {
-          if (engine.retrySeconds(sheet.retryAt)) return;
-          deps.closeSheet();
-          playEpisode(m, n, { position });
-          return;
-        }
+      // بلا جاهز بعد: «شغّل أول سيرفر يجهز» ينتظره المحرك ويزن الموثوقية وسيرفرك السابق
+      const playBest = async () => {
         if (sheet.busy || !sheet.session) return;
-        // فلتر مختار (جودة/لغة): الأفضل داخله — السيرفر المفضّل أولًا ثم الأول الجاهز
-        if (filtered()) {
-          const pool = shownGroups().flatMap(([, rs]) => rs).filter((r) => r.state === 'READY');
-          const pick = pool.find((r) => r.code === prefer) ?? pool[0];
-          if (pick) void playRoute(pick);
-          return;
-        }
         sheet.busy = true;
-        paintBest();
+        paint();
         try {
           const out = await engine.best(sheet.session, prefer);
           if (sheet.closed) return;
@@ -1497,6 +1411,65 @@ export function createAnime(deps) {
         }
       };
 
+      const ui = createServerSheet(body, {
+        el,
+        kicker: `الحلقة ${n}`,
+        title: m.title,
+        hero,
+        extraFoot,
+        prefer,
+        // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة
+        directLang: 'مترجم عربي',
+        sourceName: (r) => sourceName(r.sourceId),
+        onBack: () => deps.closeSheet(),
+        onPick: (r) => playRoute(r),
+        onBest: () => playBest(),
+        onRetry: () => {
+          if (engine.retrySeconds(sheet.retryAt)) return;
+          deps.closeSheet();
+          playEpisode(m, n, { position });
+        },
+        onUnavailable: (r) => deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000),
+      });
+      const status = ui.status;
+
+      const statusLine = () => {
+        const ready = sheet.routes.filter((r) => r.state === 'READY').length;
+        const total = sheet.routes.length;
+        if (!sheet.session) {
+          if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
+          if (sheet.work === false) return { text: 'غير متوفر في المصادر العربية حاليًا' };
+          return { text: 'نبحث في المصادر العربية والإضافات…', spin: true };
+        }
+        if (!sheet.done && ready) return { text: `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} من ${total} · البقية تصل`, spin: true };
+        if (!sheet.done) return { text: 'نجهّز السيرفرات…', spin: true };
+        return { text: ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${total > ready ? ` من ${total}` : ''}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن' };
+      };
+
+      const paint = () => {
+        paintQueued = false;
+        if (sheet.closed) return;
+        ui.update({
+          routes: sheet.routes,
+          busy: sheet.busy,
+          settled: sheet.done,
+          missing: sheet.work === false,
+          error: Boolean(sheet.searchError),
+          status: statusLine(),
+          retry: exhausted() ? { wait: engine.retrySeconds(sheet.retryAt) } : null,
+        });
+        // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
+        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some((r) => r.state === 'READY')) {
+          sheet.autoTogether = false;
+          queueMicrotask(() => ui.best.onclick());
+        }
+      };
+      const queuePaint = () => {
+        if (paintQueued) return;
+        paintQueued = true;
+        requestAnimationFrame(paint);
+      };
+
       const onWork = (id, work) => {
         if (sheet.closed || id !== m.id) return;
         sheet.work = work;
@@ -1507,7 +1480,7 @@ export function createAnime(deps) {
       off.push(() => workListeners.delete(onWork));
       paint();
       const cooldownTimer = setInterval(() => {
-        if (!sheet.closed && exhausted()) paintBest();
+        if (!sheet.closed && exhausted()) paint();
       }, 1000);
       void (async () => {
         const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
@@ -1660,7 +1633,7 @@ export function createAnime(deps) {
     more.hidden = true;
     box.append(form, chips, grid, more);
     host.replaceChildren(box);
-    requestAnimationFrame(() => chips.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }));
+    requestAnimationFrame(() => centerInStrip(chips, chips.querySelector('.active')));
   }
 
   async function loadDiscover({ append = false } = {}) {

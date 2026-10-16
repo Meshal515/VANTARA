@@ -31,7 +31,9 @@ class TorrentRequest(infoHash: String, val fileIdx: Int? = null, sources: List<S
         trackers = (sources.take(100).filter { it.startsWith("tracker:") }.map { it.removePrefix("tracker:") } + fields.filter { it.first == "tr" }.map { it.second })
             .filter(::publicTracker).distinct().take(32)
     }
-    fun magnetUri(): String = "magnet:?xt=urn:btih:$infoHash" + trackers.joinToString("") { "&tr=" + URLEncoder.encode(it, "UTF-8") }
+    /** متتبّعات الإضافة أولًا ثم قائمة عامة ثابتة: إضافة بلا متتبّعات لا تُترك لـDHT وحده. */
+    val announce: List<String> get() = TorrentPolicy.mergeTrackers(trackers)
+    fun magnetUri(): String = "magnet:?xt=urn:btih:$infoHash" + announce.joinToString("") { "&tr=" + URLEncoder.encode(it, "UTF-8") }
     private fun publicTracker(value: String): Boolean = runCatching {
         val uri = URI(value)
         val host = uri.host?.lowercase(Locale.ROOT)?.removeSurrounding("[", "]") ?: return false
@@ -78,6 +80,47 @@ data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
 /** Pure bounds/selection rules, shared by native loader and regression tests. */
 object TorrentPolicy {
+    /**
+     * متتبّعات عامة معروفة وثابتة (مجالات عامة لا عناوين رقمية): تمرّ بفلتر الشبكة نفسه
+     * (apply_ip_filter_to_trackers + ssrf_mitigation) مثل أي متتبّع من الإضافة.
+     */
+    val PUBLIC_TRACKERS = listOf(
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.demonii.com:1337/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://explodie.org:6969/announce",
+        "udp://tracker.theoks.net:6969/announce",
+        "udp://opentracker.io:6969/announce",
+        "udp://tracker.dler.org:6969/announce",
+        "udp://tracker-udp.gbitt.info:80/announce",
+        // شبكات جوّال تحجب UDP: نسخة HTTP/HTTPS
+        "http://tracker.opentrackr.org:1337/announce",
+        "https://tracker.gbitt.info:443/announce",
+    )
+    const val MAX_ANNOUNCE = 48
+    fun mergeTrackers(addon: List<String>, defaults: List<String> = PUBLIC_TRACKERS): List<String> {
+        val seen = HashSet<String>()
+        return (addon + defaults).filter { seen.add(it.trim().trimEnd('/').lowercase(Locale.ROOT)) }.take(MAX_ANNOUNCE)
+    }
+
+    /**
+     * مواعيد القطع (ms) لـset_piece_deadline: القطعة التي يقرؤها المشغّل الآن أولًا، ثم ما بقي من
+     * طرفي الملف (فهرس MP4/MKV الذي يقفز إليه المستخرج قبل أول إطار)، ثم القطع التالية بتدرّج
+     * يتسع — 12 قطعة بمواعيد متقاربة كانت تقسم السرعة عليها كلها فتتأخر القطعة الأولى.
+     */
+    fun deadlines(window: List<Int>, pendingEdges: List<Int> = emptyList()): List<Pair<Int, Int>> {
+        val out = ArrayList<Pair<Int, Int>>(window.size + pendingEdges.size)
+        val seen = HashSet<Int>()
+        window.firstOrNull()?.let { out += it to 0; seen += it }
+        for (piece in pendingEdges) if (seen.add(piece)) out += piece to 250 * out.size
+        val base = 250 * out.size
+        window.drop(1).forEachIndexed { i, piece ->
+            if (seen.add(piece)) out += piece to base + if (i < 3) i * 250 else 750 + (i - 2) * 750
+        }
+        return out
+    }
     private val video = Regex("(?i).*\\.(mkv|mp4|webm|avi|mov|m4v|ts)$")
     private fun playable(file: TorrentFile) = file.size > 0 && file.offset >= 0 && video.matches(file.path) &&
         !file.path.startsWith('/') && !file.path.contains('\\') && !file.path.contains('\u0000') &&
@@ -107,6 +150,27 @@ object TorrentPolicy {
         val last = ((Math.addExact(file.offset, file.size) - 1) / pieceLength).toInt()
         return (first..minOf(last, first + count - 1)).toList()
     }
+}
+
+/**
+ * تجهيز مسبق محدود حين تصل نتائج الإضافة (قبل أن يضغط المستخدم): بيانات التورنت (metadata)
+ * لأفضل خيارين، وطرفا الملف للأول فقط. السعة والمدة محدودتان في المحرّك.
+ */
+object TorrentPrefetch {
+    const val MAX = 2
+    /** طرفا الملف (3 قطع) لا يُجلبان مسبقًا إن تجاوزا هذا الحجم: بيانات الجوّال. */
+    const val MAX_EDGE_BYTES = 12L * 1024 * 1024
+    private val seedersMark = Regex("👤\\s*([0-9]{1,7})")
+    /** عدد المشاركين كما تكتبه Torrentio/Comet/MediaFusion في العنوان («👤 42»)؛ null إن غاب. */
+    fun seeders(label: String?): Int? = label?.let { seedersMark.find(it)?.groupValues?.get(1)?.toIntOrNull() }
+    /**
+     * من قائمة مرتّبة كما يرتّبها المشغّل (رابط، عنوان): أول خيارين ليس لهما 0 مشارك.
+     * الأول يجلب طرفي الملف أيضًا، إلا في تجهيز الحلقة التالية (بيانات فقط، لا يزاحم ما يُشاهَد).
+     */
+    fun pick(ranked: List<Pair<String, String?>>, background: Boolean = false, limit: Int = MAX): List<Pair<String, Boolean>> =
+        ranked.filter { seeders(it.second) != 0 }.distinctBy { it.first }.take(limit)
+            .mapIndexed { index, (url, _) -> url to (index == 0 && !background) }
+    fun edgesFit(pieceLength: Int, pieces: Int): Boolean = pieceLength > 0 && pieceLength.toLong() * pieces <= MAX_EDGE_BYTES
 }
 
 /**

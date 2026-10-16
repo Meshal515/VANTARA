@@ -22,7 +22,8 @@ describe('server picker source labels', () => {
     const { routeSourceLabel } = await import('./cinema.js');
     const sourceId = 'addon|https://comet.elfhosted.com|comet.elfhosted.com';
     expect(routeSourceLabel({ sourceId, sourceName: 'Comet | ElfHosted' })).toBe('Comet | ElfHosted');
-    expect(routeSourceLabel({ sourceId })).toBe('إضافة');
+    // بلا اسم معلن: من مضيف الإضافة (comet.elfhosted.com ← Comet)، لا «إضافة» مبهمة
+    expect(routeSourceLabel({ sourceId })).toBe('Comet');
     expect(routeSourceLabel({ sourceId: 'arabseed' })).toBe('ArabSeed');
   });
 });
