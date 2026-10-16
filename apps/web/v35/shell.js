@@ -19,7 +19,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -54,7 +54,7 @@ import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
-import { blockKey } from '../lib/adult-filter.js';
+import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -348,6 +348,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   const me = () => sync.user?.userId;
+  setHiddenUser(me);
 
   // ترجمة الفصول مقدمًا: الطابور المحفوظ (lib/translate-jobs.js)، يُنشأ مبكرًا فكل من يسأله يجده
   const translationJobs = createJobRunner({ sync, engine, translatePage, readerQuiet, concurrency:24, lookahead:40, prepareConcurrency:2, native: { jobProgress, jobFinished, jobStop } });
@@ -701,6 +702,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
   }
+  /** «حذف العمل»: يختفي من كل القوائم والبحث وآخر التحديثات، ويبقى في أرشيف حسابك لإعادته. */
+  function deleteWork(work) {
+    const keys = [work._work?.key, ...(work._work?.keys ?? []), String(work.id)].filter(Boolean);
+    hideWork({ id: String(work.id), keys, title: titleOf(work), cover: work.coverUrl ?? work.cover ?? work._work?.thumbnailUrl ?? null });
+    for (const node of root.querySelectorAll('.work-card')) if (node._work && (String(node._work.id) === String(work.id) || keys.includes(node._work._work?.key))) node.remove();
+    toast('حُذف العمل — تلقاه في الإعدادات › أرشيف الأعمال المحذوفة');
+  }
   function openCardActions(work) {
     const ref = String(work.id);
     openSheet((body) => {
@@ -718,6 +726,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
           if (!inCollection('read_later', ref)) { sync.enqueue('readLater.set', { ...descriptorOf(work), member: true }); toast('في «أقرأ لاحقًا»'); }
           else toast('العمل في «أقرأ لاحقًا»');
         }, { pressed: inCollection('read_later', ref) }),
+        sheetItem('trash', 'حذف العمل', () => {
+          closeSheet();
+          deleteWork(work);
+        }, { danger: true }),
       );
     }, { tone: 'manga' });
   }
@@ -2655,6 +2667,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
           toast(member ? 'في «المكتمل»' : 'أزيل من «المكتمل»');
         }, { pressed: inCollection('completed', String(w.id)) }),
       );
+      body.append(sheetItem('trash', 'حذف العمل', () => {
+        closeSheet();
+        deleteWork(w);
+        goBack();
+      }, { danger: true }));
       if (deps.report) {
         body.append(
           sheetItem('flag', 'بلّغ عن مشكلة في العمل', () => {
@@ -3232,8 +3249,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
     const snapshot = createFeedSnapshot();
+    // حارس أخير في البحث: عمل بلا نسخة عربية واحدة، أو للكبار، لا يظهر مهما كان مساره
+    const arabicOnly = (items) => items.filter((w) => !w._work || ((w._work.editions ?? []).some((e) => !isFiller(e.sourceId) && (!String(e.sourceId).includes('#') || /\.ar\./.test(String(e.sourceId)))) && !isAdult(w._work)));
     const paintSnapshot = (items) => {
-      renderGrid(grid, snapshot.accept(items));
+      renderGrid(grid, snapshot.accept(arabicOnly(items)));
       let refresh = grid.parentNode?.querySelector('.search-refresh');
       if (snapshot.pending && !refresh) {
         refresh = el('button', 'feed-refresh search-refresh');
@@ -4366,6 +4385,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
 
+  function openHiddenArchive() {
+    openSheet((body) => {
+      const paint = () => {
+        body.replaceChildren(el('h3', null, 'أرشيف الأعمال المحذوفة'));
+        const list = hiddenWorks();
+        if (!list.length) { body.append(el('p', 'settings-note', 'ما حذفت أي عمل.')); return; }
+        for (const h of list) {
+          const line = el('div', 'hidden-work');
+          line.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)';
+          if (h.cover) { const img = el('img'); img.src = h.cover; img.alt = ''; img.style.cssText = 'width:44px;height:62px;border-radius:8px;object-fit:cover;flex:none'; line.append(img); }
+          const t = el('strong', null, h.title || 'عمل'); t.dir = 'auto'; t.style.flex = '1';
+          const back = el('button', 'btn btn-secondary', 'إعادة العمل'); back.type = 'button';
+          back.onclick = () => { restoreWork(h.id); toast('رجع العمل'); paint(); renderSettings(); };
+          line.append(t, back);
+          body.append(line);
+        }
+      };
+      paint();
+    }, { tone: 'manga' });
+  }
   function renderSettings() {
     const body = q('settingsBody');
     body.replaceChildren();
@@ -4572,6 +4611,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
       if (supports('translation')) renderTranslationSettings(group, row, toggle);
+      group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
