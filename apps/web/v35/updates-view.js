@@ -28,6 +28,9 @@ export function mergeTimelineEvents(visible, incoming, { enteredAt, now = Date.n
 }
 
 const mounted = new WeakMap();
+/** كم عملًا جديدًا تضيفه كل دفعة تحميل، وأقصى طلبات الدفعة الواحدة. */
+const PAGE_WORKS = 24;
+const MAX_ROUNDS = 6;
 
 /** «الآن»، «قبل دقيقتين»، «قبل 3 ساعات»، «أمس»… */
 export function agoAr(at, now = Date.now()) {
@@ -169,28 +172,39 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!state.events.length && state.done) list.replaceChildren(empty());
   };
 
+  // الأحداث تتجمّع: 40 فصلًا قد تكون ستة أعمال فقط (عمل نزل له 26 فصلًا). فالصفحة
+  // تُطلب حتى تمتلئ الشبكة بأعمال لا بأحداث، ولا تنتظر تمريرًا لم يعد مراقبه يطلق
+  const groups = () => groupEvents(state.events, canonical?.(state.events) ?? null).length;
+  const near = () => {
+    const box = more.getBoundingClientRect?.();
+    return !box || (box.top === 0 && box.bottom === 0) || box.top < (globalThis.innerHeight ?? 800) + 600;
+  };
   const load = async () => {
     if (state.loading || state.done) return;
     state.loading = true;
     refresh.disabled = true;
     if (!state.events.length) list.replaceChildren(...Array.from({ length: 6 }, () => el('div', 'up-skel')));
-    const page = await timeline(section, { before: state.next });
-    if (token !== state.token) return;
+    const target = groups() + PAGE_WORKS;
+    let failed = false;
+    for (let round = 0; round < MAX_ROUNDS && !state.done && groups() < target; round += 1) {
+      const page = await timeline(section, { before: state.next, limit: 100 });
+      if (token !== state.token) return;
+      if (!page) { failed = true; break; }
+      state.events = [...new Map([...state.events, ...page.events].map((e) => [e.id, e])).values()];
+      if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
+      state.next = page.next;
+      state.done = !page.next;
+      paint();
+    }
     state.loading = false;
-    if (!page) {
-      refresh.disabled = false;
-      if (!state.events.length) {
-        state.done = true;
-        list.replaceChildren(empty());
-      }
+    refresh.disabled = false;
+    if (failed && !state.events.length) {
+      state.done = true;
+      list.replaceChildren(empty());
       return;
     }
-    state.events = [...new Map([...state.events, ...page.events].map((e) => [e.id, e])).values()];
-    if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
-    state.next = page.next;
-    state.done = !page.next;
-    refresh.disabled = false;
-    paint();
+    // آخر القائمة ما زال ظاهرًا: المراقب لن يطلق ثانية لأن حالته لم تتغير
+    if (!failed && !state.done && host.isConnected && near()) queueMicrotask(() => void load());
   };
 
   // المزيد عند الاقتراب من آخر القائمة
@@ -223,6 +237,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
 
 /** أول N تحديثات (لشريط الرئيسية)، مجمّعة. */
 export async function latestGroups(section, n = 14, canonical = null) {
-  const page = await timeline(section, { limit: 40 });
+  // 40 حدثًا قد تكون عملين أو ثلاثة: الشريط يأخذ صفحة كاملة ليمتلئ
+  const page = await timeline(section, { limit: 100 });
   return page ? groupEvents(page.events, canonical?.(page.events) ?? null).slice(0, n) : null;
 }

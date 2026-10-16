@@ -265,6 +265,19 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
   return reply({ accepted: reports.length, created, baselined });
 }
 
+/**
+ * أعلى فصل لكل عمل مانجا (آخر 60 يومًا) كما رآه VANTARA من كل الأجهزة والجامعين. منه يعرف
+ * التطبيق الأعمال المكررة بأسماء متقاربة (apps/web/lib/manga-twins.js). الحساب على الجهاز: خطة
+ * الخادم المجانية لا تتسع لمقارنة 1500 عمل في كل طلب.
+ */
+export async function handleUpdatesTwins(env: UpdatesEnv, now: number): Promise<Response> {
+  const { results } = await env.DB.prepare(`SELECT work, max_number AS number FROM update_watermarks WHERE section = 'manga' AND updated_at > ? AND max_number >= 5`)
+    .bind(now - 60 * 86_400_000)
+    .all<{ work: string; number: number }>();
+  const works = (results ?? []).filter((r) => r.work.startsWith('ext:')).map((r) => [r.work.slice(4), r.number]);
+  return new Response(JSON.stringify({ works, at: now }), { headers: { 'content-type': 'application/json', 'cache-control': 'private, max-age=3600' } });
+}
+
 export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Response> {
   const section = url.searchParams.get('section');
   if (section !== 'manga' && section !== 'anime' && section !== 'cinema') return reply({ error: 'section' }, 400);

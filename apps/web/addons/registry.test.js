@@ -225,3 +225,9 @@ it("installs well beyond the old 100 limit, and a full storage rolls back with a
   expect(r.list()).toHaveLength(150);
   store.set = set;
 });
+it('opens the setup page beside the manifest on its own path, like Stremio, without the query token', async () => {
+ const store=createStore({indexedDB:null});const r=createAddonRegistry({store,transport:{json:async()=>raw('1.0.0')}});await r.ready;
+ const one=await r.install(await r.inspect('https://host.test/addons/subs/manifest.json?token=secret'));
+ // كان يفتح https://host.test/configure (جذر الموقع) فيعيد 404 لكل إضافة على مسار فرعي
+ expect(r.configurationUrl(one.key)).toBe('https://host.test/addons/subs/configure');
+});

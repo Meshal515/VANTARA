@@ -1,6 +1,7 @@
 /** Server-side release collectors. Publication dates come from providers, never the scan clock. */
 import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
 import { handleUpdatesObserve } from './updates.ts';
+import { MANGA_SITES, readSite, siteReport } from './manga-sites.ts';
 import type { Env } from './types.ts';
 
 const TEAMX = 'https://olympustaff.com';
@@ -46,11 +47,11 @@ export function teamxChapters(html: string, now: number) {
     .sort((a, b) => b.publishedAt - a.publishedAt).slice(0, 40);
 }
 
-async function observe(env: Env, works: Observation[], now: number) {
+async function observe(env: Env, works: Observation[], now: number, budget = 80) {
   if (!works.length) return;
   // Keep one invocation below D1 Free's query budget. Recent history wins;
   // retain a fair share of every work instead of one long history consuming it.
-  let remaining = 80;
+  let remaining = budget;
   const bounded = works.map(w => ({ ...w, units: [] as Observation['units'] }));
   for (let i = 0; remaining > 0 && works.some(w => i < w.units.length); i++) {
     for (let j = 0; j < works.length && remaining > 0; j++) {
@@ -203,9 +204,35 @@ async function movies(env: Env, now: number, fetchImpl: Fetcher) {
   return 0;
 }
 
+/** مواقع المانجا العربية بالتناوب: خمسة في دقيقتها (كل دقيقتين)، فيُقرأ كل موقع كل أربع دقائق تقريبًا. */
+const SITES_PER_RUN = 5;
+async function mangaSites(env: Env, now: number, fetchImpl: Fetcher, cursor: number) {
+  const picked = Array.from({ length: Math.min(SITES_PER_RUN, MANGA_SITES.length) }, (_, i) => MANGA_SITES[(cursor + i) % MANGA_SITES.length]!);
+  const results = await Promise.allSettled(picked.map((site) => readSite(site, fetchImpl, now)));
+  const reports: Observation[] = [];
+  const health: unknown[][] = [];
+  results.forEach((r, i) => {
+    const site = picked[i]!;
+    if (r.status === 'fulfilled') {
+      for (const w of r.value) { const rep = siteReport(site, w); if (rep) reports.push(rep as Observation); }
+      health.push([`site:${site.id}`, now, now, null]);
+    } else {
+      health.push([`site:${site.id}`, now, 0, String(r.reason instanceof Error ? r.reason.message : r.reason).slice(0, 200)]);
+    }
+  });
+  // دقيقته له وحده: 100 عمل (حدّ التقرير الواحد) بفصلين لكل عمل
+  await observe(env, reports, now, 200);
+  // حالة كل موقع على حدة: أيها يحجب الخادم ظاهر في collector_state بلا سجلات
+  await env.DB.prepare(`INSERT INTO collector_state (source, lease_until, last_attempt_at, last_success_at, last_error) VALUES ${health.map(() => '(?, 0, ?, ?, ?)').join(',')}
+    ON CONFLICT(source) DO UPDATE SET last_attempt_at = excluded.last_attempt_at, last_success_at = CASE WHEN excluded.last_success_at > 0 THEN excluded.last_success_at ELSE collector_state.last_success_at END, last_error = excluded.last_error`)
+    .bind(...health.flat()).run();
+  return (cursor + picked.length) % MANGA_SITES.length;
+}
+
 export async function collectTimelines(env: Env, { now = Date.now(), fetchImpl = fetch, scheduled = false }: { now?: number; fetchImpl?: Fetcher; scheduled?: boolean } = {}) {
-  const jobs = [['teamx', teamx], ['mangadex-ar', mangaDex], ['anilist', anime], ['cinemeta-series', cinema], ['cinemeta-movies', movies]] as const;
-  const slots = [['teamx', 'mangadex-ar'], ['anilist', 'cinemeta-series', 'cinemeta-movies']];
+  const jobs = [['teamx', teamx], ['mangadex-ar', mangaDex], ['manga-sites', mangaSites], ['anilist', anime], ['cinemeta-series', cinema], ['cinemeta-movies', movies]] as const;
+  // دقائق متناوبة تحت حدّ D1 المجاني (50 استعلامًا للتشغيل): مواقع المانجا وحدها دقيقةً بعد دقيقة
+  const slots = [['teamx', 'mangadex-ar'], ['manga-sites'], ['anilist', 'cinemeta-series', 'cinemeta-movies'], ['manga-sites']];
   const selected = scheduled ? jobs.filter(([source]) => slots[Math.floor(now / 60_000) % slots.length]!.includes(source)) : jobs;
   await Promise.all(selected.map(async ([source, run]) => {
     const claim = await env.DB.prepare(`INSERT INTO collector_state (source, lease_until, last_attempt_at) VALUES (?, ?, ?)

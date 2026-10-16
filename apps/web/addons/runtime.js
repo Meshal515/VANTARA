@@ -38,7 +38,9 @@ export function createAddonRuntime({
       coreAdapters: core,
       runtimeName,
     });
-  const ready = Promise.all([r.ready, registry.ready]).then(() => {
+  // المصادر المدمجة تُبنى من جسر المصادر، وتُعاد بعد تثبيت إضافة أو موقع (لا بعد إعادة التشغيل)
+  const syncCore = () => {
+    core.length = 0;
     core.push(
       ...r.registry.list().map((d) => ({
         key: `core|${d.id}`,
@@ -54,9 +56,11 @@ export function createAddonRuntime({
             : [...(typeof r.registry.source?.(d.id)?.latest === "function" ? ["home"] : []), "search", "details", "episodes", "streams"],
         permissions: { networkHosts: [d.domain] },
         bundled: true,
+        ...(d.user ? { user: true } : {}),
       })),
     );
-  });
+  };
+  const ready = Promise.all([r.ready, registry.ready]).then(syncCore);
   const cache = createAddonCache({ store });
   const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
@@ -485,6 +489,18 @@ export function createAddonRuntime({
     diagnose,
     pulse,
     runtimeName,
+    /** بعد تثبيت إضافة من مستودع أو إضافة موقع: تظهر بطاقتها فورًا. */
+    async reloadSources() {
+      await ready;
+      await r.reload?.();
+      syncCore();
+    },
+    /** آخر ما نزل في المصدر مباشرة (للمعاينة حين لا توجد لقطة مشتركة له بعد). */
+    async sourceLatest(sourceId) {
+      await ready;
+      const s = r.registry.source?.(sourceId);
+      return typeof s?.latest === "function" ? s.latest(1) : null;
+    },
     async enrichAnimeIdentity(identity, options) {
       await ready;
       const eligible = registry.list().some(m => !m.bundled && m.enabled && m.protocol === "stremio" && capabilitiesFor(m).includes("streams") && !(m.configuration?.required && !m.configuration.configured) && ["series", "movie"].some(type => matchesStremioResource(m, "stream", type, "kitsu:1:1")));

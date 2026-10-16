@@ -3695,7 +3695,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
       const latestOf = async (addon) => {
         if (!addon.bundled || !addon.sourceId) return [];
-        const value = (await shots).get(addon.sourceId);
+        // لقطة مشتركة أولًا؛ مصدر بلا لقطة (إضافة ثبّتها المستخدم للتو) يُسأل مباشرة
+        const value = (await shots).get(addon.sourceId) ?? await addons.sourceLatest?.(addon.sourceId).catch(() => null);
         const list = value?.mangas ?? value?.items ?? (Array.isArray(value) ? value : []);
         const out = [];
         for (const item of list) {
@@ -3704,7 +3705,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ registry: addons.registry, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: resetSources, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ registry: addons.registry, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }

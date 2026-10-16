@@ -43,38 +43,35 @@ export function getNativeAddonRuntime() {
       features.torrentSupported = features.addonStreams && measured?.torrentSupported === true;
     })(),
     (async () => {
+      // تعذّر تهيئة الأنمي لا يحرم المانجا من مصادرها
       if (plugins.AnimeEngine) {
-        const manifest = await (await fetch("/anime/sources.json")).json();
-        await plugins.AnimeEngine.configure({ manifest });
-        const out = await plugins.AnimeEngine.sources();
-        defs.push(
-          ...out.sources
-            .filter((s) => s.enabled)
-            .map((s) => ({
-              ...s,
-              label: s.name,
-              content: s.content ?? "anime",
-              version: 1,
-            })),
-        );
+        try {
+          const manifest = await (await fetch("/anime/sources.json")).json();
+          await plugins.AnimeEngine.configure({ manifest });
+        } catch { /* مصادر الأنمي غير متاحة الآن */ }
       }
-    })(),
-    (async () => {
-      if (plugins.ExtensionEngine) {
-        const out = await plugins.ExtensionEngine.sources();
-        defs.push(
-          ...out.sources
-            .filter((s) => !s.filler)
-            .map((s) => ({
-              ...s,
-              content: "manga",
-              domain: null,
-              version: s.version ?? 1,
-            })),
-        );
-      }
+      defs.push(...(await collect()));
     })(),
   ]);
+  /** مصادر الأنمي والمانجا كما يراها المحركان الآن (المشحونة + ما ثبّته المستخدم). */
+  async function collect() {
+    const out = [];
+    if (plugins.AnimeEngine) {
+      const anime = await plugins.AnimeEngine.sources().catch(() => ({ sources: [] }));
+      out.push(...anime.sources.filter((s) => s.enabled).map((s) => ({ ...s, label: s.name, content: s.content ?? "anime", version: 1, ...(String(s.id).startsWith("user-") ? { user: true } : {}) })));
+    }
+    if (plugins.ExtensionEngine) {
+      const manga = await plugins.ExtensionEngine.sources().catch(() => ({ sources: [] }));
+      // إضافات التكملة المشحونة مخفية؛ ما ثبّته المستخدم يظهر بأي لغة كان
+      out.push(...manga.sources.filter((s) => !s.filler || s.user).map((s) => ({ ...s, content: "manga", domain: null, version: s.version ?? 1 })));
+    }
+    return out;
+  }
+  async function reload() {
+    await ready;
+    const next = await collect();
+    defs.splice(0, defs.length, ...next);
+  }
   const def = (id) => defs.find((s) => s.id === id);
   const source = (id) => {
     const d = def(id);
@@ -113,6 +110,7 @@ export function getNativeAddonRuntime() {
       get addonStreams() { return features.addonStreams; },
       get torrentSupported() { return features.torrentSupported; },
       ready,
+      reload,
       registry: {
         list: (content) => defs.filter(d => !content || d.content === content),
         def,
