@@ -1,0 +1,46 @@
+[
+  {
+    "page": "p10_breaker1.jpg",
+    "sha256": "cf20784d9719f2e3a763fa8baf4d6f6093b4958f89252a3d6d713deef29805ef"
+  },
+  {
+    "page": "p11_breaker2.jpg",
+    "sha256": "ac8a2042e13f973c2aa8fe4e4255edf655ed8266904c257707f112e9c1cc92a9"
+  },
+  {
+    "page": "p1_magician.jpg",
+    "sha256": "5b6bbebdec854c7dda92f5f9b36ff8506ed4ee1fd794442c6f6598578b284870"
+  },
+  {
+    "page": "p2_skeleton.jpg",
+    "sha256": "51ab579a57074037f823d81c667c586984b890a827097987a9dd54b727e23b65"
+  },
+  {
+    "page": "p3_village.jpg",
+    "sha256": "896d159b1acb48c0fff0fac470c332bdb2cb68d2cbd66c07bb3f51d8d6cf4cde"
+  },
+  {
+    "page": "p4_stamina.jpg",
+    "sha256": "eb9897d8c0e6cf6cbd4b7fb0344c808aa2b191fab97d95191a1ff826deabf346"
+  },
+  {
+    "page": "p5_rain.jpg",
+    "sha256": "593d904524b3ed59996209d0d06890efdf059e55cbd4d675534d7ce181d01b42"
+  },
+  {
+    "page": "p6_smoke.jpg",
+    "sha256": "6827e8c33905c76ea53d59710a4c8c2c644a6a3a1d9823db6f8cb86b8eb65ba3"
+  },
+  {
+    "page": "p7_captions.jpg",
+    "sha256": "217ad9ef2f0ae9c941aa8499bd10361d268adfc055f469d2c600bc6ce5703c25"
+  },
+  {
+    "page": "p8_darklord.jpg",
+    "sha256": "60a51c2ebd1a8f658a5f5415ba49a94a1c57f48dbf8aa44b27336b5717c9f134"
+  },
+  {
+    "page": "p9_sfx.jpg",
+    "sha256": "f5867b8c1657c7e831ba92a8b547e3d59e10ae3fc5e637fd231dce515aaea1d1"
+  }
+]

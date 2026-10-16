@@ -134,6 +134,15 @@ describe('batch 2.5 stage pipeline', () => {
     expect(device.analyzePriorities()).toEqual(['high']);
   });
 
+  it('a fast-to-smart upgrade never bypasses the heavy resident window', async () => {
+    globalThis.fetch=async()=>new Response(new Uint8Array([31,32,33]));globalThis.localStorage=memory();installDevice();
+    const hash='75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322';
+    await writeKv(`tl4:${hash}`,{translated:0,incomplete:true,regions:[],engine:'luna:t4:fast'});
+    const result=await prepareTranslation('http://localhost/_capacitor_file_/cache/upgrade.jpg',{speed:'smart'},
+      {preAnalyze:true,deferAnalyze:true});
+    expect(result.bypass).toBe(false);expect(result.continuePrepare).toEqual(expect.any(Function));
+  });
+
   it('does not run Route concurrently with an active Heavy native stage', async () => {
     globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
     globalThis.localStorage = memory();

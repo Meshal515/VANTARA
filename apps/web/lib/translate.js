@@ -44,8 +44,10 @@ const OLD_CACHE_PREFIX = 'tl3:';
 const PAGE_CACHE_PREFIX = 'tl-page-v1:';
 export const PAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Local vision/whitening contract; bump when a prior image can be visually incomplete. */
-export const LOCAL_PIPELINE_VERSION = 3;
+export const LOCAL_PIPELINE_VERSION = 4;
 export const staleLocalPipeline = value => Number(value?.pipelineVersion ?? 0) < LOCAL_PIPELINE_VERSION;
+export const repairAttemptsOf = value => staleLocalPipeline(value) && Number(value?.repairVersion ?? 0) < LOCAL_PIPELINE_VERSION
+  ? 0 : Number(value?.tries ?? 0);
 
 export function pageCacheKey(meta) {
   const index = Number(meta?.pageIndex);
@@ -76,7 +78,7 @@ function writePageCache(hash, meta, value, { stampPipeline = true } = {}) {
 }
 /** بين محاولتي إكمال لنفس الصفحة: تعود للفصل بعد دقيقة فيُكمل الناقص فورًا. */
 export const RETRY_INCOMPLETE_MS = 60 * 1000;
-/** محاولات إكمال صفحة ناقصة قبل أن تُقبل كما هي. */
+/** محاولات محدودة لكل إصدار؛ الجزئية لا تُنشر عند استنفادها. */
 const MAX_REPAIRS = 3;
 /**
  * إصدار تعليمات Luna للمسار النصي — يطابق `TEXT_PROMPT_VERSION` في
@@ -105,6 +107,8 @@ export function uploadPlan(width, height, { maxWidth = MAX_UPLOAD_WIDTH, maxEdge
 }
 
 // ───────────────────────── الطابور ─────────────────────────
+let backgroundRepairActive = 0;
+const residentWindows = new Set();
 
 /**
  * طابور أولويات حيّ. الأولوية = رتبة الفصل (الحالي 0، التالي 1، السابق 2)
@@ -182,6 +186,7 @@ export function createQueue({
   const finish = (job) => {
     jobs.delete(job.key);
     for (const fn of listeners) fn(job);
+    pumpRepairs();
     pump();
   };
   const startJob = (job, bypass = false, focusedBurst = false) => {
@@ -227,11 +232,13 @@ export function createQueue({
   const continuationBuffered = () => [...jobs.values()].filter(j =>
     !j.started && (j.needsContinue || j.continuing)).length;
   const readyCount = () => [...jobs.values()].filter(j => j.ready && !j.started).length;
-  const analysisResidentCount = () => {
+  const ownResidentCount = () => {
     const readyAnalyzed = [...jobs.values()].filter(j =>
       !j.started && j.ready && !j.prepared?.bypass && Boolean(j.prepared?.analysis)).length;
     return running + focusedBurstRunning + continuing + readyAnalyzed;
   };
+  const analysisResidentCount = () => ownResidentCount() + backgroundRepairActive;
+  if (Number.isFinite(maxInFlight)) residentWindows.add({ count: ownResidentCount, limit: maxInFlight });
 
   const beginPrepare = (job) => {
     trace(job, 'prepare', { focused: isFocused(job) });
@@ -269,6 +276,7 @@ export function createQueue({
     }).finally(() => {
       preparing--;
       job.preparing = false;
+      pumpRepairs();
       pump();
     });
   };
@@ -315,6 +323,7 @@ export function createQueue({
     }).finally(() => {
       continuing--;
       job.continuing = false;
+      pumpRepairs();
       pump();
     });
   };
@@ -389,6 +398,7 @@ export function createQueue({
   };
 
   capacity?.subscribe?.(() => queueMicrotask(pump));
+  if (Number.isFinite(maxInFlight)) repairWaiters.add(() => queueMicrotask(pump));
 
   return {
     /** وظيفة واحدة لكل مفتاح؛ الإضافة الثانية ترجع نفس الوعد. */
@@ -439,6 +449,7 @@ export function createQueue({
         jobs.delete(job.key);
         job.resolve(null);
       }
+      pumpRepairs();
     },
   };
 }
@@ -601,7 +612,7 @@ async function translatePageNow(deps, src, meta) {
     // Do not occupy the foreground reader slot rebuilding a page we refuse to
     // show anyway. Keep the original source visible and run one deduplicated
     // repair in background; only a complete accepted result may notify/swap in.
-    if ((local.tries ?? 0) < MAX_REPAIRS) scheduleRepair(runDeps, src, hash, meta, local);
+    if (repairAttemptsOf(local) < MAX_REPAIRS || backgroundRepairs.has(hash)) scheduleRepair(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
       from: 'cache',
       cacheKind: found.kind,
@@ -630,7 +641,7 @@ async function translatePageNow(deps, src, meta) {
     // نتيجة وُجدت ببصمة البايتات تُفهرس أيضًا بعنوان الصفحة الثابت؛ بهذا إعادة فتح
     // الفصل لا تعتمد على أن CDN أعاد البايتات نفسها حرفيًا.
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
-    const due = (staleEngine(local.engine) || oldPipeline) && (local.tries ?? 0) < MAX_REPAIRS &&
+    const due = (staleEngine(local.engine) || oldPipeline) && repairAttemptsOf(local) < MAX_REPAIRS &&
       (oldPipeline || Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS);
     if (due) scheduleRepair(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
@@ -662,6 +673,26 @@ async function translatePageNow(deps, src, meta) {
 const inflight = new Map();
 /** إصلاح واحد فقط لكل بصمة ناقصة/محجورة؛ لا نكرر Native/Luna بسبب إعادة الرسم. */
 const backgroundRepairs = new Map();
+const repairQueue = [];
+const repairWaiters = new Set();
+function pumpRepairs() {
+  if (backgroundRepairActive || !repairQueue.length) return;
+  if ([...residentWindows].some(window => window.count() >= window.limit)) return;
+  const index = repairQueue.findIndex(task => interactiveOf(task.deps));
+  const selected = index >= 0 ? index : 0;
+  const task = repairQueue[selected];
+  const limits = runtimeCapacity.queueLimits({lane: interactiveOf(task.deps) ? 'reader' : 'job'});
+  if (limits.prepareConcurrency <= 0) return;
+  repairQueue.splice(selected, 1);
+  backgroundRepairActive = 1;
+  Promise.resolve().then(task.run).finally(() => {
+    backgroundRepairActive = 0;
+    task.finished();
+    for (const wake of repairWaiters) wake();
+    pumpRepairs();
+  });
+}
+runtimeCapacity.subscribe(() => queueMicrotask(pumpRepairs));
 function scheduleRepair(deps, src, hash, meta, local) {
   const existing = backgroundRepairs.get(hash);
   if (existing) {
@@ -669,11 +700,17 @@ function scheduleRepair(deps, src, hash, meta, local) {
     return existing.promise;
   }
   const listeners = new Set(deps.onRepaired ? [deps.onRepaired] : []);
-  const task = { listeners, promise: null };
-  task.promise = Promise.resolve().then(() => repairInBackground({ ...deps, via: 'repair', onRepaired: result => {
+  let finished;
+  const { analysis, prepared, route, ...repairDeps } = deps;
+  const task = { listeners, deps: repairDeps, promise: new Promise(resolve => { finished = resolve; }), finished: () => {
+    backgroundRepairs.delete(hash); finished();
+  } };
+  task.run = () => repairInBackground({ ...repairDeps, via: 'repair', onRepaired: result => {
     for (const notify of listeners) { try { notify(result); } catch { /* a reader may have closed */ } }
-  } }, src, hash, meta, local)).catch(() => {}).finally(() => backgroundRepairs.delete(hash));
+  } }, src, hash, meta, local).catch(() => {});
   backgroundRepairs.set(hash, task);
+  repairQueue.push(task);
+  queueMicrotask(pumpRepairs);
   return task.promise;
 }
 
@@ -756,8 +793,8 @@ async function translateOnce(deps, src, hash, meta, clock) {
     native: result.native,
     saved: persisted,
   }, saved.written);
-  // Partial output is useful immediately, but it is not "done": start one repair
-  // pass now so residual/coverage rescue can complete while the reader is still here.
+  // The partial candidate remains quarantined. Start one bounded repair so native
+  // residual/coverage rescue can complete while the reader is still here.
   if (persisted && result.incomplete && (value.tries ?? 0) < MAX_REPAIRS) {
     scheduleRepair(deps, src, hash, meta, saved.stored);
   }
@@ -786,18 +823,21 @@ async function translateFresh(deps, src, hash, meta, clock = stopwatch()) {
 }
 
 export function repairAttemptValue(local, tries, at = Date.now()) {
-  return { ...local, at, tries };
+  return { ...local, at, tries, repairVersion: LOCAL_PIPELINE_VERSION };
 }
 
 /** إكمال صفحة ناقصة بلا إخفاء الموجود. نجح بأفضل: يُحفظ ويُبلَّغ القارئ (`deps.onRepaired`). */
 async function repairInBackground(deps, src, hash, meta, local) {
-  const tries = (local.tries ?? 0) + 1;
+  const tries = repairAttemptsOf(local) + 1;
   // يُعلَّم أولًا فلا تبدأ محاولتان معًا لنفس الصفحة
   // Starting a retry is bookkeeping, not proof that old rendered pixels came
   // from the current vision pipeline. Preserve the old revision until success.
   await writePageCache(hash, meta, repairAttemptValue(local, tries), { stampPipeline: false }).written;
   const clock = stopwatch();
-  const result = await translateFresh({ ...deps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock)
+  // Re-enter native's cached/residual repair path. The previous JS analysis is
+  // immutable and cannot contain newly promoted residuals or recovered OCR.
+  const { analysis, prepared, route, ...retryDeps } = deps;
+  const result = await translateFresh({ ...retryDeps, waitMs: 0, fetchMs: 0, via: 'repair' }, src, hash, meta, clock)
     .catch(error => ({ error: classifyTranslationError(error) }));
   const admissible=canAcceptTranslationRepair(local, result);
   if (!admissible) {
@@ -821,7 +861,7 @@ async function repairInBackground(deps, src, hash, meta, local) {
 
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
 // الصفحة التي أمام القارئ فقط latency-sensitive. الصفحات القادمة تستفيد من
-// batching وتبقى أقل أولوية في Native؛ job/repair دائمًا background.
+// batching وتبقى أقل أولوية في Native؛ إصلاح الصفحة الظاهرة يحتفظ بأولويتها.
 const interactiveOf = deps => deps.via === 'job' ? false
   : deps.isInteractive?.() ?? deps.interactive ?? (deps.via !== 'repair');
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
@@ -1007,7 +1047,8 @@ export async function prepareTranslation(src, meta, options = {}) {
   const cached=cacheLookup.value;
   // run() quarantines partial/known-bad cache and schedules a deduplicated repair.
   // Preparing Heavy here would be discarded by that branch and repeated by repair.
-  if (cached && typeof cached.translated === 'number' && (cached.incomplete || Number(cached.pipelineVersion) === 2)) {
+  const upgraded = meta.speed !== 'fast' && cached?.engine?.endsWith(':fast');
+  if (cached && !upgraded && typeof cached.translated === 'number' && (cached.incomplete || Number(cached.pipelineVersion) === 2)) {
     return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
   }
   if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {

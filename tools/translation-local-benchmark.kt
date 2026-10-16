@@ -10,6 +10,7 @@ import javax.imageio.ImageIO
  */
 fun main(args: Array<String>) {
     val models=File(args[0]); val pages=File(args[1])
+    if (args.getOrNull(2)=="--engine-sweep") { engineSweep(models,pages);return }
     val detector=Detector(File(models,"rtdetr-v4-s_int8.onnx"))
     val glyphs=GlyphSegmenter(File(models,"comictextdetector-seg.onnx"))
     val bubbles=BubbleSegmenter(File(models,"yolov8m-seg-speech-bubble.onnx"))
@@ -53,4 +54,29 @@ fun main(args: Array<String>) {
             System.out.flush()
         }
     } finally {BubbleSegmenter.nativeRoi=true;ocr.close();bubbles.close();glyphs.close();detector.close()}
+}
+
+/** تشغيل أول + ثلاث إعادات على القطعة نفسها؛ لا تُغيَّر إعدادات الإنتاج. */
+private fun engineSweep(models:File,pages:File) {
+    val file=File(pages,"p1_magician.jpg");val bitmap=ImageIO.read(file)
+    val w=bitmap.width;val h=bitmap.height;val pixels=ByteArray(w*h*3)
+    for(y in 0 until h) for(x in 0 until w) {val c=bitmap.getRGB(x,y);val i=(y*w+x)*3;pixels[i]=(c shr 16).toByte();pixels[i+1]=(c shr 8).toByte();pixels[i+2]=c.toByte()}
+    val img=RgbImage(w,h,pixels);val detector=Detector(File(models,"rtdetr-v4-s_int8.onnx"))
+    val det=try {detector.detect(img)} finally {detector.close()}
+    val crop=HeavyRoi.plan(w,h,det.filter {it.label.startsWith("text") && it.score>=.35f},det.filter {it.label=="bubble"}).first()
+    System.err.println("ORT providers: ${ai.onnxruntime.OrtEnvironment.getAvailableProviders()}; page=${file.name}; crop=$crop; desktop JVM, not Android")
+    val cases=listOf(Ort.Engine("cpu-1",1,0,spin=false),Ort.Engine("cpu-2",2,0,spin=false),Ort.Engine("cpu-4",4,0,spin=false),Ort.Engine("cpu-4-spin",4,0,spin=true),Ort.CURRENT)
+    var reference:ByteArray?=null
+    println("engine\tloadMs\tfirstGlyphMs\twarmGlyphMs\tfirstBubbleMs\twarmBubbleMs\tmaxGlyphDiff\theapMb")
+    for(e in cases) {
+        val start=System.nanoTime();val gs=GlyphSegmenter(File(models,"comictextdetector-seg.onnx"),e);val bs=BubbleSegmenter(File(models,"yolov8m-seg-speech-bubble.onnx"),e)
+        val load=(System.nanoTime()-start)/1_000_000;val gt=ArrayList<Long>();val bt=ArrayList<Long>();var maxDiff=0
+        try {repeat(4) {
+            val g0=System.nanoTime();val mask=gs.maskRoi(img,listOf(crop));gt.add((System.nanoTime()-g0)/1_000_000)
+            val ref=reference ?: mask.data.also {reference=it};maxDiff=maxOf(maxDiff,mask.data.indices.count {mask.data[it]!=ref[it]})
+            val b0=System.nanoTime();bs.segmentRoi(img,listOf(crop));bt.add((System.nanoTime()-b0)/1_000_000)
+        }} finally {gs.close();bs.close()}
+        val heap=(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory())/(1024*1024)
+        println(listOf(e.name,load,gt.first(),gt.drop(1).joinToString(","),bt.first(),bt.drop(1).joinToString(","),maxDiff,heap).joinToString("\t"));System.out.flush()
+    }
 }
