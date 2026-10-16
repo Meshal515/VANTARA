@@ -14,6 +14,14 @@ const PROTOCOL = 'vantara.together';
 const BURST = 8;
 const BURST_GAP_MS = 150;
 const RESYNC_MS = 30_000;
+// الجوال يترك أحيانًا اتصالًا «نصف ميت» (تبدّل الشبكة، نوم لحظي): يبقى OPEN والرسائل
+// لا تصل، ولا يُغلق إلا بعد مهلة طويلة من النظام، فتضيع أوامر المضيف كلها. نكشفه نحن:
+// كل أمر يعود صداه من الخادم، فأمرٌ بلا أي رسالة بعده خلال ECHO_MS = اتصال ميت؛ ونبضة
+// كل HEARTBEAT_MS، وصمتٌ أطول من SILENCE_MS = اتصال ميت. فنعيد الاتصال فورًا.
+const HEARTBEAT_MS = 5_000;
+const SILENCE_MS = 12_000;
+const ECHO_MS = 2_500;
+const WATCH_MS = 500;
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
 
 /**
@@ -71,6 +79,8 @@ export function joinRoom({
   let info = null;
   let me = null;
   let status = 'connecting';
+  let lastRx = 0;
+  let awaitingSince = null;
 
   const emit = (event, payload) => {
     for (const fn of listeners.get(event) ?? []) try { fn(payload); } catch { /* مستمع معطوب لا يوقف الغرفة */ }
@@ -84,6 +94,33 @@ export function joinRoom({
     return true;
   };
   const ping = () => send({ t: 'ping', t0: now() });
+  // رسالة ننتظر لها ردًا (أمر، أو نبضة بعد رجوع الشبكة): إن لم يصل شيء خلال ECHO_MS فالاتصال ميت
+  const expectReply = () => { if (awaitingSince == null) awaitingSince = now(); };
+
+  function stale() {
+    const dead = ws;
+    if (!dead || closed) return;
+    dead.onopen = dead.onmessage = dead.onclose = null;
+    try { dead.close(4000, 'stale'); } catch { /* ميت أصلًا */ }
+    clearPending();
+    ws = null;
+    awaitingSince = null;
+    attempt++;
+    setStatus('reconnecting');
+    later(connect, 0);
+  }
+  function watch() {
+    if (ws?.readyState === 1) {
+      const t = now();
+      if ((awaitingSince != null && t - awaitingSince > ECHO_MS) || t - lastRx > SILENCE_MS) return stale();
+    }
+    later(watch, WATCH_MS);
+  }
+  // رجوع الشبكة أو الشاشة: نتحقق فورًا بدل انتظار النبضة
+  const probe = () => { if (ws?.readyState === 1 && ping()) expectReply(); };
+  const onVisible = () => { if (globalThis.document?.visibilityState !== 'hidden') probe(); };
+  globalThis.addEventListener?.('online', probe);
+  globalThis.document?.addEventListener?.('visibilitychange', onVisible);
 
   function connect() {
     if (closed) return;
@@ -95,12 +132,17 @@ export function joinRoom({
     socket.onopen = () => {
       if (closed || ws !== socket) return;
       attempt = 0;
+      lastRx = now();
+      awaitingSince = null;
       for (let i = 0; i < BURST; i++) later(ping, i * BURST_GAP_MS);
-      const resync = () => { ping(); later(resync, RESYNC_MS); };
-      later(resync, RESYNC_MS);
+      const beat = () => { if (ping()) expectReply(); later(beat, HEARTBEAT_MS); };
+      later(beat, HEARTBEAT_MS);
+      later(watch, WATCH_MS);
     };
     socket.onmessage = (event) => {
       if (closed || ws !== socket) return;
+      lastRx = now();
+      awaitingSince = null;
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       onMessage(msg);
@@ -194,7 +236,9 @@ export function joinRoom({
       return () => listeners.get(event)?.delete(fn);
     },
     command(op, { pos, media, countdownMs } = {}) {
-      return send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
+      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
+      if (sent) expectReply();
+      return sent;
     },
     report(r) {
       return send({ t: 'report', ...r });
@@ -206,6 +250,8 @@ export function joinRoom({
     close() {
       closed = true;
       clearPending();
+      globalThis.removeEventListener?.('online', probe);
+      globalThis.document?.removeEventListener?.('visibilitychange', onVisible);
       try { ws?.close(1000, 'left'); } catch { /* مغلق */ }
       setStatus('closed');
     },

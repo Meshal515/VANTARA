@@ -261,10 +261,11 @@ export function openSmartReader(deps, ctx) {
     if (!tg) return;
     const viewportTop = scroll.getBoundingClientRect().top;
     if (settings.mode !== 'paged') seg = segs.find(s => s.frames.at(-1)?.getBoundingClientRect().bottom > viewportTop) ?? segs.at(-1) ?? seg;
-    const position = settings.mode === 'paged' ? index : readingPosition(seg.frames, viewportTop);
-    // A skeleton has an invented aspect ratio. Its fraction maps to a completely
-    // different scene on a friend's decoded image, amplifying tiny scrolls.
-    if (settings.mode !== 'paged' && !seg.slots[Math.floor(position)]?.loaded) return;
+    let position = settings.mode === 'paged' ? index : readingPosition(seg.frames, viewportTop);
+    // صفحة لم تُحمَّل بعد ارتفاعها مُخترع، فكسرها يقع على مشهد آخر عند الضيف ويضخّم أصغر
+    // تمرير. لكن السكوت عنها يجمّد الضيف حتى تُحمَّل ثم يقفز: نبلّغ بداية الصفحة بالضبط
+    // (لا تختلف بين جهازين)، والكسر يعود حين تكتمل الصورة.
+    if (settings.mode !== 'paged' && !seg.slots[Math.floor(position)]?.loaded) position = Math.floor(position);
     tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index: position, pages: seg.slots.length, source: seg.row.sourceId ?? null });
   }
 

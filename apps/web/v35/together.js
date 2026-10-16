@@ -582,7 +582,26 @@ export function readerBridge(session, { seriesRef, onFollow }) {
   const ensureStarted = () => {
     if (!destroyed && room.isHost && current && room.timeline && !room.timeline.started) room.command('play', { pos: current.index });
   };
-  const offLive = room.on('welcome', () => { clearTimeout(welcomeTimer); welcomeTimer = setTimeout(ensureStarted, 0); });
+  // المضيف يرسل موضعه كما هو الآن (يحمّل الفصل إن تغيّر)
+  function push() {
+    timer = null;
+    if (destroyed || !current || !room.isHost || !synced()) return;
+    lastSent = Date.now();
+    const { chapter, label, index } = current;
+    if (room.timeline?.media?.key !== keyOf(chapter)) {
+      room.command('load', { media: { key: keyOf(chapter), kind: 'manga', label: label ?? `الفصل ${chapter}` }, pos: index });
+      room.command('play', { pos: index });
+    } else room.command('seek', { pos: index });
+  }
+  // بعد كل (إعادة) اتصال: ما مرّره المضيف أثناء الانقطاع ضاع، فيُعاد موضعه الحالي فورًا
+  // بدل أن يبقى الضيف متجمدًا حتى يمرّر المضيف مرة أخرى
+  const offLive = room.on('welcome', () => {
+    clearTimeout(welcomeTimer);
+    welcomeTimer = setTimeout(() => {
+      ensureStarted();
+      if (!destroyed && room.timeline?.started && current && (room.timeline.pos !== current.index || room.timeline.media?.key !== keyOf(current.chapter))) push();
+    }, 0);
+  });
 
   return {
     /** موضع قراءة مستمر. المضيف يحرّك الغرفة بحد إرسال كل 80ms. */
@@ -597,18 +616,8 @@ export function readerBridge(session, { seriesRef, onFollow }) {
       else trailing = setTimeout(() => { sentAt = Date.now(); report(); }, 1000 - (Date.now() - sentAt));
       // Only host scrolling drives the room: following scroll events cannot echo commands.
       if (!room.isHost || !synced()) return;
-      const send = () => {
-        timer = null;
-        if (!current || !room.isHost || !synced()) return;
-        lastSent = Date.now();
-        const { chapter, label, index } = current;
-        if (room.timeline?.media?.key !== keyOf(chapter)) {
-          room.command('load', { media: { key: keyOf(chapter), kind: 'manga', label: label ?? `الفصل ${chapter}` }, pos: index });
-          room.command('play', { pos: index });
-        } else room.command('seek', { pos: index });
-      };
-      if (changedChapter || Date.now() - lastSent >= 80) { clearTimeout(timer); send(); }
-      else if (!timer) timer = setTimeout(send, 80 - (Date.now() - lastSent));
+      if (changedChapter || Date.now() - lastSent >= 80) { clearTimeout(timer); push(); }
+      else if (!timer) timer = setTimeout(push, 80 - (Date.now() - lastSent));
     },
     /** أين يبدأ القارئ: صفحة المضيف إن كانت الغرفة متزامنة وبدأت، وإلا null (فصل الدعوة). */
     initial() {

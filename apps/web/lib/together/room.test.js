@@ -61,6 +61,52 @@ describe('Together room client', () => {
     expect(sockets).toHaveLength(2);
   });
 
+  it('a half-dead connection (OPEN but silent) is replaced as soon as a command gets no echo', () => {
+    const { room, sockets, run, tick } = harness();
+    sockets[0].open();
+    sockets[0].receive(welcome);
+    // الشبكة تموت بصمت: الاتصال يبقى OPEN والأوامر لا يصل لها صدى
+    expect(room.command('seek', { pos: 3.2 })).toBe(true);
+    tick(1_000); run(500);
+    expect(sockets).toHaveLength(1);
+    tick(2_000); run(500);
+    expect(room.status).toBe('reconnecting');
+    run(0);
+    expect(sockets).toHaveLength(2);
+    sockets[1].open();
+    sockets[1].receive(welcome);
+    expect(room.status).toBe('live');
+  });
+
+  it('a command answered by its state echo keeps the connection', () => {
+    const { room, sockets, run, tick } = harness();
+    sockets[0].open();
+    sockets[0].receive(welcome);
+    for (let i = 0; i < 10; i++) {
+      room.command('seek', { pos: i });
+      tick(100);
+      sockets[0].receive({ t: 'state', state: { ...welcome.state, seq: 5 + i, pos: i } });
+      tick(400); run(500);
+    }
+    expect(sockets).toHaveLength(1);
+    expect(room.status).toBe('live');
+  });
+
+  it('a guest that never sends commands still detects a dead connection from an unanswered heartbeat', () => {
+    const { room, sockets, run, tick } = harness();
+    sockets[0].open();
+    sockets[0].receive(welcome);
+    // نبضة يُرد عليها: الاتصال يبقى
+    for (let t = 0; t < 20_000; t += 500) {
+      tick(500); run(5_000);
+      if (sockets[0].sent.at(-1)?.t === 'ping') sockets[0].receive({ t: 'pong', t0: sockets[0].sent.at(-1).t0, ts: 9_000 });
+    }
+    expect(sockets).toHaveLength(1);
+    // الشبكة تموت بصمت: خلال نبضة + مهلة الرد على الأكثر
+    for (let t = 0; t < 8_000 && room.status === 'live'; t += 500) { tick(500); run(5_000); }
+    expect(room.status).toBe('reconnecting');
+  });
+
   it('a full or missing room is final: no reconnect loop', () => {
     for (const t of ['full', 'gone']) {
       const { room, sockets, run } = harness();
