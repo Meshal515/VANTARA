@@ -2,6 +2,7 @@ import { publicUrl } from "../addons/manifest.js";
 import { supportedCapabilities } from "../addons/assessment.js";
 import { glyphNode } from "./icons.js";
 import { pulseView } from "../addons/source-pulse.js";
+import { renderRepositories } from "./addons-repos.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -437,6 +438,9 @@ export function renderAddons({
   latestOf = null,
   /** يركّب غلاف عمل في حاوية (نفس أغلفة التطبيق: الكاش وترويسات المصدر). */
   mountCover = null,
+  /** مستودعات مصادر المانجا (التطبيق وحده): engine.repositories() أو null. */
+  repositories = null,
+  onSourcesChanged = () => {},
 }) {
   const root = node("div", "addon-hub addon-store");
   // إضافة أُعدّت وثُبّتت من صفحتها داخل التطبيق: تظهر في القائمة فورًا
@@ -525,6 +529,7 @@ export function renderAddons({
   // صفحة قسم (مانجا/أنمي/سينما): مصادر هذا القسم فقط، بلا شرائح الفلاتر
   filters.hidden = sectionHub;
   root.append(header, toolbar, filters, states);
+  if (repositories && (filter === "manga" || filter === "all")) root.append(renderRepositories({ repositories, onSourcesChanged }));
   const panel = node("details", "addon-import");
   // الاستيراد برابط/JSON/ملف: مخفي حتى يُطلب من زر «+» أو «تثبيت»
   panel.hidden = true;

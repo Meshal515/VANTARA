@@ -86,6 +86,8 @@ class ExtensionEnginePlugin : Plugin() {
 
     private val network by lazy { Injekt.get<NetworkHelper>() }
     private val loader by lazy { FileExtensionLoader(context) }
+    /** مستودعات المستخدم وإضافاته (UserExtensions.kt). */
+    private val userStore by lazy { UserExtensionStore(java.io.File(context.filesDir, "extensions/user-repos.json")) }
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override fun load() {
@@ -112,6 +114,7 @@ class ExtensionEnginePlugin : Plugin() {
             }
             // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
             for (filler in FILLER_SOURCES) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
+            for (ext in userStore.state.extensions) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
         }
     }
 
@@ -163,8 +166,173 @@ class ExtensionEnginePlugin : Plugin() {
                     .put("ready", loaded.containsKey(id)),
             )
         }
+        // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
+        for (ext in userStore.state.extensions) {
+            for (src in ext.sources) {
+                val id = "${ext.pkg}#${src.id}"
+                list.put(
+                    JSObject()
+                        .put("id", id)
+                        .put("label", src.name)
+                        .put("lib", ext.lib)
+                        .put("version", ext.versionName)
+                        .put("warning", if (ext.nsfw) "MIXED" else "SAFE")
+                        .put("names", JSArray(listOf(src.name)))
+                        .put("lang", src.lang)
+                        .put("filler", !src.lang.equals("ar", ignoreCase = true))
+                        .put("user", true)
+                        .put("repo", userStore.state.repos.firstOrNull { it.url == ext.repoUrl }?.name ?: "")
+                        .put("ready", loaded.containsKey(id)),
+                )
+            }
+        }
         call.resolve(JSObject().put("sources", list))
     }
+
+    // ───────────────────────── مستودعات المستخدم ─────────────────────────
+
+    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name)
+
+    @PluginMethod
+    fun repos(call: PluginCall) {
+        val st = userStore.state
+        call.resolve(
+            JSObject()
+                .put("repos", JSArray(st.repos.map { repoJson(it) }))
+                .put("installed", JSArray(st.extensions.map { JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl) })),
+        )
+    }
+
+    /** يضيف مستودعًا بعد قراءة repo.json (مفتاح التوقيع) وindex.min.json. */
+    @PluginMethod
+    fun addRepo(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                val meta = RepoIndex.parseMeta(fetchText("$base/repo.json"))
+                val count = RepoIndex.parseIndex(fetchText("$base/index.min.json")).size
+                val repo = UserRepo(base, meta.name, meta.fingerprint)
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
+                call.resolve(JSObject().put("repo", repoJson(repo)).put("count", count))
+            } catch (t: Throwable) {
+                call.reject(t.message ?: t.readable())
+            }
+        }
+    }
+
+    @PluginMethod
+    fun removeRepo(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                for (ext in userStore.state.extensions.filter { it.repoUrl == base }) forget(ext.pkg)
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
+                call.resolve()
+            } catch (t: Throwable) {
+                call.reject(t.message ?: t.readable())
+            }
+        }
+    }
+
+    /** إضافات المستودع كما يعلنها الآن، مع حالتها عندنا (مثبتة، تحديث، مدمجة، أنمي). */
+    @PluginMethod
+    fun repoIndex(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val list = JSArray()
+                for (ext in RepoIndex.parseIndex(fetchText("$base/index.min.json"))) {
+                    val mine = userStore.extension(ext.pkg)
+                    list.put(
+                        JSObject()
+                            .put("pkg", ext.pkg)
+                            .put("name", ext.name)
+                            .put("version", ext.version)
+                            .put("lang", ext.lang)
+                            .put("nsfw", ext.nsfw)
+                            .put("anime", ext.anime)
+                            .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
+                            .put("builtin", packageSpec(ext.pkg) != null)
+                            .put("installed", mine?.versionName)
+                            .put("update", mine != null && mine.versionName != ext.version)
+                            .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name })),
+                    )
+                }
+                call.resolve(JSObject().put("extensions", list))
+            } catch (t: Throwable) {
+                call.reject(t.message ?: t.readable())
+            }
+        }
+    }
+
+    /**
+     * تنزيل ⇒ التحقق من توقيع المستودع ⇒ تثبيت البصمة ⇒ تحميل تجريبي. لا يُحفظ شيء
+     * إن لم تُحمَّل الحزمة فعلًا وتُخرج مصادرها.
+     */
+    @PluginMethod
+    fun installExtension(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
+                val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
+                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
+                val ext = RepoIndex.parseIndex(fetchText("$base/index.min.json")).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
+                require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
+                val apkUrl = "$base/apk/${ext.apk}"
+                val bytes = fetchBytes(apkUrl, 30 * 1024 * 1024)
+                val probe = java.io.File(context.cacheDir, "ext-verify-$pkg.apk")
+                try {
+                    probe.writeBytes(bytes)
+                    require(repo.fingerprint in apkSignerFingerprints(context, probe)) { "توقيع الإضافة لا يطابق مفتاح المستودع؛ لم تُثبَّت" }
+                } finally { probe.delete() }
+                val visible = RepoIndex.visibleSources(ext)
+                val user = UserExtension(
+                    repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
+                    versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
+                    sources = visible.map { UserSource(it.id, it.name, it.lang) },
+                )
+                forget(pkg)
+                val all = when (val result = loader.load(user.spec(), bytes)) {
+                    is FileExtensionLoader.Result.Fail -> error("${ext.name}: ${result.stage} — ${result.reason}")
+                    is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
+                }
+                require(visible.any { v -> all.any { it.id.toString() == v.id } }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
+                packages[pkg] = all
+                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+                call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
+            } catch (t: Throwable) {
+                call.reject(t.message ?: t.readable())
+            }
+        }
+    }
+
+    @PluginMethod
+    fun uninstallExtension(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        if (userStore.extension(pkg) == null) return call.reject("ليست إضافة مثبتة من مستودع")
+        forget(pkg)
+        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+        call.resolve()
+    }
+
+    /** يُخرج الحزمة من الذاكرة ويحذف ملفها (للقراءة فقط، فيُفتح أولًا). */
+    private fun forget(pkg: String) {
+        packages.remove(pkg)
+        loaded.keys.removeAll { it.startsWith("$pkg#") }
+        java.io.File(context.filesDir, "extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+    }
+
+    private fun fetchBytes(url: String, limit: Int): ByteArray =
+        network.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
+            require(res.isSuccessful) { "تعذر الوصول (HTTP ${res.code})" }
+            val length = res.body.contentLength()
+            require(length <= limit) { "الملف أكبر من الحد" }
+            res.body.bytes().also { require(it.size <= limit) { "الملف أكبر من الحد" } }
+        }
+
+    private fun fetchText(url: String): String = String(fetchBytes(url, 8 * 1024 * 1024), Charsets.UTF_8)
 
     /** تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف. يُستدعى مرة، ثم يُخدَم من الذاكرة. */
     @PluginMethod
@@ -616,7 +784,7 @@ class ExtensionEnginePlugin : Plugin() {
         // خلف تحميل خمسة عشر مصدرًا آخر عند فتح التطبيق
         loaded[sourceId]?.let { return it }
         // القفل للحزمة لا للمعرّف: العربي والتكملة من حزمة واحدة يُفكّان مرة
-        val lock = loadLocks.getOrPut(splitSourceId(sourceId).first) { Mutex() }
+        val lock = loadLocks.getOrPut(splitSourceId(sourceId.substringBefore('#')).first) { Mutex() }
         return lock.withLock {
             loaded[sourceId]?.let { return@withLock it }
             loadSlots.withPermit { load(sourceId) }
@@ -631,6 +799,16 @@ class ExtensionEnginePlugin : Plugin() {
     private val loadSlots = kotlinx.coroutines.sync.Semaphore(4)
 
     private suspend fun load(sourceId: String): CatalogueSource {
+        // مصدر من مستودع المستخدم: pkg#sourceId، والبصمة ثُبّتت عند تثبيته
+        if ('#' in sourceId) {
+            val userPkg = sourceId.substringBefore('#')
+            val sid = sourceId.substringAfter('#')
+            val ext = userStore.extension(userPkg) ?: error("unknown sourceId: $sourceId")
+            val all = packages[userPkg] ?: loadPackage(ext.spec()).also { packages[userPkg] = it }
+            val source = all.firstOrNull { it.id.toString() == sid } ?: error("${ext.name}: المصدر غير موجود في الحزمة")
+            loaded[sourceId] = source
+            return source
+        }
         val (pkg, lang) = splitSourceId(sourceId)
         val spec = packageSpec(pkg) ?: error("unknown sourceId: $sourceId")
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
