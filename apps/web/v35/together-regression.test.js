@@ -119,3 +119,17 @@ it('hands Android the verified pending friend avatar before profile sync and pre
     ]);
   }
 });
+
+it('retains selected invitee photos during native handoff before WebSocket welcome', async () => {
+  const {document}=parseHTML('<html><body><div id="sheet"></div></body></html>');
+  vi.stubGlobal('document',document);
+  vi.stubGlobal('Capacitor',{isNativePlatform:()=>true});
+  const room=roomOf(); room.info=null;
+  const person={userId:'9e4b51d9-4ca0-4da2-9b1f-2205e67134ed',displayName:'منصور',avatarKey:'/avatars/man.webp'};
+  let cfg;
+  const hub=createTogether({sync:{enqueue:vi.fn()},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,createRoomImpl:async()=> 'ABCDEF',friends:()=>[person],avatarNode:()=>document.createElement('span'),toast:vi.fn(),openSheet:build=>build(document.getElementById('sheet')),closeSheet:vi.fn()});
+  hub.openInvite({seriesRef:'anime:42',kind:'anime',label:'episode 1'},{onStarted:()=>{cfg=hub.handOff('anime:42');}});
+  document.querySelector('[data-user]').click();
+  await document.querySelector('.tg-send').onclick();
+  expect(cfg.invitees).toEqual([person]);
+});

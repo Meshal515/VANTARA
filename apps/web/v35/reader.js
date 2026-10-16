@@ -228,7 +228,14 @@ export function openSmartReader(deps, ctx) {
   }
   const followResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
     if (followAnchor && followActive() && !followFrame) placeAt(follower.position(performance.now())?.pos ?? followAnchor.position);
+    // Loading an image changes the host's fractional anchor even without scrolling.
+    reportScroll();
   }) : null;
+  // اكتمال صورة يغيّر الموضع الكسري بلا تمرير: يُبلَّغ في الإطار التالي (والضيف يُعلن به جاهزيته)
+  function reportScroll() {
+    if (exited || !tg || !state.seg || scrollReportFrame) return;
+    scrollReportFrame = requestAnimationFrame(() => { scrollReportFrame = 0; lastScrollReport = performance.now(); if (state.seg) tgPage(state.seg, state.seg.current ?? 0); });
+  }
   function attachTogether(session) {
     if (tg || !session || session.media?.kind !== 'manga' || session.media.seriesRef !== ref) return;
     tg = readerBridge(session, {
@@ -255,6 +262,9 @@ export function openSmartReader(deps, ctx) {
     const viewportTop = scroll.getBoundingClientRect().top;
     if (settings.mode !== 'paged') seg = segs.find(s => s.frames.at(-1)?.getBoundingClientRect().bottom > viewportTop) ?? segs.at(-1) ?? seg;
     const position = settings.mode === 'paged' ? index : readingPosition(seg.frames, viewportTop);
+    // A skeleton has an invented aspect ratio. Its fraction maps to a completely
+    // different scene on a friend's decoded image, amplifying tiny scrolls.
+    if (settings.mode !== 'paged' && !seg.slots[Math.floor(position)]?.loaded) return;
     tg?.page({ chapter: Number(seg.row.number), label: chapterLabel(seg.row), index: position, pages: seg.slots.length, source: seg.row.sourceId ?? null });
   }
 
@@ -798,6 +808,7 @@ export function openSmartReader(deps, ctx) {
     slot.frame.replaceChildren(img);
     tickActive();
     slot.loaded = true;
+    reportScroll();
     tickActive();
     slot.src = src;
   }

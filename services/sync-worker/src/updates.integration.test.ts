@@ -239,7 +239,7 @@ it('two devices discovering the same chapter concurrently retain both source edi
   const e = env();
   await observe(e, [manga('ext:concurrent', [1], 'a'), manga('ext:concurrent', [1], 'b')], NOW);
   await Promise.all([observe(e, [manga('ext:concurrent', [2], 'a')], NOW + H), observe(e, [manga('ext:concurrent', [2], 'b')], NOW + H)]);
-  expect(((await list(e, 'section=manga')).events[0].sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b']);
+  expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b']);
   await Promise.all([observe(e, [manga('ext:concurrent', [2], 'c')], NOW + 2 * H), observe(e, [manga('ext:concurrent', [2], 'd')], NOW + 2 * H)]);
-  expect(((await list(e, 'section=manga')).events[0].sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b','c','d']);
+  expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b','c','d']);
 });
