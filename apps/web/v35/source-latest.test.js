@@ -18,3 +18,18 @@ it('reuses a source feed fetched by another device without calling its extension
   expect((await second('source.ar', fetchAgain)).mangas[0].title).toBe('عمل');
   expect(fetchAgain).not.toHaveBeenCalled();
 });
+
+it('recovers shared snapshot discovery after a temporary initial outage', async () => {
+  let online = false;
+  const sync = { latestSnapshots: async () => { if (!online) throw new Error('offline'); return { sources: [{ sourceId: 's', fetchedAt: 100, value: { mangas: [{ title: 'shared' }] } }] }; } };
+  const latest = createSourceLatest(sync, { now: () => 100 });
+  await latest('s', async () => ({ mangas: [{ title: 'fallback' }] }));
+  online = true;
+  expect((await latest('s', async () => ({ mangas: [{ title: 'fallback' }] }))).mangas[0].title).toBe('shared');
+});
+
+it('does not silently call an expired shared snapshot a successful refresh', async () => {
+  const sync = { latestSnapshots: async () => ({ sources: [{ sourceId: 's', fetchedAt: 1, value: { mangas: [] } }] }), claimLatest: async () => { throw new Error('sync offline'); } };
+  const latest = createSourceLatest(sync, { now: () => 100_000 });
+  await expect(latest('s', async () => { throw new Error('source offline'); })).rejects.toThrow('source offline');
+});

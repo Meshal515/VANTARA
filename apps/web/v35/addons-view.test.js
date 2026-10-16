@@ -190,6 +190,37 @@ it("configure opens only an HTTPS provider page in a new protected tab", () => {
   expect(link.rel).toContain("noopener");
   expect(view.querySelector("iframe")).toBeNull();
 });
+it("explains how to bring a provider's Stremio install link back into VANTARA beside configuration", () => {
+  setup();
+  const addon = row("Torrentio", {
+    bundled: false,
+    configuration: { required: true, configurable: true, configured: false },
+  });
+  const view = renderAddonDetails({
+    addon,
+    registry: { configurationUrl: () => "https://torrentio.test/configure" },
+  });
+  const help = view.querySelector(".addon-configure-help");
+  expect(help).not.toBeNull();
+  expect(help?.textContent).toContain("تثبيت في Stremio");
+  expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+  expect(help?.textContent).toContain("إضافة جديدة");
+  expect(help?.textContent).toContain("stremio://");
+  expect(help?.previousElementSibling).toBe(view.querySelector(".addon-actions"));
+});
+it("shows the same Stremio handoff instructions on discovery cards that open provider setup", () => {
+  setup();
+  const view = renderAddons({ registry: { list: () => [] } });
+  click(view, "استكشاف");
+  for (const card of view.querySelectorAll(".addon-card")) {
+    const help = card.querySelector(".addon-configure-help");
+    if (card.querySelector("[data-configure]")) {
+      expect(help).not.toBeNull();
+      expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+      expect(help?.textContent).toContain("stremio://");
+    } else expect(help).toBeNull();
+  }
+});
 it("keeps network permissions and diagnostics collapsed and shows supplied assessment", () => {
   setup();
   const addon = row("Addon", {
@@ -523,6 +554,64 @@ it('يعيد فحص المصدر المتعثر عند انتهاء المهلة
     await vi.advanceTimersByTimeAsync(120_000);
     expect(calls).toBe(2);
   } finally { vi.useRealTimers(); }
+});
+it('previews a configured return link beside setup and replaces saved settings without duplicates', async () => {
+  setup();
+  const {createAddonRegistry}=await import('../addons/registry.js');
+  const {createStore}=await import('../pwa/cache/store.js');
+  const store=createStore({indexedDB:null}),manifest={id:'org.demo',name:'Demo',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[],behaviorHints:{configurable:true}};
+  const registry=createAddonRegistry({store,transport:{json:async()=>manifest}});await registry.ready;
+  const addon=await registry.install(await registry.inspect('https://addon.test/manifest.json'));
+  await registry.enable(addon.key,false);
+  const view=renderAddonDetails({addon,registry});const input=view.querySelector('[data-configured-url]');
+  expect(input).not.toBeNull();input.value='stremio://addon.test/settings/manifest.json?token=private';
+  click(view,'معاينة رابط الإعداد');await tick();
+  expect((await store.get('state','addons.v1')).value[0].url).toBe('https://addon.test/manifest.json');
+  expect(view.textContent).not.toContain('private');
+  click(view,'حفظ الإعداد');await tick();
+  expect(registry.list()).toHaveLength(1);expect(registry.list()[0].enabled).toBe(false);
+  const again=createAddonRegistry({store,transport:{json:async()=>manifest}});await again.ready;
+  expect(again.list()[0].enabled).toBe(false);await again.enable(addon.key,true);
+  expect(again.connection(addon.key).manifestUrl).toBe('https://addon.test/settings/manifest.json?token=private');
+});
+it('cancels a configured-link preview and rejects a different addon identity',async()=>{
+ setup();let release;const install=vi.fn();
+ const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
+ const registry={configurationUrl:()=> 'https://addon.test/configure',inspect:()=>new Promise(resolve=>{release=resolve;}),install};
+ const view=renderAddonDetails({addon,registry});view.querySelector('[data-configured-url]').value='https://addon.test/configured/manifest.json';
+ click(view,'معاينة رابط الإعداد');view.close();release({manifest:{id:'org.demo',name:'Late'}});await tick();
+ expect(view.textContent).not.toContain('Late');expect([...view.querySelectorAll('button')].some(b=>b.textContent==='حفظ الإعداد')).toBe(false);
+ const other=renderAddonDetails({addon,registry:{...registry,inspect:async()=>({manifest:{id:'org.other',name:'Other'}})}});
+ other.querySelector('[data-configured-url]').value='https://addon.test/other/manifest.json';click(other,'معاينة رابط الإعداد');await tick();
+ expect(other.textContent).toContain('هوية الإضافة');expect(install).not.toHaveBeenCalled();
+});
+it('describes desktop automatic capture and browser or APK manual fallback honestly',()=>{
+ setup();const addon=row('Demo',{bundled:false,configuration:{configurable:true}});
+ const desktop=renderAddonDetails({addon,registry:{runtimeName:'desktop',configurationUrl:()=> 'https://addon.test/configure'}});
+ expect(desktop.querySelector('.addon-configure-help').textContent).toContain('معاينة داخل VANTARA');
+ for(const runtimeName of ['pwa','apk']){
+  const view=renderAddonDetails({addon,registry:{runtimeName,configurationUrl:()=> 'https://addon.test/configure'}});
+  expect(view.querySelector('.addon-configure-help').textContent).toContain('لا تضمن الخدمة العودة التلقائية');
+ }
+});
+it('allows correcting the configured link while a slow preview is pending',async()=>{
+ setup();let release;const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
+ const view=renderAddonDetails({addon,registry:{configurationUrl:()=> 'https://addon.test/configure',inspect:()=>new Promise(resolve=>{release=resolve;}),install:async()=>{}}});
+ const input=view.querySelector('[data-configured-url]');input.value='https://addon.test/old/manifest.json';click(view,'معاينة رابط الإعداد');
+ input.value='https://addon.test/new/manifest.json';input.dispatchEvent(new document.defaultView.Event('input'));
+ expect([...view.querySelectorAll('button')].find(b=>b.textContent==='معاينة رابط الإعداد').disabled).toBe(false);
+ release({manifest:{id:'org.demo',name:'Old'}});await tick();expect(view.textContent).not.toContain('Old');
+});
+it('reviews another host explicitly before replacing the configured addon without a duplicate',async()=>{
+ setup();const {createAddonRegistry}=await import('../addons/registry.js');const {createStore}=await import('../pwa/cache/store.js');
+ const manifest={id:'org.demo',name:'Demo',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[],behaviorHints:{configurable:true}};
+ const registry=createAddonRegistry({store:createStore({indexedDB:null}),transport:{json:async()=>manifest}});await registry.ready;
+ const addon=await registry.install(await registry.inspect('https://addon.test/manifest.json')),view=renderAddonDetails({addon,registry});
+ view.querySelector('[data-configured-url]').value='https://other.test/manifest.json';click(view,'معاينة رابط الإعداد');await tick();
+ expect(view.textContent).toContain('مضيف الإضافة');expect(view.textContent).toContain('other.test');expect(registry.list()).toHaveLength(1);
+ expect(registry.connection(addon.key).manifestUrl).toBe('https://addon.test/manifest.json');
+ click(view,'حفظ الإعداد');await tick();expect(registry.list()).toHaveLength(1);
+ expect(registry.connection(addon.key).manifestUrl).toBe('https://other.test/manifest.json');
 });
 
 it("on the phone, Install inside the configure page installs the configured addon here instead of opening Stremio", async () => {

@@ -110,6 +110,9 @@ jobs:
       - name: Repository safety invariants
         run: pnpm test:safety
 
+      - name: Validate stable release metadata and platform update boundaries
+        run: node --test tools/release-manifest-validation.test.mjs tools/unified-windows-manifest.test.mjs
+
       - name: Validate operational scripts
         run: node --check services/sync-worker/verify.mjs
 

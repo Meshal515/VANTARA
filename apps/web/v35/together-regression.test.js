@@ -82,6 +82,29 @@ it('renders profile avatars and +N only, and updates overflow when people leave'
   room.roster=room.roster.slice(0,2); room.emit('roster',room.roster); expect(strip.querySelectorAll('img')).toHaveLength(2); expect(strip.querySelector('.tg-more')).toBeNull();
   hub.leave();
 });
+it('never follows unrelated media or non-finite anchors',()=>{
+  const room=roomOf(),onFollow=vi.fn();const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow});
+  for(const update of [{media:{key:'anime:other#1',kind:'anime'},pos:40000,seq:2},{media:{key:'manga:solo#bad',kind:'manga'},pos:3,seq:3},{pos:NaN,seq:4}])room.emit('state',{state:{...room.timeline,...update},by:'host'});
+  expect(onFollow).not.toHaveBeenCalled();bridge.destroy();
+});
+it('cancels pending room startup when a reader is closed before welcome callback',()=>{
+  vi.useFakeTimers();const room=roomOf();room.isHost=true;room.timeline.started=false;
+  const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow:vi.fn()});bridge.page({chapter:1,index:0,pages:10});room.command.mockClear();
+  room.emit('welcome',{state:room.timeline});bridge.destroy();vi.runAllTimers();expect(room.command).not.toHaveBeenCalled();
+});
+
+it('a repeated room notification while watching opens the panel without navigating the player away',()=>{
+  const {document}=parseHTML('<html class="pwa-playing"><body><div id="player"></div></body></html>');
+  vi.stubGlobal('document',document);
+  const openMedia=vi.fn(),openSheet=vi.fn(),room=roomOf();
+  const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia,openSheet,toast:vi.fn()});
+  const row={media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',episode:1,key:'anime:42#1'}),mode:'sync'};
+  hub.joinByCode('ABCDEF',row);expect(openMedia).toHaveBeenCalledTimes(1);
+  hub.joinByCode('ABCDEF',row);
+  expect(openMedia).toHaveBeenCalledTimes(1);
+  expect(openSheet).toHaveBeenCalledTimes(1);
+  hub.leave();
+});
 it('hands Android the room screen art and the invitees with their pictures', async () => {
   vi.stubGlobal('Capacitor', {isNativePlatform:()=>true}); const room=roomOf();
   room.info = { mode: 'sync', invited: ['u2', 'u3'] };

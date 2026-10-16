@@ -1985,6 +1985,15 @@ async function checkUpdates({ force = false } = {}) {
       return null;
     }
   }
+  // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
+  if (globalThis.VantaraDesktopUpdates) {
+    const result = await globalThis.VantaraDesktopUpdates.check({ force });
+    if (force && !result.update) {
+      showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
+        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
+    }
+    return result.update ? { desktop: result.update } : null;
+  }
   const found = await findUpdate({ force });
   if (!found) return null;
   if (found.web) {

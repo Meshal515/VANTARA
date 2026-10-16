@@ -3200,12 +3200,18 @@ html,
   background: var(--surface-1);
 }
 .v35 .up-more {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 18px;
   min-height: 24px;
   padding: 12px 0 24px;
   text-align: center;
   font-size: 12px;
   color: var(--text-3);
 }
+.v35 .up-status { flex-basis: 100%; }
 @media (min-width: 700px) {
   .v35 .up-list {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

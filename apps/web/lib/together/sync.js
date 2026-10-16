@@ -91,13 +91,19 @@ export function createDriftController(options = {}) {
 
   const reset = () => { errors = []; correcting = false; over = 0; };
 
-  function step({ timeline, pos, at, buffering = false, canRate = true, bufferedAhead = 0, bufferedBehind = 0, offsetMs = 0 }) {
+  function step({ timeline, pos, at, buffering = false, canRate = true, bufferedAhead = 0, bufferedBehind = 0, offsetMs = 0, durationMs = null }) {
     if (!timeline || !Number.isFinite(pos) || !Number.isFinite(at)) return { playing: false, rate: 1, seekTo: null, error: null, reason: 'no-timeline' };
-    const target = targetAt(timeline, at, offsetMs);
+    const boundedTarget = t => Math.min(Number.isFinite(durationMs) && durationMs > 0 ? durationMs : Infinity, targetAt(timeline, t, offsetMs));
+    const target = boundedTarget(at);
     const e = pos - target;
+    // المتوقف للتحميل: لا سرعة ولا قفز الآن. الغرفة لا تنتظره، وهو يلحق بعد الجاهزية
+    if (buffering) {
+      reset();
+      return { playing: timeline.playing, rate: 1, seekTo: null, error: e, reason: 'buffering' };
+    }
     const hostCommand = lastSeq != null && timeline.seq !== lastSeq;
     lastSeq = timeline.seq;
-    const seekTarget = (cheap) => targetAt(timeline, at + (cheap || !timeline.playing ? 0 : loadMs), offsetMs);
+    const seekTarget = (cheap) => boundedTarget(at + (cheap || !timeline.playing ? 0 : loadMs));
 
     if (hostCommand) {
       reset();
@@ -105,11 +111,6 @@ export function createDriftController(options = {}) {
         cooldownUntil = at + k.COOLDOWN_MS;
         return { playing: timeline.playing, rate: 1, seekTo: seekTarget(cheapSeek(e, bufferedAhead, bufferedBehind)), error: e, reason: 'host-command' };
       }
-    }
-    // المتوقف للتحميل: لا سرعة ولا قفز الآن. الغرفة لا تنتظره، وهو يلحق بعد الجاهزية
-    if (buffering) {
-      reset();
-      return { playing: timeline.playing, rate: 1, seekTo: null, error: e, reason: 'buffering' };
     }
     if (!timeline.playing) {
       reset();

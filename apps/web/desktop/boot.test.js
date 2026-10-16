@@ -1,0 +1,47 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { parseHTML } from 'linkedom';
+import { installDesktopBridges, renderInstallPreview } from './boot.js';
+afterEach(() => vi.unstubAllGlobals());
+it('يركب جسر AnimeEngine وAddonFabric قبل التطبيق دون اختلاق Capacitor', async () => {
+  const callbacks = [];
+  const g = { VantaraDesktop: { platform: 'windows', requestResource: async () => ({}), startPlayback: async () => ({ started: true }), onEvent: fn => { callbacks.push(fn); return () => {}; } } };
+  const bridges = installDesktopBridges(g);
+  expect(bridges.AnimeEngine).toBeTruthy();
+  expect(bridges.AddonFabric.runtime).toBeTypeOf('function');
+  expect(g.Capacitor).toBeUndefined();
+  expect(g.VantaraWeb).toBeUndefined();
+  expect(installDesktopBridges({})).toBeNull();
+  expect(installDesktopBridges(g)).toBe(bridges);
+});
+it('يعرض preview من رابط التثبيت ولا يحفظ إلا بضغط المستخدم ولا يكشف الرابط المعد', async () => {
+  const { document } = parseHTML('<html><body></body></html>');
+  const saved = [];
+  const preview = { manifest: { name: 'Torrentio', capabilities: ['streams'], contentTypes: ['movie'], compatibility: { desktop: true } } };
+  const registry = { inspect: async () => preview, install: async item => { saved.push(item); return preview.manifest; } };
+  const panel = await renderInstallPreview({ document, registry, url: 'stremio://torrentio.test/secret/manifest.json?key=hidden' });
+  document.body.append(panel);
+  expect(saved).toEqual([]);
+  expect(panel.textContent).toContain('Torrentio');
+  expect(panel.textContent).not.toContain('secret');
+  expect(panel.innerHTML).not.toContain('hidden');
+  [...panel.querySelectorAll('button')].find(b => b.textContent === 'تثبيت الإضافة').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(saved).toEqual([preview]);
+});
+it('يعرض قياس السرب الحقيقي قبل ready ولا يخترع نسبة تحميل', () => {
+  const { document } = parseHTML('<html><body></body></html>');
+  const callbacks = [];
+  const g = { document, VantaraDesktop: { platform: 'windows', requestResource: async () => ({}), startPlayback: async () => ({ started: true }), onEvent: fn => { callbacks.push(fn); return () => {}; } } };
+  installDesktopBridges(g);
+  const event = payload => callbacks.forEach(fn => fn(payload));
+  event({ type: 'playback/preparing', session: 's' });
+  event({ type: 'playback/progress', session: 's', downloadSpeed: 2097152, peers: 3, position: 0, duration: 0 });
+  const status = document.querySelector('.desktop-playback-status');
+  expect(status.hidden).toBe(false);
+  expect(status.textContent).toContain('2.00');
+  expect(status.textContent).toContain('3');
+  expect(status.textContent).not.toContain('%');
+  event({ type: 'playback/ready', session: 's' });
+  event({ type: 'playback/progress', session: 's', position: 1000, duration: 10000 });
+  expect(status.hidden).toBe(true);
+});

@@ -10,6 +10,8 @@ import { connectUpdates } from '../lib/update-engine.js';
 it('keeps loading pages until the grid has many works, even when one work floods a page', async () => {
   const { document } = parseHTML('<html><body></body></html>');
   globalThis.document = document;
+  // آخر القائمة ظاهر دائمًا: المراقب يبلّغ مرة كما في المتصفح، ولا يطلق ثانية
+  globalThis.IntersectionObserver = class { constructor(cb) { this.cb = cb; } observe() { this.cb([{ isIntersecting: true }]); } disconnect() {} };
   const NOW = Date.now();
   // 300 حدث: كل عمل له 30 فصلًا متتالية، فصفحة 100 حدث = 3–4 أعمال فقط
   const all = Array.from({ length: 300 }, (_, i) => ({

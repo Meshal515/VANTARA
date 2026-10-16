@@ -15,10 +15,40 @@ const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
 const MAX_BATCH = 20;
 const MAX_BATCH_UNITS = 200;
+const STORAGE_KEY = 'vantara.update-reports.v1';
+const MAX_QUEUE_WORKS = 1000;
+const MAX_QUEUE_UNITS = 50_000;
+const MAX_STORAGE_BYTES = 2_000_000;
 
 let transport = null;
 const queue = new Map();
 let timer = null;
+let inFlight = null;
+let dropped = 0;
+let storageFailed = false;
+
+const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
+const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
+const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
+
+function persist() {
+  try {
+    const value = JSON.stringify([...queue.values()]);
+    if (value.length > MAX_STORAGE_BYTES) { storageFailed = true; return; }
+    globalThis.localStorage?.setItem(STORAGE_KEY, value);
+    storageFailed = !globalThis.localStorage;
+  } catch { storageFailed = true; }
+}
+try {
+  const rows = JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? '[]');
+  if (Array.isArray(rows)) for (const row of rows.slice(0, MAX_QUEUE_WORKS)) {
+    if (row?.work && row?.title && Array.isArray(row.units)) queue.set(keyOf(row), row);
+  }
+} catch { storageFailed = true; }
+
+export function updateReportStatus() {
+  return { pendingWorks: queue.size, pendingUnits: [...queue.values()].reduce((n, w) => n + w.units.length, 0), dropped, storageFailed, sending: Boolean(inFlight) };
+}
 
 /** `send(path, {method, body})` → `{status, body}` (نفس `sync.translation`). */
 export function connectUpdates(send) {
@@ -31,28 +61,42 @@ function schedule() {
 }
 
 export async function flush() {
+  if (inFlight) return inFlight;
   clearTimeout(timer);
   timer = null;
   if (!transport || !queue.size) return;
   const works = [];
   let units = 0;
   for (const work of queue.values()) {
-    const count = work.units?.length || 1;
+    const chunk = { ...work, units: work.units.slice(0, MAX_UNITS) };
+    const count = chunk.units.length || 1;
     if (works.length >= MAX_BATCH || (works.length && units + count > MAX_BATCH_UNITS)) break;
-    works.push(work); units += count;
+    works.push(chunk); units += count;
   }
-  for (const w of works) queue.delete(keyOf(w));
-  try {
-    await transport('/v1/updates/observe', { method: 'POST', body: { works } });
-  } catch {
-    // مجسّ لا يُفشل شيئًا: ما ضاع يُرى في المسح التالي
+  // Keep in-flight reports durable until acknowledgement. A reload may resend;
+  // server event IDs make that retry idempotent.
+  inFlight = (async () => {
+    let accepted = false;
+    try {
+      const res = await transport('/v1/updates/observe', { method: 'POST', body: { works } });
+      accepted = res?.status >= 200 && res?.status < 300;
+    } catch { /* Retry persisted observations. */ }
+    if (accepted) for (const work of works) {
+      const key = keyOf(work);
+      const current = queue.get(key);
+      if (!current) continue;
+      const sent = new Map(work.units.map(u => [unitKey(u), JSON.stringify(u)]));
+      const remaining = current.units.filter(u => sent.get(unitKey(u)) !== JSON.stringify(u));
+      if (remaining.length) queue.set(key, { ...current, units: remaining });
+      else queue.delete(key);
+    }
+    persist();
+  })();
+  try { await inFlight; } finally {
+    inFlight = null;
+    if (queue.size) schedule();
   }
-  if (queue.size) schedule();
 }
-
-const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
-const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
-const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
 
 /** يضيف تقريرًا (يدمج وحداته مع ما ينتظر للعمل نفسه من نفس المصدر). */
 export function report(r) {
@@ -61,13 +105,21 @@ export function report(r) {
   const prev = queue.get(key);
   const units = new Map((prev?.units ?? []).map((u) => [unitKey(u), u]));
   for (const u of r.units ?? []) units.set(unitKey(u), { ...units.get(unitKey(u)), ...u });
-  queue.set(key, { ...prev, ...r, units: [...units.values()].sort(order).slice(0, MAX_UNITS) });
+  const merged = { ...prev, ...r, units: [...units.values()].sort(order) };
+  const total = [...queue.values()].reduce((n, w) => n + w.units.length, 0) - (prev?.units.length ?? 0) + merged.units.length;
+  if ((!prev && queue.size >= MAX_QUEUE_WORKS) || total > MAX_QUEUE_UNITS || JSON.stringify([...queue.values()].filter(w => keyOf(w) !== key).concat(merged)).length > MAX_STORAGE_BYTES) {
+    dropped += r.units?.length ?? 1;
+    return false;
+  }
+  queue.set(key, merged);
+  persist();
   schedule();
+  return true;
 }
 
 /**
  * تواريخ رفع لا يُعتمد عليها: مصدر يضع «الآن» لكل فصوله (كلها في نفس الدقيقة).
- * نُسقطها فيعتمد الخادم على أول اكتشاف بدلها.
+ * نُسقطها؛ الخادم لا يُنشئ حدثًا بلا تاريخ إلا بعد تقدّم خط أساس المصدر.
  */
 export function trustDates(units) {
   const dated = units.filter((u) => u.publishedAt);
@@ -76,12 +128,8 @@ export function trustDates(units) {
   return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }
 
-/**
- * عملٌ رآه مسح Latest يصعد في قائمة «آخر التحديثات» لمصدره منذ مسحٍ سابق في
- * `since`: المصدر نفسه يشهد أنه تحدّث بين `since` والآن. يُرفق بتقرير فصوله
- * التالي فيسجّل الخادم أعلى فصل حتى إن كان أول مشاهدة للعمل أو بلا تاريخ رفع
- * (كان يصير خط أساس صامتًا فيسقط العمل من «آخر التحديثات»).
- */
+/** Listing-motion hint for diagnosis only. The server never uses this as proof
+ * of publication or as permission to create an undated first-sighting event. */
 const LISTED_TTL_MS = 120_000;
 const listedHints = new Map();
 const listedKey = (sourceId, manga) => `${sourceId}|${manga?.url ?? ''}|${normalizeTitle(manga?.title)}`;
@@ -106,8 +154,7 @@ export function observeMangaChapters(sourceId, manga, chapters) {
     chapters
       .map((c) => ({ number: chapterNumberOf(c), ...(Number(c?.dateUpload) > 0 ? { publishedAt: Number(c.dateUpload) } : {}) }))
       .filter((u) => Number.isFinite(u.number) && u.number >= 0)
-      .sort(order)
-      .slice(0, MAX_UNITS),
+      .sort(order),
   );
   if (!units.length) return;
   report({

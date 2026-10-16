@@ -52,7 +52,7 @@ export function validateManifest(
   { origin, productVersion = PRODUCT_VERSION } = {},
 ) {
   const errors = [],
-    compatibility = { pwa: true, apk: false, reason: null };
+    compatibility = { pwa: true, apk: false, desktop: true, reason: null };
   let base;
   try {
     base = publicUrl(origin).origin;
@@ -149,6 +149,7 @@ export function validateManifest(
     if (permissions?.verification) {
       compatibility.pwa = false;
       compatibility.apk = false;
+      compatibility.desktop = false;
       compatibility.reason = "التحقق التفاعلي غير مدعوم في Remote v1";
     }
   }

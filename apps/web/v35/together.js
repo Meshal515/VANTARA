@@ -120,6 +120,8 @@ export function createTogether(deps) {
   // القارئ والمشغّل شاشات فوق الواجهة لها أوراقها وتنبيهاتها: ما يُفتح يظهر في الشاشة الظاهرة
   const surfaces = [];
   const ui = () => surfaces.at(-1) ?? deps;
+  const playerOnScreen = () => typeof document !== 'undefined' &&
+    (document.documentElement?.classList?.contains('pwa-playing') || !!document.querySelector('.desktop-player'));
 
   const emit = () => { for (const fn of listeners) try { fn(session); } catch { /* */ } };
   const personOf = (r) => ({ userId: r.userId, displayName: r.name, avatarKey: r.avatarKey });
@@ -321,7 +323,9 @@ export function createTogether(deps) {
       if (alive === false) return;
       // في الغرفة أصلًا: نفس الجلسة، بلا إعادة اتصال
       if (session?.code === row.code) {
-        deps.openMedia(session.media, session);
+        // Clicking the current invitation must not reopen an active player.
+        if(playerOnScreen()) openPanel();
+        else deps.openMedia(session.media, session);
         return;
       }
       const s = start(row.code, media, row.mode);
@@ -523,10 +527,10 @@ export function createTogether(deps) {
     },
     /** يُستدعى من رابط/إشعار «#together=CODE». */
     async joinByCode(code, row) {
-      if (session?.code === code) return deps.openMedia(session.media, session);
+      if (session?.code === code) return playerOnScreen() ? openPanel() : deps.openMedia(session.media, session);
       let media = row ? (() => { try { return JSON.parse(row.media_json); } catch { return null; } })() : null;
       let mode = row?.mode;
-      // الدعوة لم تصل بعد بالمزامنة؟ الغرفة نفسها تعرف العمل والحلقة
+      // إشعار سبق المزامنة: نقرأ الحلقة من الغرفة نفسها.
       if (!media) {
         const r = await info({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
         if (!r) return ui().toast('انتهت الغرفة أو ما عاد لها وجود');
@@ -546,6 +550,8 @@ export function createTogether(deps) {
 export function readerBridge(session, { seriesRef, onFollow }) {
   const room = session.room;
   let current = null;
+  let destroyed = false;
+  let welcomeTimer = null;
   let sentAt = 0;
   let timer = null;
   let trailing = null;
@@ -561,11 +567,12 @@ export function readerBridge(session, { seriesRef, onFollow }) {
 
   const offState = room.on('state', ({ state, by }) => apply(state, by));
   function apply(state, by) {
-    if (!state || !synced() || room.isHost || by === room.me) return;
+    if (destroyed || !state || !synced() || room.isHost || by === room.me) return;
+    if (!Number.isFinite(state.seq) || !Number.isFinite(state.pos) || state.media?.kind !== 'manga' || !state.media.key?.startsWith(`manga:${seriesRef}#`)) return;
     if (state.seq <= lastAppliedSeq) return;
-    lastAppliedSeq = state.seq;
     const chapter = /#([^#]+)$/.exec(state.media?.key ?? '')?.[1];
-    if (chapter == null) return;
+    if (chapter == null || !Number.isFinite(Number(chapter))) return;
+    lastAppliedSeq = state.seq;
     onFollow({ chapter: Number(chapter), index: Math.max(0, state.pos), at: Number.isFinite(state.at) ? state.at : null });
   }
   const offWelcome = room.on('welcome', (w) => { if (!room.isHost) apply(w.state, null); });
@@ -573,12 +580,12 @@ export function readerBridge(session, { seriesRef, onFollow }) {
 
   // القراءة لا غرفة انتظار لها: أول صفحة عند المضيف تبدأ الغرفة
   const ensureStarted = () => {
-    if (room.isHost && current && room.timeline && !room.timeline.started) room.command('play', { pos: current.index });
+    if (!destroyed && room.isHost && current && room.timeline && !room.timeline.started) room.command('play', { pos: current.index });
   };
   // المضيف يرسل موضعه كما هو الآن (يحمّل الفصل إن تغيّر)
   function push() {
     timer = null;
-    if (!current || !room.isHost || !synced()) return;
+    if (destroyed || !current || !room.isHost || !synced()) return;
     lastSent = Date.now();
     const { chapter, label, index } = current;
     if (room.timeline?.media?.key !== keyOf(chapter)) {
@@ -588,14 +595,18 @@ export function readerBridge(session, { seriesRef, onFollow }) {
   }
   // بعد كل (إعادة) اتصال: ما مرّره المضيف أثناء الانقطاع ضاع، فيُعاد موضعه الحالي فورًا
   // بدل أن يبقى الضيف متجمدًا حتى يمرّر المضيف مرة أخرى
-  const offLive = room.on('welcome', () => setTimeout(() => {
-    ensureStarted();
-    if (room.timeline?.started && current && (room.timeline.pos !== current.index || room.timeline.media?.key !== keyOf(current.chapter))) push();
-  }, 0));
+  const offLive = room.on('welcome', () => {
+    clearTimeout(welcomeTimer);
+    welcomeTimer = setTimeout(() => {
+      ensureStarted();
+      if (!destroyed && room.timeline?.started && current && (room.timeline.pos !== current.index || room.timeline.media?.key !== keyOf(current.chapter))) push();
+    }, 0);
+  });
 
   return {
     /** موضع قراءة مستمر. المضيف يحرّك الغرفة بحد إرسال كل 80ms. */
     page({ chapter, label, index, pages, source }) {
+      if (destroyed || !Number.isFinite(chapter) || !Number.isFinite(index)) return;
       const changedChapter = current?.chapter !== chapter;
       current = { chapter, label, index, pages, source };
       ensureStarted();
@@ -611,15 +622,15 @@ export function readerBridge(session, { seriesRef, onFollow }) {
     /** أين يبدأ القارئ: صفحة المضيف إن كانت الغرفة متزامنة وبدأت، وإلا null (فصل الدعوة). */
     initial() {
       const t = room.timeline;
-      if (!t || !synced() || room.isHost || !t.started) return null;
+      if (!t || !synced() || room.isHost || !t.started || !Number.isFinite(t.pos) || t.media?.kind !== 'manga' || !t.media.key?.startsWith(`manga:${seriesRef}#`)) return null;
       const chapter = /#([^#]+)$/.exec(t.media?.key ?? '')?.[1];
-      if (chapter == null) return null;
+      if (chapter == null || !Number.isFinite(Number(chapter))) return null;
       lastAppliedSeq = t.seq;
       return { chapter: Number(chapter), index: Math.max(0, t.pos) };
     },
     preparing() { report('preparing'); },
     failed(source) { if (current) current.source = source; report('failed'); },
-    destroy() { clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); offMode(); report('paused'); },
+    destroy() { if (destroyed) return; destroyed = true; clearTimeout(welcomeTimer); clearTimeout(timer); clearTimeout(trailing); offState(); offWelcome(); offLive(); offMode(); report('paused'); },
   };
 }
 

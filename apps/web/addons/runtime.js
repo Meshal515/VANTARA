@@ -1,6 +1,6 @@
-import { subtitleRequest } from "./subtitles.js";
+import { subtitleRequests } from "./subtitles.js";
 import { createAnimeIdentityResolver, kitsuVideoRequest } from "./anime-mapping.js";
-import { isNative, webPlugin } from "../pwa/platform.js";
+import { isNative, webPlugin, desktopPlugin } from "../pwa/platform.js";
 import { createAddonCache } from "./cache.js";
 import { createAddonRegistry } from "./registry.js";
 import { createTransport } from "./transport.js";
@@ -64,6 +64,7 @@ export function createAddonRuntime({
   const cache = createAddonCache({ store });
   const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
+    key = registry.resolveKey(key);
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
@@ -89,9 +90,13 @@ export function createAddonRuntime({
             k === "signal" || typeof v === "function" ? undefined : v,
           ),
           cacheKey = `${key}@${c.manifest.version}@${c.cacheEpoch}`;
+        const signal = args.find(arg => arg && typeof arg === "object" && arg.signal)?.signal;
+        const checkCancelled = () => { if (signal?.aborted) throw new DOMException("ألغي طلب الإضافة", "AbortError"); };
         const started = Date.now();
         try {
+          checkCancelled();
           const hit = diagnostic ? null : await cache.get(cacheKey, cap, input).catch(() => null);
+          checkCancelled();
           if (hit != null) return hit;
           if (!registry.health.allow(key, cap, runtimeName, { manual: diagnostic }))
             throw Object.assign(
@@ -99,6 +104,7 @@ export function createAddonRuntime({
               { name: "CooldownError" },
             );
           const result = await fn(...args);
+          checkCancelled();
           if (c.manifest.protocol !== "stremio" && (
             ["home", "search"].includes(cap) && !Array.isArray(result?.items ?? result?.mangas) ||
             cap === "details" && !plainObject(result?.item ?? result?.manga)
@@ -178,7 +184,8 @@ export function createAddonRuntime({
       );
   function def(id) {
     if (!id.startsWith("addon|")) return r.registry.def(id);
-    const m = external().find((x) => `addon|${x.key}` === id && x.contentTypes.some((t) => ["manga", "anime", "movie", "series"].includes(t)));
+    const key = registry.resolveKey(id.slice(6));
+    const m = external().find((x) => x.key === key && x.contentTypes.some((t) => ["manga", "anime", "movie", "series"].includes(t)));
     return m
       ? {
           id,
@@ -252,11 +259,12 @@ export function createAddonRuntime({
                 number: 1,
                 type,
                 externalIds: work.externalIds,
+                identity: work.identity,
               },
             ];
-          const kitsu = kitsuVideoRequest(work.identity);
+          const kitsu = String(work.id ?? work.url).startsWith("kitsu:") && kitsuVideoRequest(work.identity);
           // إضافة تعلن بثّ Kitsu تحت anime وحده تُطلب بنوعها (اختارته addonCopies)
-          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: work.type === "anime" ? "anime" : kitsu.type, externalIds: work.externalIds }];
+          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: work.type === "anime" ? "anime" : kitsu.type, externalIds: work.externalIds, identity: work.identity }];
           if (
             Number.isInteger(work.requestedSeason) &&
             Number.isInteger(work.episode)
@@ -269,6 +277,7 @@ export function createAddonRuntime({
                 season: work.requestedSeason,
                 type,
                 externalIds: work.externalIds,
+                identity: work.identity,
               },
             ];
           throw new Error(
@@ -328,7 +337,8 @@ export function createAddonRuntime({
           .map((x) => ({
             ...x,
             identity: {
-              kind: server.type,
+              ...server.episode?.identity,
+              kind: server.episode?.identity?.kind ?? server.type,
               externalIds: server.episode?.externalIds,
               season: server.episode?.season,
               episode: server.episode?.number,
@@ -388,8 +398,7 @@ export function createAddonRuntime({
           registry.health.state(m.key, "subtitles", runtimeName).state ===
           "healthy",
         request(identity, stream) {
-          const { kitsu, ...externalIds } = identity?.externalIds ?? {};
-          return [subtitleRequest(identity, stream), subtitleRequest({ ...identity, externalIds }, stream)].find(input => input && matchesStremioResource(m, "subtitles", input.type, input.videoId)) ?? null;
+          return subtitleRequests(identity, stream, m.key).find(input => matchesStremioResource(m, "subtitles", input.type, input.videoId)) ?? null;
         },
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));
@@ -411,6 +420,7 @@ export function createAddonRuntime({
   }
   async function diagnose(key, { signal, sample } = {}) {
     await ready;
+    key = registry.resolveKey(key);
     if (signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
     const addon = registry.list().find((x) => x.key === key);
     if (!addon) throw new Error("الإضافة غير موجودة");
@@ -503,13 +513,15 @@ export function createAddonRuntime({
     },
     async enrichAnimeIdentity(identity, options) {
       await ready;
-      const eligible = registry.list().some(m => !m.bundled && m.enabled && m.protocol === "stremio" && capabilitiesFor(m).includes("streams") && !(m.configuration?.required && !m.configuration.configured) && ["series", "movie"].some(type => matchesStremioResource(m, "stream", type, "kitsu:1:1")));
+      const eligible = registry.list().some(m => !m.bundled && m.enabled && m.protocol === "stremio" && ["streams", "subtitles"].some(cap => capabilitiesFor(m).includes(cap) && ["series", "movie"].some(type => matchesStremioResource(m, cap === "streams" ? "stream" : cap, type, type === "movie" ? "kitsu:1" : "kitsu:1:1"))) && !(m.configuration?.required && !m.configuration.configured));
       return eligible ? animeIdentity.enrich(identity, options) : identity;
     },
   };
 }
 export async function getAddonRuntime(r) {
   if (r?.addons) return r.addons;
+  const desktop = desktopPlugin("AddonFabric");
+  if (desktop) return (await desktop.runtime()).getRuntime().addons;
   if (isNative())
     return (await import("./native-runtime.js")).getNativeAddonRuntime();
   const gate = webPlugin("AddonFabric");

@@ -84,7 +84,7 @@ const reliable = (p: unknown, now: number) => {
   const n = num(p);
   return n != null && n >= EARLIEST_PUBLICATION && n <= now ? n : null;
 };
-const isAbove = (u: Unit, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
+const isAbove = (u: Mark, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
 
 /** يتحقق من تقرير مجسّ (عمل + ما يراه من وحداته) ويعيده بشكله المعتمد، أو null. */
 export function parseReport(raw: unknown, now: number): Report | null {
@@ -113,7 +113,6 @@ export function parseReport(raw: unknown, now: number): Report | null {
   const units: Unit[] = [];
   for (const u of Array.isArray(r.units) ? r.units.slice(0, 60) : []) {
     const x = u as Record<string, unknown>;
-    if (Number(x?.publishedAt) > now) continue;
     const number = num(x?.number);
     const season = num(x?.season);
     if (kind === 'movie') {
@@ -141,6 +140,22 @@ function mergeSources(old: Source[], add: Source[]): Source[] {
   return out.slice(0, MAX_SOURCES);
 }
 
+// Merge against the current SQL row, not the read snapshot: two devices may
+// discover or attach an edition between our SELECT and atomic D1 batch.
+function sourceMergeSql(existing: string, incoming: string): string {
+  return `(SELECT json_group_array(json(value)) FROM (
+    SELECT value FROM (
+      SELECT value,
+        ROW_NUMBER() OVER (PARTITION BY json_extract(value,'$.s') ORDER BY priority DESC) AS pick,
+        MIN(ordinal) OVER (PARTITION BY json_extract(value,'$.s')) AS position
+      FROM (
+        SELECT value, 0 AS priority, CAST(key AS INTEGER) AS ordinal FROM json_each(CASE WHEN json_valid(${existing}) THEN ${existing} ELSE '[]' END)
+        UNION ALL SELECT value, 1 AS priority, ${MAX_SOURCES} + CAST(key AS INTEGER) AS ordinal FROM json_each(${incoming})
+      )
+    ) WHERE pick = 1 ORDER BY position LIMIT ${MAX_SOURCES}
+  ))`;
+}
+
 /**
  * Every dated unit is history, including delayed catch-up below the watermark.
  * Undated first sightings stay a baseline; small later advances may use firstSeenAt.
@@ -151,11 +166,8 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
   if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
-  // شهادة Latest: أعلى وحدة بلا تاريخ حدثٌ واحد (بوقت الاكتشاف) لا خط أساس صامت
-  const vouched = (fresh: Unit[], ok: boolean) =>
-    report.listed != null && ok && top.publishedAt == null && !fresh.includes(top) ? [...fresh, top] : fresh;
   if (!mark) {
-    return { fresh: vouched(sorted.filter((u) => u.publishedAt != null), true), mark: { season: top.season, number: top.number } };
+    return { fresh: sorted.filter((u) => u.publishedAt != null), mark: { season: top.season, number: top.number } };
   }
   const limit = JUMP[report.kind];
   const above = sorted.filter((u) => {
@@ -164,11 +176,9 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
     if ((u.season ?? 0) > (mark.season ?? 0)) return (u.season ?? 0) === (mark.season ?? 0) + 1 && u.number <= limit;
     return u.number - mark.number <= limit;
   });
-  const undated = above.filter((u) => u.publishedAt == null);
-  const catchUp = undated.length > BURST;
-  const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null && !catchUp)];
+  const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null)];
   const last = above[above.length - 1];
-  return { fresh: vouched(fresh, last === top), mark: last ? { season: last.season, number: last.number } : mark };
+  return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
 }
 
 export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, now: number): Promise<Response> {
@@ -182,6 +192,17 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
     .bind(...works)
     .all<{ work: string; max_season: number | null; max_number: number | null }>();
   for (const m of markRows ?? []) marks.set(m.work, { season: m.max_season, number: m.max_number ?? 0 });
+
+  // A source first seen with a fuller catalog is a baseline, even when another
+  // source has fewer chapters. Listing order cannot prove chapter publication.
+  const sourceMarks = new Map<string, Mark>();
+  const sourceKey = (r: Report) => `${r.work}|${r.source?.s ?? ''}`;
+  const needsSourceBaseline = (r: Report) => r.source && r.units.some(u => u.publishedAt == null);
+  const sourceWorks = [...new Set(reports.filter(needsSourceBaseline).map(r => r.work))];
+  const sourceRows = sourceWorks.length ? (await env.DB.prepare(`SELECT work, source_id, max_season, max_number FROM update_source_watermarks WHERE work IN (${sourceWorks.map(() => '?').join(',')})`)
+    .bind(...sourceWorks).all<{ work: string; source_id: string; max_season: number | null; max_number: number }>()).results : [];
+  for (const m of sourceRows ?? []) sourceMarks.set(`${m.work}|${m.source_id}`, { season: m.max_season, number: m.max_number });
+  const sourceMarkValues: unknown[][] = [];
 
   // كل وحدة يراها المجسّ قد تكون حدثًا موجودًا: مصدر جديد يُدمج تحته
   const allIds = reports.flatMap((r) => r.units.map((u) => eventId(r.work, r.kind, u.season, r.kind === 'movie' ? null : u.number)));
@@ -203,9 +224,15 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
   const createdIds = new Set<string>();
   for (const r of reports) {
     const before = marks.get(r.work) ?? null;
-    const { fresh, mark } = decide(r, before, now);
+    const ownBefore = r.source ? sourceMarks.get(sourceKey(r)) ?? null : before;
+    const { fresh: candidates, mark } = decide(r, ownBefore, now);
+    const fresh = candidates.filter(u => u.publishedAt != null || !before || isAbove(u, before));
+    if (r.source && needsSourceBaseline(r) && mark && (!ownBefore || isAbove(mark, ownBefore))) {
+      sourceMarks.set(sourceKey(r), mark);
+      sourceMarkValues.push([r.work, r.source.s, mark.season, mark.number, now]);
+    }
     if (!before) baselined++;
-    if (mark && (!before || mark.season !== before.season || mark.number !== before.number)) {
+    if (mark && (!before || isAbove(mark, before))) {
       marks.set(r.work, mark);
       markValues.push([r.work, r.section, mark.season, mark.number, now, now]);
     }
@@ -235,27 +262,41 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
       createdIds.add(id);
       created++;
       known.set(id, { sources: JSON.stringify(add), cover: r.cover, published_at: u.publishedAt });
-      insertValues.push([id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now]);
+      insertValues.push([id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now, u.publishedAt == null ? 1 : 0]);
     }
   }
   // D1 counts SQL statements, including statements inside a batch. Pack rows
   // below its 100 bound-parameter limit instead of issuing one query per event.
+  for (let i = 0; i < sourceMarkValues.length; i += 20) {
+    const rows = sourceMarkValues.slice(i, i + 20);
+    writes.push(env.DB.prepare(`INSERT INTO update_source_watermarks (work, source_id, max_season, max_number, updated_at)
+      VALUES ${rows.map(() => '(?,?,?,?,?)').join(',')}
+      ON CONFLICT(work,source_id) DO UPDATE SET max_season=excluded.max_season,max_number=excluded.max_number,updated_at=excluded.updated_at
+      WHERE COALESCE(excluded.max_season,0) > COALESCE(update_source_watermarks.max_season,0)
+         OR (COALESCE(excluded.max_season,0) = COALESCE(update_source_watermarks.max_season,0) AND excluded.max_number > update_source_watermarks.max_number)`).bind(...rows.flat()));
+  }
   for (let i = 0; i < markValues.length; i += 16) {
     const rows = markValues.slice(i, i + 16);
     writes.push(env.DB.prepare(`INSERT INTO update_watermarks (work, section, max_season, max_number, baseline_at, updated_at)
       VALUES ${rows.map(() => '(?,?,?,?,?,?)').join(',')}
-      ON CONFLICT(work) DO UPDATE SET max_season=excluded.max_season, max_number=excluded.max_number, updated_at=excluded.updated_at`).bind(...rows.flat()));
+      ON CONFLICT(work) DO UPDATE SET max_season=excluded.max_season, max_number=excluded.max_number, updated_at=excluded.updated_at
+      WHERE COALESCE(excluded.max_season,0) > COALESCE(update_watermarks.max_season,0)
+         OR (COALESCE(excluded.max_season,0) = COALESCE(update_watermarks.max_season,0) AND excluded.max_number > update_watermarks.max_number)`).bind(...rows.flat()));
   }
   for (let i = 0; i < insertValues.length; i += 7) {
     const rows = insertValues.slice(i, i + 7);
-    writes.push(env.DB.prepare(`INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at)
-      VALUES ${rows.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')} ON CONFLICT(id) DO NOTHING`).bind(...rows.flat()));
+    writes.push(env.DB.prepare(`INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at,observed_advance)
+      VALUES ${rows.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(id) DO UPDATE SET sources=${sourceMergeSql('update_events.sources', 'excluded.sources')},
+      cover=COALESCE(update_events.cover,excluded.cover),
+      at=CASE WHEN update_events.published_at IS NULL THEN COALESCE(excluded.published_at,update_events.at) ELSE update_events.at END,
+      published_at=COALESCE(update_events.published_at,excluded.published_at), updated_at=excluded.updated_at`).bind(...rows.flat()));
   }
   const updates = [...updateValues];
   for (let i = 0; i < updates.length; i += 8) {
     const rows = updates.slice(i, i + 8);
-    const choose = `CASE id ${rows.map(() => 'WHEN ? THEN ?').join(' ')} END`;
-    writes.push(env.DB.prepare(`UPDATE update_events SET sources=${choose}, cover=COALESCE(cover,${choose}),
+    const choose = `CASE update_events.id ${rows.map(() => 'WHEN ? THEN ?').join(' ')} END`;
+    writes.push(env.DB.prepare(`UPDATE update_events SET sources=${sourceMergeSql('update_events.sources', choose)}, cover=COALESCE(cover,${choose}),
       at=CASE WHEN published_at IS NULL THEN COALESCE(${choose},at) ELSE at END,
       published_at=COALESCE(published_at,${choose}),updated_at=? WHERE id IN (${rows.map(() => '?').join(',')})`)
       .bind(...rows.flatMap(([id,u]) => [id,u.sources]), ...rows.flatMap(([id,u]) => [id,u.cover]),
@@ -292,7 +333,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
   const where = [
     'section = ?',
     `(kind <> 'movie' OR published_at IS NOT NULL)`,
-    `(published_at IS NOT NULL OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
+    `(published_at IS NOT NULL OR observed_advance = 1 OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
   ];
   const binds: unknown[] = [section];
   if (work) {
@@ -307,11 +348,11 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
     // الغلاف غلاف العمل الموحّد (works) إن عُرف، لا غلاف أول مصدر بلّغ الفصل
     `SELECT id, work, section, kind, season, number, title,
             COALESCE((SELECT cover_url FROM works WHERE works.series_ref = update_events.work), cover) AS cover,
-            at, published_at, first_seen_at, sources
+            at, published_at, first_seen_at, sources, observed_advance
      FROM update_events WHERE ${where.join(' AND ')} ORDER BY at DESC, id DESC LIMIT ?`,
   )
     .bind(...binds, limit + 1)
-    .all<{ id: string; work: string; section: Section; kind: Kind; season: number | null; number: number | null; title: string; cover: string | null; at: number; published_at: number | null; first_seen_at: number; sources: string }>();
+    .all<{ id: string; work: string; section: Section; kind: Kind; season: number | null; number: number | null; title: string; cover: string | null; at: number; published_at: number | null; first_seen_at: number; sources: string; observed_advance: number }>();
   const rows = results ?? [];
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
@@ -338,6 +379,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
         at: r.at,
         publishedAt: r.published_at,
         firstSeenAt: r.first_seen_at,
+        observedAdvance: r.observed_advance === 1,
         sources,
       };
     }),
