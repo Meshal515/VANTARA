@@ -3,14 +3,15 @@ import { adultGenre, adultManga, adultTitle, blockKey, isBlockedKey } from './ad
 import { groupEvents } from '../v35/updates-view.js';
 
 describe('محتوى الكبار لا يظهر في VANTARA', () => {
-  it('blocks hentai, ecchi, smut, BL/GL, yaoi/yuri and 18+ by genre, in English and Arabic', () => {
-    for (const genre of ['Action, Hentai', 'Ecchi', 'Romance, Smut', "Boys' Love", 'BL', 'Girls Love', 'Yaoi', 'Yuri', 'Shounen Ai', 'Shoujo-ai', 'Adult', '18+', 'Erotica', 'NSFW',
-      'أكشن، هنتاي', 'إيتشي', 'ياوي', 'يوري', 'شونين اي', 'للكبار', '+18', 'محتوى جنسي'])
+  it('blocks hentai, smut, BL/GL, yaoi/yuri and 18+ by genre, in English and Arabic', () => {
+    for (const genre of ['Action, Hentai', 'Romance, Smut', "Boys' Love", 'BL', 'Girls Love', 'Yaoi', 'Yuri', 'Shounen Ai', 'Shoujo-ai', 'Adult', '18+', 'Erotica', 'NSFW',
+      'أكشن، هنتاي', 'ياوي', 'يوري', 'شونين اي', 'للكبار', '+18', 'محتوى جنسي'])
       expect(adultGenre(genre), genre).toBe(true);
     expect(adultGenre([{ name: 'Yaoi' }, { name: 'دراما' }])).toBe(true);
   });
   it('keeps ordinary works: action, romance, mature violence, and titles that only look similar', () => {
-    for (const genre of ['Action, Drama, Adventure', 'Romance, School Life', 'Mature, Gore', 'أكشن، دراما، مغامرة', 'Full Color, Long Strip, Web Comic', 'Blue Lock'])
+    // الإيتشي يبقى بقرار المالك
+    for (const genre of ['Ecchi', 'Romance, Ecchi', 'إيتشي', 'Action, Drama, Adventure', 'Romance, School Life', 'Mature, Gore', 'أكشن، دراما، مغامرة', 'Full Color, Long Strip, Web Comic', 'Blue Lock'])
       expect(adultGenre(genre), genre).toBe(false);
     for (const title of ['Blue Lock', 'Yuri!!! on ICE', 'Kariel the Hero', 'The Adult Life of a Hero', 'BLEACH', 'Solo Leveling'])
       expect(adultTitle(title), title).toBe(false);

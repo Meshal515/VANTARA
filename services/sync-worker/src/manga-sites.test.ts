@@ -91,7 +91,7 @@ describe('adult content never reaches the timeline from the server', () => {
     expect(madaraCards(html, 'https://s.test').map((c) => c.title)).toEqual(['Clean Work']);
     const iken = ikenWorks({ posts: [{ id: 1, slug: 'a', postTitle: 'A', genres: [{ name: 'Yaoi' }], chapters: [{ number: 9 }] }, { id: 2, slug: 'b', postTitle: 'B', genres: [{ name: 'Action' }], chapters: [{ number: 9 }] }] }, NOW);
     expect(iken.map((w) => w.title)).toEqual(['B']);
-    const swat = swatWorks({ results: [{ serie_id: 1, title: 'S1', genres: [{ name: 'إيتشي' }], chapters: [{ chapter: '3' }] }, { serie_id: 2, title: 'S2', genres: [{ name: 'أكشن' }], chapters: [{ chapter: '3' }] }] }, NOW);
+    const swat = swatWorks({ results: [{ serie_id: 1, title: 'S1', genres: [{ name: 'هنتاي' }], chapters: [{ chapter: '3' }] }, { serie_id: 2, title: 'S2', genres: [{ name: 'أكشن' }], chapters: [{ chapter: '3' }] }] }, NOW);
     expect(swat.map((w) => w.title)).toEqual(['S2']);
   });
 });
