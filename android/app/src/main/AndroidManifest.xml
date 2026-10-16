@@ -39,6 +39,11 @@
 
         <!-- مشغّل الأنمي: Media3 أصلي، بالعرض، فوق الواجهة -->
         <activity
+            android:name="com.vantara.addons.AddonConfigureActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="false" />
+        <activity
             android:name="com.vantara.anime.player.PlayerActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode"
             android:theme="@style/Theme.AppCompat.NoActionBar"

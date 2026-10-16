@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
-import { renderAddons, renderAddonDetails } from "./addons-view.js";
+import { renderAddons, renderAddonDetails, configureInApp } from "./addons-view.js";
 const setup = () => {
   globalThis.document = parseHTML("<html><body></body></html>").document;
 };
@@ -523,4 +523,30 @@ it('يعيد فحص المصدر المتعثر عند انتهاء المهلة
     await vi.advanceTimersByTimeAsync(120_000);
     expect(calls).toBe(2);
   } finally { vi.useRealTimers(); }
+});
+
+it("on the phone, Install inside the configure page installs the configured addon here instead of opening Stremio", async () => {
+  setup();
+  const link = document.createElement("a");
+  link.textContent = "إعداد الإضافة";
+  document.body.append(link);
+  const configured = "https://subdl.strem.top/KEY/manifest.json";
+  const preview = { manifest: { name: "SubDL" } };
+  const registry = {
+    inspect: vi.fn(async (url) => (url === configured ? preview : null)),
+    install: vi.fn(async (p) => ({ manifest: { key: "subdl", name: p.manifest.name } })),
+  };
+  const events = [];
+  document.body.addEventListener("addon-configured", (e) => events.push(e.detail));
+  const plugin = { configure: vi.fn(async () => ({ url: configured })) };
+  await configureInApp(link, plugin, "https://subdl.strem.top/configure", registry);
+  expect(plugin.configure).toHaveBeenCalledWith({ url: "https://subdl.strem.top/configure" });
+  expect(registry.install).toHaveBeenCalledWith(preview);
+  expect(link.textContent).toBe("تم تثبيت SubDL بإعداداتك");
+  expect(events).toEqual([{ key: "subdl" }]);
+  // إغلاق الصفحة بلا Install لا يثبّت شيئًا
+  registry.install.mockClear();
+  await configureInApp(link, { configure: async () => ({ cancelled: true }) }, "https://subdl.strem.top/configure", registry);
+  expect(registry.install).not.toHaveBeenCalled();
+  expect(link.textContent).toBe("إعداد الإضافة");
 });

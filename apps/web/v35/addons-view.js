@@ -103,6 +103,34 @@ function chips(a) {
     box.append(node("span", "addon-chip addon-chip-muted", language));
   return box;
 }
+function nativeConfigure() {
+  const cap = globalThis.Capacitor;
+  const plugin = cap?.isNativePlatform?.() ? cap.Plugins?.AddonEngine : null;
+  return typeof plugin?.configure === "function" ? plugin : null;
+}
+export async function configureInApp(link, plugin, href, registry) {
+  if (link.dataset.busy) return;
+  link.dataset.busy = "1";
+  link.dataset.label ??= link.textContent;
+  const label = link.dataset.label;
+  let note = null;
+  try {
+    const result = await plugin.configure({ url: href });
+    if (!result?.url) return;
+    link.textContent = "جارٍ التثبيت…";
+    // ضغط Install في صفحة الإعداد هو الموافقة، كما في Stremio نفسه
+    const installed = await registry.install(await registry.inspect(result.url));
+    note = `تم تثبيت ${installed?.manifest?.name ?? "الإضافة"} بإعداداتك`;
+    const Event = link.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+    link.dispatchEvent(new Event("addon-configured", { bubbles: true, detail: { key: installed?.manifest?.key ?? null } }));
+  } catch (error) {
+    note = message(error);
+  } finally {
+    delete link.dataset.busy;
+    link.textContent = note ?? label;
+    if (note) setTimeout(() => { if (link.isConnected) link.textContent = label; }, 4000);
+  }
+}
 function configureLink(a, registry, explicit) {
   try {
     const value = explicit ?? registry.configurationUrl?.(a.key);
@@ -118,6 +146,13 @@ function configureLink(a, registry, explicit) {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.dataset.configure = "";
+    // التطبيق: الصفحة تُفتح داخل VANTARA، و«Install» فيها يثبّت الإضافة هنا بدل أن يرمي إلى Stremio
+    const plugin = nativeConfigure();
+    if (plugin)
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void configureInApp(link, plugin, url.href, registry);
+      });
     return link;
   } catch {
     return null;
@@ -404,6 +439,8 @@ export function renderAddons({
   mountCover = null,
 }) {
   const root = node("div", "addon-hub addon-store");
+  // إضافة أُعدّت وثُبّتت من صفحتها داخل التطبيق: تظهر في القائمة فورًا
+  root.addEventListener("addon-configured", () => paint());
   const sectionHub = ["manga", "anime", "cinema"].includes(filter);
   if (sectionHub) root.dataset.sectionHub = filter;
   root.dir = "rtl";
