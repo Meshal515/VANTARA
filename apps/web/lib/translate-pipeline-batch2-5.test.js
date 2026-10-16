@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+const { kv } = vi.hoisted(() => ({ kv: new Map() }));
+vi.mock('./chapter-store.js', () => ({readKv:async key=>kv.get(key) ?? null,writeKv:async(key,value)=>{kv.set(key,{value});return key;}}));
 import { createQueue, prepareTranslation, translatePage, withNativeTranslationStage } from './translate.js';
+import { writeKv } from './chapter-store.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const memory = () => {
@@ -48,6 +51,7 @@ function installDevice({ textless = false } = {}) {
 describe('batch 2.5 stage pipeline', () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
+    kv.clear();
     globalThis.fetch = realFetch;
     delete globalThis.Capacitor;
     delete globalThis.localStorage;
@@ -107,6 +111,36 @@ describe('batch 2.5 stage pipeline', () => {
     const prepared = await prepareTranslation(src, meta, { preAnalyze:true, via:'reader', interactive:false });
     expect(prepared.bypass).toBe(true);
     expect(device.analyses()).toBe(0);
+  });
+
+  it('does not pre-analyze quarantined cache only to discard it in the repair branch', async () => {
+    globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage = memory();
+    const device=installDevice();
+    const hash='75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322';
+    await writeKv(`tl4:${hash}`,{translated:0,incomplete:true,regions:[],tries:1,engine:'device'});
+    const prepared=await prepareTranslation('http://localhost/_capacitor_file_/cache/pages/partial.jpg',
+      {chapterKey:'partial',pageIndex:0},{preAnalyze:true,deferAnalyze:true});
+    expect(device.analyses()).toBe(0);
+    expect(prepared.bypass).toBe(true);
+    expect(prepared.continuePrepare).toBeUndefined();
+  });
+
+  it('promotes a repair while its original reader page is visible', async () => {
+    globalThis.fetch=async()=>new Response(new Uint8Array([31,32,33]));
+    globalThis.localStorage=memory(); const device=installDevice();
+    await prepareTranslation('http://localhost/_capacitor_file_/cache/pages/visible-repair.jpg',
+      {chapterKey:'repair',pageIndex:0},{preAnalyze:true,via:'repair',isInteractive:()=>true});
+    expect(device.analyzePriorities()).toEqual(['high']);
+  });
+
+  it('a fast-to-smart upgrade never bypasses the heavy resident window', async () => {
+    globalThis.fetch=async()=>new Response(new Uint8Array([31,32,33]));globalThis.localStorage=memory();installDevice();
+    const hash='75e2d2db3843a0280e4ca9a4d1b354b69646941540e711605cc66524eac20322';
+    await writeKv(`tl4:${hash}`,{translated:0,incomplete:true,regions:[],engine:'luna:t4:fast'});
+    const result=await prepareTranslation('http://localhost/_capacitor_file_/cache/upgrade.jpg',{speed:'smart'},
+      {preAnalyze:true,deferAnalyze:true});
+    expect(result.bypass).toBe(false);expect(result.continuePrepare).toEqual(expect.any(Function));
   });
 
   it('does not run Route concurrently with an active Heavy native stage', async () => {

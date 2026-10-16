@@ -415,6 +415,8 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
                 for (r in plan.fast) {
                     val res = reader.read(img, r.glyph, r.box)
                     perf.count("ocrLines", res.lines.size)
+                    perf.count("ocrRetriedLines", res.retriedLines)
+                    perf.count("ocrFailedLines", res.failedLines)
                     r.ocr = res; r.source = res.text
                     val features = plan.features[r.id]
                     val verdict = features?.let {
@@ -552,6 +554,11 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             for (r in regions) {
                 val res = reader!!.read(img, r.glyph, r.box)
                 perf.count("ocrLines", res.lines.size)
+                perf.count("ocrRetriedLines", res.retriedLines)
+                perf.count("ocrFailedLines", res.failedLines)
+                if (res.lines.isEmpty()) perf.count("ocrFailure:no_lines")
+                else if (res.text.isEmpty()) perf.count("ocrFailure:empty")
+                else if (res.confidence < Regions.MIN_OCR_CONF) perf.count("ocrFailure:low_confidence")
                 r.ocr = res
                 r.source = res.text
                 if (res.text.isEmpty() || res.confidence < Regions.MIN_OCR_CONF) r.status = "skipped:unreadable"

@@ -9,6 +9,8 @@ import java.io.File
  * الخرج خريطة احتمال [0,1] بحجم الصورة.
  */
 class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
+    /** بدائل القياس فقط؛ الإنتاج يبقى AUTO بشروطه الأصلية. */
+    enum class Mode { AUTO, ATLAS, STRIPES }
     private val session: OrtSession = Ort.open(file, engine = engine)
     private val size = 1024
 
@@ -102,10 +104,10 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
      * full-width stripes than canvases takes the stripes instead: same cost or less,
      * and exactly the reference geometry. Same threshold/averaging downstream.
      */
-    fun maskAtlas(img: RgbImage, crops: List<Box>, threshold: Float = .3f): ByteMask {
+    fun maskAtlas(img: RgbImage, crops: List<Box>, threshold: Float = .3f, mode: Mode = Mode.AUTO): ByteMask {
         val plan = RoiAtlas.plan(crops, size, scale = RoiAtlas.referenceScale(img.width, size))
         val spans = RoiAtlas.stripes(img.width, img.height, crops)
-        val local = if (spans.size <= plan.atlases) {
+        val local = if (mode == Mode.STRIPES || (mode == Mode.AUTO && spans.size <= plan.atlases)) {
             lastMode = "stripes"
             tiles = spans.size
             lastOccupancy = 1f
