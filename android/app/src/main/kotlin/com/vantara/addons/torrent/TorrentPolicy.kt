@@ -174,6 +174,40 @@ object TorrentPrefetch {
 }
 
 /**
+ * وزن السرب في ترتيب خيارات التورنت. الترتيب كان يرى الجودة والصحة فقط، فيختار تلقائيًا (ويجهّز
+ * مسبقًا) تورنتًا بثلاثة زارعين أو ريمكس 40GB بجانب خيار بمئات الزارعين وحجم معقول — بدء بطيء جدًا
+ * أو لا بدء. سرعة بدء التورنت يحددها عدد المشاركين وحجم القطعة/معدل البت، لا الجودة.
+ */
+object TorrentSwarm {
+    private const val GB = 1024.0 * 1024 * 1024
+    private val sizeMark = Regex("💾\\s*([0-9]{1,5}(?:[.,][0-9]{1,3})?)\\s*(TB|GB|MB)", RegexOption.IGNORE_CASE)
+    /** الحجم كما تكتبه Torrentio/Comet/MediaFusion في العنوان («💾 1.4 GB»)؛ null إن غاب. */
+    fun size(label: String?): Long? = label?.let { sizeMark.find(it) }?.let { m ->
+        val value = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+        val unit = when (m.groupValues[2].uppercase()) { "TB" -> 1024 * GB; "GB" -> GB; else -> GB / 1024 }
+        (value * unit).toLong()
+    }
+    /** صفر زارعين = ميت عمليًا؛ ثم لوغاريتم العدد (1000 زارع ≈ 1.0)؛ والأحجام الضخمة تتأخر. */
+    fun score(label: String?, videoSize: Long?): Double {
+        val seeds = TorrentPrefetch.seeders(label)
+        val swarm = when {
+            seeds == null -> 0.0
+            seeds == 0 -> -1.5
+            else -> minOf(1.0, kotlin.math.log10(seeds + 1.0) / 3.0)
+        }
+        val bytes = videoSize?.takeIf { it > 0 } ?: size(label)
+        val heavy = when {
+            bytes == null -> 0.0
+            bytes > 30 * GB -> -0.6
+            bytes > 15 * GB -> -0.4
+            bytes > 6 * GB -> -0.15
+            else -> 0.0
+        }
+        return swarm + heavy
+    }
+}
+
+/**
  * نافذة التورنت المتحركة على القرص (نفس نسخة الويندوز):
  *  - ورا موضع المشاهدة: 50 ثانية فقط (32MB على الأقل)؛ ما قبلها يُفرَّغ من القرص (hole punch).
  *  - قدّام: حتى 10 دقائق بقدر ما تسمح المساحة الحرة (نصف الفائض عن احتياط 1GB)، و12 قطعة دائمًا.
