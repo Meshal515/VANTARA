@@ -88,6 +88,7 @@ class ExtensionEnginePlugin : Plugin() {
     private val loader by lazy { FileExtensionLoader(context) }
     /** مستودعات المستخدم وإضافاته (UserExtensions.kt). */
     private val userStore by lazy { UserExtensionStore(java.io.File(context.filesDir, "extensions/user-repos.json")) }
+    private val repoClient by lazy { RepoClient(context, network.client) }
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override fun load() {
@@ -209,7 +210,7 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val (meta, list) = readRepo(base)
+                val (meta, list) = repoClient.read(base)
                 val count = list.size
                 val repo = UserRepo(base, meta.name, meta.fingerprint)
                 userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
@@ -242,7 +243,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
                 val list = JSArray()
-                for (ext in readRepo(base).second) {
+                for (ext in repoClient.read(base).second) {
                     val mine = userStore.extension(ext.pkg)
                     list.put(
                         JSObject()
@@ -278,17 +279,10 @@ class ExtensionEnginePlugin : Plugin() {
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
                 val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
                 require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
-                val (meta, list) = readRepo(base)
-                require(meta.fingerprint == repo.fingerprint) { "مفتاح توقيع المستودع تغيّر منذ أضفته؛ أزله وأضفه من جديد إن كنت تثق به" }
-                val ext = list.firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
+                val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
                 val apkUrl = ext.apkUrl
-                val bytes = fetchBytes(apkUrl, 30 * 1024 * 1024)
-                val probe = java.io.File(context.cacheDir, "ext-verify-$pkg.apk")
-                try {
-                    probe.writeBytes(bytes)
-                    require(repo.fingerprint in apkSignerFingerprints(context, probe)) { "توقيع الإضافة لا يطابق مفتاح المستودع؛ لم تُثبَّت" }
-                } finally { probe.delete() }
+                val bytes = repoClient.downloadSigned(apkUrl, repo.fingerprint)
                 val visible = RepoIndex.visibleSources(ext)
                 val user = UserExtension(
                     repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
@@ -326,28 +320,7 @@ class ExtensionEnginePlugin : Plugin() {
         java.io.File(context.filesDir, "extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
     }
 
-    private fun fetchBytes(url: String, limit: Int): ByteArray =
-        network.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
-            require(res.isSuccessful) { "تعذر الوصول (HTTP ${res.code})" }
-            val length = res.body.contentLength()
-            require(length <= limit) { "الملف أكبر من الحد" }
-            res.body.bytes().also { require(it.size <= limit) { "الملف أكبر من الحد" } }
-        }
 
-    private fun fetchText(url: String): String = String(fetchBytes(url, 8 * 1024 * 1024), Charsets.UTF_8)
-
-    /** repo.json ثم فهرسه: index.pb (v2) إن أعلنه، وإلا index.min.json (v1). */
-    private fun readRepo(base: String): Pair<RepoIndex.Meta, List<RepoIndex.Extension>> {
-        val repoJson = fetchText("$base/repo.json")
-        val v2 = RepoIndex.indexV2(repoJson)
-        if (v2 != null) {
-            val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024))
-            val declared = RepoIndex.parseMeta(repoJson)
-            require(declared.fingerprint == meta.fingerprint) { "مفتاح التوقيع في repo.json لا يطابق الفهرس" }
-            return declared to list
-        }
-        return RepoIndex.parseMeta(repoJson) to RepoIndex.parseIndex(fetchText("$base/index.min.json"), base)
-    }
 
     /** تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف. يُستدعى مرة، ثم يُخدَم من الذاكرة. */
     @PluginMethod

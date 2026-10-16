@@ -74,6 +74,10 @@ class AnimeEngine(context: Context) {
     private val crawler = CatalogCrawler(catalogStore)
 
     @Volatile private var manifest = Manifest()
+    /** البيان كما أرسلته الواجهة، قبل دمج إضافات المستخدم. */
+    @Volatile private var shipped = Manifest()
+    /** إضافات Aniyomi التي ثبّتها المستخدم من مستودعاته (UserAnime.kt). */
+    @Volatile private var userSources: List<com.vantara.anime.registry.SourceEntry> = emptyList()
     private val adapters = ConcurrentHashMap<String, AnimeAdapter>()
     private val loadErrors = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
@@ -103,6 +107,22 @@ class AnimeEngine(context: Context) {
         val parsed = ManifestParser.parse(text)
         val errors = ManifestParser.validate(parsed)
         if (errors.isNotEmpty()) return errors
+        shipped = parsed
+        apply()
+        return emptyList()
+    }
+
+    /** المشحون + ما ثبّته المستخدم؛ يُنادى بعد كل تثبيت أو إزالة دون انتظار الواجهة. */
+    fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
+        userSources = list
+        apply()
+    }
+
+    /** هل الحزمة جزء من البيان المشحون (فلا تُثبَّت مرة ثانية من مستودع)؟ */
+    fun shipsPackage(pkg: String): Boolean = shipped.sources.any { it.extension?.pkg == pkg }
+
+    @Synchronized private fun apply() {
+        val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources)
         manifest = parsed
         for (s in parsed.sources) {
             AnimeHostRouter.register(s.id, s.domains.plan(null))
@@ -114,7 +134,6 @@ class AnimeEngine(context: Context) {
         // مصدر تغيّر ملفه أو دومينه يُعاد تحميله عند أول طلب
         adapters.keys.retainAll(parsed.sources.filter { it.enabled }.map { it.id }.toSet())
         preload()
-        return emptyList()
     }
 
     /**

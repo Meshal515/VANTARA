@@ -35,7 +35,7 @@ object RepoIndex {
     private val SHA256 = Regex("^[0-9a-f]{64}$")
 
     data class Meta(val name: String, val fingerprint: String)
-    data class Source(val id: String, val name: String, val lang: String)
+    data class Source(val id: String, val name: String, val lang: String, val baseUrl: String = "")
     data class Extension(
         val name: String, val pkg: String, val apkUrl: String, val lang: String, val version: String,
         val lib: Double, val nsfw: Boolean, val sources: List<Source>,
@@ -80,7 +80,7 @@ object RepoIndex {
             val sources = (o["sources"] as? JsonArray).orEmpty().mapNotNull { s ->
                 val so = s as? JsonObject ?: return@mapNotNull null
                 val id = so["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                Source(id, so["name"]?.jsonPrimitive?.contentOrNull ?: pkg, so["lang"]?.jsonPrimitive?.contentOrNull ?: "")
+                Source(id, so["name"]?.jsonPrimitive?.contentOrNull ?: pkg, so["lang"]?.jsonPrimitive?.contentOrNull ?: "", so["baseUrl"]?.jsonPrimitive?.contentOrNull ?: "")
             }
             Extension(
                 name = (o["name"]?.jsonPrimitive?.contentOrNull ?: pkg).removePrefix("Tachiyomi: ").removePrefix("Aniyomi: "),
@@ -113,7 +113,7 @@ object RepoIndex {
             val sources = e.all(8).mapNotNull { s ->
                 val so = Pb(s).fields()
                 val id = so.varint(1)?.toULong()?.toLong()?.toString() ?: return@mapNotNull null
-                Source(id, so.text(2) ?: pkg, so.text(3) ?: "")
+                Source(id, so.text(2) ?: pkg, so.text(3) ?: "", so.text(4) ?: "")
             }
             val langs = sources.map { it.lang }.distinct()
             Extension(
@@ -238,4 +238,50 @@ fun apkSignerFingerprints(context: Context, apk: File): Set<String> {
         pm.getPackageArchiveInfo(apk.absolutePath, PackageManager.GET_SIGNATURES)?.signatures
     } ?: return emptySet()
     return certs.map { sha256Hex(it.toByteArray()) }.toSet()
+}
+
+/**
+ * قراءة المستودع وتنزيل إضافاته والتحقق من توقيعها: مشترك بين المانجا والأنمي.
+ * إضافة لا يطابق توقيعها مفتاح المستودع لا تُرجع بايتاتها أبدًا.
+ */
+class RepoClient(private val context: Context, private val client: okhttp3.OkHttpClient) {
+    fun fetchBytes(url: String, limit: Int): ByteArray =
+        client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { res ->
+            require(res.isSuccessful) { "تعذر الوصول (HTTP ${res.code})" }
+            require(res.body.contentLength() <= limit) { "الملف أكبر من الحد" }
+            res.body.bytes().also { require(it.size <= limit) { "الملف أكبر من الحد" } }
+        }
+
+    fun fetchText(url: String): String = String(fetchBytes(url, 8 * 1024 * 1024), Charsets.UTF_8)
+
+    /** repo.json ثم فهرسه: index.pb (v2) إن أعلنه، وإلا index.min.json (v1). */
+    fun read(base: String): Pair<RepoIndex.Meta, List<RepoIndex.Extension>> {
+        val repoJson = fetchText("$base/repo.json")
+        val declared = RepoIndex.parseMeta(repoJson)
+        val v2 = RepoIndex.indexV2(repoJson)
+        if (v2 != null) {
+            val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024))
+            require(declared.fingerprint == meta.fingerprint) { "مفتاح التوقيع في repo.json لا يطابق الفهرس" }
+            return declared to list
+        }
+        return declared to RepoIndex.parseIndex(fetchText("$base/index.min.json"), base)
+    }
+
+    /** يقرأ المستودع ويتأكد أن مفتاحه لم يتغيّر منذ أضافه المستخدم. */
+    fun readTrusted(repo: UserRepo): List<RepoIndex.Extension> {
+        val (meta, list) = read(repo.url)
+        require(meta.fingerprint == repo.fingerprint) { "مفتاح توقيع المستودع تغيّر منذ أضفته؛ أزله وأضفه من جديد إن كنت تثق به" }
+        return list
+    }
+
+    /** يُنزّل APK ويرجع بايتاته فقط إن وقّعه مفتاح المستودع. */
+    fun downloadSigned(url: String, fingerprint: String): ByteArray {
+        val bytes = fetchBytes(url, 40 * 1024 * 1024)
+        val probe = File(context.cacheDir, "ext-verify-${System.nanoTime()}.apk")
+        try {
+            probe.writeBytes(bytes)
+            require(fingerprint in apkSignerFingerprints(context, probe)) { "توقيع الإضافة لا يطابق مفتاح المستودع؛ لم تُثبَّت" }
+        } finally { probe.delete() }
+        return bytes
+    }
 }

@@ -15,7 +15,7 @@ it("lists Arabic extensions first by state, hides adult ones, and explains what 
     ext({ name: "Adult", pkg: "f", nsfw: true }),
   ];
   const { rows, adult } = extensionRows(list);
-  expect(rows.map((r) => [r.ext.name, r.state])).toEqual([["Alpha", "update"], ["Zeta", "available"], ["Built", "builtin"], ["Anime", "anime"]]);
+  expect(rows.map((r) => [r.ext.name, r.state])).toEqual([["Alpha", "update"], ["Zeta", "available"], ["Built", "builtin"], ["Anime", "foreign"]]);
   expect(adult).toBe(1);
   expect(extensionRows(list, { filter: "all" }).rows.map((r) => r.ext.name)).toContain("English");
   expect(extensionRows(list, { query: "zet" }).rows.map((r) => r.ext.name)).toEqual(["Zeta"]);
@@ -51,4 +51,29 @@ it("adding a repository needs an explicit trust confirmation, then installing re
   await tick();
   expect(repositories.install).toHaveBeenCalledWith("https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json", "ar.3asq");
   expect(onSourcesChanged).toHaveBeenCalled();
+});
+
+it("anime repositories install Aniyomi extensions into the section the user picks, and refuse manga ones", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const list = [ext({ name: "Egy Dead", pkg: "ar.egydead", anime: true }), ext({ name: "3asq", pkg: "ar.3asq", anime: false })];
+  expect(extensionRows(list, { kind: "anime" }).rows.map((r) => [r.ext.name, r.state])).toEqual([["Egy Dead", "available"], ["3asq", "foreign"]]);
+  const repositories = {
+    kind: "anime",
+    list: vi.fn(async () => ({ repos: [{ url: "https://raw.githubusercontent.com/yuzono/anime-repo/repo", name: "Yūzōnō" }] })),
+    extensions: vi.fn(async () => list),
+    install: vi.fn(async () => ({ id: "user-egydead" })),
+    add: vi.fn(), remove: vi.fn(), uninstall: vi.fn(),
+  };
+  const view = renderRepositories({ repositories });
+  document.body.append(view);
+  await tick();
+  const card = view.querySelector("details");
+  card.open = true;
+  card.dispatchEvent(new (document.defaultView.Event)("toggle"));
+  await tick();
+  expect(view.textContent).toContain("مستودعات الأنمي والأفلام");
+  expect(view.textContent).toContain("إضافة مانجا — ثبّتها من قسم المانجا");
+  [...view.querySelectorAll("button")].find((b) => b.textContent === "ثبّت في الأفلام").onclick();
+  await tick();
+  expect(repositories.install).toHaveBeenCalledWith("https://raw.githubusercontent.com/yuzono/anime-repo/repo", "ar.egydead", "cinema");
 });
