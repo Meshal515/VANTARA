@@ -14,6 +14,7 @@ import { addonCopies } from '../addons/video.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
 import { isNative, webPlugin } from '../pwa/platform.js';
+import { withImdbEpisode } from './anime-imdb.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
@@ -433,6 +434,8 @@ export async function open(args) {
   if (!plugin) return null;
   const identity = addonDiscoverySessions.get(args.session)?.identity;
   if (identity && identity.canonicalId === args.subtitleIdentity?.canonicalId && identity.kind === args.subtitleIdentity?.kind) args = { ...args, subtitleIdentity: { ...args.subtitleIdentity, externalIds: { ...args.subtitleIdentity.externalIds, ...identity.externalIds } } };
+  // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
+  if (args.subtitleIdentity) args = { ...args, subtitleIdentity: await withImdbEpisode(args.subtitleIdentity) };
   if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
     try {
       const a = await getAddonRuntime(); await a.ready;
