@@ -566,8 +566,20 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
             settings.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 7)
             settings.setInteger(settings_pack.int_types.tracker_receive_timeout.swigValue(), 6)
             settings.setInteger(settings_pack.int_types.tracker_completion_timeout.swigValue(), 15)
-            settings.setInteger(settings_pack.int_types.request_timeout.swigValue(), 10)
+            // Stremio (btRequestTimeout 4000): طلب لم يُجب خلال 4 ث يُعاد طلبه من مشارك آخر،
+            // فلا يعلّق مشارك بطيء القطعة التي ينتظرها المشغّل
+            settings.setInteger(settings_pack.int_types.request_timeout.swigValue(), 4)
             settings.setInteger(settings_pack.int_types.piece_timeout.swigValue(), 8)
+            // القطع المستعجلة قبل الجملة (stremio-libtorrent-playback-fix): طوابير الطلب الافتراضية
+            // تمتلئ بقطع لا يحتاجها التشغيل فتنتظر قطعة الموضع الحالي خلفها. طابور أقصر وزمن أقصر،
+            // وبلا تفضيل القطعة الكاملة أو المجاورة، فتتقدّم كتل القطعة ذات الموعد.
+            settings.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 250)
+            settings.setInteger(settings_pack.int_types.request_queue_time.swigValue(), 1)
+            settings.setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 0)
+            settings.setBoolean(settings_pack.bool_types.piece_extent_affinity.swigValue(), false)
+            // مشاركون خلف NAT لا يصلون إلا باتصال داخل: افتح المنفذ تلقائيًا حيث يسمح الراوتر
+            settings.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
+            settings.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
             return settings
         }
         private val PRIVATE_RANGES = listOf(
