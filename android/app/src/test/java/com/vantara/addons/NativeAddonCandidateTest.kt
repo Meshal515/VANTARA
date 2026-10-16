@@ -52,7 +52,10 @@ class NativeAddonCandidateTest {
         val request = NativeAddonCandidates.torrentRequest(raw)
         assertNull(request.fileIdx)
         assertEquals("0123456789abcdef0123456789abcdef01234567", request.infoHash)
-        assertEquals("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567", request.magnetUri())
+        // بلا متتبّعات من الإضافة: القائمة العامة الثابتة وحدها
+        assertTrue(request.trackers.isEmpty())
+        assertTrue(request.magnetUri().startsWith("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&tr="))
+        assertEquals(com.vantara.addons.torrent.TorrentPolicy.PUBLIC_TRACKERS.size, request.magnetUri().split("&tr=").size - 1)
     }
     @Test fun `invalid torrent file index never silently selects a different video`() {
         for (index in listOf("-1", "2147483648", "1.5", "\"2\"")) {

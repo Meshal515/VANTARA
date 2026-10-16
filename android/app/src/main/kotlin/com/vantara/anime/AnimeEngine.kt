@@ -517,6 +517,8 @@ class AnimeEngine(context: Context) {
     fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
 
     private fun launchAddonRequest(prep: com.vantara.anime.stream.PreparedEpisode, provider: com.vantara.addons.NativeStremioProvider) {
+        // جلسة التورنت وDHT تبدأ مع طلب الإضافات، لا عند الضغط على التشغيل (لا تنزيل هنا)
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(appContext).warmUp() }
         CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
             val raw = try {
                 withTimeout(46_000) { kotlinx.coroutines.runInterruptible { provider.streams(com.vantara.addons.nativeAddonClient(appContext), prep.number, "stream-${prep.id}-${provider.sourceId.hashCode()}") } }
@@ -548,6 +550,15 @@ class AnimeEngine(context: Context) {
                         com.vantara.anime.stream.RouteState.READY, listOf(c))
                     if (c.url.startsWith("vantara-torrent:")) prep.allowRuntimeCandidate(c.id)
                     prep.report(report)
+                }
+                // تجهيز مسبق محدود لأفضل خيارَي تورنت بترتيب المشغّل: بيانات التورنت (وطرفا الملف
+                // للأول) قبل الضغط، فالتشغيل لا ينتظر إلا القطع. تجهيز الحلقة التالية: بيانات فقط.
+                val torrents = list.filter { it.url.startsWith("vantara-torrent:") }
+                if (torrents.isNotEmpty() && prepared[id] === prep && prep.job?.isActive == true) runCatching {
+                    val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
+                    engine.warmUp()
+                    val picks = com.vantara.addons.torrent.TorrentPrefetch.pick(prep.rank(torrents).map { it.url to it.label }, background = id.startsWith("warm-"))
+                    for ((url, edges) in picks) engine.prefetch(android.net.Uri.parse(url), edges)
                 }
                 // All provider choices are visible immediately; bounded probes run independently.
                 if (prep.probe) coroutineScope {
