@@ -36,7 +36,7 @@ describe('server collectors', () => {
   });
   it('identifies the server-side MangaDex collector with a User-Agent required by its API', async () => {
     const { env } = setup();
-    const now = NOW - (Math.floor(NOW / 60_000) % 2) * 60_000;
+    const now = NOW - (Math.floor(NOW / 60_000) % 4) * 60_000;
     const requests: Headers[] = [];
     await collectTimelines(env, { now, scheduled: true, fetchImpl: (async (input, init) => {
       if (String(input).includes('api.mangadex.org')) {
@@ -73,7 +73,7 @@ describe('server collectors', () => {
   it('collects dated movies without opening them and ignores undated or future catalog entries', async () => {
     const { env } = setup();
     // Pick the movie collection minute and let the other providers return empty feeds.
-    const now = NOW + ((1 - Math.floor(NOW / 60_000) % 2 + 2) % 2) * 60_000;
+    const now = NOW + ((2 - Math.floor(NOW / 60_000) % 4 + 4) % 4) * 60_000;
     await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
       if (!String(input).includes('/catalog/movie/')) return reply(String(input).includes('anilist') ? { data: { Page: { airingSchedules: [] } } } : { metas: [] });
       return reply({ metas: [
@@ -86,7 +86,7 @@ describe('server collectors', () => {
   it('advances rotation despite a broken detail page, so later works are not starved', async () => {
     const { env } = setup();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const now = NOW - (Math.floor(NOW / 60_000) % 2) * 60_000;
+    const now = NOW - (Math.floor(NOW / 60_000) % 4) * 60_000;
     await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
       const url = String(input);
       if (url.includes('/series/work0')) return new Response('broken', { status: 503 });
@@ -100,14 +100,18 @@ describe('server collectors', () => {
     errors.mockRestore();
   });
   it('keeps scheduled ingestion under the 50-query D1 Free limit during a full catch-up', async () => {
-    for (let slot = 0; slot < 2; slot++) {
+    for (let slot = 0; slot < 4; slot++) {
       const { env } = setup();
       let queries = 0;
       const prepare = env.DB.prepare.bind(env.DB);
       env.DB.prepare = (sql: string) => { queries++; return prepare(sql); };
-      const now = NOW + ((slot - Math.floor(NOW / 60_000) % 2 + 2) % 2) * 60_000;
+      const now = NOW + ((slot - Math.floor(NOW / 60_000) % 4 + 4) % 4) * 60_000;
       await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
         const url = String(input);
+        // مواقع المانجا العربية بقوائم كاملة (20 عملًا لكل موقع)
+        if (url.includes('admin-ajax') || url.includes('m_orderby')) return new Response(Array.from({ length: 20 }, (_, i) => `<div class="page-item-detail manga"><img src="https://c/${i}.jpg"><div class="post-title"><h3><a href="https://s/manga/m${i}/">Madara${i}</a></h3></div><div class="list-chapter"><span class="chapter"><a href="https://s/manga/m${i}/9/">9</a></span><span class="chapter"><a href="https://s/manga/m${i}/8/">8</a></span></div></div>`).join(''));
+        if (url.includes('api.azorafly')) return reply({ posts: Array.from({ length: 24 }, (_, i) => ({ id: i, slug: `a${i}`, postTitle: `Iken${i}`, chapters: [{ number: 5, createdAt: new Date(now - H).toISOString() }, { number: 4, createdAt: new Date(now - 2 * H).toISOString() }] })) });
+        if (url.includes('meshmanga')) return reply({ results: Array.from({ length: 20 }, (_, i) => ({ serie_id: i + 1, title: `Swat${i}`, chapters: [{ chapter: '7', created_at: new Date(now - H).toISOString() }] })) });
         if (url.includes('olympustaff.com/series/')) return new Response(Array.from({ length: 40 }, (_, i) => `<div class="chapter-card" data-date="${(now - (i+1)*60_000)/1000}" data-number="${400-i}"></div>`).join(''));
         if (url.includes('olympus')) return new Response('<div class="last-chapter">' + Array.from({ length: 24 }, (_, i) => `<div class="box"><a href="/series/work${i}"><h3>Work${i}</h3></a></div>`).join(''));
         if (url.includes('mangadex')) return reply({ data: Array.from({ length: 50 }, (_, i) => ({ attributes: { chapter: '1', publishAt: new Date(now-H).toISOString() }, relationships: [{ id: String(i), type: 'manga', attributes: { title: { en: `Dex${i}` } } }] })) });
