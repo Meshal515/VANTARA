@@ -209,8 +209,8 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val meta = RepoIndex.parseMeta(fetchText("$base/repo.json"))
-                val count = RepoIndex.parseIndex(fetchText("$base/index.min.json")).size
+                val (meta, list) = readRepo(base)
+                val count = list.size
                 val repo = UserRepo(base, meta.name, meta.fingerprint)
                 userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", count))
@@ -242,7 +242,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
                 val list = JSArray()
-                for (ext in RepoIndex.parseIndex(fetchText("$base/index.min.json"))) {
+                for (ext in readRepo(base).second) {
                     val mine = userStore.extension(ext.pkg)
                     list.put(
                         JSObject()
@@ -278,9 +278,11 @@ class ExtensionEnginePlugin : Plugin() {
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
                 val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
                 require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
-                val ext = RepoIndex.parseIndex(fetchText("$base/index.min.json")).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
+                val (meta, list) = readRepo(base)
+                require(meta.fingerprint == repo.fingerprint) { "مفتاح توقيع المستودع تغيّر منذ أضفته؛ أزله وأضفه من جديد إن كنت تثق به" }
+                val ext = list.firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
-                val apkUrl = "$base/apk/${ext.apk}"
+                val apkUrl = ext.apkUrl
                 val bytes = fetchBytes(apkUrl, 30 * 1024 * 1024)
                 val probe = java.io.File(context.cacheDir, "ext-verify-$pkg.apk")
                 try {
@@ -333,6 +335,19 @@ class ExtensionEnginePlugin : Plugin() {
         }
 
     private fun fetchText(url: String): String = String(fetchBytes(url, 8 * 1024 * 1024), Charsets.UTF_8)
+
+    /** repo.json ثم فهرسه: index.pb (v2) إن أعلنه، وإلا index.min.json (v1). */
+    private fun readRepo(base: String): Pair<RepoIndex.Meta, List<RepoIndex.Extension>> {
+        val repoJson = fetchText("$base/repo.json")
+        val v2 = RepoIndex.indexV2(repoJson)
+        if (v2 != null) {
+            val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024))
+            val declared = RepoIndex.parseMeta(repoJson)
+            require(declared.fingerprint == meta.fingerprint) { "مفتاح التوقيع في repo.json لا يطابق الفهرس" }
+            return declared to list
+        }
+        return RepoIndex.parseMeta(repoJson) to RepoIndex.parseIndex(fetchText("$base/index.min.json"), base)
+    }
 
     /** تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف. يُستدعى مرة، ثم يُخدَم من الذاكرة. */
     @PluginMethod

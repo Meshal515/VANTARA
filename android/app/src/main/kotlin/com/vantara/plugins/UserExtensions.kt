@@ -21,9 +21,10 @@ import java.security.MessageDigest
 /**
  * مستودعات إضافات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi):
  *
- *   <base>/repo.json        { meta: { name, signingKeyFingerprint } }
- *   <base>/index.min.json   [{ name, pkg, apk, lang, version, nsfw, sources: [{ id, name, lang }] }]
- *   <base>/apk/<apk>
+ *   <base>/repo.json        { meta: { name, signingKeyFingerprint }, index_v2?: رابط index.pb }
+ *   index.pb (v2، Keiyoushi اليوم): protobuf مضغوط gzip فيه الإضافات ورابط APK كل منها
+ *   <base>/index.min.json   (v1) [{ name, pkg, apk, lang, version, nsfw, sources: [{ id, name, lang }] }]
+ *   <base>/apk/<apk>        (v1)
  *
  * الإضافة كود يعمل داخل التطبيق، فالثقة بالمستودع لا بالملف: كل APK يجب أن يكون
  * موقَّعًا بالمفتاح الذي أعلنه المستودع (كما في Mihon)، وبصمته SHA-256 تُثبَّت عند
@@ -36,7 +37,7 @@ object RepoIndex {
     data class Meta(val name: String, val fingerprint: String)
     data class Source(val id: String, val name: String, val lang: String)
     data class Extension(
-        val name: String, val pkg: String, val apk: String, val lang: String, val version: String,
+        val name: String, val pkg: String, val apkUrl: String, val lang: String, val version: String,
         val lib: Double, val nsfw: Boolean, val sources: List<Source>,
     ) {
         val anime: Boolean get() = pkg.contains(".animeextension.")
@@ -51,6 +52,13 @@ object RepoIndex {
         return raw.replace(Regex("/(index\\.min\\.json|index\\.json|repo\\.json)$", RegexOption.IGNORE_CASE), "")
     }
 
+    /** رابط index.pb إن أعلنه repo.json (HTTPS فقط)، وإلا null فيُقرأ index.min.json. */
+    fun indexV2(repoJson: String): String? {
+        val url = (json.parseToJsonElement(repoJson).jsonObject["index_v2"])?.jsonPrimitive?.contentOrNull ?: return null
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        return url.takeIf { uri.scheme.equals("https", ignoreCase = true) && uri.host != null && uri.rawUserInfo == null }
+    }
+
     fun parseMeta(text: String): Meta {
         val meta = json.parseToJsonElement(text).jsonObject["meta"]?.jsonObject ?: error("repo.json بلا meta")
         val name = meta["name"]?.jsonPrimitive?.contentOrNull?.take(80)?.ifBlank { null } ?: error("المستودع بلا اسم")
@@ -59,7 +67,7 @@ object RepoIndex {
         return Meta(name, fingerprint)
     }
 
-    fun parseIndex(text: String): List<Extension> {
+    fun parseIndex(text: String, base: String): List<Extension> {
         val list = json.parseToJsonElement(text) as? JsonArray ?: error("index.min.json ليس قائمة")
         require(list.size <= 5000) { "المستودع أكبر من الحد" }
         return list.mapNotNull { element ->
@@ -76,9 +84,96 @@ object RepoIndex {
             }
             Extension(
                 name = (o["name"]?.jsonPrimitive?.contentOrNull ?: pkg).removePrefix("Tachiyomi: ").removePrefix("Aniyomi: "),
-                pkg = pkg, apk = apk, lang = o["lang"]?.jsonPrimitive?.contentOrNull ?: "",
+                pkg = pkg, apkUrl = "$base/apk/$apk", lang = o["lang"]?.jsonPrimitive?.contentOrNull ?: "",
                 version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources,
             )
+        }
+    }
+
+    /**
+     * index.pb (v2): Index { 1 name, 3 signingKeyFingerprint, 101 { 1 Extension... } }
+     * Extension { 1 name, 2 pkg, 3 { 1 apkUrl }, 4 lib, 6 versionName, 7 contentWarning (1 آمن، 2 مختلط، 3 للكبار),
+     *             8 Source { 1 id, 2 name, 3 lang } }
+     * يُفك يدويًا (حقول قليلة ثابتة) بلا مخطط مولَّد.
+     */
+    fun parseIndexV2(raw: ByteArray): Pair<Meta, List<Extension>> {
+        val bytes = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) gunzip(raw, 32 * 1024 * 1024) else raw
+        val top = Pb(bytes).fields()
+        val name = top.text(1)?.take(80)?.ifBlank { null } ?: error("فهرس المستودع بلا اسم")
+        val fingerprint = top.text(3)?.lowercase()?.replace(":", "")
+        require(fingerprint != null && SHA256.matches(fingerprint)) { "المستودع لا يعلن مفتاح توقيع؛ لا نشغّل كودًا بلا توقيع معروف" }
+        val list = top.all(101).flatMap { Pb(it).fields().all(1) }
+        require(list.size <= 5000) { "المستودع أكبر من الحد" }
+        val extensions = list.mapNotNull { entry ->
+            val e = Pb(entry).fields()
+            val pkg = e.text(2)?.takeIf { Regex("^[A-Za-z0-9_.]+$").matches(it) } ?: return@mapNotNull null
+            val apkUrl = e.bytes(3)?.let { Pb(it).fields().text(1) }?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
+            val version = e.text(6) ?: return@mapNotNull null
+            val lib = e.text(4)?.toDoubleOrNull() ?: version.split('.').take(2).joinToString(".").toDoubleOrNull() ?: return@mapNotNull null
+            val sources = e.all(8).mapNotNull { s ->
+                val so = Pb(s).fields()
+                val id = so.varint(1)?.toULong()?.toLong()?.toString() ?: return@mapNotNull null
+                Source(id, so.text(2) ?: pkg, so.text(3) ?: "")
+            }
+            val langs = sources.map { it.lang }.distinct()
+            Extension(
+                name = e.text(1) ?: pkg, pkg = pkg, apkUrl = apkUrl, lang = langs.singleOrNull() ?: "all",
+                version = version, lib = lib, nsfw = e.varint(7) == 3L, sources = sources,
+            )
+        }
+        return Meta(name, fingerprint) to extensions
+    }
+
+    private fun gunzip(raw: ByteArray, limit: Int): ByteArray =
+        java.util.zip.GZIPInputStream(raw.inputStream()).use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                out.write(buf, 0, n)
+                require(out.size() <= limit) { "فهرس المستودع أكبر من الحد" }
+            }
+            out.toByteArray()
+        }
+
+    /** قارئ protobuf صغير: حقول varint ونصوص/رسائل فقط (ما يحتاجه الفهرس). */
+    private class Pb(private val b: ByteArray) {
+        class Fields(private val map: Map<Int, List<Any>>) {
+            fun all(f: Int): List<ByteArray> = map[f].orEmpty().filterIsInstance<ByteArray>()
+            fun bytes(f: Int): ByteArray? = all(f).firstOrNull()
+            fun text(f: Int): String? = bytes(f)?.toString(Charsets.UTF_8)
+            fun varint(f: Int): Long? = map[f].orEmpty().filterIsInstance<Long>().firstOrNull()
+        }
+        private var i = 0
+        private fun varint(): Long {
+            var r = 0L; var shift = 0
+            while (true) {
+                require(i < b.size && shift < 64) { "فهرس تالف" }
+                val c = b[i++].toInt() and 0xff
+                r = r or ((c and 0x7f).toLong() shl shift)
+                if (c < 0x80) return r
+                shift += 7
+            }
+        }
+        fun fields(): Fields {
+            val map = HashMap<Int, MutableList<Any>>()
+            while (i < b.size) {
+                val key = varint()
+                val field = (key ushr 3).toInt()
+                when ((key and 7).toInt()) {
+                    0 -> map.getOrPut(field) { mutableListOf() }.add(varint())
+                    2 -> {
+                        val len = varint().toInt()
+                        require(len >= 0 && i + len <= b.size) { "فهرس تالف" }
+                        map.getOrPut(field) { mutableListOf() }.add(b.copyOfRange(i, i + len)); i += len
+                    }
+                    1 -> i += 8
+                    5 -> i += 4
+                    else -> error("فهرس تالف")
+                }
+            }
+            return Fields(map)
         }
     }
 
