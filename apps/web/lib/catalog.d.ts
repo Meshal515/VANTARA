@@ -4,3 +4,5 @@ export function normalizeTitle(raw: unknown): string;
 export function decodeEntities<T>(raw: T): T;
 /** First number in a chapter label («الفصل ٣٣٠» → 330), or -1. Shared with the app's chapter parser. */
 export function parseChapterNumber(name: unknown): number;
+/** Comparison-only singular («machinations» → «machination»); never a key on its own. */
+export function singular(word: string): string;

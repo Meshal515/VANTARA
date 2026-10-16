@@ -72,3 +72,14 @@ describe('server manga sites', () => {
     expect(state.results?.find((r) => r.source.endsWith('.mangalek'))?.last_error).toBeNull();
   });
 });
+
+describe('top chapters for duplicate detection', () => {
+  it('serves each manga work and its highest chapter, skipping first chapters', async () => {
+    const { env } = sqliteEnv({ VANTARA_SESSION_SECRET: 's'.repeat(40), VANTARA_IDENTITY_SECRET: 'i'.repeat(40), VANTARA_DEVICE_PEPPER: 'p'.repeat(40) } as never);
+    const { handleUpdatesObserve, handleUpdatesTwins } = await import('./updates.ts');
+    const works = [['City Of Sin', 37], ['City of Sins', 37], ['Tiny', 2]].map(([title, n]) => ({ work: `ext:${normalizeTitle(String(title))}`, section: 'manga', kind: 'chapter', title, units: [{ number: n }] }));
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe', { method: 'POST', body: JSON.stringify({ works }) }), env, NOW);
+    const body = await (await handleUpdatesTwins(env, NOW)).json() as { works: Array<[string, number]> };
+    expect(body.works.sort()).toEqual([[normalizeTitle('City Of Sin'), 37], [normalizeTitle('City of Sins'), 37]].sort());
+  });
+});

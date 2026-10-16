@@ -13,7 +13,7 @@ import { handleTranslateTextBatch } from './translation-batch.ts';
 
 import { handleSourceReportGet, handleSourceReportPost } from './source-reports.ts';
 import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
-import { handleUpdatesList, handleUpdatesObserve, type UpdatesEnv } from './updates.ts';
+import { handleUpdatesList, handleUpdatesObserve, handleUpdatesTwins, type UpdatesEnv } from './updates.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
@@ -3157,6 +3157,8 @@ export default {
       else if (path === '/v1/diag/sources' && request.method === 'GET') response = await handleSourceReportGet(url, env, now);
       else if (path === '/v1/updates/observe' && request.method === 'POST') response = await handleUpdatesObserve(request, env as UpdatesEnv, now);
       else if (path === '/v1/updates' && request.method === 'GET') response = await handleUpdatesList(url, env as UpdatesEnv);
+      // نفس العمل بأسماء متقاربة في مصادر مختلفة (بدليل أعلى فصل): أسماء بديلة للفهرس
+      else if (path === '/v1/updates/twins' && request.method === 'GET') response = await handleUpdatesTwins(env as UpdatesEnv, now);
       else if (path === '/v1/sync' && request.method === 'GET') response = await handleSync(url, env, userId, now);
       else if (path === '/v1/ops' && request.method === 'POST') response = await handleOps(request, env, userId, now);
       else if (path === '/v1/presence' && request.method === 'POST') response = await handlePresenceBeat(request, env, userId, now);
