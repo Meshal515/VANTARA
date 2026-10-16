@@ -89,3 +89,8 @@ it('accepts a valid magnet result natively and preserves the selected file index
  const hash='0123456789abcdef0123456789abcdef01234567';
  expect(normalizeStreams([{url:`magnet:?xt=urn:btih:${hash}&tr=udp%3A%2F%2Ftracker.example.com%3A80`,fileIdx:0}],{addonKey:'a',runtimeName:'apk',torrentSupported:true})[0]).toMatchObject({type:'torrent',status:'RESOLVED',infoHash:hash,fileIdx:0});
 });
+it('lets the Windows player (mpv) take direct streams that are not web-ready', () => {
+ const raw=[{url:'https://cdn.test/movie.mkv',name:'1080p',behaviorHints:{notWebReady:true}}];
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'desktop'})[0].status).toBe('RESOLVED');
+ expect(normalizeStreams(raw,{addonKey:'a',runtimeName:'pwa'})[0].status).toBe('UNSUPPORTED');
+});

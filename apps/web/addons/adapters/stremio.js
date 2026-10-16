@@ -59,14 +59,11 @@ export function createStremioAdapter({ manifest, manifestUrl, transport, runtime
   }
   async function meta({ type, id, signal }) {
     const out = await request("meta", { type, id, signal });
-    if (
-      !plainObject(out.meta) ||
-      out.meta.id !== id ||
-      (out.meta.type && out.meta.type !== type)
-    )
-      throw new StremioError("INVALID_RESPONSE", "meta");
+    // المعرّف يجب أن يطابق (لا نعرض عملًا آخر)، أما النوع فإضافات كثيرة تردّ anime لما طُلب
+    // series أو العكس؛ فلا يُرفض الرد بسببه
+    if (!plainObject(out.meta) || out.meta.id !== id) throw new StremioError("INVALID_RESPONSE", "meta");
     if (out.meta.videos != null && (!Array.isArray(out.meta.videos) || out.meta.videos.length > LIMITS.videos)) throw new StremioError("INVALID_RESPONSE", "meta");
-    return { ...out.meta, ...(out.meta.videos ? { videos: out.meta.videos.filter((video) => plainObject(video) && safeStremioString(video.id, 2000)) } : {}) };
+    return { ...out.meta, type, ...(out.meta.videos ? { videos: out.meta.videos.filter((video) => plainObject(video) && safeStremioString(video.id, 2000)) } : {}) };
   }
   async function streams({ type, videoId, extra = {}, signal, onResult }) {
     const out = await request("stream", { type, id: videoId, extra, signal });

@@ -162,3 +162,9 @@ it('allows long-running series metadata beyond 1000 episodes while bounding the 
  videos.push(...Array.from({length:8801},(_,i)=>({id:String(i)})));
  await expect(a.meta({type:'series',id:'kitsu:12'})).rejects.toThrow();
 });
+it("accepts meta whose declared type differs (anime vs series) but never another work", async () => {
+  const a = make({ ...raw(), types: ["series"], resources: ["meta"], idPrefixes: ["kitsu:"] }, async () => ({ meta: { id: "kitsu:12", type: "anime", name: "One Piece" } }));
+  expect(await a.meta({ type: "series", id: "kitsu:12" })).toMatchObject({ id: "kitsu:12", type: "series", name: "One Piece" });
+  const b = make({ ...raw(), types: ["series"], resources: ["meta"], idPrefixes: ["kitsu:"] }, async () => ({ meta: { id: "kitsu:99", type: "series", name: "Other" } }));
+  await expect(b.meta({ type: "series", id: "kitsu:12" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});

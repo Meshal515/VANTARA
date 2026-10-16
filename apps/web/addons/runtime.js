@@ -26,11 +26,11 @@ export function createAddonRuntime({
   pulse = createSourcePulse(),
 } = {}) {
   if (!store) throw new Error("مخزن الإضافات غير متاح");
-  const runtimeName = r.native ? "apk" : "pwa";
+  const runtimeName = r.runtimeName === "desktop" ? "desktop" : r.native ? "apk" : "pwa";
   const capabilitiesFor = m => supportedCapabilities(m, runtimeName)
     .filter(cap => cap !== "streams" || runtimeName !== "apk" || r.addonStreams !== false);
   const streamRouteSupported = stream => (!stream.status || stream.status === "RESOLVED") &&
-    (runtimeName === "apk" ? stream.type !== "torrent" || r.torrentSupported === true : stream.type !== "dash" && stream.type !== "torrent");
+    (["apk", "desktop"].includes(runtimeName) ? stream.type !== "torrent" || r.torrentSupported === true : stream.type !== "dash" && stream.type !== "torrent");
   const core = [],
     registry = createAddonRegistry({
       store,
@@ -251,7 +251,8 @@ export function createAddonRuntime({
               },
             ];
           const kitsu = kitsuVideoRequest(work.identity);
-          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: kitsu.type, externalIds: work.externalIds }];
+          // إضافة تعلن بثّ Kitsu تحت anime وحده تُطلب بنوعها (اختارته addonCopies)
+          if (kitsu) return [{ url: kitsu.videoId, name: `الحلقة ${work.episode}`, number: work.episode, type: work.type === "anime" ? "anime" : kitsu.type, externalIds: work.externalIds }];
           if (
             Number.isInteger(work.requestedSeason) &&
             Number.isInteger(work.episode)

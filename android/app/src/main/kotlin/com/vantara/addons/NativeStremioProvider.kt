@@ -25,7 +25,8 @@ data class NativeStremioProvider(
         if (type == "movie") return videoId.takeIf { number < 0 }
         if (number < 1 || number.toInt().toFloat() != number) return null
         val kitsu = Regex("kitsu:([0-9]+):([0-9]+)").matchEntire(videoId)
-        if (type == "series" && kitsu != null) return "kitsu:${kitsu.groupValues[1]}:${number.toInt()}"
+        // إضافات أنمي تعلن بثّ Kitsu تحت anime وحده؛ الحلقة التالية بنفس الصيغة
+        if ((type == "series" || type == "anime") && kitsu != null) return "kitsu:${kitsu.groupValues[1]}:${number.toInt()}"
         val match = Regex("(tt[0-9]+):([0-9]+):([0-9]+)").matchEntire(videoId)
         val currentSeason = season ?: match?.groupValues?.get(2)?.toIntOrNull()
         // Explicit private/catalog episode IDs take precedence and are scoped to the season.
