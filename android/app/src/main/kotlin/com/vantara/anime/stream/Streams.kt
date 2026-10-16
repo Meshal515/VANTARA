@@ -135,7 +135,8 @@ object StreamRanker {
             Container.DASH -> 0.15
             Container.UNKNOWN -> 0.0
         }
-        return h + variant + q + container
+        val swarm = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentSwarm.score(c.label, c.videoSize) else 0.0
+        return h + variant + q + container + swarm
     }
 }
 
@@ -177,11 +178,14 @@ class PlaybackSession(
     }
 
     fun failed(c: Candidate, error: String): Candidate? {
-        health.fail(HealthStore.hostKey(c.host), error)
+        // كل التورنتات تشترك في المضيف «torrent»: تورنت ميت (سرب بلا زارعين) كان يُحسب على الجميع،
+        // فبعد 3 إخفاقات تُدفن كل التورنتات لساعة ويبقى السجل أيامًا. فشل التورنت خاص بسربه وحده.
+        val torrent = HealthStore.isTorrent(c)
+        if (!torrent) health.fail(HealthStore.hostKey(c.host), error)
         synchronized(this) {
             failedIds += c.id
             // سيرفر ميت لا يدين المصدر كله؛ المصدر يُدان فقط إذا ماتت كل سيرفراته
-            if (queue.none { it.sourceId == c.sourceId } && tried.count { it.sourceId == c.sourceId } > 0) {
+            if (!torrent && queue.none { it.sourceId == c.sourceId } && tried.count { it.sourceId == c.sourceId } > 0) {
                 health.fail(HealthStore.sourceKey(c.sourceId), "كل سيرفرات الحلقة فشلت: $error")
             }
         }

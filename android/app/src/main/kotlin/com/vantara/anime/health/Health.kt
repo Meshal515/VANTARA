@@ -112,6 +112,8 @@ class HealthStore(private val file: File?, private val clock: () -> Long = Syste
                 // سجلات فشلها الوحيد «Canceled» كانت إلغاءنا نحن (مهلة البحث القديمة)
                 // لا عطل المصدر؛ تُمسح مرة ليبدأ المصدر نظيفًا
                 ?.filterNot { it.ok == 0 && it.lastError?.endsWith("Canceled") == true }
+                // سجلات سمّمها فشل تورنتات ميتة (قبل فصل فشل التورنت عن المضيف/المصدر): تُمسح مرة
+                ?.filterNot { poisonedByTorrent(it) }
                 ?.forEach { records[it.key] = it }
         }
     }
@@ -170,5 +172,9 @@ class HealthStore(private val file: File?, private val clock: () -> Long = Syste
     companion object {
         fun sourceKey(id: String) = "source:$id"
         fun hostKey(host: String) = "host:${host.removePrefix("www.").lowercase()}"
+        fun isTorrent(c: com.vantara.anime.stream.Candidate) = c.url.startsWith("vantara-torrent:")
+        /** المضيف المشترك «torrent»، أو مصدر آخر فشله رسالة محرّك التورنت/مهلة بدء التورنت (90 ث). */
+        internal fun poisonedByTorrent(r: Record): Boolean = r.key == hostKey("torrent") ||
+            (r.key.startsWith("source:") && r.lastError?.let { it.contains("Torrent", true) || it.contains("خلال 90 ثانية") } == true)
     }
 }
