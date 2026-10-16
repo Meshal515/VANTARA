@@ -117,7 +117,18 @@ jobs:
           path: ${{ runner.temp }}/windows-current
       - name: Verify install, branding, real embedded playback and user-data preservation
         shell: pwsh
-        run: ./tools/verify-windows-runtime.ps1 -CandidateDir (Join-Path $env:RUNNER_TEMP 'windows-current') -Version $env:VERSION
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'windows-current'
+          try { ./tools/verify-windows-runtime.ps1 -CandidateDir $dir -Version $env:VERSION }
+          catch {
+            # سبب الفشل وتقارير الفحص كملاحظات يقرؤها الـAPI (السجلات نفسها خارج متناوله)
+            Write-Host "::error title=verify::$($_.Exception.Message)"
+            Get-ChildItem $dir -Filter *report.json | ForEach-Object {
+              $c = (Get-Content $_.FullName -Raw) -replace "`r?`n", ' '
+              Write-Host "::notice title=$($_.Name)::$($c.Substring(0, [Math]::Min(3500, $c.Length)))"
+            }
+            throw
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
