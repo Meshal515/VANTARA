@@ -25,6 +25,7 @@ import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import uy.kohesive.injekt.api.get
 
 /**
  * جسر الواجهة إلى محرك الأنمي. رقيق عمدًا: كل منطق في [AnimeEngine] وطبقاته.
@@ -39,11 +40,16 @@ class AnimeEnginePlugin : Plugin() {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val crawls = ConcurrentHashMap<String, Job>()
     private lateinit var engine: AnimeEngine
+    /** مستودعات Aniyomi وإضافاتها التي ثبّتها المستخدم. */
+    private val userStore by lazy { com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json")) }
+    private val http by lazy { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client }
+    private val repoClient by lazy { com.vantara.plugins.RepoClient(context, http) }
 
     override fun load() {
         WebViewActivityHolder.set(activity)
         ensureEngineInjekt(context.applicationContext as Application)
         engine = AnimeEngine.get(context)
+        engine.setUserSources(userStore.state.extensions.map { it.entry() })
         // تقدّم المشاهدة من المشغّل الأصلي إلى الواجهة (سجل المشاهدة/الاستئناف)
         com.vantara.anime.player.PlaybackEvents.listener = { p ->
             notifyListeners(
@@ -259,6 +265,114 @@ class AnimeEnginePlugin : Plugin() {
             )
         }
         call.resolve(JSObject().put("sources", list))
+    }
+
+    // ───────────────────── مستودعات إضافات الأنمي (Aniyomi) ─────────────────────
+
+    private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name)
+    private fun failure(call: PluginCall, t: Throwable) = call.reject(t.message ?: t.javaClass.simpleName)
+
+    @PluginMethod
+    fun repos(call: PluginCall) {
+        val st = userStore.state
+        call.resolve(
+            JSObject()
+                .put("repos", JSArray(st.repos.map { repoJson(it) }))
+                .put("installed", JSArray(st.extensions.map { JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl) })),
+        )
+    }
+
+    @PluginMethod
+    fun addRepo(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                val (meta, list) = repoClient.read(base)
+                require(list.any { it.anime }) { "هذا مستودع مانجا؛ أضفه من قسم المانجا" }
+                val repo = com.vantara.plugins.UserRepo(base, meta.name, meta.fingerprint)
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
+                call.resolve(JSObject().put("repo", repoJson(repo)).put("count", list.count { it.anime }))
+            } catch (t: Throwable) { failure(call, t) }
+        }
+    }
+
+    @PluginMethod
+    fun removeRepo(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
+                engine.setUserSources(next.extensions.map { it.entry() })
+                call.resolve()
+            } catch (t: Throwable) { failure(call, t) }
+        }
+    }
+
+    /** إضافات المستودع مع حالتها: مثبتة، تحديث، مشحونة مع التطبيق، أو ليست أنمي. */
+    @PluginMethod
+    fun repoIndex(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
+                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val list = JSArray()
+                for (ext in repoClient.readTrusted(repo)) {
+                    val mine = userStore.state.extensions.firstOrNull { it.pkg == ext.pkg }
+                    list.put(
+                        JSObject()
+                            .put("pkg", ext.pkg).put("name", ext.name.removePrefix("Aniyomi: ")).put("version", ext.version).put("lang", ext.lang)
+                            .put("nsfw", ext.nsfw).put("anime", ext.anime)
+                            .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
+                            .put("builtin", engine.shipsPackage(ext.pkg))
+                            .put("installed", mine?.version).put("content", mine?.content)
+                            .put("update", mine != null && mine.version != ext.version)
+                            .put("sources", JSArray(com.vantara.plugins.RepoIndex.visibleSources(ext).map { it.name })),
+                    )
+                }
+                call.resolve(JSObject().put("extensions", list))
+            } catch (t: Throwable) { failure(call, t) }
+        }
+    }
+
+    /**
+     * تنزيل ← توقيع المستودع ← تحميل تجريبي بنفس محمّل المحرك ← تثبيت البصمة في البيان.
+     * `content`: anime أو cinema (القسم الذي تظهر فيه).
+     */
+    @PluginMethod
+    fun installExtension(call: PluginCall) {
+        scope.launch {
+            try {
+                val base = com.vantara.plugins.RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
+                val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
+                val content = call.getString("content")?.takeIf { it == "anime" || it == "cinema" } ?: "anime"
+                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                require(!engine.shipsPackage(pkg)) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
+                val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
+                require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
+                val bytes = repoClient.downloadSigned(ext.apkUrl, repo.fingerprint)
+                val source = com.vantara.plugins.RepoIndex.visibleSources(ext).firstOrNull() ?: error("الإضافة لا تعلن مصدرًا")
+                val user = com.vantara.anime.registry.UserAnimeExtension(
+                    repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
+                    sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
+                    sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                )
+                // التحميل نفسه الذي سيستعمله المحرك: حزمة لا تُحمَّل لا تُحفظ
+                com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
+                val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+                engine.setUserSources(next.extensions.map { it.entry() })
+                call.resolve(JSObject().put("id", user.id))
+            } catch (t: Throwable) { failure(call, t) }
+        }
+    }
+
+    @PluginMethod
+    fun uninstallExtension(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
+        val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+        engine.setUserSources(next.extensions.map { it.entry() })
+        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+        call.resolve()
     }
 
     /** صحة كل مصدر وسيرفر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي. */

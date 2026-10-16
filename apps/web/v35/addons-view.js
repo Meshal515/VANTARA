@@ -440,6 +440,8 @@ export function renderAddons({
   mountCover = null,
   /** مستودعات مصادر المانجا (التطبيق وحده): engine.repositories() أو null. */
   repositories = null,
+  /** مستودعات إضافات Aniyomi (الأنمي والأفلام): animeEngine.repositories() أو null. */
+  animeRepositories = null,
   onSourcesChanged = () => {},
 }) {
   const root = node("div", "addon-hub addon-store");
@@ -530,6 +532,7 @@ export function renderAddons({
   filters.hidden = sectionHub;
   root.append(header, toolbar, filters, states);
   if (repositories && (filter === "manga" || filter === "all")) root.append(renderRepositories({ repositories, onSourcesChanged }));
+  if (animeRepositories && (filter === "anime" || filter === "cinema" || filter === "all")) root.append(renderRepositories({ repositories: animeRepositories, onSourcesChanged }));
   const panel = node("details", "addon-import");
   // الاستيراد برابط/JSON/ملف: مخفي حتى يُطلب من زر «+» أو «تثبيت»
   panel.hidden = true;

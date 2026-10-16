@@ -20,8 +20,11 @@ const button = (text, action, cls = "addon-button") => {
 const reason = (error) => String(error?.message ?? error ?? "تعذر إكمال الطلب").replace(/https?:\/\/[^\s]+/gi, "[رابط]").slice(0, 240);
 const host = (url) => { try { return new URL(url).host; } catch { return url; } };
 
-/** يقرر ما يظهر وأي زر لكل إضافة. `filter`: 'arabic' (افتراضي) أو 'all'. */
-export function extensionRows(list, { filter = "arabic", query = "" } = {}) {
+/**
+ * يقرر ما يظهر وأي زر لكل إضافة. `filter`: 'arabic' (افتراضي) أو 'all'.
+ * `kind`: 'manga' (إضافات Tachiyomi) أو 'anime' (إضافات Aniyomi): كل قسم يثبّت نوعه.
+ */
+export function extensionRows(list, { filter = "arabic", query = "", kind = "manga" } = {}) {
   const q = query.trim().toLowerCase();
   const rows = [];
   let adult = 0;
@@ -29,20 +32,26 @@ export function extensionRows(list, { filter = "arabic", query = "" } = {}) {
     if (ext.nsfw) { adult++; continue; }
     if (filter === "arabic" && !ext.arabic) continue;
     if (q && !`${ext.name} ${ext.pkg} ${(ext.sources ?? []).join(" ")}`.toLowerCase().includes(q)) continue;
-    const state = ext.anime ? "anime" : ext.builtin ? "builtin" : ext.update ? "update" : ext.installed ? "installed" : "available";
+    const foreign = kind === "anime" ? !ext.anime : ext.anime;
+    const state = foreign ? "foreign" : ext.builtin ? "builtin" : ext.update ? "update" : ext.installed ? "installed" : "available";
     rows.push({ ext, state });
   }
-  rows.sort((a, b) => ["update", "installed", "available", "builtin", "anime"].indexOf(a.state) - ["update", "installed", "available", "builtin", "anime"].indexOf(b.state) || a.ext.name.localeCompare(b.ext.name));
+  const order = ["update", "installed", "available", "builtin", "foreign"];
+  rows.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || a.ext.name.localeCompare(b.ext.name));
   return { rows, adult };
 }
 
 export function renderRepositories({ repositories, onSourcesChanged = () => {} }) {
+  const kind = repositories.kind ?? "manga";
   const root = node("section", "addon-repos");
   root.dir = "rtl";
+  root.dataset.kind = kind;
   const head = node("div", "addon-repos-head");
   head.append(
-    node("h3", null, "مستودعات المصادر"),
-    node("p", "addon-muted", "أضف رابط مستودع إضافات مانجا (مثل Keiyoushi). تظهر مصادره هنا وتثبّت منها ما تريد، وتشتغل كأنها مدمجة."),
+    node("h3", null, kind === "anime" ? "مستودعات الأنمي والأفلام" : "مستودعات المانجا"),
+    node("p", "addon-muted", kind === "anime"
+      ? "أضف رابط مستودع إضافات Aniyomi (مثل Yūzōnō). ثبّت أي إضافة في الأنمي أو في الأفلام، وتشتغل كأنها مدمجة."
+      : "أضف رابط مستودع إضافات مانجا (مثل Keiyoushi). تظهر مصادره هنا وتثبّت منها ما تريد، وتشتغل كأنها مدمجة."),
   );
   const form = node("form", "addon-repos-form");
   const input = node("input", "addon-input");
@@ -121,7 +130,7 @@ export function renderRepositories({ repositories, onSourcesChanged = () => {} }
     };
     function draw() {
       if (!extensions) return;
-      const { rows, adult } = extensionRows(extensions, { filter, query: search.value });
+      const { rows, adult } = extensionRows(extensions, { filter, query: search.value, kind });
       const out = rows.slice(0, 200).map(({ ext, state }) => extensionRow(repo, ext, state, load));
       if (!rows.length) out.push(node("p", "addon-muted", filter === "arabic" ? "لا إضافات عربية هنا. اعرض «الكل»." : "لا نتائج."));
       if (adult) out.push(node("p", "addon-muted", `مخفية ${adult} إضافة للكبار.`));
@@ -141,7 +150,7 @@ export function renderRepositories({ repositories, onSourcesChanged = () => {} }
     row.append(info);
     const note = (text) => row.append(node("span", "addon-chip addon-chip-muted", text));
     if (state === "builtin") note("مدمجة في التطبيق");
-    else if (state === "anime") note("إضافة أنمي — غير مدعومة بعد");
+    else if (state === "foreign") note(kind === "anime" ? "إضافة مانجا — ثبّتها من قسم المانجا" : "إضافة أنمي — ثبّتها من قسم الأنمي");
     else {
       const run = async (action, label) => {
         for (const b of row.querySelectorAll("button")) b.disabled = true;
@@ -150,8 +159,16 @@ export function renderRepositories({ repositories, onSourcesChanged = () => {} }
         try { await action(); onSourcesChanged(); await reload(); }
         catch (error) { msg.className = "addon-error"; msg.textContent = reason(error); for (const b of row.querySelectorAll("button")) b.disabled = false; }
       };
-      if (state === "available" || state === "update")
-        row.append(button(state === "update" ? "تحديث" : "تثبيت", () => run(() => repositories.install(repo.url, ext.pkg), "جارٍ التنزيل والتحقق…"), "addon-button addon-button-primary"));
+      if (state === "update")
+        row.append(button("تحديث", () => run(() => repositories.install(repo.url, ext.pkg, ext.content ?? "anime"), "جارٍ التنزيل والتحقق…"), "addon-button addon-button-primary"));
+      else if (state === "available" && kind === "anime") {
+        // المستودع لا يفرّق بين الأنمي والأفلام: المستخدم يختار القسم
+        row.append(
+          button("ثبّت في الأنمي", () => run(() => repositories.install(repo.url, ext.pkg, "anime"), "جارٍ التنزيل والتحقق…"), "addon-button addon-button-primary"),
+          button("ثبّت في الأفلام", () => run(() => repositories.install(repo.url, ext.pkg, "cinema"), "جارٍ التنزيل والتحقق…"), "addon-button"),
+        );
+      } else if (state === "available")
+        row.append(button("تثبيت", () => run(() => repositories.install(repo.url, ext.pkg), "جارٍ التنزيل والتحقق…"), "addon-button addon-button-primary"));
       if (state === "installed" || state === "update")
         row.append(button("إزالة", () => run(() => repositories.uninstall(ext.pkg), "جارٍ الإزالة…"), "addon-button"));
     }

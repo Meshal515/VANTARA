@@ -534,3 +534,21 @@ export function on(event, handler) {
   const handle = plugin.addListener(event, handler);
   return () => Promise.resolve(handle).then((h) => h?.remove?.());
 }
+
+/**
+ * مستودعات إضافات الأنمي والأفلام (Aniyomi) التي يضيفها المستخدم. داخل التطبيق وحده.
+ * التثبيت يختار القسم: `content` = 'anime' أو 'cinema'. `null` حيث لا تتوفر.
+ */
+export function repositories() {
+  const plugin = bridge();
+  if (typeof plugin?.addRepo !== 'function') return null;
+  return {
+    kind: 'anime',
+    list: () => plugin.repos(),
+    add: (url) => plugin.addRepo({ url }),
+    remove: (url) => plugin.removeRepo({ url }),
+    extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],
+    install: (repo, pkg, content = 'anime') => plugin.installExtension({ repo, pkg, content }),
+    uninstall: (pkg) => plugin.uninstallExtension({ pkg }),
+  };
+}
