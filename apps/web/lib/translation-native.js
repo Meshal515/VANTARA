@@ -22,7 +22,32 @@
  * على الويب (بلا Capacitor) لا ترجمة على الجهاز: `available()` = false والإعدادات تقول ذلك.
  */
 
-const plugin = () => globalThis.Capacitor?.Plugins?.Translation ?? null;
+/**
+ * Backend resolution is the only platform-specific seam. The APK exposes the
+ * Capacitor plugin; the Windows desktop app (Electron, onnxruntime-node) exposes
+ * the same contract on `globalThis.vantaraDesktop.translation` from its preload.
+ * Scheduler, Luna chunking, caching and the perf report stay shared JS.
+ */
+const desktop = () => globalThis.vantaraDesktop?.translation ?? null;
+const plugin = () => globalThis.Capacitor?.Plugins?.Translation ?? desktop();
+
+/** Which local engine answers (`android` | `desktop` | null) — for the perf report. */
+export const nativeBackend = () => globalThis.Capacitor?.Plugins?.Translation ? 'android' : desktop() ? 'desktop' : null;
+
+/** Local file path of a reader image URL, or null (Capacitor `_capacitor_file_` or desktop hook). */
+export function nativePathFromSrc(src) {
+  const m = /_capacitor_file_(\/.*)$/.exec(String(src ?? ''));
+  if (m) {
+    try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+  }
+  try { return desktop()?.pathFromSrc?.(String(src ?? '')) ?? null; } catch { return null; }
+}
+
+/** URL the reader can load for a rendered local file. */
+export function nativeFileSrc(path) {
+  const convert = globalThis.Capacitor?.convertFileSrc ?? desktop()?.fileSrc;
+  return typeof convert === 'function' ? convert(path) : path;
+}
 
 export const nativeTranslationAvailable = () => Boolean(plugin());
 

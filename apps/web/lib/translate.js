@@ -20,7 +20,7 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
+import { analyzePage, nativeBackend, nativeFileSrc, nativePathFromSrc, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
 import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
@@ -124,7 +124,11 @@ export function createQueue({
   // old "prepare slots filled with Analyze" convoy without routing the whole
   // chapter up front.
   maxRouteAhead = Math.max(1, Math.min(maxPrepared, prepareConcurrency * 2)),
+  // Reading lead: the visible page plus this many pages ahead outrank everything
+  // else, so translation stays in front of the reader (stall ≈ 0 is the goal).
+  lead = 3,
 } = {}) {
+  const leadPages = Math.max(1, Math.floor(Number(lead) || 3));
   const jobs = new Map();
   let running = 0;
   let preparing = 0;
@@ -153,7 +157,7 @@ export function createQueue({
       bypassConcurrency: cap(requested.bypassConcurrency, bypassConcurrency),
     };
   };
-  const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + 3;
+  const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + leadPages;
 
   // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
   // الحالية + الثلاث التالية، ثم أقرب الصفحات الفائتة خلفك، ثم بقية الحالي.
@@ -162,9 +166,9 @@ export function createQueue({
     if (job.chapterKey !== focusKey) return rank * 1_000_000 + Math.max(0, job.index);
     const d = job.index - focusIndex;
     if (d === 0) return rank * 1_000_000;
-    if (d > 0 && d <= 3) return rank * 1_000_000 + d;
-    if (d < 0) return rank * 1_000_000 + 10 + (-d);
-    return rank * 1_000_000 + 100 + d;
+    if (d > 0 && d <= leadPages) return rank * 1_000_000 + d;
+    if (d < 0) return rank * 1_000_000 + 1_000 + (-d);
+    return rank * 1_000_000 + 10_000 + d;
   };
   const next = (predicate) => {
     let best = null;
@@ -464,13 +468,7 @@ export function resultOf(body) {
  * (`http://localhost/_capacitor_file_/data/…`)، أو null لرابط عادي.
  */
 export function filePathFromSrc(src) {
-  const m = /_capacitor_file_(\/.*)$/.exec(String(src ?? ''));
-  if (!m) return null;
-  try {
-    return decodeURIComponent(m[1]);
-  } catch {
-    return m[1];
-  }
+  return nativePathFromSrc(src);
 }
 
 /**
@@ -643,7 +641,7 @@ const backgroundRepairs = new Map();
 
 const refinementTargets = new Map();
 const earlyRefinements = new Map();
-const convertedPath = path => globalThis.Capacitor?.convertFileSrc ? globalThis.Capacitor.convertFileSrc(path) : path;
+const convertedPath = path => nativeFileSrc(path);
 async function acceptRefinement(event) {
   const target = refinementTargets.get(event?.previewPath);
   if (!target) {
@@ -715,6 +713,7 @@ async function translateOnce(deps, src, hash, meta, clock) {
     translated: result.incomplete ? 0 : result.translated,
     candidateTranslated: result.incomplete ? (result.translated ?? 0) : null,
     incomplete: Boolean(result.incomplete),
+    incompleteReasons: result.incompleteReasons ?? null,
     engine: result.engine ?? null,
     native: result.native,
     saved: persisted,
@@ -732,7 +731,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, capacity: runtimeCapacity.compactTelemetry(), ...extra });
+    recordPerf({ at: Date.now(), backend: nativeBackend(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -854,6 +853,52 @@ export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = 
   });
 }
 
+/**
+ * Pages of a chapter that are routed as text but have not asked Luna yet. The
+ * batcher holds an ahead page for companions only while this is non-zero, so one
+ * provider call carries a chapter chunk instead of one page. Entries expire so a
+ * dropped/abandoned page can never stall a batch beyond its bounded chunk wait.
+ */
+export const LUNA_EXPECT_TTL_MS = 90_000;
+export const LUNA_CHUNK_WAIT_MS = 2500;
+const lunaExpected = new Map();
+const lunaMode = meta => meta?.speed === 'fast' ? 'fast' : 'quality';
+export function expectLuna(hash, meta, now = Date.now()) {
+  if (!hash || !meta?.chapterKey) return;
+  lunaExpected.set(hash, { chapterKey: meta.chapterKey, mode: lunaMode(meta), at: now });
+}
+export function settleLuna(hash) {
+  if (lunaExpected.delete(hash)) for (const batcher of liveBatchers) batcher.poke?.();
+}
+export function expectedLunaPages(page, now = Date.now()) {
+  let n = 0;
+  for (const [hash, e] of lunaExpected) {
+    if (now - e.at > LUNA_EXPECT_TTL_MS) { lunaExpected.delete(hash); continue; }
+    if (hash !== page?.pageHash && e.chapterKey === page?.chapterKey && e.mode === lunaMode(page)) n += 1;
+  }
+  return n;
+}
+const liveBatchers = new Set();
+
+/**
+ * Chapter-level probe memory: once a chapter's pages keep answering need_image
+ * (nobody translated it before), the image-less cache probe is a pure extra
+ * round trip per page. After two consecutive misses the image goes in the first
+ * request; the server still answers from cache when a page turns out cached.
+ */
+export const PROBE_SKIP_AFTER_MISSES = 2;
+const probeMisses = new Map();
+export function shouldProbe(meta) {
+  const key = `${meta?.chapterKey ?? ''}|${lunaMode(meta)}`;
+  return (probeMisses.get(key) ?? 0) < PROBE_SKIP_AFTER_MISSES;
+}
+export function observeProbe(meta, { missed, cached }) {
+  const key = `${meta?.chapterKey ?? ''}|${lunaMode(meta)}`;
+  if (cached) probeMisses.delete(key);
+  else if (missed) probeMisses.set(key, (probeMisses.get(key) ?? 0) + 1);
+  if (probeMisses.size > 64) probeMisses.delete(probeMisses.keys().next().value);
+}
+
 const textBatchers = new WeakMap();
 function textBatcher(sync) {
   if (!textBatchers.has(sync)) {
@@ -870,8 +915,11 @@ function textBatcher(sync) {
         maxInFlight:6,
         adaptive:true,
         limits:{maxPages:6,maxRegions:48,maxSourceChars:7000,maxSourceTokens:2600},
+        chunkWaitMs:LUNA_CHUNK_WAIT_MS,
+        expectMore:page => expectedLunaPages(page),
       },
     ));
+    liveBatchers.add(textBatchers.get(sync));
   }
   return textBatchers.get(sync);
 }
@@ -906,6 +954,7 @@ export async function prepareTranslation(src, meta, options = {}) {
     },
   );
   runtimeCapacity.observePerf(route?.perf, 'route');
+  if (!route?.textless) expectLuna(hash, meta);
   const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages};
   if (route?.textless || !options.preAnalyze) {
     runtimeCapacity.observeStages(prep.stages);
@@ -949,14 +998,20 @@ async function translateOnDevice(deps, hash, meta, clock) {
       },
     ));
   } catch (error) {
+    settleLuna(hash);
     return { error: String(error?.message ?? '').includes('models') ? 'models_missing' : 'device_failed' };
   }
   if (!deps.analysis) runtimeCapacity.observePerf(analysis?.perf, 'analyze');
   const native = { analyze: analysis.perf ?? null, ...(deps.route?.perf?{route:deps.route.perf}:{}) };
+  // Page-size independent metrics (s per megapixel / per region) need the analysed size.
+  if (Number.isFinite(analysis.width) && Number.isFinite(analysis.height)) native.pagePixels = analysis.width * analysis.height;
   const readable = (analysis.regions ?? []).filter((r) => r.status === 'pending' && r.source);
   const coverageUnknown = Number(analysis.coverageUnknown ?? analysis.perf?.counts?.coverageUnknown ?? 0);
   const textless = !(analysis.regions ?? []).length && coverageUnknown === 0;
-  if (!readable.length) return { incomplete: !textless || coverageUnknown > 0, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native };
+  if (!readable.length) {
+    settleLuna(hash);
+    return { incomplete: !textless || coverageUnknown > 0, image: null, regions: analysis.regions ?? [], translated: 0, engine: 'device', cached: false, error: null, textless, native, incompleteReasons: incompleteReasonsOf({ textless, coverageUnknown, readable: 0, regions: analysis.regions ?? [] }) };
+  }
 
   // Current APK releases Native as soon as Analyze returns. Keep the legacy
   // release hook only so an older installed APK cannot retain its Luna-era reservation.
@@ -975,8 +1030,13 @@ async function translateOnDevice(deps, hash, meta, clock) {
           () => deps.sync.translation('/v1/translate/text', { method:'POST', body:bodyFor('') }),
           { interactive: interactiveOf(deps), kind:'probe' },
         );
-    let res = await clock.time('cacheProbe', () => ask(''));
-    if (res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image')) {
+    settleLuna(hash);
+    const probe = shouldProbe(meta);
+    let res = probe ? await clock.time('cacheProbe', () => ask('')) : null;
+    const missed = !res || res.status === 409 || (res.status === 400 && res.body?.error === 'bad_image');
+    if (probe) observeProbe(meta, { missed, cached: res?.status === 200 && Boolean(res.body?.cached) });
+    else native.probeSkipped = true;
+    if (missed) {
       const began=globalThis.performance?.now?.() ?? Date.now();
       res = await ask(analysis.thumbnail ?? '');
       const observed=Math.max(0,Math.round((globalThis.performance?.now?.() ?? Date.now())-began));
@@ -985,11 +1045,13 @@ async function translateOnDevice(deps, hash, meta, clock) {
       clock.stages['luna.request']=Math.max(0,Math.round(Number(perf.requestMs)||0));
       clock.stages['luna.provider/network']=Math.max(0,Math.round(Number(perf.providerNetworkMs)||0));
       native.luna=perf;
+      if (!probe) observeProbe(meta, { missed: false, cached: res?.status === 200 && Boolean(res.body?.cached) });
     }
     if (res.status !== 200) return { error: res.body?.error ?? `http_${res.status}`, native };
     const plan = renderPlan(analysis, res.body);
     let incomplete = coverageUnknown > 0 || unansweredIds(readable, res.body).length > 0 || (analysis.regions ?? []).some(r => r.status === 'skipped:unreadable');
-    if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
+    const reasonsBase = { coverageUnknown, regions: analysis.regions ?? [], unanswered: unansweredIds(readable, res.body).length };
+    if (!plan.length) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native, incompleteReasons: incompleteReasonsOf(reasonsBase) };
     let rendered;
     runtimeCapacity.renderReady(1);
     try {
@@ -1018,26 +1080,47 @@ async function translateOnDevice(deps, hash, meta, clock) {
       Number(rendered.perf?.counts?.residualLatin ?? 0) > 0 ||
       Number(rendered.perf?.counts?.residualUnknown ?? 0) > 0 ||
       Number(rendered.perf?.counts?.residualRescueQueued ?? 0) > 0;
-    if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native };
-    const convert = globalThis.Capacitor?.convertFileSrc;
+    const incompleteReasons = incomplete ? incompleteReasonsOf({ ...reasonsBase, drawn, planned: plan.length, renderCounts: rendered.perf?.counts }) : null;
+    if (!drawn) return { image: null, regions: analysis.regions ?? [], translated: 0, engine: res.body?.engine ?? 'device', cached: Boolean(res.body?.cached), incomplete, error: null, native, incompleteReasons };
     return {
-      image: convert ? convert(rendered.path) : rendered.path,
+      image: nativeFileSrc(rendered.path),
       refinementPath: rendered.perf?.counts?.refinementPending ? rendered.path : null,
       regions: (analysis.regions ?? []).map((r) => ({ ...r, ...(plan.find((p) => p.id === r.id) ?? {}) })),
       translated: drawn,
       engine: res.body?.engine ?? 'device',
       cached: Boolean(res.body?.cached),
       incomplete,
+      incompleteReasons,
       error: null,
       native,
     };
   } finally {
+    settleLuna(hash);
     // Compatibility only: current PriorityGate reserves nothing across Luna.
     // Older APKs still need this on error / no-plan / exception paths.
     if (!renderCompleted && priorityOf(deps) === 'high') {
       try { await releasePageReservation(meta.chapterKey, meta.pageIndex); } catch { /* APK قديم أو إغلاق الصفحة */ }
     }
   }
+}
+
+/**
+ * لماذا الصفحة «جزئية»؟ تقرير الجهاز كان يقول «0 مكتملة، 2 جزئية» بلا سبب. كل
+ * سبب هنا هو الشرط نفسه الذي يجعل `incomplete` صحيحًا، بعدده.
+ */
+export function incompleteReasonsOf({ textless = false, coverageUnknown = 0, regions = [], readable = null, unanswered = 0, drawn = null, planned = null, renderCounts = null } = {}) {
+  const out = {};
+  if (coverageUnknown > 0) out.coverageUnknown = coverageUnknown;
+  const unreadable = regions.filter(r => r?.status === 'skipped:unreadable').length;
+  if (unreadable) out.unreadable = unreadable;
+  if (readable === 0 && !textless) out.noReadable = 1;
+  if (unanswered > 0) out.unanswered = unanswered;
+  if (Number.isFinite(drawn) && Number.isFinite(planned) && drawn < planned) out.notDrawn = planned - drawn;
+  for (const k of ['residualLatin', 'residualUnknown', 'residualRescueQueued', 'noFit', 'invisible', 'bubbleKept']) {
+    const n = Number(renderCounts?.[k] ?? 0);
+    if (n > 0) out[k] = n;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /**

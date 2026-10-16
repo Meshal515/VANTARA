@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERF_LIMIT, clearPerf, formatReport, localRoute, readPerf, recordPerf, roiRouting, roiServiceDemand, stopwatch, summarize } from './translate-perf.js';
+import { PERF_LIMIT, clearPerf, formatReport, incompleteReasonTotals, localRoute, readPerf, recordPerf, roiRouting, roiServiceDemand, stopwatch, summarize, v3Throughput } from './translate-perf.js';
 
 const memory = () => {
   const m = new Map();
@@ -247,6 +247,7 @@ it('reports only the latest run, dedupes retries, and never calls partial pages 
       fastRoi: 5, ctdRoi: 3, bubbleRoi: 1, rescueRoi: 1,
       fastPct: 63, ctdPct: 38, bubblePct: 13, rescuePct: 13,
       rejectionReasons: { background: 1, ocr: 2 },
+      backgroundDetail: {},
     });
     const report = formatReport(entries);
     expect(report).toContain('FastROI 63% (5/8)');
@@ -262,3 +263,49 @@ it('reports only the latest run, dedupes retries, and never calls partial pages 
     });
     expect(report).toContain('طلب الخدمة المحلي التقديري 2.11 ث/ROI');
   });
+
+describe('v3 throughput evidence', () => {
+  const page = (i, extra = {}) => ({
+    at: 1000 * (i + 1), runId: 'v3', chapterKey: 'c', pageIndex: i, from: 'model', textless: false, total: 1000,
+    stages: { cacheProbe: 300 }, ...extra,
+  });
+
+  it('explains why pages are partial instead of only counting them', () => {
+    const entries = [
+      page(0, { incomplete: true, incompleteReasons: { residualLatin: 2, unanswered: 1 } }),
+      page(1, { incomplete: true, incompleteReasons: { residualLatin: 1 } }),
+      page(2, { incomplete: false }),
+    ];
+    expect(incompleteReasonTotals(entries)).toEqual({ residualLatin: 3, unanswered: 1 });
+    expect(formatReport(entries)).toContain('أسباب الجزئية: residualLatin×3 · unanswered×1');
+  });
+
+  it('reports atlas CTD calls, occupancy, native BubbleSeg and probe skips', () => {
+    const counts = { ctdCalls: 1, ctdAtlas: 1, ctdAtlasCalls: 1, ctdAtlasOccupancyPermille: 640, bubbleNativeRoi: 1, bubbleInputPixels: 262144, fastRoi: 1, ctdRoi: 4, 'fastReject:background': 3, 'fastBackground:spread': 2, 'fastBackground:paper_share': 1 };
+    const entries = [
+      page(0, { native: { analyze: { counts } } }),
+      { ...page(1, { native: { analyze: { counts: { ...counts, ctdCalls: 2 } }, probeSkipped: true } }), stages: {} },
+    ];
+    const line = v3Throughput(entries);
+    expect(line).toContain('CTD calls/صفحة نص 1.50');
+    expect(line).toContain('أطلس 2/2 صفحة · امتلاء 64%');
+    expect(line).toContain('BubbleSeg بمقاس ROI 2 نداء');
+    expect(line).toContain('فحص كاش Luna بلا صورة 1 · تُخطّي 1');
+    const report = formatReport(entries);
+    expect(report).toContain('تفصيل رفض background: spread×4 · paper_share×2');
+    expect(report).toContain(line);
+  });
+
+  it('shows the E2b membrane tier and refusal notes in the erase evidence', () => {
+    const render = { counts: { eraseMaskPixels: 100, eraseChangedPixels: 90, smoothChangedPixels: 60, smoothMaskPixels: 60, inpaintMaskPixels: 30, inpaintChangedPixels: 30, eraseE2b: 2, eraseE3: 1, eraseRegions: 3, lamaInvocations: 1, 'eraseNote:smooth:textured': 1 }, stages: { erase: 30 } };
+    const report = formatReport([page(0, { native: { render } })]);
+    expect(report).toContain('E2b غشاء 60');
+    expect(report).toContain('E2b 2 · E3 1');
+    expect(report).toContain('لماذا لم يكفِ مسح أرخص من LaMa: smooth:textured×1');
+  });
+
+  it('prints sustained seconds per page for each chapter', () => {
+    const entries = [page(0, { at: 1000, total: 1000 }), page(1, { at: 3000, total: 1000 })];
+    expect(formatReport(entries)).toMatch(/c: 2 صفحة · 3\.00 ث · 1\.50 ث\/صفحة مستدام/);
+  });
+});
