@@ -95,7 +95,7 @@ export function parseRelease(name, title) {
   const all = `${n}\n${t}`;
   const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
   const seeds = /👤\s*(\d+)/.exec(all);
-  const site = /⚙️\s*([^\n👤💾]+)/.exec(all)?.[1]?.trim() || null;
+  const site = /(?:⚙️|🔎)\s*([^\n👤💾🔎]+)/u.exec(all)?.[1]?.trim() || null;
   const languages = [...new Set([...all].join('').match(/\p{Regional_Indicator}{2}/gu)?.map((f) => FLAGS[f]).filter(Boolean) ?? [])];
   // اسم الملف: أول سطر لا يحمل 👤/💾/⚙️ ولا أعلامًا
   const filename = lines.find((l) => !/[👤💾⚙️]/u.test(l) && !/\p{Regional_Indicator}/u.test(l) && !/^(?:Multi|Dual|Dubbed)\b/i.test(l)) ?? null;
