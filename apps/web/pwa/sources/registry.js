@@ -15,6 +15,7 @@
  */
 
 import { checkListing, checkPages, checkSeries, defErrors, defHash } from './contract.js';
+import { configVariants, siteDef, siteOrigin } from './detect.js';
 
 const STATE_KEY = 'registry:v1';
 const RETRY_FAILED_MS = 6 * 60 * 60 * 1000;
@@ -70,12 +71,13 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
         }
         activate(def.id);
       }
-      // مصادر لم تعد في الحزمة: تُزال
+      // مصادر لم تعد في الحزمة: تُزال (ومواقع المستخدم تبقى: ليست من الحزمة أصلًا)
       const shipped = new Set(defs.map((d) => d.id));
-      for (const id of Object.keys(state)) if (!shipped.has(id)) {
+      for (const id of Object.keys(state)) if (!shipped.has(id) && !state[id].user) {
         delete state[id];
         live.delete(id);
       }
+      for (const [id, rec] of Object.entries(state)) if (rec.user && !live.has(id) && engines[rec.stable?.def?.engine]) activate(id);
       await save();
     })();
     return loaded;
@@ -183,9 +185,61 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
 
   const cooling = (id) => (state[id]?.health?.coolUntil ?? 0) > now();
 
+  /**
+   * موقع أضافه المستخدم (detect.js): يُفحص كاملًا أولًا كأي مصدر، ولا يُحفظ إن فشل.
+   * إعادة إضافة نفس الموقع تستبدل تعريفه.
+   */
+  async function addUser(def) {
+    await loaded;
+    const errors = defErrors(def, engineNames);
+    if (errors.length) throw new Error(`تعريف الموقع غير صالح: ${errors.join('، ')}`);
+    if (state[def.id] && !state[def.id].user) throw new Error('هذا الموقع مصدر مدمج أصلًا');
+    const summary = await probe(def);
+    state[def.id] = { user: true, stable: { version: def.version, hash: defHash(def), def, verified: true, summary }, lkg: null, candidate: null, health: fresh() };
+    activate(def.id);
+    await save();
+    return { id: def.id, label: def.label, engine: def.engine, summary };
+  }
+
+  /** يفتح الموقع، يتعرّف على قالبه، ويضيفه بعد الفحص. */
+  async function addSite(input) {
+    const origin = siteOrigin(input);
+    let res;
+    try {
+      res = await ctx.fetch.text(origin);
+    } catch (error) {
+      if (error?.code === 'host_not_allowed' || /host_not_allowed|غير مسموح/.test(String(error?.message)))
+        throw new Error('نسخة المتصفح تفتح مواقع محددة فقط. أضف الموقع من التطبيق أو برنامج الويندوز');
+      throw new Error(`تعذر فتح الموقع: ${error?.message ?? error}`);
+    }
+    if (!res?.text || (res.status && res.status >= 400)) throw new Error(`تعذر فتح الموقع (${res?.status ?? 'بلا رد'})`);
+    const base = siteDef({ origin, html: res.text });
+    let last = null;
+    for (const config of configVariants(base.engine, res.text, base.domain)) {
+      try {
+        return await addUser({ ...base, config });
+      } catch (error) {
+        last = error;
+      }
+    }
+    throw new Error(`القالب ${base.engine} معروف لكن الموقع معدّل ولم ينجح فحصه: ${last?.message ?? last}`);
+  }
+
+  async function removeUser(id) {
+    await loaded;
+    if (!state[id]?.user) throw new Error('ليس موقعًا أضفته');
+    delete state[id];
+    live.delete(id);
+    await save();
+  }
+
   return {
     init,
     verifyPending,
+    addUser,
+    addSite,
+    removeUser,
+    userSites: () => Object.values(state).filter((r) => r.user && r.stable).map((r) => ({ id: r.stable.def.id, label: r.stable.def.label, engine: r.stable.def.engine, domain: r.stable.def.domain })),
     report,
     call,
     cooling,

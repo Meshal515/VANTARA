@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.5
+name: Publish verified VANTARA Windows 0.2.6
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.2.5'
-  TAG: 'windows-v0.2.5'
+  VERSION: '0.2.6'
+  TAG: 'windows-v0.2.6'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -127,7 +127,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.2.5
+    name: Publish verified Windows 0.2.6
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

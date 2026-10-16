@@ -161,8 +161,41 @@ export async function clearImageCache() {
 	return required().clearImageCache();
 }
 
+/**
+ * مستودعات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi). داخل التطبيق وحده:
+ * الإضافة كود DEX يعمل في الجهاز، والمتصفح لا يشغّله. `null` حيث لا تتوفر.
+ */
+export function repositories() {
+	const plugin = bridge();
+	if (typeof plugin?.addRepo !== 'function') return null;
+	return {
+		list: () => plugin.repos(),
+		add: (url) => plugin.addRepo({ url }),
+		remove: (url) => plugin.removeRepo({ url }),
+		extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],
+		install: (repo, pkg) => plugin.installExtension({ repo, pkg }),
+		uninstall: (pkg) => plugin.uninstallExtension({ pkg }),
+	};
+}
+
+/**
+ * مواقع مانجا يضيفها المستخدم برابطها (الويب والويندوز، حيث لا تعمل إضافات Mihon):
+ * يُكتشف قالب الموقع ويُفحص قبل الإضافة. `null` حيث لا تتوفر (التطبيق له المستودعات).
+ */
+export function sites() {
+	const plugin = bridge();
+	if (typeof plugin?.addSite !== 'function') return null;
+	return {
+		list: async () => (await plugin.sites()).sites ?? [],
+		add: (url) => plugin.addSite({ url }),
+		remove: (id) => plugin.removeSite({ id }),
+	};
+}
+
 export default {
 	cover,
+	repositories,
+	sites,
 	isAvailable,
 	sources,
 	prepare,

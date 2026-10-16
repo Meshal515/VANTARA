@@ -19,7 +19,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -51,7 +51,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentRange, momentStart } from '../lib/anime-engine.js';
+import { momentRange, momentStart, repositories as animeRepositories } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
@@ -3708,7 +3708,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ registry: addons.registry, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ registry: addons.registry, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: resetSources, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }

@@ -2,6 +2,8 @@ import { publicUrl } from "../addons/manifest.js";
 import { supportedCapabilities } from "../addons/assessment.js";
 import { glyphNode } from "./icons.js";
 import { pulseView } from "../addons/source-pulse.js";
+import { renderRepositories } from "./addons-repos.js";
+import { renderSites } from "./addons-sites.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -104,6 +106,34 @@ function chips(a) {
     box.append(node("span", "addon-chip addon-chip-muted", language));
   return box;
 }
+function nativeConfigure() {
+  const cap = globalThis.Capacitor;
+  const plugin = cap?.isNativePlatform?.() ? cap.Plugins?.AddonEngine : null;
+  return typeof plugin?.configure === "function" ? plugin : null;
+}
+export async function configureInApp(link, plugin, href, registry) {
+  if (link.dataset.busy) return;
+  link.dataset.busy = "1";
+  link.dataset.label ??= link.textContent;
+  const label = link.dataset.label;
+  let note = null;
+  try {
+    const result = await plugin.configure({ url: href });
+    if (!result?.url) return;
+    link.textContent = "جارٍ التثبيت…";
+    // ضغط Install في صفحة الإعداد هو الموافقة، كما في Stremio نفسه
+    const installed = await registry.install(await registry.inspect(result.url));
+    note = `تم تثبيت ${installed?.manifest?.name ?? "الإضافة"} بإعداداتك`;
+    const Event = link.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+    link.dispatchEvent(new Event("addon-configured", { bubbles: true, detail: { key: installed?.manifest?.key ?? null } }));
+  } catch (error) {
+    note = message(error);
+  } finally {
+    delete link.dataset.busy;
+    link.textContent = note ?? label;
+    if (note) setTimeout(() => { if (link.isConnected) link.textContent = label; }, 4000);
+  }
+}
 function configureLink(a, registry, explicit) {
   try {
     const value = explicit ?? registry.configurationUrl?.(a.key);
@@ -119,6 +149,13 @@ function configureLink(a, registry, explicit) {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.dataset.configure = "";
+    // التطبيق: الصفحة تُفتح داخل VANTARA، و«Install» فيها يثبّت الإضافة هنا بدل أن يرمي إلى Stremio
+    const plugin = nativeConfigure();
+    if (plugin)
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void configureInApp(link, plugin, url.href, registry);
+      });
     return link;
   } catch {
     return null;
@@ -480,8 +517,17 @@ export function renderAddons({
   latestOf = null,
   /** يركّب غلاف عمل في حاوية (نفس أغلفة التطبيق: الكاش وترويسات المصدر). */
   mountCover = null,
+  /** مستودعات مصادر المانجا (التطبيق وحده): engine.repositories() أو null. */
+  repositories = null,
+  /** مستودعات إضافات Aniyomi (الأنمي والأفلام): animeEngine.repositories() أو null. */
+  animeRepositories = null,
+  /** مواقع المانجا المضافة برابطها (الويب والويندوز): engine.sites() أو null. */
+  sites = null,
+  onSourcesChanged = () => {},
 }) {
   const root = node("div", "addon-hub addon-store");
+  // إضافة أُعدّت وثُبّتت من صفحتها داخل التطبيق: تظهر في القائمة فورًا
+  root.addEventListener("addon-configured", () => paint());
   const sectionHub = ["manga", "anime", "cinema"].includes(filter);
   if (sectionHub) root.dataset.sectionHub = filter;
   root.dir = "rtl";
@@ -578,6 +624,9 @@ export function renderAddons({
   // صفحة قسم (مانجا/أنمي/سينما): مصادر هذا القسم فقط، بلا شرائح الفلاتر
   filters.hidden = sectionHub;
   root.append(header, toolbar, filters, states);
+  if (repositories && (filter === "manga" || filter === "all")) root.append(renderRepositories({ repositories, onSourcesChanged }));
+  if (animeRepositories && (filter === "anime" || filter === "cinema" || filter === "all")) root.append(renderRepositories({ repositories: animeRepositories, onSourcesChanged }));
+  if (sites && (filter === "manga" || filter === "all")) root.append(renderSites({ sites, onSourcesChanged }));
   const panel = node("details", "addon-import");
   // الاستيراد برابط/JSON/ملف: مخفي حتى يُطلب من زر «+» أو «تثبيت»
   panel.hidden = true;

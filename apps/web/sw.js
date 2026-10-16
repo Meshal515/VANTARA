@@ -155,6 +155,8 @@ const SHELL = [
   '/pwa/player/subtitle-adjustments.js',
   '/pwa/sources/hls-variants.js',
   '/v35/addons-view.js',
+  '/v35/addons-repos.js',
+  '/v35/addons-sites.js',
   '/v35/source-mode.js',
   '/vendor/hls.min.js',
   '/v35/shell.js',
@@ -278,6 +280,7 @@ const SHELL = [
   '/pwa/sources/engines/witanime.js',
   '/pwa/sources/hosts.js',
   '/pwa/sources/registry.js',
+  '/pwa/sources/detect.js',
   '/pwa/update.js',
 ];
 
