@@ -65,3 +65,9 @@ it('prepares exact anime Kitsu episodes and bare movie IDs with native-next desc
   expect(input).toMatchObject({videoId,type});
  }
 });
+it('asks anime-only providers for Kitsu episodes under the anime type they declare', async()=>{
+ let input; const a=runtime(async args=>{input=args;return [];});
+ const anime={...copy,type:'anime',id:'kitsu:12',url:'kitsu:12',identity:{kind:'anime',format:'TV',externalIds:{kitsu:'12'}}};
+ await nativeAddonPreparation({runtime:a,copies:[anime],episode:7}).start('s',{appendAddonStreams:async()=>{}}).done;
+ expect(input).toMatchObject({videoId:'kitsu:12:7',type:'anime'});
+});

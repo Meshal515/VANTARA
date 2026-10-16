@@ -4,6 +4,14 @@ import { matchesStremioResource } from "./stremio-model.js";
 export function nextEpisodeCopies(copies = [], episode, identity = {}) {
   return copies.map(c => ({ ...c, ...(identity.kind === "series" ? { requestedSeason: identity.season ?? c.requestedSeason } : {}), ...(c.sourceId?.startsWith("addon|") ? { episode, identity: { ...c.identity, ...identity, episode } } : {}) }));
 }
+/**
+ * نوع الطلب الذي تقبله الإضافة لهذا العمل. إضافات الأنمي تختلف: أغلبها (Torrentio وComet)
+ * تأخذ معرّف Kitsu تحت `series`/`movie`، وبعضها يعلن `anime` وحده. فنجرّب الأول ثم `anime`.
+ */
+export function streamType(manifest, input, identity) {
+  const types = identity?.kind === "anime" ? [input.type, "anime"] : [input.type];
+  return types.find((type) => matchesStremioResource(manifest, "stream", type, input.videoId)) ?? null;
+}
 export function addonCopies(registry, identity, runtimeName = "pwa") {
   // Cross-provider video fan-out needs a canonical work ID, not just one
   // provider's private episode ID. Its own source copy already retains that ID.
@@ -20,13 +28,13 @@ export function addonCopies(registry, identity, runtimeName = "pwa") {
         m.protocol === "stremio" &&
         m.capabilities.includes("streams") &&
         !(m.configuration?.required && !m.configuration.configured) &&
-        matchesStremioResource(m, "stream", input.type, input.videoId),
+        Boolean(streamType(m, input, identity)),
     )
     .map((m) => ({
       sourceId: `addon|${m.key}`,
       url: identity.kind === "anime" && identity.externalIds.kitsu ? `kitsu:${identity.externalIds.kitsu}` : identity.externalIds.imdb,
       id: identity.kind === "anime" && identity.externalIds.kitsu ? `kitsu:${identity.externalIds.kitsu}` : identity.externalIds.imdb,
-      type: input.type,
+      type: streamType(m, input, identity),
       title: m.name,
       requestedSeason: identity.season,
       episode: identity.episode,

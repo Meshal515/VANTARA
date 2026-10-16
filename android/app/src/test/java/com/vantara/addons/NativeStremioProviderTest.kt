@@ -32,6 +32,9 @@ class NativeStremioProviderTest {
         val anime = provider.copy(videoId = "kitsu:1234:4", season = null)
         assertEquals("kitsu:1234:5", anime.idAt(5f))
         assertTrue(anime.endpoint(5f)!!.contains("/stream/series/kitsu%3A1234%3A5.json"))
+        val animeOnly = anime.copy(type = "anime")
+        assertEquals("kitsu:1234:5", animeOnly.idAt(5f))
+        assertTrue(animeOnly.endpoint(5f)!!.contains("/stream/anime/kitsu%3A1234%3A5.json"))
         assertTrue(anime.copy(episodes = List(1200) { NativeAddonEpisode((it + 1).toFloat(), "kitsu:1234:${it + 1}") }).valid())
     }
 
