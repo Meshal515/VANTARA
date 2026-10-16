@@ -108,6 +108,23 @@ export const MangaEngine = {
     const def = sourceId ? r.registry.def(sourceId) : null;
     return { path: imageSrc(url, def ? `https://${def.domain}/` : null, r.fetcher), cached: false };
   },
+  /** مواقع المانجا التي أضافها المستخدم برابطها (pwa/sources/detect.js). */
+  async sites() {
+    const r = getRuntime();
+    await r.ready;
+    return { sites: r.registry.userSites?.() ?? [] };
+  },
+  async addSite({ url }) {
+    const r = getRuntime();
+    await r.ready;
+    return r.registry.addSite(url);
+  },
+  async removeSite({ id }) {
+    const r = getRuntime();
+    await r.ready;
+    await r.registry.removeUser(id);
+    return {};
+  },
   async clearImageCache() {
     const { clearImageCache } = await import('../cache/images.js');
     // الحجم بالبايت لا يُعرف من كاش المتصفح؛ العدد يكفي للواجهة
