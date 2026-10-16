@@ -41,7 +41,7 @@ const blocked = (() => {
     return new Set();
   }
 })();
-export const isBlockedKey = (key) => Boolean(key) && blocked.has(String(key).replace(/^ext:/, ''));
+export const isBlockedKey = (key) => Boolean(key) && (blocked.has(String(key).replace(/^ext:/, '')) || isHiddenKey(key));
 export function blockKey(key) {
   const k = String(key ?? '').replace(/^ext:/, '');
   if (!k || blocked.has(k)) return;
@@ -52,3 +52,48 @@ export function blockKey(key) {
     // تخزين ممتلئ: الحجب للجلسة يكفي
   }
 }
+
+// ───────── أعمال حذفها صاحب الحساب بنفسه («حذف العمل»)، وأرشيفها لإعادتها ─────────
+let currentUser = () => null;
+let hiddenFor = null;
+const hiddenKey = () => {
+  const id = currentUser();
+  return `vantara.works.hidden.v1.${id ? `user.${encodeURIComponent(id)}` : 'guest'}`;
+};
+let hiddenCache = null;
+const hiddenMap = () => {
+  if (hiddenFor !== hiddenKey()) { hiddenFor = hiddenKey(); hiddenCache = null; }
+  if (hiddenCache) return hiddenCache;
+  try {
+    hiddenCache = JSON.parse(globalThis.localStorage?.getItem(hiddenKey()) ?? '{}') ?? {};
+  } catch {
+    hiddenCache = {};
+  }
+  return hiddenCache;
+};
+const saveHidden = () => {
+  try {
+    globalThis.localStorage?.setItem(hiddenKey(), JSON.stringify(hiddenMap()));
+  } catch {
+    // تخزين ممتلئ: الحذف للجلسة يكفي
+  }
+};
+const norm = (k) => String(k ?? '').replace(/^ext:/, '');
+/** الأرشيف خاص بكل حساب على الجهاز: `userOf()` يرجع الحساب الحالي. */
+export function setHiddenUser(userOf) {
+  currentUser = typeof userOf === 'function' ? userOf : () => userOf;
+}
+export const isHiddenKey = (key) => Boolean(key) && Object.values(hiddenMap()).some((h) => h.keys?.includes(norm(key)));
+/** يخفي العمل من كل القوائم والبحث وآخر التحديثات. */
+export function hideWork({ id, keys = [], title = '', cover = null }) {
+  const all = [...new Set([id, ...keys].filter(Boolean).map(norm))];
+  if (!all.length) return;
+  hiddenMap()[all[0]] = { keys: all, title, cover, at: Date.now() };
+  saveHidden();
+}
+export function restoreWork(id) {
+  delete hiddenMap()[id];
+  saveHidden();
+}
+/** [{id, title, cover, at}] الأحدث أولًا. */
+export const hiddenWorks = () => Object.entries(hiddenMap()).map(([id, h]) => ({ id, ...h })).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));

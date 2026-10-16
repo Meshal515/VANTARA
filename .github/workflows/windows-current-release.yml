@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.8
+name: Publish verified VANTARA Windows 0.2.9
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.2.8'
-  TAG: 'windows-v0.2.8'
+  VERSION: '0.2.9'
+  TAG: 'windows-v0.2.9'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -138,7 +138,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.2.8
+    name: Publish verified Windows 0.2.9
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -165,7 +165,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.2.8: حذف محتوى الكبار (هنتاي، BL/GL، +18، عناوين NSFW) مع إبقاء الإيتشي، فوق كل ما في 0.2.7 (آخر التحديثات الكاملة، دمج المكررات، إضافة موقع برابطه، توافق Stremio). يتحدث تلقائيًا من 0.2.5 فما فوق. اختُبر في Windows CI: التثبيت وتشغيل MPV الحقيقي. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "ويندوز 0.2.9: ورقة سيرفرات جديدة (الأفضل لك، أسماء حقيقية، تورنت بحجمه ومشاركيه)، صفحة الأنمي تفتح من الأعلى، ترجمات الإضافات للأنمي عبر IMDb، زر حذف العمل وأرشيفه، وحارس محتوى الكبار في البحث، فوق كل ما في 0.2.8. يتحدث تلقائيًا من 0.2.5 فما فوق. اختُبر في Windows CI: التثبيت وتشغيل MPV الحقيقي. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
