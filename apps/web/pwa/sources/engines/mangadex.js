@@ -10,6 +10,7 @@ import { mangaDexNames } from '../../../lib/manga-evidence.js';
 const API = 'https://api.mangadex.org';
 const LIMIT = 20;
 const RATINGS = ['safe', 'suggestive'];
+const EXCLUDED_TAGS = ['5920b825-4181-4a17-beeb-9918b0ff7a30', 'a3c67850-4684-404e-9b7f-c69850ee5da6', '97893a4c-12af-4dac-b6be-0dffb353568e'];
 const STATUS = { ongoing: 1, completed: 2, hiatus: 6, cancelled: 5 };
 
 const pick = (map, ...langs) => {
@@ -40,7 +41,8 @@ export const mangadex = {
     const toManga = (m) => {
       const title = titleOf(m);
       const altNames = mangaDexNames(m).filter((n) => n !== title);
-      return { url: `/manga/${m.id}`, title, thumbnailUrl: coverOf(m, 256), ...(altNames.length ? { altNames } : {}) };
+      const genre = (m.attributes?.tags ?? []).map((t) => t.attributes?.name?.en).filter(Boolean).join(', ');
+      return { url: `/manga/${m.id}`, title, thumbnailUrl: coverOf(m, 256), ...(genre ? { genre } : {}), ...(altNames.length ? { altNames } : {}) };
     };
 
     async function list(page, order, title = '') {
@@ -50,6 +52,8 @@ export const mangadex = {
       url.searchParams.append('availableTranslatedLanguage[]', lang);
       url.searchParams.append('includes[]', 'cover_art');
       for (const r of RATINGS) url.searchParams.append('contentRating[]', r);
+      // محتوى الكبار محذوف من VANTARA: Boys' Love، Girls' Love، العنف الجنسي (معرّفات وسوم MangaDex)
+      for (const tag of EXCLUDED_TAGS) url.searchParams.append('excludedTags[]', tag);
       if (title) url.searchParams.set('title', title.trim());
       url.searchParams.set(`order[${order}]`, 'desc');
       const data = await fetch.json(url.toString());
@@ -64,7 +68,7 @@ export const mangadex = {
         url.searchParams.set('offset', String(offset));
         url.searchParams.append('translatedLanguage[]', lang);
         url.searchParams.append('includes[]', 'scanlation_group');
-        for (const r of [...RATINGS, 'erotica']) url.searchParams.append('contentRating[]', r);
+        for (const r of RATINGS) url.searchParams.append('contentRating[]', r);
         url.searchParams.set('order[volume]', 'desc');
         url.searchParams.set('order[chapter]', 'desc');
         const data = await fetch.json(url.toString());

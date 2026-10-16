@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const call = channel => args => ipcRenderer.invoke(`vantara:${channel}`, args);
 contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   platform: 'windows',
-  version: '0.2.7',
+  version: '0.2.8',
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
   showApp:call('show-app'),

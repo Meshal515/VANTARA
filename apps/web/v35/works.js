@@ -18,6 +18,7 @@ import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed, topChapters } from '../lib/update-engine.js';
+import { adultManga, blockKey, isBlockedKey } from '../lib/adult-filter.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -340,7 +341,7 @@ function recentWorks(entries) {
     if (!hit) continue;
     if (!observed.has(hit.key) || observedAt > observed.get(hit.key).at) observed.set(hit.key, { chapter, at: observedAt });
   }
-  const works = index.list().filter((w) => !isWestern(w));
+  const works = index.list().filter((w) => !isWestern(w) && !isAdult(w));
   // ما رُصد لكل نسخة يصير للبطاقة التي انضمت إليها (الأحدث يفوز)
   for (const [own, seen] of [...observed]) {
     const key = index.keyOf(own);
@@ -512,6 +513,8 @@ function learnWestern(key) {
 }
 /** عملٌ لا نعرضه في القوائم: أي نسخة منه غربية، أو كشفته تفاصيله قبل. */
 export const isWestern = (work) => learnedWestern.has(work?.key) || (work?.editions ?? []).some((e) => isWesternManga(e.manga));
+/** محتوى للكبار (هنتاي، BL/GL…): لا يظهر في أي قائمة، حتى في البحث. انظر adult-filter.js. */
+export const isAdult = (work) => isBlockedKey(work?.key) || (work?.keys ?? []).some(isBlockedKey) || (work?.editions ?? []).some((e) => adultManga(e.manga));
 
 /**
  * صفحة من كل المصادر معًا، مدموجة أعمالًا.
@@ -559,7 +562,7 @@ function addPage(index, positions, source, value) {
 }
 function ranked(index, positions, kind, { keepWestern = false } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
-  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)) && !isEmptyWork(w));
+  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w));
   const byWork = new Map();
   for (const [own, list] of positions) {
     const key = index.keyOf(own);
@@ -945,6 +948,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
             detail = out.manga ?? detail;
             // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
             if (isWesternManga(detail)) learnWestern(v35work._work?.key);
+            // التفاصيل كشفت محتوى للكبار: يُحجب العمل بكل مفاتيحه على هذا الجهاز
+            if (adultManga(detail)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
             learnDetailAliases(v35work._work?.key, detail);
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {

@@ -9,6 +9,7 @@
  * لكل تشغيل، والقوائم 40–200 كيلوبايت.
  */
 import { decodeEntities, normalizeTitle, parseChapterNumber } from '../../../apps/web/lib/catalog.js';
+import { adultGenre, adultTitle } from '../../../apps/web/lib/adult-filter.js';
 
 export type SiteUnit = { number: number; publishedAt?: number };
 export type SiteWork = { title: string; url: string; cover: string | null; units: SiteUnit[] };
@@ -44,6 +45,8 @@ export function madaraCards(html: string, base: string): SiteWork[] {
   const blocks = html.split(/<div\b[^>]*class=["'][^"']*\bpage-item-detail\b[^"']*["'][^>]*>/i).slice(1);
   const out: SiteWork[] = [];
   for (const block of blocks) {
+    // شارة «18+» في بطاقة Madara (manga-title-badges … adult): محتوى للكبار لا يُبلَّغ
+    if (/class=["'][^"']*\bmanga-title-badges\b[^"']*\badult\b/i.test(block)) continue;
     const titleArea = /class=["'][^"']*\bpost-title\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:h3|h5|div)>/i.exec(block)?.[1] ?? '';
     // 3asq وأمثاله يضعون قبل رابط العمل شارة («18+») ترتبط بموقع آخر: رابط العمل على نفس الموقع
     const host = new URL(base).hostname;
@@ -54,7 +57,7 @@ export function madaraCards(html: string, base: string): SiteWork[] {
     if (!link) continue;
     const title = strip(link[2]!);
     const url = pathOf(link[1]!, base);
-    if (!title || !url) continue;
+    if (!title || !url || adultTitle(title)) continue;
     const img = /<img\b[^>]*>/i.exec(block)?.[0] ?? '';
     const src = /\b(?:data-src|data-lazy-src|src)=["']([^"']+)["']/i.exec(img)?.[1] ?? null;
     const units: SiteUnit[] = [];
@@ -68,10 +71,11 @@ export function madaraCards(html: string, base: string): SiteWork[] {
   return out;
 }
 
-type IkenPost = { id?: number; slug?: string; postTitle?: string; featuredImage?: string; isNovel?: boolean; seriesType?: string; chapters?: Array<{ number?: number; createdAt?: string; isLocked?: boolean }> };
+type IkenPost = { id?: number; slug?: string; postTitle?: string; featuredImage?: string; isNovel?: boolean; seriesType?: string; genres?: Array<{ name?: string }>; chapters?: Array<{ number?: number; createdAt?: string; isLocked?: boolean }> };
 /** Iken (Azora): JSON بتاريخ رفع دقيق لكل فصل. */
 export function ikenWorks(body: { posts?: IkenPost[] }, now: number): SiteWork[] {
-  return (body.posts ?? []).filter((p) => p.postTitle && p.slug && p.isNovel !== true && String(p.seriesType ?? '').toLowerCase() !== 'novel').map((p) => ({
+  return (body.posts ?? []).filter((p) => p.postTitle && p.slug && p.isNovel !== true && String(p.seriesType ?? '').toLowerCase() !== 'novel'
+    && !adultGenre((p.genres ?? []).map((g) => g?.name ?? '')) && !adultTitle(p.postTitle)).map((p) => ({
     title: String(p.postTitle).trim(),
     url: `${p.slug}#${p.id}`,
     cover: p.featuredImage && /^https?:\/\//.test(p.featuredImage) ? p.featuredImage : null,
@@ -83,10 +87,10 @@ export function ikenWorks(body: { posts?: IkenPost[] }, now: number): SiteWork[]
   })).filter((w) => w.units.length);
 }
 
-type SwatSerie = { serie_id?: number; title?: string; poster?: { medium?: string }; chapters?: Array<{ chapter?: string; created_at?: string }> };
+type SwatSerie = { serie_id?: number; title?: string; genres?: Array<{ name?: string }>; poster?: { medium?: string }; chapters?: Array<{ chapter?: string; created_at?: string }> };
 /** MangaSwat (meshmanga): `/series/releases/` JSON بتاريخ الرفع. */
 export function swatWorks(body: { results?: SwatSerie[] }, now: number): SiteWork[] {
-  return (body.results ?? []).filter((s) => s.title && s.serie_id).map((s) => ({
+  return (body.results ?? []).filter((s) => s.title && s.serie_id && !adultGenre((s.genres ?? []).map((g) => g?.name ?? '')) && !adultTitle(s.title)).map((s) => ({
     title: String(s.title).trim(),
     url: String(s.serie_id),
     cover: s.poster?.medium && /^https?:\/\//.test(s.poster.medium) ? s.poster.medium : null,

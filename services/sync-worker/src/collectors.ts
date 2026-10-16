@@ -2,6 +2,7 @@
 import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
 import { handleUpdatesObserve } from './updates.ts';
 import { MANGA_SITES, readSite, siteReport } from './manga-sites.ts';
+import { adultGenre } from '../../../apps/web/lib/adult-filter.js';
 import type { Env } from './types.ts';
 
 const TEAMX = 'https://olympustaff.com';
@@ -81,7 +82,8 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
 }
 
 async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
-  const query = 'limit=50&translatedLanguage%5B%5D=ar&includes%5B%5D=manga&order%5BpublishAt%5D=desc';
+  // بلا محتوى للكبار: MangaDex يضمّ erotica افتراضيًا ما لم تُحدَّد الفئات
+  const query = 'limit=50&translatedLanguage%5B%5D=ar&includes%5B%5D=manga&order%5BpublishAt%5D=desc&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive';
   const body = await (await request(`https://api.mangadex.org/chapter?${query}`, fetchImpl, {
     headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
   })).json() as { data?: Array<{ attributes?: { chapter?: string; publishAt?: string }; relationships?: Array<{ id: string; type: string; attributes?: { title?: Record<string, string> } }> }> };
@@ -107,10 +109,13 @@ async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
       const q = ids.map((id) => `ids%5B%5D=${id}`).join('&');
       const covers = await (await request(`https://api.mangadex.org/manga?limit=100&includes%5B%5D=cover_art&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&${q}`, fetchImpl, {
         headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
-      })).json() as { data?: Array<{ id: string; relationships?: Array<{ type: string; attributes?: { fileName?: string } }> }> };
+      })).json() as { data?: Array<{ id: string; attributes?: { tags?: Array<{ attributes?: { name?: { en?: string } } }> }; relationships?: Array<{ type: string; attributes?: { fileName?: string } }> }> };
       const art = new Map((covers.data ?? []).map((m) => [m.id, m.relationships?.find((r) => r.type === 'cover_art')?.attributes?.fileName]));
-      for (const w of works.values()) {
+      // وسوم العمل نفسه: Boys' Love وGirls' Love وأمثالها لا تدخل الخط الزمني
+      const adult = new Set((covers.data ?? []).filter((m) => adultGenre((m.attributes?.tags ?? []).map((t) => t.attributes?.name?.en ?? ''))).map((m) => m.id));
+      for (const [key, w] of [...works]) {
         const id = w.source.u!.slice('/manga/'.length);
+        if (adult.has(id)) { works.delete(key); continue; }
         const file = art.get(id);
         if (file && /^[\w.-]+$/.test(file)) w.cover = `https://uploads.mangadex.org/covers/${id}/${file}.512.jpg`;
       }
@@ -155,12 +160,12 @@ async function animeFallback(env: Env, now: number, fetchImpl: Fetcher, cursor: 
 async function anime(env: Env, now: number, fetchImpl: Fetcher, cursor: number) {
   try {
   const body = await (await request('https://graphql.anilist.co', fetchImpl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-    query: `query ($from: Int, $to: Int) { Page(perPage: 50) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { id title { english romaji } isAdult coverImage { large } } } } }`,
+    query: `query ($from: Int, $to: Int) { Page(perPage: 50) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { id title { english romaji } isAdult genres coverImage { large } } } } }`,
     variables: { from: Math.floor((now - 7 * DAY) / 1000), to: Math.floor(now / 1000) },
-  }) })).json() as { data?: { Page?: { airingSchedules?: Array<{ episode: number; airingAt: number; media?: { id: number; title?: { english?: string; romaji?: string }; isAdult?: boolean; coverImage?: { large?: string } } }> } } };
+  }) })).json() as { data?: { Page?: { airingSchedules?: Array<{ episode: number; airingAt: number; media?: { id: number; title?: { english?: string; romaji?: string }; isAdult?: boolean; genres?: string[]; coverImage?: { large?: string } } }> } } };
   const schedules = body.data?.Page?.airingSchedules;
   if (!Array.isArray(schedules)) throw new Error('invalid AniList schedule');
-  const reports: Observation[] = schedules.filter((s) => s.media && !s.media.isAdult && s.airingAt * 1000 <= now).map((s) => ({
+  const reports: Observation[] = schedules.filter((s) => s.media && !s.media.isAdult && !adultGenre(s.media.genres) && s.airingAt * 1000 <= now).map((s) => ({
     work: `anime:${s.media!.id}`, section: 'anime', kind: 'episode', title: s.media!.title?.english || s.media!.title?.romaji || String(s.media!.id), cover: s.media!.coverImage?.large ?? null,
     source: { s: 'anilist' }, units: [{ number: s.episode, publishedAt: s.airingAt * 1000 }],
   }));

@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.2.7
+name: Publish verified VANTARA Windows 0.2.8
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.2.7'
-  TAG: 'windows-v0.2.7'
+  VERSION: '0.2.8'
+  TAG: 'windows-v0.2.8'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -138,7 +138,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.2.7
+    name: Publish verified Windows 0.2.8
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -165,7 +165,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.2.7: آخر التحديثات تصل كاملة (الخادم يتابع مواقع المانجا بنفسه، والصفحة لا تقف بعد صفّين)، دمج الأعمال المكررة بأسماء متقاربة، إضافة موقع مانجا برابطه (أي موقع عام)، توافق إضافات Stremio (روابط notWebReady في mpv وأنمي Kitsu)، وما يثبّته المستخدم من إضافات يظهر فورًا. يتحدث تلقائيًا من 0.2.5 فما فوق. اختُبر في Windows CI: التثبيت وتشغيل MPV الحقيقي. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "ويندوز 0.2.8: حذف محتوى الكبار (هنتاي، BL/GL، +18، عناوين NSFW) مع إبقاء الإيتشي، فوق كل ما في 0.2.7 (آخر التحديثات الكاملة، دمج المكررات، إضافة موقع برابطه، توافق Stremio). يتحدث تلقائيًا من 0.2.5 فما فوق. اختُبر في Windows CI: التثبيت وتشغيل MPV الحقيقي. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
@@ -177,7 +177,7 @@ jobs:
           python3 - <<'PYMANIFEST'
           import os,json,pathlib,hashlib
           version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
-          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['آخر التحديثات تصل كاملة ولا تقف بعد صفّين','دمج الأعمال المكررة','إضافة موقع مانجا برابطه وتوافق إضافات Stremio']}
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['حذف محتوى الكبار (هنتاي، BL/GL، +18)','آخر التحديثات الكاملة ودمج المكررات','إضافة موقع مانجا برابطه وتوافق Stremio']}
           pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
           PYMANIFEST
           if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
