@@ -3,6 +3,7 @@ import { supportedCapabilities } from "../addons/assessment.js";
 import { glyphNode } from "./icons.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { renderRepositories } from "./addons-repos.js";
+import { renderSites } from "./addons-sites.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -442,6 +443,8 @@ export function renderAddons({
   repositories = null,
   /** مستودعات إضافات Aniyomi (الأنمي والأفلام): animeEngine.repositories() أو null. */
   animeRepositories = null,
+  /** مواقع المانجا المضافة برابطها (الويب والويندوز): engine.sites() أو null. */
+  sites = null,
   onSourcesChanged = () => {},
 }) {
   const root = node("div", "addon-hub addon-store");
@@ -533,6 +536,7 @@ export function renderAddons({
   root.append(header, toolbar, filters, states);
   if (repositories && (filter === "manga" || filter === "all")) root.append(renderRepositories({ repositories, onSourcesChanged }));
   if (animeRepositories && (filter === "anime" || filter === "cinema" || filter === "all")) root.append(renderRepositories({ repositories: animeRepositories, onSourcesChanged }));
+  if (sites && (filter === "manga" || filter === "all")) root.append(renderSites({ sites, onSourcesChanged }));
   const panel = node("details", "addon-import");
   // الاستيراد برابط/JSON/ملف: مخفي حتى يُطلب من زر «+» أو «تثبيت»
   panel.hidden = true;

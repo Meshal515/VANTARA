@@ -178,9 +178,24 @@ export function repositories() {
 	};
 }
 
+/**
+ * مواقع مانجا يضيفها المستخدم برابطها (الويب والويندوز، حيث لا تعمل إضافات Mihon):
+ * يُكتشف قالب الموقع ويُفحص قبل الإضافة. `null` حيث لا تتوفر (التطبيق له المستودعات).
+ */
+export function sites() {
+	const plugin = bridge();
+	if (typeof plugin?.addSite !== 'function') return null;
+	return {
+		list: async () => (await plugin.sites()).sites ?? [],
+		add: (url) => plugin.addSite({ url }),
+		remove: (id) => plugin.removeSite({ id }),
+	};
+}
+
 export default {
 	cover,
 	repositories,
+	sites,
 	isAvailable,
 	sources,
 	prepare,
