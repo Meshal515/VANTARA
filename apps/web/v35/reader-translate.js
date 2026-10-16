@@ -65,6 +65,7 @@ const store = {
  */
 export const LEAD_PAGES = 6;
 const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24, capacity: runtimeCapacity, lane: 'reader', lead: LEAD_PAGES });
+export const translationReady = result => Boolean(result) && !result.error && !result.incomplete;
 
 /**
  * Reader stall clock: time the reader spends on a page that needs translation
@@ -224,14 +225,14 @@ export function createReaderTranslation(deps) {
 
   /** صفحة واحدة في الطابور. تُعاد بعد فشل عابر، فلا تبقى صفحة إنجليزية لأنك مررت عليها بسرعة. */
   function enqueuePage(seg, index) {
-    if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
+    if (!seg.tl || stopped || disabledReason || !isOn() || translationReady(seg.tl.results.get(index))) return;
     const chapterKey = keyOf(seg.row);
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
-    const prepare=async({interactive=false,isInteractive}={})=> {
+    const prepare=async({interactive=false,isInteractive,schedulingPriority}={})=> {
       if(stopped || disabledReason || !isOn()) return null;
-      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive});
+      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive,schedulingPriority});
     };
-    const run = async ({ waitedMs = 0,admissionWaitMs=0,continuationWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive } = {}) => {
+    const run = async ({ waitedMs = 0,admissionWaitMs=0,continuationWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive,schedulingPriority,queueTrace } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -241,8 +242,13 @@ export function createReaderTranslation(deps) {
         if (!seg.tl) return;
         seg.tl.results.set(index, better);
         paint(seg, index);
+        if (translationReady(better)) {
+          seg.tl.failed.delete(index);
+          stall.settled({ chapterKey, pageIndex: index });
+          updateGate();
+        }
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,continuation:continuationWaitMs,prepared:preparedWaitMs}, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,continuation:continuationWaitMs,prepared:preparedWaitMs}, queueTrace, schedulingPriority, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
@@ -262,7 +268,8 @@ export function createReaderTranslation(deps) {
         seg.tl.failed.delete(index);
         seg.tl.results.set(index, result);
         paint(seg, index);
-        stall.settled({ chapterKey, pageIndex: index });
+        if (translationReady(result)) stall.settled({ chapterKey, pageIndex: index });
+        else failed(seg, index, 'incomplete');
         updateGate();
       })
       .catch((error) => failed(seg, index, classifyTranslationError(error)));
@@ -309,7 +316,7 @@ export function createReaderTranslation(deps) {
     queue.focus(keyOf(seg.row), at, ranks, { pageCount: seg.slots.length });
     focusPage(keyOf(seg.row), at, seg.slots.length);
     if (!isOn()) { stall.stop(); return; }
-    if (seg.tl && !disabledReason) stall.view({ chapterKey: keyOf(seg.row), pageIndex: at, runId, ready: seg.tl.results.has(at) || seg.tl.failed.has(at) });
+    if (seg.tl && !disabledReason) stall.view({ chapterKey: keyOf(seg.row), pageIndex: at, runId, ready: translationReady(seg.tl.results.get(at)) || seg.tl.failed.has(at) });
     if (!ensureModelsOrOffer()) return;
     startLesson();
     enqueue(seg);
@@ -401,7 +408,7 @@ export function createReaderTranslation(deps) {
   function readyAhead(seg, from) {
     let n = 0;
     for (let i = from; i < seg.slots.length; i++) {
-      if (!seg.tl.results.has(i) && !seg.tl.failed.has(i)) break;
+      if (!translationReady(seg.tl.results.get(i)) && !seg.tl.failed.has(i)) break;
       n += 1;
     }
     return n;

@@ -504,6 +504,19 @@ export function formatReport(entries, benchmarks = [], engines = null, cleaning 
         ? ` · outer admission ${sec(e.queueWait.admission)} · route→analyze ${sec(e.queueWait.continuation)} · prepared→run ${sec(e.queueWait.prepared)}`
         : '';
       lines.push(`  صفحة ${Number.isFinite(e.pageIndex) ? e.pageIndex + 1 : '?'}: ${sec(e.total)} · ${e.incomplete ? 'جزئية' : 'مكتملة'} · مسار ${route} · دور ${sec(queue)} · RT-DETR ${sec(a.detect ?? probe.detect)} · Fast ${sec(a.fastFlat)} · CTD ${sec(a.glyphs)} · فقاعات ${sec(a.bubbles)} · OCR ${sec(a.fastOcr ?? a.ocr)} · fullRes ${sec(r.fullRes)} · تبييض ${sec(r.erase)} · ${network} · مرسوم ${e.translated ?? 0}${outer}${telemetry ? ` · ${telemetry}` : ''}`);
+      for (const event of (e.queueTrace?.events ?? []).slice(-12)) {
+        const detail = event.event === 'continuation-blocked'
+          ? ` · ${event.reason} · المالك ${(event.owners ?? []).join(',') || '—'} · استكمال ${event.continuing}/${event.continuationCap} · محفوظ ${event.resident}/${event.maxInFlight ?? '∞'} · حرارة ${event.capacity?.thermal ?? '?'} · ذاكرة ${event.capacity?.heapMb ?? '?'}MB`
+          : event.focused == null ? '' : ` · ظاهر ${event.focused ? 'نعم' : 'لا'}`;
+        lines.push(`    طابور @${event.at}: ${event.event}${detail}`);
+      }
+      for (const event of (e.nativeTrace ?? []).slice(-16)) {
+        const owner = event.owner ? `${event.owner.chapterKey}#${event.owner.pageIndex}` : '—';
+        const detail = event.event === 'native-blocker'
+          ? ` · المالك ${owner} · ${event.ownerStage} · ${sec(Math.max(0,event.endedAt-event.startedAt))}`
+          : event.event === 'native-enqueued' ? ` · المالك ${owner} · ${event.ownerStage ?? 'خامل'}` : '';
+        lines.push(`    Native @${event.at}: ${event.event} · ${event.stage}${detail}`);
+      }
     }
   }
 

@@ -5,7 +5,7 @@ import java.io.File
 import kotlin.math.ceil
 
 data class OcrLine(val box: Box, val text: String, val confidence: Float)
-data class OcrResult(val text: String, val confidence: Float, val lines: List<OcrLine>)
+data class OcrResult(val text: String, val confidence: Float, val lines: List<OcrLine>, val failedLines: Int = 0, val retriedLines: Int = 0)
 
 /**
  * قراءة النص اللاتيني سطرًا سطرًا: PP-OCRv5 mobile rec (CTC).
@@ -88,17 +88,11 @@ class LatinOcr(model: File, dict: File, private val work:InferenceWork=Inference
         return sb.toString().trim() to (if (confs.isEmpty()) 0f else confs.average().toFloat())
     }
 
-    fun read(img: RgbImage, glyph: ByteMask, box: Box, pad: Int = 4): OcrResult {
-        val lines = ArrayList<OcrLine>()
-        for (l in splitLines(glyph, box)) {
-            val crop = img.crop(maxOf(0, l.x1 - pad), maxOf(0, l.y1 - pad), minOf(img.width, l.x2 + pad), minOf(img.height, l.y2 + pad))
-            val (text, conf) = recognize(crop)
-            if (text.isNotEmpty()) lines.add(OcrLine(l, text, conf))
+    fun read(img: RgbImage, glyph: ByteMask, box: Box, pad: Int = 4): OcrResult =
+        OcrRecovery.read(splitLines(glyph, box), pad) { line, margin ->
+            recognize(img.crop(maxOf(0, line.x1 - margin), maxOf(0, line.y1 - margin),
+                minOf(img.width, line.x2 + margin), minOf(img.height, line.y2 + margin)))
         }
-        val text = lines.joinToString(" ") { it.text }
-        val conf = if (lines.isEmpty()) 0f else lines.map { it.confidence }.average().toFloat()
-        return OcrResult(text, conf, lines)
-    }
 
     fun close() = session.close()
 }

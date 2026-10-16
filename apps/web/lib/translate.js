@@ -158,6 +158,10 @@ export function createQueue({
     };
   };
   const isNearForward = job => job.chapterKey === focusKey && job.index >= focusIndex && job.index <= focusIndex + leadPages;
+  const trace = (job, event, detail = {}) => {
+    job.events.push({ at: Date.now(), event, ...detail });
+    if (job.events.length > 32) job.events.shift();
+  };
 
   // القارئ السريع لا يرمي الصفحة التي عبرها خلف فصل كامل:
   // الحالية + الثلاث التالية، ثم أقرب الصفحات الفائتة خلفك، ثم بقية الحالي.
@@ -181,6 +185,7 @@ export function createQueue({
     pump();
   };
   const startJob = (job, bypass = false, focusedBurst = false) => {
+    trace(job, 'run', { focused: isFocused(job) });
     job.started = true;
     if (bypass) bypassRunning++;
     else if (focusedBurst) { focusedBurstRunning++; job.burst = true; }
@@ -204,6 +209,9 @@ export function createQueue({
       prepared: job.prepared,
       interactive: isFocused(job),
       isInteractive: () => isFocused(job),
+      schedulingPriority: () => priority(job),
+      queueTrace: { queuedAt: job.addedAt, prepareStartedAt: job.prepareStartedAt, routePreparedAt: job.routePreparedAt,
+        continuationStartedAt: job.continuationStartedAt, preparedAt: job.preparedAt, runAt, events: job.events },
     }))
       .then(job.resolve, job.reject).finally(() => {
         if (bypass) bypassRunning--;
@@ -226,15 +234,17 @@ export function createQueue({
   };
 
   const beginPrepare = (job) => {
+    trace(job, 'prepare', { focused: isFocused(job) });
     job.preparing = true;
     preparing++;
     job.prepareStartedAt ??= Date.now();
     const phaseStartedAt = Date.now();
-    Promise.resolve().then(() => job.prepare({ interactive: isFocused(job), isInteractive: () => isFocused(job) })).then(prepared => {
+    Promise.resolve().then(() => job.prepare({ interactive: isFocused(job), isInteractive: () => isFocused(job), schedulingPriority: () => priority(job) })).then(prepared => {
       if (jobs.get(job.key) !== job) return;
       const phaseDoneAt = Date.now();
       job.prepareMs = (job.prepareMs ?? 0) + Math.max(0, phaseDoneAt - phaseStartedAt);
       job.routePreparedAt = phaseDoneAt;
+      trace(job, 'route-ready');
       job.prepared = prepared;
       if (prepared?.bypass) {
         job.ready = true;
@@ -264,6 +274,8 @@ export function createQueue({
   };
 
   const beginContinuation = (job) => {
+    trace(job, 'continuation', { focused: isFocused(job) });
+    job.blockedKey = null;
     const continuation = job.prepared?.continuePrepare;
     if (typeof continuation !== 'function') {
       job.needsContinue = false;
@@ -274,6 +286,7 @@ export function createQueue({
     job.continuing = true;
     continuing++;
     const continuedAt = Date.now();
+    job.continuationStartedAt = continuedAt;
     job.continuationWaitMs = (job.continuationWaitMs ?? 0) +
       Math.max(0, continuedAt - (job.routePreparedAt ?? continuedAt));
     Promise.resolve().then(() => continuation()).then(prepared => {
@@ -342,8 +355,10 @@ export function createQueue({
             ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
             : preparing >= prepareConcurrency;
       const preparedCap = capacity ? caps.maxPrepared : maxPrepared + (focused ? 2 : near ? 1 : 0);
-      if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap ||
-        continuationBuffered() >= maxRouteAhead) break;
+      // Route metadata for the visible page may borrow one buffer position.
+      // Heavy snapshots still obey maxInFlight and native execution is serialized.
+      if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap + (focused ? 1 : 0) ||
+        continuationBuffered() >= maxRouteAhead + (focused ? 1 : 0)) break;
       beginPrepare(job);
     }
 
@@ -352,11 +367,23 @@ export function createQueue({
     // keeps Route above Analyze, so a queue-level `preparing === 0` barrier only
     // starves Heavy behind a deep Route-ahead window (real-device: 40–83s).
     const continuationCap = capacity ? Math.min(continueConcurrency, caps.prepareConcurrency) : continueConcurrency;
-    while (continuing < continuationCap) {
+    while (continuationCap > 0) {
       const residentBlocked = Number.isFinite(maxInFlight) && analysisResidentCount() >= maxInFlight;
-      if (residentBlocked) break;
       const job = next(j => j.needsContinue && !j.continuing);
       if (!job) break;
+      // A continuation slot can be held by an ahead page waiting at Native.
+      // Admit ONE extra visible request so the global gate can actually promote it.
+      // This is request admission, not parallel model execution; focus churn cannot
+      // accumulate additional borrowers, and the snapshot hard bound never moves.
+      const canBorrow = isFocused(job) && continuing === continuationCap;
+      const blocked = residentBlocked ? 'resident-limit' : continuing >= continuationCap && !canBorrow ? 'continuation-limit' : null;
+      if (blocked) {
+        const owners = [...jobs.values()].filter(j => j !== job && (j.continuing || j.started || (j.ready && j.prepared?.analysis))).map(j => j.key).slice(0, 24);
+        const detail = { reason: blocked, owners, continuing, resident: analysisResidentCount(), continuationCap, maxInFlight: Number.isFinite(maxInFlight) ? maxInFlight : null, limits: caps, capacity: capacity?.compactTelemetry?.() ?? null };
+        const key = JSON.stringify(detail);
+        if (job.blockedKey !== key) { trace(job, 'continuation-blocked', detail); job.blockedKey = key; }
+        break;
+      }
       beginContinuation(job);
     }
   };
@@ -382,7 +409,7 @@ export function createQueue({
       });
       jobs.set(key, {
         key, chapterKey, index, run, prepare, resolve, reject, promise,
-        started: false, addedAt: Date.now(), prepareMs: 0,
+        started: false, addedAt: Date.now(), prepareMs: 0, events: [{ at: Date.now(), event: 'added' }],
         prepareStartedAt: null, routePreparedAt: null, continuationWaitMs: 0, preparedAt: null,
         preparing: false, continuing: false, needsContinue: false, ready: false,
       });
@@ -397,6 +424,7 @@ export function createQueue({
         ranks.clear();
         for (const [k, r] of Object.entries(chapterRanks)) ranks.set(k, r);
       }
+      for (const job of jobs.values()) if (!job.started) trace(job, 'focus', { focused: isFocused(job), chapterKey, index });
       queueMicrotask(pump);
     },
     /** ترتيب الانتظار الحالي (للاختبار والعرض). */
@@ -542,6 +570,7 @@ async function translatePageNow(deps, src, meta) {
   if (!runDeps.route && prepared?.route) runDeps = { ...runDeps, route: prepared.route };
   if (!runDeps.routeStartedAt && prepared?.routeStartedAt) runDeps = { ...runDeps, routeStartedAt: prepared.routeStartedAt };
   if (prepared?.analysis) runDeps = { ...runDeps, analysis: prepared.analysis };
+  if (prepared?.nativeTrace) runDeps = { ...runDeps, nativeTrace: prepared.nativeTrace };
   if (prepared?.prepareStages) {
     let detailed = 0;
     for (const [name, value] of Object.entries(prepared.prepareStages)) {
@@ -572,12 +601,7 @@ async function translatePageNow(deps, src, meta) {
     // Do not occupy the foreground reader slot rebuilding a page we refuse to
     // show anyway. Keep the original source visible and run one deduplicated
     // repair in background; only a complete accepted result may notify/swap in.
-    if ((local.tries ?? 0) < MAX_REPAIRS && !backgroundRepairs.has(hash)) {
-      const repair = Promise.resolve()
-        .then(() => repairInBackground({ ...runDeps, via: 'repair' }, src, hash, meta, local))
-        .finally(() => backgroundRepairs.delete(hash));
-      backgroundRepairs.set(hash, repair);
-    }
+    if ((local.tries ?? 0) < MAX_REPAIRS) scheduleRepair(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
       from: 'cache',
       cacheKind: found.kind,
@@ -608,7 +632,7 @@ async function translatePageNow(deps, src, meta) {
     if (found.kind === 'hash' && found.cacheKey) void writeKv(found.cacheKey, { ...local, sourceHash: hash });
     const due = (staleEngine(local.engine) || oldPipeline) && (local.tries ?? 0) < MAX_REPAIRS &&
       (oldPipeline || Date.now() - (local.at ?? 0) > RETRY_INCOMPLETE_MS);
-    if (due) void repairInBackground(runDeps, src, hash, meta, local);
+    if (due) scheduleRepair(runDeps, src, hash, meta, local);
     logPage(runDeps, meta, hash, clock, {
       from: 'cache',
       cacheKind: found.kind,
@@ -638,6 +662,20 @@ async function translatePageNow(deps, src, meta) {
 const inflight = new Map();
 /** إصلاح واحد فقط لكل بصمة ناقصة/محجورة؛ لا نكرر Native/Luna بسبب إعادة الرسم. */
 const backgroundRepairs = new Map();
+function scheduleRepair(deps, src, hash, meta, local) {
+  const existing = backgroundRepairs.get(hash);
+  if (existing) {
+    if (deps.onRepaired && existing.listeners.size < 16) existing.listeners.add(deps.onRepaired);
+    return existing.promise;
+  }
+  const listeners = new Set(deps.onRepaired ? [deps.onRepaired] : []);
+  const task = { listeners, promise: null };
+  task.promise = Promise.resolve().then(() => repairInBackground({ ...deps, via: 'repair', onRepaired: result => {
+    for (const notify of listeners) { try { notify(result); } catch { /* a reader may have closed */ } }
+  } }, src, hash, meta, local)).catch(() => {}).finally(() => backgroundRepairs.delete(hash));
+  backgroundRepairs.set(hash, task);
+  return task.promise;
+}
 
 const refinementTargets = new Map();
 const earlyRefinements = new Map();
@@ -721,7 +759,7 @@ async function translateOnce(deps, src, hash, meta, clock) {
   // Partial output is useful immediately, but it is not "done": start one repair
   // pass now so residual/coverage rescue can complete while the reader is still here.
   if (persisted && result.incomplete && (value.tries ?? 0) < MAX_REPAIRS) {
-    queueMicrotask(() => void repairInBackground(deps, src, hash, meta, saved.stored));
+    scheduleRepair(deps, src, hash, meta, saved.stored);
   }
   return { ...saved.stored, hash, cacheKey: saved.cacheKey, from: result.cached ? 'friends' : 'model', saved: persisted, stages: { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages }, ...(deps.via === 'job' && !persisted ? { error: 'storage_failed' } : {}) };
 }
@@ -731,7 +769,7 @@ function logPage(deps, meta, hash, clock, extra, written = null) {
   const record = (cacheWrite) => {
     const stages = { wait: deps.waitMs ?? 0, fetch: deps.fetchMs ?? 0, ...clock.stages, ...(cacheWrite === null ? {} : { cacheWrite }) };
     const total = Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0);
-    recordPerf({ at: Date.now(), backend: nativeBackend(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, capacity: runtimeCapacity.compactTelemetry(), ...extra });
+    recordPerf({ at: Date.now(), backend: nativeBackend(), runId: deps.runId ?? meta?.runId ?? null, via: deps.via ?? null, chapterKey: meta?.chapterKey ?? null, pageIndex: meta?.pageIndex ?? null, hash, path: deps.imagePath ?? null, speed: meta?.speed ?? 'smart', total, stages, queueWait: deps.queueWait ?? null, queueTrace: deps.queueTrace ?? null, nativeTrace: deps.nativeTrace ?? null, capacity: runtimeCapacity.compactTelemetry(), ...extra });
   };
   if (!written) return record(null);
   const t = Date.now();
@@ -784,17 +822,25 @@ async function repairInBackground(deps, src, hash, meta, local) {
 /** الصفحة التي أمام القارئ أولًا على المعالج؛ المقدّمة والإكمال بعدها. */
 // الصفحة التي أمام القارئ فقط latency-sensitive. الصفحات القادمة تستفيد من
 // batching وتبقى أقل أولوية في Native؛ job/repair دائمًا background.
-const interactiveOf = deps => deps.via === 'job' || deps.via === 'repair'
-  ? false
-  : deps.isInteractive?.() ?? deps.interactive ?? true;
+const interactiveOf = deps => deps.via === 'job' ? false
+  : deps.isInteractive?.() ?? deps.interactive ?? (deps.via !== 'repair');
 const priorityOf = deps => interactiveOf(deps) ? 'high' : 'low';
 const nativeStagePriorityOf = (deps, foreground) => {
-  if (deps.via === 'job' || deps.via === 'repair') return 'background';
+  if (deps.via === 'job' || (deps.via === 'repair' && !interactiveOf(deps))) return 'background';
   if (interactiveOf(deps)) return foreground;
   if (foreground === 'render') return 'aheadRender';
   if (foreground === 'route') return 'aheadRoute';
   return 'aheadAnalyze';
 };
+const nativeDiagnostics = (deps, meta) => ({
+  order: () => deps.schedulingPriority?.() ?? 0,
+  page: { chapterKey: meta.chapterKey ?? null, pageIndex: meta.pageIndex ?? null, via: deps.via ?? null },
+  onEvent: event => {
+    if (!deps.nativeTrace) return;
+    deps.nativeTrace.push(event);
+    if (deps.nativeTrace.length > 32) deps.nativeTrace.shift();
+  },
+});
 
 /**
  * بوابة محلية واحدة لكل نداء Native ثقيل/كاشف عبر القارئ والأعمال والإصلاح.
@@ -817,10 +863,16 @@ const NATIVE_STAGE_RANK = Object.freeze({
 let nativeStageRunning = false;
 let nativeStageSeq = 0;
 const nativeStageQueue = [];
+let nativeStageOwner = null;
+let aheadRouteStreak = 0;
 
 const nativeStageNow = () => globalThis.performance?.now?.() ?? Date.now();
 const nativeStagePriorityName = job => typeof job.priority === 'function' ? job.priority() : job.priority;
 const nativeStageRank = job => NATIVE_STAGE_RANK[nativeStagePriorityName(job)] ?? NATIVE_STAGE_RANK.analyze;
+const nativeStageOrder = job => Number(typeof job.order === 'function' ? job.order() : job.order) || 0;
+const nativeEvent = (job, event, detail = {}) => {
+  try { job.onEvent?.({ at: Date.now(), event, page: job.page, stage: nativeStagePriorityName(job), ...detail }); } catch { /* telemetry only */ }
+};
 
 function pumpNativeTranslationStage() {
   if (nativeStageRunning || !nativeStageQueue.length) return;
@@ -830,25 +882,47 @@ function pumpNativeTranslationStage() {
     const b = nativeStageQueue[best];
     const ar = nativeStageRank(a);
     const br = nativeStageRank(b);
-    if (ar < br || (ar === br && a.seq < b.seq)) best = i;
+    if (ar < br || (ar === br && (nativeStageOrder(a) < nativeStageOrder(b) ||
+      (nativeStageOrder(a) === nativeStageOrder(b) && a.seq < b.seq)))) best = i;
+  }
+  // Two speculative classifications may pass a pending ahead analysis. Then
+  // service the best analysis before another Route wave. Visible work and ready
+  // renders retain their ranks; finite chapters drain without Route starvation.
+  if (nativeStagePriorityName(nativeStageQueue[best]) === 'aheadRoute' && aheadRouteStreak >= 2) {
+    const waiting = nativeStageQueue.map((job, i) => ({ job, i })).filter(x => nativeStagePriorityName(x.job) === 'aheadAnalyze');
+    waiting.sort((a,b) => nativeStageOrder(a.job)-nativeStageOrder(b.job) || a.job.seq-b.job.seq);
+    if (waiting.length) best = waiting[0].i;
   }
   const [job] = nativeStageQueue.splice(best, 1);
+  aheadRouteStreak = nativeStagePriorityName(job) === 'aheadRoute' ? aheadRouteStreak + 1 : 0;
+  nativeStageOwner = job;
+  job.startedAt = Date.now();
   nativeStageRunning = true;
+  nativeEvent(job, 'native-granted', { pending: nativeStageQueue.length });
   try { job.onWait?.(Math.max(0, Math.round(nativeStageNow() - job.queuedAt))); } catch { /* telemetry only */ }
   Promise.resolve()
     .then(job.fn)
     .then(job.resolve, job.reject)
     .finally(() => {
+      const endedAt = Date.now();
+      nativeEvent(job, 'native-completed');
+      for (const waiter of nativeStageQueue) nativeEvent(waiter, 'native-blocker', {
+        owner: job.page, ownerStage: nativeStagePriorityName(job),
+        startedAt: Math.max(waiter.enqueuedAt, job.startedAt), endedAt,
+      });
       nativeStageRunning = false;
+      nativeStageOwner = null;
       pumpNativeTranslationStage();
     });
 }
 
-export function withNativeTranslationStage(fn, { priority = 'analyze', onWait = null } = {}) {
+export function withNativeTranslationStage(fn, { priority = 'analyze', order = 0, page = null, onWait = null, onEvent = null } = {}) {
   return new Promise((resolve, reject) => {
     // priority may be a function. Re-evaluate it only when the owner is handed
     // over so a page scrolled into focus is promoted without cancelling work.
-    nativeStageQueue.push({ fn, resolve, reject, priority, seq: nativeStageSeq++, queuedAt: nativeStageNow(), onWait });
+    const job = { fn, resolve, reject, priority, order, page, seq: nativeStageSeq++, queuedAt: nativeStageNow(), enqueuedAt: Date.now(), onWait, onEvent };
+    nativeStageQueue.push(job);
+    nativeEvent(job, 'native-enqueued', { owner: nativeStageOwner?.page ?? null, ownerStage: nativeStageOwner ? nativeStagePriorityName(nativeStageOwner) : null, pending: nativeStageQueue.length });
     queueMicrotask(pumpNativeTranslationStage);
   });
 }
@@ -931,6 +1005,11 @@ export async function prepareTranslation(src, meta, options = {}) {
   const hash=await prep.time('prepare.hash', () => pageHashOf(src));
   const cacheLookup=await prep.time('prepare.cacheRead', () => readPageCache(hash,meta));
   const cached=cacheLookup.value;
+  // run() quarantines partial/known-bad cache and schedules a deduplicated repair.
+  // Preparing Heavy here would be discarded by that branch and repeated by repair.
+  if (cached && typeof cached.translated === 'number' && (cached.incomplete || Number(cached.pipelineVersion) === 2)) {
+    return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
+  }
   if (cached && !cached.incomplete && !staleEngine(cached.engine) && !(meta.speed!=='fast' && cached.engine?.endsWith(':fast'))) {
     return {src,hash,cacheLookup,bypass:true,prepareStages:prep.stages};
   }
@@ -943,19 +1022,22 @@ export async function prepareTranslation(src, meta, options = {}) {
     via: options.via ?? 'reader',
     interactive: Boolean(options.interactive),
     isInteractive: options.isInteractive,
+    schedulingPriority: options.schedulingPriority,
+    nativeTrace: [],
   };
 
   const routeStartedAt=Date.now();
   const route=await withNativeTranslationStage(
     () => prep.time('prepare.route', () => routePage({path,chapterKey:meta.chapterKey,pageIndex:meta.pageIndex})),
     {
+      ...nativeDiagnostics(prepDeps, meta),
       priority:() => nativeStagePriorityOf(prepDeps,'route'),
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
   runtimeCapacity.observePerf(route?.perf, 'route');
   if (!route?.textless) expectLuna(hash, meta);
-  const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages};
+  const routed={src,hash,cacheLookup,route,routeStartedAt,bypass:Boolean(route?.textless),prepareStages:prep.stages,nativeTrace:prepDeps.nativeTrace};
   if (route?.textless || !options.preAnalyze) {
     runtimeCapacity.observeStages(prep.stages);
     return routed;
@@ -975,6 +1057,7 @@ export async function prepareTranslation(src, meta, options = {}) {
         routeHash:route?.pageHash,
       })),
       {
+        ...nativeDiagnostics(prepDeps, meta),
         priority:() => nativeStagePriorityOf(prepDeps,'analyze'),
         onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
@@ -993,7 +1076,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
     analysis = deps.analysis ?? (deps.route?.textless ? {...deps.route,regions:[],thumbnail:''} : await withNativeTranslationStage(
       () => clock.time('analyze', () => analyzePage({ path: deps.imagePath, sourceLang: meta.sourceLang ?? 'auto', priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex,routeHash:deps.route?.pageHash })),
       {
-        priority: nativeStagePriorityOf(deps, 'analyze'),
+        ...nativeDiagnostics(deps, meta),
+        priority: () => nativeStagePriorityOf(deps, 'analyze'),
         onWait: ms => { clock.stages['nativeWait.analyze'] = Math.round((clock.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
     ));
@@ -1059,7 +1143,8 @@ async function translateOnDevice(deps, hash, meta, clock) {
         rendered = await withNativeTranslationStage(
           () => clock.time('render', () => renderPage({ path: deps.imagePath, regions: plan, leave: leftAsIs(res.body), priority: priorityOf(deps), chapterKey: meta.chapterKey, pageIndex: meta.pageIndex })),
           {
-            priority: nativeStagePriorityOf(deps, 'render'),
+            ...nativeDiagnostics(deps, meta),
+            priority: () => nativeStagePriorityOf(deps, 'render'),
             onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
           },
         );

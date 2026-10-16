@@ -225,6 +225,8 @@ class TranslationPlugin : Plugin() {
                             .put("source", r.source)
                             .put("status", r.status)
                             .put("ocrConfidence", (r.ocr?.confidence ?: 0f).toDouble())
+                            .put("ocrFailedLines", r.ocr?.failedLines ?: 0)
+                            .put("ocrRetriedLines", r.ocr?.retriedLines ?: 0)
                             .put("inkLight", r.inkLight),
                     )
                 }

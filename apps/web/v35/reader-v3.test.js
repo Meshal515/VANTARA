@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEAD_PAGES, createStallClock } from './reader-translate.js';
+import { LEAD_PAGES, createStallClock, translationReady } from './reader-translate.js';
 import { createQueue } from '../lib/translate.js';
 import { formatReport, readerStall, sizeIndependent } from '../lib/translate-perf.js';
 
@@ -18,6 +18,12 @@ describe('v3 reading lead', () => {
 });
 
 describe('v3 reader stall clock', () => {
+  it('a quarantined partial result is not ready and cannot end reader waiting', () => {
+    expect(translationReady({incomplete:true,image:null,translated:0})).toBe(false);
+    expect(translationReady(null)).toBe(false);
+    expect(translationReady({incomplete:false,image:null,translated:0,regions:[]})).toBe(true);
+    expect(translationReady({incomplete:false,image:'arabic.webp',translated:2})).toBe(true);
+  });
   it('measures only time spent on a page that was not ready', () => {
     let t = 0;
     const rec = [];

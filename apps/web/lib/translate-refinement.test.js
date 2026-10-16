@@ -60,3 +60,20 @@ it('accepts a complete merged repair without losing either previous source phras
   expect(test.repaired).toHaveLength(1);
   expect(test.repaired[0]).toMatchObject({translated:1,incomplete:false});
 });
+
+it('deduplicates the immediate partial repair with a simultaneous cache revisit',async()=>{
+ const test=setup(); const meta={seriesRef:'repair-race',sourceId:'s',chapterKey:'repair-race#1',pageIndex:0};
+ let analyses=0;let releaseRepair;const held=new Promise(resolve=>{releaseRepair=resolve;});
+ globalThis.Capacitor.Plugins.Translation.analyzePage=async()=>{
+  analyses++;
+  if(analyses>1) await held;
+  return {width:800,height:1200,thumbnail:'AAAA',regions:[{id:'r1',source:'HELLO',kind:'speech',status:'pending',box:[1,2,3,4]}]};
+ };
+ globalThis.Capacitor.Plugins.Translation.renderPage=async()=>({path:'/partial.webp',translated:0,perf:{counts:{noFit:1}}});
+ await translatePage(test.deps,'file:/repair-race.jpg',meta);
+ await settle();
+ await translatePage(test.deps,'file:/repair-race.jpg',meta);
+ await settle();releaseRepair();
+ for(let i=0;i<100;i++) await Promise.resolve();
+ expect(analyses).toBe(2);
+});
