@@ -208,9 +208,14 @@ export function createAddonRegistry({
   }
   function configurationUrl(key) {
     const r = row(key);
-    // Setup never leaks configured path/query tokens; installing the returned
-    // configured link is a separate preview/permissions step.
-    return new URL('/configure', new URL(r.url).origin).href;
+    // كما يفعل Stremio: «configure» بجانب manifest.json في مساره نفسه. إضافة على مسار فرعي
+    // (site.com/addon/manifest.json) صفحتها site.com/addon/configure، وجذر الموقع يعيد 404.
+    // المسار لا يذهب إلا لمضيف الإضافة نفسه، والاستعلام (?token=…) لا يُنقل.
+    const u = new URL(r.url);
+    u.search = '';
+    u.hash = '';
+    u.pathname = /\/manifest\.json$/.test(u.pathname) ? u.pathname.replace(/manifest\.json$/, 'configure') : '/configure';
+    return u.href;
   }
   function row(key) {
     const r = entries.get(resolveKey(key));

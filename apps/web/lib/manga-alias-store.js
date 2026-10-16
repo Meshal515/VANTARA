@@ -8,6 +8,7 @@
  */
 
 const KEY = 'vantara.manga.aliases.v1';
+const TWINS_KEY = 'vantara.manga.twins.v1';
 const REFS_KEY = 'vantara.manga.refAliases.v1';
 const MAX_LEARNED = 4000;
 
@@ -28,12 +29,14 @@ const write = (key, value) => {
 
 let shipped = {};
 let learned = read(KEY);
+// أعمال مكررة بأسماء متقاربة وأعلى فصل واحد (manga-twins.js): محفوظة فتعمل من أول قائمة
+let twins = read(TWINS_KEY);
 let map = null;
 let loading = null;
 
 function rebuild() {
   map = new Map();
-  for (const source of [shipped, learned]) {
+  for (const source of [shipped, learned, twins.aliases ?? {}]) {
     for (const [key, names] of Object.entries(source)) {
       const prev = map.get(key) ?? [];
       map.set(key, [...new Set([...prev, ...(names ?? [])])]);
@@ -55,6 +58,16 @@ export function loadAliases(fetchImpl = globalThis.fetch) {
     return map;
   })();
   return loading;
+}
+
+/** الأسماء من أعلى الفصول لدى الخادم. تُعاد كل ست ساعات على الأكثر. */
+export function twinsAt() {
+  return Number(twins.at) || 0;
+}
+export function setTwinAliases(aliases, at = Date.now()) {
+  twins = { at, aliases: aliases ?? {} };
+  write(TWINS_KEY, twins);
+  rebuild();
 }
 
 /** الخريطة الحالية (فارغة قبل التحميل؛ القائمة التالية تستفيد). */
@@ -118,6 +131,7 @@ export function refsOf(ref) {
 export function _reset() {
   shipped = {};
   learned = read(KEY);
+  twins = read(TWINS_KEY);
   refAliases = read(REFS_KEY);
   map = null;
   loading = null;

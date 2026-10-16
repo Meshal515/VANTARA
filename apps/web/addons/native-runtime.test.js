@@ -76,3 +76,14 @@ it('preserves different native movie and series prefix rules rather than taking 
  const {a}=await setup({...manifest,resources:[{name:'subtitles',types:['movie'],idPrefixes:['tt']},{name:'subtitles',types:['series'],idPrefixes:['tt9']}]});
  const providers=a.nativeSubtitleProviders();expect(providers).toHaveLength(2);expect(providers.map(x=>[x.types,x.idPrefixes])).toEqual([[['movie'],['tt']],[['series'],['tt9']]]);
 });
+it('shows an extension installed from a repository right away, in any language, and keeps hidden fillers hidden',async()=>{
+  vi.stubGlobal('fetch',async()=>{throw new Error('core configure failed');});
+  const manga=[{id:'eu.kanade.tachiyomi.extension.ar.azora',name:'Azora',filler:false}];
+  const {a}=await setup(manifest,{ExtensionEngine:{sources:async()=>({sources:manga})}});
+  expect(a.registry.list().filter(x=>x.bundled).map(x=>x.sourceId)).toEqual(['eu.kanade.tachiyomi.extension.ar.azora']);
+  manga.push({id:'eu.kanade.tachiyomi.extension.en.asura#1',name:'Asura',filler:true,user:true},{id:'eu.kanade.tachiyomi.extension.en.shipped',name:'Filler',filler:true});
+  await a.reloadSources();
+  const rows=a.registry.list().filter(x=>x.bundled);
+  expect(rows.map(x=>x.sourceId)).toEqual(['eu.kanade.tachiyomi.extension.ar.azora','eu.kanade.tachiyomi.extension.en.asura#1']);
+  expect(rows[1]).toMatchObject({user:true,contentTypes:['manga']});
+});

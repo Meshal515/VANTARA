@@ -169,6 +169,13 @@ export function observeMangaChapters(sourceId, manga, chapters) {
   });
 }
 
+/** أعلى فصل لكل عمل مانجا كما يعرفه الخادم: [مفتاح، فصل]، أو null. */
+export async function topChapters() {
+  if (!transport) return null;
+  const res = await transport('/v1/updates/twins').catch(() => null);
+  return res?.status === 200 && Array.isArray(res.body?.works) ? res.body.works : null;
+}
+
 /** الخط الزمني من ذاكرة VANTARA: الأحدث أولًا، بمؤشر ثابت للصفحات التالية. */
 export async function timeline(section, { before = null, limit = 40 } = {}) {
   if (!transport) return null;

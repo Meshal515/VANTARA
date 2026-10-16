@@ -283,3 +283,9 @@ it('removes a reviewed replacement when called through an old saved addon key',a
  await r.remove(original.key);expect(r.list()).toEqual([]);
  const again=createAddonRegistry({store,transport:{json:async()=>raw()}});await again.ready;expect(again.list()).toEqual([]);
 });
+it('opens the setup page beside the manifest on its own path, like Stremio, without the query token', async () => {
+ const store=createStore({indexedDB:null});const r=createAddonRegistry({store,transport:{json:async()=>raw('1.0.0')}});await r.ready;
+ const one=await r.install(await r.inspect('https://host.test/addons/subs/manifest.json?token=secret'));
+ // كان يفتح https://host.test/configure (جذر الموقع) فيعيد 404 لكل إضافة على مسار فرعي
+ expect(r.configurationUrl(one.key)).toBe('https://host.test/addons/subs/configure');
+});

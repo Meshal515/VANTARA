@@ -257,7 +257,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       if (section === 'manga') await loadAliases();
       if (!active()) return false;
       const requestedCursor = state.bridgeNext ?? state.next;
-      const page = await timeline(section, { before: requestedCursor });
+      const page = await timeline(section, { before: requestedCursor, limit: 100 });
       if (!active()) return false;
       if (!page || !Array.isArray(page.events)) { error(); return false; }
       if (page.next && page.next === requestedCursor) { error(); return false; }
@@ -336,6 +336,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
 /** أول N تحديثات (لشريط الرئيسية)، مجمّعة. */
 export async function latestGroups(section, n = 14, canonical = null) {
   if (section === 'manga') await loadAliases();
-  const page = await timeline(section, { limit: 40 });
+  // 40 حدثًا قد تكون عملين أو ثلاثة: الشريط يأخذ صفحة كاملة ليمتلئ
+  const page = await timeline(section, { limit: 100 });
   return page ? groupEvents(page.events, canonical?.(page.events) ?? null).slice(0, n) : null;
 }

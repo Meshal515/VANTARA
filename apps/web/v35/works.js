@@ -11,12 +11,13 @@
 
 import engine from '../lib/extension-engine.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
-import { aliasMap, learnAliases, loadAliases, noteRefAliases } from '../lib/manga-alias-store.js';
+import { aliasMap, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
+import { twinAliases } from '../lib/manga-twins.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
-import { noteListed } from '../lib/update-engine.js';
+import { noteListed, topChapters } from '../lib/update-engine.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -39,8 +40,19 @@ export function seriesRefOf(work) {
  * البطاقة التي صارت جزءًا من عمل قانوني تُسجَّل مرجعًا قديمًا له، فتقدّمها
  * ومكتبتها تُقرأ معه (`refsOf`).
  */
+/** أعمال مكررة بأسماء متقاربة: تُحسب من أعلى الفصول لدى الخادم كل ست ساعات (manga-twins.js). */
+let twinsLoading = null;
+function loadTwins() {
+  if (twinsLoading || Date.now() - twinsAt() < 6 * 3_600_000) return;
+  twinsLoading = topChapters()
+    .then((rows) => { if (rows) setTwinAliases(twinAliases(rows)); })
+    .catch(() => {})
+    .finally(() => { twinsLoading = null; });
+}
+
 function workIndex() {
   void loadAliases();
+  loadTwins();
   const index = canonicalIndex({ aliases: aliasMap() });
   const list = index.list;
   index.list = () => {
@@ -59,6 +71,7 @@ function workIndex() {
  */
 export function canonicalEventWorks(events) {
   void loadAliases();
+  loadTwins();
   const index = canonicalIndex({ aliases: aliasMap() });
   const own = new Map();
   for (const e of events ?? []) {
