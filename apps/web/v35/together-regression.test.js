@@ -46,6 +46,20 @@ it('sends continuous scroll while the host keeps moving instead of debouncing in
   expect(room.command.mock.calls.length).toBeGreaterThan(3); vi.advanceTimersByTime(120);
   expect(room.command).toHaveBeenLastCalledWith('seek',{pos:4.19}); bridge.destroy();
 });
+it('after a silent reconnect the host re-sends the position it scrolled to while offline', () => {
+  vi.useFakeTimers(); const room=roomOf(); room.isHost=room.canControl=true;
+  const bridge=readerBridge({room,mode:'sync'},{seriesRef:'solo',onFollow:vi.fn()});
+  bridge.page({chapter:1,index:4.25,pages:50}); vi.advanceTimersByTime(100);
+  // الاتصال ميت: المضيف يمرّر والأوامر تضيع، والخادم ما زال على 4.25
+  for(let i=1;i<=10;i++){ bridge.page({chapter:1,index:4.25+i/10,pages:50}); vi.advanceTimersByTime(100); }
+  room.command.mockClear();
+  room.emit('welcome',{state:room.timeline}); vi.advanceTimersByTime(1);
+  expect(room.command).toHaveBeenCalledWith('seek',{pos:5.25});
+  // لا إرسال مكرر إن كان الخادم على موضع المضيف نفسه
+  room.command.mockClear(); room.timeline={...room.timeline,pos:5.25};
+  room.emit('welcome',{state:room.timeline}); vi.advanceTimersByTime(1);
+  expect(room.command).not.toHaveBeenCalled(); bridge.destroy();
+});
 it('a reading position never advances as video milliseconds', () => {
   const room=roomOf(); expect(targetAt(room.timeline,10000)).toBe(4.25);
 });
