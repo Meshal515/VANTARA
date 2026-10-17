@@ -196,6 +196,10 @@ html.desktop-overlay .pwa-player .pp-scrim[hidden] {
 /* Windows-only: live friends are rendered in the transparent HWND overlay rather
    than the main renderer hidden behind native MPV video. */
 html.desktop-overlay .pp-people {
+  position: absolute;
+  z-index: 15;
+  top: 68px;
+  right: 20px;
   display: inline-flex;
   align-items: center;
   flex: none;
@@ -209,6 +213,8 @@ html.desktop-overlay .pp-people {
   cursor: pointer;
 }
 html.desktop-overlay .pp-people[hidden] { display: none !important; }
+html.desktop-overlay .pwa-player.pp--sheet .pp-people { pointer-events: none; }
+html.desktop-overlay .pwa-player.pp--lobby .pp-people { display: none; }
 html.desktop-overlay .pp-person {
   position: relative;
   display: grid;
@@ -255,6 +261,6 @@ html.desktop-overlay .pp-people:focus-visible { outline: 2px solid var(--accent)
   html.desktop-overlay .pp-people { padding: 3px 7px; }
 }
 @media (max-width: 700px) {
-  html.desktop-overlay .pp-people { max-width: 100px; }
+  html.desktop-overlay .pp-people { top: 66px; right: 8px; max-width: 100px; }
   html.desktop-overlay .pp-person { width: 24px; height: 24px; }
 }
