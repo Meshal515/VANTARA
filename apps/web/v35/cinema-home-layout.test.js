@@ -28,3 +28,10 @@ describe('بانر السينما: نفس التخطيط لكل شريحة', () 
     expect(rule('.v35 .cn-bill-actions')).toMatch(/\bheight:\s*46px/);
   });
 });
+
+describe('بطاقة «أكمل المشاهدة»: ⋮ تابع لبطاقته', () => {
+  it('الاسم لا يتمدد فيدفع ⋮ إلى حافة البطاقة، و⋮ لا يخرج عن حدودها', () => {
+    expect(rule('.v35 .cn-wide .cw-name .cn-wide-title')).toMatch(/flex:\s*0 1 auto/);
+    expect(rule('.v35 .cn-wide .cw-name .cw-more')).toMatch(/margin:\s*-4px 0 0/);
+  });
+});

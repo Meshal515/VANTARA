@@ -575,8 +575,12 @@
   min-width: 0;
 }
 .v35 .cn-wide .cw-name .cn-wide-title {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+}
+/* ⋮ يلي الاسم مباشرة داخل حدود بطاقته، لا على حافتها قرب البطاقة المجاورة */
+.v35 .cn-wide .cw-name .cw-more {
+  margin: -4px 0 0;
 }
 
 /* قائمة IMDb: ثلاثة صفوف في كل عمود، تمرير أفقي */
