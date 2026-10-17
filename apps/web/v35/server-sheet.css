@@ -275,7 +275,7 @@
   line-height: 1.35;
   color: var(--text-1);
 }
-.v35 .ss-desc {
+.v35 .sheet .ss-desc {
   width: 100%;
   margin: 0;
   font-size: var(--fs-body);
@@ -284,7 +284,7 @@
   text-align: start;
   unicode-bidi: plaintext;
 }
-.v35 .ss-desc.clamped {
+.v35 .sheet .ss-desc.clamped {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -788,12 +788,12 @@
   font-weight: 600;
   color: var(--text-1);
 }
-.v35 .ss-note p {
+.v35 .sheet .ss-note p {
   margin: 4px 0 0;
   font-size: 13px;
   line-height: 1.6;
 }
-.v35 .ss-none {
+.v35 .sheet .ss-none {
   margin: 0;
   padding: 28px 0;
   font-size: 13.5px;
@@ -1005,13 +1005,13 @@
   .v35 .ss-ep-title {
     font-size: var(--fs-title-lg);
   }
-  .v35 .ss-desc {
+  .v35 .sheet .ss-desc {
     font-size: var(--fs-body-lg);
     line-height: 1.7;
     color: var(--text-1);
     opacity: 0.86;
   }
-  .v35 .ss-desc.clamped {
+  .v35 .sheet .ss-desc.clamped {
     -webkit-line-clamp: 4;
   }
   .v35 .ss-src {
@@ -1045,6 +1045,52 @@
     padding: 14px 28px calc(var(--safe-bottom) + 18px);
     background: var(--bg-raised);
     box-shadow: inset 1px 0 0 var(--line), 0 -1px 0 var(--line);
+  }
+}
+/* الشاشة العريضة تُقرأ من مسافة أبعد: خطوط أكبر ودرجات رمادي أفتح داخل الورقة وحدها
+   (الرمادي الأغمق كان يكاد يختفي على الأسود، والوصف ومعلومات التورنت صغيرة) */
+@media (min-width: 900px) {
+  .v35 .an-pick {
+    --text-2: #d9d6e2;
+    --text-3: #b3aec4;
+    --text-4: #8f8aa3;
+    --fs-caption: 13px;
+    --fs-meta: 14.5px;
+    --fs-body: 16px;
+    --fs-body-lg: 17px;
+    --fs-title-sm: 18px;
+    --fs-title: 21px;
+    --fs-title-lg: 27px;
+  }
+  .v35 .sheet .ss-desc {
+    font-size: 18px;
+    opacity: 1;
+    color: var(--text-2);
+  }
+  .v35 .ss-facts {
+    font-size: var(--fs-body-lg);
+  }
+  .v35 .ss-rate-src {
+    font-size: 12.5px;
+  }
+  .v35 .ss-more,
+  .v35 .ss-resume,
+  .v35 .an-srv-q b,
+  .v35 .cn-srv-dead > summary,
+  .v35 .sheet .ss-note p {
+    font-size: 15px;
+  }
+  .v35 .ss-tab,
+  .v35 .ss-addon-select,
+  .v35 .sheet .ss-none,
+  .v35 .an-pick-together {
+    font-size: 15.5px;
+  }
+  .v35 .ss-q b {
+    font-size: 17px;
+  }
+  .v35 .ss-q small {
+    font-size: 12.5px;
   }
 }
 @media (min-width: 1500px) {
