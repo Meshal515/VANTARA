@@ -55,6 +55,23 @@ jobs:
             adb shell am instrument -w -r -e playerShots 1 -e class com.vantara.anime.player.PlayerScreensDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee player-shots/instrumentation.txt
             for f in $(adb shell run-as com.vantara.app.debug ls files/player-shots | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/player-shots/$f" > "player-shots/$f"; done
             ls -la player-shots
+      - name: Shots as notes (readable through the checks API)
+        if: always()
+        run: |
+          pip install --quiet pillow
+          python3 - <<'PY'
+          import base64, io, pathlib
+          from PIL import Image
+          shots = sorted(pathlib.Path('player-shots').glob('*.png'))
+          if not shots:
+              print('::error title=shots::لا لقطات'); raise SystemExit(0)
+          for p in shots[:10]:
+              im = Image.open(p).convert('RGB')
+              if im.width < im.height: im = im.rotate(90, expand=True)
+              im.thumbnail((960, 960))
+              buf = io.BytesIO(); im.save(buf, 'JPEG', quality=55, optimize=True)
+              print(f"::notice title=shot {p.stem}::{base64.b64encode(buf.getvalue()).decode()}")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
