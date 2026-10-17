@@ -8,37 +8,63 @@ export const language = (v) =>
     : /^(en|eng|english)(?:-|$)/i.test(v ?? "")
       ? "en"
       : String(v ?? "und");
-export function subtitleRequest(identity, stream = {}) {
+/**
+ * عنوان حلقة الأنمي في IMDb من خريطة ani.zip (رقم الحلقة عندنا ← [الموسم، رقمها فيه، المطلق]).
+ * الأنمي يُرقَّم داخل عمله (الجزء الثاني يبدأ من 1 أو يكمل من 13، وOne Piece مطلق حتى 1100+)،
+ * وإضافات الترجمة تعرف الحلقة بـIMDb + الموسم + رقمها فيه. حلقة لم تصل الخريطة بعد (أنمي يُعرض الآن)
+ * تكمل من آخر حلقة معروفة قبلها في العمل نفسه. يرجع العناوين بالترتيب: موسم TVDB ثم الترقيم المطلق
+ * في الموسم 1 (OpenSubtitles يفهرس One Piece وNaruto Shippuden هكذا).
+ */
+export function animeImdbAddresses(map, episode) {
+  const n = Number(episode);
+  if (!map || typeof map !== "object" || !Number.isInteger(n) || n < 1) return [];
+  const valid = (v) => Array.isArray(v) && Number.isInteger(v[0]) && v[0] >= 0 && Number.isInteger(v[1]) && v[1] > 0;
+  let hit = valid(map[n]) ? map[n] : null;
+  if (!hit) {
+    let k = 0;
+    for (const key of Object.keys(map)) { const m = Number(key); if (Number.isInteger(m) && m < n && m > k && valid(map[key])) k = m; }
+    if (k && n - k <= 30) { const [s, e, a] = map[k]; hit = [s, e + n - k, Number.isInteger(a) ? a + n - k : null]; }
+  }
+  if (!hit) return [];
+  const [season, number, absolute] = hit;
+  const out = [[season, number]];
+  if (Number.isInteger(absolute) && absolute > 0 && !(season === 1 && number === absolute)) out.push([1, absolute]);
+  return out;
+}
+/** كل الطلبات الممكنة لهذه الحلقة بالترتيب؛ المزوّد يجرّب التالي إن رجع الأول فارغًا. */
+export function subtitleRequests(identity, stream = {}) {
   const imdb = identity?.externalIds?.imdb;
   const providerId = identity?.addonKey && typeof identity.videoId === "string" && identity.videoId.length <= 2000 && !/[\x00-\x1f]/.test(identity.videoId) ? identity.videoId : null;
   const kitsu = !providerId && kitsuVideoRequest(identity);
-  if (!providerId && !kitsu && !/^tt\d+$/.test(imdb ?? "")) return null;
+  const extra = {};
+  for (const key of ["filename", "videoHash", "videoSize"])
+    if (stream?.[key] != null) extra[key] = stream[key];
+  if (providerId || kitsu) {
+    const type = kitsu?.type ?? ((identity.kind === "movie" || identity.kind === "anime" && identity.format === "MOVIE") ? "movie" : ["series", "anime"].includes(identity.kind) ? "series" : null);
+    if (!type) return [];
+    const first = { type, videoId: providerId ?? kitsu.videoId, extra };
+    // Kitsu لإضافات تعرفه، وIMDb بعده لإضافات لا تعرف إلا tt (OpenSubtitles)
+    if (providerId) return [first];
+    const { kitsu: _k, ...externalIds } = identity.externalIds ?? {};
+    return [first, ...subtitleRequests({ ...identity, externalIds }, stream)];
+  }
+  if (!/^tt\d+$/.test(imdb ?? "")) return [];
   const type =
-    kitsu?.type ?? ((identity.kind === "movie" || identity.kind === "anime" && identity.format === "MOVIE")
+    (identity.kind === "movie" || identity.kind === "anime" && identity.format === "MOVIE")
       ? "movie"
       : ["series", "anime"].includes(identity.kind)
         ? "series"
-        : null);
-  if (!type) return null;
-  if (
-    !providerId && !kitsu && type === "series" &&
-    (!Number.isInteger(identity.season) ||
-      identity.season < 0 ||
-      !Number.isInteger(identity.episode) ||
-      identity.episode < 1)
-  )
-    return null;
-  const extra = {};
-  for (const key of ["filename", "videoHash", "videoSize"])
-    if (stream[key] != null) extra[key] = stream[key];
-  return {
-    type,
-    videoId:
-      providerId ?? kitsu?.videoId ?? (type === "movie"
-        ? imdb
-        : `${imdb}:${identity.season}:${identity.episode}`),
-    extra,
-  };
+        : null;
+  if (!type) return [];
+  if (type === "movie") return [{ type, videoId: imdb, extra }];
+  if (!Number.isInteger(identity.episode) || identity.episode < 1) return [];
+  const mapped = identity.kind === "anime" ? animeImdbAddresses(identity.imdbEpisodes, identity.episode) : [];
+  const addresses = mapped.length ? mapped
+    : Number.isInteger(identity.season) && identity.season >= 0 ? [[identity.season, identity.episode]] : [];
+  return addresses.map(([season, episode]) => ({ type, videoId: `${imdb}:${season}:${episode}`, extra }));
+}
+export function subtitleRequest(identity, stream = {}) {
+  return subtitleRequests(identity, stream)[0] ?? null;
 }
 export async function discoverSubtitles({
   identity,
@@ -53,13 +79,18 @@ export async function discoverSubtitles({
   const seen = new Set();
   await runProgressive(
     providers.flatMap((p) => {
-      const request = p.request ? p.request(identity, stream) : input;
-      if (!request) return [];
+      const requests = (p.requests ? p.requests(identity, stream) : p.request ? [p.request(identity, stream)] : subtitleRequests(identity, stream)).filter(Boolean).slice(0, 3);
+      if (!requests.length) return [];
       return [{
       origin: p.origin ?? p.key,
       addonKey: p.key,
       run: async (signal) => {
-        const result = boundedItems(await p.subtitles({ ...request, signal }));
+        // معرّف لا يعرفه المزوّد يرجع فارغًا: نجرّب التالي (Kitsu ← IMDb بموسم TVDB ← المطلق)
+        let result = [];
+        for (const request of requests) {
+          result = boundedItems(await p.subtitles({ ...request, signal }));
+          if (result.length) break;
+        }
         onHealth(p.key, true);
         return { p, result };
       },

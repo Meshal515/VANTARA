@@ -1,4 +1,4 @@
-import { subtitleRequest } from "./subtitles.js";
+import { subtitleRequests } from "./subtitles.js";
 import { createAnimeIdentityResolver, kitsuVideoRequest } from "./anime-mapping.js";
 import { isNative, webPlugin } from "../pwa/platform.js";
 import { createAddonCache } from "./cache.js";
@@ -387,9 +387,9 @@ export function createAddonRuntime({
         healthy:
           registry.health.state(m.key, "subtitles", runtimeName).state ===
           "healthy",
-        request(identity, stream) {
-          const { kitsu, ...externalIds } = identity?.externalIds ?? {};
-          return [subtitleRequest(identity, stream), subtitleRequest({ ...identity, externalIds }, stream)].find(input => input && matchesStremioResource(m, "subtitles", input.type, input.videoId)) ?? null;
+        // كل ما يقبله المزوّد بالترتيب (Kitsu ثم IMDb بموسم TVDB ثم المطلق)، لا الأول وحده
+        requests(identity, stream) {
+          return subtitleRequests(identity, stream).filter(input => matchesStremioResource(m, "subtitles", input.type, input.videoId));
         },
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));

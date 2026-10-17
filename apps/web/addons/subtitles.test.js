@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { subtitleRequest, discoverSubtitles, toWebVtt } from "./subtitles.js";
+import { subtitleRequest, subtitleRequests, animeImdbAddresses, discoverSubtitles, toWebVtt } from "./subtitles.js";
 it("matches episode by explicit IMDb and season/episode, never title alone", () => {
   expect(
     subtitleRequest(
@@ -85,4 +85,26 @@ it('uses a provider-specific exact request without requesting incompatible names
  const calls=[], results=[];
  await discoverSubtitles({identity:{kind:'anime',format:'MOVIE',externalIds:{kitsu:'12',imdb:'tt123'}},providers:[{key:'imdb',request:()=>({type:'movie',videoId:'tt123',extra:{}}),subtitles:async input=>{calls.push(input);return [{url:'https://sub.test/a.srt',lang:'ara'}];}},{key:'wrong',request:()=>null,subtitles:async()=>{throw Error('must not request');}}],onResult:x=>results.push(x)});
  expect(calls[0].videoId).toBe('tt123');expect(results).toHaveLength(1);
+});
+
+it('عنوان حلقة الأنمي في IMDb: موسم TVDB ثم المطلق، وحلقة لم تصل الخريطة تكمل من آخر معروفة', () => {
+  const map = { 1: [2, 13, 38], 2: [2, 14, 39] };
+  expect(animeImdbAddresses(map, 1)).toEqual([[2, 13], [1, 38]]);
+  expect(animeImdbAddresses(map, 5)).toEqual([[2, 17], [1, 42]]);
+  expect(animeImdbAddresses(map, 40)).toEqual([]);
+  expect(animeImdbAddresses({ 3: [1, 3, 3] }, 3)).toEqual([[1, 3]]);
+  expect(subtitleRequests({ kind: 'anime', externalIds: { kitsu: '12', imdb: 'tt0388629' }, imdbEpisodes: { 62: [5, 2, 62] }, episode: 62 }).map(r => r.videoId))
+    .toEqual(['kitsu:12:62', 'tt0388629:5:2', 'tt0388629:1:62']);
+});
+
+it('المزوّد يجرّب المعرّف التالي حين يرجع الأول فارغًا (One Piece مفهرس بالمطلق)', async () => {
+  const asked = [];
+  const found = [];
+  await discoverSubtitles({
+    identity: { kind: 'anime', externalIds: { imdb: 'tt0388629' }, imdbEpisodes: { 62: [5, 2, 62] }, episode: 62 },
+    providers: [{ key: 'os', subtitles: async (req) => { asked.push(req.videoId); return req.videoId === 'tt0388629:1:62' ? [{ url: 'https://subs.test/a.srt', lang: 'ara' }] : []; } }],
+    onResult: (t) => found.push(t),
+  });
+  expect(asked).toEqual(['tt0388629:5:2', 'tt0388629:1:62']);
+  expect(found.map(t => t.lang)).toEqual(['ar']);
 });
