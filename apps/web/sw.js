@@ -162,6 +162,7 @@ const SHELL = [
   '/v35/source-mode.js',
   '/vendor/hls.min.js',
   '/v35/shell.js',
+  '/v35/sheet-lifecycle.js',
   '/v35/markup.js',
   '/v35/icons.js',
   '/v35/plural.js',
