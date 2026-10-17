@@ -575,7 +575,7 @@ export function createCinema(deps) {
         later.setAttribute('aria-pressed', String(on));
       };
       paintLater();
-      const more = opener(button('cn-btn cn-btn--icon', glyph('info', { size: 20 }), null, 'التفاصيل'), m);
+      const more = opener(button('cn-btn cn-btn--icon', `${glyph('info', { size: 20 })}<span>التفاصيل</span>`, null, 'التفاصيل'), m);
       actions.append(play, later, more);
       // سطر الأنواع يُحجز دائمًا (ولو فارغًا): لا تقفز الأزرار بين شريحة وأخرى
       const content = [top, el('p', 'cn-bill-genres', genres || '\u00a0'), actions];

@@ -66,3 +66,12 @@ describe('البانر البديل (cn-hero-alt): خلف صنف واحد', () =
     expect(rule('.v35 .cn-hero-alt .cn-bill-info')).toMatch(/margin-top:\s*-84px/);
   });
 });
+
+describe('أزرار البانر (B): بلا صناديق', () => {
+  it('«قائمتي» و«التفاصيل» أيقونة وكلمة بلا خلفية ولا إطار، بنفس الارتفاع الثابت', () => {
+    const r = rule('.v35 .cn-bill-actions .cn-btn--ghost,\n.v35 .cn-bill-actions .cn-btn--icon');
+    expect(r).toMatch(/background:\s*none/);
+    expect(r).toMatch(/box-shadow:\s*none/);
+    expect(r).toMatch(/min-height:\s*46px/);
+  });
+});
