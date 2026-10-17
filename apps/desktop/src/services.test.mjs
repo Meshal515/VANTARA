@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs } from './services.mjs';
 
 const hash = 'a'.repeat(40);
 test('HTTPS يرفض الأهداف الداخلية وكل DNS يحتوي عنوانًا داخليًا', async () => {
@@ -69,6 +69,39 @@ test('لا يقبل hashes أو headers أو magnets مخالفة للعقد', (
     assert.throws(() => validateCandidate(candidate));
   }
 });
+test('المتتبّعات العامة تُدمج في magnet بعد متتبّعات الإضافة بلا تكرار وبحد أقصى', () => {
+  assert.equal(PUBLIC_TRACKERS.length,12);
+  const plain=new URL(validateCandidate({infoHash:hash}).magnet).searchParams.getAll('tr');
+  assert.deepEqual(plain,[...PUBLIC_TRACKERS]);
+  // متتبّع الإضافة أولًا؛ نسخة مكررة من العام (بشرطة أخيرة/حروف كبيرة) لا تُضاف مرتين
+  const addon='https://example.com/announce',dup='UDP://tracker.opentrackr.org:1337/announce/';
+  const merged=new URL(validateCandidate({infoHash:hash,magnet:`magnet:?xt=urn:btih:${hash}&tr=${encodeURIComponent(dup)}&dn=x`,sources:[`tracker:${addon}`]}).magnet);
+  const tr=merged.searchParams.getAll('tr');
+  assert.deepEqual(tr.slice(0,2),[dup,addon]);
+  assert.equal(tr.length,2+PUBLIC_TRACKERS.length-1);
+  assert.equal(merged.searchParams.get('dn'),'x');
+  assert.equal(merged.searchParams.getAll('xt').length,1);
+  // magnet غني بالمتتبّعات لا يتجاوز الحد بسبب القائمة العامة، ولا يُحذف منه شيء
+  const many=Array.from({length:MAX_ANNOUNCE+3},(_,i)=>`udp://t${i}.example.org:80/announce`);
+  assert.equal(mergeTrackers(many).length,MAX_ANNOUNCE+3);
+  assert.equal(mergeTrackers(many.slice(0,40)).length,MAX_ANNOUNCE);
+  // القائمة العامة تمر بنفس قواعد validateTracker
+  assert.throws(()=>mergeTrackers([],['udp://10.0.0.1:80/announce']),/tracker/);
+});
+test('initial_peers: عناوين عامة فقط وبصيغة SocketAddr التي يقبلها rqbit', () => {
+  assert.deepEqual(initialPeers(['93.184.216.34:6881','10.0.0.7:6881','127.0.0.1:1','[2a00:1450:4001::5]:51413','[fe80::1]:6881','[::ffff:1.2.3.4]:5','bad','8.8.8.8:0','8.8.8.8:70000','300.1.1.1:5','93.184.216.34:6881',5,null]),
+    ['93.184.216.34:6881','[2a00:1450:4001::5]:51413']);
+  assert.deepEqual(initialPeers(undefined),[]);
+  assert.equal(initialPeers(Array.from({length:200},(_,i)=>`93.184.${i>>8}.${i&255}:6881`)).length,50);
+});
+test('سطر rqbit: خيارات 9.0.1 الصحيحة، وحفظ DHT يمكن تعطيله للمحاولة الثانية', () => {
+  const on=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache'});
+  assert.deepEqual(on,['-v','error','--http-api-listen-addr','127.0.0.1:3030','--disable-lsd','--listen-port','51413','server','start','C:\\cache','--disable-persistence']);
+  const off=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache',dhtPersistence:false});
+  assert.ok(off.includes('--disable-dht-persistence'));
+  assert.ok(off.indexOf('--disable-dht-persistence')<off.indexOf('server'),'خيار عام قبل الأمر الفرعي');
+  assert.throws(()=>engineArgs({apiPort:3030,listenPort:0,dir:'x'}));
+});
 
 async function fixture(t, mode='normal', serviceOptions={}) {
   const dir=await mkdtemp(join(tmpdir(),'vantara-services-test-'));
@@ -76,8 +109,9 @@ async function fixture(t, mode='normal', serviceOptions={}) {
   const rqbit=join(dir,'rqbit'), mpv=join(dir,'mpv');
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
+fs.appendFileSync(${JSON.stringify(join(dir,'rqbit-attempts'))},JSON.stringify(args)+'\\n');if(${JSON.stringify(mode)}==='dht-conflict'&&!args.includes('--disable-dht-persistence'))process.exit(1);
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
-const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
+const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:tracks.length+1,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,...serviceOptions});
@@ -88,7 +122,10 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.deepEqual(await services.startPlayback({session:'one',candidate:{type:'torrent',infoHash:hash,fileIdx:0},title:'عنوان عربي',position:5000}),{started:true});
   await new Promise(r=>setTimeout(r,150));
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
-  assert.ok(rq.args.includes('--disable-upnp-port-forward'));
+  // UPnP مفعّل وحفظ DHT مفعّل ومنفذ استماع صريح (0 يصير 4240 الثابت في rqbit server)
+  assert.ok(!rq.args.includes('--disable-upnp-port-forward'));
+  assert.ok(!rq.args.includes('--disable-dht-persistence'));
+  assert.ok(Number(rq.args[rq.args.indexOf('--listen-port')+1])>0);
   assert.ok(rq.args.includes('--disable-lsd'));
   assert.ok(rq.args.includes('--disable-persistence'));
   assert.match(rq.auth,/^vantara:[a-f0-9]{48}$/);
@@ -118,6 +155,35 @@ test('عطل metadata المؤقت يعالج تلقائيًا قبل بدء ا�
   const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(requests.filter(r=>r.url.includes('list_only=true')).length,2);
   assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1);
+  assert.ok(events.some(e=>e.type==='playback/ready'));
+  assert.equal(events.some(e=>e.type==='playback/error'),false);
+});
+test('مشاركو list_only يصلون لإضافة التنزيل كـinitial_peers مفلترين',async t=>{
+  const {dir,services,events}=await fixture(t,'peers');
+  assert.deepEqual(await services.startPlayback({session:'peers',candidate:{infoHash:hash,fileIdx:0}}),{started:true});
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  const add=requests.filter(r=>r.url.includes('only_files=0'));
+  assert.equal(add.length,1);
+  assert.equal(new URL(add[0].url,'http://x').searchParams.get('initial_peers'),'93.184.216.34:6881,[2a00:1450:4001::5]:51413');
+  assert.ok(add[0].body.includes('tracker.opentrackr.org'),'magnet الإضافة يحمل المتتبّعات العامة');
+  assert.ok(events.some(e=>e.type==='playback/ready'));
+});
+test('رفض rqbit لـinitial_peers يعاد مرة واحدة بدونها ولا يُسقط التشغيل',async t=>{
+  const {dir,services,events}=await fixture(t,'reject-peers');
+  assert.deepEqual(await services.startPlayback({session:'reject',candidate:{infoHash:hash,fileIdx:0}}),{started:true});
+  const add=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse).filter(r=>r.url.includes('only_files=0'));
+  assert.equal(add.length,2);
+  assert.ok(add[0].url.includes('initial_peers='));assert.ok(!add[1].url.includes('initial_peers='));
+  assert.equal(events.some(e=>e.type==='playback/error'),false);
+});
+test('خروج rqbit مبكرًا مع حفظ DHT يعيد التشغيل مرة بلا حفظ DHT وبمنافذ جديدة',async t=>{
+  const {dir,services,events}=await fixture(t,'dht-conflict');
+  assert.deepEqual(await services.startPlayback({session:'dht',candidate:{infoHash:hash,fileIdx:0}}),{started:true});
+  const attempts=(await readFile(join(dir,'rqbit-attempts'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(attempts.length,2);
+  assert.ok(!attempts[0].includes('--disable-dht-persistence'));assert.ok(attempts[1].includes('--disable-dht-persistence'));
+  const api=a=>a[a.indexOf('--http-api-listen-addr')+1];
+  assert.notEqual(api(attempts[0]),api(attempts[1]));
   assert.ok(events.some(e=>e.type==='playback/ready'));
   assert.equal(events.some(e=>e.type==='playback/error'),false);
 });

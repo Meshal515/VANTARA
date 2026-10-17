@@ -92,6 +92,9 @@ export function validateCandidate(candidate) {
       if (source.startsWith('tracker:')) { const tr = source.slice(8); validateTracker(tr); if (!uri.searchParams.getAll('tr').includes(tr)) uri.searchParams.append('tr',tr); }
       else if (!/^dht:[a-f0-9]{40}$/i.test(source)) throw new Error('مصدر تورنت غير صالح');
     }
+    // متتبّعات الإضافة أولًا ثم القائمة العامة (نفس أندرويد): إضافة بلا متتبّعات لا تُترك لـDHT وحده
+    const present = uri.searchParams.getAll('tr');
+    for (const tr of mergeTrackers(present).slice(present.length)) uri.searchParams.append('tr',tr);
     return {...candidate,infoHash:hash,magnet:uri.href,headers};
   }
   const url = publicURL(candidate.url).href;
@@ -103,6 +106,71 @@ function validateTracker(input) {
   const host=u.hostname.replace(/^\[|\]$/g,'');
   if (!['https:','http:','udp:'].includes(u.protocol) || u.username || u.password || input.length > 2000 || /[\x00-\x20\x7f]/.test(input) ||
     !host.includes('.') && !net.isIP(host) || host.endsWith('.local') || host.endsWith('.localhost') || net.isIP(host) && !publicAddress(host)) throw new Error('tracker غير صالح');
+}
+/**
+ * متتبّعات عامة معروفة وثابتة (نفس TorrentPolicy.PUBLIC_TRACKERS في أندرويد): مجالات عامة لا عناوين
+ * رقمية، وتمرّ بـvalidateTracker نفسه مثل أي متتبّع من الإضافة. rqbit يعلن لها كلها بالتوازي.
+ */
+export const PUBLIC_TRACKERS = Object.freeze([
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.theoks.net:6969/announce',
+  'udp://opentracker.io:6969/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://tracker-udp.gbitt.info:80/announce',
+  // شبكات تحجب UDP: نسخة HTTP/HTTPS
+  'http://tracker.opentrackr.org:1337/announce',
+  'https://tracker.gbitt.info:443/announce',
+]);
+export const MAX_ANNOUNCE = 48;
+/** متتبّعات الإضافة كما هي وبترتيبها، ثم العامة غير المكررة حتى MAX_ANNOUNCE. */
+export function mergeTrackers(addon, defaults = PUBLIC_TRACKERS) {
+  const key = value => String(value).trim().replace(/\/+$/,'').toLowerCase();
+  const seen = new Set(addon.map(key)), out = [...addon];
+  for (const tracker of defaults) {
+    if (out.length >= MAX_ANNOUNCE) break;
+    if (seen.has(key(tracker))) continue;
+    validateTracker(tracker);seen.add(key(tracker));out.push(tracker);
+  }
+  return out;
+}
+/**
+ * المشاركون الذين رآهم rqbit أثناء جلب بيانات المغناطيس (list_only) يُمرَّرون كـinitial_peers
+ * لإضافة التنزيل الفعلية، فلا يعيد rqbit البحث في DHT والمتتبّعات من الصفر قبل أول قطعة.
+ * عناوين عامة فقط، وبصيغة SocketAddr التي يقبلها rqbit حرفيًا (عنوان واحد خاطئ = رفض الطلب كله).
+ */
+export const MAX_INITIAL_PEERS = 50;
+export function initialPeers(seen) {
+  if (!Array.isArray(seen)) return [];
+  const out = new Set();
+  for (const value of seen) {
+    if (out.size >= MAX_INITIAL_PEERS) break;
+    if (typeof value !== 'string' || value.length > 64) continue;
+    const m = /^(?:(\d{1,3}(?:\.\d{1,3}){3})|\[([0-9a-fA-F:]{2,39})\]):(\d{1,5})$/.exec(value);
+    if (!m) continue;
+    const port = Number(m[3]);
+    if (!(port >= 1 && port <= 65535)) continue;
+    if (m[1]) {
+      const octets = m[1].split('.').map(Number);
+      if (octets.some(x => x > 255)) continue;
+      const ip = octets.join('.');
+      if (publicAddress(ip)) out.add(`${ip}:${port}`);
+    } else if (net.isIPv6(m[2]) && publicAddress(m[2])) out.add(`[${m[2].toLowerCase()}]:${port}`);
+  }
+  return [...out];
+}
+/** سطر أوامر rqbit (خيارات rqbit 9.0.1 كما في crates/rqbit/src/main.rs لذلك الإصدار). */
+export function engineArgs({apiPort,listenPort,dir,dhtPersistence=true}) {
+  if (!Number.isSafeInteger(apiPort) || !Number.isSafeInteger(listenPort) || listenPort < 1 || listenPort > 65535 || typeof dir !== 'string') throw new Error('إعداد محرك التورنت غير صالح');
+  // LSD يبقى معطلًا (لا إعلان في الشبكة المحلية، مثل أندرويد). UPnP مفعّل: rqbit يطلب من الراوتر
+  // فتح منفذ الاستماع بعقد 60 ث يجدده كل 30 ث، فيصل إلينا مشاركون خلف NAT؛ وينتهي العقد بعد الإغلاق.
+  // --listen-port صريح: القيمة 0 يحوّلها «server start» إلى 4240 الثابت، فيتعارض مع أي rqbit آخر.
+  return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--listen-port',String(listenPort),
+    ...(dhtPersistence ? [] : ['--disable-dht-persistence']),'server','start',dir,'--disable-persistence'];
 }
 export function selectTorrentFile(files, candidate) {
   if (!Array.isArray(files) || !files.length) throw new Error('لم يعثر المحرك على ملفات التورنت');
@@ -394,18 +462,18 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function engine(state,candidate) {
     emit(state,{type:'playback/stage',stage:'engine-start'});
-    const apiPort=await port();assertSession(state);
     const chosen=await selectTorrentCacheRoot({userData,platform});assertSession(state);
     state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
     const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
-    state.auth=`vantara:${secret()}`;state.api=`http://127.0.0.1:${apiPort}`;
+    state.auth=`vantara:${secret()}`;
     const env=cleanEnv();env.RQBIT_HTTP_BASIC_AUTH_USERPASS=state.auth;
-    const args=['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-upnp-port-forward','--disable-lsd','--disable-dht-persistence','--listen-port','0','server','start',dir,'--disable-persistence'];
-    child(state,binaries.rqbit,args,env,message=>fail(state,message));
+    // جدول DHT المحفوظ (مثل dht.state في أندرويد): rqbit يحفظه كل 60 ث ويحمّله عند البدء، فلا يبدأ
+    // كل تشغيل ببحث بارد من عقد الإقلاع. ويندوز: %LOCALAPPDATA%\rqbit\dht\cache\dht.json (مسار rqbit الثابت).
+    // غير ويندوز (الاختبارات): داخل بيانات التطبيق لا في ~/.cache.
+    if(platform!=='win32')env.XDG_CACHE_HOME=join(userData,'engine-state');
     const options={auth:state.auth,signal:state.controller.signal};
-    const deadline=Date.now()+15000;
-    for(;;){assertSession(state);try{await localJSON(state.api,'/',{...options,timeout:1000});break;}catch(e){if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');await sleep(50,state.controller.signal);}}
+    await launchEngine(state,dir,env,options);
 
     emit(state,{type:'playback/stage',stage:'metadata'});
     const metadata=await getTorrentMetadata(
@@ -424,10 +492,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const fileOffset=files.slice(0,index).reduce((sum,f)=>sum+(Number(f.length)||0),0);
     const totalBytes=files.reduce((sum,f)=>sum+(Number(f.length)||0),0);
     const totalPieces=Number(metadata.details.total_pieces)||0;
-    state.win={index,magnet:candidate.magnet,fileLength:Number(files[index].length),fileOffset,totalPieces,pieceLength:pieceLengthOf(totalBytes,totalPieces),evictedTo:0,paused:false,readPos:null,filePath:null};
+    state.win={index,magnet:candidate.magnet,peers:initialPeers(metadata.seen_peers),fileLength:Number(files[index].length),fileOffset,totalPieces,pieceLength:pieceLengthOf(totalBytes,totalPieces),evictedTo:0,paused:false,readPos:null,filePath:null};
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
-    const added=await localJSON(state.api,`/torrents?only_files=${index}`,{...options,body:candidate.magnet,timeout:120000});assertSession(state);
+    const added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
     emit(state,{type:'playback/stage',stage:'downloading'});
@@ -439,6 +507,40 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
     return makeProxy(state,state.streamUrl,{},true);
+  }
+  /**
+   * يشغّل rqbit وينتظر واجهته. المحاولة الأولى بجدول DHT المحفوظ؛ إن خرج rqbit قبل أن يجيب (منفذ DHT
+   * المحفوظ مشغول بـrqbit آخر، أو ملف الحفظ غير مقروء — rqbit 9.0.1 يتوقف حينها ولا يتجاهل) نعيد مرة
+   * واحدة بلا حفظ DHT وبمنافذ جديدة، أي كما كان المحرك قبل هذا التعديل.
+   */
+  async function launchEngine(state,dir,env,options) {
+    for(const dhtPersistence of [true,false]) {
+      const apiPort=await port();let listenPort=await port();
+      while(listenPort===apiPort)listenPort=await port();
+      assertSession(state);
+      state.api=`http://127.0.0.1:${apiPort}`;
+      let exited=false;
+      child(state,binaries.rqbit,engineArgs({apiPort,listenPort,dir,dhtPersistence}),env,message=>{if(state.engineReady)void fail(state,message);else exited=true;});
+      const deadline=Date.now()+15000;
+      while(!exited){
+        assertSession(state);
+        try{await localJSON(state.api,'/',{...options,timeout:1000});if(exited)break;state.engineReady=true;return;}
+        catch{if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');if(!exited)await sleep(50,state.controller.signal);}
+      }
+    }
+    throw new Error('لم يبدأ محرك التورنت');
+  }
+  /**
+   * إضافة التنزيل الفعلية. rqbit لا يحتفظ بنتيجة list_only فيحل المغناطيس مرة ثانية؛ مع initial_peers
+   * يتصل فورًا بمن أعطوه البيانات قبل ثوانٍ بدل بحث DHT/متتبّعات جديد. رفض 400 مع المشاركين يعاد مرة
+   * واحدة بدونهم: خطأ صيغة الاستعلام يُرفض قبل تسجيل أي تورنت، وإن سُجّل فـrqbit يرد بنفس الرقم.
+   */
+  async function addTorrent(state,options,extra) {
+    const w=state.win,base=`/torrents?only_files=${w.index}${extra}`;
+    const request=peers=>localJSON(state.api,peers.length?`${base}&initial_peers=${encodeURIComponent(peers.join(','))}`:base,{...options,body:w.magnet,timeout:120000});
+    if(!w.peers.length)return request([]);
+    try{return await request(w.peers);}
+    catch(error){if(error?.status!==400)throw error;assertSession(state);w.peers=[];return request([]);}
   }
   /** يسجّل تورنتًا مضافًا: رقمه ورابط بثه ومسار ملفه على القرص. */
   function adopt(state,added) {
@@ -464,7 +566,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       emit(state,{type:'playback/retrying',message:'رجعت لجزء حُذف من الكاش لتوفير المساحة؛ نعيد تنزيله من هنا'});
       await localJSON(state.api,`/torrents/${state.torrentId}/delete`,{...options,body:'',timeout:15000}).catch(()=>{});
       assertSession(state);
-      const added=await localJSON(state.api,`/torrents?only_files=${state.win.index}&overwrite=true`,{...options,body:state.win.magnet,timeout:120000});
+      const added=await addTorrent(state,options,'&overwrite=true');
       assertSession(state);
       if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
       adopt(state,added);
