@@ -2011,6 +2011,12 @@ html,
 
 /* ───────────────────────── الأوراق السفلية والرسائل ───────────────────────── */
 
+/* لا يكفي pointer-events:none على الأب: .ss-bar > * تعيد التقاط اللمس.
+   ورقة السيرفرات المغلقة يجب أن تخرج كليًا من العرض وhit testing. */
+.v35 .sheet-backdrop[hidden],
+.v35 .sheet-backdrop:not(.show) {
+  display: none;
+}
 .v35 .modal-backdrop,
 .v35 .sheet-backdrop {
   position: fixed;
