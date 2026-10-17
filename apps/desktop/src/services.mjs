@@ -520,6 +520,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
+    warmEdges(state);
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
@@ -563,6 +564,21 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!w.peers.length)return request([]);
     try{return await request(w.peers);}
     catch(error){if(error?.status!==400)throw error;assertSession(state);w.peers=[];return request([]);}
+  }
+  /**
+   * مثل الـAPK (TorrentEngine: «Container index lives at the head or the tail»): فهرس الحاوية في أول
+   * الملف أو آخره، وmpv لا يعرض أول إطار قبل قراءته. نطلب الطرفين فور إضافة التورنت فيعطيهما rqbit
+   * أولوية القارئ، بدل أن ينتظر المشغل حتى يطلب آخر الملف ثم يبدأ تنزيله من الصفر.
+   */
+  function warmEdges(state) {
+    const w=state.win,size=w.fileLength;if(!(size>0)||!state.streamUrl)return;
+    const span=Math.min(8*1024*1024,Math.max(1024*1024,Math.ceil(size*0.002)));
+    const ranges=[`bytes=0-${Math.min(size,span)-1}`];
+    if(size>span*2)ranges.push(`bytes=${size-span}-${size-1}`);
+    for(const range of ranges){
+      const req=http.get(state.streamUrl,{headers:{Range:range,Authorization:`Basic ${Buffer.from(state.auth).toString('base64')}`},signal:state.controller.signal},res=>{res.on('data',()=>{});res.on('error',()=>{});});
+      req.on('error',()=>{});req.setTimeout(180000,()=>req.destroy());
+    }
   }
   /** يسجّل تورنتًا مضافًا: رقمه ورابط بثه ومسار ملفه على القرص. */
   function adopt(state,added) {
