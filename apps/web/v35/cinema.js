@@ -559,7 +559,8 @@ export function createCinema(deps) {
       paintLater();
       const more = opener(button('cn-btn cn-btn--icon', glyph('info', { size: 20 }), null, 'التفاصيل'), m);
       actions.append(play, later, more);
-      const content = [top, ...(genres ? [el('p', 'cn-bill-genres', genres)] : []), actions];
+      // سطر الأنواع يُحجز دائمًا (ولو فارغًا): لا تقفز الأزرار بين شريحة وأخرى
+      const content = [top, el('p', 'cn-bill-genres', genres || '\u00a0'), actions];
       clearTimeout(swapTimer);
       if (calm) {
         info.classList.remove('is-out', 'no-anim');
@@ -678,9 +679,12 @@ export function createCinema(deps) {
 
   function renderSkeleton() {
     const page = el('div', 'cn-home');
-    page.append(kindTabs(), el('div', 'cn-bill-stage cn-skel'));
-    const bar = el('div', 'cn-skel cn-skel-line');
-    page.append(bar);
+    // هيكل البانر بنفس مقاسات البانر الحقيقي: لا يقفز ما تحته حين تصل البيانات
+    const bill = el('section', 'cn-bill');
+    const info = el('div', 'cn-bill-info');
+    info.append(el('div', 'cn-skel cn-skel-line'), el('div', 'cn-skel cn-skel-line short'));
+    bill.append(el('div', 'cn-bill-stage cn-skel'), info, el('div', 'cn-bill-ticks'));
+    page.append(kindTabs(), bill);
     for (let r = 0; r < 2; r++) {
       const strip = el('div', 'cn-strip');
       for (let i = 0; i < 4; i++) strip.append(el('div', 'cn-skel cn-skel-poster'));

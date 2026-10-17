@@ -310,6 +310,8 @@
 .v35 .cn-bill-img {
   position: absolute;
   inset: 0;
+  /* كل خلفية تملأ الإطار نفسه (16/10) مهما كان مقاسها، ومركزها أعلى قليلًا حيث الوجوه */
+  object-position: 50% 30%;
   --from: 0;
   --to: 0;
   --drag: 0px;
@@ -356,12 +358,25 @@
   display: grid;
   gap: 10px;
   padding: 4px var(--cn-gutter) 0;
-  min-height: 168px;
+  /* ارتفاع ثابت لكل شريحة: الشعار والسطور والأزرار في نفس المكان دائمًا */
+  height: var(--cn-bill-info-h);
   align-content: start;
+  --cn-bill-info-h: 196px;
 }
 .v35 .cn-bill-top {
   display: grid;
   gap: 10px;
+}
+/* خانة الشعار ثابتة الارتفاع: الشعار (أو الاسم) يجلس على قاعدتها مهما كان مقاسه */
+.v35 .cn-bill-mark {
+  height: 72px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.v35 .cn-bill-mark .cn-mark-logo {
+  max-height: 100%;
+  object-position: right bottom;
 }
 .v35 .cn-bill-mark .cn-mark-text {
   font-size: 28px;
@@ -370,15 +385,27 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.v35 .cn-bill .cn-facts {
+  height: 20px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
 .v35 .cn-bill-genres {
   margin: -2px 0 0;
+  height: 18px;
+  line-height: 18px;
   font-size: 13px;
   color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v35 .cn-bill-actions {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+  height: 46px;
 }
 .v35 .cn-bill-actions .cn-btn--play {
   flex: 1;
@@ -386,6 +413,7 @@
 .v35 .cn-bill-ticks {
   display: flex;
   gap: 4px;
+  height: 18px;
   padding: 16px var(--cn-gutter) 0;
 }
 .v35 .cn-tick {
