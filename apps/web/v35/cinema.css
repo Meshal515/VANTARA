@@ -524,6 +524,39 @@
   margin-top: -84px;
 }
 
+/* أزرار الترويسة في السينما (الجوال): الجرس والبحث في كبسولة داكنة شفيفة واحدة،
+   والقائمة في دائرة بنفس المادة — تُقرأ فوق أي صورة. الشعار ومبدّل الأقسام كما هما. */
+@media (max-width: 699px) {
+  .v35[data-section='cinema'] #home > .header {
+    padding-inline: 12px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end,
+  .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
+    background: rgba(18, 18, 21, 0.58);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    border-radius: 999px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end {
+    gap: 2px;
+    padding-inline: 6px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end .icon-btn,
+  .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+  .v35[data-section='cinema'] #home > .header .icon-btn .icon {
+    width: 22px;
+    height: 22px;
+  }
+  .v35[data-section='cinema'] #home > .header .notify-dot {
+    top: 9px;
+    inset-inline-end: 10px;
+    box-shadow: none;
+  }
+}
+
 /* الأشرطة */
 .v35 .cn-rail {
   margin-top: 28px;
