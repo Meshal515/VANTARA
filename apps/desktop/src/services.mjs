@@ -804,6 +804,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     else if(command==='speed'&&Number.isFinite(value)&&value>=0.25&&value<=3)await ipcCommand(state,['set_property','speed',value]);
     else if(command==='video-fit'&&['fit','fill'].includes(value))await ipcCommand(state,['set_property','panscan',value==='fill'?1:0]);
     else if(command==='subtitle-position'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','sub-pos',value]);
+    else if(command==='subtitle-background'&&['shadow','box'].includes(value)){
+      // «ظل» = حدود وظل (افتراضي mpv)، «خلفية داكنة» = صندوق نصف شفاف خلف السطر كما في الجوال
+      await ipcCommand(state,['set_property','sub-border-style',value==='box'?'opaque-box':'outline-and-shadow']);
+      await ipcCommand(state,['set_property','sub-back-color',value==='box'?'#B3000000':'#00000000']);
+    }
     else if(command==='volume'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','volume',value]);
     else if(command==='audio-select'&&Number.isSafeInteger(value)&&state.audioTracks?.some(t=>t.id===value))await ipcCommand(state,['set_property','aid',value]);
     else if(command==='subtitle-load')await loadSubtitle(state,value);

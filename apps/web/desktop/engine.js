@@ -229,7 +229,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       if(command==='pause'&&s.together?.playPause(!value))return;
       if(command==='seek'&&s.together?.seek(value))return;
       const result=await bridge.playbackCommand({session,command,value});
-      if(['speed','volume','video-fit','subtitle-delay','subtitle-size','subtitle-position'].includes(command))(s.playerPreferences??={})[command]=value;
+      if(['speed','volume','video-fit','subtitle-delay','subtitle-size','subtitle-position','subtitle-background'].includes(command))(s.playerPreferences??={})[command]=value;
       return result;
     },
     async changeEpisode({session,episode}) {

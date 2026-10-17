@@ -319,6 +319,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       body.append(sectionLabel('الحجم'), chips([['صغير', size === 32, 32], ['متوسط', size === 40, 40], ['كبير', size === 52, 52], ['كبير جدًا', size === 64, 64]], (v) => cmd('subtitle-size', v)));
       const pos = state.subtitlePosition ?? 100;
       body.append(sectionLabel('الموضع'), chips([['أسفل', pos === 100, 100], ['أعلى قليلًا', pos === 85, 85], ['أعلى', pos === 12, 12]], (v) => cmd('subtitle-position', v)));
+      const bg = state.subtitleBackground ?? 'shadow';
+      body.append(sectionLabel('الخلفية'), chips([['ظل', bg === 'shadow', 'shadow'], ['خلفية داكنة', bg === 'box', 'box']], (v) => cmd('subtitle-background', v)));
     };
     subtitlesBody = openSheet('subtitles', 'الترجمة', null, paint, 'pp-sheet--subtitles');
     subtitlesPaint = paint;
@@ -383,7 +385,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     paintTime();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers') paintServers();
-    if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition)) subtitlesPaint(subtitlesBody);
+    if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
     if (!state.ready || state.paused) showControls(true);
     else if (previous.paused && !state.paused) showControls();
   }

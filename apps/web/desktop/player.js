@@ -12,7 +12,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const doc=g.document;
   let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
-  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,netInfo=null,skipLabel=null,buffering=false,titleText='VANTARA';
+  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,titleText='VANTARA';
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
   const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
@@ -50,7 +50,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
-      skip:skipLabel,net:netInfo,synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
+      skip:skipLabel,net:netInfo,synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
   const switchTo=async(id,find)=>{try{const selected=await find();if(session===id&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id)tell(error.message,true);}};
   const overlayCommand=message=>{
@@ -75,6 +75,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'subtitle-off':void command('subtitle-off');break;
       case 'subtitle-delay':if(Number.isFinite(value)&&Math.abs(value)<=60000){subDelay=value;void command('subtitle-delay',value);link?.push(true);}break;
       case 'subtitle-size':if(Number.isFinite(value)){subSize=Math.max(20,Math.min(80,value));void command('subtitle-size',subSize);link?.push(true);}break;
+      case 'subtitle-background':if(value==='shadow'||value==='box'){subBg=value;void command('subtitle-background',value);link?.push(true);}break;
       case 'subtitle-position':if(Number.isFinite(value)&&value>=0&&value<=100){subPos=value;void command('subtitle-position',value);link?.push(true);}break;
       case 'audio-select':if(Number.isSafeInteger(value))void command('audio-select',value);break;
       case 'skip':skipButton?.click();break;
@@ -117,7 +118,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     }catch{}}
   function open(event){
     if(panel&&session===event.session){skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;tell('يجهز المصدر الجديد…');void sources();return;}
-    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;titleText=event.title??'VANTARA';
+    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
