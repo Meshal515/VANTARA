@@ -1,6 +1,20 @@
 import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
 import { publicUrl } from '../addons/manifest.js';
+import { parseRelease } from '../addons/release-info.js';
+
+// Same quality, variant and swarm weights as Android StreamRanker/TorrentSwarm.
+function playbackScore(candidate, session) {
+  const quality = candidate.quality == null ? 0.2 : 0.5 - Math.abs(candidate.quality - session.quality) / 2000;
+  const variant = candidate.variant === session.variant ? 0.6 : !candidate.variant || candidate.variant === 'UNKNOWN' ? 0.3 : 0;
+  const container = ['hls','mp4'].includes(candidate.type) ? 0.2 : candidate.type === 'dash' ? 0.15 : 0;
+  if (!candidate.infoHash && !candidate.magnet) return quality + variant + container;
+  const info = parseRelease(candidate.name, candidate.title ?? candidate.label);
+  const swarm = info.seeders == null ? 0 : info.seeders === 0 ? -1.5 : Math.min(1, Math.log10(info.seeders + 1) / 3);
+  const bytes = candidate.videoSize > 0 ? candidate.videoSize : info.size;
+  const heavy = bytes > 30 * 1024 ** 3 ? -0.6 : bytes > 15 * 1024 ** 3 ? -0.4 : bytes > 6 * 1024 ** 3 ? -0.15 : 0;
+  return quality + variant + container + swarm + heavy;
+}
 /** AnimeEngine desktop: البيانات تأتي من adapter، واختيار التشغيل صريح. */
 export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRuntime } = {}) {
   const sessions = new Map(), listeners = new Map(), searches = new Map();
@@ -12,8 +26,16 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     s.routes.set(route.id, route);
     emit('route', { session: s.id, route: { ...route }, retryAt: 0 });
   };
+  const live = c => !Number.isFinite(c.expiresAt) || c.expiresAt > Date.now();
   const choices = (s, route = null) => [...s.candidates.values()].filter(c => (!route || c.route === route) && s.routes.get(c.route)?.state === 'READY')
-    .sort((a, b) => Math.abs((a.quality ?? s.quality) - s.quality) - Math.abs((b.quality ?? s.quality) - s.quality));
+    .filter(live)
+    .sort((a, b) => playbackScore(b, s) - playbackScore(a, s));
+  async function awaitChoice(s, generation) {
+    const end=Date.now()+45000;
+    while(current(s)&&generation===s.playGeneration&&!s.done&&!choices(s).length&&Date.now()<end)
+      await new Promise(resolve=>setTimeout(resolve,50));
+    return current(s)&&generation===s.playGeneration?choices(s)[0]:null;
+  }
   const sessionOf = id => {
     const s = sessions.get(id);
     if (!s || s.closed) throw new Error('الجلسة انتهت؛ افتح السيرفرات من جديد');
@@ -31,7 +53,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
   bridge?.onEvent?.(event => {
     const s = sessions.get(event.session);
     if (!s || !s.playing || !current(s)) return;
-    if (event.type === 'playback/closed' && s.recoverableError) return;
+    if (event.type === 'playback/closed' && (s.recoverableError || s.recovering)) return;
     if (event.type === 'playback/closed' && s.ignorePreviousClose) { s.ignorePreviousClose = false; return; }
     if(event.type==='playback/ready'){
       s.nativeReady=true;
@@ -41,9 +63,33 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     s.together?.progressEvent(event);
     emit('desktopPlayback', event);
     if (event.type === 'playback/progress') {
-      s.progress = { position: event.position, duration: event.duration };
+      if(Number.isFinite(event.position))s.progress.position=event.position;
+      if(Number.isFinite(event.duration))s.progress.duration=event.duration;
       emit('playback', { ...s.context, ...s.progress, session: s.id, final: false });
     } else if (event.type === 'playback/error') {
+      if (s.recovering || s.starting) return;
+      const failed = s.candidates.get(s.playArgs?.candidate);
+      if (failed) routeUpdate(s, {...s.routes.get(failed.route), state:'FAILED', reason:event.message ?? 'تعذر تشغيل الفيديو'});
+      const next = choices(s)[0];
+      if (!next && !s.done) {
+        s.recovering=true;
+        const generation=s.playGeneration,position=s.progress.position ?? s.playArgs.position ?? 0;
+        emit('desktopNotice',{session:s.id,message:'نجهّز سيرفرًا آخر…'});
+        void awaitChoice(s,generation).then(async candidate=>{
+          if(!current(s)||generation!==s.playGeneration)return;
+          if(candidate)return engine.play({...s.playArgs,candidate:candidate.id,position});
+          emit('playerError',{session:s.id,message:event.message ?? 'تعذّر التشغيل من كل السيرفرات المتاحة'});
+          if(s.together){s.nativeReady=false;s.recoverableError=true;}else await finish(s);
+        }).catch(()=>{}).finally(()=>{s.recovering=false;});
+        return;
+      }
+      if (next) {
+        s.recovering = true;
+        emit('desktopNotice', {session:s.id,message:'تم التبديل إلى سيرفر آخر'});
+        void engine.play({...s.playArgs,candidate:next.id,position:s.progress.position ?? s.playArgs.position ?? 0})
+          .catch(() => {}).finally(() => {s.recovering=false;});
+        return;
+      }
       emit('playerError', { session: s.id, message: event.message ?? 'تعذر تشغيل الفيديو' });
       if(s.together){s.nativeReady=false;s.recoverableError=true;}else void finish(s);
     } else if (event.type === 'playback/closed') void finish(s);
@@ -221,7 +267,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const s=sessionOf(session);
       return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
         total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
-        sources:choices(s).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
+        sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },
     async playerCommand({session,command,value}) {
       const s=sessionOf(session);
@@ -243,7 +289,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       }
       return transitionEpisode(s,episode);
     },
-    async switchSource({session,candidate,position}){const s=sessionOf(session);return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
+    async switchSource({session,candidate,position}){const s=sessionOf(session),c=s.candidates.get(candidate);if(c&&!live(c))throw new Error('انتهت صلاحية الرابط؛ افتح السيرفرات من جديد');if(c&&s.routes.get(c.route)?.state==='FAILED')routeUpdate(s,{...s.routes.get(c.route),state:'READY',reason:null});return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
     presentRoom(args){emit('desktopRoomEntry',args);return true;},
     leavePlayerRoom({session}){const t=sessions.get(session)?.playArgs?.together;if(t?.hub?.session===t?.session)t?.hub?.leave?.();},
     roomHub({session}){const s=sessionOf(session);return s.playArgs?.roomHub??s.playArgs?.together?.hub??null;},
@@ -287,6 +333,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     },
     async play(args) {
       const s = sessionOf(args.session), c = s.candidates.get(args.candidate);
+      if(c&&!live(c))throw new Error('انتهت صلاحية الرابط؛ افتح السيرفرات من جديد');
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
       const previousOffset=s.context?.episode===(args.episode??s.episode)?s.together?.getVideoOffset()??0:0;
       s.playArgs={...args};
@@ -327,13 +374,24 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         };
         if(args.together?.session?.room)s.bindTogether(args.together);
         const synced=args.together?.session?.room&&(args.together.session.room.info?.mode??args.together.session.mode)==='sync';
+        s.starting = generation;
         const out = await bridge.startPlayback({ session: s.id, candidate: c, title: args.title ?? 'VANTARA', position: args.position ?? 0,...(synced?{pause:true}:{}) });
+        if (s.starting === generation) s.starting = null;
         if (!out?.started) throw new Error('لم يبدأ المشغل');
         if (!current(s) || generation !== s.playGeneration) throw new Error('انتهى تشغيل الجلسة');
         s.ignorePreviousClose = false;s.recoverableError=false;
         void startSubtitles(s, c, args.subtitleIdentity, generation);
         return out;
       } catch (error) {
+        if (s.starting === generation) s.starting = null;
+        if (current(s) && generation === s.playGeneration) {
+          routeUpdate(s, {...s.routes.get(c.route),state:'FAILED',reason:error.message ?? 'تعذر تشغيل الفيديو'});
+          const next = choices(s)[0] ?? (!s.done ? await awaitChoice(s,generation) : null);
+          if (next) {
+            emit('desktopNotice',{session:s.id,message:'تم التبديل إلى سيرفر آخر'});
+            return engine.play({...args,candidate:next.id});
+          }
+        }
         if (current(s) && generation === s.playGeneration) { emit('playerError', { session: s.id, message: error.message ?? 'تعذر تشغيل الفيديو' }); await finish(s, { stop: true }); }
         throw error;
       }

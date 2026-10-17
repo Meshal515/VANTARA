@@ -18,6 +18,77 @@ async function prepared(f) {
   await f.engine.prepare({ session: 's', copies: [{ sourceId: 'addon|torrentio', id: 'tt123', requestedSeason: 2 }], episode: 1 });
   await done;
 }
+it('يختار سربًا حيًا بحجم معقول قبل تورنت ميت بنفس الجودة', async () => {
+  const f = fixture();
+  f.source.streams = async () => [
+    {...f.stream, infoHash:'a'.repeat(40),title:'ميت\n👤 0 💾 40 GB'},
+    {...f.stream, infoHash:'b'.repeat(40),title:'حي\n👤 500 💾 1.4 GB'},
+  ];
+  await prepared(f);
+  const best = await f.engine.best({session:'s'});
+  await f.engine.play({session:'s',candidate:best.candidate});
+  expect(f.starts[0].candidate.infoHash).toBe('b'.repeat(40));
+  await f.engine.closeSession({session:'s'});
+});
+it('ينتقل لسيرفر بديل من نفس الموضع بعد فشل التشغيل ويحفظ الجلسة', async () => {
+  const f = fixture();
+  f.source.streams = async () => [f.stream,{...f.stream,infoHash:'b'.repeat(40)}];
+  await prepared(f);
+  const best=await f.engine.best({session:'s'});
+  await f.engine.play({session:'s',candidate:best.candidate,position:12000});
+  f.emit({type:'playback/progress',session:'s',position:37000});
+  f.emit({type:'playback/error',session:'s',message:'تعذر فتح الفيديو'});
+  await vi.waitFor(()=>expect(f.starts).toHaveLength(2));
+  expect(f.starts[1]).toMatchObject({position:37000,candidate:{infoHash:'b'.repeat(40)}});
+  expect(f.release()).toBe(0);
+  expect((await f.engine.routes({session:'s'})).routes[0].state).toBe('FAILED');
+  await f.engine.closeSession({session:'s'});
+});
+it('لا تمسح إحصاءات السرب موضع الاستئناف قبل التبديل التلقائي', async () => {
+  const f=fixture();f.source.streams=async()=>[f.stream,{...f.stream,infoHash:'b'.repeat(40)}];
+  await prepared(f);const best=await f.engine.best({session:'s'});
+  await f.engine.play({session:'s',candidate:best.candidate,position:12000});
+  f.emit({type:'playback/progress',session:'s',position:37000,duration:100000});
+  f.emit({type:'playback/progress',session:'s',peers:10,downloadSpeed:1000});
+  f.emit({type:'playback/error',session:'s',message:'فشل'});
+  await vi.waitFor(()=>expect(f.starts).toHaveLength(2));expect(f.starts[1].position).toBe(37000);
+  await f.engine.closeSession({session:'s'});
+});
+it('يحاول كل مرشح مرة عند فشل الإقلاع ويبلغ الخطأ بعد نفادها', async () => {
+  const f=fixture({startError:'فشل الإقلاع'}),errors=[];
+  f.engine.addListener('playerError',e=>errors.push(e));
+  f.source.streams=async()=>[f.stream,{...f.stream,infoHash:'b'.repeat(40)}];
+  await prepared(f);const best=await f.engine.best({session:'s'});
+  await expect(f.engine.play({session:'s',candidate:best.candidate,position:12000})).rejects.toThrow('فشل الإقلاع');
+  expect(f.starts).toHaveLength(2);expect(errors).toHaveLength(1);expect(f.release()).toBe(1);
+});
+it('يتجاهل المرشحين منتهية الصلاحية عند اختيار الأفضل', async () => {
+  const f=fixture();f.source.streams=async()=>[{...f.stream,expiresAt:Date.now()-1},{...f.stream,infoHash:'b'.repeat(40),expiresAt:Date.now()+60000}];
+  await prepared(f);const best=await f.engine.best({session:'s'});
+  await f.engine.play({session:'s',candidate:best.candidate});expect(f.starts[0].candidate.infoHash).toBe('b'.repeat(40));
+  await f.engine.closeSession({session:'s'});
+});
+it('لا يعرض ولا يشغل مصدرًا منتهيًا من قائمة التبديل اليدوي',async()=>{
+  const f=fixture();f.source.streams=async()=>[{...f.stream,expiresAt:Date.now()-1},{...f.stream,infoHash:'b'.repeat(40),expiresAt:Date.now()+60000}];
+  await prepared(f);const snap=await f.engine.routes({session:'s'}),expired=snap.routes[0].candidates[0];
+  expect((await f.engine.playerState({session:'s'})).sources).toHaveLength(1);
+  await expect(f.engine.play({session:'s',candidate:expired})).rejects.toThrow('صلاحية');
+  await expect(f.engine.switchSource({session:'s',candidate:expired})).rejects.toThrow('صلاحية');
+  expect(f.starts).toHaveLength(0);await f.engine.closeSession({session:'s'});
+});
+it('ينتظر المصدر الذي ما زال يتجهز بعد فشل السيرفر ثم يستأنف نفس الموضع',async()=>{
+  const f=fixture(),late=deferred();
+  f.source.servers=async()=>[{name:'الأول'},{name:'الثاني'}];
+  f.source.streams=async server=>server.name==='الأول'?[f.stream]:late.promise;
+  await f.engine.prepare({session:'s',copies:[{sourceId:'addon|torrentio',id:'tt123',requestedSeason:2}],episode:1});
+  const best=await f.engine.best({session:'s'});
+  await f.engine.play({session:'s',candidate:best.candidate,position:12000});
+  f.emit({type:'playback/error',session:'s',message:'فشل'});
+  expect(f.release()).toBe(0);
+  late.resolve([{...f.stream,infoHash:'b'.repeat(40)}]);
+  await vi.waitFor(()=>expect(f.starts).toHaveLength(2));expect(f.starts[1].position).toBe(12000);
+  await f.engine.closeSession({session:'s'});
+});
 it('جلسة الغرفة تجهز المشغل متوقفًا وتعرض الجاهزية حتى يبدأ المضيف',async()=>{
   const f=fixture(),reports=[],lobbies=[];
   const room={status:'live',info:{mode:'sync'},isHost:true,canControl:true,roster:[{name:'صديق',state:'ready'}],clock:{serverNow:()=>Date.now()},timeline:{started:false,playing:false,pos:0,at:Date.now(),media:{key:'anime:owned#1'}},on:()=>()=>{},report:report=>reports.push(report),command() {}};

@@ -167,9 +167,35 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   }
 
   // ── الأوراق ──
-  let openKind = null;
+  let openKind = null, anchorButton = null;
+  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${kind}"]`);
+  function positionSheet() {
+    if (sheet.hidden || !anchorButton) return;
+    const bounds = root.getBoundingClientRect?.() ?? {left:0,top:0}, anchor = anchorButton.getBoundingClientRect?.() ?? {top:690,right:1000};
+    const width = bounds.width || doc.defaultView.innerWidth || 1024;
+    const height = bounds.height || doc.defaultView.innerHeight || 768;
+    const bottom = Math.max(12, height - (anchor.top - bounds.top) + 10);
+    sheet.style.top = 'auto';
+    const measured = sheet.getBoundingClientRect?.().width || (openKind === 'subtitles' ? 360 : 280);
+    sheet.style.right = `${Math.max(12, Math.min(width - measured - 12, width - (anchor.right - bounds.left)))}px`;
+    sheet.style.bottom = `${Math.min(height - 100, bottom)}px`;
+    sheet.style.maxHeight = `${Math.max(80, height - bottom - 12)}px`;
+    if (openKind === 'more') {
+      const top = Math.max(12, (anchor.bottom ?? anchor.top) - bounds.top + 10);
+      sheet.style.top = `${top}px`; sheet.style.bottom = 'auto';
+      sheet.style.maxHeight = `${Math.max(80, height - top - 12)}px`;
+    }
+  }
+  doc.defaultView?.addEventListener('resize', positionSheet);
   function openSheet(kind, title, subtitle, build, modifier = '') {
+    if (anchorButton) anchorButton.setAttribute('aria-expanded', 'false');
     openKind = kind;
+    anchorButton = anchorFor(kind);
+    anchorButton?.setAttribute('aria-expanded', 'true');
+    anchorButton?.setAttribute('aria-haspopup', 'dialog');
+    sheet.dataset.kind = kind;
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', title);
     sheet.className = `pp-sheet${modifier ? ` ${modifier}` : ''}`;
     sheet.replaceChildren(el('i', 'pp-sheet__grip'));
     const head = el('div', 'pp-sheet__head');
@@ -179,15 +205,20 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     sheet.append(head, body);
     build(body);
     sheet.hidden = false; sheetScrim.hidden = false;
-    hideControls();
+    showControls(true);
     root.classList.add('pp--sheet');
+    positionSheet();
+    sheet.querySelector('button')?.focus();
     return body;
   }
   function closeSheet() {
     if (openKind === 'servers') cmd('servers-close');
+    anchorButton?.setAttribute('aria-expanded', 'false');
+    const restoreFocus = anchorButton; anchorButton = null;
     openKind = null; serverUi = null; offsetOut = null;
     root.classList.remove('pp--sheet');
     sheet.hidden = true; sheetScrim.hidden = true;
+    restoreFocus?.focus();
     showControls();
   }
   const sheetRow = (label, sub, { on = false, onClick = null } = {}) => {
@@ -301,26 +332,32 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   };
   function showSubtitles() {
     const paint = (body) => {
+      const focusIndex = [...body.querySelectorAll('button')].indexOf(doc.activeElement);
       body.replaceChildren();
+      const restore = () => { if (focusIndex >= 0) body.querySelectorAll('button')[focusIndex]?.focus(); positionSheet(); };
       body.append(chips([['المسارات', subtitleTab === 'tracks', 'tracks'], ['الضبط', subtitleTab === 'adjust', 'adjust']], (t) => { subtitleTab = t; paint(body); }));
       if (subtitleTab === 'tracks') {
         const tracks = state.subtitles ?? [];
         body.append(sheetRow('إيقاف', null, { on: !tracks.some((t) => t.selected), onClick: () => cmd('subtitle-off') }));
-        if (tracks.length) body.append(sectionLabel('الترجمات'));
+        if (tracks.length) body.append(sectionLabel('الترجمة من الفيديو'));
         for (const t of tracks) body.append(sheetRow(t.label, t.lang && t.lang !== 'und' ? t.lang : null, { on: !!t.selected, onClick: () => cmd('subtitle-select', t.id) }));
         if (!tracks.length) body.append(el('p', 'pp-note', 'نبحث عن ترجمات لهذه الحلقة… تظهر هنا فور وصولها.'));
+        restore();
         return;
       }
       const delay = state.subtitleDelay ?? 0;
-      body.append(sectionLabel('التوقيت'), el('div', 'pp-big', delay ? `${delay > 0 ? 'متأخرة' : 'مبكرة'} ${Math.abs(delay / 1000).toFixed(1)} ث` : 'بلا إزاحة'));
+      body.append(sectionLabel('التوقيت'), el('div', 'pp-big', delay ? `${delay > 0 ? 'أتأخر' : 'أبكر'} ${Math.abs(delay / 1000).toFixed(1)} ث` : 'بلا إزاحة'));
       body.append(chips([['أبكر 0.5', false, -500], ['أبكر 0.1', false, -100], ['أتأخر 0.1', false, 100], ['أتأخر 0.5', false, 500]], (d) => cmd('subtitle-delay', delay + d)));
       body.append(el('small', 'pp-sub-hint', 'الترجمة تظهر بعد الكلام ← «أبكر». تسبقه ← «أتأخر».'));
+      if (delay) body.append(chips([['تصفير التوقيت', false, 0]], () => cmd('subtitle-delay', 0)));
       const size = state.subtitleSize ?? 40;
       body.append(sectionLabel('الحجم'), chips([['صغير', size === 32, 32], ['متوسط', size === 40, 40], ['كبير', size === 52, 52], ['كبير جدًا', size === 64, 64]], (v) => cmd('subtitle-size', v)));
       const pos = state.subtitlePosition ?? 100;
       body.append(sectionLabel('الموضع'), chips([['أسفل', pos === 100, 100], ['أعلى قليلًا', pos === 85, 85], ['أعلى', pos === 12, 12]], (v) => cmd('subtitle-position', v)));
       const bg = state.subtitleBackground ?? 'shadow';
       body.append(sectionLabel('الخلفية'), chips([['ظل', bg === 'shadow', 'shadow'], ['خلفية داكنة', bg === 'box', 'box']], (v) => cmd('subtitle-background', v)));
+
+      restore();
     };
     subtitlesBody = openSheet('subtitles', 'الترجمة', null, paint, 'pp-sheet--subtitles');
     subtitlesPaint = paint;
@@ -358,7 +395,18 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   // ── لوحة المفاتيح: كلها تعود لـplayer.js (نفس اختصارات النافذة الرئيسية) ──
   doc.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !sheet.hidden) { e.preventDefault(); closeSheet(); return; }
+    if (!sheet.hidden) {
+      if (e.key === 'Tab') {
+        const buttons = [...sheet.querySelectorAll('button:not([disabled]), input, [tabindex="0"]')];
+        const first = buttons[0], last = buttons[buttons.length - 1];
+        if (e.shiftKey && doc.activeElement === first) { e.preventDefault(); last?.focus(); }
+        else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
+      if (e.key === ' ' && e.target?.tagName === 'BUTTON') return;
+      if (['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    }
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? '')) return;
+    if (sheet.hidden && ['c', 'C'].includes(e.key)) { e.preventDefault(); showSubtitles(); return; }
     if ([' ', 'ArrowLeft', 'ArrowRight', 'f', 'F', 'Escape', 'm', 'M'].includes(e.key)) { e.preventDefault(); showControls(); cmd('key', e.key); }
   });
 
@@ -387,7 +435,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (openKind === 'servers') paintServers();
     if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
     if (!state.ready || state.paused) showControls(true);
-    else if (previous.paused && !state.paused) showControls();
+    else if (!previous.ready || previous.paused) showControls();
   }
   showControls(true);
   return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, speed: showSpeed, more: showMore } };
