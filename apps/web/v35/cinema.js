@@ -19,7 +19,7 @@ import { addonName, createServerSheet } from './server-sheet.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
-import { GENRES_AR, TYPE_AR, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
+import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
@@ -1532,10 +1532,43 @@ export function createCinema(deps) {
         renderEpisodes(eps, m);
       }
 
-      const credits = [['الإخراج', m.director], ['البطولة', m.cast?.slice(0, 6)]].filter(([, v]) => v?.length);
-      if (credits.length) {
+      // البطولة: دوائر بصور الممثلين (Wikidata). نجوم Cinemeta أولًا بترتيبه، ثم بقية طاقم
+      // Wikidata الذين لهم صورة حتى 10؛ والحرف الأول مكان الصورة حتى تصل أو إن لم توجد
+      const sec = el('section', 'cn-cast');
+      sec.append(el('h2', 'cn-section-title', 'البطولة'));
+      const strip = el('div', 'cn-cast-strip');
+      sec.append(strip);
+      const faces = new Map();
+      const addPerson = (name, src = null) => {
+        const key = castKey(name);
+        if (!key || faces.has(key) || faces.size >= 10) return;
+        const person = el('div', 'cn-person');
+        const face = el('span', 'cn-face', String(name).trim().charAt(0));
+        person.append(face, text('span', 'cn-person-name', name, 'ltr'));
+        strip.append(person);
+        faces.set(key, face);
+        if (src) putFace(face, src);
+      };
+      const putFace = (face, src) => {
+        // بلا loading=lazy: صورة كسولة لم تُضف للصفحة بعد لا تُحمَّل أبدًا
+        const img = new Image();
+        img.alt = '';
+        img.decoding = 'async';
+        img.onload = () => face.replaceChildren(img);
+        img.src = src;
+      };
+      for (const name of (m.cast ?? []).slice(0, 10)) addPerson(name);
+      sec.hidden = !faces.size;
+      body.append(sec);
+      void castPhotos(m.id).then((photos) => {
+        if (!sec.isConnected) return;
+        for (const [key, face] of faces) if (photos.has(key)) putFace(face, photos.get(key).src);
+        for (const { name, src } of photos.values()) addPerson(name, src);
+        sec.hidden = !faces.size;
+      });
+      if (m.director?.length) {
         const dl = el('dl', 'cn-credits');
-        for (const [k, v] of credits) dl.append(el('dt', null, k), text('dd', null, v.join('، ')));
+        dl.append(el('dt', null, 'الإخراج'), text('dd', null, m.director.join('، ')));
         body.append(dl);
       }
       const similarHost = el('div', 'cn-similar');

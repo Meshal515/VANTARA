@@ -465,6 +465,9 @@
   position: sticky;
   top: 0;
   z-index: 30;
+  /* طبقة رسم مستقلة فوق الصورة المتحركة تحتها: WebView أندرويد يرتّب مناطق اللمس
+     بطبقات المعالج، وبدونها قد يذهب لمس زرَّي القائمة والبحث إلى البانر */
+  transform: translateZ(0);
   background: transparent;
   transition: background-color 0.25s ease;
 }
@@ -860,12 +863,21 @@
   position: relative;
 }
 .v35 .cn-detail-bar {
-  /* يبقى مع التمرير بلا أن يحجز مكانًا فوق الصورة */
+  /* يبقى مع التمرير بلا أن يحجز مكانًا فوق الصورة. ارتفاعه حقيقي (والهامش السالب يعيد
+     المكان): بارتفاع 0 كان الزر يطفح خارج طبقة بلا حدود، وWebView أندرويد يحسب مناطق
+     اللمس من حدود الطبقة فيذهب اللمس للصورة المتحركة تحته — زر الرجوع لا ينضغط */
+  --cn-bar-h: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
   position: sticky;
   top: 0;
-  height: 0;
+  height: var(--cn-bar-h);
+  margin-bottom: calc(-1 * var(--cn-bar-h));
   z-index: 5;
   padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px) 10px 0;
+  transform: translateZ(0);
+  pointer-events: none;
+}
+.v35 .cn-detail-bar > * {
+  pointer-events: auto;
 }
 .v35 .cn-detail-bar .icon-btn {
   position: relative;
@@ -1206,6 +1218,62 @@
   overflow: hidden;
 }
 
+.v35 .cn-cast {
+  margin-top: 28px;
+}
+.v35 .cn-cast .cn-section-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.v35 .cn-cast-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  margin-inline: calc(var(--cn-gutter) * -1);
+  padding-inline: var(--cn-gutter);
+  scrollbar-width: none;
+}
+.v35 .cn-cast-strip::-webkit-scrollbar {
+  display: none;
+}
+.v35 .cn-person {
+  flex: 0 0 74px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 6px;
+  text-align: center;
+}
+.v35 .cn-face {
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 22px;
+  font-weight: 700;
+}
+.v35 .cn-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+.v35 .cn-person-name {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.3;
+  color: var(--text-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .v35 .cn-credits {
   display: grid;
   grid-template-columns: auto 1fr;
