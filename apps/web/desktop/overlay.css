@@ -157,3 +157,29 @@ html.desktop-overlay .pp-step output {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+html.desktop-overlay .pp-chips {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+html.desktop-overlay .pp-chip {
+  flex: 1;
+  min-height: 46px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+html.desktop-overlay .pp-chip:hover {
+  background: var(--surface-3);
+}
+html.desktop-overlay .pp-chip.is-on {
+  background: var(--accent);
+  color: #fff;
+}
+html.desktop-overlay .pp-big {
+  text-align: center;
+  font-size: 26px;
+  font-weight: 700;
+  margin: 6px 0 12px;
+}

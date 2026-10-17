@@ -288,17 +288,37 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       for (const s of list) body.append(sheetRow(s.label, null, { on: s.id === state.candidate, onClick: s.id === state.candidate ? null : () => { closeSheet(); cmd('source', s.id); } }));
     });
   }
+  // الترجمة كما في الـAPK: تبويبان «المسارات» و«الضبط»؛ الضبط أزرار لا أرقام صغيرة
+  let subtitleTab = 'tracks';
+  const chips = (items, onPick) => {
+    const row = el('div', 'pp-chips');
+    for (const [label, on, value] of items) {
+      const b = el('button', `pp-chip${on ? ' is-on' : ''}`, label); b.type = 'button';
+      b.onclick = () => onPick(value);
+      row.append(b);
+    }
+    return row;
+  };
   function showSubtitles() {
     const paint = (body) => {
       body.replaceChildren();
-      const tracks = state.subtitles ?? [];
-      body.append(sheetRow('بدون ترجمة', null, { on: !tracks.some((t) => t.selected), onClick: () => cmd('subtitle-off') }));
-      for (const t of tracks) body.append(sheetRow(t.label, t.lang && t.lang !== 'und' ? t.lang : null, { on: !!t.selected, onClick: () => cmd('subtitle-select', t.id) }));
-      if (!tracks.length) body.append(el('p', 'pp-note', 'نبحث عن ترجمات لهذه الحلقة… تظهر هنا فور وصولها.'));
-      body.append(sectionLabel('ضبط الترجمة'));
-      body.append(stepper('التوقيت', `${((state.subtitleDelay ?? 0) / 1000).toFixed(1)} ث`, (d) => cmd('subtitle-delay', (state.subtitleDelay ?? 0) + d * 500)));
-      body.append(stepper('الحجم', String(state.subtitleSize ?? 40), (d) => cmd('subtitle-size', Math.max(20, Math.min(80, (state.subtitleSize ?? 40) + d * 4)))));
-      body.append(el('small', 'pp-sub-hint', '+ يؤخر الترجمة، − يقدمها'));
+      body.append(chips([['المسارات', subtitleTab === 'tracks', 'tracks'], ['الضبط', subtitleTab === 'adjust', 'adjust']], (t) => { subtitleTab = t; paint(body); }));
+      if (subtitleTab === 'tracks') {
+        const tracks = state.subtitles ?? [];
+        body.append(sheetRow('إيقاف', null, { on: !tracks.some((t) => t.selected), onClick: () => cmd('subtitle-off') }));
+        if (tracks.length) body.append(sectionLabel('الترجمات'));
+        for (const t of tracks) body.append(sheetRow(t.label, t.lang && t.lang !== 'und' ? t.lang : null, { on: !!t.selected, onClick: () => cmd('subtitle-select', t.id) }));
+        if (!tracks.length) body.append(el('p', 'pp-note', 'نبحث عن ترجمات لهذه الحلقة… تظهر هنا فور وصولها.'));
+        return;
+      }
+      const delay = state.subtitleDelay ?? 0;
+      body.append(sectionLabel('التوقيت'), el('div', 'pp-big', delay ? `${delay > 0 ? 'متأخرة' : 'مبكرة'} ${Math.abs(delay / 1000).toFixed(1)} ث` : 'بلا إزاحة'));
+      body.append(chips([['أبكر 0.5', false, -500], ['أبكر 0.1', false, -100], ['أتأخر 0.1', false, 100], ['أتأخر 0.5', false, 500]], (d) => cmd('subtitle-delay', delay + d)));
+      body.append(el('small', 'pp-sub-hint', 'الترجمة تظهر بعد الكلام ← «أبكر». تسبقه ← «أتأخر».'));
+      const size = state.subtitleSize ?? 40;
+      body.append(sectionLabel('الحجم'), chips([['صغير', size === 32, 32], ['متوسط', size === 40, 40], ['كبير', size === 52, 52], ['كبير جدًا', size === 64, 64]], (v) => cmd('subtitle-size', v)));
+      const pos = state.subtitlePosition ?? 100;
+      body.append(sectionLabel('الموضع'), chips([['أسفل', pos === 100, 100], ['أعلى قليلًا', pos === 85, 85], ['أعلى', pos === 12, 12]], (v) => cmd('subtitle-position', v)));
     };
     subtitlesBody = openSheet('subtitles', 'الترجمة', null, paint, 'pp-sheet--subtitles');
     subtitlesPaint = paint;
@@ -326,8 +346,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       }
       body.append(sectionLabel('الشبكة'));
       const net = el('div', 'pp-net');
-      net.append(el('span', null, 'السرعة'), el('b', null, state.net?.kbps != null ? `${(state.net.kbps / 1024).toFixed(1)} MB/s` : '—'));
-      if (state.net?.peers != null) net.append(el('span', null, 'المشاركون'), el('b', null, String(state.net.peers)));
+      if (state.net?.peers != null) net.append(el('span', null, 'مشاركون متصلون'), el('b', null, String(state.net.peers)));
+      net.append(el('span', null, 'السرعة الآن'), el('b', null, state.net?.kbps != null ? `${(state.net.kbps * 8 / 1024).toFixed(1)} Mbps` : '—'));
       net.append(el('span', null, 'السيرفر'), el('b', null, state.serverCode ?? '—'));
       body.append(net);
     });
@@ -363,7 +383,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     paintTime();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers') paintServers();
-    if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize)) subtitlesPaint(subtitlesBody);
+    if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition)) subtitlesPaint(subtitlesBody);
     if (!state.ready || state.paused) showControls(true);
     else if (previous.paused && !state.paused) showControls();
   }
