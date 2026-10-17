@@ -90,6 +90,7 @@ it('native Windows overlay keeps actual room avatars and preparation status visi
   view.update({people,ready:true,paused:false});
   const strip=view.root.querySelector('.pp-people');
   expect(strip.hidden).toBe(false);
+  expect(strip.parentElement).toBe(view.root); // outside the auto-hiding pp-controls
   expect(strip.getAttribute('aria-label')).toContain('4');
   expect(strip.querySelectorAll('.pp-person')).toHaveLength(3);
   expect(strip.querySelector('img')?.getAttribute('src')).toBe('https://example.org/a.png');
