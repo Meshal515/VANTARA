@@ -87,6 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const version=JSON.parse(fs.readFileSync("apps/desktop/package.json","utf8")).version; assert.equal(version,process.env.VERSION,"رقم التطبيق لا يطابق رقم النشر"); assert.equal(process.env.TAG,`windows-v${version}`,"وسم الإصدار لا يطابق رقم التطبيق");'
           node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe" --output="$RUNNER_TEMP/windows-current"
           cd "$RUNNER_TEMP/windows-current"
           sha256sum -c SHA256SUMS.txt
