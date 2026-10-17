@@ -14,6 +14,8 @@ describe('الدعوة من ورقة السيرفرات تدخل الغرفة', 
     expect(source('anime.js')).toMatch(/onStarted: \(\) => playEpisode\(m, n\)/);
   });
   it('ورقة جديدة تغلق السابقة (سبب إعادة الفتح)', () => {
-    expect(source('shell.js')).toMatch(/function openSheet\([^)]*\) \{\n\s+closeSheet\(\);/);
+    // Lifecycle lives in sheet-lifecycle.js: new sheet calls close() first.
+    expect(source('shell.js')).toContain('const openSheet = sheetController.open;');
+    expect(source('sheet-lifecycle.js')).toMatch(/function open\(build, \{ tone = null, full = false \} = \{\}\) \{\n\s+close\(\);/);
   });
 });

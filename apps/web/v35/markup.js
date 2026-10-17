@@ -291,5 +291,5 @@ export const SHELL_HTML = `<div class="app">
   </aside>
 </div>
 
-<div class="sheet-backdrop" id="sheet" data-act="sheetBackdrop"><div class="sheet" role="dialog" aria-modal="true" id="sheetBody"></div></div>
+<div class="sheet-backdrop" id="sheet" data-act="sheetBackdrop" hidden inert aria-hidden="true"><div class="sheet" role="dialog" aria-modal="true" id="sheetBody"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
