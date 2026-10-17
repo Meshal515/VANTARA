@@ -184,7 +184,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   }
   function closeSheet() {
     if (openKind === 'servers') cmd('servers-close');
-    openKind = null; serverUi = null;
+    openKind = null; serverUi = null; offsetOut = null;
     root.classList.remove('pp--sheet');
     sheet.hidden = true; sheetScrim.hidden = true;
     showControls();
@@ -261,7 +261,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     subtitlesBody = openSheet('subtitles', 'الترجمة', null, paint, 'pp-sheet--subtitles');
     subtitlesPaint = paint;
   }
-  let subtitlesBody = null, subtitlesPaint = null;
+  let subtitlesBody = null, subtitlesPaint = null, offsetOut = null;
   function showSpeed() {
     openSheet('speed', 'السرعة', state.synced ? 'السرعة تتبع مزامنة الغرفة' : null, (body) => {
       for (const sp of SPEEDS) body.append(sheetRow(sp === 1 ? 'عادية' : `${sp}×`, null, { on: (state.speed ?? 1) === sp, onClick: state.synced ? null : () => { closeSheet(); cmd('speed', sp); } }));
@@ -271,6 +271,13 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     openSheet('more', 'المزيد', null, (body) => {
       body.append(sheetRow('ملء الصورة', state.fit === 'fill' ? 'مفعّل: تُقصّ الحواف' : 'الصورة كاملة بلا قص', { on: state.fit === 'fill', onClick: () => { closeSheet(); cmd('fit', state.fit === 'fill' ? 'fit' : 'fill'); } }));
       body.append(sheetRow('شاهد مع أصدقائك', 'ادعُ أصدقاءك لنفس الحلقة', { onClick: () => { closeSheet(); cmd('room'); } }));
+      if (state.together) {
+        body.append(sectionLabel('مع أصدقائك'));
+        const paintOffset = () => `${(state.videoOffsetMs ?? 0) > 0 ? '+' : (state.videoOffsetMs ?? 0) < 0 ? '−' : ''}${Math.abs((state.videoOffsetMs ?? 0) / 1000).toFixed(1)} ث`;
+        const row = stepper('ديلاي فيديوي', paintOffset(), (d) => { cmd('video-offset', (state.videoOffsetMs ?? 0) + d * 500); });
+        offsetOut = row.querySelector('output');
+        body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
+      }
       if ((state.audio ?? []).length > 1) {
         body.append(sectionLabel('الصوت'));
         for (const a of state.audio) body.append(sheetRow(a.label, a.lang && a.lang !== 'und' ? a.lang : null, { on: !!a.selected, onClick: () => { closeSheet(); cmd('audio-select', a.id); } }));
@@ -312,6 +319,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     fullTop.innerHTML = fullBottom.innerHTML = state.fullscreen ? ICON.fullExit : ICON.full;
     if (state.skip) { skipBtn.hidden = false; skipBtn.textContent = state.skip; } else skipBtn.hidden = true;
     paintTime();
+    if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers') paintServers();
     if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize)) subtitlesPaint(subtitlesBody);
     if (!state.ready || state.paused) showControls(true);

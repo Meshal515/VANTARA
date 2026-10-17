@@ -50,7 +50,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
-      skip:skipLabel,net:netInfo,synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
+      skip:skipLabel,net:netInfo,synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
   const switchTo=async(id,find)=>{try{const selected=await find();if(session===id&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id)tell(error.message,true);}};
   const overlayCommand=message=>{
@@ -77,6 +77,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'subtitle-size':if(Number.isFinite(value)){subSize=Math.max(20,Math.min(80,value));void command('subtitle-size',subSize);link?.push(true);}break;
       case 'audio-select':if(Number.isSafeInteger(value))void command('audio-select',value);break;
       case 'skip':skipButton?.click();break;
+      case 'video-offset':if(Number.isFinite(value)&&Math.abs(value)<=120000&&typeof engine.setVideoOffset==='function')void Promise.resolve(engine.setVideoOffset({session:id,ms:value})).then(()=>sources(),error=>tell(error.message,true));break;
       case 'key':if(typeof value==='string')keyboard({key:value,target:{},preventDefault(){}});break;
     }
   };

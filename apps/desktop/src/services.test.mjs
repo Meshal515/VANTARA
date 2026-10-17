@@ -238,7 +238,7 @@ test('نقل الإضافات يحد حجم الاستجابة ويرفض الت
   const resource=await services.requestResource({url:'https://example.com/json',json:true,limit:100});assert.equal(resource.text,'{"fixture":true}');assert.equal(resource.status,200);
   await assert.rejects(services.requestResource({url:'https://example.com/large',limit:20}),/حجم/);
   await assert.rejects(services.requestResource({url:'https://example.com/redirect'}),/توجيه|داخلي/);
-  assert.equal(requests[0].accept,'application/json');assert.equal(requests[0].authorization,undefined);
+  assert.match(requests[0].accept,/^application\/json, application\/\*\+json/);assert.equal(requests[0].authorization,undefined);
 });
 
 test('حجب SNI: مصافحة تنقطع تُعاد مرة بتقسيم ClientHello، ويُذكر السبب الحقيقي إن فشلت',async t=>{

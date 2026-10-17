@@ -394,7 +394,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const controller=new AbortController();resourceControllers.add(controller);const timer=setTimeout(()=>controller.abort(),timeout);
     try {
       let request=validateResourceRequest({url,...options});
-      request.headers={accept:json?'application/json':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
+      // JSON:API (Kitsu لربط الأنمي بـTorrentio) يرفض application/json وحده بـ406؛ نقبل +json وأي نوع احتياطًا
+      request.headers={accept:json?'application/json, application/*+json;q=0.9, */*;q=0.8':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
       for(let redirects=0;redirects<6;redirects++) {
         const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout,lookup});
         const status=response.statusCode;
