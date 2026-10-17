@@ -1381,19 +1381,14 @@ class PlayerActivity : Activity() {
             body.addView(label(status, 12f, Tone.TEXT_3).apply { setPadding(dp(4), dp(6), dp(4), 0) })
             for ((name, list) in RouteGroups.group(routes)) {
                 body.addView(sectionLabel(name))
-                // مربعات رموز (مثل HGC · MPU) أربعة في الصف: كل السيرفرات في نظرة
-                val perRow = 4
-                list.chunked(perRow).forEach { chunk ->
-                    val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    chunk.forEach { r -> row.addView(routeTile(r, r.id == currentRoute), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) }) }
-                    repeat(perRow - chunk.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = dp(8) }) }
-                    body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
-                }
+                // صف لكل سيرفر كورقة السيرفرات في التطبيق: اسم المصدر، وتحته ما يميّزه (الحجم،
+                // الترميز، البذور…) وحالته — لا مربعات رموز متشابهة («TRR 3»، «TRR 4») لا تقول شيئًا
+                list.forEach { r -> body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }) }
             }
         }
     }
 
-    private fun routeTile(r: Route, isCurrent: Boolean): View {
+    private fun routeRow(r: Route, isCurrent: Boolean): View {
         val (text, color, pulse) = when {
             isCurrent -> Triple(if (reportedStart) "يعمل الآن" else "يبدأ…", Tone.ACCENT, !reportedStart)
             r.state == RouteState.RESOLVING -> Triple("يتجهّز…", Tone.WARN, true)
@@ -1403,27 +1398,31 @@ class PlayerActivity : Activity() {
         }
         val playable = !isCurrent && r.state == RouteState.READY
         val dim = r.state == RouteState.UNAVAILABLE || r.state == RouteState.RESOLVING
+        val title = r.sourceName?.takeIf { it.isNotBlank() } ?: r.server.ifBlank { r.code }
+        // ما يميّز هذا السيرفر عن جاره: وصف المصدر (الحجم والترميز والبذور للتورنت)، وإلا اسم الخادم ورمزه
+        val detail = r.label?.takeIf { it.isNotBlank() && it != title }
+            ?: listOf(r.server.takeIf { it.isNotBlank() && it != title }, r.code.takeIf { it != title }).filterNotNull().joinToString(" · ")
         return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            minimumHeight = dp(72)
-            setPadding(dp(14), dp(12), dp(14), dp(10))
-            val bg = when {
-                isCurrent -> Tone.ACCENT_SOFT
-                dim -> Tone.alpha(Tone.SURFACE_2, 0x80)
-                else -> Tone.SURFACE_2
-            }
-            background = if (playable) pressable(bg, dp(16).toFloat(), dp(1), Tone.LINE)
-            else rounded(bg, dp(16).toFloat(), dp(1), if (isCurrent) Tone.ACCENT_LINE else Tone.LINE)
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(60)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            val bg = if (isCurrent) Tone.ACCENT_SOFT else Color.TRANSPARENT
+            background = if (playable) pressable(bg, dp(12).toFloat(), 0, Tone.LINE) else rounded(bg, dp(12).toFloat(), 0, Tone.LINE)
+            alpha = if (dim) 0.55f else 1f
+            val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            top.addView(label(r.code, 17f, if (r.state == RouteState.UNAVAILABLE) Tone.TEXT_4 else if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { letterSpacing = 0.08f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            top.addView(label(title, 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             else if (r.code == preferCode && !isCurrent) top.addView(chip("آخر اختيار", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
-            addView(top)
-            val state = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0) }
+            texts.addView(top)
+            if (detail.isNotBlank()) texts.addView(label(detail, 12.5f, Tone.TEXT_2).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, dp(3), 0, 0) })
+            addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val state = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
             state.addView(StatusDot(context, color, pulse))
             state.addView(label(text, 12f, if (r.state == RouteState.FAILED) Tone.BAD else Tone.TEXT_2, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
             addView(state)
-            contentDescription = "سيرفر ${r.code}، $text"
+            contentDescription = "$title، $detail، $text"
             if (playable) setOnClickListener { switchTo(r) }
         }
     }

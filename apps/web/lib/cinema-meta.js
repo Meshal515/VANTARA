@@ -105,3 +105,36 @@ export async function detail(type, id, { fetchImpl } = {}) {
 
 /** أسماء الأعمال تبقى كما هي (الإنجليزية)؛ القصة وحدها تُعرَّب. */
 export const displayTitle = (m) => m?.title || '';
+
+const castCache = new Map();
+const normName = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * صور الممثلين: Cinemeta يعطي الأسماء وحدها، وWikidata يربط العمل بمعرّف IMDb
+ * (P345) بممثليه (P161) وصورهم من ويكيميديا (P18) — مجاني وبلا مفتاح ويسمح بالطلب من
+ * المتصفح. الصورة لاسم مطابق حرفيًا فقط (لا تخمين)، ومصغّرة من المصدر.
+ * @returns {Promise<Map<string,{name:string,src:string}>>} اسم مطبَّع ← الاسم ورابط الصورة
+ */
+export function castPhotos(imdb, { fetchImpl = globalThis.fetch } = {}) {
+  if (!/^tt\d+$/.test(imdb ?? '')) return Promise.resolve(new Map());
+  if (!castCache.has(imdb)) {
+    const query = `SELECT ?name ?img WHERE { ?w wdt:P345 "${imdb}" . ?w wdt:P161 ?p . ?p wdt:P18 ?img . ?p rdfs:label ?name FILTER(lang(?name)="en") }`;
+    castCache.set(imdb, fetchImpl(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, { headers: { Accept: 'application/sparql-results+json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const out = new Map();
+        for (const b of d?.results?.bindings ?? []) {
+          const key = normName(b.name?.value);
+          const src = String(b.img?.value ?? '').replace(/^http:/, 'https:');
+          if (key && src && !out.has(key)) out.set(key, { name: b.name.value, src: `${src}?width=240` });
+        }
+        return out;
+      })
+      .catch(() => {
+        castCache.delete(imdb);
+        return new Map();
+      }));
+  }
+  return castCache.get(imdb);
+}
+export const castKey = normName;
