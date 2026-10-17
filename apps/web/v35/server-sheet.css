@@ -913,20 +913,31 @@
   .v35 .an-pick {
     --ss-bar: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(420px, 36vw, 560px);
+    /* المصادر في جهة البداية (يمين الواجهة العربية) والصورة في الجهة الأخرى */
+    grid-template-columns: clamp(420px, 36vw, 560px) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     grid-template-areas:
-      'info src'
-      'info foot';
+      'src info'
+      'foot info';
   }
   /* لا تمرير مشترك: اللوحتان عنصرا الشبكة، والمصادر تُمرَّر وحدها */
   .v35 .an-pick-scroll {
     display: contents;
   }
+  /* الرجوع في الزاوية العليا بجوار «المصادر»، لا معلّقًا وسط الشاشة */
   .v35 .ss-bar {
-    grid-area: info;
+    grid-area: src;
     height: auto;
-    padding: calc(var(--safe-top) + 20px) 24px 0;
+    padding: calc(var(--safe-top) + 14px) 14px 0;
+  }
+  .v35 .an-pick-back {
+    color: var(--text-1);
+  }
+  .v35 .an-pick-back::before {
+    opacity: 0;
+  }
+  .v35 .an-pick-back:hover {
+    background: var(--surface-2);
   }
   .v35 .ss-bar::before,
   .v35 .ss-bar-mark {
@@ -953,12 +964,12 @@
   .v35 .ss-art-img.loaded {
     opacity: 1;
   }
-  /* ذوبان أسفل اللوحة (للوصف) ونحو لوحة المصادر (يسارًا في الواجهة العربية) */
+  /* ذوبان أسفل اللوحة (للوصف) ونحو لوحة المصادر (يمينًا في الواجهة العربية) */
   .v35 .ss-art::after {
     background:
       linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent 22%),
       linear-gradient(to top, var(--bg) 4%, color-mix(in srgb, var(--bg) 70%, transparent) 36%, transparent 68%),
-      linear-gradient(to left, var(--bg) 0, transparent 22%);
+      linear-gradient(to left, var(--bg) 0, color-mix(in srgb, var(--bg) 60%, transparent) 14%, transparent 42%);
   }
   .v35 .ss-brand {
     position: relative;
@@ -1010,7 +1021,7 @@
     overscroll-behavior: contain;
     padding: 0 28px 28px;
     background: var(--bg-raised);
-    box-shadow: inset -1px 0 0 var(--line);
+    box-shadow: inset 1px 0 0 var(--line);
     scrollbar-width: thin;
     scrollbar-color: var(--surface-3) transparent;
   }
@@ -1023,6 +1034,7 @@
   .v35 .ss-tools-head {
     min-height: 36px;
     padding-top: 0;
+    padding-inline-start: 36px;
     border-top: 0;
   }
   .v35 .ss-tools-head > b {
@@ -1032,7 +1044,7 @@
     grid-area: foot;
     padding: 14px 28px calc(var(--safe-bottom) + 18px);
     background: var(--bg-raised);
-    box-shadow: inset -1px 0 0 var(--line), 0 -1px 0 var(--line);
+    box-shadow: inset 1px 0 0 var(--line), 0 -1px 0 var(--line);
   }
 }
 @media (min-width: 1500px) {
