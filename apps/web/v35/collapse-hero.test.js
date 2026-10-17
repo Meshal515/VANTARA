@@ -15,6 +15,10 @@ describe('البطل وهو ينطوي', () => {
     expect(a.headOpacity).toBe(1);
     expect(a.collapsed).toBe(false);
     const b = heroFrame(400, 1);
+    // العمق: الخلفية تغوص (تكبر) والشعار ينحني للخلف بمنظور
+    expect(b.bg).toContain('scale(1.1200)');
+    expect(b.head).toContain('perspective(800px)');
+    expect(b.head).toContain('rotateX(14.00deg)');
     expect(b.headOpacity).toBe(0);
     expect(b.collapsed).toBe(true);
   });

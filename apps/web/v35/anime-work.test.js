@@ -147,7 +147,7 @@ it('hero: waits for the IMDb link, prefers its key art, and never uses the AniLi
   expect(heroSrcs()).toEqual([]);
   await new Promise((r) => setTimeout(r, 120));
   await settle();
-  expect(heroSrcs()).toEqual(['https://images.metahub.space/background/medium/tt26743760/img']);
+  expect(heroSrcs()).toEqual(['https://images.metahub.space/background/large/tt26743760/img']);
   expect(heroSrcs()).not.toContain('https://img/banner.jpg');
   anime.leaveDetail();
 });
