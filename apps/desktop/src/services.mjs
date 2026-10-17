@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createPlaybackBudget } from './playback-budget.mjs';
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
@@ -364,11 +365,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function playbackState(state) {
     return {position:state.progress.position??0,duration:state.progress.duration??0,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true};
   }
-  function emitPlaybackState(state) {if(state.ready)emit(state,{type:'playback/state',...playbackState(state)});}
+  function emitPlaybackState(state) {if(state.ready){const value=playbackState(state);state.budget?.update(value);emit(state,{type:'playback/state',...value});}}
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
+    state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -670,7 +671,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
+    const ready=()=>{if(state.ready)return;state.ready=true;state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
@@ -725,8 +726,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // والأجزاء التي وصلت، فلا يُعاد حل المغناطيس أو الاختيار أو الإعدادات.
     if(!state.ready) {
       // تورنت ينزل فعلًا (سرعة خلال آخر 15 ث): لا نعيد فتح الفيديو، فإعادة الفتح تهدم ما تجمّع في
-      // ذاكرة mpv وتطيل البداية. ننتظر ما دام التنزيل يتحرك (حتى 6 دقائق)، ونعيد المحاولة عند التوقف فقط.
-      const flowing=()=>state.win&&state.flowAt&&Date.now()-state.flowAt<15000&&Date.now()-state.startedAt<360000;
+      // ذاكرة mpv وتطيل البداية. ننتظر ما دام التنزيل يتحرك (ضمن مهلة البداية الكلية)، ونعيد المحاولة عند التوقف فقط.
+      const flowing=()=>state.win&&state.flowAt&&Date.now()-state.flowAt<15000&&Date.now()-state.startedAt<90000;
       const waitWhileFlowing=()=>{
         if(state.stopped||current!==state||state.ready)return;
         if(flowing()){emit(state,{type:'playback/stage',stage:'downloading'});state.firstFrameWatchdog=setTimeout(waitWhileFlowing,10000);return;}
@@ -755,6 +756,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     current=state;states.add(state);
+    state.budget=createPlaybackBudget({torrent:!!candidate.infoHash,onTimeout:reason=>{
+      if(state.stopped||current!==state)return;
+      emit(state,{type:'playback/recovery-needed',reason});
+      void fail(state,reason==='startup'?'انتهت مهلة بدء المصدر؛ نجرب مصدرًا آخر':'توقف تقدم الفيديو؛ نجرب مصدرًا آخر');
+    }});
     try{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);

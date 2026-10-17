@@ -35,35 +35,33 @@ html.desktop-overlay .pp-status[data-error='true'] {
 html.desktop-overlay .pp-status:empty {
   display: none;
 }
-/* الأوراق كما في الـAPK: لوح عائم مستدير يمين الشاشة، صفوفه بطاقات */
-@media (min-width: 600px) {
-  html.desktop-overlay .pwa-player .pp-sheet {
-    top: 24px;
-    bottom: 24px;
-    right: 24px;
-    left: auto;
-    width: min(38%, 460px);
-    min-width: 340px;
-    max-height: none;
-    box-sizing: border-box;
-    padding: 22px 18px;
-    border-radius: 26px;
-    border: 1px solid var(--line);
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  html.desktop-overlay .pwa-player .pp-sheet__body {
-    overflow-y: auto;
-    min-height: 0;
-    scrollbar-width: thin;
-  }
-  html.desktop-overlay .pwa-player .pp-scrim {
-    background: rgba(0, 0, 0, 0.35);
-  }
+/* Compact desktop popovers stay attached to the control that opens them. */
+html.desktop-overlay .pwa-player .pp-sheet {
+  position: absolute; top: auto; left: auto; right: 12px; bottom: 80px;
+  width: min(280px, calc(100vw - 24px)); min-width: 0;
+  max-height: calc(100vh - 110px); height: auto; box-sizing: border-box;
+  padding: 14px; border-radius: 18px; border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+  display: flex; flex-direction: column; transform: none;
 }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="subtitles"] { width: min(360px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="episodes"],
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="servers"] { width: min(420px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[hidden] { display: none; }
+html.desktop-overlay .pwa-player .pp-sheet__grip { display: none; }
+html.desktop-overlay .pwa-player .pp-sheet__head { margin-bottom: 10px; }
+html.desktop-overlay .pwa-player .pp-sheet__head strong { font-size: 17px; }
+html.desktop-overlay .pwa-player .pp-sheet__body { overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+html.desktop-overlay .pwa-player .pp-scrim { background: transparent; }
+html.desktop-overlay .pwa-player .pp-icon { width: 36px; height: 36px; }
+html.desktop-overlay .pwa-player .pp-icon svg { width: 21px; height: 21px; }
+html.desktop-overlay .pwa-player .pp-icon--big { width: 40px; height: 40px; }
+html.desktop-overlay .pwa-player .pp-play { width: 48px; height: 48px; }
+html.desktop-overlay .pwa-player .pp-row-item { padding: 10px 12px; min-height: 40px; border-radius: 10px; }
+html.desktop-overlay .pwa-player .pp-row-item__text strong { font-size: 13px; }
+html.desktop-overlay .pwa-player .pp-section { font-size: 12px; margin: 10px 0 6px; }
+html.desktop-overlay .pwa-player button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html.desktop-overlay .pp-route {
   display: flex;
   align-items: center;
@@ -159,15 +157,15 @@ html.desktop-overlay .pp-step output {
 }
 html.desktop-overlay .pp-chips {
   display: flex;
-  gap: 8px;
-  margin: 6px 0 14px;
+  gap: 6px;
+  margin: 5px 0 9px;
 }
 html.desktop-overlay .pp-chip {
   flex: 1;
-  min-height: 46px;
-  border-radius: 14px;
+  min-height: 34px;
+  border-radius: 10px;
   background: var(--surface-2);
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 600;
 }
 html.desktop-overlay .pp-chip:hover {
@@ -179,9 +177,9 @@ html.desktop-overlay .pp-chip.is-on {
 }
 html.desktop-overlay .pp-big {
   text-align: center;
-  font-size: 26px;
+  font-size: 21px;
   font-weight: 700;
-  margin: 6px 0 12px;
+  margin: 4px 0 8px;
 }
 /* العنوان يمينًا حتى لو كان إنجليزيًا (Black Clover…) كما في الجوال */
 html.desktop-overlay .pp-top .pp-titles,

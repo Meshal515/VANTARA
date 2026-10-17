@@ -1,7 +1,7 @@
 {
   "name": "@vantara/desktop",
   "productName": "VANTARA",
-  "version": "0.3.8",
+  "version": "0.3.10",
   "private": true,
   "main": "main.cjs",
   "description": "عميل VANTARA لويندوز مع إضافات Stremio ومحرك تورنت ومشغل مرفقين",

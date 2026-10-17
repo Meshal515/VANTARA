@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.3.8
+name: Publish verified VANTARA Windows 0.3.10
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.8'
-  TAG: 'windows-v0.3.8'
+  VERSION: '0.3.10'
+  TAG: 'windows-v0.3.10'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -87,6 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const version=JSON.parse(fs.readFileSync("apps/desktop/package.json","utf8")).version; assert.equal(version,process.env.VERSION,"رقم التطبيق لا يطابق رقم النشر"); assert.equal(process.env.TAG,`windows-v${version}`,"وسم الإصدار لا يطابق رقم التطبيق");'
           node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe" --output="$RUNNER_TEMP/windows-current"
           cd "$RUNNER_TEMP/windows-current"
           sha256sum -c SHA256SUMS.txt
@@ -138,7 +139,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.8
+    name: Publish verified Windows 0.3.10
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -165,7 +166,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.3.8: التورنت يبدأ أسرع مثل الجوال: أول الملف وآخره (فهرس الفيديو) يُطلبان فور إضافة التورنت، ولا إعادة فتح للفيديو ما دام التنزيل يتحرك. مع كل ما سبق: أوراق المشغل كالجوال، السيرفرات بصفوف، الترجمة بالمسارات والضبط والخلفية، تورنت الأنمي. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "ويندوز 0.3.10: أدوات المشغل تختفي بعد 3 ثوانٍ بلا حركة مثل Stremio (كانت تبقى للأبد)، والشريط العلوي عربي: السهم والعنوان يمينًا والأزرار يسارًا، وسطر «الحلقة N» كالجوال. مع كل ما في 0.3.9. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
@@ -177,7 +178,7 @@ jobs:
           python3 - <<'PYMANIFEST'
           import os,json,pathlib,hashlib
           version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
-          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['تورنت أسرع: متتبعات عامة وحفظ DHT وUPnP','إعادة استعمال المشاركين المكتشفين']}
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إخفاء أدوات المشغل ولوحات صغيرة قرب الأزرار','ترتيب التورنت والتعافي عبر مصدر بديل مع حفظ الموضع','حدود انتظار البداية والتوقف مثل APK']}
           pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
           PYMANIFEST
           if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
