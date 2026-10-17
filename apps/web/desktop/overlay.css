@@ -183,3 +183,14 @@ html.desktop-overlay .pp-big {
   font-weight: 700;
   margin: 6px 0 12px;
 }
+/* العنوان يمينًا حتى لو كان إنجليزيًا (Black Clover…) كما في الجوال */
+html.desktop-overlay .pp-top .pp-titles,
+html.desktop-overlay .pp-top .pp-titles strong,
+html.desktop-overlay .pp-top .pp-titles small {
+  text-align: right;
+}
+/* الورقة المغلقة لا تُرى إطلاقًا (كانت حافتها تظهر يمين الشاشة) */
+html.desktop-overlay .pwa-player .pp-sheet[hidden],
+html.desktop-overlay .pwa-player .pp-scrim[hidden] {
+  display: none !important;
+}

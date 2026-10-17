@@ -8,7 +8,7 @@
  * لا تشغيل هنا ولا شبكة؛ الفيديو نافذة mpv الأصلية تحت هذه النافذة الشفافة.
  */
 
-const HIDE_AFTER_MS = 3500;
+const HIDE_AFTER_MS = 3000;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 const svg = (body, { fill = false } = {}) =>
@@ -65,8 +65,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
 
   // ── الأعلى ──
   const controls = el('div', 'pp-controls'); controls.dir = 'ltr';
-  const top = el('div', 'pp-top');
-  const titles = el('div', 'pp-titles'); titles.dir = 'auto';
+  // الشريط العلوي عربي: الرجوع والعنوان يمينًا، والأزرار يسارًا (كمشغل الجوال)
+  const top = el('div', 'pp-top'); top.dir = 'rtl';
+  const titles = el('div', 'pp-titles'); titles.dir = 'rtl';
   const titleEl = el('strong'), subEl = el('small');
   titleEl.dir = 'auto'; subEl.dir = 'auto'; // «الحلقة 3» لا تنقلب خلف عنوان إنجليزي
   titles.append(titleEl, subEl);
@@ -124,7 +125,16 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (!stay && !state.paused && state.ready) hideTimer = timers.setTimeout(() => { if (!overControls && sheet.hidden) root.classList.remove('pp--shown'); }, HIDE_AFTER_MS);
   }
   const hideControls = () => { timers.clearTimeout(hideTimer); root.classList.remove('pp--shown'); };
-  root.addEventListener('mousemove', () => showControls());
+  // حركة حقيقية فقط: Chromium يطلق mousemove وهميًا بعد كل إعادة رسم (الوقت يتغير كل ربع ثانية)،
+  // فكان عدّاد الإخفاء يُعاد للصفر إلى الأبد والأدوات لا تختفي.
+  let lastX = null, lastY = null;
+  root.addEventListener('mousemove', (e) => {
+    if (e.screenX === lastX && e.screenY === lastY) return;
+    lastX = e.screenX; lastY = e.screenY;
+    showControls();
+  });
+  // خروج المؤشر من النافذة: الأدوات تختفي بعد المهلة كما في Stremio
+  doc.addEventListener('mouseleave', () => { overControls = false; showControls(); });
   for (const zone of [top, bottom]) {
     zone.addEventListener('mouseenter', () => { overControls = true; showControls(true); });
     zone.addEventListener('mouseleave', () => { overControls = false; showControls(); });
@@ -386,8 +396,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers') paintServers();
     if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
-    if (!state.ready || state.paused) showControls(true);
-    else if (previous.paused && !state.paused) showControls();
+    // بدأ التشغيل أو استؤنف: يبدأ عدّاد الإخفاء (كان لا يبدأ إلا بعد إيقاف ثم تشغيل)
+    if (!state.ready || state.paused) { if (!root.classList.contains('pp--shown') || previous.ready !== state.ready || previous.paused !== state.paused) showControls(true); }
+    else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);
   return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, speed: showSpeed, more: showMore } };

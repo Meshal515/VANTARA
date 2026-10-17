@@ -46,7 +46,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const overlaySnapshot=()=>{
     const info=playerInfo??{},server=info.server??null,movie=info.section==='cinema'&&!(Number(info.total)>1);
     const code=server?.code??null,q=Number(server?.quality)||null;
-    return {title:info.title??titleText,subtitle:[movie?'فيلم':`الحلقة ${info.episode??''}`,code?`${code}${q?` · ${q}p`:''}`:null].filter(Boolean).join(' · '),
+    return {title:info.title??titleText,subtitle:movie?'فيلم':`الحلقة ${info.episode??''}`,
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
