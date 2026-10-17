@@ -127,3 +127,27 @@ it('«الكل» opens its exact list, and genres cycle include → exclude → 
   f = cycleGenre(f, 'Action');
   expect(f).toEqual({ include: [], exclude: [] });
 });
+
+it('hero: waits for the IMDb link, prefers its key art, and never uses the AniList strip banner on a phone', async () => {
+  const { anime, document } = setup();
+  const made = [];
+  vi.stubGlobal('Image', function () { const n = document.createElement('img'); made.push(n); return n; });
+  const anilist = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+    if (String(url).startsWith('https://api.ani.zip/')) {
+      // ربط IMDb يصل بعد بيانات AniList: هذا السباق كان يثبّت بانر AniList
+      await new Promise((r) => setTimeout(r, 60));
+      return { ok: true, json: async () => ({ mappings: { imdb_id: 'tt26743760' }, episodes: {} }) };
+    }
+    return anilist(url, init);
+  }));
+  await anime.openAnime({ id: 161645, title: 'The Apothecary Diaries', poster: 'https://img/cover.jpg' });
+  await settle();
+  const heroSrcs = () => made.filter((n) => /aw-bg-img/.test(n.className)).map((n) => n.src);
+  expect(heroSrcs()).toEqual([]);
+  await new Promise((r) => setTimeout(r, 120));
+  await settle();
+  expect(heroSrcs()).toEqual(['https://images.metahub.space/background/medium/tt26743760/img']);
+  expect(heroSrcs()).not.toContain('https://img/banner.jpg');
+  anime.leaveDetail();
+});

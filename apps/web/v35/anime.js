@@ -561,10 +561,16 @@ export function createAnime(deps) {
       state.art = { ...art, id: m.id };
       paintLogo(state.detail);
       patchStills(state.detail);
+      // وصل بعد المهلة والغلاف ظاهر: يُرقّى للخلفية الدعائية (لا يمسّ صورة عريضة)
+      paintHero(state.detail);
       return art;
     });
-    void Promise.race([artReady, new Promise((r) => setTimeout(r, 450))]).then(() => {
-      if (token === state.detailToken) paintHero(state.detail);
+    // البطل لا يُرسم قبل أن يستقر ربط IMDb (أو تمضي المهلة): رسمه مبكرًا كان يثبّت
+    // بانر AniList قبل وصول الخلفية الدعائية فلا تُستبدل بعده
+    void Promise.race([artReady, new Promise((r) => setTimeout(r, 1200))]).then(() => {
+      if (token !== state.detailToken) return;
+      if (state.view?.id === m.id) state.view.artSettled = true;
+      paintHero(state.detail);
     });
     // لمسة أو عجلة أثناء التحميل = المستخدم يتصفّح؛ لا نعيده للأعلى بعدها
     let userScrolled = false;
@@ -644,6 +650,9 @@ export function createAnime(deps) {
     const hero = el('div', 'aw-hero');
     const bg = el('div', 'aw-bg');
     hero.append(bg, el('div', 'aw-shade'));
+    // الغلاف بطاقةً قدّام الخلفية: تعرف العمل منه فورًا مهما كانت الخلفية (سماء، منظر…)
+    const cover = el('div', 'aw-cover');
+    hero.append(cover);
     const head = el('div', 'aw-head');
     // ضغطة مطوّلة على الاسم أو الشعار: «نسخ» و«مشاركة» (نفس ورقة المانجا، `data-copyable`)
     const mark = el('div', 'an-mark');
@@ -671,7 +680,7 @@ export function createAnime(deps) {
     body.append(cta, actions, sources, about, insightHost, eps, more);
     wrap.append(bar, hero, body);
 
-    state.view = { id: m.id, token, page, bar, barTitle, hero, bg, head, mark, meta, genres, cta, actions, sources, about, insightHost, eps, more, heroRank: Infinity, heroTried: new Set(), unbind: null };
+    state.view = { id: m.id, token, page, bar, barTitle, hero, bg, cover, head, mark, meta, genres, cta, actions, sources, about, insightHost, eps, more, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
     paintMeta(m);
     paintCta(m);
     paintActions(m);
@@ -680,8 +689,9 @@ export function createAnime(deps) {
     eps.append(...Array.from({ length: 3 }, () => el('div', 'an-skel an-skel-ep')));
     page.replaceChildren(wrap);
     paintLogo(m);
+    paintCover(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    state.view.unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    state.view.unbind = bindCollapsingHero({ hero, bar, bg, head, cover, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
   }
 
   /** التفاصيل وصلت: كل مكان يُملأ في موضعه. */
@@ -699,21 +709,25 @@ export function createAnime(deps) {
     paintBelow(m);
     paintHero(m);
     paintLogo(m);
+    paintCover(m);
     if (!String(m.id).startsWith('addon-')) void paintWorkInsights(v.insightHost, { sync: deps.sync, ref: `anime:${m.id}`, openProfile: deps.openProfile });
   }
 
   /**
-   * صورة البطل: خلفية IMDb العريضة (metahub) إن عُرفت، ثم بانر AniList، ثم الغلاف.
-   * تُختار مرة؛ لا تُستبدل إلا لو كانت الغلافَ الطولي ووصل ما هو عريض. الصورة
-   * تُفكّ قبل أن تظهر ثم تتلاشى فوق لون العمل.
+   * صورة البطل: يجب أن تعرف العمل منها فورًا. الخلفية الدعائية من IMDb (metahub) إن
+   * عُرفت، ثم الغلاف — مضمون لكل أنمي وفيه شخصياته. بانر AniList شريط 1900×400
+   * يُقصّ على الجوال إلى منتصفه (سماء «يوميات الصيدلانية» مثلًا) فلا يُستعمل إلا على
+   * الشاشة العريضة التي يناسبها شكله. تُختار مرة بعد استقرار ربط IMDb؛ لا تُستبدل إلا
+   * لو كانت الغلافَ ووصل ما هو عريض. الصورة تُفكّ قبل أن تظهر ثم تتلاشى فوق لون العمل.
    */
   function paintHero(m) {
     const v = state.view;
-    if (!v || v.id !== m?.id) return;
+    if (!v || v.id !== m?.id || !v.artSettled) return;
     const imdb = artOf(m)?.imdb;
+    const wide = globalThis.matchMedia?.('(min-width: 900px)').matches === true;
     const list = [
       /^tt\d+$/.test(imdb ?? '') ? { src: `https://images.metahub.space/background/medium/${imdb}/img`, rank: 0 } : null,
-      m.banner ? { src: m.banner, rank: 1 } : null,
+      m.banner && wide ? { src: m.banner, rank: 1 } : null,
       m.poster ?? m.posterSmall ? { src: m.poster ?? m.posterSmall, rank: 2 } : null,
     ].filter((c) => c && !v.heroTried.has(c.src));
     const pick = list[0];
@@ -743,6 +757,28 @@ export function createAnime(deps) {
       if (!v.heroShown) paintHero(state.detail);
     };
     img.src = pick.src;
+  }
+
+  /** بطاقة الغلاف في البطل: تظهر متى فُكّت، وتُرقّى من الصغير إلى الكبير مرة. */
+  function paintCover(m) {
+    const v = state.view;
+    const src = m?.poster ?? m?.posterSmall;
+    if (!v || v.id !== m?.id || !src || v.cover.dataset.src === src) return;
+    if (v.cover.dataset.src && src === m.posterSmall) return;
+    v.cover.dataset.src = src;
+    const img = new Image();
+    img.alt = '';
+    img.className = 'aw-cover-img';
+    img.decoding = 'async';
+    img.onload = () => {
+      if (state.view !== v) return;
+      const show = () => {
+        v.cover.replaceChildren(img);
+        v.cover.classList.add('in');
+      };
+      img.decode ? img.decode().catch(() => {}).then(show) : show();
+    };
+    img.src = src;
   }
 
   /** شعار العنوان (IMDb ← metahub) في صندوقه المحجوز، ونسخة صغيرة للترويسة. */

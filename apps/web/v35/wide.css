@@ -837,6 +837,14 @@
     max-width: 560px;
     bottom: 28px;
   }
+  /* الغلاف في الجهة الأخرى من الشعار (يسار الواجهة العربية)، على خط قاعدته */
+  .v35 .aw-cover {
+    top: auto;
+    bottom: 28px;
+    inset-inline: auto var(--gutter);
+    margin-inline: 0;
+    width: clamp(180px, 15vw, 240px);
+  }
   .v35 .an-mark {
     height: 140px;
   }

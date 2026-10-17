@@ -887,7 +887,8 @@
 
 .v35 .aw-hero {
   position: relative;
-  height: clamp(380px, 112vw, 560px);
+  /* أطول قليلًا: بطاقة الغلاف فوق، والشعار والمعلومات تحتها */
+  height: clamp(440px, 126vw, 600px);
   overflow: hidden;
   isolation: isolate;
   background: color-mix(in srgb, var(--art) 16%, var(--bg));
@@ -913,6 +914,36 @@
 }
 .v35 .aw-bg-img--poster {
   object-position: center 18%;
+  /* الغلاف نفسه خلفيةً (لا خلفية دعائية): يتراجع خلف بطاقته الحادة فلا يتكرر بنفس الوضوح */
+  filter: blur(20px) saturate(1.15) brightness(0.55);
+  transform: scale(1.15);
+}
+/* بطاقة الغلاف: الطبقة الأقرب للعين في البطل (collapse-hero.js يحرّكها) */
+.v35 .aw-cover {
+  position: absolute;
+  z-index: 1;
+  top: calc(var(--safe-top) + 70px);
+  inset-inline: 0;
+  margin-inline: auto;
+  width: min(40vw, 190px);
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 22%, var(--bg));
+  box-shadow: 0 22px 44px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.v35 .aw-cover.in {
+  opacity: 1;
+}
+.v35 .aw-cover-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .v35 .aw-shade {
   position: absolute;
