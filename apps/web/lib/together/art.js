@@ -42,10 +42,17 @@ function remember(key, data, now) {
 }
 
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
-async function aniZip(anilistId, fetchImpl, now) {
+const inflight = new Map();
+export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
   const key = `az-${anilistId}`;
   const hit = cached(key, now);
-  if (hit) return hit;
+  if (hit) return Promise.resolve(hit);
+  // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
+  if (!inflight.has(key)) inflight.set(key, aniZip(anilistId, fetchImpl, now).finally(() => inflight.delete(key)));
+  return inflight.get(key);
+}
+async function aniZip(anilistId, fetchImpl, now) {
+  const key = `az-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
   if (!r.ok) return null;
   const d = await r.json();
@@ -73,7 +80,7 @@ export async function resolveArt(media, { fetchImpl = globalThis.fetch, now = Da
   try {
     const anilist = media?.kind === 'anime' ? Number(/^anime:(\d+)/.exec(media.seriesRef ?? '')?.[1]) : null;
     if (anilist > 0 && (!art.logo || !art.banner || !art.episodeTitle)) {
-      const z = await aniZip(anilist, fetchImpl, now);
+      const z = await aniZipArt(anilist, { fetchImpl, now });
       const e = z?.episodes?.[String(media.episode)];
       art.logo ??= logoOfImdb(z?.imdb);
       art.banner ??= e?.image ?? null;
