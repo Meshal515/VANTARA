@@ -114,7 +114,7 @@ fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,p
 const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:tracks.length+1,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
-  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,...serviceOptions});
+  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,...serviceOptions});
   t.after(()=>services.close());return {dir,services,events,binaries:{rqbit,mpv}};
 }
 test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC وتقدم وأوامر وتنظيف',async t=>{
@@ -241,6 +241,28 @@ test('نقل الإضافات يحد حجم الاستجابة ويرفض الت
   assert.equal(requests[0].accept,'application/json');assert.equal(requests[0].authorization,undefined);
 });
 
+test('حجب SNI: مصافحة تنقطع تُعاد مرة بتقسيم ClientHello، ويُذكر السبب الحقيقي إن فشلت',async t=>{
+  const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
+  const {FragmentingAgent}=await import('./net-unblock.mjs');
+  const server=http.createServer((req,res)=>res.end('{"ok":true}'));
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+  t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
+  const agents=[];
+  t.mock.method(https,'request',(url,options,callback)=>{
+    agents.push(options.agent instanceof FragmentingAgent?'fragment':'plain');
+    if(url.hostname==='blocked.example.com'&&!(options.agent instanceof FragmentingAgent)||url.hostname==='dead.example.com'){
+      const req=new http.ClientRequest(`http://127.0.0.1:${server.address().port}/`,()=>{});
+      queueMicrotask(()=>req.destroy(Object.assign(new Error('read ECONNRESET'),{code:'ECONNRESET'})));return req;
+    }
+    return http.request(`http://127.0.0.1:${server.address().port}${url.pathname}`,{method:options.method,headers:options.headers,signal:options.signal},callback);
+  });
+  const {services}=await fixture(t);
+  const ok=await services.requestResource({url:'https://blocked.example.com/a',json:true});assert.equal(ok.text,'{"ok":true}');
+  assert.deepEqual(agents,['plain','fragment']);
+  await services.requestResource({url:'https://blocked.example.com/b'});assert.equal(agents.at(-1),'fragment');assert.equal(agents.length,3);
+  await assert.rejects(services.requestResource({url:'https://dead.example.com/'}),/قُطع الاتصال الآمن فور المصافحة/);
+});
+
 test('proxy يمرر Range ويحصر headers بالأصل عبر redirects دون كشفها للمشغل',async t=>{
   const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
   const seen=[];
@@ -277,7 +299,7 @@ test('HLS يعيد كتابة المراجع النسبية والمطلقة ب�
 test('فشل callback الأحداث لا يمنع إنهاء العمليات وتنظيف ملفات التحميل',async t=>{
   const {dir,services:unused,binaries}=await fixture(t);await unused.close();
   const events=[];
-  const services=createDesktopServices({userData:dir,binaries,onEvent:event=>{events.push(event);if(event.type==='playback/closed')throw new Error('callback failed');}});
+  const services=createDesktopServices({userData:dir,binaries,dnsOverHttps:false,onEvent:event=>{events.push(event);if(event.type==='playback/closed')throw new Error('callback failed');}});
   t.after(()=>services.close());
   await services.startPlayback({session:'callback',candidate:{infoHash:hash,fileIdx:0}});
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
@@ -360,7 +382,7 @@ test('تهيئة العميل تنظف cache المتروك قبل تشغيل ج
   const {mkdir,readdir}=await import('node:fs/promises');
   const stale=join(dir,'torrent-cache','a'.repeat(48));await mkdir(stale,{recursive:true});await writeFile(join(stale,'partial.mp4'),'owned stale fixture');
   await writeFile(join(dir,'user-preferences.json'),'keep');
-  const services=createDesktopServices({userData:dir,binaries});t.after(()=>services.close());
+  const services=createDesktopServices({userData:dir,binaries,dnsOverHttps:false});t.after(()=>services.close());
   await services.startPlayback({session:'after-crash',candidate:{infoHash:hash,fileIdx:0}});
   const {cacheNamespace}=await import('./torrent-cache.mjs');
   const entries=await readdir(join(dir,cacheNamespace(dir)));assert.equal(entries.length,1);assert.notEqual(entries[0],'a'.repeat(48));

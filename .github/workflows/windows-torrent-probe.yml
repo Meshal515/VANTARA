@@ -1,0 +1,72 @@
+name: Windows torrent and network probe
+# فحص تشخيصي فقط: لا يبني ولا ينشر. يشغّل services.mjs من هذا الـcommit مع rqbit وmpv
+# من إصدار ويندوز المنشور، على أسراب حقيقية ومواقع حقيقية، ويكتب الجدول الزمني في الملخص.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/windows-torrent-probe.yml'
+      - 'tools/windows-torrent-probe.mjs'
+      - 'apps/desktop/src/services.mjs'
+      - 'apps/desktop/src/net-unblock.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-torrent-probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native binaries from the published Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          gh release download windows-v0.3.2 --repo $env:GITHUB_REPOSITORY --pattern '*-x64.zip' --dir $dir
+          Expand-Archive (Get-ChildItem $dir -Filter *.zip | Select-Object -First 1).FullName -DestinationPath (Join-Path $dir 'app')
+          $rqbit = Get-ChildItem (Join-Path $dir 'app') -Recurse -Filter rqbit.exe | Select-Object -First 1
+          if (-not $rqbit) { throw 'rqbit.exe غير موجود في الحزمة' }
+          "NATIVE=$($rqbit.DirectoryName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Probe network, real swarms, seek and server switch
+        shell: pwsh
+        run: node tools/windows-torrent-probe.mjs "$env:NATIVE" "$env:RUNNER_TEMP/probe-report.json"
+      - name: Summary
+        if: always()
+        shell: python
+        run: |
+          import json, os, pathlib
+          p = pathlib.Path(os.environ['RUNNER_TEMP']) / 'probe-report.json'
+          out = ['## فحص ويندوز الحقيقي']
+          if not p.exists():
+              out.append('لا تقرير')
+          else:
+              r = json.loads(p.read_text(encoding='utf-8'))
+              out.append('\n### الشبكة (DoH أولًا مقابل DNS النظام)\n\n| الهدف | DoH | النظام |\n|---|---|---|')
+              f = lambda x: (f"{x['status']} · {x['ms']}ms" + (' · تحدي CF' if x.get('cf') else '')) if x and 'status' in x else f"❌ {x.get('error') if x else '-'} · {x.get('ms') if x else ''}ms"
+              for n in r['network']:
+                  out.append(f"| {n['name']} | {f(n.get('doh'))} | {f(n.get('system'))} |")
+              out.append('\n### التورنت\n\n| المرشح | أول إطار | القفز | السبب | المراحل |\n|---|---|---|---|---|')
+              for t in r['torrents']:
+                  if 'skipped' in t:
+                      out.append(f"| {t['name']} | — | — | {t['skipped']} | |"); continue
+                  st = ' → '.join(f"{s['stage']}@{s['t']}" for s in t.get('stages', []))
+                  peak = max([s.get('peers') or 0 for s in t.get('samples', [])] or [0])
+                  out.append(f"| {t['name']} | {t.get('firstFrameMs')} | {t.get('seekMs')} | {t.get('failure') or t.get('seekFailure') or 'نجح'} (أقصى مشاركين {peak}) | {st} |")
+              out.append(f"\n### تبديل السيرفر أثناء التشغيل\n\n`{json.dumps(r.get('switch'), ensure_ascii=False)}`")
+          text = '\n'.join(out)
+          print(text)
+          open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8').write(text + '\n')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-torrent-probe
+          path: ${{ runner.temp }}/probe-report.json
+          if-no-files-found: warn

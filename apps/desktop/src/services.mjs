@@ -9,6 +9,13 @@ import { join, basename, resolve, sep } from 'node:path';
 import { tmpdir, freemem } from 'node:os';
 import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom } from './torrent-cache.mjs';
 import { planWindow, readNeedsRebuild, rangeStart, createHolePuncher } from './torrent-window.mjs';
+import { createUnblockingLookup, FragmentingAgent, looksLikeSniReset, describeNetError } from './net-unblock.mjs';
+
+// DoH أولًا ثم DNS النظام، مثل الـAPK (AnimeDns): حجب DNS عند المزوّد لا يُسقط المصادر ولا الإضافات.
+const unblockingLookup = createUnblockingLookup();
+const systemLookup = host => dns.lookup(host, { all: true, verbatim: true });
+/** مضيفات نجحت بتقسيم ClientHello: طلباتها التالية تذهب بالتقسيم مباشرة (AnimeHostRouter.fragmentHosts). */
+const fragmentHosts = new Set();
 
 const secret = () => randomBytes(24).toString('hex');
 export function validateResourceRequest({url,method='GET',body=null,headers={},binary=false,follow=true}={}) {
@@ -53,7 +60,7 @@ function publicURL(input) {
     net.isIP(host) && !publicAddress(host)) throw new Error('رابط غير مسموح أو هدف داخلي');
   return url;
 }
-export async function resolvePublicURL(input, lookup = host => dns.lookup(host, { all: true, verbatim: true })) {
+export async function resolvePublicURL(input, lookup = unblockingLookup) {
   const url = publicURL(input), host = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = net.isIP(host) ? [{address:host,family:net.isIP(host)}] : await lookup(host);
   if (!addresses.length || addresses.some(x => !publicAddress(x.address))) throw new Error('رابط يشير إلى هدف داخلي');
@@ -211,21 +218,33 @@ function readResponse(response, limit) {
     response.on('aborted',()=>reject(new Error('انقطع نقل الاستجابة')));
   });
 }
-async function secureResponse(url, {headers={},signal,timeout=15000,method='GET',body=null}={}) {
+async function secureResponse(url, {headers={},signal,timeout=15000,method='GET',body=null,lookup=unblockingLookup}={}) {
   if (signal?.aborted) throw cancelled();
   const pinned = await new Promise((resolve,reject) => {
     const abort = () => reject(cancelled());
     signal?.addEventListener('abort',abort,{once:true});
-    resolvePublicURL(url).then(resolve,reject).finally(() => signal?.removeEventListener('abort',abort));
+    resolvePublicURL(url,lookup).then(resolve,reject).finally(() => signal?.removeEventListener('abort',abort));
   });
   if (signal?.aborted) throw cancelled();
-  return new Promise((resolve,reject) => {
-    // Pin the validated DNS answer for this connection to prevent rebinding.
-    const request=https.request(pinned.url,{method,headers,signal,agent:false,
+  const host=pinned.url.hostname;
+  // Pin the validated DNS answer for this connection to prevent rebinding.
+  const attempt=fragment=>new Promise((resolve,reject) => {
+    const agent=fragment?new FragmentingAgent({address:pinned.address}):false;
+    const request=https.request(pinned.url,{method,headers,signal,agent,servername:host,
       lookup:(_host, options, cb) => options?.all ? cb(null,[{address:pinned.address,family:pinned.family}]) : cb(null,pinned.address,pinned.family)},resolve);
-    request.setTimeout(timeout,()=>request.destroy(new Error('انتهت مهلة HTTPS')));
+    request.setTimeout(timeout,()=>request.destroy(Object.assign(new Error('انتهت مهلة HTTPS'),{code:'ETIMEDOUT'})));
     request.on('error',reject); request.end(body);
   });
+  if(pinned.url.protocol!=='https:')return attempt(false);
+  if(fragmentHosts.has(host))return attempt(true);
+  try { return await attempt(false); }
+  catch(error) {
+    // نمط حجب SNI: أعد مرة واحدة بتقسيم ClientHello (نفس الـAPK)، وتذكّر المضيف إن نجحت.
+    if(signal?.aborted||!looksLikeSniReset(error))throw error;
+    const response=await attempt(true).catch(again=>{throw Object.assign(again,{first:error});});
+    fragmentHosts.add(host);
+    return response;
+  }
 }
 async function localJSON(base,path,{body,signal,timeout=15000,auth}={}) {
   return new Promise((resolve,reject) => {
@@ -329,9 +348,11 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
+  // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
+  const lookup=dnsOverHttps?unblockingLookup:systemLookup;
   const puncher=holePuncher??createHolePuncher(platform);
   const states=new Set(), resourceControllers=new Set();
   // Electron owns the single-instance lock before constructing services.
@@ -375,7 +396,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       let request=validateResourceRequest({url,...options});
       request.headers={accept:json?'application/json':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
       for(let redirects=0;redirects<6;redirects++) {
-        const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout});
+        const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout,lookup});
         const status=response.statusCode;
         if(status>=300&&status<400&&response.headers.location&&request.follow) {
           response.destroy();
@@ -398,7 +419,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         return {text:await readResponse(response,limit),status,url:request.url,headers,location:response.headers.location??null};
       }
       throw new Error('عدد إعادة التوجيه أكبر من الحد');
-    } catch(e) {if(e.message?.includes('رابط')||e.message?.includes('حد')||e.message?.includes('حجم')||e.message?.includes('توجيه'))throw e;throw new Error('تعذر جلب مورد HTTPS أو انتهت المهلة');}
+    } catch(e) {if(e.message?.includes('رابط')||e.message?.includes('حد')||e.message?.includes('حجم')||e.message?.includes('توجيه'))throw e;throw new Error(`تعذر جلب مورد HTTPS: ${describeNetError(e)}`);}
     finally{clearTimeout(timer);resourceControllers.delete(controller);}
   }
   async function makeProxy(state, target, headers={}, torrent=false) {
@@ -430,7 +451,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             const u=new URL(url);requestHeaders={...(u.origin===origin?headers:{}),...requestHeaders,'Accept-Encoding':'identity'};
             // Rebuild each hop: origin-scoped credentials must never persist.
             if(u.origin!==origin)requestHeaders={...(req.headers.range?{Range:req.headers.range}:{}),'Accept-Encoding':'identity'};
-            upstream=await secureResponse(url,{headers:requestHeaders,signal:abort.signal,timeout:60000});
+            upstream=await secureResponse(url,{headers:requestHeaders,signal:abort.signal,timeout:60000,lookup});
             if(upstream.statusCode<300||upstream.statusCode>=400)break;
             if(redirects>=4||!upstream.headers.location){upstream.destroy();throw new Error('إعادة توجيه غير صالحة');}
             const next=new URL(upstream.headers.location,url);upstream.destroy();publicURL(next.href);url=next.href;
@@ -729,7 +750,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     try {
       let url=value.url;
       for(let redirects=0;;redirects++) {
-        response=await secureResponse(url,{headers:{Accept:'text/plain,application/x-subrip,text/vtt,text/x-ssa'},signal:controller.signal,timeout:15000});
+        response=await secureResponse(url,{headers:{Accept:'text/plain,application/x-subrip,text/vtt,text/x-ssa'},signal:controller.signal,timeout:15000,lookup});
         if(response.statusCode<300||response.statusCode>=400)break;
         if(redirects>=4||typeof response.headers.location!=='string')throw new Error('توجيه الترجمة تجاوز الحد أو أعاد رابطًا غير صالح');
         try { url=publicURL(new URL(response.headers.location,url).href).href; }
