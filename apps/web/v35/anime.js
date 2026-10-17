@@ -26,6 +26,8 @@ import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
+import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
+import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
 
@@ -116,13 +118,15 @@ export function createAnime(deps) {
     playing: null,
     newestFirst: false,
     malTitles: {},
+    // فن العمل من ani.zip: لقطات الحلقات والشعار ({ id, episodes, imdb, logo })
+    art: null,
     libraryTab: 'history',
     discover: { query: '', genre: '', page: 1, items: [], hasNext: false, token: 0 },
   };
 
   // ───────────── عناصر صغيرة ─────────────
 
-  function image(src, cls = 'an-img', { eager = false, position } = {}) {
+  function image(src, cls = 'an-img', { eager = false, position, fallback = null } = {}) {
     const img = new Image();
     img.alt = '';
     img.className = cls;
@@ -130,7 +134,15 @@ export function createAnime(deps) {
     if (!eager) img.loading = 'lazy';
     if (position) img.style.objectPosition = position;
     img.onload = () => img.classList.add('loaded');
-    img.onerror = () => img.classList.add('failed');
+    img.onerror = () => {
+      // لقطة مكسورة: الغلاف مكانها مرة واحدة، لا إطار فارغ
+      if (fallback && img.src !== fallback && !img.dataset.fellBack) {
+        img.dataset.fellBack = '1';
+        img.src = fallback;
+        return;
+      }
+      img.classList.add('failed');
+    };
     if (src) img.src = src;
     return img;
   }
@@ -249,9 +261,7 @@ export function createAnime(deps) {
   function continueCard(w) {
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
-    const c = el('button', 'an-cw');
-    c.type = 'button';
-    c.setAttribute('aria-label', `${w.title} — الحلقة ${w.episode}`);
+    const c = asButton(el('div', 'an-cw'), `${w.title} — الحلقة ${w.episode}`);
     tint(c, w.color);
     const art = el('span', 'an-cw-art');
     const src = w.banner ?? w.poster;
@@ -262,10 +272,14 @@ export function createAnime(deps) {
     play.innerHTML = glyph('play', { size: 16, filled: true });
     art.append(play);
     if (ratio > 0 && !e.done) art.append(progress(ratio));
+    c.dataset.ref = `anime:${w.id}`;
     const t = el('span', 'an-cw-title', w.title);
     t.dir = 'auto';
+    // ⋮ بجانب الاسم: المفضلة والقائمة والحذف من السجل
+    const name = el('span', 'cw-name');
+    name.append(t, moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
     const sub = el('span', 'an-cw-sub', [`الحلقة ${w.episode}`, e.done ? 'شوهدت' : minutesLeft(e)].filter(Boolean).join(' · '));
-    c.append(art, t, sub);
+    c.append(art, name, sub);
     c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color });
     return c;
   }
@@ -529,7 +543,16 @@ export function createAnime(deps) {
     const token = ++state.detailToken;
     state.episodeRange = 0;
     state.detail = m;
+    if (state.art?.id !== m.id) state.art = null;
     deps.showPage('anime');
+    // لقطات الحلقات والشعار من ani.zip: إضافة لا تؤخّر الصفحة، والمخبّأ يصل قبل التفاصيل غالبًا
+    void loadAnimeArt(m.id).then((art) => {
+      if (token !== state.detailToken || !art) return;
+      state.art = { ...art, id: m.id };
+      paintTitleLogo(state.detail);
+      const box = q('animeEpisodes');
+      if (box?.querySelector('.an-er-list')) renderEpisodes(box, state.detail);
+    });
     renderDetail(m, { partial: true });
     // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
     window.scrollTo?.({ top: 0, behavior: 'instant' });
@@ -660,9 +683,13 @@ export function createAnime(deps) {
     const poster = el('div', 'an-detail-poster');
     poster.append(image(m.poster, 'an-img', { eager: true }));
     const titles = el('div', 'an-detail-titles');
+    // شعار العنوان كالسينما إن وُجد؛ الاسم يبقى للقارئ ويظهر إن لم يُحمَّل الشعار
+    const mark = el('div', 'an-mark');
+    mark.id = 'animeTitleMark';
     const h1 = el('h1', null, m.title);
     h1.dir = 'auto';
-    titles.append(h1);
+    mark.append(h1);
+    titles.append(mark);
     const alt = m.romaji && m.romaji !== m.title ? m.romaji : m.native;
     if (alt && alt.toLowerCase() !== m.title.toLowerCase()) {
       const a = el('div', 'an-detail-alt', alt);
@@ -670,6 +697,7 @@ export function createAnime(deps) {
       titles.append(a);
     }
     head.append(poster, titles);
+    queueMicrotask(() => paintTitleLogo(m));
 
     const facts = el('div', 'an-facts');
     facts.dataset.reveal = '';
@@ -773,6 +801,21 @@ export function createAnime(deps) {
    */
   const seenEp = (m, n, e) => (signedIn() ? account.isSeen(m.id, n) : Boolean(e?.done));
 
+  /** يضع شعار العنوان فوق الاسم متى عُرف (مرة واحدة لكل صفحة). */
+  function paintTitleLogo(m) {
+    const mark = q('animeTitleMark');
+    const src = state.art?.id === m?.id ? state.art.logo : null;
+    if (!mark || !src || mark.querySelector('.an-mark-logo')) return;
+    const logo = image(src, 'an-mark-logo', { eager: true });
+    logo.alt = m.title;
+    logo.onload = () => {
+      logo.classList.add('loaded');
+      mark.classList.add('has-logo');
+    };
+    mark.prepend(logo);
+  }
+
+  /** صف حلقة كالمسلسلات: لقطتها 16:9 (أو غلاف العمل)، رقمها وعنوانها، وزر «شوهدت». */
   function episodeRow(m, n, e) {
     const done = seenEp(m, n, e);
     e = e ? { ...e, done } : done ? { done: true, position: 0, duration: 0 } : e;
@@ -781,24 +824,28 @@ export function createAnime(deps) {
     row.dataset.ep = String(n);
     const main = el('button', 'an-er-main');
     main.type = 'button';
-    // صورة الحلقة نفسها إن وُجدت؛ وإلا بلاطة برقمها (كانت كل الحلقات تكرّر بنر العمل)
-    const thumb = m.thumbs?.[n]?.thumbnail;
-    const art = el('span', thumb ? 'an-er-art' : 'an-er-art an-er-art--num');
-    if (thumb) {
-      art.append(image(thumb, 'an-img', { position: 'center' }));
-      art.append(el('span', 'an-er-no', String(n)));
-    } else art.append(el('b', 'an-er-num', String(n)));
+    const shot = episodeStill(m, n, state.art?.id === m.id ? state.art : null);
+    const cover = m.poster ?? m.banner ?? null;
+    const art = el('span', `an-er-art${shot.still ? '' : ' an-er-art--cover'}`);
+    art.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.still ? cover : null }));
+    const playMark = el('span', 'an-er-play');
+    playMark.innerHTML = glyph('play', { size: 14, filled: true });
+    art.append(playMark);
     if (ratio > 0 && !e?.done) {
       const bar = progress(ratio);
       bar.classList.add('an-er-bar');
       art.append(bar);
     }
     const copy = el('span', 'an-er-copy');
-    copy.append(el('b', null, `الحلقة ${n}`));
-    const title = state.malTitles?.[n] ?? m.thumbs?.[n]?.title;
-    const sub = el('span', 'an-er-sub', [title, m.duration ? `${m.duration} د` : null].filter(Boolean).join(' · ') || (e?.done ? 'شوهدت' : ''));
-    sub.dir = 'auto';
-    copy.append(sub);
+    const top = el('span', 'an-er-top');
+    const title = episodeTitleOf(m, n, { mal: state.malTitles, art: state.art?.id === m.id ? state.art : null });
+    const name = el('b', 'an-er-title', title || `الحلقة ${n}`);
+    name.dir = 'auto';
+    top.append(el('b', 'an-er-no', String(n)), name);
+    copy.append(top);
+    // الرقم بجانب العنوان؛ هنا ما يخصّك: شوهدت، أو كم باقي، أو مدتها
+    const sub = e?.done ? 'شوهدت' : minutesLeft(e) ?? (m.duration ? `${m.duration} د` : null);
+    if (sub) copy.append(el('span', 'an-er-sub', sub));
     main.append(art, copy);
     main.onclick = () => playEpisode(m, n);
     const eye = button(`an-er-icon${e?.done ? ' on' : ''}`, glyph('eye', { size: 20 }), () => {
@@ -1329,10 +1376,12 @@ export function createAnime(deps) {
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
       const hero = el('div', 'an-pick-hero');
-      const thumb = m.thumbs?.[n]?.thumbnail;
+      const art = state.art?.id === m.id ? state.art : null;
+      const shot = episodeStill(m, n, art);
+      const thumb = shot.still ? shot.src : null;
       hero.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { eager: true, position: thumb || m.banner ? 'center' : 'center 25%' }));
       const cap = el('div', 'an-pick-cap');
-      const epTitle = state.malTitles?.[n] ?? m.thumbs?.[n]?.title;
+      const epTitle = episodeTitleOf(m, n, { mal: state.malTitles, art });
       cap.append(el('span', 'an-pick-no', `الحلقة ${n}`));
       if (epTitle) {
         const et = el('b', 'an-pick-title', epTitle);
@@ -1354,8 +1403,8 @@ export function createAnime(deps) {
             title: m.title,
             cover: m.posterSmall ?? m.poster ?? null,
             // شاشة الغرفة: بنر الحلقة (أو بنر العمل) وعنوانها؛ الشعار يُكمَّل من ani.zip
-            banner: m.thumbs?.[n]?.thumbnail ?? m.banner ?? null,
-            episodeTitle: state.malTitles?.[n] ?? m.thumbs?.[n]?.title ?? null,
+            banner: thumb ?? m.banner ?? null,
+            episodeTitle: epTitle ?? null,
             episode: n,
           }, {
             // ورقة الدعوة أغلقت ورقة السيرفرات وأوقفت تجهيزها: نعيد فتحها والغرفة نشطة،
@@ -1672,29 +1721,105 @@ export function createAnime(deps) {
     deps.showPage('library');
   }
 
-  function historyRow(w) {
-    const r = el('div', 'an-hr');
-    r.dataset.ref = `anime:${w.id}`;
-    const info = el('div', 'an-hr-info');
-    const t = el('b', 'an-hr-title', w.title);
+  /** حذف عمل من «آخر المشاهدات»: من الجهاز والحساب، ومن كل بطاقة ظاهرة له. */
+  function removeWatch(w) {
+    const all = localWatch();
+    delete all[w.id];
+    saveWatch(all);
+    if (signedIn()) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
+    const ref = `anime:${w.id}`;
+    for (const node of deps.root?.querySelectorAll?.('.an-cw, .an-hc') ?? []) {
+      if (node.dataset.ref !== ref) continue;
+      const strip = node.closest('.an-rail');
+      node.remove();
+      // كان آخر بطاقة في الشريط: لا شريط فارغًا بعنوانه
+      if (strip && !strip.querySelector('.an-cw')) strip.remove();
+    }
+    if (state.libraryTab === 'history' && !watching().length) renderLibrary();
+    toast('حُذف من آخر المشاهدات');
+  }
+
+  /** ورقة ⋮ لبطاقة «آخر المشاهدات»: نفس أفعال صفحة العمل (المفضلة، القائمة) والحذف. */
+  function openContinueMenu(w) {
+    const m = { id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color };
+    const listName = signedIn() ? 'أتابعها' : 'قائمتي';
+    openWatchMenu({
+      openSheet: deps.openSheet,
+      closeSheet: deps.closeSheet,
+      el,
+      title: w.title,
+      tone: 'anime',
+      items: watchMenuItems({ favorite: signedIn() ? Boolean(account.inCollection('favorite', w.id)) : null, list: { on: inList(w.id), name: listName } }),
+      actions: {
+        favorite: () => {
+          const on = !account.inCollection('favorite', w.id);
+          account.setCollection('favorite', m, on);
+          toast(on ? `أُضيف إلى المفضلة: ${w.title}` : 'أُزيل من المفضلة');
+        },
+        list: () => {
+          const on = toggleList(m);
+          toast(on ? `أُضيف إلى ${listName}: ${w.title}` : `أُزيل من ${listName}`);
+        },
+        remove: () => removeWatch(w),
+      },
+    });
+  }
+
+  /**
+   * «آخر المشاهدات» في مكتبتي بهوية الأنمي: لقطة الحلقة نفسها عريضة بتوهّج لون العمل،
+   * شارة الحلقة ووقتها، زر «تابع» زجاجي، شريط التقدّم مضيئًا، والبوستر يطلّ من الزاوية.
+   * اللقطة من ani.zip (مخبّأة) تحلّ محل البنر متى وصلت؛ بلا لقطة يبقى البنر أو الغلاف.
+   */
+  function historyCard(w) {
+    const e = w.episodes?.[w.episode] ?? {};
+    const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
+    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — الحلقة ${w.episode}`);
+    c.dataset.ref = `anime:${w.id}`;
+    tint(c, w.color);
+    const stage = el('div', 'an-hc-stage');
+    const wide = w.banner ?? w.poster ?? null;
+    const still = image(wide, 'an-img an-hc-still', { position: w.banner ? 'center' : 'center 22%' });
+    stage.append(still, el('span', 'an-hc-shade'));
+    const chip = el('span', 'an-hc-chip');
+    chip.append(el('small', null, 'الحلقة'), el('b', null, String(w.episode)));
+    const when = el('span', 'an-hc-when', relativeAr(w.at));
+    const play = el('span', 'an-hc-play');
+    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? 'التالية' : 'تابع'}</span>`;
+    const bar = el('span', 'an-hc-bar');
+    const fill = el('i');
+    fill.style.width = `${(ratio * 100).toFixed(1)}%`;
+    bar.append(fill);
+    stage.append(chip, when, play, bar);
+
+    const foot = el('div', 'an-hc-foot');
+    const poster = el('span', 'an-hc-poster');
+    poster.append(image(w.poster));
+    const info = el('div', 'an-hc-info');
+    const t = el('b', 'an-hc-title', w.title);
     t.dir = 'auto';
-    const when = el('span', 'an-when');
-    when.innerHTML = `${glyph('clock', { size: 15 })}<span>${relativeAr(w.at)}</span>`;
-    info.append(t, el('span', 'an-hr-ep', `الحلقة ${w.episode}`), el('span', 'an-hr-duration'), when);
-    const art = el('div', 'an-hr-art');
-    art.append(image(w.poster));
-    const x = button('an-hr-x', glyph('trash'), (ev) => {
-      ev.stopPropagation();
-      const all = localWatch();
-      delete all[w.id];
-      saveWatch(all);
-      if (signedIn()) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
-      r.remove();
-      if (!Object.keys(all).length) renderLibrary();
-    }, 'احذف من السجل');
-    r.append(art, info, x);
-    r.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color });
-    return r;
+    const name = el('span', 'cw-name');
+    name.append(t, moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
+    const meta = el('span', 'an-hc-meta');
+    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? `الحلقة ${w.episode}`), el('span', 'an-hc-watched'));
+    info.append(name, meta);
+    // البوستر في زاوية النهاية: بداية شريط التقدّم (جهة البداية) تبقى ظاهرة
+    foot.append(info, poster);
+    c.append(stage, foot);
+    c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
+
+    // لقطة الحلقة نفسها حين تصل (لا وميض: تُبدَّل بعد أن تُحمَّل)
+    void loadAnimeArt(w.id).then((art) => {
+      const shot = episodeStill({}, w.episode, art);
+      if (!shot.still || !c.isConnected) return;
+      const pre = new Image();
+      pre.onload = () => {
+        still.src = shot.src;
+        still.style.objectPosition = 'center';
+        c.classList.add('has-still');
+      };
+      pre.src = shot.src;
+    });
+    return c;
   }
 
   function renderLibrary() {
@@ -1753,8 +1878,8 @@ export function createAnime(deps) {
             toast('مُسح سجل المشاهدة');
           }),
         );
-        const list = el('div', 'an-hr-list');
-        list.append(...items.map(historyRow));
+        const list = el('div', 'an-hc-list');
+        list.append(...items.map(historyCard));
         nodes.push(list);
       }
     } else {
@@ -1785,15 +1910,13 @@ export function createAnime(deps) {
     if (state.libraryTab === 'history' && signedIn()) void deps.sync.insights(historyOwner).then((data) => {
       if (!host.isConnected || state.libraryTab !== 'history' || currentUser() !== historyOwner || !data?.content) return;
       const times = new Map(data.content.map((item) => [item.seriesRef, item.activeMs]));
-      for (const row of host.querySelectorAll('.an-hr[data-ref]')) {
+      for (const row of host.querySelectorAll('.an-hc[data-ref]')) {
         const ms = times.get(row.dataset.ref);
         if (ms < 60000) continue;
-        const span = row.querySelector('.an-hr-duration');
-        span.innerHTML = glyph('clock', { size: 15 });
-        span.append(document.createTextNode(insightDuration(ms)));
+        row.querySelector('.an-hc-watched').textContent = `شاهدت ${insightDuration(ms)}`;
       }
     });
-    stripIn([...host.querySelectorAll('.an-hr, .an-card')].slice(0, 10));
+    stripIn([...host.querySelectorAll('.an-hc, .an-card')].slice(0, 10));
   }
   /** صحة كل مصدر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي، والكتالوج المحلوب. */
   async function renderSourcesHealth(box) {

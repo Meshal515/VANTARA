@@ -27,6 +27,7 @@ import { matchCriteria, mergeWork, namesOf } from '../lib/cinema-identity.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
+import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -383,8 +384,8 @@ export function createCinema(deps) {
   function continueCard(w) {
     const e = w.episodes?.[`${w.season ?? 0}:${w.episode}`] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
-    const c = el('button', 'cn-wide');
-    c.type = 'button';
+    const c = asButton(el('div', 'cn-wide'), displayTitle(w));
+    c.dataset.ref = refOf(w.id);
     const art = el('span', 'cn-wide-art');
     art.append(image(w.background ?? w.poster));
     const bar = el('span', 'cn-progress');
@@ -394,8 +395,46 @@ export function createCinema(deps) {
     art.append(bar);
     const where = w.type === 'series' ? `الموسم ${w.season} · الحلقة ${w.episode}` : 'فيلم';
     const left = e.done ? 'شوهد' : remainingAr(e.position, e.duration);
-    c.append(art, text('span', 'cn-wide-title', displayTitle(w)), el('span', 'cn-wide-sub', [where, left].filter(Boolean).join(' · ')));
+    // ⋮ بجانب الاسم: المفضلة وقائمتي والحذف من السجل
+    const name = el('span', 'cw-name');
+    name.append(text('span', 'cn-wide-title', displayTitle(w)), moreButton(el, () => openContinueMenu(w), `خيارات ${displayTitle(w)}`));
+    c.append(art, name, el('span', 'cn-wide-sub', [where, left].filter(Boolean).join(' · ')));
     return opener(c, w, { autoplay: false });
+  }
+
+  /** حذف عمل من «آخر المشاهدات»: من الجهاز والحساب، ومن كل بطاقة ظاهرة له. */
+  function removeWatch(w) {
+    const all = watchAll();
+    delete all[w.id];
+    writeJson(userKey('watch', currentUser()), all);
+    if (me()) sync?.enqueue('view.remove', { seriesRef: refOf(w.id) });
+    for (const node of deps.root?.querySelectorAll?.('.cn-wide') ?? []) {
+      if (node.dataset.ref !== refOf(w.id)) continue;
+      const strip = node.closest('.cn-rail');
+      node.remove();
+      // كان آخر بطاقة في الشريط: لا شريط فارغًا بعنوانه
+      if (strip && !strip.querySelector('.cn-wide')) strip.remove();
+    }
+    if (state.libraryTab === 'continue' && !continuing().length) renderLibrary();
+    toast('حُذف من آخر المشاهدات');
+  }
+
+  /** ورقة ⋮ لبطاقة «آخر المشاهدات»: نفس زرّي صفحة العمل (قائمتي، المفضلة) والحذف. */
+  function openContinueMenu(w) {
+    const title = displayTitle(w);
+    openWatchMenu({
+      openSheet: deps.openSheet,
+      closeSheet: deps.closeSheet,
+      el,
+      title,
+      tone: 'cinema',
+      items: watchMenuItems({ favorite: inList('fav', w.id), list: { on: inList('later', w.id), name: 'قائمتي' } }),
+      actions: {
+        favorite: () => toast(toggleList('fav', w) ? `أُضيف إلى المفضلة: ${title}` : 'أُزيل من المفضلة'),
+        list: () => toast(toggleList('later', w) ? `أُضيف إلى قائمتي: ${title}` : 'أُزيل من قائمتي'),
+        remove: () => removeWatch(w),
+      },
+    });
   }
 
   function rail(title, items, card = posterCard, { more, sub } = {}) {

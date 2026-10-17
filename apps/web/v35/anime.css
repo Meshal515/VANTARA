@@ -1045,19 +1045,18 @@
   font-size: 14px;
   outline: none;
 }
+/* صفوف الحلقات كالمسلسلات: لقطة 16:9 بزر تشغيل، الرقم والعنوان بجانبها، و«شوهدت» آخر الصف */
 .v35 .an-er-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 .v35 .an-er {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
-  padding: 6px;
-  padding-inline-end: 4px;
-  border-radius: 16px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  margin-inline: -8px;
+  padding: 8px;
+  border-radius: 12px;
   transition: box-shadow 0.4s ease, background-color 0.4s ease;
 }
 .v35 .an-er.flash {
@@ -1067,8 +1066,8 @@
 .v35 .an-er-main {
   flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 132px 1fr;
   gap: 12px;
   padding: 0;
   border: 0;
@@ -1080,45 +1079,31 @@
 }
 .v35 .an-er-art {
   position: relative;
-  flex: none;
-  width: 112px;
+  display: block;
   aspect-ratio: 16 / 9;
-  border-radius: 11px;
+  border-radius: 6px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--art) 25%, var(--surface-2));
+  background: color-mix(in srgb, var(--art, var(--accent)) 22%, var(--surface-1));
+  align-self: start;
 }
-.v35 .an-er-art--num {
-  width: 60px;
-  aspect-ratio: 1;
+.v35 .an-er-art .an-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .an-er-play {
+  position: absolute;
+  inset-inline-start: 6px;
+  bottom: 8px;
   display: grid;
   place-items: center;
-  background: linear-gradient(140deg, color-mix(in srgb, var(--art, var(--accent)) 30%, var(--surface-2)), var(--surface-2));
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.v35 .an-er-num {
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-  font-size: 21px;
-  font-weight: 850;
-  letter-spacing: -0.02em;
-  color: var(--text-1);
-}
-.v35 .an-er.seen .an-er-num {
-  color: var(--text-3);
-}
-.v35 .an-er-no {
-  position: absolute;
-  bottom: 5px;
-  inset-inline-start: 5px;
-  min-width: 26px;
-  padding: 1px 7px;
-  border-radius: 7px;
-  background: rgba(3, 5, 10, 0.72);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(3, 5, 10, 0.7);
   color: #fff;
-  font-size: 12px;
-  font-weight: 850;
-  text-align: center;
 }
 .v35 .an-er-bar {
   position: absolute;
@@ -1130,11 +1115,33 @@
 .v35 .an-er-copy {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 4px;
+  align-content: start;
+  padding-top: 2px;
 }
-.v35 .an-er-copy b {
-  font-size: 14.5px;
-  font-weight: 800;
+.v35 .an-er-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.v35 .an-er-no {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.v35 .an-er-title {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
 }
 .v35 .an-er-sub {
   font-size: 12px;
@@ -1143,7 +1150,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 .an-er.seen .an-er-copy b {
+.v35 .an-er.seen .an-er-sub {
+  color: var(--accent-text);
+}
+.v35 .an-er.seen .an-er-title {
   color: var(--text-3);
 }
 .v35 .an-er.seen .an-er-art img {
@@ -1303,69 +1313,205 @@
   font-size: 13px;
   cursor: pointer;
 }
-.v35 .an-hr-list {
+/* «آخر المشاهدات» في مكتبتي: بطاقة سينمائية بهوية الأنمي */
+.v35 .an-hc-list {
   display: grid;
-  gap: 0;
+  gap: 26px;
+  padding-top: 6px;
 }
-.v35 .an-hr {
-  display: flex;
-  align-items: stretch;
-  border-radius: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
+.v35 .an-hc {
+  --art: var(--accent);
+  position: relative;
+  display: grid;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.v35 .an-hr-art {
+.v35 .an-hc:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 4px;
+  border-radius: 20px;
+}
+.v35 .an-hc-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 20px;
+  overflow: hidden;
+  isolation: isolate;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--art) 45%, var(--surface-2)), var(--surface-1));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 18px 40px -18px color-mix(in srgb, var(--art) 75%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--art) 22%, transparent);
+  transition: transform 0.18s ease;
+}
+.v35 .an-hc:active .an-hc-stage {
+  transform: scale(0.985);
+}
+.v35 .an-hc-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+.v35 .an-hc:not(.has-still) .an-hc-still {
+  filter: saturate(1.1);
+}
+.v35 .an-hc-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, rgba(5, 7, 13, 0.92) 0%, rgba(5, 7, 13, 0.35) 38%, transparent 62%),
+    linear-gradient(to bottom, rgba(5, 7, 13, 0.55), transparent 32%),
+    radial-gradient(120% 90% at 0% 100%, color-mix(in srgb, var(--art) 38%, transparent), transparent 60%);
+}
+.v35 .an-hc-chip {
+  position: absolute;
+  top: 12px;
+  inset-inline-start: 12px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 11px 6px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--art) 30%, rgba(5, 7, 13, 0.55));
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  color: #fff;
+  line-height: 1;
+}
+.v35 .an-hc-chip small {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.v35 .an-hc-chip b {
+  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+.v35 .an-hc-when {
+  position: absolute;
+  top: 14px;
+  inset-inline-end: 12px;
+  padding: 4px 9px;
+  border-radius: 99px;
+  background: rgba(5, 7, 13, 0.5);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.86);
+}
+.v35 .an-hc-play {
+  position: absolute;
+  bottom: 18px;
+  inset-inline-start: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 16px 0 14px;
+  border-radius: 99px;
+  background: var(--accent);
+  box-shadow:
+    0 8px 22px -6px color-mix(in srgb, var(--accent) 80%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+.v35 .an-hc-bar {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.v35 .an-hc-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-text), var(--accent));
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--accent) 85%, transparent);
+}
+.v35 .an-hc.done .an-hc-bar i {
+  background: var(--accent-text);
+}
+.v35 .an-hc-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-inline: 4px 14px;
+}
+.v35 .an-hc-poster {
+  position: relative;
+  z-index: 1;
   flex: none;
-  width: 64px;
+  width: 62px;
   aspect-ratio: 2 / 3;
-  border-radius: 9px;
+  margin-top: -46px;
+  border-radius: 11px;
   overflow: hidden;
   background: var(--surface-2);
+  box-shadow:
+    0 0 0 3px var(--bg),
+    0 0 0 4px color-mix(in srgb, var(--art) 55%, transparent),
+    0 12px 24px -8px rgba(0, 0, 0, 0.7);
 }
-.v35 .an-hr-info {
+.v35 .an-hc-poster .an-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .an-hc-info {
   flex: 1;
   min-width: 0;
   display: grid;
-  align-content: center;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: 4px;
+  padding-top: 10px;
 }
-.v35 .an-hr-title {
-  font-size: 15px;
+.v35 .an-hc .cw-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.v35 .an-hc-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15.5px;
   font-weight: 800;
-  line-height: 1.3;
+  line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.v35 .an-hr-ep {
-  font-size: 13px;
-  color: var(--text-2);
-}
-.v35 .an-hr-duration:not(:empty) { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 12px; }
-.v35 .an-when {
-  display: inline-flex;
+.v35 .an-hc-meta {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
+  gap: 4px 10px;
+  font-size: 12.5px;
   color: var(--text-3);
 }
-.v35 .an-hr-x {
-  flex: none;
-  align-self: center;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  margin-inline-end: 10px;
-  padding: 0;
-  border: 0;
-  border-radius: 12px;
-  background: var(--surface-2);
+.v35 .an-hc-left {
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 .an-hc-left.done {
   color: var(--text-2);
-  cursor: pointer;
+}
+.v35 .an-hc-watched:empty {
+  display: none;
+}
+.v35 .an-hc-watched::before {
+  content: '·';
+  margin-inline-end: 10px;
+  color: var(--text-4);
 }
 .v35 .an-foot {
   margin-top: 16px;
@@ -1748,4 +1894,41 @@
   margin-top: -4px;
   font-size: 11.5px;
   color: var(--text-3);
+}
+
+/* شعار العنوان في صفحة العمل (كالسينما): الاسم نصًا حتى يُحمَّل الشعار، ثم للقارئ وحده */
+.v35 .an-mark {
+  position: relative;
+}
+.v35 .an-mark-logo {
+  display: block;
+  max-width: min(100%, 260px);
+  max-height: 64px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: right center;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.45));
+}
+.v35 .an-mark.has-logo h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.v35 .an-mark:not(.has-logo) .an-mark-logo {
+  display: none;
+}
+
+/* «آخر المشاهدات»: الاسم وبجانبه ⋮ */
+.v35 .an-cw .cw-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.v35 .an-cw .cw-name .an-cw-title {
+  flex: 1;
+  min-width: 0;
 }

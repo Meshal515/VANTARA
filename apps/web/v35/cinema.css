@@ -539,6 +539,17 @@
   font-size: 12px;
   color: var(--text-3);
 }
+/* الاسم وبجانبه ⋮ (المفضلة، قائمتي، الحذف) */
+.v35 .cn-wide .cw-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.v35 .cn-wide .cw-name .cn-wide-title {
+  flex: 1;
+  min-width: 0;
+}
 
 /* قائمة IMDb: ثلاثة صفوف في كل عمود، تمرير أفقي */
 .v35 .cn-chart-grid {

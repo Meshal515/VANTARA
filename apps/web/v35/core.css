@@ -2077,6 +2077,25 @@ html,
   margin-inline-start: auto;
   color: var(--accent-text);
 }
+/* ⋮ بجانب اسم بطاقة «آخر المشاهدات» (الأنمي والسينما): صغير هادئ، ولمسه واسع */
+.v35 .cw-more {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.v35 .cw-more:active {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
 .v35 .sheet-item--danger,
 .v35 .sheet-item--danger .icon {
   color: var(--danger);

@@ -1,0 +1,40 @@
+import { parseHTML } from 'linkedom';
+import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('./motion.js', () => ({ pop() {}, progressFill() {}, reduced: () => true, revealIn() {}, stripIn() {} }));
+vi.mock('../lib/anime-engine.js', async (original) => ({ ...await original(), available: () => false, on: () => () => {} }));
+const { createCinema } = await import('./cinema.js');
+
+afterEach(() => { vi.unstubAllGlobals(); });
+
+it('series continue-watching cards get ⋮ beside the title: favorite, list, remove — without opening the work', () => {
+  const { window, document } = parseHTML('<html><body><main><section id="cinemaLibrary"></section></main></body></html>');
+  vi.stubGlobal('window', window); vi.stubGlobal('document', document);
+  vi.stubGlobal('requestAnimationFrame', (fn) => setTimeout(fn, 0));
+  vi.stubGlobal('Image', function () { return document.createElement('img'); });
+  const store = new Map();
+  const key = 'vantara.cinema.watch.v1.user.u1';
+  store.set(key, JSON.stringify({ tt0903747: { id: 'tt0903747', type: 'series', title: 'Breaking Bad', poster: 'p.jpg', season: 2, episode: 3, at: 5, episodes: {} } }));
+  vi.stubGlobal('localStorage', { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) });
+  const root = document.querySelector('main');
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const sheet = document.createElement('div');
+  const sync = { user: { userId: 'u1' }, rows: () => [], enqueue: vi.fn() };
+  const deps = { root, q: (id) => root.querySelector(`#${id}`), el, toast: vi.fn(), openSheet: vi.fn((build, opts) => { expect(opts).toEqual({ tone: 'cinema' }); sheet.replaceChildren(); build(sheet); }), closeSheet: vi.fn(), showPage: vi.fn(), currentPage: () => 'library', sync, readKv: async () => null, writeKv: async () => {} };
+  const cinema = createCinema(deps);
+  cinema.renderLibrary();
+  const card = root.querySelector('.cn-wide');
+  expect(card.tagName).toBe('DIV');
+  expect(card.getAttribute('role')).toBe('button');
+  const more = card.querySelector('.cw-name .cw-more');
+  more.dispatchEvent(new window.Event('click', { bubbles: true }));
+  expect(deps.showPage).not.toHaveBeenCalled();
+  expect([...sheet.querySelectorAll('.sheet-item')].map((b) => b.dataset.key)).toEqual(['favorite', 'list', 'remove']);
+  sheet.querySelector('[data-key="favorite"]').onclick();
+  expect(sync.enqueue).toHaveBeenCalledWith('favorite.set', expect.objectContaining({ seriesRef: 'cinema:tt0903747', member: true }));
+  sheet.querySelector('[data-key="list"]').onclick();
+  expect(sync.enqueue).toHaveBeenCalledWith('library.add', expect.objectContaining({ seriesRef: 'cinema:tt0903747' }));
+  sheet.querySelector('[data-key="remove"]').onclick();
+  expect(sync.enqueue).toHaveBeenCalledWith('view.remove', { seriesRef: 'cinema:tt0903747' });
+  expect(JSON.parse(store.get(key))).toEqual({});
+  expect(root.querySelector('.cn-wide')).toBeNull();
+});
