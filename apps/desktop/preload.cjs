@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   showPlayer:call('show-player'),
   playerViewport:call('player-viewport'),
   playerFullscreen:call('player-fullscreen'),
+  playerOverlay:call('player-overlay'),
   startPlayback: call('start-playback'),
   stopPlayback: call('stop-playback'),
   playbackCommand: call('playback-command'),
@@ -16,6 +17,12 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   openUpdatePage: call('open-update-page'),
   downloadUpdate: call('download-update'),
   applyUpdate: call('apply-update'),
+  onOverlayCommand(callback) {
+    if (typeof callback !== 'function') throw new TypeError('مستمع غير صالح');
+    const receive = (_event, value) => callback(value);
+    ipcRenderer.on('vantara:overlay-command', receive);
+    return () => ipcRenderer.removeListener('vantara:overlay-command', receive);
+  },
   onEvent(callback) {
     if (typeof callback !== 'function') throw new TypeError('مستمع غير صالح');
     const receive = (_event, value) => callback(value);

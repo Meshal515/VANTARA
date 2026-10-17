@@ -22,6 +22,7 @@ const profileReady=portable?migratePortableProfile(previousProfile,portableProfi
 let window;
 let services;
 let videoHost;
+let overlay=null;
 let playbackSession=null;
 let quitting = false;
 // تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
@@ -121,6 +122,13 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     scaleFactor:bounds=>screen.getDisplayMatching(bounds).scaleFactor,
     onFailure:session=>{publish({type:'playback/error',session,message:'أغلقت نافذة الفيديو المدمجة؛ اختر مصدرًا من جديد'});void services?.stopPlayback({session});},
   });
+  // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
+  if(videoHost){
+    const {createPlayerOverlay}=require('./player-overlay.cjs');
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+      onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
+    ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
+  }
   services = createDesktopServices({
     userData: app.getPath('userData'),
     binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
@@ -161,19 +169,27 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
   register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
   register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
-  register('player-viewport',args=>videoHost?.viewport(args)??false);
+  register('player-viewport',args=>{overlay?.viewport(args);return videoHost?.viewport(args)??false;});
+  register('player-overlay',args=>{
+    if(!overlay)return false;
+    if(args?.open===true)return overlay.open(args);
+    if(args?.close===true){overlay.close();return true;}
+    return overlay.state(args);
+  });
   register('player-fullscreen',({enabled}={})=>{if(typeof enabled!=='boolean')throw new Error('طلب ملء الشاشة غير صالح');window.setFullScreen(enabled);return true;});
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: windowIcon,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--vantara-version=${require('./package.json').version}`], sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
-  window.on?.('resize',()=>videoHost?.resize());
-  window.on?.('move',()=>videoHost?.resize());
-  window.on?.('minimize',()=>videoHost?.hide());
-  window.on?.('restore',()=>videoHost?.show());
+  window.on?.('resize',()=>{videoHost?.resize();overlay?.place();});
+  window.on?.('move',()=>{videoHost?.resize();overlay?.place();});
+  window.on?.('minimize',()=>{videoHost?.hide();overlay?.place();});
+  window.on?.('restore',()=>{videoHost?.show();overlay?.place();});
+  window.on?.('enter-full-screen',()=>overlay?.place());
+  window.on?.('leave-full-screen',()=>overlay?.place());
   window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{
-    if(isMainFrame){videoHost?.hide();if(playbackSession)void services.stopPlayback({session:playbackSession});}
+    if(isMainFrame){videoHost?.hide();overlay?.close();if(playbackSession)void services.stopPlayback({session:playbackSession});}
   });
   window.webContents.session?.webRequest?.onHeadersReceived?.({urls:['https://vantara-sync.ngm-309.workers.dev/*']},(details,callback)=>{
     const headers=Object.fromEntries(Object.entries(details.responseHeaders??{}).filter(([key])=>key.toLowerCase()!=='access-control-allow-origin'));
@@ -234,5 +250,6 @@ app.on('before-quit', event => {
   if (quitting || !services) return;
   event.preventDefault(); quitting = true;
   for (const popup of settingsWindows) popup.destroy();
+  overlay?.destroy();
   Promise.resolve(services.close()).catch(() => {}).finally(() => app.quit());
 });

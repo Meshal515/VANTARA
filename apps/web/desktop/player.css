@@ -43,3 +43,7 @@
 .desktop-player-skip{position:absolute;right:0;border:1px solid #ffffff30!important;border-radius:28px!important;width:auto!important;padding:10px 18px;background:#ffffff12!important;direction:rtl}
 .desktop-player-skip[hidden],.desktop-player-tools button[hidden]{display:none}
 @media(max-width:800px){.desktop-player-transport{padding-top:46px}.desktop-player-tools{top:0}.desktop-player-skip{top:0}.desktop-player-settings select{min-width:130px}}
+/* وضع الطبقة (player-overlay.cjs): الأدوات ترسمها نافذة شفافة فوق الفيديو بتصميم الـAPK،
+   فالفيديو يملأ المشغل كله كما في الهاتف، والصفوف أعلاه احتياط فقط حين تتعذر الطبقة. */
+.desktop-player.desktop-player--overlay>header,.desktop-player.desktop-player--overlay .desktop-player-controls{display:none}
+.desktop-player.desktop-player--overlay .desktop-player-video{position:absolute;inset:0;min-height:0}

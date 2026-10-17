@@ -1093,8 +1093,10 @@
     font-size: 12.5px;
   }
 }
+/* الشاشات الكبيرة: لوحة المصادر تبقى بعرض قراءة مريح (مثل 1200px) والصورة تأخذ الباقي؛
+   قلب العمودين كان يمد المصادر بعرض الشاشة كلها ويحشر الصورة في 600px */
 @media (min-width: 1500px) {
   .v35 .an-pick {
-    grid-template-columns: minmax(0, 1fr) 600px;
+    grid-template-columns: clamp(480px, 32vw, 600px) minmax(0, 1fr);
   }
 }
