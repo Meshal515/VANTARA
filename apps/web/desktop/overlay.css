@@ -35,18 +35,91 @@ html.desktop-overlay .pp-status[data-error='true'] {
 html.desktop-overlay .pp-status:empty {
   display: none;
 }
-/* ورقة السيرفرات المشتركة (v35) تملأ ارتفاع الورقة */
-html.desktop-overlay .pp-sheet.pp-sheet--servers {
-  max-height: 100%;
-  height: 100%;
+/* الأوراق كما في الـAPK: لوح عائم مستدير يمين الشاشة، صفوفه بطاقات */
+@media (min-width: 600px) {
+  html.desktop-overlay .pwa-player .pp-sheet {
+    top: 24px;
+    bottom: 24px;
+    right: 24px;
+    left: auto;
+    width: min(38%, 460px);
+    min-width: 340px;
+    max-height: none;
+    box-sizing: border-box;
+    padding: 22px 18px;
+    border-radius: 26px;
+    border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  html.desktop-overlay .pwa-player .pp-sheet__body {
+    overflow-y: auto;
+    min-height: 0;
+    scrollbar-width: thin;
+  }
+  html.desktop-overlay .pwa-player .pp-scrim {
+    background: rgba(0, 0, 0, 0.35);
+  }
 }
-html.desktop-overlay .pp-sheet--servers .pp-sheet__head,
-html.desktop-overlay .pp-sheet--servers .pp-sheet__grip {
-  display: none;
+html.desktop-overlay .pp-route {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  text-align: start;
 }
-html.desktop-overlay .pp-sheet--servers .pp-sheet__body {
-  padding: 0;
-  height: 100%;
+html.desktop-overlay .pp-route:hover {
+  background: var(--surface-3);
+}
+html.desktop-overlay .pp-route.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+html.desktop-overlay .pp-route.is-current strong {
+  color: var(--accent-text);
+}
+html.desktop-overlay .pp-route__text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+html.desktop-overlay .pp-route__text strong {
+  font-size: 16px;
+}
+html.desktop-overlay .pp-route__text small {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html.desktop-overlay .pp-route__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 13px;
+  color: var(--text-2);
+  background: none;
+}
+html.desktop-overlay .pp-route__chip {
+  font-style: normal;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 html.desktop-overlay .pp-net {
   display: grid;

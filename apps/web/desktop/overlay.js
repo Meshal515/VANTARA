@@ -7,7 +7,6 @@
  * هذه الصفحة عرض فقط: تُرسم من «الحالة» التي يرسلها player.js، وكل لمسة أمرٌ يعود إليه.
  * لا تشغيل هنا ولا شبكة؛ الفيديو نافذة mpv الأصلية تحت هذه النافذة الشفافة.
  */
-import { createServerSheet } from '../v35/server-sheet.js';
 
 const HIDE_AFTER_MS = 3500;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -58,7 +57,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const cmd = (name, value) => { void Promise.resolve(send(value === undefined ? { name } : { name, value })).catch(() => {}); };
 
   // v35: أنماط ورقة السيرفرات المشتركة مربوطة به (مشغل الويب يضيفه كذلك في غرفة الأصدقاء)
-  const root = el('div', 'pwa-player v35');
+  const root = el('div', 'pwa-player');
   root.dir = 'ltr';
   const gestures = el('div', 'pp-gestures');
   const spinner = el('div', 'pp-spinner'); spinner.innerHTML = '<i></i>';
@@ -214,17 +213,58 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     return row;
   };
 
+  // ورقة السيرفرات بأسلوب الـAPK (routeRow في PlayerActivity.kt): «شغّل الأفضل»، ثم صفوف
+  // مجمّعة بالجودة: اسم المصدر، سطر التفاصيل، نقطة الحالة، وشارة «يعمل الآن».
   let serverUi = null;
+  const ICON_SPARK = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 3 14 10l7 2-7 2-2 7-2-7-7-2 7-2Z"/></svg>';
+  const bucket = (q) => (!q ? null : q >= 2000 ? 2160 : q >= 1000 ? 1080 : q >= 700 ? 720 : q >= 460 ? 480 : 360);
   function showServers() {
-    const body = openSheet('servers', 'السيرفرات', null, () => {}, 'pp-sheet--servers');
-    serverUi = createServerSheet(body, { el, title: state.title ?? 'VANTARA', kicker: state.movie ? 'فيلم' : `الحلقة ${state.episode ?? ''}`,
-      onBack: () => closeSheet(), onPick: (route) => { closeSheet(); cmd('pick', route.id); }, onBest: () => { closeSheet(); cmd('best'); } });
+    const body = openSheet('servers', 'السيرفرات', state.movie ? 'فيلم' : `الحلقة ${state.episode ?? ''}`, () => {}, 'pp-sheet--routes');
+    serverUi = { body };
     paintServers();
     cmd('servers-open');
   }
   function paintServers() {
-    if (!serverUi || !state.routes) return;
-    serverUi.update({ routes: state.routes, current: state.currentRoute ?? null, settled: !!state.routesDone, status: { text: state.routesDone ? '' : 'نجلب السيرفرات…', spin: !state.routesDone } });
+    if (!serverUi) return;
+    const body = serverUi.body, routes = state.routes ?? [];
+    const keep = body.scrollTop;
+    body.replaceChildren();
+    const best = el('button', 'pp-pill-btn pp-pill-btn--primary pp-pill-btn--wide');
+    best.type = 'button'; best.innerHTML = `${ICON_SPARK}<span>شغّل الأفضل</span>`;
+    best.onclick = () => { closeSheet(); cmd('best'); };
+    const ready = routes.filter((r) => r.state === 'READY').length;
+    body.append(best, el('p', 'pp-note', !state.routesDone ? `يتجهّز… ${ready} جاهز حتى الآن` : ready ? `${ready} سيرفر جاهز` : 'لم يجهز أي سيرفر لهذه الحلقة'));
+    const groups = new Map();
+    for (const r of routes.filter((x) => x.state !== 'UNAVAILABLE')) {
+      const key = bucket(r.quality) ? `${bucket(r.quality)}p` : 'جودة غير محددة';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    const order = (k) => (k.endsWith('p') ? -parseInt(k, 10) : 0);
+    const row = (r) => {
+      const current = (r.candidates ?? []).includes(state.candidate) || r.id === state.candidate;
+      const playable = !current && r.state === 'READY';
+      const b = el(playable ? 'button' : 'div', `pp-route${current ? ' is-current' : ''}`);
+      if (playable) { b.type = 'button'; b.onclick = () => { closeSheet(); cmd('pick', r.id); }; }
+      const text = el('span', 'pp-route__text');
+      const name = el('strong', null, r.sourceName ?? r.code ?? 'مصدر'); name.dir = 'auto';
+      const detail = el('small', null, [r.server && r.server !== r.sourceName ? r.server : null, r.label].filter(Boolean).join(' · ')); detail.dir = 'auto';
+      text.append(name, detail);
+      const tone = current ? 'accent' : r.state === 'READY' ? 'ok' : r.state === 'RESOLVING' ? 'warn' : 'off';
+      const st = el('span', `pp-route__state pp-tile--${tone}`);
+      st.append(el('i', `pp-dot${r.state === 'RESOLVING' || (current && !state.ready) ? ' pp-dot--pulse' : ''}`), el('span', null, current ? (state.ready ? 'يعمل الآن' : 'يبدأ…') : r.state === 'READY' ? 'جاهز' : r.state === 'RESOLVING' ? 'يتجهّز…' : 'غير متاح'));
+      if (r.variant === 'DUB') st.prepend(el('em', 'pp-route__chip', 'مدبلج'));
+      b.append(text, st);
+      if (r.reason) b.title = r.reason;
+      return b;
+    };
+    for (const [label, list] of [...groups.entries()].sort((a, b) => order(a[0]) - order(b[0]))) {
+      body.append(el('div', 'pp-section', label));
+      for (const r of list.sort((a, b) => ['READY', 'RESOLVING'].indexOf(a.state) - ['READY', 'RESOLVING'].indexOf(b.state))) body.append(row(r));
+    }
+    const dead = routes.filter((r) => r.state === 'UNAVAILABLE');
+    if (dead.length) { body.append(el('div', 'pp-section', `غير متاح (${dead.length})`)); dead.forEach((r) => body.append(row(r))); }
+    body.scrollTop = keep;
   }
   function showEpisodes() {
     const total = Number(state.total) || 0;
