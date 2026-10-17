@@ -43,6 +43,18 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const close=async()=>{const id=session;if(!id)return;engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action,'aria-label':label,title:label});b.onclick=fn;return b;};
   const iconButton=(label,action,icon,fn)=>{const b=button(label,action,fn);b.innerHTML=action==='fullscreen'?'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>':glyph(icon,{size:24});return b;};
+  // The native mpv child window hides DOM mounted in the main renderer.
+  // Send the live room roster to the transparent controls window instead.
+  const overlayPeople=()=>{
+    const hub=session&&engine.roomHub?.({session});
+    const room=hub?.session?.room;
+    if(!room||room.status==='closed')return [];
+    return (room.roster??[]).slice(0,24).map(r=>{
+      const person=hub.person?.(r.userId);
+      return {userId:String(r.userId??''),name:String(r.name||person?.displayName||'صديق'),
+        avatarKey:r.avatarKey||person?.avatarKey||null,state:String(r.state||'preparing'),host:!!r.host};
+    });
+  };
   const overlaySnapshot=()=>{
     const info=playerInfo??{},server=info.server??null,movie=info.section==='cinema'&&!(Number(info.total)>1);
     const code=server?.code??null,q=Number(server?.quality)||null;
@@ -50,7 +62,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
-      skip:skipLabel,net:netInfo,synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
+      skip:skipLabel,net:netInfo,people:overlayPeople(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
   const switchTo=async(id,find)=>{try{const selected=await find();if(session===id&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id)tell(error.message,true);}};
   const overlayCommand=message=>{
@@ -62,6 +74,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'close':void close();break;
       case 'fullscreen':panel?.querySelector('[data-action="fullscreen"]')?.click();break;
       case 'room':engine.openPlayerRoom?.({session:id});break;
+      case 'settings':showSettings();break;
       case 'fit':if(value==='fit'||value==='fill'){fitValue=value;void command('video-fit',value);link?.push(true);}break;
       case 'volume':if(Number.isFinite(value)){volumeValue=Math.max(0,Math.min(100,Math.round(value)));void command('volume',volumeValue);link?.push(true);}break;
       case 'speed':if(Number.isFinite(value)){speedValue=value;void command('speed',value);link?.push(true);}break;
@@ -202,7 +215,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     entryView=openDesktopRoomEntry({document:doc,...event});
   });
   const noticeListener=engine.addListener?.('desktopNotice',event=>{if(event.session===session)tell(event.message,true);});
-  const keyboard=e=>{if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','Escape'].includes(e.key))e.preventDefault();if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
+  const keyboard=e=>{if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','F11','Escape'].includes(e.key))e.preventDefault();if(e.key==='F11'){panel.querySelector('[data-action="fullscreen"]')?.click();return;}if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
   g.addEventListener?.('keydown',keyboard);g.addEventListener?.('resize',viewport);
   return {close,dispose(){entryView?.destroy();void close();off?.();void routeListener?.remove?.();void preparedListener?.remove?.();void togetherListener?.remove?.();void noticeListener?.remove?.();void entryListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
 }
