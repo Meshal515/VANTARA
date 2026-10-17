@@ -875,7 +875,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       .map((e) => workFromRef(e.ref, e.title, e.cover));
   }
   function refreshFriendsHero() {
-    const next = friendsReading().filter((w) => w.coverImage?.large).slice(0, 6);
+    // أصدقاء لم يقرؤوا شيئًا خلال أسبوعين لا يتركون البانر فراغًا: الرائج مكانهم.
+    const withCover = (list) => list.filter((w) => w.coverImage?.large && !isAdult(w));
+    const friends = withCover(friendsReading());
+    const next = (friends.length ? friends : withCover(state.home.trending ?? [])).slice(0, 6);
     if (next.length === state.heroItems.length && next.every((w, i) => w.id === state.heroItems[i]?.id)) return;
     state.heroItems = next;
     renderHero();
@@ -978,6 +981,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function renderHome() {
+    if (!state.heroItems.length) refreshFriendsHero();
     paintIndex();
     const specs = [];
     const history = historyWorks();
