@@ -95,6 +95,23 @@ export function chartLines(items, genre = (g) => g) {
   const rated = list.length > 0 && list.every((m) => Number.isFinite(m.rating) && m.rating > 0);
   return list.map((m) => [rated ? `★ ${m.rating.toFixed(1)}` : null, m.year, (m.genres ?? []).slice(0, 2).map(genre).join('، ')].filter(Boolean).join(' · '));
 }
+/**
+ * صورة لكل نوع من أعمال الرئيسية نفسها: أول عمل مشهور من النوع له خلفية، ولا يتكرر
+ * عمل في بلاطتين ما وُجد غيره. ما لا يجد له عملًا يبقى خارج الخريطة (يُجلب لاحقًا).
+ */
+export function genreCovers(genres, lists) {
+  const pool = lists.flat().filter((m) => m?.background);
+  const used = new Set();
+  const out = new Map();
+  for (const g of genres) {
+    const fits = pool.filter((m) => (m.genres ?? []).includes(g));
+    const pick = fits.find((m) => !used.has(m.id)) ?? fits[0];
+    if (!pick) continue;
+    used.add(pick.id);
+    out.set(g, pick);
+  }
+  return out;
+}
 export const seasonsAr = (n) => (n === 1 ? 'موسم واحد' : n === 2 ? 'موسمان' : n <= 10 ? `${n} مواسم` : `${n} موسمًا`);
 
 export function createCinema(deps) {
@@ -493,15 +510,32 @@ export function createCinema(deps) {
     return s;
   }
 
-  function genreGrid(onPick) {
+  // صور الأنواع التي لم تجد عملًا في الرئيسية: تُجلب مرة واحدة في الجلسة من قائمة النوع
+  const genreArt = new Map();
+  /** «حسب النوع»: بلاطات بصورة عمل مشهور من النوع، تدرّج داكن، والاسم العربي وحده. */
+  function genreGrid(onPick, lists = [], type = 'movie') {
     const s = el('section', 'cn-rail');
     s.dataset.reveal = '';
     const head = el('header', 'cn-rail-head');
     head.append(el('h2', null, 'حسب النوع'));
     const grid = el('div', 'cn-genres');
+    const covers = genreCovers(GENRES, lists);
     for (const g of GENRES) {
       const b = button('cn-genre', '', () => onPick(g));
-      b.append(el('b', null, genreAr(g)), text('span', null, g, 'ltr'));
+      const art = el('span', 'cn-genre-art');
+      const put = (m) => m?.background && art.replaceChildren(image(m.background));
+      b.append(art, el('b', null, genreAr(g)));
+      const known = covers.get(g) ?? genreArt.get(g);
+      if (known) put(known);
+      else {
+        // سلسلة واحدة لكل نوع: الطلبات لا تتكرر مع كل رسم للرئيسية
+        if (!genreArt.has(`${g}:p`)) genreArt.set(`${g}:p`, catalog(type, 'top', { genre: g }).then((list) => list.find((m) => m.background) ?? null, () => null));
+        void genreArt.get(`${g}:p`).then((m) => {
+          if (!m) return;
+          genreArt.set(g, m);
+          put(m);
+        });
+      }
       grid.append(b);
     }
     s.append(head, grid);
@@ -690,7 +724,8 @@ export function createCinema(deps) {
     if (wants('movie') && data.topMovies?.length) page.append(chart('أعلى الأفلام تقييمًا', data.topMovies));
     if (wants('movie') && data.fresh?.length) page.append(rail(`جديد ${new Date().getFullYear()}`, data.fresh, posterCard, { sub: 'صدرت هذه السنة' }));
     if (wants('series') && data.topSeries?.length) page.append(chart('أعلى المسلسلات تقييمًا', data.topSeries));
-    page.append(genreGrid((g) => openDiscover({ genre: g, type: k === 'series' ? 'series' : 'movie' })));
+    const genreLists = [data.movies, data.series, data.topMovies, data.topSeries, data.fresh].map((l) => l ?? []);
+    page.append(genreGrid((g) => openDiscover({ genre: g, type: k === 'series' ? 'series' : 'movie' }), genreLists, k === 'series' ? 'series' : 'movie'));
     page.append(el('p', 'cn-credit', 'بيانات الأعمال من Cinemeta · القصص معرّبة · التشغيل من المصادر العربية'));
     q('cinemaHome').replaceChildren(page);
     return page;

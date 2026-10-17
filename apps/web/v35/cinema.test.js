@@ -52,3 +52,21 @@ describe('قائمة IMDb: التقييم في سطر عمله، للكل أو �
     expect(chartLines([])).toEqual([]);
   });
 });
+describe('بلاطات الأنواع: صورة من أعمال الرئيسية', () => {
+  it('أول عمل له خلفية من النوع، ولا يتكرر عمل ما وُجد غيره', async () => {
+    const { genreCovers } = await import('./cinema.js');
+    const a = { id: 'a', background: 'A', genres: ['Action', 'Drama'] };
+    const b = { id: 'b', background: 'B', genres: ['Drama'] };
+    const noArt = { id: 'c', background: null, genres: ['Horror'] };
+    const covers = genreCovers(['Action', 'Drama', 'Horror', 'Comedy'], [[a], [noArt, b, null]]);
+    expect(covers.get('Action')).toBe(a);
+    expect(covers.get('Drama')).toBe(b);
+    expect(covers.has('Horror')).toBe(false);
+    expect(covers.has('Comedy')).toBe(false);
+  });
+  it('عمل وحيد للنوعين: يتكرر خيرًا من بلاطة بلا صورة', async () => {
+    const { genreCovers } = await import('./cinema.js');
+    const a = { id: 'a', background: 'A', genres: ['Action', 'Drama'] };
+    expect(genreCovers(['Action', 'Drama'], [[a]]).get('Drama')).toBe(a);
+  });
+});
