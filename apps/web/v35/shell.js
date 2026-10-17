@@ -13,6 +13,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { getAddonRuntime } from '../addons/runtime.js';
@@ -226,28 +227,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     t._x = setTimeout(() => t.classList.remove('show'), ms);
   }
 
-  let sheetClose = null;
-  /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
-  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. `full`: صفحة كاملة لا ورقة. */
-  function openSheet(build, { tone = null, full = false } = {}) {
-    closeSheet();
-    const body = q('sheetBody');
-    body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
-    body.className = 'sheet';
-    if (tone) q('sheet').dataset.tone = tone;
-    // صفحة كاملة (اختيار السيرفر والجودة): نفس الطبقة وزر الرجوع يغلقها
-    q('sheet').classList.toggle('sheet-backdrop--full', full);
-    sheetClose = build(body) ?? null;
-    q('sheet').classList.add('show');
-  }
-  function closeSheet() {
-    if (!q('sheet').classList.contains('show')) return false;
-    q('sheet').classList.remove('show');
-    delete q('sheet').dataset.tone;
-    sheetClose?.();
-    sheetClose = null;
-    return true;
-  }
+  // الأزرار داخل ورقة السيرفرات لها pointer-events:auto. إزالة .show
+  // وحدها لا تعطل hit testing للأبناء؛ وحدة التحكم تخفي الطبقة كلها.
+  const { open: openSheet, close: closeSheet } = createSheetController(q('sheet'), q('sheetBody'));
   function sheetItem(icon, label, run, { pressed, danger } = {}) {
     const b = el('button', `sheet-item${danger ? ' sheet-item--danger' : ''}`);
     b.type = 'button';
