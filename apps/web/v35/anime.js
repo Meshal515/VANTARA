@@ -1728,7 +1728,7 @@ export function createAnime(deps) {
     saveWatch(all);
     if (signedIn()) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
     const ref = `anime:${w.id}`;
-    for (const node of deps.root?.querySelectorAll?.('.an-cw, .an-hr') ?? []) {
+    for (const node of deps.root?.querySelectorAll?.('.an-cw, .an-hc') ?? []) {
       if (node.dataset.ref !== ref) continue;
       const strip = node.closest('.an-rail');
       node.remove();
@@ -1765,26 +1765,61 @@ export function createAnime(deps) {
     });
   }
 
-  function historyRow(w) {
-    const r = el('div', 'an-hr');
-    r.dataset.ref = `anime:${w.id}`;
-    const info = el('div', 'an-hr-info');
-    const t = el('b', 'an-hr-title', w.title);
+  /**
+   * «آخر المشاهدات» في مكتبتي بهوية الأنمي: لقطة الحلقة نفسها عريضة بتوهّج لون العمل،
+   * شارة الحلقة ووقتها، زر «تابع» زجاجي، شريط التقدّم مضيئًا، والبوستر يطلّ من الزاوية.
+   * اللقطة من ani.zip (مخبّأة) تحلّ محل البنر متى وصلت؛ بلا لقطة يبقى البنر أو الغلاف.
+   */
+  function historyCard(w) {
+    const e = w.episodes?.[w.episode] ?? {};
+    const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
+    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — الحلقة ${w.episode}`);
+    c.dataset.ref = `anime:${w.id}`;
+    tint(c, w.color);
+    const stage = el('div', 'an-hc-stage');
+    const wide = w.banner ?? w.poster ?? null;
+    const still = image(wide, 'an-img an-hc-still', { position: w.banner ? 'center' : 'center 22%' });
+    stage.append(still, el('span', 'an-hc-shade'));
+    const chip = el('span', 'an-hc-chip');
+    chip.append(el('small', null, 'الحلقة'), el('b', null, String(w.episode)));
+    const when = el('span', 'an-hc-when', relativeAr(w.at));
+    const play = el('span', 'an-hc-play');
+    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? 'التالية' : 'تابع'}</span>`;
+    const bar = el('span', 'an-hc-bar');
+    const fill = el('i');
+    fill.style.width = `${(ratio * 100).toFixed(1)}%`;
+    bar.append(fill);
+    stage.append(chip, when, play, bar);
+
+    const foot = el('div', 'an-hc-foot');
+    const poster = el('span', 'an-hc-poster');
+    poster.append(image(w.poster));
+    const info = el('div', 'an-hc-info');
+    const t = el('b', 'an-hc-title', w.title);
     t.dir = 'auto';
     const name = el('span', 'cw-name');
     name.append(t, moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
-    const when = el('span', 'an-when');
-    when.innerHTML = `${glyph('clock', { size: 15 })}<span>${relativeAr(w.at)}</span>`;
-    info.append(name, el('span', 'an-hr-ep', `الحلقة ${w.episode}`), el('span', 'an-hr-duration'), when);
-    const art = el('div', 'an-hr-art');
-    art.append(image(w.poster));
-    const x = button('an-hr-x', glyph('trash'), (ev) => {
-      ev.stopPropagation();
-      removeWatch(w);
-    }, 'احذف من السجل');
-    r.append(art, info, x);
-    r.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color });
-    return r;
+    const meta = el('span', 'an-hc-meta');
+    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? `الحلقة ${w.episode}`), el('span', 'an-hc-watched'));
+    info.append(name, meta);
+    // البوستر في زاوية النهاية: بداية شريط التقدّم (جهة البداية) تبقى ظاهرة
+    foot.append(info, poster);
+    c.append(stage, foot);
+    c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
+
+    // لقطة الحلقة نفسها حين تصل (لا وميض: تُبدَّل بعد أن تُحمَّل)
+    void loadAnimeArt(w.id).then((art) => {
+      const shot = episodeStill({}, w.episode, art);
+      if (!shot.still || !c.isConnected) return;
+      const pre = new Image();
+      pre.onload = () => {
+        still.src = shot.src;
+        still.style.objectPosition = 'center';
+        c.classList.add('has-still');
+      };
+      pre.src = shot.src;
+    });
+    return c;
   }
 
   function renderLibrary() {
@@ -1843,8 +1878,8 @@ export function createAnime(deps) {
             toast('مُسح سجل المشاهدة');
           }),
         );
-        const list = el('div', 'an-hr-list');
-        list.append(...items.map(historyRow));
+        const list = el('div', 'an-hc-list');
+        list.append(...items.map(historyCard));
         nodes.push(list);
       }
     } else {
@@ -1875,15 +1910,13 @@ export function createAnime(deps) {
     if (state.libraryTab === 'history' && signedIn()) void deps.sync.insights(historyOwner).then((data) => {
       if (!host.isConnected || state.libraryTab !== 'history' || currentUser() !== historyOwner || !data?.content) return;
       const times = new Map(data.content.map((item) => [item.seriesRef, item.activeMs]));
-      for (const row of host.querySelectorAll('.an-hr[data-ref]')) {
+      for (const row of host.querySelectorAll('.an-hc[data-ref]')) {
         const ms = times.get(row.dataset.ref);
         if (ms < 60000) continue;
-        const span = row.querySelector('.an-hr-duration');
-        span.innerHTML = glyph('clock', { size: 15 });
-        span.append(document.createTextNode(insightDuration(ms)));
+        row.querySelector('.an-hc-watched').textContent = `شاهدت ${insightDuration(ms)}`;
       }
     });
-    stripIn([...host.querySelectorAll('.an-hr, .an-card')].slice(0, 10));
+    stripIn([...host.querySelectorAll('.an-hc, .an-card')].slice(0, 10));
   }
   /** صحة كل مصدر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي، والكتالوج المحلوب. */
   async function renderSourcesHealth(box) {

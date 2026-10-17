@@ -54,7 +54,15 @@ it('continue-watching rows get a ⋮ beside the title: list and remove work, fav
   const key = 'vantara.anime.watch.v2.guest';
   store.set(key, JSON.stringify({ 5: { id: 5, title: 'Frieren', poster: 'p.jpg', episode: 3, at: 1, episodes: { 3: { position: 60_000, duration: 1_440_000 } } } }));
   anime.renderLibrary();
-  const row = root.querySelector('.an-hr');
+  const row = root.querySelector('.an-hc');
+  // بطاقة بهوية الأنمي: لقطة عريضة، شارة الحلقة، الوقت، «تابع»، التقدّم، البوستر — و⋮ بدل سلة الحذف
+  expect(row.querySelector('.an-hc-chip').textContent).toBe('الحلقة3');
+  expect(row.querySelector('.an-hc-play').textContent).toBe('تابع');
+  expect(row.querySelector('.an-hc-bar i').style.width).toBe('4.2%');
+  expect(row.querySelector('.an-hc-left').textContent).toBe('باقي 23 د');
+  expect(row.querySelector('.an-hc-poster img').getAttribute('src')).toBe('p.jpg');
+  expect(row.querySelector('[aria-label="احذف من السجل"]')).toBeNull();
+  expect(root.querySelector('.an-clear')).toBeTruthy();
   const more = row.querySelector('.cw-name .cw-more');
   expect(more).toBeTruthy();
   more.onclick({ stopPropagation() {}, preventDefault() {} });
@@ -67,7 +75,7 @@ it('continue-watching rows get a ⋮ beside the title: list and remove work, fav
   expect(sheet.querySelector('[data-key="list"]').getAttribute('aria-pressed')).toBe('true');
   sheet.querySelector('[data-key="remove"]').onclick();
   expect(JSON.parse(store.get(key))).toEqual({});
-  expect(root.querySelector('.an-hr')).toBeNull();
+  expect(root.querySelector('.an-hc')).toBeNull();
   expect(deps.closeSheet).toHaveBeenCalled();
 });
 
@@ -77,7 +85,7 @@ it('signed in: the ⋮ sheet adds to favorites through the account', () => {
   deps.sync.insights = () => new Promise(() => {});
   store.set('vantara.anime.watch.v2.user.u1', JSON.stringify({ 5: { id: 5, title: 'Frieren', poster: 'p.jpg', episode: 3, at: 1, episodes: {} } }));
   anime.renderLibrary();
-  root.querySelector('.an-hr .cw-more').onclick({ stopPropagation() {}, preventDefault() {} });
+  root.querySelector('.an-hc .cw-more').onclick({ stopPropagation() {}, preventDefault() {} });
   expect([...sheet.querySelectorAll('.sheet-item')].map((b) => b.dataset.key)).toEqual(['favorite', 'list', 'remove']);
   sheet.querySelector('[data-key="favorite"]').onclick();
   expect(deps.sync.enqueue).toHaveBeenCalledWith('favorite.set', expect.objectContaining({ seriesRef: 'anime:5', member: true }));
