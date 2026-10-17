@@ -606,7 +606,7 @@
 }
 .v35 .cn-chart-row {
   display: grid;
-  grid-template-columns: 34px 52px 1fr auto;
+  grid-template-columns: 34px 52px 1fr;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -652,12 +652,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.v35 .cn-chart-rate {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
 }
 
 /* الأنواع: بلاطات نصية، العربي كبير والإنجليزي همس */

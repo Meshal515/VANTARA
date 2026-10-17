@@ -40,3 +40,15 @@ describe('native torrent picker readiness', () => {
     expect(ui.routeSelectable({state:'READY',probed:true})).toBe(true);
   });
 });
+describe('قائمة IMDb: التقييم في سطر عمله، للكل أو لا لأحد', () => {
+  it('كلها مقيَّمة: النجمة أول السطر', async () => {
+    const { chartLines } = await import('./cinema.js');
+    const lines = chartLines([{ rating: 8.14, year: 2026, genres: ['Drama', 'Crime', 'War'] }, { rating: 7, year: 2025 }], (g) => `«${g}»`);
+    expect(lines).toEqual(['★ 8.1 · 2026 · «Drama»، «Crime»', '★ 7.0 · 2025']);
+  });
+  it('عمل واحد بلا تقييم يُخفيه عن القائمة كلها', async () => {
+    const { chartLines } = await import('./cinema.js');
+    expect(chartLines([{ rating: 6.9, year: 2026 }, { rating: null, year: 2024, genres: ['Comedy'] }])).toEqual(['2026', '2024 · Comedy']);
+    expect(chartLines([])).toEqual([]);
+  });
+});

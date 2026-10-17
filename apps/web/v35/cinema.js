@@ -79,6 +79,16 @@ export function remainingAr(position, duration) {
   const left = Math.max(1, Math.round((duration - position) / 60_000));
   return left >= 60 ? `باقي ${Math.floor(left / 60)} س ${left % 60} د` : `باقي ${left} د`;
 }
+/**
+ * سطر قائمة IMDb تحت الاسم: «★ 8.1 · 2026 · دراما، جريمة». التقييم داخل سطر عمله
+ * (لا عمود عائم يجاور العمود التالي)، ويظهر للكل أو لا يظهر لأحد: إن غاب عن عمل
+ * واحد من القائمة لا نعرضه لبقيتها.
+ */
+export function chartLines(items, genre = (g) => g) {
+  const list = items.slice(0, 12);
+  const rated = list.length > 0 && list.every((m) => Number.isFinite(m.rating) && m.rating > 0);
+  return list.map((m) => [rated ? `★ ${m.rating.toFixed(1)}` : null, m.year, (m.genres ?? []).slice(0, 2).map(genre).join('، ')].filter(Boolean).join(' · '));
+}
 export const seasonsAr = (n) => (n === 1 ? 'موسم واحد' : n === 2 ? 'موسمان' : n <= 10 ? `${n} مواسم` : `${n} موسمًا`);
 
 export function createCinema(deps) {
@@ -458,6 +468,7 @@ export function createCinema(deps) {
     const head = el('header', 'cn-rail-head');
     head.append(el('h2', null, title), el('span', 'cn-rail-sub', 'IMDb'));
     const grid = el('ol', 'cn-chart-grid');
+    const lines = chartLines(items, genreAr);
     items.slice(0, 12).forEach((m, i) => {
       const li = el('li');
       const row = el('button', 'cn-chart-row');
@@ -465,9 +476,8 @@ export function createCinema(deps) {
       const art = el('span', 'cn-chart-art');
       art.append(image(m.poster));
       const copy = el('span', 'cn-chart-copy');
-      copy.append(text('b', null, displayTitle(m)), el('span', null, [m.year, (m.genres ?? []).slice(0, 2).map(genreAr).join('، ')].filter(Boolean).join(' · ')));
+      copy.append(text('b', null, displayTitle(m)), el('span', null, lines[i]));
       row.append(el('span', 'cn-chart-rank', String(i + 1)), art, copy);
-      if (m.rating) row.append(el('span', 'cn-chart-rate', m.rating.toFixed(1)));
       li.append(opener(row, m));
       grid.append(li);
     });
