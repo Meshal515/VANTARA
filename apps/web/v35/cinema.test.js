@@ -70,3 +70,29 @@ describe('بلاطات الأنواع: صورة من أعمال الرئيسية
     expect(genreCovers(['Action', 'Drama'], [[a]]).get('Drama')).toBe(a);
   });
 });
+describe('اكتشف: الفلاتر المتقدمة', () => {
+  const m = (id, year, rating, genres) => ({ id, year, rating, genres });
+  it('كل التصنيفات المختارة، مدى السنوات، وأقل تقييم', async () => {
+    const { applyDiscoverFilters, DISCOVER_DEFAULTS } = await import('./cinema.js');
+    const items = [m('a', 2020, 8, ['Crime', 'Drama']), m('b', 2015, 7.5, ['Crime']), m('c', 2021, null, ['Crime', 'Drama']), m('d', '2011–2019', 9, ['Drama', 'Crime'])];
+    expect(applyDiscoverFilters(items, DISCOVER_DEFAULTS).map((x) => x.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(applyDiscoverFilters(items, { ...DISCOVER_DEFAULTS, genres: ['Crime', 'Drama'] }).map((x) => x.id)).toEqual(['a', 'c', 'd']);
+    expect(applyDiscoverFilters(items, { ...DISCOVER_DEFAULTS, minRating: 7.5 }).map((x) => x.id)).toEqual(['a', 'b', 'd']);
+    expect(applyDiscoverFilters(items, { ...DISCOVER_DEFAULTS, yearFrom: 2011, yearTo: 2020 }).map((x) => x.id)).toEqual(['a', 'b', 'd']);
+  });
+  it('المصادر: الأشهر والأعلى تقييمًا بأول تصنيف، والأحدث سنة بعد سنة نزولًا', async () => {
+    const { discoverStreams, DISCOVER_DEFAULTS } = await import('./cinema.js');
+    expect(discoverStreams('movie', DISCOVER_DEFAULTS)).toEqual([{ type: 'movie', id: 'top', genre: '' }]);
+    expect(discoverStreams('series', { ...DISCOVER_DEFAULTS, sort: 'rating', genres: ['Crime', 'War'] })).toEqual([{ type: 'series', id: 'imdbRating', genre: 'Crime' }]);
+    expect(discoverStreams('movie', { ...DISCOVER_DEFAULTS, sort: 'newest', yearFrom: 2023 }, 2026).map((x) => x.genre)).toEqual(['2026', '2025', '2024', '2023']);
+    expect(discoverStreams('movie', { ...DISCOVER_DEFAULTS, sort: 'newest', yearFrom: 2020, yearTo: 2021 }, 2026).map((x) => x.id + x.genre)).toEqual(['year2021', 'year2020']);
+  });
+  it('عدد الفلاتر الفعّالة وسجل البحث (العبارة النهائية، بلا تكرار، ثمانية)', async () => {
+    const { activeFilterCount, pushRecentSearch, DISCOVER_DEFAULTS } = await import('./cinema.js');
+    expect(activeFilterCount(DISCOVER_DEFAULTS)).toBe(0);
+    expect(activeFilterCount({ ...DISCOVER_DEFAULTS, genres: ['A', 'B'], yearTo: 2020, minRating: 7, sort: 'newest' })).toBe(5);
+    expect(pushRecentSearch(['Dune', 'batman'], ' Batman ')).toEqual(['Batman', 'Dune']);
+    expect(pushRecentSearch(['x'], ' b')).toEqual(['x']);
+    expect(pushRecentSearch(Array.from({ length: 8 }, (_, i) => `t${i}`), 'new')).toHaveLength(8);
+  });
+});

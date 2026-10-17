@@ -1134,20 +1134,30 @@
   --cn-r: 6px;
   --cn-gutter: 16px;
 }
+.v35 .cn-discover.page-body {
+  /* عناصر السينما تحمل هامشها (--cn-gutter): لا هامش مضاعف، والبحث بعرض الشبكة */
+  padding-inline: 0;
+}
+.v35 .cn-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px var(--cn-gutter) 8px;
+}
 .v35 .cn-search {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 4px var(--cn-gutter) 12px;
   padding: 0 14px;
   min-height: 46px;
   border-radius: var(--cn-r);
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--text-3);
 }
 .v35 .cn-search:focus-within {
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .v35 .cn-search input {
   flex: 1;
@@ -1159,6 +1169,33 @@
   font-size: 15px;
   color: var(--text);
 }
+.v35 .cn-filter-btn {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: var(--cn-r);
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+}
+.v35 .cn-filter-btn b {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
 .v35 .cn-filters[hidden] {
   display: none;
 }
@@ -1168,6 +1205,9 @@
   padding: 4px var(--cn-gutter) 14px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* يتلاشى عند الحافتين بدل أن تُقصّ الرقاقة */
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 var(--cn-gutter), #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, transparent, #000 var(--cn-gutter), #000 calc(100% - 28px), transparent);
 }
 .v35 .cn-chips::-webkit-scrollbar {
   display: none;
@@ -1179,7 +1219,6 @@
   border: 0;
   border-radius: var(--cn-r);
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
   font: inherit;
   font-size: 13px;
   color: var(--text-2);
@@ -1188,8 +1227,93 @@
 .v35 .cn-chip.active {
   background: var(--text);
   color: var(--bg);
-  box-shadow: none;
   font-weight: 700;
+}
+/* ما قبل الكتابة: بقطع بحث المانجا نفسها، بهامش السينما */
+.v35 .cn-discover-body > .search-head,
+.v35 .cn-discover-body > .search-recent,
+.v35 .cn-discover-body > .search-trend {
+  margin-inline: var(--cn-gutter);
+}
+.v35 .cn-discover-body > .search-head:first-child {
+  margin-top: 8px;
+}
+.v35 .cn-trend {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.v35 .cn-trend .search-trend-row {
+  padding-inline: 0;
+}
+.v35 .cn-trend .search-trend-row + .search-trend-row::before {
+  inset-inline: 76px 0;
+}
+.v35 .cn-discover-genres {
+  margin-bottom: 8px;
+}
+.v35 .cn-discover-body > .cn-rail-head {
+  margin-top: 28px;
+}
+.v35 .cn-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 var(--cn-gutter) 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.v35 .cn-more {
+  height: 1px;
+}
+.v35 .cn-more.loading {
+  height: 56px;
+  background: radial-gradient(circle, var(--text-4) 2px, transparent 3px) center / 14px 14px no-repeat;
+}
+/* ورقة التصفية */
+.v35 .cn-fs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.v35 .cn-fs-head h3 {
+  margin: 0;
+}
+.v35 .cn-fs-group {
+  margin-top: 16px;
+}
+.v35 .cn-fs-group h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .cn-fs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.v35 .cn-fs-years {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+}
+.v35 .cn-fs-select {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--cn-r);
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.v35 .cn-fs-apply {
+  width: 100%;
+  margin-top: 20px;
 }
 .v35 .cn-grid {
   display: grid;

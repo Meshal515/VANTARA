@@ -112,6 +112,43 @@ export function genreCovers(genres, lists) {
   }
   return out;
 }
+// ───────────── اكتشف: الفلاتر المتقدمة ─────────────
+export const DISCOVER_DEFAULTS = Object.freeze({ genres: [], yearFrom: null, yearTo: null, minRating: 0, sort: 'popular' });
+export const SORT_AR = { popular: 'الأشهر', rating: 'الأعلى تقييمًا', newest: 'الأحدث' };
+/** كم فلترًا فعّالًا (رقم صغير على زر القمع). */
+export const activeFilterCount = (f) => (f.genres?.length ?? 0) + (f.yearFrom || f.yearTo ? 1 : 0) + (f.minRating ? 1 : 0) + (f.sort && f.sort !== 'popular' ? 1 : 0);
+/** ما لا يفهمه Cinemeta يُطبَّق هنا: كل التصنيفات المختارة، مدى السنوات، وأقل تقييم. */
+export function applyDiscoverFilters(items, f) {
+  const from = f.yearFrom ?? -Infinity;
+  const to = f.yearTo ?? Infinity;
+  return items.filter((m) => {
+    if (!m) return false;
+    if ((f.genres ?? []).some((g) => !(m.genres ?? []).includes(g))) return false;
+    const y = Number.parseInt(String(m.year ?? ''), 10);
+    if ((f.yearFrom || f.yearTo) && !(y >= from && y <= to)) return false;
+    if (f.minRating && !(m.rating >= f.minRating)) return false;
+    return true;
+  });
+}
+/**
+ * من أين تُجلب الصفحات وبأي ترتيب: «الأشهر» و«الأعلى تقييمًا» قائمة واحدة بأول تصنيف،
+ * و«الأحدث» قوائم السنوات من الأحدث نزولًا (فالترتيب حقيقي لا داخل الصفحة وحدها).
+ */
+export function discoverStreams(type, f, thisYear = new Date().getFullYear()) {
+  const genre = f.genres?.[0] ?? '';
+  if (f.sort === 'newest') {
+    const out = [];
+    for (let y = Math.min(f.yearTo ?? thisYear, thisYear); y >= (f.yearFrom ?? 1950); y--) out.push({ type, id: 'year', genre: String(y) });
+    return out;
+  }
+  return [{ type, id: f.sort === 'rating' ? 'imdbRating' : 'top', genre }];
+}
+/** آخر ما بُحث عنه: الأحدث أولًا، بلا تكرار (حالة الأحرف لا تهم)، ثمانية على الأكثر. */
+export function pushRecentSearch(list, term) {
+  const t = String(term ?? '').trim();
+  if (t.length < 2) return list;
+  return [t, ...list.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
+}
 export const seasonsAr = (n) => (n === 1 ? 'موسم واحد' : n === 2 ? 'موسمان' : n <= 10 ? `${n} مواسم` : `${n} موسمًا`);
 
 export function createCinema(deps) {
@@ -132,7 +169,7 @@ export function createCinema(deps) {
     warm: null,
     playing: null,
     libraryTab: 'continue',
-    discover: { query: '', genre: '', type: 'movie', token: 0 },
+    discover: { query: '', type: 'movie', token: 0, filters: { ...DISCOVER_DEFAULTS, genres: [] } },
   };
 
   // ───────────── التخزين المحلي ─────────────
@@ -513,11 +550,11 @@ export function createCinema(deps) {
   // صور الأنواع التي لم تجد عملًا في الرئيسية: تُجلب مرة واحدة في الجلسة من قائمة النوع
   const genreArt = new Map();
   /** «حسب النوع»: بلاطات بصورة عمل مشهور من النوع، تدرّج داكن، والاسم العربي وحده. */
-  function genreGrid(onPick, lists = [], type = 'movie') {
+  function genreGrid(onPick, lists = [], type = 'movie', title = 'حسب النوع') {
     const s = el('section', 'cn-rail');
     s.dataset.reveal = '';
     const head = el('header', 'cn-rail-head');
-    head.append(el('h2', null, 'حسب النوع'));
+    head.append(el('h2', null, title));
     const grid = el('div', 'cn-genres');
     const covers = genreCovers(GENRES, lists);
     for (const g of GENRES) {
@@ -1868,13 +1905,88 @@ export function createCinema(deps) {
   // ───────────── اكتشف والمكتبة ─────────────
 
   function openDiscover({ genre = '', query = '', type = state.discover.type } = {}) {
-    state.discover = { ...state.discover, genre, query, type };
+    state.discover = { ...state.discover, query, type, filters: { ...DISCOVER_DEFAULTS, genres: genre ? [genre] : [] } };
     deps.showPage('discover');
+  }
+
+  // آخر ما بحثت عنه: العبارات النهائية وحدها (Enter أو فتح نتيجة)، لا كل حرف
+  const searchesKey = () => userKey('searches', currentUser());
+  const recentSearches = () => readJson(searchesKey(), []).filter((x) => typeof x === 'string');
+  const rememberSearch = (term) => writeJson(searchesKey(), pushRecentSearch(recentSearches(), term));
+
+  /** لوحة الفلاتر المتقدمة: النوع، التصنيفات، السنوات، أقل تقييم، والترتيب. */
+  function openFilterSheet() {
+    const draft = { type: state.discover.type, ...state.discover.filters, genres: [...state.discover.filters.genres] };
+    const thisYear = new Date().getFullYear();
+    const years = Array.from({ length: thisYear - 1950 + 1 }, (_, i) => thisYear - i);
+    deps.openSheet((body) => {
+      body.classList.add('cn-fs');
+      const paint = () => {
+        const group = (title, ...nodes) => {
+          const g = el('div', 'cn-fs-group');
+          g.append(el('h4', null, title), ...nodes);
+          return g;
+        };
+        const chips = (options, isOn, pick) => {
+          const row = el('div', 'cn-fs-chips');
+          for (const [value, label] of options) {
+            const b = button(`cn-chip${isOn(value) ? ' active' : ''}`, '', () => {
+              pick(value);
+              paint();
+            });
+            b.textContent = label;
+            b.setAttribute('aria-pressed', String(isOn(value)));
+            row.append(b);
+          }
+          return row;
+        };
+        const yearSelect = (key, label) => {
+          const s = el('select', 'cn-fs-select');
+          s.setAttribute('aria-label', label);
+          s.append(new Option(label, ''));
+          for (const y of years) s.append(new Option(String(y), String(y)));
+          s.value = draft[key] ? String(draft[key]) : '';
+          s.onchange = () => {
+            draft[key] = s.value ? Number(s.value) : null;
+          };
+          return s;
+        };
+        const yearsRow = el('div', 'cn-fs-years');
+        yearsRow.append(yearSelect('yearFrom', 'من سنة'), el('span', null, '—'), yearSelect('yearTo', 'إلى سنة'));
+        const apply = button('cn-btn cn-btn--play cn-fs-apply', 'اعرض النتائج', () => {
+          const { type, ...filters } = draft;
+          if (filters.yearFrom && filters.yearTo && filters.yearFrom > filters.yearTo) [filters.yearFrom, filters.yearTo] = [filters.yearTo, filters.yearFrom];
+          state.discover = { ...state.discover, type, filters };
+          deps.closeSheet();
+          showDiscover();
+        });
+        const reset = button('text-btn', 'مسح الكل', () => {
+          Object.assign(draft, DISCOVER_DEFAULTS, { genres: [] });
+          paint();
+        });
+        const head = el('div', 'cn-fs-head');
+        head.append(el('h3', null, 'تصفية'), reset);
+        body.replaceChildren(
+          el('div', 'sheet-handle'),
+          head,
+          group('النوع', chips([['movie', 'أفلام'], ['series', 'مسلسلات']], (v) => draft.type === v, (v) => (draft.type = v))),
+          group('التصنيفات', chips(GENRES.map((g) => [g, genreAr(g)]), (g) => draft.genres.includes(g), (g) => {
+            draft.genres = draft.genres.includes(g) ? draft.genres.filter((x) => x !== g) : [...draft.genres, g];
+          })),
+          group('سنة الصدور', yearsRow),
+          group('أقل تقييم IMDb', chips([[0, 'الكل'], [6, '\u20666+\u2069'], [7, '\u20667+\u2069'], [8, '\u20668+\u2069']], (v) => draft.minRating === v, (v) => (draft.minRating = v))),
+          group('الترتيب', chips(Object.entries(SORT_AR), (v) => draft.sort === v, (v) => (draft.sort = v))),
+          apply,
+        );
+      };
+      paint();
+    }, { tone: 'cinema' });
   }
 
   function showDiscover() {
     const host = q('cinemaDiscover');
     if (!host) return;
+    host.classList.add('cn-discover');
     const d = state.discover;
     const form = el('form', 'cn-search');
     form.setAttribute('role', 'search');
@@ -1883,9 +1995,10 @@ export function createCinema(deps) {
     input.value = d.query;
     let t = null;
     const run = () => {
-      state.discover.query = input.value.trim();
-      paintFilters();
-      void loadDiscover();
+      const next = input.value.trim();
+      if (next === state.discover.query) return;
+      state.discover.query = next;
+      paintBody();
     };
     input.oninput = () => {
       clearTimeout(t);
@@ -1894,58 +2007,217 @@ export function createCinema(deps) {
     form.onsubmit = (e) => {
       e.preventDefault();
       clearTimeout(t);
+      rememberSearch(input.value);
       run();
       input.blur();
     };
-    const filters = el('div', 'cn-filters');
-    const paintFilters = () => {
-      filters.hidden = Boolean(state.discover.query);
-      const types = el('div', 'cn-kinds cn-kinds--inline');
-      for (const [k, label] of [['movie', 'أفلام'], ['series', 'مسلسلات']]) {
-        types.append(button(`cn-kind${state.discover.type === k ? ' active' : ''}`, label, () => {
-          state.discover.type = k;
-          paintFilters();
-          void loadDiscover();
-        }));
-      }
-      const genres = el('div', 'cn-chips');
-      genres.append(button(`cn-chip${state.discover.genre ? '' : ' active'}`, 'الكل', () => {
-        state.discover.genre = '';
-        paintFilters();
-        void loadDiscover();
-      }));
-      for (const g of GENRES) {
-        genres.append(button(`cn-chip${state.discover.genre === g ? ' active' : ''}`, genreAr(g), () => {
-          state.discover.genre = g;
-          paintFilters();
-          void loadDiscover();
-        }));
-      }
-      filters.replaceChildren(types, genres);
+    const searchFor = (term) => {
+      input.value = term;
+      rememberSearch(term);
+      run();
     };
-    paintFilters();
-    const grid = el('div', 'cn-grid');
-    grid.id = 'cinemaDiscoverGrid';
-    host.replaceChildren(form, filters, grid);
-    void loadDiscover();
+    const active = activeFilterCount(d.filters);
+    const funnel = button('cn-filter-btn', glyph('filter', { size: 20 }), openFilterSheet, 'تصفية متقدمة');
+    if (active) funnel.append(el('b', null, String(active)));
+    const bar = el('div', 'cn-search-row');
+    bar.append(form, funnel);
+
+    const types = el('div', 'cn-kinds cn-kinds--inline');
+    for (const [k, label] of [['movie', 'أفلام'], ['series', 'مسلسلات']]) {
+      types.append(button(`cn-kind${d.type === k ? ' active' : ''}`, label, () => {
+        state.discover.type = k;
+        showDiscover();
+      }));
+    }
+    // صف التصنيفات السريع: يتلاشى عند الحافة بدل أن يُقصّ
+    const chips = el('div', 'cn-chips');
+    const only = d.filters.genres.length === 1 ? d.filters.genres[0] : null;
+    chips.append(button(`cn-chip${d.filters.genres.length ? '' : ' active'}`, 'الكل', () => {
+      state.discover.filters = { ...state.discover.filters, genres: [] };
+      showDiscover();
+    }));
+    for (const g of GENRES) {
+      chips.append(button(`cn-chip${only === g ? ' active' : ''}`, genreAr(g), () => {
+        state.discover.filters = { ...state.discover.filters, genres: [g] };
+        showDiscover();
+      }));
+    }
+    const filters = el('div', 'cn-filters');
+    filters.append(types, chips);
+    const body = el('div', 'cn-discover-body');
+    host.replaceChildren(bar, filters, body);
+
+    const paintBody = () => {
+      const { query, filters: f } = state.discover;
+      filters.hidden = Boolean(query);
+      const grid = el('div', 'cn-grid');
+      grid.id = 'cinemaDiscoverGrid';
+      const nodes = [];
+      if (!query && !activeFilterCount(f)) nodes.push(...discoverIdle(searchFor));
+      else if (activeFilterCount(f) && !query) nodes.push(filterSummary(f));
+      if (!query && !activeFilterCount(f)) {
+        const head = el('header', 'cn-rail-head');
+        head.append(el('h2', null, d.type === 'series' ? 'المسلسلات الأشهر الآن' : 'الأفلام الأشهر الآن'));
+        nodes.push(head);
+      }
+      nodes.push(grid);
+      body.replaceChildren(...nodes);
+      void loadDiscover(grid, { onOpen: () => query && rememberSearch(query) });
+    };
+    paintBody();
   }
 
-  async function loadDiscover() {
-    const grid = q('cinemaDiscoverGrid');
+  /** ما قبل الكتابة: آخر ما بحثت عنه، والرائج مرقّمًا، والتصفّح بالنوع. */
+  function discoverIdle(searchFor) {
+    const out = [];
+    const recent = recentSearches();
+    if (recent.length) {
+      const head = el('div', 'search-head');
+      head.append(el('h2', null, 'آخر ما بحثت عنه'), button('text-btn', 'امسح', () => {
+        writeJson(searchesKey(), []);
+        head.nextElementSibling?.remove();
+        head.remove();
+      }));
+      const row = el('div', 'search-recent');
+      for (const term of recent) {
+        const b = button('search-chip', glyph('history', { size: 16 }), () => searchFor(term));
+        b.append(el('bdi', null, term));
+        row.append(b);
+      }
+      out.push(head, row);
+    }
+    const type = state.discover.type;
+    const pool = (type === 'series' ? state.home?.series : state.home?.movies) ?? [];
+    if (pool.length) {
+      const head = el('div', 'search-head');
+      head.append(el('h2', null, 'الرائج الآن'));
+      const list = el('div', 'search-trend cn-trend');
+      pool.slice(0, 6).forEach((m, i) => {
+        const b = el('button', 'search-trend-row');
+        b.type = 'button';
+        const cover = el('span', 'search-trend-cover');
+        cover.append(image(m.poster, 'cn-img'));
+        const copy = el('span', 'search-trend-copy');
+        copy.append(el('bdi', 'search-trend-title', displayTitle(m)));
+        const meta = [m.year, (m.genres ?? []).slice(0, 2).map(genreAr).join('، ')].filter(Boolean).join(' · ');
+        if (meta) copy.append(el('span', 'search-trend-meta', meta));
+        b.append(el('span', 'search-trend-rank', String(i + 1)), cover, copy);
+        list.append(opener(b, m));
+      });
+      out.push(head, list);
+    }
+    const lists = [state.home?.movies, state.home?.series, state.home?.topMovies, state.home?.topSeries, state.home?.fresh].map((l) => l ?? []);
+    const genres = genreGrid((g) => {
+      state.discover.filters = { ...state.discover.filters, genres: [g] };
+      showDiscover();
+      globalThis.scrollTo?.(0, 0);
+    }, lists, type, 'تصفّح بالنوع');
+    genres.classList.add('cn-discover-genres');
+    out.push(genres);
+    return out;
+  }
+
+  /** سطر الفلاتر الفعّالة ومسحها بلمسة. */
+  function filterSummary(f) {
+    const parts = [
+      ...f.genres.map(genreAr),
+      f.yearFrom || f.yearTo ? `${f.yearFrom ?? '…'}–${f.yearTo ?? '…'}` : null,
+      // عزل الاتجاه: «IMDb 7+» لا «+IMDb 7» وسط سطر عربي
+      f.minRating ? `\u2066IMDb ${f.minRating}+\u2069` : null,
+      f.sort !== 'popular' ? SORT_AR[f.sort] : null,
+    ].filter(Boolean);
+    const row = el('div', 'cn-filter-summary');
+    row.append(el('span', null, parts.join(' · ')), button('text-btn', 'مسح', () => {
+      state.discover.filters = { ...DISCOVER_DEFAULTS, genres: [] };
+      showDiscover();
+    }));
+    return row;
+  }
+
+  /**
+   * الشبكة بتمرير لا ينتهي: صفحة بعد صفحة من مصادر Cinemeta بالترتيب (discoverStreams)،
+   * والفلاتر التي لا يفهمها الخادم تُطبَّق هنا (applyDiscoverFilters).
+   */
+  async function loadDiscover(grid, { onOpen } = {}) {
     if (!grid) return;
     const token = ++state.discover.token;
-    const { query, genre, type } = state.discover;
+    const { query, type, filters: f } = state.discover;
+    const alive = () => token === state.discover.token && grid.isConnected;
     grid.replaceChildren(...Array.from({ length: 9 }, () => el('div', 'cn-skel cn-skel-poster')));
-    try {
-      let items = query ? await searchMeta(query) : await catalog(type, 'top', { genre });
-      items = items.slice(0, 42);
-      if (token !== state.discover.token) return;
-      if (query) peerResults.set(peerKey(query), Promise.resolve(items));
-      grid.replaceChildren(...(items.length ? items.map((m) => posterCard(m)) : [emptyBox('search', 'لا نتائج', 'جرّب الاسم الإنجليزي للعمل.')]));
-      stripIn([...grid.children].slice(0, 9));
-    } catch {
-      if (token === state.discover.token) grid.replaceChildren(emptyBox('offline', 'تعذّر البحث', 'تحقّق من الاتصال ثم أعد المحاولة.'));
+    const card = (m) => {
+      const c = posterCard(m);
+      c.addEventListener('click', () => onOpen?.(), { capture: true });
+      return c;
+    };
+    if (query) {
+      try {
+        const found = await searchMeta(query);
+        if (!alive()) return;
+        peerResults.set(peerKey(query), Promise.resolve(found));
+        const items = applyDiscoverFilters(found, f).slice(0, 60);
+        grid.replaceChildren(...(items.length ? items.map(card) : [emptyBox('search', 'لا نتائج', 'جرّب الاسم الإنجليزي للعمل.')]));
+        stripIn([...grid.children].slice(0, 9));
+      } catch {
+        if (alive()) grid.replaceChildren(emptyBox('offline', 'تعذّر البحث', 'تحقّق من الاتصال ثم أعد المحاولة.'));
+      }
+      return;
     }
+    infiniteGrid(grid, { streams: discoverStreams(type, f), filter: (page) => applyDiscoverFilters(page, f), alive, card, type });
+  }
+
+  /** شبكة تملأ نفسها مع التمرير من قائمة مصادر متتالية؛ لا تكرار، وتتوقف حين تنفد. */
+  function infiniteGrid(grid, { streams, filter = (x) => x, alive, card = posterCard, type }) {
+    const run = { at: 0, skip: 0, seen: new Set(), busy: false, done: false, shown: 0 };
+    const sentinel = el('div', 'cn-more');
+    const more = async () => {
+      if (run.busy || run.done || !alive()) return;
+      run.busy = true;
+      sentinel.classList.add('loading');
+      let added = 0;
+      let empties = 0;
+      try {
+        // الفلاتر قد تُسقط صفحة كاملة: نتابع حتى يظهر جديد أو تتوالى صفحات فارغة
+        while (!added && !run.done && empties < 6) {
+          const s = streams[run.at];
+          if (!s) {
+            run.done = true;
+            break;
+          }
+          const page = await catalog(s.type ?? type, s.id, { genre: s.genre, skip: run.skip });
+          if (!alive()) return;
+          if (!page.length) {
+            run.at += 1;
+            run.skip = 0;
+            continue;
+          }
+          run.skip += page.length;
+          const fresh = filter(page.filter((m) => !run.seen.has(m.id)));
+          for (const m of fresh) run.seen.add(m.id);
+          if (!fresh.length) empties += 1;
+          if (run.shown === 0 && fresh.length) grid.replaceChildren();
+          const cards = fresh.map(card);
+          grid.append(...cards);
+          if (run.shown === 0) stripIn(cards.slice(0, 9));
+          run.shown += fresh.length;
+          added += fresh.length;
+        }
+        if (!run.shown && (run.done || empties >= 6)) grid.replaceChildren(emptyBox('search', 'لا نتائج', 'خفّف الفلاتر أو جرّب نوعًا آخر.'));
+      } catch {
+        if (alive() && !run.shown) grid.replaceChildren(emptyBox('offline', 'تعذّر الجلب', 'تحقّق من الاتصال ثم أعد المحاولة.'));
+        run.done = true;
+      } finally {
+        run.busy = false;
+        sentinel.classList.remove('loading');
+      }
+      if (run.done) {
+        sentinel.remove();
+        io?.disconnect();
+      } else if (alive() && sentinel.getBoundingClientRect().top < innerHeight + 600) void more();
+    };
+    grid.after(sentinel);
+    const io = globalThis.IntersectionObserver ? new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && void more(), { rootMargin: '600px 0px' }) : null;
+    io?.observe(sentinel);
+    void more();
   }
 
   function openLibrary(tab) {
