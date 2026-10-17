@@ -35,3 +35,19 @@ describe('بطاقة «أكمل المشاهدة»: ⋮ تابع لبطاقته'
     expect(rule('.v35 .cn-wide .cw-name .cw-more')).toMatch(/margin:\s*-4px 0 0/);
   });
 });
+
+describe('أسماء الصفوف: محاذاة واحدة وقصّ بـ«…»', () => {
+  it('الأسماء يمينًا دائمًا (ولو إنجليزية) وبنفس حدّ السطرين', () => {
+    const title = rule('.v35 .cn-poster-title');
+    expect(title).toMatch(/text-align:\s*right/);
+    expect(title).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(rule('.v35 .cn-poster')).toMatch(/align-content:\s*start/);
+    expect(rule('.v35 .cn-wide-title')).toMatch(/text-align:\s*right/);
+    expect(rule('.v35 .cn-chart-copy b')).toMatch(/text-align:\s*right/);
+  });
+  it('السطور المفردة تُقصّ بعلامة الحذف لا تفيض', () => {
+    for (const sel of ['.v35 .cn-wide-title', '.v35 .cn-wide-sub', '.v35 .cn-poster-meta > span', '.v35 .cn-chart-copy span']) {
+      expect(rule(sel), sel).toMatch(/text-overflow:\s*ellipsis/);
+    }
+  });
+});

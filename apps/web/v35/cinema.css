@@ -484,6 +484,8 @@
   width: 124px;
   display: grid;
   gap: 6px;
+  /* بطاقات الصف تتمدد لأطولها: السطور تبقى من الأعلى فيبدأ كل اسم من نفس الخط */
+  align-content: start;
   border: 0;
   padding: 0;
   background: none;
@@ -506,6 +508,8 @@
   transform: scale(0.97);
 }
 .v35 .cn-poster-title {
+  /* الاسم الإنجليزي (dir=auto) يبدأ من يساره فيبدو موسّطًا في سطرين: يمين دائمًا كبقية الصف */
+  text-align: right;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
@@ -518,10 +522,17 @@
 .v35 .cn-poster-meta {
   display: flex;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   margin-top: -3px;
   font-size: 11.5px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+.v35 .cn-poster-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v35 .cn-poster-rate {
   color: var(--text-2);
@@ -556,6 +567,7 @@
   bottom: 0;
 }
 .v35 .cn-wide-title {
+  text-align: right;
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
@@ -566,6 +578,11 @@
 .v35 .cn-wide-sub {
   font-size: 12px;
   color: var(--text-3);
+  /* سطر واحد يُقصّ بـ«…» داخل البطاقة، لا يفيض تحت البطاقة المجاورة */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* الاسم وبجانبه ⋮ (المفضلة، قائمتي، الحذف) */
 .v35 .cn-wide .cw-name {
@@ -640,6 +657,7 @@
   min-width: 0;
 }
 .v35 .cn-chart-copy b {
+  text-align: right;
   font-size: 14px;
   color: var(--text);
   white-space: nowrap;
