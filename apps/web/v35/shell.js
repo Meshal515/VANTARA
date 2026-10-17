@@ -61,6 +61,7 @@ import { pinPad } from '../screens/pin-pad.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
+import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { refsOf } from '../lib/manga-alias-store.js';
@@ -1296,6 +1297,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function openWork(work, { readNumber = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
+    // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
+    if (currentPage() === 'search' && searchTerm) rememberSearch(searchTerm);
     // أنمي (ترشيح، إشعار، حضور…): صفحته في قسم الأنمي، لا صفحة مانجا بنفس العنوان
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
@@ -3285,12 +3288,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   // البحث قبل أن تكتب ليس صفحة فارغة: آخر ما بحثت عنه، والتصنيفات، والرائج
+  // يُحفظ البحث النهائي وحده: «بحث» من لوحة المفاتيح، أو عملٌ فُتح من نتائجه — لا كل
+  // ما توقّفت عنده الكتابة («Kar»، «Karil»، «Kariel»)
   const SEARCHES_KEY = 'vantara.v35.searches';
-  const recentSearches = () => readJson(SEARCHES_KEY, []).filter((x) => typeof x === 'string').slice(0, 8);
+  const searches = recentStore(SEARCHES_KEY);
+  const recentSearches = () => searches.list();
   function rememberSearch(term) {
-    const t = term.trim();
-    if (t.length < 2) return;
-    writeJson(SEARCHES_KEY, [t, ...recentSearches().filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8));
+    searches.remember(term);
   }
   function searchFor(term) {
     q('searchInput').value = term;
@@ -3396,7 +3400,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const found = await runSearch(t, q('searchGrid'), () => searchTerm);
         if (searchTerm !== t) return;
         if (found) {
-          rememberSearch(t);
           // الكلمة معزولة بـbdi: بحثٌ إنجليزي لا يقلب ترتيب السطر العربي
           q('searchCount').replaceChildren(document.createTextNode(`${countLabel(found, 'work')} لـ `), el('bdi', null, t));
           q('searchCount').hidden = false;
@@ -5071,6 +5074,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   root.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (e.target.contains(q('searchInput'))) rememberSearch(q('searchInput').value);
     // «بحث» في لوحة المفاتيح يخفيها: النتائج تحتها لا فوقها
     e.target.querySelector('input')?.blur();
   });

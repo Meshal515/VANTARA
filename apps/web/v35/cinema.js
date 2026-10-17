@@ -28,6 +28,7 @@ import { report as reportUpdate } from '../lib/update-engine.js';
 import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
+import { bindCollapsingHero } from './collapse-hero.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -1431,15 +1432,29 @@ export function createCinema(deps) {
     void similar(full, token);
   }
 
+  let unbindHero = null;
   function renderDetail(m, { partial = false } = {}) {
     const page = q('cinema');
     const wrap = el('article', 'cn-detail');
 
     const bar = el('div', 'cn-detail-bar');
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
+    // حين تنطوي الخلفية مع التمرير: الترويسة صلبة والشعار (أو الاسم) صغيرًا فيها
+    const barTitle = el('div', 'cn-bar-title');
+    barTitle.append(text('span', 'cn-bar-text', displayTitle(m)));
+    if (m.logo) {
+      const small = new Image();
+      small.alt = '';
+      small.className = 'cn-bar-logo';
+      small.onload = () => barTitle.classList.add('has-logo');
+      small.src = m.logo;
+      barTitle.prepend(small);
+    }
+    bar.append(barTitle);
 
     const art = el('div', 'cn-detail-art');
-    art.append(image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true }));
+    const backdrop = image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true });
+    art.append(backdrop);
 
     const body = el('div', 'cn-detail-body');
     body.id = 'cinemaBody';
@@ -1532,6 +1547,8 @@ export function createCinema(deps) {
 
     wrap.append(bar, art, body);
     page.replaceChildren(wrap);
+    unbindHero?.();
+    unbindHero = bindCollapsingHero({ hero: art, bar, bg: backdrop, active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id });
     if (!partial) {
       startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);

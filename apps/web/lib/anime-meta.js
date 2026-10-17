@@ -31,6 +31,7 @@ const DETAIL_QUERY = `query ($id: Int) {
     streamingEpisodes { title thumbnail }
     relations { edges { relationType node { ${CARD} type } } }
     recommendations(perPage: 12, sort: RATING_DESC) { nodes { mediaRecommendation { ${CARD} } } }
+    characters(perPage: 16, sort: [ROLE, RELEVANCE, ID]) { edges { role node { id name { full } image { large } } voiceActors(language: JAPANESE, sort: RELEVANCE) { name { full } } } }
   }
 }`;
 
@@ -167,6 +168,10 @@ export function parseDetail(data) {
     .map((e) => ({ ...normalize(e.node), relation: RELATION_AR[e.relationType] }))
     .filter((m) => m.id);
   const recommendations = (media.recommendations?.nodes ?? []).map((n) => normalize(n.mediaRecommendation)).filter(Boolean);
+  // الشخصيات: الرئيسية أولًا، بلا صورة AniList الافتراضية الفارغة
+  const characters = (media.characters?.edges ?? [])
+    .filter((e) => e?.node?.image?.large && !/\/default\.(jpg|png)$/.test(e.node.image.large))
+    .map((e) => ({ id: e.node.id, name: e.node.name?.full ?? '', image: e.node.image.large, main: e.role === 'MAIN', voice: e.voiceActors?.[0]?.name?.full ?? null }));
   const rated = (media.rankings ?? []).find((r) => r.type === 'RATED' && r.allTime);
   // حلقات المنصّات بصورها: «Episode 3 - العنوان»، والرقم منها لا من ترتيب القائمة
   const thumbs = {};
@@ -178,6 +183,7 @@ export function parseDetail(data) {
     ...base,
     relations,
     recommendations,
+    characters,
     synonyms: media.synonyms ?? [],
     favourites: media.favourites ?? 0,
     rank: rated?.rank ?? null,
@@ -220,6 +226,57 @@ export async function fetchAnimeDetail(id, opts = {}) {
 
 export async function searchAnime({ search, genre, page = 1 } = {}, opts = {}) {
   const data = await request(SEARCH_QUERY, { search: search || undefined, genre: genre || undefined, page }, opts);
+  return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+}
+
+/**
+ * البحث والتصفّح بفلاتر (ورقة الفلاتر في «اكتشف» وصفحات «الكل»): الأنواع المطلوبة
+ * والمستبعدة، الشكل، الحالة، السنة والموسم، أقل تقييم، والترتيب. طلب AniList واحد.
+ */
+const DISCOVER_QUERY = `query ($page: Int, $perPage: Int, $search: String, $genreIn: [String], $genreNotIn: [String], $formatIn: [MediaFormat], $status: MediaStatus, $year: Int, $season: MediaSeason, $minScore: Int, $minPop: Int, $sort: [MediaSort]) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage }
+    media(type: ANIME, isAdult: false, search: $search, genre_in: $genreIn, genre_not_in: $genreNotIn, format_in: $formatIn, status: $status, seasonYear: $year, season: $season, averageScore_greater: $minScore, popularity_greater: $minPop, sort: $sort) { ${CARD} }
+  }
+}`;
+
+export const DISCOVER_SORTS = { relevance: 'SEARCH_MATCH', popularity: 'POPULARITY_DESC', score: 'SCORE_DESC', newest: 'START_DATE_DESC', trending: 'TRENDING_DESC' };
+export const SORT_AR = { relevance: 'الأقرب للبحث', popularity: 'الأشهر', score: 'الأعلى تقييمًا', newest: 'الأحدث', trending: 'الرائج' };
+
+/** فلاتر فارغة: لا شيء مختار، والترتيب بحسب وجود كلمة بحث. */
+export const emptyFilters = () => ({ include: [], exclude: [], formats: [], status: '', year: null, season: '', minScore: 0, sort: '' });
+
+/** عدد الفلاتر المفعّلة (نقطة على زر القمع). الترتيب ليس فلترًا. */
+export const activeFilterCount = (f = {}) =>
+  (f.include?.length ?? 0) + (f.exclude?.length ?? 0) + (f.formats?.length ?? 0) + (f.status ? 1 : 0) + (f.year ? 1 : 0) + (f.season ? 1 : 0) + (f.minScore > 0 ? 1 : 0);
+
+/** متغيّرات الطلب من الفلاتر: ما لم يُختر لا يُرسل (AniList يتجاهل null). */
+export function discoverVariables({ search = '', page = 1, perPage = 30, minPop = null, ...f } = {}) {
+  const q = String(search ?? '').trim();
+  const sortKey = f.sort && DISCOVER_SORTS[f.sort] ? f.sort : q ? 'relevance' : 'popularity';
+  const sort = [DISCOVER_SORTS[sortKey], ...(sortKey === 'relevance' ? ['POPULARITY_DESC'] : [])];
+  // «الأحدث» و«الأعلى تقييمًا» بلا حدّ شهرة تمتلئ بأعمال لا يعرفها أحد
+  const floor = minPop ?? (q ? null : sortKey === 'score' ? 20_000 : sortKey === 'newest' ? 2_000 : null);
+  return {
+    page,
+    perPage,
+    search: q || null,
+    genreIn: f.include?.length ? [...f.include] : null,
+    genreNotIn: f.exclude?.length ? [...f.exclude] : null,
+    formatIn: f.formats?.length ? [...f.formats] : null,
+    status: f.status || null,
+    year: Number(f.year) > 1900 ? Number(f.year) : null,
+    season: f.season || null,
+    minScore: f.minScore > 0 ? Math.round(f.minScore * 10) - 1 : null,
+    minPop: floor,
+    sort,
+  };
+}
+
+export async function discoverAnime(filters = {}, opts = {}) {
+  // ما لم يُختر يُحذف من المتغيّرات تمامًا: null الصريح يربك AniList في بعض الحقول
+  const vars = Object.fromEntries(Object.entries(discoverVariables(filters)).filter(([, v]) => v != null));
+  const data = await request(DISCOVER_QUERY, vars, opts);
   return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
 }
 

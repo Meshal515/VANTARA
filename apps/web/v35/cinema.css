@@ -868,8 +868,85 @@
   padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px) 10px 0;
 }
 .v35 .cn-detail-bar .icon-btn {
+  position: relative;
+  flex: none;
   background: rgba(10, 7, 7, 0.62);
   color: #fff;
+  transition: background-color 0.22s ease, color 0.22s ease;
+}
+/* انطوت الخلفية: ترويسة صلبة (لا شيء يظهر من خلفها) والشعار صغيرًا فيها */
+.v35 .cn-detail-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.v35 .cn-detail-bar::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--line);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed::before {
+  opacity: 1;
+}
+.v35 .cn-detail-bar.collapsed .icon-btn {
+  background: transparent;
+  color: var(--text);
+}
+.v35 .cn-bar-title {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: var(--tap);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+  transform-origin: right center;
+  transition: opacity 0.24s ease, transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed .cn-bar-title {
+  opacity: 1;
+  transform: none;
+}
+.v35 .cn-bar-logo {
+  display: block;
+  max-height: 28px;
+  max-width: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: right center;
+}
+.v35 .cn-bar-title:not(.has-logo) .cn-bar-logo,
+.v35 .cn-bar-title.has-logo .cn-bar-text {
+  display: none;
+}
+.v35 .cn-bar-text {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.v35 .cn-detail-art > .cn-img {
+  transform-origin: 50% 0;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-bar-title {
+    transition: none;
+  }
 }
 .v35 .cn-detail-art {
   position: relative;
