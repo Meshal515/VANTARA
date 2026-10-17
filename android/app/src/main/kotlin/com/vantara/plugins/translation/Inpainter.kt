@@ -11,7 +11,7 @@ import java.io.File
 class Inpainter(file: File, private val edgeLimit: () -> Int = { 1024 }) {
     data class Stats(val maskPixels: Int, val changedPixels: Int, val scaled: Boolean)
 
-    private val session: OrtSession = Ort.open(file)
+    private val session: OrtSession = Ort.open(file, engine = Ort.DYNAMIC)
     private val context = 96
 
     private fun forward(rgb: RgbImage, mask: ByteMask): RgbImage {

@@ -12,7 +12,7 @@ data class Bubble(val box: Box, val score: Float, val mask: ByteMask)
  * [1, 32, mh, mw] بروتوتايبات القناع. القناع = sigmoid(coef · proto).
  */
 class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
-    private val session: OrtSession = Ort.open(file, engine = engine)
+    private val session: OrtSession = Ort.open(file, engine = engine ?: Ort.DYNAMIC)
     var conf = 0.35f
     var iouThr = 0.5f
     private val size = INPUT_SIZE

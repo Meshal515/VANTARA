@@ -291,6 +291,9 @@ describe('v3 throughput evidence', () => {
     expect(line).toContain('أطلس 2/2 صفحة · امتلاء 64%');
     expect(line).toContain('BubbleSeg بمقاس ROI 2 نداء');
     expect(line).toContain('فحص كاش Luna بلا صورة 1 · تُخطّي 1');
+    const tight = v3Throughput([page(0, { native: { analyze: { counts: { ctdCalls: 2, ctdTightCalls: 2, ctdTensorPixels: 327680 } } } })]);
+    expect(tight).toContain('CTD بمقاس المنطقة 2 نداء');
+    expect(tight).toContain('CTD موتّر 0.33M بكسل');
     const report = formatReport(entries);
     expect(report).toContain('تفصيل رفض background: spread×4 · paper_share×2');
     expect(report).toContain(line);

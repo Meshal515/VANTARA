@@ -364,9 +364,11 @@ export function createQueue({
             ? preparingNear >= 2 || preparing >= prepareConcurrency + 1
             : preparing >= prepareConcurrency;
       const preparedCap = capacity ? caps.maxPrepared : maxPrepared + (focused ? 2 : near ? 1 : 0);
-      // Route metadata for the visible page may borrow one buffer position.
-      // Heavy snapshots still obey maxInFlight and native execution is serialized.
-      if (prepBlocked || readyCount() + preparing + continuationBuffered() >= preparedCap + (focused ? 1 : 0) ||
+      // Routed text pages waiting for Heavy hold only Route metadata, bounded by
+      // maxRouteAhead on their own. Counting them against preparedCap stopped Route
+      // after ~6 text pages, so textless pages behind them sat 30–47s in admission
+      // for a 0.3s classification (device report, King of Violence #72).
+      if (prepBlocked || readyCount() + preparing >= preparedCap + (focused ? 1 : 0) ||
         continuationBuffered() >= maxRouteAhead + (focused ? 1 : 0)) break;
       beginPrepare(job);
     }
@@ -905,69 +907,74 @@ const NATIVE_STAGE_RANK = Object.freeze({
   aheadAnalyze: 5,
   background: 6,
 });
-let nativeStageRunning = false;
+// One serialized lane per Native stage, mirroring the plugin's own gates
+// (detectGate / gate / renderGate). The old single JS mutex serialized whole
+// page calls across stages, so a visible 0.3s Route waited behind a 5–25s
+// Analyze of another page and the Native priority gates only ever saw one
+// call. The plugin's compute lock already keeps model calls exclusive at
+// per-inference granularity and by reader priority.
+const NATIVE_LANES = Object.freeze(['route', 'analyze', 'render']);
+const nativeLaneOf = (priority, lane) => {
+  if (NATIVE_LANES.includes(lane)) return lane;
+  const name = String(typeof priority === 'function' ? priority() : priority ?? '').toLowerCase();
+  return name.includes('render') ? 'render' : name.includes('route') ? 'route' : 'analyze';
+};
 let nativeStageSeq = 0;
 const nativeStageQueue = [];
-let nativeStageOwner = null;
-let aheadRouteStreak = 0;
+const nativeStageOwners = new Map();
 
 const nativeStageNow = () => globalThis.performance?.now?.() ?? Date.now();
 const nativeStagePriorityName = job => typeof job.priority === 'function' ? job.priority() : job.priority;
 const nativeStageRank = job => NATIVE_STAGE_RANK[nativeStagePriorityName(job)] ?? NATIVE_STAGE_RANK.analyze;
 const nativeStageOrder = job => Number(typeof job.order === 'function' ? job.order() : job.order) || 0;
 const nativeEvent = (job, event, detail = {}) => {
-  try { job.onEvent?.({ at: Date.now(), event, page: job.page, stage: nativeStagePriorityName(job), ...detail }); } catch { /* telemetry only */ }
+  try { job.onEvent?.({ at: Date.now(), event, page: job.page, stage: nativeStagePriorityName(job), lane: job.lane, ...detail }); } catch { /* telemetry only */ }
 };
 
 function pumpNativeTranslationStage() {
-  if (nativeStageRunning || !nativeStageQueue.length) return;
-  let best = 0;
-  for (let i = 1; i < nativeStageQueue.length; i += 1) {
-    const a = nativeStageQueue[i];
-    const b = nativeStageQueue[best];
-    const ar = nativeStageRank(a);
-    const br = nativeStageRank(b);
-    if (ar < br || (ar === br && (nativeStageOrder(a) < nativeStageOrder(b) ||
-      (nativeStageOrder(a) === nativeStageOrder(b) && a.seq < b.seq)))) best = i;
-  }
-  // Two speculative classifications may pass a pending ahead analysis. Then
-  // service the best analysis before another Route wave. Visible work and ready
-  // renders retain their ranks; finite chapters drain without Route starvation.
-  if (nativeStagePriorityName(nativeStageQueue[best]) === 'aheadRoute' && aheadRouteStreak >= 2) {
-    const waiting = nativeStageQueue.map((job, i) => ({ job, i })).filter(x => nativeStagePriorityName(x.job) === 'aheadAnalyze');
-    waiting.sort((a,b) => nativeStageOrder(a.job)-nativeStageOrder(b.job) || a.job.seq-b.job.seq);
-    if (waiting.length) best = waiting[0].i;
-  }
-  const [job] = nativeStageQueue.splice(best, 1);
-  aheadRouteStreak = nativeStagePriorityName(job) === 'aheadRoute' ? aheadRouteStreak + 1 : 0;
-  nativeStageOwner = job;
-  job.startedAt = Date.now();
-  nativeStageRunning = true;
-  nativeEvent(job, 'native-granted', { pending: nativeStageQueue.length });
-  try { job.onWait?.(Math.max(0, Math.round(nativeStageNow() - job.queuedAt))); } catch { /* telemetry only */ }
-  Promise.resolve()
-    .then(job.fn)
-    .then(job.resolve, job.reject)
-    .finally(() => {
-      const endedAt = Date.now();
-      nativeEvent(job, 'native-completed');
-      for (const waiter of nativeStageQueue) nativeEvent(waiter, 'native-blocker', {
-        owner: job.page, ownerStage: nativeStagePriorityName(job),
-        startedAt: Math.max(waiter.enqueuedAt, job.startedAt), endedAt,
+  for (const lane of NATIVE_LANES) {
+    if (nativeStageOwners.has(lane)) continue;
+    let best = -1;
+    for (let i = 0; i < nativeStageQueue.length; i += 1) {
+      const a = nativeStageQueue[i];
+      if (a.lane !== lane) continue;
+      if (best < 0) { best = i; continue; }
+      const b = nativeStageQueue[best];
+      const ar = nativeStageRank(a);
+      const br = nativeStageRank(b);
+      if (ar < br || (ar === br && (nativeStageOrder(a) < nativeStageOrder(b) ||
+        (nativeStageOrder(a) === nativeStageOrder(b) && a.seq < b.seq)))) best = i;
+    }
+    if (best < 0) continue;
+    const [job] = nativeStageQueue.splice(best, 1);
+    nativeStageOwners.set(lane, job);
+    job.startedAt = Date.now();
+    nativeEvent(job, 'native-granted', { pending: nativeStageQueue.filter(j => j.lane === lane).length });
+    try { job.onWait?.(Math.max(0, Math.round(nativeStageNow() - job.queuedAt))); } catch { /* telemetry only */ }
+    Promise.resolve()
+      .then(job.fn)
+      .then(job.resolve, job.reject)
+      .finally(() => {
+        const endedAt = Date.now();
+        nativeEvent(job, 'native-completed');
+        for (const waiter of nativeStageQueue) if (waiter.lane === lane) nativeEvent(waiter, 'native-blocker', {
+          owner: job.page, ownerStage: nativeStagePriorityName(job),
+          startedAt: Math.max(waiter.enqueuedAt, job.startedAt), endedAt,
+        });
+        nativeStageOwners.delete(lane);
+        pumpNativeTranslationStage();
       });
-      nativeStageRunning = false;
-      nativeStageOwner = null;
-      pumpNativeTranslationStage();
-    });
+  }
 }
 
-export function withNativeTranslationStage(fn, { priority = 'analyze', order = 0, page = null, onWait = null, onEvent = null } = {}) {
+export function withNativeTranslationStage(fn, { priority = 'analyze', lane = null, order = 0, page = null, onWait = null, onEvent = null } = {}) {
   return new Promise((resolve, reject) => {
     // priority may be a function. Re-evaluate it only when the owner is handed
     // over so a page scrolled into focus is promoted without cancelling work.
-    const job = { fn, resolve, reject, priority, order, page, seq: nativeStageSeq++, queuedAt: nativeStageNow(), enqueuedAt: Date.now(), onWait, onEvent };
+    const job = { fn, resolve, reject, priority, lane: nativeLaneOf(priority, lane), order, page, seq: nativeStageSeq++, queuedAt: nativeStageNow(), enqueuedAt: Date.now(), onWait, onEvent };
+    const owner = nativeStageOwners.get(job.lane) ?? null;
     nativeStageQueue.push(job);
-    nativeEvent(job, 'native-enqueued', { owner: nativeStageOwner?.page ?? null, ownerStage: nativeStageOwner ? nativeStagePriorityName(nativeStageOwner) : null, pending: nativeStageQueue.length });
+    nativeEvent(job, 'native-enqueued', { owner: owner?.page ?? null, ownerStage: owner ? nativeStagePriorityName(owner) : null, pending: nativeStageQueue.filter(j => j.lane === job.lane).length });
     queueMicrotask(pumpNativeTranslationStage);
   });
 }
@@ -1078,6 +1085,7 @@ export async function prepareTranslation(src, meta, options = {}) {
     {
       ...nativeDiagnostics(prepDeps, meta),
       priority:() => nativeStagePriorityOf(prepDeps,'route'),
+      lane:'route',
       onWait: ms => { prep.stages['nativeWait.route'] = Math.round((prep.stages['nativeWait.route'] ?? 0) + ms); },
     },
   );
@@ -1105,6 +1113,7 @@ export async function prepareTranslation(src, meta, options = {}) {
       {
         ...nativeDiagnostics(prepDeps, meta),
         priority:() => nativeStagePriorityOf(prepDeps,'analyze'),
+        lane:'analyze',
         onWait: ms => { prep.stages['nativeWait.analyze'] = Math.round((prep.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
     );
@@ -1124,6 +1133,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
       {
         ...nativeDiagnostics(deps, meta),
         priority: () => nativeStagePriorityOf(deps, 'analyze'),
+        lane: 'analyze',
         onWait: ms => { clock.stages['nativeWait.analyze'] = Math.round((clock.stages['nativeWait.analyze'] ?? 0) + ms); },
       },
     ));
@@ -1191,6 +1201,7 @@ async function translateOnDevice(deps, hash, meta, clock) {
           {
             ...nativeDiagnostics(deps, meta),
             priority: () => nativeStagePriorityOf(deps, 'render'),
+            lane: 'render',
             onWait: ms => { clock.stages['nativeWait.render'] = Math.round((clock.stages['nativeWait.render'] ?? 0) + ms); },
           },
         );

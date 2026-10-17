@@ -27,6 +27,15 @@ object Ort {
     // XNNPACK owns the heavy intra-op pool. A second 4-thread ORT pool on the
     // same session multiplied runnable workers and amplified S23 contention.
     val CURRENT = Engine("current", 1, 4, spin = false)
+    /**
+     * Models whose graph has symbolic H/W (BubbleSeg `model_dynamic`, LaMa dynamic, CTD
+     * after [CtdDynamicModel]). ORT 1.20's XNNPACK EP only claims a Conv when C/H/W are
+     * known at load (`ConvBase::IsOnnxNodeSupported`), so under [CURRENT] every Conv of
+     * these graphs silently fell back to the CPU EP with a single intra-op thread. They
+     * get the 4-thread CPU pool instead; no XNNPACK pool is created for them, so the
+     * runnable worker count is the same as before.
+     */
+    val DYNAMIC = Engine("dynamic-cpu", 4, 0, spin = false)
     private val lanes = InferenceLanes()
 
     fun open(file: File, threads: Int = 4, engine: Engine? = null): OrtSession {

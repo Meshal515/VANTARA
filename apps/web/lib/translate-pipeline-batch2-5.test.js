@@ -143,59 +143,53 @@ describe('batch 2.5 stage pipeline', () => {
     expect(result.bypass).toBe(false);expect(result.continuePrepare).toEqual(expect.any(Function));
   });
 
-  it('does not run Route concurrently with an active Heavy native stage', async () => {
+  it('Route runs while another page holds the Heavy lane (no whole-page head-of-line blocking)', async () => {
     globalThis.fetch = async () => new Response(new Uint8Array([31,32,33]));
     globalThis.localStorage = memory();
     installDevice({ textless:true });
 
     let release;
     const hold = new Promise(resolve => { release = resolve; });
-    const heavy = withNativeTranslationStage(() => hold, { priority:'analyze' });
+    const heavy = withNativeTranslationStage(() => hold, { priority:'aheadAnalyze', lane:'analyze' });
     await tick();
 
-    let routed = false;
-    const original = globalThis.Capacitor.Plugins.Translation.routePage;
-    globalThis.Capacitor.Plugins.Translation.routePage = async args => {
-      routed = true;
-      return original(args);
-    };
-    const preparing = prepareTranslation(
-      'http://localhost/_capacitor_file_/cache/pages/serialized-route.jpg',
-      { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:2, sourceLang:'en' },
-      { preAnalyze:true, via:'reader', interactive:false },
-    );
-    await tick();
-    await tick();
-    expect(routed).toBe(false);
-    release();
-    await heavy;
-    const prepared = await preparing;
-    expect(routed).toBe(true);
-    expect(prepared.bypass).toBe(true);
+    try {
+      const prepared = await prepareTranslation(
+        'http://localhost/_capacitor_file_/cache/pages/lane-route.jpg',
+        { seriesRef:'ext:test', sourceId:'src', chapterKey:'c', pageIndex:2, sourceLang:'en' },
+        { preAnalyze:true, via:'reader', interactive:true },
+      );
+      expect(prepared.bypass).toBe(true);
+    } finally {
+      release();
+      await heavy;
+    }
   });
 
-  it('routes jump ahead of queued ahead-analysis while all native inference remains serialized', async () => {
+  it('serializes each Native lane and orders it by reader priority', async () => {
     let release;
     const hold = new Promise(resolve => { release = resolve; });
     const order = [];
-    let active = 0;
-    let maxActive = 0;
-    const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
-      active += 1; maxActive = Math.max(maxActive, active); order.push(name);
+    const active = { route:0, analyze:0, render:0 };
+    const maxActive = { route:0, analyze:0, render:0 };
+    const task = (name, priority, lane, wait = null) => withNativeTranslationStage(async () => {
+      active[lane] += 1; maxActive[lane] = Math.max(maxActive[lane], active[lane]); order.push(name);
       if (wait) await wait;
-      active -= 1;
-    }, { priority });
+      active[lane] -= 1;
+    }, { priority, lane });
 
-    const holder = task('holder','analyze',hold);
+    const holder = task('holder','aheadAnalyze','analyze',hold);
     await tick();
-    const ahead = task('ahead','aheadAnalyze');
-    const route = task('route','route');
-    await tick();
+    const ahead = task('ahead','aheadAnalyze','analyze');
+    const visible = task('visible','analyze','analyze');
+    const route = task('route','aheadRoute','route');
+    await route;
+    expect(order).toEqual(['holder','route']);
     release();
-    await Promise.all([holder,ahead,route]);
+    await Promise.all([holder,ahead,visible]);
 
-    expect(order).toEqual(['holder','route','ahead']);
-    expect(maxActive).toBe(1);
+    expect(order).toEqual(['holder','route','visible','ahead']);
+    expect(maxActive).toEqual({ route:1, analyze:1, render:0 });
   });
 
   it('capacity contract pauses and resumes queue admission without dropping work', async () => {
@@ -232,44 +226,42 @@ describe('batch 2.5 stage pipeline', () => {
     expect(source).toMatch(/prepareTranslation\([^;]+\{\s*preAnalyze:\s*true,/s);
   });
 
-  it('lets a ready render beat speculative ahead route work', async () => {
+  it('a visible render beats a queued ahead render in the render lane', async () => {
     let release;
     const hold = new Promise(resolve => { release = resolve; });
     const order = [];
     const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
       order.push(name);
       if (wait) await wait;
-    }, { priority });
+    }, { priority, lane:'render' });
 
-    const holder = task('holder', 'analyze', hold);
+    const holder = task('holder', 'aheadRender', hold);
     await tick();
-    const speculativeRoute = task('ahead-route', () => 'aheadRoute');
-    const readyRender = task('ready-render', 'aheadRender');
+    const ahead = task('ahead-render', () => 'aheadRender');
+    const visible = task('visible-render', 'render');
     await tick();
     release();
-    await Promise.all([holder, speculativeRoute, readyRender]);
+    await Promise.all([holder, ahead, visible]);
 
-    expect(order).toEqual(['holder', 'ready-render', 'ahead-route']);
+    expect(order).toEqual(['holder', 'visible-render', 'ahead-render']);
   });
 
   it('re-evaluates queued native priority so focus promotion is live', async () => {
     let releaseHolder;
     let releaseCandidate;
-    let releaseRoute;
     const holderWait = new Promise(resolve => { releaseHolder = resolve; });
     const candidateWait = new Promise(resolve => { releaseCandidate = resolve; });
-    const routeWait = new Promise(resolve => { releaseRoute = resolve; });
     const order = [];
     let focused = false;
     const task = (name, priority, wait = null) => withNativeTranslationStage(async () => {
       order.push(name);
       if (wait) await wait;
-    }, { priority });
+    }, { priority, lane:'analyze' });
 
-    const holder = task('holder', 'analyze', holderWait);
+    const holder = task('holder', 'aheadAnalyze', holderWait);
     await tick();
-    const candidate = task('candidate', () => focused ? 'render' : 'aheadAnalyze', candidateWait);
-    const route = task('route', 'route', routeWait);
+    const other = task('other', 'aheadAnalyze');
+    const candidate = task('candidate', () => focused ? 'analyze' : 'aheadAnalyze', candidateWait);
     await tick();
 
     focused = true;
@@ -277,11 +269,8 @@ describe('batch 2.5 stage pipeline', () => {
     await tick();
     expect(order).toEqual(['holder', 'candidate']);
     releaseCandidate();
-    await tick();
-    expect(order).toEqual(['holder', 'candidate', 'route']);
-    releaseRoute();
-    await Promise.all([holder, candidate, route]);
-    expect(order).toEqual(['holder', 'candidate', 'route']);
+    await Promise.all([holder, candidate, other]);
+    expect(order).toEqual(['holder', 'candidate', 'other']);
   });
 
 

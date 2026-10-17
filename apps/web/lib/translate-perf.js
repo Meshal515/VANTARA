@@ -296,6 +296,8 @@ export function v3Throughput(entries = []) {
     `CTD calls/صفحة نص ${(c('ctdCalls') / analyzed.length).toFixed(2)}`,
     ctdPages ? `CTD calls/صفحة فيها CTD ${(c('ctdCalls') / ctdPages).toFixed(2)}` : null,
     atlasPages ? `أطلس ${atlasPages}/${ctdPages} صفحة · امتلاء ${occupancy}%` : 'أطلس غير مفعّل في هذا APK',
+    c('ctdTightCalls') ? `CTD بمقاس المنطقة ${c('ctdTightCalls')} نداء` : null,
+    c('ctdTensorPixels') ? `CTD موتّر ${(c('ctdTensorPixels') / 1e6).toFixed(2)}M بكسل` : null,
     c('bubbleNativeRoi') ? `BubbleSeg بمقاس ROI ${c('bubbleNativeRoi')} نداء · ${(c('bubbleInputPixels') / 1e6).toFixed(2)}M بكسل موتّر` : null,
     probes || skipped ? `فحص كاش Luna بلا صورة ${probes} · تُخطّي ${skipped}` : null,
   ].filter(Boolean);

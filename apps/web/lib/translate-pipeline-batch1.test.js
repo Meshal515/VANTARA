@@ -16,7 +16,7 @@ describe('batch 1 reader pipeline', () => {
     delete globalThis.localStorage;
   });
 
-  it('lets a ready render jump ahead of queued analyze work without overlapping native stages', async () => {
+  it('runs a ready render beside a held analyze lane; each lane stays serialized', async () => {
     let releaseHolder;
     const held = new Promise(resolve => { releaseHolder = resolve; });
     const order = [];
@@ -37,12 +37,14 @@ describe('batch 1 reader pipeline', () => {
     const render = run('ready-render', 'render');
     await tick();
 
-    expect(order).toEqual(['holder']);
+    // The render lane is free: a ready page never waits for another page's analyze.
+    expect(order).toEqual(['holder', 'ready-render']);
+    await render;
     releaseHolder();
-    await Promise.all([holder, analyze, render]);
+    await Promise.all([holder, analyze]);
 
     expect(order).toEqual(['holder', 'ready-render', 'next-analyze']);
-    expect(maxActive).toBe(1);
+    expect(maxActive).toBe(2);
   });
 
   it('reuses preparation hash cache and route instead of reading the same page twice', async () => {
