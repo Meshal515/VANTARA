@@ -1375,22 +1375,27 @@ export function createAnime(deps) {
 
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
-      const hero = el('div', 'an-pick-hero');
+      // رأس الورقة (server-sheet.js): لقطة الحلقة بشعار العمل، ثم تقييمها وتاريخها ومدتها ووصفها من ani.zip
       const art = state.art?.id === m.id ? state.art : null;
       const shot = episodeStill(m, n, art);
       const thumb = shot.still ? shot.src : null;
-      hero.append(image(thumb ?? m.banner ?? m.poster, 'an-img', { eager: true, position: thumb || m.banner ? 'center' : 'center 25%' }));
-      const cap = el('div', 'an-pick-cap');
       const epTitle = episodeTitleOf(m, n, { mal: state.malTitles, art });
-      cap.append(el('span', 'an-pick-no', `الحلقة ${n}`));
-      if (epTitle) {
-        const et = el('b', 'an-pick-title', epTitle);
-        et.dir = 'auto';
-        cap.append(et);
-      }
-      if (clip) cap.append(el('span', 'an-pick-resume', `اللقطة ${engine.clock(clip.startMs)}–${engine.clock(clip.endMs)}`));
-      else if (startAt > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(startAt)}`));
-      hero.append(cap);
+      const epArt = art?.episodes?.[String(n)] ?? null;
+      const minutes = epArt?.runtime || m.duration;
+      const media = {
+        title: m.title,
+        logo: art?.logo ?? null,
+        backdrop: thumb ?? m.banner ?? m.poster,
+        backdropFallback: m.banner ?? m.poster ?? null,
+        backdropPosition: thumb || m.banner ? null : 'center 25%',
+        label: `الحلقة ${n}`,
+        episodeTitle: epTitle,
+        description: epArt?.overview ?? null,
+        rating: epArt?.rating ? { value: epArt.rating } : null,
+        date: epArt?.airDate ?? null,
+        duration: minutes ? `${minutes} د` : null,
+        resume: clip ? `اللقطة ${engine.clock(clip.startMs)}–${engine.clock(clip.endMs)}` : startAt > 5000 ? `تكمل من ${engine.clock(startAt)}` : null,
+      };
 
       const extraFoot = [];
       if (hub && !sheet.autoTogether) {
@@ -1464,7 +1469,7 @@ export function createAnime(deps) {
         el,
         kicker: `الحلقة ${n}`,
         title: m.title,
-        hero,
+        media,
         extraFoot,
         prefer,
         // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة

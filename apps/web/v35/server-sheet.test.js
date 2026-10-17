@@ -50,9 +50,15 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
     { id: 'dead', sourceId: 'witanime', server: 'videa', code: 'VDA', quality: 480, state: 'UNAVAILABLE' },
   ];
   ui.update({ routes, settled: false, status: { text: '…' } });
-  expect(body.querySelector('.ss-rec-name').textContent).toBe('WitAnime');
-  expect(body.querySelector('.ss-rec').textContent).toContain('يبدأ فورًا');
-  expect(body.querySelector('.ss-rec').textContent).toContain('مترجم عربي');
+  // لا بطاقة «الأفضل لك»: كلمة «مقترح» على صفّه وحده، وسببه تحت الزر الواحد
+  expect(body.querySelector('.ss-rec')).toBeNull();
+  const top = body.querySelectorAll('.ss-row--top');
+  expect(top).toHaveLength(1);
+  expect(top[0].querySelector('.ss-name').textContent).toBe('WitAnime');
+  expect(top[0].querySelector('.ss-host').textContent).toBe('StreamWish');
+  expect(top[0].textContent).toContain('مترجم عربي');
+  expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل الأفضل');
+  expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · يبدأ فورًا');
   // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ لا رموز ثلاثية في أي صف
   const direct = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
   expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload']);
@@ -63,6 +69,111 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
   expect(onPick).toHaveBeenCalledWith(routes[2]);
-  body.querySelector('.ss-rec').onclick();
+  top[0].onclick();
   expect(onPick).toHaveBeenLastCalledWith(routes[2]);
+});
+
+const dom = () => {
+  const { document } = parseHTML('<html><body><main></main></body></html>');
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  return { document, el, body: document.querySelector('main') };
+};
+
+it('heads the sheet with the episode: logo over its still, one quiet facts line, code, title and description', () => {
+  const { el, body } = dom();
+  createServerSheet(body, {
+    el, onPick() {},
+    media: {
+      title: 'Breaking Bad', logo: 'https://images.metahub.space/logo/medium/tt0903747/img',
+      backdrop: 'https://episodes.metahub.space/tt0903747/2/3/w780.jpg', backdropFallback: 'https://bg.jpg',
+      code: 'S02E03', label: 'الموسم 2 · الحلقة 3', episodeTitle: 'Bit by a Dead Bee',
+      description: 'Walt and Jesse cover their tracks.', rating: { value: 7.6, label: 'IMDb' }, date: '2009-03-23', duration: '49 د', resume: 'تكمل من 31:05',
+    },
+  });
+  expect(body.querySelector('.ss-art-img').getAttribute('src')).toContain('w780.jpg');
+  expect(body.querySelector('.ss-logo').getAttribute('src')).toContain('/logo/');
+  expect(body.querySelector('.ss-brand').className).toContain('ss-brand--logo');
+  // الشعار نفسه ينتقل إلى الشريط المضغوط حين تنكمش الصورة
+  expect(body.querySelector('.ss-bar-logo')).not.toBeNull();
+  const facts = [...body.querySelectorAll('.ss-fact')].map((f) => f.textContent);
+  expect(facts[0]).toBe('IMDb7.6');
+  expect(facts[1]).toMatch(/2009/);
+  expect(facts[2]).toBe('49 د');
+  expect(body.querySelector('.ss-ep-code').textContent).toBe('S02E03');
+  expect(body.querySelector('.ss-ep-no').textContent).toBe('الموسم 2 · الحلقة 3');
+  expect(body.querySelector('.ss-ep-title').textContent).toBe('Bit by a Dead Bee');
+  // الوصف الإنجليزي باتجاهه (dir=auto) ومقصوص على ثلاثة أسطر مع «المزيد»
+  const desc = body.querySelector('.ss-desc');
+  expect(desc.dir).toBe('auto');
+  expect(desc.className).toContain('clamped');
+  const more = body.querySelector('.ss-more');
+  more.onclick();
+  expect(desc.className).not.toContain('clamped');
+  expect(more.textContent).toBe('أقل');
+  expect(body.querySelector('.ss-resume').textContent).toContain('31:05');
+  // خلفية بديلة إن تعذّرت لقطة الحلقة، والاسم نصًا إن تعذّر الشعار
+  body.querySelector('.ss-art-img').onerror();
+  expect(body.querySelector('.ss-art-img').getAttribute('src')).toBe('https://bg.jpg');
+  body.querySelector('.ss-logo').onerror();
+  expect(body.querySelector('.ss-logo')).toBeNull();
+  expect(body.querySelector('.ss-brand').className).not.toContain('ss-brand--logo');
+  expect(body.querySelector('.ss-title').textContent).toBe('Breaking Bad');
+});
+
+it('a movie without logo or episode shows its name as text and no episode line', () => {
+  const { el, body } = dom();
+  createServerSheet(body, { el, onPick() {}, kicker: 'فيلم', title: 'Fight Club', media: { label: 'فيلم', date: 1999, rating: { value: 8.8, label: 'IMDb' } } });
+  expect(body.querySelector('.ss-logo')).toBeNull();
+  expect(body.querySelector('.ss-title').textContent).toBe('Fight Club');
+  expect(body.querySelector('.ss-ep')).toBeNull();
+  expect([...body.querySelectorAll('.ss-fact')].map((f) => f.textContent)).toEqual(['IMDb8.8', '1999']);
+  expect(body.querySelector('.ss-art').className).toContain('ss-art--none');
+});
+
+const choose = (select, value) => {
+  for (const o of select.querySelectorAll('option')) o.toggleAttribute('selected', o.value === value);
+  select.onchange();
+};
+
+it('filters by quality, language and source as quiet tabs plus one source menu', () => {
+  const { el, body } = dom();
+  const onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => ({ witanime: 'WitAnime' })[r.sourceId] ?? r.sourceId });
+  const routes = [
+    { id: 'w', sourceId: 'witanime', server: 'streamwish', quality: 1080, variant: 'SUB', state: 'READY', probeMs: 700 },
+    { id: 'd', sourceId: 'witanime', server: 'mp4upload', quality: 720, variant: 'DUB', state: 'READY', probeMs: 900 },
+    { id: 't', sourceId: TORR, sourceName: 'Torrentio', quality: 1080, state: 'READY', runtimeReady: true, label: 'X.1080p.WEB-DL\n👤 80 💾 1 GB ⚙️ Nyaa' },
+    { id: 'c', sourceId: COMET, sourceName: 'Comet', quality: 2160, state: 'READY', runtimeReady: true, label: 'X.2160p.WEB-DL\n👤 20 💾 5 GB ⚙️ Nyaa' },
+  ];
+  ui.update({ routes, settled: true, status: { text: '4 جاهزة' } });
+  const tabs = [...body.querySelectorAll('.ss-tab')].map((b) => b.textContent);
+  expect(tabs).toEqual(['الكل', '4K', '1080p', '720p', 'مترجم', 'مدبلج']);
+  const select = body.querySelector('.ss-addon-select');
+  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
+  choose(select, 'Comet');
+  expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-name').textContent)).toEqual(['Comet']);
+  // المقترح والزر يتبعان المرشّح
+  expect(body.querySelector('.ss-row--top .ss-name').textContent).toBe('Comet');
+  body.querySelector('.an-pick-best').onclick();
+  expect(onPick).toHaveBeenLastCalledWith(routes[3]);
+  choose(body.querySelector('.ss-addon-select'), 'all');
+  [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
+  expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
+  expect(body.querySelector('.ss-tab.on').textContent).toBe('الكل');
+  expect([...body.querySelectorAll('.ss-tab.on')].map((b) => b.textContent)).toEqual(['الكل', 'مدبلج']);
+});
+
+it('says plainly when nothing is ready, without a hero card, and offers a retry', () => {
+  const { el, body } = dom();
+  const onRetry = vi.fn();
+  const ui = createServerSheet(body, { el, onPick() {}, onRetry });
+  ui.update({ routes: [], settled: false, status: { text: 'نبحث…', spin: true } });
+  expect(body.querySelectorAll('.ss-skel')).toHaveLength(5);
+  expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل أول سيرفر يجهز');
+  ui.update({ routes: [{ id: 'x', sourceId: 'witanime', server: 'videa', quality: 480, state: 'UNAVAILABLE' }], settled: true, status: { text: '' }, retry: { wait: 0 } });
+  expect(body.querySelector('.ss-note').textContent).toContain('لم يجهز أي سيرفر الآن');
+  expect(body.querySelector('.an-srv-status').hidden).toBe(true);
+  expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
+  body.querySelector('.an-pick-best').onclick();
+  expect(onRetry).toHaveBeenCalled();
 });

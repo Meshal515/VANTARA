@@ -44,6 +44,7 @@ export function seasonsOf(videos = []) {
       title: v.name || v.title || null,
       overview: v.overview || v.description || null,
       thumb: v.thumbnail || null,
+      rating: Number.parseFloat(v.rating) > 0 ? Number.parseFloat(v.rating) : null,
       // بعض أعمال Cinemeta (Besstydniki) تعطي firstAired بدل released
       released: v.released || v.firstAired ? Date.parse(v.released || v.firstAired) || null : null,
     });

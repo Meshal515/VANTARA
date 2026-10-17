@@ -39,7 +39,7 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   expect(first.textContent).toContain('Release-0');
   expect(first.className).toContain('an-srv--ready');
   expect(first.className).toContain('ss-row--torrent');
-  expect(sheet.querySelector('.ss-rec .ss-rec-name').textContent).toBe('Torrentio');
+  expect(sheet.querySelector('.ss-row--top .ss-name').textContent).toBe('Torrentio');
   expect(Boolean(sheet.querySelector('.cn-srv-wait'))).toBe(httpPending);
   expect(sheet.querySelectorAll('.an-srv-group > .an-srv-grid .an-srv').length).toBe(6);
   const more=sheet.querySelector('.an-srv-group details');

@@ -1,11 +1,25 @@
 /*
  * ورقة السيرفرات — الأنمي (أزرق) والسينما (أحمر) بالمكوّن نفسه (server-sheet.js).
- * صفحة كاملة: شريط علوي، لقطة الحلقة، «الأفضل لك»، مرشّحات بسطر واحد،
- * صفوف 64px (مباشر ثم تورنت)، والمطويّات. الألوان من رموز القسم.
+ *
+ * هادئة وناضجة: لا توهّج، لا حدود نيون، لا رقائق ملوّنة، لا صناديق حول كل شيء.
+ * لون القسم (--accent) للفعل الأساسي والمختار وحدهما؛ البقية درجات النص الأربع.
+ *
+ * الهاتف: صفحة كاملة تُمرَّر — صورة الحلقة بالشعار، سطر معلومات والوصف، ثم
+ * المصادر. مع التمرير تنكمش الصورة ويظهر الشعار في شريط علوي مضغوط؛ الحركة
+ * تحويل وشفافية فقط عبر --ss-y و--ss-p و--ss-bar (يكتبها server-sheet.js).
+ * الشاشة العريضة (≥ 900px): لوحتان بعرض الشاشة كلها — الصورة الكبيرة بالشعار
+ * والوصف في جهة البداية، والمصادر بمرشّحاتها وزرّها في الجهة الأخرى.
  */
 
-.v35 .sheet-backdrop--full > .sheet {
+/* أقوى من نافذة الشاشة العريضة (wide.css): هنا الشاشة كلها لا نافذة في الوسط */
+.v35 .sheet-backdrop.sheet-backdrop--full {
+  padding: 0;
+  place-items: stretch;
+  background: var(--bg);
+}
+.v35 .sheet-backdrop.sheet-backdrop--full > .sheet {
   width: 100%;
+  max-width: none;
   max-height: none;
   height: 100%;
   overflow: hidden;
@@ -15,26 +29,46 @@
   background: var(--bg);
   transform: translateY(12px);
 }
-.v35 .sheet-backdrop--full.show > .sheet {
+.v35 .sheet-backdrop.sheet-backdrop--full.show > .sheet {
   transform: none;
 }
 
 .v35 .an-pick {
+  --ss-y: 0px;
+  --ss-p: 0;
+  --ss-bar: 0;
+  --ss-bar-h: calc(var(--safe-top) + 56px);
+  position: relative;
   display: flex;
   flex-direction: column;
-  --ss-gold: #f3cf7a;
-  --ss-good: #5fd49a;
-  --ss-fair: #b9d96a;
 }
 
-/* ── الشريط العلوي ── */
-.v35 .an-pick-bar {
+/* ── الشريط العلوي: شفاف فوق الصورة، يمتلئ ويظهر فيه الشعار حين تنكمش ── */
+.v35 .ss-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: calc(var(--safe-top) + 6px) 6px 6px;
+  gap: 6px;
+  height: var(--ss-bar-h);
+  padding: var(--safe-top) 6px 0;
+  pointer-events: none;
+}
+.v35 .ss-bar > * {
+  pointer-events: auto;
+}
+.v35 .ss-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--line);
+  opacity: var(--ss-bar);
 }
 .v35 .an-pick-back {
+  position: relative;
   flex: none;
   display: grid;
   place-items: center;
@@ -43,32 +77,58 @@
   border: 0;
   border-radius: 50%;
   background: none;
-  color: var(--text-1);
+  color: #fff;
+}
+/* دائرة داكنة خلف السهم فوق الصورة فقط، تختفي حين يمتلئ الشريط */
+.v35 .an-pick-back::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.42);
+  opacity: calc(1 - var(--ss-bar));
 }
 .v35 .an-pick-back:active {
-  background: var(--surface-2);
+  background: rgba(255, 255, 255, 0.08);
 }
-.v35 .an-pick-heading {
-  display: grid;
-  gap: 1px;
+.v35 .ss-bar-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
+  opacity: var(--ss-bar);
+  transform: translateY(calc((1 - var(--ss-bar)) * 6px));
 }
-.v35 .an-pick-heading b {
-  font-size: 16px;
-  font-weight: 800;
+.v35 .ss-bar-logo {
+  flex: none;
+  height: 26px;
+  max-width: 132px;
+  object-fit: contain;
+  object-position: right center;
 }
-.v35 .an-pick-anime {
+.v35 .ss-bar--logo .ss-bar-title {
+  display: none;
+}
+.v35 .ss-bar-title {
   overflow: hidden;
-  font-size: 12.5px;
-  color: var(--text-3);
+  font-size: var(--fs-body-lg);
+  font-weight: 700;
+  color: var(--text-1);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v35 .ss-bar-sub {
+  flex: none;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
   white-space: nowrap;
 }
 
 .v35 .an-pick-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 4px var(--gutter) 28px;
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
@@ -76,250 +136,239 @@
   display: none;
 }
 
-/* ── لقطة الحلقة: عريضة وقصيرة، فالسيرفرات تظهر من أول نظرة ── */
-.v35 .an-pick-hero {
+/* ── الصورة والشعار ── */
+.v35 .ss-info {
   position: relative;
-  aspect-ratio: 2.35 / 1;
-  overflow: hidden;
-  border-radius: 18px;
-  background: var(--surface-2);
 }
-.v35 .an-pick-hero .an-img {
+.v35 .ss-art,
+.v35 .ss-brand {
+  aspect-ratio: 5 / 4;
+}
+.v35 .ss-art {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.v35 .ss-art-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transform: translate3d(0, calc(var(--ss-y) * 0.5), 0) scale(calc(1 + var(--ss-p) * 0.06));
+  transform-origin: center top;
+  transition: opacity var(--dur-slow) var(--ease);
+  will-change: transform;
 }
-.v35 .an-pick-hero::after {
+.v35 .ss-art-img.loaded {
+  opacity: calc(1 - var(--ss-p) * 0.65);
+}
+/* تعتيم أعلى (للسهم) وذوبان أسفل في الخلفية — لا لمعان */
+.v35 .ss-art::after {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 26%),
+    linear-gradient(to top, var(--bg) 2%, color-mix(in srgb, var(--bg) 55%, transparent) 34%, transparent 62%);
+}
+.v35 .ss-art--none::after {
+  background: none;
+}
+.v35 .ss-brand {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 28px 10px;
+  opacity: calc(1 - var(--ss-p) * 1.5);
+  transform: translate3d(0, calc(var(--ss-y) * 0.3), 0) scale(calc(1 - var(--ss-p) * 0.22));
+  transform-origin: center bottom;
   pointer-events: none;
 }
-.v35 .an-pick-cap {
-  position: absolute;
-  inset: auto 0 0;
-  display: grid;
-  justify-items: start;
-  gap: 3px;
-  padding: 40px 14px 12px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.4) 60%, transparent);
+.v35 .ss-logo {
+  max-width: min(74%, 300px);
+  max-height: 96px;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease);
 }
-.v35 .an-pick-no {
-  font-size: 11.5px;
-  font-weight: 800;
-  color: var(--accent-text);
+.v35 .ss-logo.loaded {
+  opacity: 1;
 }
-.v35 .an-pick-title {
-  max-width: 100%;
+.v35 .ss-title {
+  display: -webkit-box;
+  margin: 0;
   overflow: hidden;
-  font-size: 15px;
+  font-size: 26px;
   font-weight: 800;
+  line-height: 1.2;
   color: #fff;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
-.v35 .an-pick-resume {
-  margin-top: 2px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(8px);
+.v35 .ss-brand--logo .ss-title {
+  display: none;
 }
 
-/* ── «الأفضل لك» ── */
-.v35 .ss-rec {
-  position: relative;
-  margin-top: 14px;
-  padding: 14px 14px 13px;
-  border-radius: 20px;
-  background:
-    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 62%),
-    var(--surface-1);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 14px 34px -18px color-mix(in srgb, var(--accent) 70%, transparent);
-  cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease);
-  -webkit-tap-highlight-color: transparent;
+/* ── سطر المعلومات والعنوان والوصف ── */
+.v35 .ss-about {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 8px var(--gutter) 0;
 }
-.v35 .ss-rec:not(.ss-rec--loading):not(.ss-rec--empty):active {
-  transform: scale(0.985);
+.v35 .ss-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-2);
 }
-.v35 .ss-rec--loading,
-.v35 .ss-rec--empty {
-  cursor: default;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+.v35 .ss-fact + .ss-fact::before {
+  content: '·';
+  margin-inline: 8px;
+  color: var(--text-4);
 }
-.v35 .ss-rec-head {
+.v35 .ss-fact--rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.v35 .ss-fact--rate .icon {
+  color: var(--text-2);
+}
+.v35 .ss-rate-src {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+.v35 .ss-ep {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .ss-ep-code {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+.v35 .ss-ep-code + .ss-ep-no::before {
+  content: '·';
+  margin-inline-end: 8px;
+  color: var(--text-4);
+}
+.v35 .ss-ep-title {
+  margin: -2px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-1);
+}
+.v35 .ss-desc {
+  width: 100%;
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  color: var(--text-2);
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+.v35 .ss-desc.clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.v35 .ss-more {
+  margin-top: -4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.v35 .ss-more[hidden] {
+  display: none;
+}
+.v35 .ss-resume {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--accent-text);
-}
-.v35 .ss-rec--empty .ss-rec-head {
+  font-size: 13px;
   color: var(--text-2);
-  font-size: 13.5px;
 }
-.v35 .ss-rec-note {
-  margin: 6px 0 0;
-  font-size: 12.5px;
-  line-height: 1.6;
+.v35 .ss-resume .icon {
   color: var(--text-3);
 }
-.v35 .ss-rec-main {
+
+/* ── المصادر: رأس ومرشّحات نصّية ثابتة عند التمرير ── */
+.v35 .ss-src {
+  padding: 0 var(--gutter) 24px;
+}
+.v35 .ss-tools {
+  position: sticky;
+  top: var(--ss-bar-h);
+  z-index: 2;
+  margin-top: 20px;
+  background: var(--bg);
+}
+.v35 .ss-tools-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 10px;
+  min-height: 40px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
-.v35 .ss-rec-q {
+.v35 .ss-tools-head > b {
   flex: none;
-  display: grid;
-  place-items: center;
-  min-width: 62px;
-  height: 54px;
-  padding: 0 10px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-  font-size: 19px;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  color: #fff;
-}
-.v35 .ss-rec-q--uhd {
-  background: linear-gradient(140deg, #f7dc92, #c9973a);
-  box-shadow: none;
-  color: #231806;
-}
-.v35 .ss-rec-copy {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-.v35 .ss-rec-name {
-  overflow: hidden;
-  font-size: 17px;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.v35 .ss-rec-host {
-  overflow: hidden;
-  font-size: 12.5px;
-  color: var(--text-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.v35 .ss-rec-play {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  padding: 0 0 0 3px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 10px 22px -8px var(--accent);
-}
-.v35 .ss-rec-play:disabled {
-  opacity: 0.5;
-}
-.v35 .ss-rec-why {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-.v35 .ss-rec-why .ss-chip {
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 8px;
-  font-size: 11.5px;
-}
-.v35 .ss-rec-why .ss-chip--kind,
-.v35 .ss-rec-why .ss-chip--spec {
-  padding: 0 9px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* ── الرقائق ── */
-.v35 .ss-chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: 6px;
-  font-style: normal;
-  font-size: 11px;
+  font-size: var(--fs-title-sm);
   font-weight: 700;
-  line-height: 1;
+  color: var(--text-1);
+}
+.v35 .an-srv-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-inline-start: auto;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .an-srv-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.v35 .an-srv-status[hidden] {
+  display: none;
+}
+.v35 .an-srv-status.ss-status--warn {
   color: var(--text-2);
-  background: rgba(255, 255, 255, 0.06);
 }
-.v35 .ss-chip--kind {
-  padding: 0;
-  background: none;
-  color: var(--text-3);
-}
-.v35 .ss-chip bdi {
-  unicode-bidi: isolate;
-}
-.v35 .ss-chip--spec {
-  padding: 0;
-  background: none;
-  color: var(--text-3);
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-  font-weight: 650;
-}
-.v35 .ss-meta .ss-chip--spec + .ss-chip--spec::before {
-  content: '·';
-  margin-inline-end: 4px;
-  color: var(--text-4);
-}
-.v35 .ss-chip--ar {
-  color: #86e8b8;
-  background: rgba(95, 212, 154, 0.13);
-}
-.v35 .ss-chip--speed {
-  color: #ffd27a;
-  background: rgba(242, 183, 91, 0.13);
-}
-.v35 .ss-chip--prefer {
-  color: var(--accent-text);
-  background: var(--accent-soft);
-}
-.v35 .ss-chip--cam {
-  color: var(--danger);
-  background: var(--danger-soft);
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-}
-
-/* ── المرشّحات: سطر واحد يتمرّر أفقيًا، لا يلتف ── */
 .v35 .an-pick-filters {
   display: flex;
-  gap: 8px;
-  margin: 18px calc(var(--gutter) * -1) 0;
-  padding: 0 var(--gutter);
+  align-items: center;
+  gap: 18px;
   overflow-x: auto;
+  box-shadow: inset 0 -1px 0 var(--line);
   scrollbar-width: none;
+}
+.v35 .an-pick-filters.ss-filters--more {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 36px);
+  mask-image: linear-gradient(to right, transparent, #000 36px);
 }
 .v35 .an-pick-filters::-webkit-scrollbar {
   display: none;
@@ -327,486 +376,667 @@
 .v35 .an-pick-filters[hidden] {
   display: none;
 }
-.v35 .ss-seg {
+.v35 .ss-tabs {
+  display: flex;
   flex: none;
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 12px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  gap: 16px;
 }
-.v35 .ss-seg-btn {
-  height: 32px;
-  padding: 0 11px;
+.v35 .ss-tabs + .ss-tabs {
+  padding-inline-start: 18px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 .ss-tab {
+  position: relative;
+  padding: 11px 0 12px;
   border: 0;
-  border-radius: 9px;
   background: none;
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--text-3);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 750;
   white-space: nowrap;
-  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
-.v35 .ss-seg-btn.on {
-  background: var(--surface-3);
+.v35 .ss-tab.on {
   color: var(--text-1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
-
-/* ── سطر الحالة ── */
-.v35 .an-srv-status {
+.v35 .ss-tab.on::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.v35 .ss-addon {
+  position: relative;
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 8px;
-  min-height: 18px;
-  margin: 16px 2px 0;
-  font-size: 12.5px;
+  margin-inline-start: auto;
+}
+.v35 .ss-addon-select {
+  max-width: 150px;
+  padding-block: 11px 12px;
+  padding-inline: 0 20px;
+  border: 0;
+  background: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  appearance: none;
+  field-sizing: content;
+  cursor: pointer;
+}
+.v35 .ss-addon-select option {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.v35 .ss-addon-chev {
+  position: absolute;
+  inset-inline-end: 0;
   color: var(--text-3);
-}
-.v35 .an-srv-status[hidden] {
-  display: none;
-}
-.v35 .an-srv-status.ss-status--warn {
-  color: var(--warning);
+  transform: rotate(-90deg);
+  pointer-events: none;
 }
 
-/* ── الأقسام ── */
+/* ── القائمة ── */
 .v35 .an-srv-list {
   display: grid;
-  gap: 4px;
-  padding-bottom: 6px;
+}
+.v35 .an-srv-group {
+  display: grid;
 }
 .v35 .an-srv-group[hidden] {
   display: none;
 }
 .v35 .an-srv-q {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
-  margin: 18px 2px 10px;
-  font-size: 15px;
+  margin: 18px 0 2px;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-3);
 }
 .v35 .an-srv-q b {
-  font-weight: 800;
-  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
 }
 .v35 .ss-count {
-  min-width: 22px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-  font-size: 11px;
-  font-weight: 800;
-  text-align: center;
-  color: var(--text-3);
+  color: var(--text-4);
 }
 .v35 .ss-sub {
   margin-inline-start: auto;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-4);
 }
 .v35 .an-srv-grid {
   display: grid;
-  gap: 8px;
 }
 
-/* ── صفّ السيرفر: 64px ── */
 .v35 .ss-row {
   position: relative;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  width: 100%;
+  width: calc(100% + 16px);
   min-height: 64px;
-  padding: 8px 10px 8px 14px;
+  margin-inline: -8px;
+  padding: 10px 8px;
   border: 0;
-  border-radius: 16px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--text-1);
+  border-radius: 10px;
+  background: none;
+  color: inherit;
   font: inherit;
   text-align: start;
-  cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
-  -webkit-tap-highlight-color: transparent;
+}
+/* فاصل شعري بين الصفوف لا صناديق */
+.v35 .ss-row + .ss-row::before {
+  content: '';
+  position: absolute;
+  inset: 0 8px auto;
+  height: 1px;
+  background: var(--line);
 }
 .v35 .ss-row:not(:disabled):active {
-  transform: scale(0.985);
-  background: var(--surface-2);
+  background: var(--surface-1);
 }
-.v35 .ss-row--busy .ss-end small {
-  color: var(--accent-text);
+.v35 .ss-row:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
 }
-.v35 .ss-row.an-srv--prefer {
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+@media (hover: hover) {
+  .v35 .ss-row:not(:disabled):hover {
+    background: var(--surface-1);
+  }
+  .v35 .ss-row:hover::before,
+  .v35 .ss-row:hover + .ss-row::before {
+    opacity: 0;
+  }
+  .v35 .ss-row:not(:disabled):hover .ss-play {
+    color: var(--text-1);
+  }
 }
 .v35 .ss-q {
   display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 3px;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--surface-3);
-  line-height: 1;
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
+  justify-items: start;
+  gap: 1px;
 }
 .v35 .ss-q b {
   font-size: 15px;
-  font-weight: 850;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 .v35 .ss-q small {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   color: var(--text-3);
 }
 .v35 .ss-q small:empty {
   display: none;
 }
-.v35 .ss-row--uhd .ss-q {
-  background: linear-gradient(140deg, rgba(247, 220, 146, 0.22), rgba(201, 151, 58, 0.12));
-  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, 0.28);
-}
-.v35 .ss-row--uhd .ss-q b,
-.v35 .ss-q--hdr small {
-  color: var(--ss-gold);
-}
 .v35 .ss-main {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
 }
 .v35 .ss-line {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  white-space: nowrap;
 }
 .v35 .ss-name {
   flex: none;
-  max-width: 62%;
+  max-width: 60%;
   overflow: hidden;
-  font-size: 14.5px;
-  font-weight: 800;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .v35 .ss-host {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--text-3);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.v35 .ss-host[hidden] {
+.v35 .ss-host[hidden],
+.v35 .ss-tag[hidden] {
   display: none;
+}
+/* المقترح: كلمة صغيرة بلون القسم، لا بطاقة ولا إطار */
+.v35 .ss-tag {
+  flex: none;
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
 }
 .v35 .ss-meta {
   display: flex;
-  align-items: center;
-  gap: 6px;
   min-width: 0;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 18px);
-  mask-image: linear-gradient(to right, transparent, #000 18px);
-}
-.v35 .ss-end {
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 4px;
-  min-width: 42px;
-}
-.v35 .ss-end small {
-  font-size: 10.5px;
-  font-weight: 700;
+  font-size: var(--fs-meta);
   color: var(--text-3);
   white-space: nowrap;
 }
-.v35 .ss-end .ss-bad {
-  color: var(--danger);
+.v35 .ss-chip {
+  flex: none;
 }
-.v35 .ss-play {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  padding-left: 2px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent-text);
+.v35 .ss-chip + .ss-chip::before {
+  content: '·';
+  margin-inline: 6px;
+  color: var(--text-4);
+}
+.v35 .ss-chip--ar,
+.v35 .ss-chip--lang,
+.v35 .ss-chip--prefer {
+  color: var(--text-2);
+}
+.v35 .ss-chip--cam {
+  color: var(--warning);
+}
+.v35 .ss-end {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 .ss-end small {
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+.v35 .ss-end .ss-bad {
+  color: var(--text-4);
 }
 .v35 .an-srv-seeds {
-  font-family: Inter, 'Vantara Sans', system-ui, sans-serif;
-  font-size: 15px;
-  font-weight: 850;
-  line-height: 1;
-  color: var(--text-1);
+  min-width: 2.2em;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
 }
-
-/* مقياس صحة السرب: أربعة أعمدة صاعدة */
+.v35 .an-srv--swarm-dead .an-srv-seeds {
+  color: var(--text-4);
+}
+/* صحة السرب: أعمدة رمادية صغيرة — مؤشر لا إشارة مرور */
 .v35 .ss-meter {
   direction: ltr;
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 12px;
+  height: 11px;
 }
 .v35 .ss-meter i {
-  width: 4px;
-  border-radius: 1.5px;
-  background: rgba(255, 255, 255, 0.13);
+  width: 3px;
+  border-radius: 1px;
+  background: var(--surface-3);
+}
+.v35 .ss-meter i.on {
+  background: var(--text-3);
 }
 .v35 .ss-meter i:nth-child(1) { height: 4px; }
-.v35 .ss-meter i:nth-child(2) { height: 6.5px; }
-.v35 .ss-meter i:nth-child(3) { height: 9px; }
-.v35 .ss-meter i:nth-child(4) { height: 12px; }
-.v35 .ss-meter--strong i.on { background: var(--ss-good); }
-.v35 .ss-meter--fair i.on { background: var(--ss-fair); }
-.v35 .ss-meter--weak i.on { background: var(--warning); }
-.v35 .an-srv--swarm-dead .an-srv-seeds { color: var(--danger); }
+.v35 .ss-meter i:nth-child(2) { height: 6px; }
+.v35 .ss-meter i:nth-child(3) { height: 8.5px; }
+.v35 .ss-meter i:nth-child(4) { height: 11px; }
+.v35 .ss-play {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-4);
+}
 
-/* الحالات */
-.v35 .ss-row.an-srv--resolving {
-  cursor: default;
-  background: color-mix(in srgb, var(--surface-1) 65%, transparent);
+/* يبدأ التشغيل من هذا الصف: الحالة المختارة بلون القسم */
+.v35 .ss-row--busy {
+  background: var(--accent-soft);
+}
+.v35 .ss-row--busy .ss-end {
+  color: var(--accent-text);
 }
 .v35 .ss-row.an-srv--resolving .ss-main,
-.v35 .ss-row.an-srv--resolving .ss-q {
-  opacity: 0.6;
-}
-.v35 .ss-row.an-srv--failed,
-.v35 .ss-row.an-srv--unavailable {
-  background: color-mix(in srgb, var(--surface-1) 55%, transparent);
-}
+.v35 .ss-row.an-srv--resolving .ss-q,
 .v35 .ss-row.an-srv--failed .ss-main,
 .v35 .ss-row.an-srv--failed .ss-q,
 .v35 .ss-row.an-srv--unavailable .ss-main,
 .v35 .ss-row.an-srv--unavailable .ss-q {
-  opacity: 0.45;
-  filter: grayscale(1);
+  opacity: 0.5;
 }
 
 .v35 .ss-spin {
-  width: 14px;
-  height: 14px;
+  flex: none;
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 1.75px solid var(--surface-3);
+  border-top-color: var(--text-2);
   border-radius: 50%;
-  border: 2px solid var(--accent-soft);
-  border-top-color: var(--accent);
-  animation: an-spin 0.8s linear infinite;
+  animation: ss-spin 0.8s linear infinite;
+}
+@keyframes ss-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── المطويّات: نسخ إضافية · تُجهَّز بالخلفية · غير متاح ── */
-.v35 .cn-srv-dead {
-  margin-top: 8px;
-}
 .v35 .cn-srv-dead[hidden] {
   display: none;
 }
 .v35 .cn-srv-dead > summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  padding: 0 14px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
   list-style: none;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-2);
-  box-shadow: inset 0 0 0 1px var(--line);
 }
 .v35 .cn-srv-dead > summary::-webkit-details-marker {
   display: none;
 }
 .v35 .cn-srv-dead > summary::after {
   content: '';
-  width: 8px;
-  height: 8px;
-  margin-bottom: 3px;
-  border-right: 2px solid var(--text-3);
-  border-bottom: 2px solid var(--text-3);
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
-  transition: transform var(--dur) var(--ease);
 }
 .v35 .cn-srv-dead[open] > summary::after {
-  margin: 3px 0 0;
+  margin-top: 3px;
   transform: rotate(-135deg);
 }
-.v35 .cn-srv-dead[open] > summary {
-  margin-bottom: 8px;
-}
 .v35 .an-srv-list > .cn-srv-dead {
-  margin-top: 16px;
-}
-.v35 .ss-dead > summary {
-  color: var(--text-3);
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
-/* ── الهياكل أثناء التحميل ── */
+/* ── التحميل والحالات الفارغة ── */
 .v35 .ss-skel-list {
   display: grid;
-  gap: 8px;
-  margin-top: 18px;
-}
-.v35 .ss-skel,
-.v35 .ss-shim {
-  position: relative;
-  overflow: hidden;
-  background: var(--surface-1);
+  padding-top: 8px;
 }
 .v35 .ss-skel {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  height: 64px;
-  padding: 0 14px;
-  border-radius: 16px;
-  box-shadow: inset 0 0 0 1px var(--line);
+  min-height: 64px;
+}
+.v35 .ss-skel + .ss-skel {
+  border-top: 1px solid var(--line);
 }
 .v35 .ss-skel > span {
   display: grid;
   gap: 8px;
 }
-.v35 .ss-shim--box {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-}
 .v35 .ss-shim {
+  position: relative;
   display: block;
-  border-radius: 8px;
-  background: var(--surface-2);
+  height: 10px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-1);
 }
-.v35 .ss-skel::after,
 .v35 .ss-shim::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.05) 50%, transparent 80%);
-  animation: an-shimmer 1.4s infinite;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.035) 50%, transparent 80%);
+  transform: translateX(100%);
+  animation: ss-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes ss-shimmer {
+  to { transform: translateX(-100%); }
 }
 .v35 .ss-shim--q {
-  flex: none;
-  width: 62px;
-  height: 54px;
-  border-radius: 14px;
+  width: 40px;
+  height: 14px;
 }
 .v35 .ss-shim--a {
-  width: 58%;
-  height: 16px;
+  width: 42%;
 }
 .v35 .ss-shim--b {
-  width: 36%;
-  height: 12px;
-  margin-top: 4px;
+  width: 68%;
 }
-.v35 .ss-none {
-  margin: 22px 0 0;
-  font-size: 13px;
-  text-align: center;
+.v35 .ss-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 0 8px;
   color: var(--text-3);
 }
-
-/* ── الأسفل: زر التشغيل الثابت ── */
-.v35 .an-pick-foot {
-  position: relative;
-  padding: 10px var(--gutter) calc(var(--safe-bottom) + 12px);
-  background: var(--bg);
+.v35 .ss-note .icon {
+  flex: none;
+  margin-top: 2px;
 }
-.v35 .an-pick-foot::before {
-  content: '';
-  position: absolute;
-  inset: -24px 0 100%;
-  background: linear-gradient(to top, var(--bg), transparent);
-  pointer-events: none;
+.v35 .ss-note b {
+  display: block;
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.v35 .ss-note p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.v35 .ss-none {
+  margin: 0;
+  padding: 28px 0;
+  font-size: 13.5px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/* ── أسفل الصفحة: فعل أساسي واحد هادئ، ومشاهدة مع الأصدقاء ثانوية ── */
+.v35 .an-pick-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px var(--gutter) calc(var(--safe-bottom) + 10px);
+  background: var(--bg);
+  box-shadow: 0 -1px 0 var(--line);
 }
 .v35 .an-pick-best {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  width: 100%;
-  height: 54px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 16px;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--r-md);
   background: var(--accent);
   color: #fff;
-  font: inherit;
-  font-size: 15px;
-  font-weight: 800;
-  transition: opacity var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
+  font-size: var(--fs-body-lg);
+  font-weight: 700;
 }
 .v35 .an-pick-best:not(:disabled):active {
   background: var(--accent-press);
-  transform: scale(0.985);
 }
 .v35 .an-pick-best.waiting {
-  opacity: 0.75;
+  background: var(--surface-2);
+  color: var(--text-1);
 }
 .v35 .an-pick-best:disabled {
-  opacity: 0.4;
+  background: var(--surface-1);
+  color: var(--text-3);
+}
+.v35 .an-pick-best .icon {
+  flex: none;
 }
 .v35 .ss-best-copy {
   display: grid;
   justify-items: start;
-  gap: 1px;
-  line-height: 1.2;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: start;
+}
+.v35 .ss-best-copy > span,
+.v35 .ss-best-copy small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .v35 .ss-best-copy small {
-  font-size: 11.5px;
-  font-weight: 600;
-  opacity: 0.82;
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  opacity: 0.8;
 }
 .v35 .an-pick-together {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  height: 46px;
-  margin-top: 8px;
+  gap: 7px;
+  height: 48px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.v35 .an-pick-together:active {
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--text-1);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
+}
+@media (hover: hover) {
+  .v35 .an-pick-together:hover {
+    background: var(--surface-1);
+    color: var(--text-1);
+  }
+  .v35 .an-pick-best:not(:disabled):hover {
+    background: var(--accent-press);
+  }
+}
+@media (max-width: 370px) {
+  .v35 .an-pick-together span {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .v35 .ss-art-img,
+  .v35 .ss-brand,
+  .v35 .ss-bar-mark {
+    transform: none;
+  }
+  .v35 .ss-art-img,
+  .v35 .ss-logo {
+    transition: none;
+  }
   .v35 .ss-spin,
-  .v35 .ss-skel::after,
   .v35 .ss-shim::after {
     animation: none;
   }
 }
 
-/* سطح المكتب: عمود واحد مريح في الوسط بدل صفوف ممتدة بعرض الشاشة */
+/* ───────── الشاشة العريضة: لوحتان بعرض الشاشة ───────── */
 @media (min-width: 900px) {
-  .v35 .an-pick-bar,
-  .v35 .an-pick-scroll > *,
-  .v35 .an-pick-foot > * {
-    width: 100%;
-    max-width: 680px;
-    margin-inline: auto;
+  .v35 .an-pick {
+    --ss-bar: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(420px, 36vw, 560px);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'info src'
+      'info foot';
   }
-  .v35 .an-pick-scroll > .an-pick-filters {
+  /* لا تمرير مشترك: اللوحتان عنصرا الشبكة، والمصادر تُمرَّر وحدها */
+  .v35 .an-pick-scroll {
+    display: contents;
+  }
+  .v35 .ss-bar {
+    grid-area: info;
+    height: auto;
+    padding: calc(var(--safe-top) + 20px) 24px 0;
+  }
+  .v35 .ss-bar::before,
+  .v35 .ss-bar-mark {
+    display: none;
+  }
+  .v35 .ss-info {
+    grid-area: info;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 clamp(40px, 5vw, 80px) clamp(36px, 6vh, 64px);
+  }
+  .v35 .ss-art {
+    position: absolute;
+    inset: 0;
+    aspect-ratio: auto;
+  }
+  .v35 .ss-art-img,
+  .v35 .ss-art-img.loaded {
+    transform: none;
+  }
+  .v35 .ss-art-img.loaded {
+    opacity: 1;
+  }
+  /* ذوبان أسفل اللوحة (للوصف) ونحو لوحة المصادر (يسارًا في الواجهة العربية) */
+  .v35 .ss-art::after {
+    background:
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent 22%),
+      linear-gradient(to top, var(--bg) 4%, color-mix(in srgb, var(--bg) 70%, transparent) 36%, transparent 68%),
+      linear-gradient(to left, var(--bg) 0, transparent 22%);
+  }
+  .v35 .ss-brand {
+    position: relative;
+    inset: auto;
+    aspect-ratio: auto;
+    justify-content: flex-start;
+    margin-bottom: 22px;
+    padding: 0;
+    opacity: 1;
+    transform: none;
+  }
+  .v35 .ss-logo {
+    max-width: min(440px, 70%);
+    max-height: 150px;
+    object-position: right bottom;
+  }
+  .v35 .ss-title {
+    font-size: 44px;
+    text-align: start;
+  }
+  .v35 .ss-about {
+    position: relative;
+    z-index: 1;
+    max-width: 640px;
     padding: 0;
   }
-  .v35 .an-pick-scroll > .an-pick-together {
-    margin-top: 8px;
+  .v35 .ss-facts {
+    font-size: var(--fs-body-lg);
+  }
+  .v35 .ss-ep {
+    font-size: var(--fs-body);
+  }
+  .v35 .ss-ep-title {
+    font-size: var(--fs-title-lg);
+  }
+  .v35 .ss-desc {
+    font-size: var(--fs-body-lg);
+    line-height: 1.7;
+    color: var(--text-1);
+    opacity: 0.86;
+  }
+  .v35 .ss-desc.clamped {
+    -webkit-line-clamp: 4;
+  }
+  .v35 .ss-src {
+    grid-area: src;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 28px 28px;
+    background: var(--bg-raised);
+    box-shadow: inset -1px 0 0 var(--line);
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-3) transparent;
+  }
+  .v35 .ss-tools {
+    top: 0;
+    margin-top: 0;
+    padding-top: calc(var(--safe-top) + 22px);
+    background: var(--bg-raised);
+  }
+  .v35 .ss-tools-head {
+    min-height: 36px;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .v35 .ss-tools-head > b {
+    font-size: var(--fs-title);
+  }
+  .v35 .an-pick-foot {
+    grid-area: foot;
+    padding: 14px 28px calc(var(--safe-bottom) + 18px);
+    background: var(--bg-raised);
+    box-shadow: inset -1px 0 0 var(--line), 0 -1px 0 var(--line);
+  }
+}
+@media (min-width: 1500px) {
+  .v35 .an-pick {
+    grid-template-columns: minmax(0, 1fr) 600px;
   }
 }

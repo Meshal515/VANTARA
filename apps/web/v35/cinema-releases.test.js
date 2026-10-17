@@ -72,11 +72,16 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(best.className).toContain('an-srv--swarm-strong');
   expect(visible[4].querySelectorAll('.ss-meter i.on').length).toBe(1);
   expect(folded[0].className).toContain('an-srv--swarm-dead');
-  // «الأفضل لك»: سرب قوي بحجم يُبثّ (لا ريمكس 61 GB)، وتقول لماذا
-  const rec = sheet.querySelector('.ss-rec');
-  expect(rec.querySelector('.ss-rec-q').textContent).toBe('1080p');
-  expect(rec.textContent).toContain('1,240 مشارك · سرب قوي');
-  expect(rec.textContent).toContain('2.1 GB');
+  // المقترح: سرب قوي بحجم يُبثّ (لا ريمكس 61 GB) — كلمة صغيرة على صفّه، وسببه تحت «شغّل الأفضل»
+  const top = sheet.querySelectorAll('.ss-row--top');
+  expect(top).toHaveLength(1);
+  expect(top[0].title).toBe('Fight.Club.1999.1080p.BluRay.x264.AAC-YTS');
+  expect(top[0].querySelector('.ss-tag').hidden).toBe(false);
+  expect(best.querySelector('.ss-tag').hidden).toBe(true);
+  const why = sheet.querySelector('.an-pick-best small').textContent;
+  expect(why).toContain('1080p');
+  expect(why).toContain('1,240 مشارك · سرب قوي');
+  expect(why).toContain('2.1 GB');
   // اختيار المستخدم يبقى: المطويّ والضعيف قابلان للضغط
   expect(folded[0].disabled).toBe(false);
   await best.onclick();
