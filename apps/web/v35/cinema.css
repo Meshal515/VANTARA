@@ -300,7 +300,8 @@
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  background: var(--surface-1);
+  /* أسفل الإطار بلون الصفحة: يتصل بالذوبان بلا حافة (انظر قص الصورة أدناه) */
+  background: linear-gradient(to top, var(--bg) 3px, var(--surface-1) 3px);
   touch-action: pan-y;
   cursor: pointer;
 }
@@ -312,6 +313,9 @@
   inset: 0;
   /* كل خلفية تملأ الإطار نفسه (16/10) مهما كان مقاسها، ومركزها أعلى قليلًا حيث الوجوه */
   object-position: 50% 30%;
+  /* الصورة طبقة متحركة تُرسم على حافة كسرية غير حافة الذوبان: على كثافة 2.625 (S23)
+     كان صف بكسل منها يظهر خطًا فاتحًا تحت الذوبان. قصّ أسفلها يلغيه */
+  clip-path: inset(0 0 2px 0);
   --from: 0;
   --to: 0;
   --drag: 0px;
@@ -481,28 +485,37 @@
   color: rgba(255, 255, 255, 0.72);
 }
 .v35 .cn-hero-alt .cn-bill-stage {
-  aspect-ratio: 10 / 11;
+  aspect-ratio: 4 / 3;
 }
-/* ستار علوي خفيف تحت الترويسة والتبويبات ليُقرآ فوق أي صورة */
+/* ستار علوي متدرّج تحت الترويسة والتبويبات ليُقرآ فوق أي صورة، حتى الفاتحة */
 .v35 .cn-hero-alt .cn-bill-stage::before {
   content: '';
   position: absolute;
   inset-inline: 0;
   top: 0;
-  height: 32%;
+  height: 40%;
   z-index: 1;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.78) 0%,
+    rgba(0, 0, 0, 0.62) 30%,
+    rgba(0, 0, 0, 0.3) 62%,
+    rgba(0, 0, 0, 0) 100%
+  );
   pointer-events: none;
 }
-/* أسفل الصورة: تمويه ناعم يتلاشى للأعلى وظلّ داكن يذوب في الخلفية خلف الشعار */
+/* أسفل الصورة: ظلّ متدرّج ناعم بلا تمويه يذوب في الخلفية خلف الشعار */
 .v35 .cn-hero-alt .cn-bill-stage::after {
-  height: 42%;
+  height: 50%;
   z-index: 1;
-  background: linear-gradient(to top, var(--bg) 0%, rgba(8, 7, 12, 0.72) 38%, rgba(8, 7, 12, 0) 100%);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  -webkit-mask-image: linear-gradient(to top, #000 45%, transparent);
-  mask-image: linear-gradient(to top, #000 45%, transparent);
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    rgba(8, 7, 12, 0.86) 22%,
+    rgba(8, 7, 12, 0.55) 48%,
+    rgba(8, 7, 12, 0.22) 74%,
+    rgba(8, 7, 12, 0) 100%
+  );
 }
 /* الشعار وما تحته يصعدان فوق أسفل الصورة؛ الارتفاع الثابت نفسه */
 .v35 .cn-hero-alt .cn-bill-info {

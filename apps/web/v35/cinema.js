@@ -335,48 +335,43 @@ export function createCinema(deps) {
   // ───────────── قطع صغيرة ─────────────
 
   /**
-   * الشاشة الكبيرة تأخذ نسخة أوضح من نفس الصورة (Metahub بثلاثة مقاسات: 780،
-   * 1280، والأصل حتى 4K). في اللوحات العريضة تظهر 1280 فورًا ثم تُستبدل
-   * بالأصل متى وصل، والملصق بمقاسه المتوسط. الجوال يبقى على مقاساته.
+   * الشاشة الكبيرة تأخذ نسخة أوضح من الصورة (Metahub: ‏small 480، ‏medium 1280، ‏large
+   * الأصل حتى 4K). تنبيه: large ليست دائمًا نفس لقطة medium (Carrie وSpider-Man
+   * لقطتان مختلفتان)، فلا تُعرض medium ثم تُستبدل — يتغيّر المشهد أمام العين. اللوحة
+   * العريضة تطلب large مباشرة صورةً واحدة، وتنزل إلى medium إن فشلت. الملصق بمقاسه المتوسط.
    */
   const bigScreen = () => globalThis.matchMedia?.('(min-width: 700px)').matches === true;
   const sharpPoster = (src) => (src && bigScreen() ? src.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/') : src);
-  const sharpBackground = (src) => (src && bigScreen() ? src.replace(/(metahub\.space\/background)\/(?:small|medium)\//, '$1/large/') : src);
-  function image(src, cls = 'cn-img', { eager = false, fallback = null, hero = false } = {}) {
+  const sharpBackground = (src, force = false) => (src && (force || bigScreen()) ? src.replace(/(metahub\.space\/background)\/(?:small|medium)\//, '$1/large/') : src);
+  function image(src, cls = 'cn-img', { eager = false, fallback = null, hero = false, sharp = false } = {}) {
     src = sharpPoster(src);
     fallback = sharpPoster(fallback);
-    // الأصل الكبير للّوحات العريضة وحدها (البانر وصفحة العمل)، لا لكل بطاقة صغيرة
-    const sharper = hero ? sharpBackground(src) : src;
+    // الأصل الكبير للّوحات العريضة وحدها (البانر وصفحة العمل)، لا لكل بطاقة صغيرة.
+    // sharp: لوحة تقصّ الصورة وتكبّرها حتى على الجوال (البانر البديل) فتحتاج الأصل دائمًا
+    const sharper = hero ? sharpBackground(src, sharp) : src;
+    // الأصل غير متاح: المقاس المعتاد قبل البديل
+    if (sharper !== src) fallback = src;
+    const first = sharper;
     const img = new Image();
     img.alt = '';
     img.className = cls;
     img.decoding = 'async';
     if (!eager) img.loading = 'lazy';
-    img.onload = () => {
-      img.classList.add('loaded');
-      if (sharper === src || img.dataset.sharp) return;
-      img.dataset.sharp = '1';
-      const hi = new Image();
-      hi.decoding = 'async';
-      hi.src = sharper;
-      hi.decode().then(() => {
-        img.src = sharper;
-      }, () => {});
-    };
+    img.onload = () => img.classList.add('loaded');
     img.onerror = () => {
       // تعثّر شبكة عابر: محاولة ثانية واحدة قبل البديل (الشعار والخلفية خصوصًا)
-      if (src && !img.dataset.retried && img.src === new URL(src, location.href).href) {
+      if (first && !img.dataset.retried && img.src === new URL(first, location.href).href) {
         img.dataset.retried = '1';
         setTimeout(() => {
-          img.src = src;
+          img.src = first;
         }, 1200);
         return;
       }
       // صورة الحلقة غير موجودة بعد: خلفية العمل بدل مربع فارغ
-      if (fallback && img.src !== fallback) img.src = fallback;
+      if (fallback && img.src !== new URL(fallback, location.href).href) img.src = fallback;
       else img.classList.add('failed');
     };
-    if (src) img.src = src;
+    if (first) img.src = first;
     return img;
   }
   const button = (cls, html, onClick, label) => {
@@ -618,7 +613,7 @@ export function createCinema(deps) {
       const m = items[i];
       state.hero.index = i;
       const calm = first || reduced();
-      const img = image(m.background ?? m.poster, 'cn-img cn-bill-img', { eager: first || i < 2, hero: true });
+      const img = image(m.background ?? m.poster, 'cn-img cn-bill-img', { eager: first || i < 2, hero: true, sharp: HERO_FULL_BLEED });
       img.classList.add('cn-bill-enter');
       if (!calm) img.style.setProperty('--from', String(from));
       const previous = [...stage.querySelectorAll('.cn-bill-img')];

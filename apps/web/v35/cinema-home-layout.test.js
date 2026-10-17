@@ -62,7 +62,7 @@ describe('البانر البديل (cn-hero-alt): خلف صنف واحد', () =
     expect(rule(".v35[data-section='cinema'].cn-scrolled #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header")).toMatch(/background:\s*var\(--bg\)/);
   });
   it('مقاسات ثابتة كالأصل: نسبة الصورة وموضع الشعار', () => {
-    expect(rule('.v35 .cn-hero-alt .cn-bill-stage')).toMatch(/aspect-ratio:\s*10 \/ 11/);
+    expect(rule('.v35 .cn-hero-alt .cn-bill-stage')).toMatch(/aspect-ratio:\s*4 \/ 3/);
     expect(rule('.v35 .cn-hero-alt .cn-bill-info')).toMatch(/margin-top:\s*-84px/);
   });
 });
