@@ -44,7 +44,7 @@ function remember(key, data, now) {
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
 const inflight = new Map();
 export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
-  const key = `az-${anilistId}`;
+  const key = `az2-${anilistId}`;
   const hit = cached(key, now);
   if (hit) return Promise.resolve(hit);
   // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
@@ -52,7 +52,7 @@ export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.
   return inflight.get(key);
 }
 async function aniZip(anilistId, fetchImpl, now) {
-  const key = `az-${anilistId}`;
+  const key = `az2-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
   if (!r.ok) return null;
   const d = await r.json();
@@ -60,7 +60,16 @@ async function aniZip(anilistId, fetchImpl, now) {
   for (const [n, e] of Object.entries(d?.episodes ?? {})) {
     if (!/^\d+$/.test(n)) continue;
     const title = e?.title?.ar ?? e?.title?.en ?? e?.title?.['x-jat'] ?? null;
-    episodes[n] = { image: typeof e?.image === 'string' ? e.image : null, title };
+    // وصف الحلقة وتاريخها ومدتها وتقييمها لورقة السيرفرات (server-sheet.js)
+    const rating = Number.parseFloat(e?.rating);
+    episodes[n] = {
+      image: typeof e?.image === 'string' ? e.image : null,
+      title,
+      overview: typeof e?.overview === 'string' && e.overview.trim() ? e.overview.trim() : null,
+      airDate: e?.airDate ?? e?.airdate ?? null,
+      runtime: Number(e?.runtime ?? e?.length) || null,
+      rating: Number.isFinite(rating) && rating > 0 ? rating : null,
+    };
   }
   const data = { imdb: d?.mappings?.imdb_id ?? null, episodes };
   remember(key, data, now);

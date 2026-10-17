@@ -1,9 +1,11 @@
 /**
  * ورقة السيرفرات المشتركة بين الأنمي والسينما.
  *
- * كانت مربعات برموز (TRR · TRR2 · HGC) لا يعرف أحد معناها. هنا كل سيرفر صفّ
- * بشري: من أين (WitAnime · StreamWish، Torrentio · Nyaa)، بأي جودة، بأي لغة،
- * وكم يحتاج ليبدأ. فوقها بطاقة «الأفضل لك» تقول لماذا هي الأفضل وتشغّل بلمسة.
+ * هادئة على طريقة Stremio لا نسخة منه: فوقها صورة الحلقة بشعار العمل، ثم سطر
+ * معلومات واحد (التقييم · التاريخ · المدة) والعنوان والوصف، ثم المصادر قائمةً
+ * نظيفة — كل صفّ: الجودة نصًا، المصدر، سطر مواصفات خافت، واللغة نصًا لا رقائق.
+ * المقترح علامة صغيرة على صفّه، وزرّ واحد «شغّل الأفضل»؛ «شاهد مع أصدقائك» ثانوي.
+ * لا توهّج ولا حدود نيون ولا ألوان متناثرة: لون القسم للفعل الأساسي والمختار وحدهما.
  *
  * الترتيب: السيرفرات المباشرة أولًا (تبدأ فورًا)، ثم التورنت (يبدأ أبطأ ويحتاج
  * مشاركين)، وما يُجهَّز بعد وما تعذّر مطويّان. الورقة لا تملك جلسة التشغيل:
@@ -121,34 +123,70 @@ const meterBars = (d) => {
 };
 const compact = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
 
-/** ما يقال عن الصف في سطره الثاني. */
+
+/**
+ * سطر الصف الثاني نصًا هادئًا لا رقائق ملوّنة: اللغة أولًا (أوضح قليلًا)، ثم
+ * المواصفات بخفوت. سطر واحد لا يُقصّ في منتصف كلمة.
+ */
 function metaChips(r, d, pending) {
   const out = [];
+  for (const l of d.langs) out.push({ t: l.t, cls: l.ar ? 'ar' : 'lang' });
   if (d.torrent) {
-    for (const l of d.langs) out.push({ t: l.t, cls: l.ar ? 'ar' : 'lang' });
     if (d.info?.source === 'CAM') out.push({ t: 'CAM', cls: 'cam' });
     if (d.info?.sizeLabel) out.push({ t: d.info.sizeLabel, cls: 'spec' });
     if (d.info?.source && d.info.source !== 'CAM') out.push({ t: d.info.source, cls: 'spec' });
     if (d.info?.codec) out.push({ t: d.info.codec, cls: 'spec' });
     if (d.info?.audio) out.push({ t: d.info.audio, cls: 'spec' });
-    // سطر واحد لا يُقصّ في منتصف كلمة: اللغات أولًا ثم الأهم من المواصفات
     return out.slice(0, d.langs.length > 1 ? 4 : 5);
-  } else {
-    for (const l of d.langs) out.push({ t: l.t, cls: l.ar ? 'ar' : 'lang' });
-    const sp = !pending && speedHint(r);
-    if (sp) out.push({ t: sp, cls: 'speed' });
-    if (d.prefer) out.push({ t: 'سيرفرك السابق', cls: 'prefer' });
   }
+  const sp = !pending && speedHint(r);
+  if (sp) out.push({ t: sp, cls: 'speed' });
+  if (d.prefer) out.push({ t: 'سيرفرك السابق', cls: 'prefer' });
   return out;
 }
 
+const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'بلا مشاركين' };
+
+/** لماذا هذا هو المقترح، بكلمات قليلة: يُقال تحت زر «شغّل الأفضل». */
+export function bestReason(r, d) {
+  const out = [qualityLabel(d.q), d.name];
+  if (d.prefer) out.push('سيرفرك السابق');
+  if (!d.torrent) out.push(speedHint(r) ?? 'يبدأ فورًا');
+  else if (Number.isFinite(d.info?.seeders)) out.push(`${d.info.seeders.toLocaleString('en')} مشارك · ${SWARM_AR[d.tier]}`);
+  if (d.torrent && d.info?.sizeLabel) out.push(d.info.sizeLabel);
+  return out.filter(Boolean);
+}
+
+/** «2009-03-23» ← «23 مارس 2009»، والسنة وحدها تبقى سنة. */
+export function factDate(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number' && v > 0 && v < 3000) return String(v);
+  const t = typeof v === 'number' ? v : Date.parse(String(v));
+  if (!Number.isFinite(t)) return /^\d{4}$/.test(String(v)) ? String(v) : null;
+  try {
+    return new Date(t).toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' });
+  } catch {
+    return new Date(t).toISOString().slice(0, 10);
+  }
+}
+
 /**
- * يبني الورقة داخل `body` ويعيد {update, best, status}.
- * o: { el, title, kicker, hero, onBack, onPick(r), onBest(), onRetry(), onUnavailable(r),
+ * يبني الورقة داخل `body` ويعيد {update, best, status, body, scroll}.
+ *
+ * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onRetry(), onUnavailable(r),
  *      selectable(r), pending(r), dead(r), sourceName(r), prefer, directLang, extraFoot[] }
+ * media: { title, logo, backdrop, backdropFallback, backdropPosition, code ('S01E02'),
+ *          label ('الموسم 1 · الحلقة 2'), episodeTitle, description, rating: {value, label},
+ *          date, duration, resume ('تكمل من 12:40') }
+ *
+ * على الهاتف: صفحة واحدة تُمرَّر — صورة الحلقة بالشعار، ثم سطر معلومات هادئ والوصف،
+ * ثم المصادر. مع التمرير تنكمش الصورة ويصعد الشعار إلى شريط علوي مضغوط.
+ * على الشاشة العريضة (≥ 900px): لوحتان — الصورة الكبيرة بالشعار والوصف في جهة،
+ * وقائمة المصادر بمرشّحاتها وزرّ التشغيل في الجهة الأخرى تُمرَّر وحدها.
  */
 export function createServerSheet(body, o) {
   const el = o.el;
+  const media = { title: o.title, label: o.kicker, ...(o.media ?? {}) };
   const btn = (cls, html, label) => {
     const b = el('button', cls);
     b.type = 'button';
@@ -156,31 +194,179 @@ export function createServerSheet(body, o) {
     if (label) b.setAttribute('aria-label', label);
     return b;
   };
+  const auto = (tag, cls, text) => {
+    const n = el(tag, cls, text);
+    n.dir = 'auto';
+    return n;
+  };
   body.classList.add('an-pick', 'ss');
-  const bar = el('header', 'an-pick-bar');
+  body.setAttribute('aria-label', ['اختر السيرفر', media.title, media.label].filter(Boolean).join(' — '));
+
+  // ── الشريط العلوي: رجوع، وشعار مضغوط يظهر حين تنكمش الصورة ──
+  const bar = el('header', 'an-pick-bar ss-bar');
   const back = btn('an-pick-back', glyph('back', { size: 22 }), 'رجوع');
   back.onclick = () => o.onBack?.();
-  const heading = el('div', 'an-pick-heading');
-  const name = el('span', 'an-pick-anime');
-  name.dir = 'rtl';
-  name.textContent = [o.kicker, o.title].filter(Boolean).join(' · ');
-  heading.append(el('b', null, 'اختر السيرفر'), name);
-  bar.append(back, heading);
+  const mark = el('div', 'ss-bar-mark');
+  mark.setAttribute('aria-hidden', 'true');
+  const markTitle = auto('b', 'ss-bar-title', media.title ?? '');
+  mark.append(markTitle);
+  if (media.label || media.code) mark.append(el('span', 'ss-bar-sub', media.code ?? media.label));
+  bar.append(back, mark);
+
+  // ── معلومات الحلقة: الصورة والشعار، ثم سطر الحقائق والعنوان والوصف ──
+  const info = el('section', 'ss-info');
+  const art = el('div', 'ss-art');
+  const shot = el('img', 'ss-art-img');
+  shot.alt = '';
+  shot.decoding = 'async';
+  const sources = [media.backdrop, media.backdropFallback].filter(Boolean);
+  if (sources.length) {
+    let i = 0;
+    shot.onload = () => shot.classList.add('loaded');
+    shot.onerror = () => {
+      i += 1;
+      if (sources[i]) shot.src = sources[i];
+      else art.classList.add('ss-art--none');
+    };
+    if (media.backdropPosition) shot.style.objectPosition = media.backdropPosition;
+    shot.src = sources[0];
+    art.append(shot);
+  } else art.classList.add('ss-art--none');
+  const brand = el('div', 'ss-brand');
+  const name = auto('h2', 'ss-title', media.title ?? '');
+  brand.append(name);
+  if (media.logo) {
+    // الشعار بدل الاسم؛ إن تعذّر يبقى الاسم نصًا — لا تخمين
+    brand.classList.add('ss-brand--logo');
+    const logo = el('img', 'ss-logo');
+    logo.alt = media.title ?? '';
+    logo.decoding = 'async';
+    logo.onload = () => logo.classList.add('loaded');
+    logo.onerror = () => {
+      logo.remove();
+      brand.classList.remove('ss-brand--logo');
+      bar.classList.remove('ss-bar--logo');
+    };
+    logo.src = media.logo;
+    brand.prepend(logo);
+    const small = el('img', 'ss-bar-logo');
+    small.alt = '';
+    small.onerror = () => small.remove();
+    small.src = media.logo;
+    mark.prepend(small);
+    bar.classList.add('ss-bar--logo');
+  }
+  const about = el('div', 'ss-about');
+  const facts = el('div', 'ss-facts');
+  const fact = (node) => facts.append(node);
+  const rating = Number(media.rating?.value ?? media.rating);
+  if (Number.isFinite(rating) && rating > 0) {
+    const f = el('span', 'ss-fact ss-fact--rate');
+    if (media.rating?.label) f.append(el('small', 'ss-rate-src', media.rating.label));
+    else f.insertAdjacentHTML('beforeend', glyph('star', { size: 13, filled: true }));
+    const v = el('bdi', null, rating.toFixed(1));
+    v.dir = 'ltr';
+    f.append(v);
+    fact(f);
+  }
+  const when = factDate(media.date);
+  if (when) fact(el('span', 'ss-fact', when));
+  if (media.duration) fact(el('span', 'ss-fact', media.duration));
+  if (facts.children.length) about.append(facts);
+  if (media.code || (media.label && media.episodeTitle)) {
+    const ep = el('div', 'ss-ep');
+    if (media.code) {
+      const code = el('bdi', 'ss-ep-code', media.code);
+      code.dir = 'ltr';
+      ep.append(code);
+    }
+    if (media.label) ep.append(el('span', 'ss-ep-no', media.label));
+    about.append(ep);
+  } else if (media.label && media.label !== 'فيلم') about.append(el('div', 'ss-ep', media.label));
+  if (media.episodeTitle && media.episodeTitle !== media.title) about.append(auto('h3', 'ss-ep-title', media.episodeTitle));
+  if (media.description) {
+    // dir=auto: الوصف الإنجليزي يُقرأ من اليسار بنقطته في آخره، والعربي من اليمين
+    const desc = auto('p', 'ss-desc clamped', media.description);
+    const more = btn('ss-more', 'المزيد');
+    more.hidden = true;
+    more.onclick = () => {
+      const closed = desc.classList.toggle('clamped');
+      more.textContent = closed ? 'المزيد' : 'أقل';
+    };
+    about.append(desc, more);
+    // «المزيد» فقط إن كان الوصف أطول من ثلاثة أسطر فعلًا
+    const measure = () => {
+      if (desc.scrollHeight - desc.clientHeight > 2) more.hidden = false;
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(measure);
+  }
+  if (media.resume) {
+    const r = el('div', 'ss-resume');
+    r.innerHTML = glyph('history', { size: 15 });
+    r.append(el('span', null, media.resume));
+    about.append(r);
+  }
+  // الشعار شقيق الصورة لا ابنها: على الهاتف يعلوها، وعلى الشاشة العريضة يجلس فوق الوصف
+  info.append(art, brand, about);
+
+  // ── المصادر: المرشّحات وسطر الحالة ثم القائمة ──
+  const src = el('section', 'ss-src');
+  const tools = el('div', 'ss-tools');
+  const toolsHead = el('div', 'ss-tools-head');
+  toolsHead.append(el('b', null, 'المصادر'));
+  const status = el('div', 'an-srv-status');
+  toolsHead.append(status);
+  const filters = el('div', 'an-pick-filters');
+  tools.append(toolsHead, filters);
+  const list = el('div', 'an-srv-list');
+  src.append(tools, list);
 
   const scroll = el('div', 'an-pick-scroll');
-  const rec = el('section', 'ss-rec ss-rec--loading');
-  rec.setAttribute('aria-live', 'polite');
-  const status = el('div', 'an-srv-status');
-  const filters = el('div', 'an-pick-filters');
-  const list = el('div', 'an-srv-list');
-  scroll.append(...[o.hero, rec, filters, status, list].filter(Boolean));
+  scroll.append(info, src);
 
   const foot = el('footer', 'an-pick-foot');
   const best = btn('an-pick-best');
   foot.append(best, ...(o.extraFoot ?? []));
   body.append(bar, scroll, foot);
 
-  const filter = { q: 'all', v: null };
+  // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
+  const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);
+  const wide = mq('(min-width: 900px)');
+  const still = mq('(prefers-reduced-motion: reduce)');
+  let ticking = false;
+  const collapse = () => {
+    ticking = false;
+    if (wide?.matches) {
+      body.style.setProperty('--ss-y', '0px');
+      body.style.setProperty('--ss-p', '0');
+      body.style.setProperty('--ss-bar', '0');
+      return;
+    }
+    const y = Math.max(0, scroll.scrollTop || 0);
+    const span = Math.max(1, (art.offsetHeight || 0) - (bar.offsetHeight || 0));
+    const p = Math.min(1, y / span);
+    // الشريط يمتلئ في آخر ثلث الانكماش، والشعار المضغوط يظهر معه
+    const solid = Math.min(1, Math.max(0, (p - 0.62) / 0.38));
+    if (still?.matches) {
+      body.style.setProperty('--ss-y', '0px');
+      body.style.setProperty('--ss-p', '0');
+      body.style.setProperty('--ss-bar', p >= 0.8 ? '1' : '0');
+      return;
+    }
+    body.style.setProperty('--ss-y', `${Math.min(y, span).toFixed(1)}px`);
+    body.style.setProperty('--ss-p', p.toFixed(3));
+    body.style.setProperty('--ss-bar', solid.toFixed(3));
+  };
+  scroll.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(collapse);
+    else collapse();
+  }, { passive: true });
+  wide?.addEventListener?.('change', collapse);
+  collapse();
+
+  const filter = { q: 'all', v: null, a: 'all' };
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
@@ -226,11 +412,14 @@ export function createServerSheet(body, o) {
   const wait = fold('cn-srv-wait');
   const dead = fold('ss-dead');
   const skeleton = el('div', 'ss-skel-list');
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const sk = el('div', 'ss-skel');
-    sk.innerHTML = '<i class="ss-shim ss-shim--box"></i><span><i class="ss-shim ss-shim--a"></i><i class="ss-shim ss-shim--b"></i></span>';
+    sk.innerHTML = '<i class="ss-shim ss-shim--q"></i><span><i class="ss-shim ss-shim--a"></i><i class="ss-shim ss-shim--b"></i></span>';
     skeleton.append(sk);
   }
+  // لا جاهز ولا انتظار: جملة هادئة مكان القائمة، لا بطاقة
+  const note = el('div', 'ss-note');
+  note.setAttribute('aria-live', 'polite');
 
   const reconcile = (parent, nodes) => {
     nodes.forEach((node, i) => {
@@ -244,9 +433,9 @@ export function createServerSheet(body, o) {
   const isSelectable = (r) => o.selectable?.(r) ?? r.state === 'READY';
 
   function chipNode(c) {
-    const i = el('i', `ss-chip ss-chip--${c.cls}`);
-    // «2.1 GB» يبقى بترتيبه داخل سطر عربي، والفاصل بين الرقائق في جهته الصحيحة
-    if (/[A-Za-z0-9]/.test(c.t) && !/[\u0600-\u06FF]/.test(c.t)) {
+    const i = el('span', `ss-chip ss-chip--${c.cls}`);
+    // «2.1 GB» يبقى بترتيبه داخل سطر عربي، والفاصل بين العناصر في جهته الصحيحة
+    if (/[A-Za-z0-9]/.test(c.t) && !/[؀-ۿ]/.test(c.t)) {
       const b = el('bdi', null, c.t);
       b.dir = 'ltr';
       i.append(b);
@@ -255,6 +444,7 @@ export function createServerSheet(body, o) {
     return i;
   }
 
+  let topId = null;
   function row(r) {
     const d = view(r);
     const pending = isPending(r);
@@ -264,20 +454,21 @@ export function createServerSheet(body, o) {
     if (!b) {
       b = el('button');
       b.type = 'button';
-      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
+      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
       rows.set(r.id, b);
     }
     const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
-    b.className = `an-srv ss-row ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}`;
+    const top = r.id === topId;
+    b.className = `an-srv ss-row ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
     b.disabled = pending;
     const qb = b.querySelector('.ss-q');
-    qb.firstElementChild.textContent = d.q == null ? 'HD' : d.q === 2160 ? '4K' : d.q === 480 ? 'SD' : String(d.q);
-    qb.lastElementChild.textContent = d.hdr.length ? d.hdr[0] : ({ 2160: 'UHD', 1440: 'QHD', 1080: 'FHD', 720: 'HD' })[d.q] ?? '';
-    qb.classList.toggle('ss-q--hdr', d.hdr.length > 0);
+    qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
+    qb.lastElementChild.textContent = d.hdr.length ? d.hdr[0] : '';
     b.querySelector('.ss-name').textContent = d.name;
     const host = b.querySelector('.ss-host');
     host.textContent = d.host ?? '';
     host.hidden = !d.host;
+    b.querySelector('.ss-tag').hidden = !top;
     b.querySelector('.ss-meta').replaceChildren(...metaChips(r, d, pending).map(chipNode));
     const end = b.querySelector('.ss-end');
     const starting = Boolean(last.busy && picked === r.id);
@@ -289,75 +480,31 @@ export function createServerSheet(body, o) {
       const bars = meterBars(d);
       const meter = Array.from({ length: 4 }, (_, i) => `<i${i < bars ? ' class="on"' : ''}></i>`).join('');
       end.innerHTML = bars < 0
-        ? `<span class="ss-meter ss-meter--none">${meter}</span><small>غير معلن</small>`
-        : `<b class="an-srv-seeds" dir="ltr">${compact(d.info.seeders)}</b><span class="ss-meter ss-meter--${d.tier}" aria-hidden="true">${meter}</span>`;
-    } else end.innerHTML = `<span class="ss-play">${glyph('play', { size: 14, filled: true })}</span>`;
-    const why = [d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? 'نفحص التشغيل' : gone ? 'غير متاح' : null].filter(Boolean).join('، ');
+        ? '<small>غير معلن</small>'
+        : `<span class="ss-meter ss-meter--${d.tier}" aria-hidden="true">${meter}</span><b class="an-srv-seeds" dir="ltr">${compact(d.info.seeders)}</b>`;
+    } else end.innerHTML = `<span class="ss-play">${glyph('play', { size: 13, filled: true })}</span>`;
+    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? 'نفحص التشغيل' : gone ? 'غير متاح' : null].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
     b.onclick = () => (selectable ? pick(r) : o.onUnavailable?.(r));
     return b;
   }
 
-  function recCard(r, model) {
-    rec.className = 'ss-rec';
-    const d = view(r);
-    const reasons = [];
-    if (!d.torrent) reasons.push({ t: speedHint(r) ?? 'سيرفر مباشر · يبدأ فورًا', cls: 'speed', icon: 'bolt' });
-    else if (Number.isFinite(d.info?.seeders)) reasons.push({ t: `${d.info.seeders.toLocaleString('en')} مشارك · ${({ strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'بلا مشاركين' })[d.tier]}`, cls: 'speed' });
-    else reasons.push({ t: 'تورنت', cls: 'kind' });
-    for (const l of d.langs) reasons.push({ t: l.t, cls: l.ar ? 'ar' : 'lang' });
-    if (d.prefer) reasons.push({ t: 'سيرفرك السابق', cls: 'prefer' });
-    if (d.torrent && d.info?.sizeLabel) reasons.push({ t: d.info.sizeLabel, cls: 'spec', ltr: true });
-    const play = btn('ss-rec-play', glyph('play', { size: 22, filled: true }), `شغّل ${d.name} ${qualityLabel(d.q)}`);
-    play.disabled = model.busy;
-    const head = el('div', 'ss-rec-head');
-    head.innerHTML = `${glyph('spark', { size: 14 })}<span>الأفضل لك</span>`;
-    const main = el('div', 'ss-rec-main');
-    const q = el('span', `ss-rec-q${d.q === 2160 ? ' ss-rec-q--uhd' : ''}`);
-    q.dir = 'ltr';
-    q.textContent = qualityLabel(d.q);
-    const copy = el('div', 'ss-rec-copy');
-    const nm = el('b', 'ss-rec-name', d.name);
-    nm.dir = 'auto';
-    copy.append(nm);
-    if (d.host) {
-      const h = el('span', 'ss-rec-host', d.host);
-      h.dir = 'auto';
-      copy.append(h);
-    }
-    main.append(q, copy, play);
-    const why = el('div', 'ss-rec-why');
-    why.append(...reasons.map((c) => {
-      const n = chipNode(c);
-      if (c.icon) n.insertAdjacentHTML('afterbegin', glyph(c.icon, { size: 12, filled: true }));
-      return n;
-    }));
-    rec.replaceChildren(head, main, why);
-    rec.onclick = () => {
-      if (!model.busy) pick(r);
-    };
+  function paintNote(model) {
+    const msg = model.missing ? 'لم نجد هذه الحلقة في المصادر الآن' : model.error ? 'تعذّر الوصول إلى المصادر' : 'لم يجهز أي سيرفر الآن';
+    const hint = model.missing ? 'جرّب لاحقًا، أو فعّل مصادر أخرى من الإعدادات.' : 'أعد المحاولة بعد لحظات — كثيرًا ما تعود السيرفرات سريعًا.';
+    note.innerHTML = `${glyph('info', { size: 18 })}<div><b></b><p></p></div>`;
+    note.querySelector('b').textContent = msg;
+    note.querySelector('p').textContent = hint;
   }
 
-  function recEmpty(model) {
-    if (model.settled || model.missing || model.error) {
-      rec.className = 'ss-rec ss-rec--empty';
-      rec.onclick = null;
-      const msg = model.missing ? 'لم نجد هذه الحلقة في المصادر الآن' : model.error ? 'تعذّر الوصول إلى المصادر' : 'لم يجهز أي سيرفر الآن';
-      rec.innerHTML = `<div class="ss-rec-head">${glyph('info', { size: 14 })}<span>${msg}</span></div><p class="ss-rec-note">${model.missing ? 'جرّب لاحقًا، أو فعّل مصادر أخرى من الإعدادات.' : 'أعد المحاولة بعد لحظات — كثيرًا ما تعود السيرفرات سريعًا.'}</p>`;
-      return;
-    }
-    rec.className = 'ss-rec ss-rec--loading';
-    rec.onclick = null;
-    rec.innerHTML = `<div class="ss-rec-head"><i class="ss-spin"></i><span>نختار لك الأفضل…</span></div><div class="ss-rec-main"><span class="ss-shim ss-shim--q"></span><span class="ss-rec-copy"><span class="ss-shim ss-shim--a"></span><span class="ss-shim ss-shim--b"></span></span></div>`;
-  }
-
-  const seg = (items, active, onPick, label) => {
-    const g = el('div', 'ss-seg');
+  // مرشّحات نصّية في سطر واحد: الجودة، ثم مترجم/مدبلج، ثم قائمة المصدر
+  const tabs = (items, active, onPick, label) => {
+    const g = el('div', 'ss-tabs');
     g.setAttribute('role', 'group');
     g.setAttribute('aria-label', label);
     for (const [key, text] of items) {
-      const b = btn(`ss-seg-btn${key === active ? ' on' : ''}`);
+      const b = btn(`ss-tab${key === active ? ' on' : ''}`);
       b.textContent = text;
       b.setAttribute('aria-pressed', String(key === active));
       b.onclick = () => onPick(key);
@@ -374,14 +521,35 @@ export function createServerSheet(body, o) {
     const dub = live.some((r) => r.variant === 'DUB');
     const sub = live.some((r) => r.variant !== 'DUB');
     if (!(dub && sub)) filter.v = null;
+    const names = [...new Set(live.map((r) => view(r).name))];
+    if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
     const parts = [];
-    if (qs.length > 1) parts.push(seg([['all', 'الكل'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q, (k) => { filter.q = k; update(last); }, 'الجودة'));
-    // اللغة زرّان يُلغى المختار منهما بلمسة ثانية: سطر واحد يتّسع للجودة واللغة معًا
-    if (dub && sub) parts.push(seg([['SUB', 'مترجم'], ['DUB', 'مدبلج']], filter.v, (k) => { filter.v = filter.v === k ? null : k; update(last); }, 'اللغة'));
+    if (qs.length > 1) parts.push(tabs([['all', 'الكل'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q, (k) => { filter.q = k; update(last); }, 'الجودة'));
+    // اللغة زرّان يُلغى المختار منهما بلمسة ثانية
+    if (dub && sub) parts.push(tabs([['SUB', 'مترجم'], ['DUB', 'مدبلج']], filter.v, (k) => { filter.v = filter.v === k ? null : k; update(last); }, 'اللغة'));
+    if (names.length > 1) {
+      const wrap = el('label', 'ss-addon');
+      const select = el('select', 'ss-addon-select');
+      select.setAttribute('aria-label', 'المصدر');
+      for (const [value, text] of [['all', 'كل المصادر'], ...names.map((n) => [n, n])]) {
+        const opt = el('option', null, text);
+        opt.value = value;
+        if (value === filter.a) opt.selected = true;
+        select.append(opt);
+      }
+      select.onchange = () => { filter.a = select.value; update(last); };
+      wrap.append(select);
+      wrap.insertAdjacentHTML('beforeend', glyph('chevron', { size: 14, cls: 'icon ss-addon-chev' }));
+      parts.push(wrap);
+    }
     filters.replaceChildren(...parts);
     filters.hidden = !parts.length;
+    // سطر أعرض من الشاشة: يذوب طرفه إشارةً إلى أنه يُمرَّر، بدل قصّ كلمة في منتصفها
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => filters.classList.toggle('ss-filters--more', filters.scrollWidth > filters.clientWidth + 1));
   }
-  const passes = (r) => (filter.q === 'all' || view(r).q === filter.q) && (filter.v == null || (filter.v === 'DUB') === (r.variant === 'DUB'));
+  const passes = (r) => (filter.q === 'all' || view(r).q === filter.q)
+    && (filter.v == null || (filter.v === 'DUB') === (r.variant === 'DUB'))
+    && (filter.a === 'all' || view(r).name === filter.a);
 
   /**
    * model: { routes, busy, settled, missing, error, status: {text, spin}, retry: null | {wait} }
@@ -395,17 +563,17 @@ export function createServerSheet(body, o) {
     const anyReady = routes.some(isSelectable);
     const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).sort((a, b) => b.s - a.s);
     const top = scored[0]?.r ?? null;
-    if (top) recCard(top, model);
-    else recEmpty(model);
+    topId = top?.id ?? null;
 
-    // سطر الحالة
+    // سطر الحالة: «55 جاهزة من 77 · البقية تصل»
     const st = model.status ?? {};
     status.replaceChildren();
-    if (st.spin) status.append(el('i', 'an-sources-spin'));
+    if (st.spin) status.append(el('i', 'ss-spin'));
     status.append(el('span', null, st.text ?? ''));
     status.classList.toggle('ss-status--warn', Boolean(model.error || model.missing));
-    // بطاقة «الأفضل لك» تقول الحال حين لا جاهز ولا انتظار: لا سطر يكرّرها
-    status.hidden = !top && Boolean(model.settled || model.missing || model.error);
+    // الملاحظة تقول الحال حين لا جاهز ولا انتظار: لا سطر يكرّرها
+    const empty = !top && Boolean(model.settled || model.missing || model.error);
+    status.hidden = empty;
 
     // المباشر ثم التورنت؛ ما يُجهَّز بعد (حين يوجد جاهز) وما تعذّر مطويّان
     const pend = shown.filter(isPending);
@@ -419,7 +587,7 @@ export function createServerSheet(body, o) {
     const fill = (g, items, cap, weak) => {
       const main = [];
       const extra = [];
-      for (const r of items) ((weak?.(r) || main.length >= cap) ? extra : main).push(row(r));
+      for (const r of items) ((r.id !== topId && (weak?.(r) || main.length >= cap)) ? extra : main).push(row(r));
       reconcile(g.grid, main);
       reconcile(g.moreGrid, extra);
       g.more.hidden = !extra.length;
@@ -439,7 +607,9 @@ export function createServerSheet(body, o) {
     reconcile(dead.grid, gone.map(row));
     dead.summary.textContent = `غير متاح الآن (${gone.length})`;
     const loading = !routes.length && !model.settled && !model.missing && !model.error;
+    if (empty) paintNote(model);
     const order = [
+      empty ? note : null,
       loading ? skeleton : null,
       directLive.length ? direct.s : null,
       torrentLive.length ? torrent.s : null,
@@ -447,24 +617,32 @@ export function createServerSheet(body, o) {
       gone.length ? dead.d : null,
     ].filter(Boolean);
     reconcile(list, order);
-    if (!order.length && routes.length) list.replaceChildren(el('p', 'ss-none', 'لا سيرفر بهذا الاختيار — جرّب جودة أو لغة أخرى'));
+    if (!order.length && routes.length) list.replaceChildren(el('p', 'ss-none', 'لا سيرفر بهذا الاختيار — جرّب جودة أو لغة أو مصدرًا آخر'));
 
-    // الزر الثابت أسفل الورقة: يشغّل نفس «الأفضل لك»، أو ينتظر أول جاهز
+    // زرّ واحد هادئ: يشغّل المقترح نفسه، أو ينتظر أول جاهز
     best.classList.remove('waiting');
     if (model.retry) {
       const w = model.retry.wait;
       best.disabled = w > 0;
-      best.innerHTML = `${glyph('refresh', { size: 20 })}<span>${w ? `أعد المحاولة بعد ${w} ث` : 'أعد المحاولة'}</span>`;
+      best.innerHTML = `${glyph('refresh', { size: 18 })}<span class="ss-best-copy"><span>${w ? `أعد المحاولة بعد ${w} ث` : 'أعد المحاولة'}</span></span>`;
       best.onclick = () => o.onRetry?.();
       return;
     }
-    best.disabled = Boolean(model.busy || model.missing || (!top && (model.settled || (filter.q !== 'all' || filter.v != null))));
+    const filtered = filter.q !== 'all' || filter.v != null || filter.a !== 'all';
+    best.disabled = Boolean(model.busy || model.missing || (!top && (model.settled || filtered)));
     best.classList.toggle('waiting', !top && !model.settled && !model.missing);
     const td = top ? view(top) : null;
     const label = model.busy ? 'نجهّز التشغيل…' : top ? 'شغّل الأفضل' : model.settled ? 'لا سيرفر جاهز' : 'شغّل أول سيرفر يجهز';
-    best.innerHTML = `${glyph('play', { size: 20, filled: true })}<span class="ss-best-copy"><span>${label}</span>${td && !model.busy ? `<small dir="auto"></small>` : ''}</span>`;
+    best.innerHTML = `${glyph('play', { size: 18, filled: true })}<span class="ss-best-copy"><span>${label}</span>${td && !model.busy ? '<small></small>' : ''}</span>`;
     const small = best.querySelector('small');
-    if (small) small.textContent = `${td.name} · ${qualityLabel(td.q)}`;
+    if (small) {
+      // كل جزء معزول: «1080p · Torrentio» يُقرأ بترتيبه من اليمين لا مقلوبًا
+      small.dir = 'rtl';
+      bestReason(top, td).forEach((part, i) => {
+        if (i) small.append(' · ');
+        small.append(el('bdi', null, part));
+      });
+    }
     best.onclick = () => {
       if (best.disabled) return;
       if (top) pick(top);

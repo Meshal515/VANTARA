@@ -1678,16 +1678,27 @@ export function createCinema(deps) {
     let off = [];
     let queued = false;
     deps.openSheet((body) => {
-      const hero = el('div', 'an-pick-hero');
+      // رأس الورقة (server-sheet.js): لقطة الحلقة (أو خلفية العمل) بشعار metahub، ثم التقييم والتاريخ والمدة والوصف
       const epMeta = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n);
       const thumb = epMeta?.thumb;
-      hero.append(image(thumb ?? m.background ?? m.poster, 'an-img loaded', { eager: true }));
-      const cap = el('div', 'an-pick-cap');
-      cap.append(el('span', 'an-pick-no', heading));
-      if (m.type === 'series' && epMeta?.title) cap.append(text('b', 'an-pick-title', epMeta.title));
-      else if (m.type !== 'series') cap.append(text('b', 'an-pick-title', displayTitle(m)));
-      if (position > 5000) cap.append(el('span', 'an-pick-resume', `تكمل من ${engine.clock(position)}`));
-      hero.append(cap);
+      const series = m.type === 'series';
+      const overview = series ? epMeta?.overview : m.description;
+      const two = (x) => String(x).padStart(2, '0');
+      const media = {
+        title: displayTitle(m),
+        logo: m.logo ?? null,
+        backdrop: thumb ?? m.background ?? m.poster,
+        backdropFallback: m.background ?? m.poster ?? null,
+        code: series ? `S${two(season)}E${two(n)}` : null,
+        label: series ? heading : null,
+        episodeTitle: series ? epMeta?.title ?? null : null,
+        // القصة بالعربية إن تُرجمت من قبل، وإلا الإنجليزي (الورقة تعرضه باتجاهه)
+        description: overview ? cachedOverview(series ? `${m.id}:${season}:${n}` : m.id, overview) ?? overview : null,
+        rating: (series ? epMeta?.rating : m.rating) ? { value: series ? epMeta.rating : m.rating, label: 'IMDb' } : null,
+        date: series ? epMeta?.released ?? null : m.year ?? null,
+        duration: runtimeAr(m.runtime),
+        resume: position > 5000 ? `تكمل من ${engine.clock(position)}` : null,
+      };
       const extraFoot = [];
       if (hub && !sheet.autoTogether) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
@@ -1748,7 +1759,7 @@ export function createCinema(deps) {
         el,
         kicker: heading,
         title: displayTitle(m),
-        hero,
+        media,
         extraFoot,
         directLang: 'ترجمة عربية',
         sourceName: (r) => routeSourceLabel(r),
