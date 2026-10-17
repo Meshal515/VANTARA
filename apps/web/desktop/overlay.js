@@ -77,7 +77,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
   peopleButton.onclick = () => cmd('room');
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, peopleButton, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -120,7 +120,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const sheetScrim = el('div', 'pp-scrim'); sheetScrim.hidden = true;
   const sheet = el('div', 'pp-sheet'); sheet.dir = 'rtl'; sheet.hidden = true;
   sheetScrim.onclick = () => closeSheet();
-  root.append(gestures, spinner, status, controls, skipBtn, sheetScrim, sheet);
+  // Like Android's pp-together strip: the participants stay visible even when
+  // playback controls fade after three seconds.
+  root.append(gestures, spinner, status, controls, peopleButton, skipBtn, sheetScrim, sheet);
   doc.body.append(root);
 
   // ── الظهور والاختفاء ──
