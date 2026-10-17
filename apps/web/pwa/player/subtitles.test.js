@@ -110,8 +110,3 @@ it('does not let an untyped builtin cinema candidate erase the confirmed series 
  const s=createSubtitleSession({video,identity:{kind:'series',externalIds:{imdb:'tt1196946'},season:1,episode:1},providers:[{key:'real',subtitles:async req=>{calls++;expect(req.videoId).toBe('tt1196946:1:1');return [];}}]});
  s.setStream({identity:{kind:'cinema',externalIds:undefined,season:1,episode:1}});await new Promise(r=>setTimeout(r,5));expect(calls).toBe(1);s.close();
 });
-it('بث أنمي يحمل Kitsu وحده لا يمحو IMDb الذي رُبطت به الحلقة (كالمسلسل)',async()=>{
- const asked=[];const {document}=parseHTML('<html><body></body></html>');globalThis.document=document;const video=document.createElement('video');video.textTracks=[];
- const s=createSubtitleSession({video,identity:{kind:'anime',externalIds:{anilist:166873,imdb:'tt13293588'},imdbEpisodes:{1:[2,13,38]},season:2,episode:1},providers:[{key:'os',requests:id=>[id.externalIds.kitsu?{type:'series',videoId:`kitsu:${id.externalIds.kitsu}:1`,extra:{}}:null,{type:'series',videoId:`${id.externalIds.imdb}:2:13`,extra:{}}],subtitles:async req=>{asked.push(req.videoId);return [];}}]});
- s.setStream({identity:{kind:'anime',externalIds:{kitsu:'47694'},episode:1}});await new Promise(r=>setTimeout(r,5));expect(asked).toEqual(['kitsu:47694:1','tt13293588:2:13']);s.close();
-});

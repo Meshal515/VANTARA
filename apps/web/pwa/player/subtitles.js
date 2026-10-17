@@ -143,8 +143,6 @@ export function createSubtitleSession({
       ...Object.fromEntries(
         Object.entries(candidate.identity ?? {}).filter(([k, v]) => v != null && (k !== "kind" || ["movie", "series", "anime"].includes(v))),
       ),
-      // معرّفات البث (Kitsu وحده غالبًا في الأنمي) تُضاف ولا تمحو IMDb الذي ربطناه للحلقة
-      externalIds: { ...identity.externalIds, ...Object.fromEntries(Object.entries(candidate.identity?.externalIds ?? {}).filter(([, v]) => v != null)) },
     };
     if (!providers.length || !subtitleRequest(context, candidate)) return;
     working = true;
