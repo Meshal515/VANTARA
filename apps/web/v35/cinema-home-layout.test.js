@@ -75,3 +75,12 @@ describe('أزرار البانر (B): بلا صناديق', () => {
     expect(r).toMatch(/min-height:\s*46px/);
   });
 });
+
+describe('بلا إطارات زائدة (F)', () => {
+  it('لا خط تحت صفوف قوائم IMDb ولا إطار حول ملصقات الرئيسية واكتشف', () => {
+    expect(rule('.v35 .cn-chart-row')).not.toMatch(/border-bottom/);
+    expect(rule('.v35 .cn-home .cn-poster-art,\n.v35 .cn-discover .cn-poster-art')).toMatch(/box-shadow:\s*none/);
+    expect(rule('.v35 .cn-genre')).not.toMatch(/box-shadow/);
+    expect(rule('.v35 .cn-search')).not.toMatch(/box-shadow/);
+  });
+});

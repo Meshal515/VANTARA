@@ -585,6 +585,11 @@
   box-shadow: inset 0 0 0 1px var(--line);
   transition: transform 0.18s ease;
 }
+/* الرئيسية واكتشف: الملصق صورته وحدها بلا خط إطار حوله (صفحة العمل كما هي) */
+.v35 .cn-home .cn-poster-art,
+.v35 .cn-discover .cn-poster-art {
+  box-shadow: none;
+}
 .v35 .cn-poster:active .cn-poster-art {
   transform: scale(0.97);
 }
@@ -709,9 +714,8 @@
   gap: 12px;
   width: 100%;
   border: 0;
-  padding: 0 0 10px;
+  padding: 0;
   background: none;
-  border-bottom: 1px solid var(--line);
   text-align: start;
   font: inherit;
   color: inherit;
