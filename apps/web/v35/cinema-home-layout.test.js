@@ -102,3 +102,15 @@ describe('ترويسات السينما على الجوال: لمس ثابت ر�
     expect(bar).toMatch(/transform:\\s*none/);
   });
 });
+
+describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبتلع اللمس', () => {
+  const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
+  it('يلغي إطار الفتح المؤجل عند الإغلاق ويمنع إعادة فتح الستار بعده', () => {
+    expect(shell).toContain('cancelAnimationFrame(sectionOpenFrame)');
+    expect(shell).toContain('if (!sectionsOpen()) return;');
+  });
+  it('يعطّل التقاط اللمس على الستار والقائمة فور بدء الإغلاق', () => {
+    expect(shell).toContain("scrim.style.pointerEvents = 'none'");
+    expect(shell).toContain("menu.style.pointerEvents = 'none'");
+  });
+});
