@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { airedEpisodes, cleanDescription, compactCount, latestEpisodes, normalize, parseHome, relativeAr, seasonOf } from './anime-meta.js';
+import { activeFilterCount, airedEpisodes, cleanDescription, compactCount, discoverVariables, emptyFilters, latestEpisodes, normalize, parseDetail, parseHome, relativeAr, seasonOf } from './anime-meta.js';
 
 const media = (over = {}) => ({ id: 1, title: { english: 'A', romaji: 'a' }, coverImage: { large: 'p' }, popularity: 10_000, status: 'FINISHED', episodes: 12, ...over });
 
@@ -57,5 +57,28 @@ describe2('airingWeek — جدول البث', () => {
     // 22:30 UTC = 01:30 في مكة من اليوم التالي
     expect2(meccaDay(Date.UTC(2026, 9, 1, 22, 30))).toBe('2026-10-02');
     expect2(meccaDay(Date.UTC(2026, 9, 1, 20, 59))).toBe('2026-10-01');
+  });
+});
+
+describe('اكتشف: الفلاتر إلى متغيّرات AniList', () => {
+  it('بلا شيء: الأشهر، وبكلمة بحث: الأقرب لها ثم الأشهر', () => {
+    expect(discoverVariables({}).sort).toEqual(['POPULARITY_DESC']);
+    expect(discoverVariables({ search: ' frieren ' })).toMatchObject({ search: 'frieren', sort: ['SEARCH_MATCH', 'POPULARITY_DESC'] });
+  });
+  it('الأنواع المطلوبة والمستبعدة والشكل والموسم وأقل تقييم والترتيب', () => {
+    const v = discoverVariables({ ...emptyFilters(), include: ['Action'], exclude: ['Romance'], formats: ['TV', 'MOVIE'], status: 'FINISHED', year: 2019, season: 'SPRING', minScore: 8, sort: 'score', page: 2 });
+    expect(v).toMatchObject({ page: 2, genreIn: ['Action'], genreNotIn: ['Romance'], formatIn: ['TV', 'MOVIE'], status: 'FINISHED', year: 2019, season: 'SPRING', minScore: 79, sort: ['SCORE_DESC'], minPop: 20000 });
+    expect(discoverVariables({ sort: 'score', minPop: 40000 }).minPop).toBe(40000);
+  });
+  it('عدد الفلاتر المفعّلة لا يحسب الترتيب', () => {
+    expect(activeFilterCount(emptyFilters())).toBe(0);
+    expect(activeFilterCount({ ...emptyFilters(), include: ['A'], exclude: ['B'], minScore: 7, sort: 'score' })).toBe(3);
+  });
+  it('الشخصيات من التفاصيل: بصورها، بلا الصورة الافتراضية، وصوتها الياباني', () => {
+    const d = parseDetail({ Media: { ...media(), characters: { edges: [
+      { role: 'MAIN', node: { id: 1, name: { full: 'Frieren' }, image: { large: 'https://img/f.png' } }, voiceActors: [{ name: { full: 'Atsumi Tanezaki' } }] },
+      { role: 'SUPPORTING', node: { id: 2, name: { full: 'X' }, image: { large: 'https://s4.anilist.co/file/anilistcdn/character/large/default.jpg' } }, voiceActors: [] },
+    ] } } });
+    expect(d.characters).toEqual([{ id: 1, name: 'Frieren', image: 'https://img/f.png', main: true, voice: 'Atsumi Tanezaki' }]);
   });
 });

@@ -97,6 +97,8 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page anime-page" id="anime"></section>
 
+  <section class="page anime-collection-page" id="animeCollection"></section>
+
   <section class="page cinema-page" id="cinema"></section>
 
   <section class="page" id="detail">

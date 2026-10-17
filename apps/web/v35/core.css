@@ -797,9 +797,9 @@ html,
 .v35 .skeleton {
   position: absolute;
   inset: 0;
-  background: linear-gradient(100deg, var(--surface-2) 30%, var(--surface-3) 50%, var(--surface-2) 70%);
-  background-size: 300% 100%;
-  animation: v35-shimmer 1.4s linear infinite;
+  /* هادئ: نبضة خفيفة لا لمعة تعبر الغلاف */
+  background: var(--surface-2);
+  animation: v35-pulse 1.6s ease-in-out infinite;
 }
 .v35 .skeleton-line {
   display: block;
@@ -812,9 +812,9 @@ html,
   width: 60%;
   margin-top: 6px;
 }
-@keyframes v35-shimmer {
-  to {
-    background-position: -300% 0;
+@keyframes v35-pulse {
+  50% {
+    opacity: 0.6;
   }
 }
 /* صورةٌ تعذّرت: الحرف الأول من العنوان على لون هادئ، لا شعار التطبيق */
