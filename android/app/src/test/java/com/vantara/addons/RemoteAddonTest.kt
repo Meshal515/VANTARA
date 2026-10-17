@@ -94,4 +94,31 @@ class RemoteAddonTest {
     @org.junit.Test fun `IMDb anime movie subtitle fallback remains a movie without a season`() {
         org.junit.Assert.assertEquals("movie" to "tt123456", SubtitleProviders.videoId("""{"kind":"anime","format":"MOVIE","externalIds":{"imdb":"tt123456"}}""", 1f))
     }
+
+    // ترجمات الأنمي كالمسلسلات: خريطة ani.zip ترسل الحلقة بموسم TVDB ورقمها فيه، لا برقمها داخل عمل AniList
+    @Test fun `anime subtitle ids follow the ani zip episode map like series`() {
+        val mushoku = """{"kind":"anime","format":"TV","externalIds":{"anilist":166873,"imdb":"tt13293588"},"season":2,"imdbEpisodes":{"1":[2,13,38],"2":[2,14,39]}}"""
+        assertEquals(listOf("series" to "tt13293588:2:13", "series" to "tt13293588:1:38"), SubtitleProviders.videoIds(mushoku, 1f))
+        // الحلقة التالية داخل المشغّل وحلقة لم تصل الخريطة بعد (أنمي يُعرض الآن)
+        assertEquals("series" to "tt13293588:2:14", SubtitleProviders.videoId(mushoku, 2f))
+        assertEquals("series" to "tt13293588:2:16", SubtitleProviders.videoId(mushoku, 4f))
+        val onePiece = """{"kind":"anime","externalIds":{"kitsu":"12","imdb":"tt0388629"},"imdbEpisodes":{"62":[5,2,62]}}"""
+        assertEquals(listOf("series" to "kitsu:12:62", "series" to "tt0388629:5:2", "series" to "tt0388629:1:62"), SubtitleProviders.videoIds(onePiece, 62f))
+        // بلا خريطة: الموسم كما في المسلسل
+        assertEquals("series" to "tt5607616:4:1", SubtitleProviders.videoId("""{"kind":"anime","externalIds":{"imdb":"tt5607616"},"season":4}""", 1f))
+    }
+    @Test fun `subtitle provider falls through to the next id when one returns nothing`() {
+        val paths = mutableListOf<String>()
+        val client = RemoteAddonClient(OkHttpClient.Builder().addInterceptor { chain ->
+            val path = chain.request().url.encodedPath
+            paths += path
+            val body = if (path.contains("tt0388629%3A1%3A62")) "{\"subtitles\":[{\"url\":\"https://subs.test/a.srt\",\"lang\":\"ara\"}]}" else "{\"subtitles\":[]}"
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody()).build()
+        }.build())
+        val provider = AddonSubtitleProvider("os", "OpenSubtitles", "https://addon.test/manifest.json", listOf("movie", "series"), listOf("tt"))
+        val tracks = SubtitleProviders.discover(client, provider, """{"kind":"anime","externalIds":{"kitsu":"12","imdb":"tt0388629"},"imdbEpisodes":{"62":[5,2,62]}}""", 62f, "r")
+        assertEquals(listOf("ar"), tracks.map { it.lang })
+        assertEquals(2, paths.size)
+        assertTrue(paths[0].contains("tt0388629%3A5%3A2"))
+    }
 }
