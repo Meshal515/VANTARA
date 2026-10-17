@@ -71,6 +71,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const titleEl = el('strong'), subEl = el('small');
   titleEl.dir = 'auto'; subEl.dir = 'auto'; // «الحلقة 3» لا تنقلب خلف عنوان إنجليزي
   titles.append(titleEl, subEl);
+  let peopleKey = '';
   const peopleButton = el('button', 'pp-people pp-desk');
   peopleButton.type = 'button'; peopleButton.hidden = true;
   peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
@@ -465,7 +466,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       return face;
     });
     if(people.length>3)faces.push(el('span','pp-person-more',`+${people.length-3}`));
-    peopleButton.replaceChildren(...faces);
+    const key=JSON.stringify(people.map(p=>[p.userId,p.name,p.avatarKey,p.state,p.host]));
+    if(key!==peopleKey){peopleKey=key;peopleButton.replaceChildren(...faces);}
     peopleButton.setAttribute('aria-label',`في الغرفة ${people.length} · عرض المشاركين`);
     audioBtn.hidden=!(state.audio??[]).length||state.audio.length<2;
     nextBtn.hidden = state.movie || !(Number(state.total) > Number(state.episode));
