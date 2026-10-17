@@ -464,6 +464,13 @@ html,
 .v35 .section-menu.open {
   opacity: 1;
 }
+/* The authored display:grid above otherwise overrides the UA [hidden] rule.
+   A fully transparent closed menu can still intercept taps in Android WebView. */
+.v35 .section-menu[hidden],
+.v35 .section-scrim[hidden] {
+  display: none !important;
+  pointer-events: none !important;
+}
 .v35 .section-item {
   --tone: #8f5cff;
   position: relative;

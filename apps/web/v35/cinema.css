@@ -461,13 +461,21 @@
 /* ── البانر البديل (cn-hero-alt): خيار يُقبل أو يُرفض بحذف الصنف وحده ──
    الصورة بعرض الشاشة من أعلاها تحت الترويسة، الترويسة شفافة ثم معتمة مع التمرير،
    والشعار فوق أسفل الصورة على ستار داكن ناعم (تمويه بلا توهّج). المقاسات ثابتة كالأصل. */
+.v35[data-section='cinema'] #home > .header {
+  /* Stable hit-testing above the animated billboard, including while it loads. */
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  isolation: isolate;
+  pointer-events: auto;
+}
 .v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
   position: sticky;
   top: 0;
-  z-index: 30;
-  /* طبقة رسم مستقلة فوق الصورة المتحركة تحتها: WebView أندرويد يرتّب مناطق اللمس
-     بطبقات المعالج، وبدونها قد يذهب لمس زرَّي القائمة والبحث إلى البانر */
-  transform: translateZ(0);
+  z-index: 80;
+  /* A transform here captures the fixed section scrim and creates a competing
+     compositor hit-test layer on Android. Isolation needs no transformed parent. */
+  isolation: isolate;
   background: transparent;
   transition: background-color 0.25s ease;
 }
@@ -871,10 +879,10 @@
   top: 0;
   height: var(--cn-bar-h);
   margin-bottom: calc(-1 * var(--cn-bar-h));
-  z-index: 5;
+  z-index: 80;
   padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px) 10px 0;
-  transform: translateZ(0);
-  pointer-events: none;
+  isolation: isolate;
+  pointer-events: auto;
 }
 .v35 .cn-detail-bar > * {
   pointer-events: auto;
@@ -962,6 +970,8 @@
 }
 .v35 .cn-detail-art {
   position: relative;
+  /* Artwork is decorative: it must never win the hit test over navigation. */
+  pointer-events: none;
   aspect-ratio: 16 / 10;
   background: var(--surface-1);
   overflow: hidden;
