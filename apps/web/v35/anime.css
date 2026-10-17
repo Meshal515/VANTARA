@@ -2526,3 +2526,20 @@
 .v35 :is(.an-card-title, .an-cw-title, .an-hc-title, .aw-person-name, .an-mark-text, .up-title, .an-slot-title, .an-ep-title):dir(ltr) {
   padding-right: 4px;
 }
+
+/* الشاشة العريضة (ويندوز والكمبيوتر): شبكات الجوال (عمود أو 2–3 بنسبة من العرض) كانت تتمدد
+   فتصير «آخر المشاهدات» بطاقة واحدة بعرض الشاشة وأغلفة «الكل» عملاقة. هنا عرض البطاقة ثابت
+   تقريبًا ويزيد عددها مع عرض الشاشة */
+@media (min-width: 700px) {
+  .v35 .an-hc-list {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 22px 18px;
+  }
+  .v35 .an-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 22px 14px;
+  }
+  .v35 .ag-grid {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+}
