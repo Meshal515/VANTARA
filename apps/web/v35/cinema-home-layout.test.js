@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { HERO_FULL_BLEED } from './cinema.js';
 
 // قواعد CSS لرئيسية السينما: كل قاعدة تُقرأ بمحدّدها كما هي في الملف
 const css = readFileSync(new URL('./cinema.css', import.meta.url), 'utf8');
@@ -49,5 +50,19 @@ describe('أسماء الصفوف: محاذاة واحدة وقصّ بـ«…»'
     for (const sel of ['.v35 .cn-wide-title', '.v35 .cn-wide-sub', '.v35 .cn-poster-meta > span', '.v35 .cn-chart-copy span']) {
       expect(rule(sel), sel).toMatch(/text-overflow:\s*ellipsis/);
     }
+  });
+});
+
+describe('البانر البديل (cn-hero-alt): خلف صنف واحد', () => {
+  it('مفعّل افتراضيًا، والترويسة لا تتأثر إلا في رئيسية السينما الظاهرة', () => {
+    expect(HERO_FULL_BLEED).toBe(true);
+    const header = rule(".v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header");
+    expect(header).toMatch(/position:\s*sticky/);
+    expect(header).toMatch(/background:\s*transparent/);
+    expect(rule(".v35[data-section='cinema'].cn-scrolled #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header")).toMatch(/background:\s*var\(--bg\)/);
+  });
+  it('مقاسات ثابتة كالأصل: نسبة الصورة وموضع الشعار', () => {
+    expect(rule('.v35 .cn-hero-alt .cn-bill-stage')).toMatch(/aspect-ratio:\s*10 \/ 11/);
+    expect(rule('.v35 .cn-hero-alt .cn-bill-info')).toMatch(/margin-top:\s*-84px/);
   });
 });

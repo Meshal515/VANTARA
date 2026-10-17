@@ -33,6 +33,12 @@ const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
 const STALE_MS = 6 * 3_600_000;
 const HERO_SECONDS = 8;
+/**
+ * البانر البديل (خيار للمالك): الخلفية بعرض الشاشة تبدأ من أعلاها تحت ترويسة شفافة
+ * تصير معتمة مع التمرير، والشعار فوق أسفل الصورة. كله خلف صنف واحد `cn-hero-alt`:
+ * false يعيد البانر الأصلي كما كان.
+ */
+export const HERO_FULL_BLEED = true;
 const STATE_AR_ROUTE = { RESOLVING: 'يتجهّز…', READY: 'جاهز', UNAVAILABLE: 'غير متاح', FAILED: 'فشل التشغيل' };
 const SOURCE_NAMES = { faselhd: 'FaselHD', arabseed: 'ArabSeed', egydead: 'EgyDead', cimaleek: 'Cimaleek', tuktukcinema: 'TukTuk', asia2tv: 'Asia2TV', akwam: 'Akwam' };
 /** Display metadata stays separate from the internal routing key/configured URL. */
@@ -94,6 +100,8 @@ export const seasonsAr = (n) => (n === 1 ? 'موسم واحد' : n === 2 ? 'مو
 export function createCinema(deps) {
   const { q, el, toast } = deps;
   const currentUser = () => deps.sync?.user?.userId ?? null;
+  // الترويسة فوق البانر البديل: شفافة في أعلى الصفحة، معتمة متى بدأ التمرير
+  globalThis.addEventListener?.('scroll', () => deps.root?.classList?.toggle('cn-scrolled', globalThis.scrollY > 8), { passive: true });
   const state = {
     home: null,
     loading: null,
@@ -668,6 +676,7 @@ export function createCinema(deps) {
       .slice(0, 5);
     page.append(kindTabs());
     if (heroItems.length) page.append(billboard(heroItems));
+    page.classList.toggle('cn-hero-alt', HERO_FULL_BLEED && heroItems.length > 0);
     const cont = continuing().filter((w) => wants(w.type));
     if (cont.length) page.append(rail('أكمل المشاهدة', cont.slice(0, 12), continueCard, { more: () => openLibrary('continue') }));
     const later = shelf('later').filter((x) => !x.type || wants(x.type));
@@ -695,6 +704,7 @@ export function createCinema(deps) {
     info.append(el('div', 'cn-skel cn-skel-line'), el('div', 'cn-skel cn-skel-line short'));
     bill.append(el('div', 'cn-bill-stage cn-skel'), info, el('div', 'cn-bill-ticks'));
     page.append(kindTabs(), bill);
+    page.classList.toggle('cn-hero-alt', HERO_FULL_BLEED);
     for (let r = 0; r < 2; r++) {
       const strip = el('div', 'cn-strip');
       for (let i = 0; i < 4; i++) strip.append(el('div', 'cn-skel cn-skel-poster'));

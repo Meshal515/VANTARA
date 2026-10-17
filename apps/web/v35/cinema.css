@@ -430,6 +430,63 @@
   transform-origin: right center;
 }
 
+/* ── البانر البديل (cn-hero-alt): خيار يُقبل أو يُرفض بحذف الصنف وحده ──
+   الصورة بعرض الشاشة من أعلاها تحت الترويسة، الترويسة شفافة ثم معتمة مع التمرير،
+   والشعار فوق أسفل الصورة على ستار داكن ناعم (تمويه بلا توهّج). المقاسات ثابتة كالأصل. */
+.v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: transparent;
+  transition: background-color 0.25s ease;
+}
+.v35[data-section='cinema'].cn-scrolled #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
+  background: var(--bg);
+}
+.v35 .cn-hero-alt {
+  position: relative;
+  margin-top: calc(-1 * (var(--top-h) + var(--safe-top)));
+}
+.v35 .cn-hero-alt > .cn-kinds {
+  position: absolute;
+  top: calc(var(--top-h) + var(--safe-top));
+  inset-inline: 0;
+  z-index: 3;
+}
+.v35 .cn-hero-alt > .cn-kinds .cn-kind:not(.active) {
+  color: rgba(255, 255, 255, 0.72);
+}
+.v35 .cn-hero-alt .cn-bill-stage {
+  aspect-ratio: 10 / 11;
+}
+/* ستار علوي خفيف تحت الترويسة والتبويبات ليُقرآ فوق أي صورة */
+.v35 .cn-hero-alt .cn-bill-stage::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 32%;
+  z-index: 1;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+/* أسفل الصورة: تمويه ناعم يتلاشى للأعلى وظلّ داكن يذوب في الخلفية خلف الشعار */
+.v35 .cn-hero-alt .cn-bill-stage::after {
+  height: 42%;
+  z-index: 1;
+  background: linear-gradient(to top, var(--bg) 0%, rgba(8, 7, 12, 0.72) 38%, rgba(8, 7, 12, 0) 100%);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  -webkit-mask-image: linear-gradient(to top, #000 45%, transparent);
+  mask-image: linear-gradient(to top, #000 45%, transparent);
+}
+/* الشعار وما تحته يصعدان فوق أسفل الصورة؛ الارتفاع الثابت نفسه */
+.v35 .cn-hero-alt .cn-bill-info {
+  position: relative;
+  z-index: 2;
+  margin-top: -84px;
+}
+
 /* الأشرطة */
 .v35 .cn-rail {
   margin-top: 28px;
