@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.3.6
+name: Publish verified VANTARA Windows 0.3.7
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.6'
-  TAG: 'windows-v0.3.6'
+  VERSION: '0.3.7'
+  TAG: 'windows-v0.3.7'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -138,7 +138,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.6
+    name: Publish verified Windows 0.3.7
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -165,7 +165,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.3.6: كل ما في 0.3.5 (أوراق المشغل كالجوال، السيرفرات بصفوف، الترجمة بتبويبي المسارات والضبط) مع خلفية الترجمة «ظل / خلفية داكنة» مربوطة فعليًا بالمشغل، والإعدادات تبقى عند تغيير السيرفر. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "ويندوز 0.3.7: التورنت لا يعيد فتح الفيديو بعد 45 ثانية ما دام ينزل فعلًا (إعادة الفتح كانت تطيل البداية وتظهر «نعيد الاتصال…»)، مع كل ما في 0.3.6: أوراق المشغل كالجوال وخلفية الترجمة. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash

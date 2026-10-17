@@ -523,7 +523,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
-      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
+      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;if(Number.isFinite(speed)&&speed>0.05)state.flowAt=Date.now();
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
       }catch{}finally{state.statsPending=false;}
     },1000);
@@ -708,7 +708,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // أعد فتح رابط الـproxy الداخلي *مرة واحدة*؛ يحتفظ rqbit بنفس الجلسة
     // والأجزاء التي وصلت، فلا يُعاد حل المغناطيس أو الاختيار أو الإعدادات.
     if(!state.ready) {
-      state.firstFrameWatchdog=setTimeout(()=>{
+      // تورنت ينزل فعلًا (سرعة خلال آخر 15 ث): لا نعيد فتح الفيديو، فإعادة الفتح تهدم ما تجمّع في
+      // ذاكرة mpv وتطيل البداية. ننتظر ما دام التنزيل يتحرك (حتى 6 دقائق)، ونعيد المحاولة عند التوقف فقط.
+      const flowing=()=>state.win&&state.flowAt&&Date.now()-state.flowAt<15000&&Date.now()-state.startedAt<360000;
+      const waitWhileFlowing=()=>{
+        if(state.stopped||current!==state||state.ready)return;
+        if(flowing()){emit(state,{type:'playback/stage',stage:'downloading'});state.firstFrameWatchdog=setTimeout(waitWhileFlowing,10000);return;}
+        recover();
+      };
+      const recover=()=>{
         if(state.stopped||current!==state||state.ready)return;
         emit(state,{type:'playback/retrying',message:'نعيد الاتصال بالفيديو مع إبقاء تنزيل التورنت نشطًا'});
         // Per-file --start survives normal initial loading, but retry explicitly
@@ -718,7 +726,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(!state.stopped&&current===state&&!state.ready)
             void fail(state,'لم يصل إطار فيديو بعد إعادة المحاولة؛ يمكنك تجربة سيرفر آخر');
         },firstFrameFailureMs);
-      },firstFrameRecoveryMs);
+      };
+      state.startedAt??=Date.now();
+      state.firstFrameWatchdog=setTimeout(waitWhileFlowing,firstFrameRecoveryMs);
     }
   }
   async function startPlayback({session,candidate,title,position=0,pause=false}={}) {
