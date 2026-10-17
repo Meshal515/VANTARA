@@ -89,17 +89,17 @@ describe('ترويسات السينما على الجوال: لمس ثابت ر�
   it('ترويسة الرئيسية خارج طبقة الصورة المتحركة وبدون translateZ', () => {
     const selector = ".v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header";
     const rules = rule(selector);
-    expect(rules).toMatch(/position:\\s*fixed/);
-    expect(rules).toMatch(/z-index:\\s*100/);
-    expect(rules).toMatch(/transform:\\s*none/);
-    expect(rule('.v35 .cn-hero-alt')).toMatch(/margin-top:\\s*0/);
+    expect(rules).toMatch(/position:\s*fixed/);
+    expect(rules).toMatch(/z-index:\s*100/);
+    expect(rules).toMatch(/transform:\s*none/);
+    expect(rule('.v35 .cn-hero-alt')).toMatch(/margin-top:\s*0/);
   });
   it('شريط الرجوع ثابت في الشاشة، ويستقبل اللمس من الحاوية نفسها', () => {
     const bar = rule('.v35 #cinema.active .cn-detail-bar');
-    expect(bar).toMatch(/position:\\s*fixed/);
-    expect(bar).toMatch(/z-index:\\s*100/);
-    expect(bar).toMatch(/pointer-events:\\s*auto/);
-    expect(bar).toMatch(/transform:\\s*none/);
+    expect(bar).toMatch(/position:\s*fixed/);
+    expect(bar).toMatch(/z-index:\s*100/);
+    expect(bar).toMatch(/pointer-events:\s*auto/);
+    expect(bar).toMatch(/transform:\s*none/);
   });
 });
 
@@ -118,9 +118,9 @@ describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبت�
 describe('لا قوائم شفافة تعترض أزرار الترويسة', () => {
   const coreCss = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
   it('يحترم hidden رغم display:grid في قائمة الأقسام', () => {
-    expect(coreCss).toMatch(/\\.v35 \\.section-menu\\[hidden\\]\\s*\\{\\s*display:\\s*none/);
+    expect(coreCss).toMatch(/\.v35 \.section-menu\[hidden\]\s*\{\s*display:\s*none/);
   });
   it('لا يستقبل الستار المغلق اللمس أثناء انتقال الشفافية', () => {
-    expect(coreCss).toMatch(/\\.v35 \\.section-scrim:not\\(\\.open\\)\\s*\\{\\s*pointer-events:\\s*none/);
+    expect(coreCss).toMatch(/\.v35 \.section-scrim:not\(\.open\)\s*\{\s*pointer-events:\s*none/);
   });
 });
