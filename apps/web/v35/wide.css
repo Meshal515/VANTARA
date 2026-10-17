@@ -57,7 +57,7 @@
   }
 
   /* ── الترويسات الثابتة لصفحات الأنمي والسينما: بعرض المحتوى ── */
-  .v35 .an-detail-top {
+  .v35 .aw-bar {
     width: 100%;
     max-width: var(--wide-max);
   }
@@ -138,7 +138,7 @@
 
   /* أنمي بلا لافتة عريضة: الغلاف (460px) لا يُمطّ على الشاشة الكبيرة فيتغبّش،
      بل يصير ضبابًا سينمائيًا مقصودًا خلف الغلاف الحاد في الرأس */
-  .v35 .an-detail-art--poster .an-img {
+  .v35 .aw-bg-img--poster {
     filter: blur(36px) saturate(1.25) brightness(0.62);
     transform: scale(1.18);
   }
@@ -812,91 +812,54 @@
 }
 
 /* ═══════════════ صفحة الأنمي على الكمبيوتر ═══════════════
- * فن العمل بانر بعرض المحتوى، والملصق أكبر يتداخل معه، ثم عمودان: الأفعال
- * والحقائق والبث في البداية، والمصادر والحلقات والقصة في الرئيسي. */
+ * كما في منصّات البث: الفن بعرض المحتوى، والشعار والفعل فوقه في البداية،
+ * ثم عمود مقروء للقصة والحلقات، والشرائط بعرض الصفحة. */
 @media (min-width: 1024px) {
-  .v35 .an-detail-top {
+  .v35 .aw-bar {
     left: 0;
     right: var(--rail-w);
     width: auto;
     max-width: none;
     transform: none;
     padding-inline: calc(var(--gutter) - 8px);
-    transition: right var(--dur-slow) var(--ease-out), background-color 0.25s ease, box-shadow 0.25s ease;
+    transition: right var(--dur-slow) var(--ease-out);
   }
-  .v35 .an-detail {
-    --side: 340px;
-    --side-gap: 48px;
-    display: flow-root;
-    padding-bottom: 56px;
+  .v35 .aw-hero {
+    height: min(72vh, 640px);
   }
-  /* لافتة AniList بارتفاع 400 تقريبًا: لا نمطّها أطول منه فتتغبّش */
-  .v35 .an-detail-hero {
-    aspect-ratio: auto;
-    height: min(46vh, 420px);
+  .v35 .aw-shade {
+    background:
+      linear-gradient(to top, var(--bg) 2%, transparent 55%),
+      linear-gradient(to left, color-mix(in srgb, var(--bg) 85%, transparent) 0%, transparent 58%);
   }
-  .v35 .an-detail-head {
-    margin-top: -150px;
-    gap: 32px;
-    padding: 0 var(--gutter);
+  .v35 .aw-head {
+    inset-inline: var(--gutter) auto;
+    max-width: 560px;
+    bottom: 28px;
   }
-  .v35 .an-detail-poster {
-    width: var(--side);
-    max-width: 220px;
-    border-radius: 16px;
+  .v35 .an-mark {
+    height: 140px;
   }
-  .v35 .an-detail-titles {
-    gap: 10px;
-    padding-bottom: 8px;
+  .v35 .an-mark-text {
+    font-size: 48px;
   }
-  .v35 .an-detail-titles h1 {
-    font-size: 44px;
-    line-height: 1.1;
-    letter-spacing: -0.5px;
+  .v35 .an-mark-logo {
+    max-height: 140px;
+    max-width: min(100%, 440px);
   }
-  .v35 .an-detail-alt {
-    font-size: var(--fs-body);
+  .v35 .aw-body > :not(.aw-below) {
+    max-width: 760px;
   }
-  .v35 .an-detail > .an-facts,
-  .v35 .an-detail > .an-stats,
-  .v35 .an-detail > .an-onair,
-  .v35 .an-detail > .an-next,
-  .v35 .an-detail > .an-detail-actions {
-    float: right;
-    clear: right;
-    width: var(--side);
-    margin-right: var(--gutter);
-    margin-left: 0;
-  }
-  .v35 .an-detail > .an-facts,
-  .v35 .an-detail > .an-detail-actions {
-    padding-left: 0;
-    padding-right: 0;
-  }
-  .v35 .an-detail > .an-facts {
-    padding-top: 22px;
-  }
-  .v35 .an-detail > .an-detail-actions {
-    padding-top: 18px;
-  }
-  .v35 .an-detail > .work-insights,
-  .v35 .an-detail > .an-sources,
-  .v35 .an-detail > .an-block {
-    margin-right: calc(var(--gutter) + var(--side) + var(--side-gap));
-    margin-left: var(--gutter);
-    padding-left: 0;
-    padding-right: 0;
-  }
-  .v35 .an-detail > .an-sources {
-    padding-top: 22px;
+  .v35 .aw-cta,
+  .v35 .aw-actions {
+    max-width: 420px !important;
   }
   .v35 .an-synopsis {
-    font-size: 15.5px;
-    line-height: 1.85;
-    max-width: 75ch;
+    font-size: 15px;
+    line-height: 1.8;
   }
-  .v35 .an-btn:hover {
-    filter: brightness(1.12);
+  .v35 .aw-play:hover {
+    filter: brightness(1.1);
   }
 }
 

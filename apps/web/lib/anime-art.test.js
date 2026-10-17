@@ -46,11 +46,11 @@ describe('anime episode art', () => {
     const fetchImpl = async (url) => {
       calls++;
       expect(url).toBe('https://api.ani.zip/mappings?anilist_id=161645');
-      return { ok: true, json: async () => ({ mappings: { imdb_id: 'tt26743760' }, episodes: { 1: { image: 'https://tvdb/1.jpg', title: { en: 'Maomao' } }, S1: { image: 'nope' } } }) };
+      return { ok: true, json: async () => ({ mappings: { imdb_id: 'tt26743760' }, episodes: { 1: { image: 'https://tvdb/1.jpg', title: { en: 'Maomao' }, overview: ' Maomao is sold to the palace. ', airDate: '2023-10-22', runtime: 24, rating: '7.84' }, S1: { image: 'nope' } } }) };
     };
     const [a, b] = await Promise.all([loadAnimeArt(161645, { fetchImpl }), loadAnimeArt(161645, { fetchImpl })]);
     expect(calls).toBe(1);
-    expect(a).toEqual({ imdb: 'tt26743760', logo: logoOfImdb('tt26743760'), episodes: { 1: { image: 'https://tvdb/1.jpg', title: 'Maomao' } } });
+    expect(a).toEqual({ imdb: 'tt26743760', fanart: null, logo: logoOfImdb('tt26743760'), episodes: { 1: { image: 'https://tvdb/1.jpg', title: 'Maomao', overview: 'Maomao is sold to the palace.', airDate: '2023-10-22', runtime: 24, rating: 7.84 } } });
     expect(b).toEqual(a);
     expect(await loadAnimeArt(161645, { fetchImpl })).toEqual(a);
     expect(calls).toBe(1);
