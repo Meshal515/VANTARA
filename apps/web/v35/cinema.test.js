@@ -96,3 +96,14 @@ describe('اكتشف: الفلاتر المتقدمة', () => {
     expect(pushRecentSearch(Array.from({ length: 8 }, (_, i) => `t${i}`), 'new')).toHaveLength(8);
   });
 });
+describe('«الكل» في صفوف الرئيسية', () => {
+  it('كل صف يفتح قائمته نفسها من Cinemeta', async () => {
+    const { homeLists } = await import('./cinema.js');
+    const L = homeLists(2026);
+    expect(L.movies).toMatchObject({ type: 'movie', id: 'top' });
+    expect(L.series).toMatchObject({ type: 'series', id: 'top' });
+    expect(L.topMovies).toMatchObject({ type: 'movie', id: 'imdbRating' });
+    expect(L.topSeries).toMatchObject({ type: 'series', id: 'imdbRating' });
+    expect(L.fresh).toMatchObject({ type: 'movie', id: 'year', genre: '2026', title: 'جديد 2026' });
+  });
+});

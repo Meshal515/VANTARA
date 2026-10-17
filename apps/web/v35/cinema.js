@@ -149,6 +149,16 @@ export function pushRecentSearch(list, term) {
   if (t.length < 2) return list;
   return [t, ...list.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
 }
+/** صفوف الرئيسية ومصدر كل منها في Cinemeta: «الكل» يفتح القائمة نفسها لا قائمة قريبة منها. */
+export function homeLists(year = new Date().getFullYear()) {
+  return {
+    movies: { title: 'أفلام رائجة الآن', type: 'movie', id: 'top', genre: '' },
+    series: { title: 'مسلسلات يتابعها الجميع', type: 'series', id: 'top', genre: '' },
+    topMovies: { title: 'أعلى الأفلام تقييمًا', type: 'movie', id: 'imdbRating', genre: '' },
+    topSeries: { title: 'أعلى المسلسلات تقييمًا', type: 'series', id: 'imdbRating', genre: '' },
+    fresh: { title: `جديد ${year}`, type: 'movie', id: 'year', genre: String(year) },
+  };
+}
 export const seasonsAr = (n) => (n === 1 ? 'موسم واحد' : n === 2 ? 'موسمان' : n <= 10 ? `${n} مواسم` : `${n} موسمًا`);
 
 export function createCinema(deps) {
@@ -524,11 +534,12 @@ export function createCinema(deps) {
   }
 
   /** قائمة IMDb: أعمدة من ثلاثة، بالرقم والملصق الصغير والتقييم. */
-  function chart(title, items) {
+  function chart(title, items, { more } = {}) {
     const s = el('section', 'cn-rail cn-chart');
     s.dataset.reveal = '';
     const head = el('header', 'cn-rail-head');
     head.append(el('h2', null, title), el('span', 'cn-rail-sub', 'IMDb'));
+    if (more) head.append(button('cn-rail-more', `الكل${glyph('chevron', { size: 14 })}`, more));
     const grid = el('ol', 'cn-chart-grid');
     const lines = chartLines(items, genreAr);
     items.slice(0, 12).forEach((m, i) => {
@@ -756,11 +767,13 @@ export function createCinema(deps) {
     if (fresh.length) page.append(rail('آخر التحديثات', fresh, updateCard, { more: deps.openUpdates ? () => deps.openUpdates('cinema') : undefined }));
     const skip = new Set(heroItems.map((m) => m.id));
     const rest = (list) => (list ?? []).filter((m) => !skip.has(m.id));
-    if (wants('movie') && data.movies?.length) page.append(rail('أفلام رائجة الآن', rest(data.movies)));
-    if (wants('series') && data.series?.length) page.append(rail('مسلسلات يتابعها الجميع', rest(data.series)));
-    if (wants('movie') && data.topMovies?.length) page.append(chart('أعلى الأفلام تقييمًا', data.topMovies));
-    if (wants('movie') && data.fresh?.length) page.append(rail(`جديد ${new Date().getFullYear()}`, data.fresh, posterCard, { sub: 'صدرت هذه السنة' }));
-    if (wants('series') && data.topSeries?.length) page.append(chart('أعلى المسلسلات تقييمًا', data.topSeries));
+    // «الكل» يفتح نفس قائمة الصف من Cinemeta كاملة (homeLists)
+    const all = (key) => ({ more: () => openList(homeLists()[key]) });
+    if (wants('movie') && data.movies?.length) page.append(rail('أفلام رائجة الآن', rest(data.movies), posterCard, all('movies')));
+    if (wants('series') && data.series?.length) page.append(rail('مسلسلات يتابعها الجميع', rest(data.series), posterCard, all('series')));
+    if (wants('movie') && data.topMovies?.length) page.append(chart('أعلى الأفلام تقييمًا', data.topMovies, all('topMovies')));
+    if (wants('movie') && data.fresh?.length) page.append(rail(`جديد ${new Date().getFullYear()}`, data.fresh, posterCard, { sub: 'صدرت هذه السنة', ...all('fresh') }));
+    if (wants('series') && data.topSeries?.length) page.append(chart('أعلى المسلسلات تقييمًا', data.topSeries, all('topSeries')));
     const genreLists = [data.movies, data.series, data.topMovies, data.topSeries, data.fresh].map((l) => l ?? []);
     page.append(genreGrid((g) => openDiscover({ genre: g, type: k === 'series' ? 'series' : 'movie' }), genreLists, k === 'series' ? 'series' : 'movie'));
     page.append(el('p', 'cn-credit', 'بيانات الأعمال من Cinemeta · القصص معرّبة · التشغيل من المصادر العربية'));
@@ -786,13 +799,14 @@ export function createCinema(deps) {
   }
 
   async function fetchHome() {
-    const y = String(new Date().getFullYear());
+    const L = homeLists();
+    const from = (l) => catalog(l.type, l.id, l.genre ? { genre: l.genre } : {});
     const [movies, series, fresh, topMovies, topSeries] = await Promise.all([
-      catalog('movie', 'top'),
-      catalog('series', 'top'),
-      catalog('movie', 'year', { genre: y }).catch(() => []),
-      catalog('movie', 'imdbRating').catch(() => []),
-      catalog('series', 'imdbRating').catch(() => []),
+      from(L.movies),
+      from(L.series),
+      from(L.fresh).catch(() => []),
+      from(L.topMovies).catch(() => []),
+      from(L.topSeries).catch(() => []),
     ]);
     const cut = (list) => list.slice(0, 20).map(slim);
     const data = { movies: cut(movies), series: cut(series), fresh: cut(fresh), topMovies: cut(topMovies), topSeries: cut(topSeries), fetchedAt: Date.now() };
@@ -832,6 +846,7 @@ export function createCinema(deps) {
   }
 
   function show() {
+    state.discover.list = null;
     if (state.home && !state.loading) renderHome(state.home);
     void loadHome();
     void loadUpdates();
@@ -1905,8 +1920,26 @@ export function createCinema(deps) {
   // ───────────── اكتشف والمكتبة ─────────────
 
   function openDiscover({ genre = '', query = '', type = state.discover.type } = {}) {
-    state.discover = { ...state.discover, query, type, filters: { ...DISCOVER_DEFAULTS, genres: genre ? [genre] : [] } };
+    state.discover = { ...state.discover, query, type, list: null, filters: { ...DISCOVER_DEFAULTS, genres: genre ? [genre] : [] } };
     deps.showPage('discover');
+  }
+
+  /** «الكل» في صف من الرئيسية: نفس قائمة الصف (نوعها ومصدرها) كاملة بتمرير لا ينتهي. */
+  function openList(list) {
+    state.discover = { ...state.discover, list };
+    deps.showPage('discover');
+    globalThis.scrollTo?.(0, 0);
+  }
+  function showList(host, list) {
+    const head = el('header', 'cn-rail-head cn-list-head');
+    head.append(el('h2', null, list.title), button('cn-rail-more', `اكتشف${glyph('chevron', { size: 14 })}`, () => {
+      state.discover.list = null;
+      showDiscover();
+    }));
+    const grid = el('div', 'cn-grid');
+    host.replaceChildren(head, grid);
+    const token = ++state.discover.token;
+    infiniteGrid(grid, { streams: [{ type: list.type, id: list.id, genre: list.genre ?? '' }], alive: () => token === state.discover.token && grid.isConnected, type: list.type });
   }
 
   // آخر ما بحثت عنه: العبارات النهائية وحدها (Enter أو فتح نتيجة)، لا كل حرف
@@ -1988,6 +2021,7 @@ export function createCinema(deps) {
     if (!host) return;
     host.classList.add('cn-discover');
     const d = state.discover;
+    if (d.list) return showList(host, d.list);
     const form = el('form', 'cn-search');
     form.setAttribute('role', 'search');
     form.innerHTML = `${glyph('search', { size: 18 })}<input type="search" enterkeyhint="search" autocomplete="off" placeholder="فيلم، مسلسل… بالاسم الإنجليزي" aria-label="ابحث عن فيلم أو مسلسل">`;

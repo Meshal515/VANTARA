@@ -1264,6 +1264,9 @@
   font-size: 13px;
   color: var(--text-2);
 }
+.v35 .cn-list-head {
+  padding-top: 4px;
+}
 .v35 .cn-more {
   height: 1px;
 }
