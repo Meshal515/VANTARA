@@ -57,7 +57,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   let state = {};
   const cmd = (name, value) => { void Promise.resolve(send(value === undefined ? { name } : { name, value })).catch(() => {}); };
 
-  const root = el('div', 'pwa-player');
+  // v35: أنماط ورقة السيرفرات المشتركة مربوطة به (مشغل الويب يضيفه كذلك في غرفة الأصدقاء)
+  const root = el('div', 'pwa-player v35');
   root.dir = 'ltr';
   const gestures = el('div', 'pp-gestures');
   const spinner = el('div', 'pp-spinner'); spinner.innerHTML = '<i></i>';
@@ -68,6 +69,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const top = el('div', 'pp-top');
   const titles = el('div', 'pp-titles'); titles.dir = 'auto';
   const titleEl = el('strong'), subEl = el('small');
+  titleEl.dir = 'auto'; subEl.dir = 'auto'; // «الحلقة 3» لا تنقلب خلف عنوان إنجليزي
   titles.append(titleEl, subEl);
   const fullTop = iconButton('full', 'ملء الشاشة (F)', () => cmd('fullscreen'));
   top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
