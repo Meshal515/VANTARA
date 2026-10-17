@@ -4943,22 +4943,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
-  // «VANTARA MANGA ⌄»: قائمة الأقسام. الأنمي والسينما قريبًا.
+  // ألغِ فتحًا مؤجَّلًا عند الإغلاق كي لا تعود طبقة كاملة لابتلاع اللمس.
+  let sectionOpenFrame = 0;
   function setSectionsOpen(open) {
     const menu = q('sectionMenu');
     const scrim = q('sectionScrim');
     const button = q('brandSwitch');
     if (!menu || !button) return;
+    if (sectionOpenFrame) {
+      cancelAnimationFrame(sectionOpenFrame);
+      sectionOpenFrame = 0;
+    }
     button.setAttribute('aria-expanded', String(open));
     if (open) {
+      menu.style.removeProperty('pointer-events');
+      scrim.style.removeProperty('pointer-events');
       for (const layer of [menu, scrim]) layer.hidden = false;
-      requestAnimationFrame(() => {
+      sectionOpenFrame = requestAnimationFrame(() => {
+        sectionOpenFrame = 0;
+        if (!sectionsOpen()) return;
         menu.classList.add('open');
         scrim.classList.add('open');
         menuIn(menu, [...menu.querySelectorAll('.section-item')]);
       });
       return;
     }
+    // تعتيم الطبقة لا يعطّل hit testing: أوقف اللمس فورًا لا بعد 240ms.
+    menu.style.pointerEvents = 'none';
+    scrim.style.pointerEvents = 'none';
     scrim.classList.remove('open');
     setTimeout(() => {
       if (!scrim.classList.contains('open')) scrim.hidden = true;

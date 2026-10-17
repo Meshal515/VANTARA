@@ -528,8 +528,38 @@
 }
 
 /* أزرار الترويسة في السينما (الجوال): الجرس والبحث في كبسولة داكنة شفيفة واحدة،
-   والقائمة في دائرة بنفس المادة — تُقرأ فوق أي صورة. الشعار ومبدّل الأقسام كما هما. */
+   والقائمة في دائرة بنفس المادة — تُقرأ فوق أي صورة. الشعار ومبدّل الأقسام كما هما.
+   لا تُثبَّت داخل البانر المتحرك: ترويسات مستقلة على مستوى الشاشة حتى لا
+   تُحسب منطقة اللمس ضمن طبقة الصورة/التمرير في Android WebView. */
 @media (max-width: 699px) {
+  .v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    width: min(100%, 520px);
+    margin-inline: auto;
+    z-index: 100;
+    transform: none;
+    isolation: isolate;
+  }
+  /* كانت الترويسة sticky تشغل ارتفاعها في التخطيط؛ fixed لا تشغله.
+     إزالة الهامش السالب تبقي بداية صورة البانر في الموضع نفسه. */
+  .v35 .cn-hero-alt {
+    margin-top: 0;
+  }
+  /* زر الرجوع ثابت مستقل عن طبقة الصورة المتحركة. لا نترك حاويته
+     pointer-events:none ثم نطلب من الأبناء إصلاح اللمس داخل WebView. */
+  .v35 #cinema.active .cn-detail-bar {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    width: min(100%, 520px);
+    margin-inline: auto;
+    margin-bottom: 0;
+    z-index: 100;
+    transform: none;
+    pointer-events: auto;
+  }
   .v35[data-section='cinema'] #home > .header {
     padding-inline: 12px;
   }
