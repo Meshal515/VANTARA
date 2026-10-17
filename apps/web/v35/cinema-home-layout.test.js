@@ -84,3 +84,21 @@ describe('بلا إطارات زائدة (F)', () => {
     expect(rule('.v35 .cn-search')).not.toMatch(/box-shadow/);
   });
 });
+
+describe('ترويسات السينما على الجوال: لمس ثابت رغم تمرير البانر', () => {
+  it('ترويسة الرئيسية خارج طبقة الصورة المتحركة وبدون translateZ', () => {
+    const selector = ".v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header";
+    const rules = rule(selector);
+    expect(rules).toMatch(/position:\\s*fixed/);
+    expect(rules).toMatch(/z-index:\\s*100/);
+    expect(rules).toMatch(/transform:\\s*none/);
+    expect(rule('.v35 .cn-hero-alt')).toMatch(/margin-top:\\s*0/);
+  });
+  it('شريط الرجوع ثابت في الشاشة، ويستقبل اللمس من الحاوية نفسها', () => {
+    const bar = rule('.v35 #cinema.active .cn-detail-bar');
+    expect(bar).toMatch(/position:\\s*fixed/);
+    expect(bar).toMatch(/z-index:\\s*100/);
+    expect(bar).toMatch(/pointer-events:\\s*auto/);
+    expect(bar).toMatch(/transform:\\s*none/);
+  });
+});
