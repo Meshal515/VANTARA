@@ -114,3 +114,13 @@ describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبت�
     expect(shell).toContain("menu.style.pointerEvents = 'none'");
   });
 });
+
+describe('لا قوائم شفافة تعترض أزرار الترويسة', () => {
+  const coreCss = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
+  it('يحترم hidden رغم display:grid في قائمة الأقسام', () => {
+    expect(coreCss).toMatch(/\\.v35 \\.section-menu\\[hidden\\]\\s*\\{\\s*display:\\s*none/);
+  });
+  it('لا يستقبل الستار المغلق اللمس أثناء انتقال الشفافية', () => {
+    expect(coreCss).toMatch(/\\.v35 \\.section-scrim:not\\(\\.open\\)\\s*\\{\\s*pointer-events:\\s*none/);
+  });
+});
