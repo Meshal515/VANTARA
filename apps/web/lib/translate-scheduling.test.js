@@ -7,6 +7,25 @@ const flush = async () => { for (let i = 0; i < 5; i++) await tick(); };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
 describe('live reader admission', () => {
+  it('keeps routing textless pages while routed text pages wait for one Heavy owner', async () => {
+    const heavy = deferred(); const routed = [];
+    const q = createQueue({ prepareConcurrency: 2, maxPrepared: 4, maxRouteAhead: 12, maxInFlight: 24 });
+    const pages = Array.from({ length: 12 }, (_, index) => q.add({ key: `k#${index}`, chapterKey: 'k', index,
+      prepare: async () => {
+        routed.push(index);
+        // Even pages carry text and need Heavy; odd pages are textless.
+        return index % 2 ? { bypass: true } : { continuePrepare: async () => { await heavy.promise; return { analysis: {} }; } };
+      },
+      run: async () => index,
+    }));
+    q.focus('k', 0, { k: 0 });
+    await flush(); await flush();
+    // Old rule: routed-and-waiting text pages filled maxPrepared (4) and Route stopped.
+    expect(routed.length).toBe(12);
+    heavy.resolve();
+    await expect(Promise.all(pages)).resolves.toEqual(Array.from({ length: 12 }, (_, i) => i));
+  });
+
   it('admits the visible continuation past a waiting ahead continuation without overlapping Native', async () => {
     const held = deferred(); const order = []; let active = 0; let peak = 0;
     const native = (name, wait, priority) => withNativeTranslationStage(async () => {

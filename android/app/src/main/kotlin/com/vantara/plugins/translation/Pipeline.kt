@@ -474,12 +474,12 @@ class Pipeline(private val context: Context, private val store: ModelStore, priv
             val elapsed=(perf.nanos["glyphs"] ?: 0L)-before
             if(atlas) {
                 perf.count("ctdAtlas")
-                perf.count(if(gs.lastMode=="stripes") "ctdStripeCalls" else "ctdAtlasCalls",gs.tiles)
+                perf.count(when(gs.lastMode) {"stripes" -> "ctdStripeCalls"; "tight" -> "ctdTightCalls"; else -> "ctdAtlasCalls"},gs.tiles)
                 perf.count("ctdAtlasOccupancyPermille",(gs.lastOccupancy*1000).toInt())
             }
             perf.count("glyphTiles",gs.tiles)
             perf.count("ctdCalls",gs.tiles)
-            perf.count("ctdTensorPixels",gs.tiles*gs.inputPixelsPerTile)
+            perf.count("ctdTensorPixels",if(atlas) minOf(Int.MAX_VALUE.toLong(),gs.lastTensorPixels).toInt() else gs.tiles*gs.inputPixelsPerTile)
             if(crops.isNotEmpty()) perf.add("ctdPerRoi",elapsed/crops.size)
             if(gs.tiles>0) perf.add("ctdPerCall",elapsed/gs.tiles)
             mask.also {
