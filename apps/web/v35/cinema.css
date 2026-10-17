@@ -300,7 +300,8 @@
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  background: var(--surface-1);
+  /* أسفل الإطار بلون الصفحة: يتصل بالذوبان بلا حافة (انظر قص الصورة أدناه) */
+  background: linear-gradient(to top, var(--bg) 3px, var(--surface-1) 3px);
   touch-action: pan-y;
   cursor: pointer;
 }
@@ -310,6 +311,11 @@
 .v35 .cn-bill-img {
   position: absolute;
   inset: 0;
+  /* كل خلفية تملأ الإطار نفسه (16/10) مهما كان مقاسها، ومركزها أعلى قليلًا حيث الوجوه */
+  object-position: 50% 30%;
+  /* الصورة طبقة متحركة تُرسم على حافة كسرية غير حافة الذوبان: على كثافة 2.625 (S23)
+     كان صف بكسل منها يظهر خطًا فاتحًا تحت الذوبان. قصّ أسفلها يلغيه */
+  clip-path: inset(0 0 2px 0);
   --from: 0;
   --to: 0;
   --drag: 0px;
@@ -356,12 +362,25 @@
   display: grid;
   gap: 10px;
   padding: 4px var(--cn-gutter) 0;
-  min-height: 168px;
+  /* ارتفاع ثابت لكل شريحة: الشعار والسطور والأزرار في نفس المكان دائمًا */
+  height: var(--cn-bill-info-h);
   align-content: start;
+  --cn-bill-info-h: 196px;
 }
 .v35 .cn-bill-top {
   display: grid;
   gap: 10px;
+}
+/* خانة الشعار ثابتة الارتفاع: الشعار (أو الاسم) يجلس على قاعدتها مهما كان مقاسه */
+.v35 .cn-bill-mark {
+  height: 72px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.v35 .cn-bill-mark .cn-mark-logo {
+  max-height: 100%;
+  object-position: right bottom;
 }
 .v35 .cn-bill-mark .cn-mark-text {
   font-size: 28px;
@@ -370,22 +389,59 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.v35 .cn-bill .cn-facts {
+  height: 20px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
 .v35 .cn-bill-genres {
   margin: -2px 0 0;
+  height: 18px;
+  line-height: 18px;
   font-size: 13px;
   color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v35 .cn-bill-actions {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+  height: 46px;
 }
 .v35 .cn-bill-actions .cn-btn--play {
   flex: 1;
 }
+/* «قائمتي» و«التفاصيل» بلا صناديق: أيقونة فوق كلمة صغيرة، و«شاهد» الأحمر وحده زر ممتلئ */
+.v35 .cn-bill-actions .cn-btn--ghost,
+.v35 .cn-bill-actions .cn-btn--icon {
+  flex: none;
+  flex-direction: column;
+  gap: 3px;
+  width: 64px;
+  min-height: 46px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.v35 .cn-bill-actions .cn-btn--ghost svg,
+.v35 .cn-bill-actions .cn-btn--icon svg {
+  color: var(--text);
+}
+.v35 .cn-bill-actions .cn-btn--ghost:active,
+.v35 .cn-bill-actions .cn-btn--icon:active {
+  background: none;
+  opacity: 0.7;
+}
 .v35 .cn-bill-ticks {
   display: flex;
   gap: 4px;
+  height: 18px;
   padding: 16px var(--cn-gutter) 0;
 }
 .v35 .cn-tick {
@@ -400,6 +456,108 @@
   background: var(--text-2);
   transform: scaleX(0);
   transform-origin: right center;
+}
+
+/* ── البانر البديل (cn-hero-alt): خيار يُقبل أو يُرفض بحذف الصنف وحده ──
+   الصورة بعرض الشاشة من أعلاها تحت الترويسة، الترويسة شفافة ثم معتمة مع التمرير،
+   والشعار فوق أسفل الصورة على ستار داكن ناعم (تمويه بلا توهّج). المقاسات ثابتة كالأصل. */
+.v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  /* طبقة رسم مستقلة فوق الصورة المتحركة تحتها: WebView أندرويد يرتّب مناطق اللمس
+     بطبقات المعالج، وبدونها قد يذهب لمس زرَّي القائمة والبحث إلى البانر */
+  transform: translateZ(0);
+  background: transparent;
+  transition: background-color 0.25s ease;
+}
+.v35[data-section='cinema'].cn-scrolled #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header {
+  background: var(--bg);
+}
+.v35 .cn-hero-alt {
+  position: relative;
+  margin-top: calc(-1 * (var(--top-h) + var(--safe-top)));
+}
+.v35 .cn-hero-alt > .cn-kinds {
+  position: absolute;
+  top: calc(var(--top-h) + var(--safe-top));
+  inset-inline: 0;
+  z-index: 3;
+}
+.v35 .cn-hero-alt > .cn-kinds .cn-kind:not(.active) {
+  color: rgba(255, 255, 255, 0.72);
+}
+.v35 .cn-hero-alt .cn-bill-stage {
+  aspect-ratio: 4 / 3;
+}
+/* ستار علوي متدرّج تحت الترويسة والتبويبات ليُقرآ فوق أي صورة، حتى الفاتحة */
+.v35 .cn-hero-alt .cn-bill-stage::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 40%;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.78) 0%,
+    rgba(0, 0, 0, 0.62) 30%,
+    rgba(0, 0, 0, 0.3) 62%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+}
+/* أسفل الصورة: ظلّ متدرّج ناعم بلا تمويه يذوب في الخلفية خلف الشعار */
+.v35 .cn-hero-alt .cn-bill-stage::after {
+  height: 50%;
+  z-index: 1;
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    rgba(8, 7, 12, 0.86) 22%,
+    rgba(8, 7, 12, 0.55) 48%,
+    rgba(8, 7, 12, 0.22) 74%,
+    rgba(8, 7, 12, 0) 100%
+  );
+}
+/* الشعار وما تحته يصعدان فوق أسفل الصورة؛ الارتفاع الثابت نفسه */
+.v35 .cn-hero-alt .cn-bill-info {
+  position: relative;
+  z-index: 2;
+  margin-top: -84px;
+}
+
+/* أزرار الترويسة في السينما (الجوال): الجرس والبحث في كبسولة داكنة شفيفة واحدة،
+   والقائمة في دائرة بنفس المادة — تُقرأ فوق أي صورة. الشعار ومبدّل الأقسام كما هما. */
+@media (max-width: 699px) {
+  .v35[data-section='cinema'] #home > .header {
+    padding-inline: 12px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end,
+  .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
+    background: rgba(18, 18, 21, 0.58);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    border-radius: 999px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end {
+    gap: 2px;
+    padding-inline: 6px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-end .icon-btn,
+  .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+  .v35[data-section='cinema'] #home > .header .icon-btn .icon {
+    width: 22px;
+    height: 22px;
+  }
+  .v35[data-section='cinema'] #home > .header .notify-dot {
+    top: 9px;
+    inset-inline-end: 10px;
+    box-shadow: none;
+  }
 }
 
 /* الأشرطة */
@@ -456,6 +614,8 @@
   width: 124px;
   display: grid;
   gap: 6px;
+  /* بطاقات الصف تتمدد لأطولها: السطور تبقى من الأعلى فيبدأ كل اسم من نفس الخط */
+  align-content: start;
   border: 0;
   padding: 0;
   background: none;
@@ -474,10 +634,17 @@
   box-shadow: inset 0 0 0 1px var(--line);
   transition: transform 0.18s ease;
 }
+/* الرئيسية واكتشف: الملصق صورته وحدها بلا خط إطار حوله (صفحة العمل كما هي) */
+.v35 .cn-home .cn-poster-art,
+.v35 .cn-discover .cn-poster-art {
+  box-shadow: none;
+}
 .v35 .cn-poster:active .cn-poster-art {
   transform: scale(0.97);
 }
 .v35 .cn-poster-title {
+  /* الاسم الإنجليزي (dir=auto) يبدأ من يساره فيبدو موسّطًا في سطرين: يمين دائمًا كبقية الصف */
+  text-align: right;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
@@ -490,10 +657,17 @@
 .v35 .cn-poster-meta {
   display: flex;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   margin-top: -3px;
   font-size: 11.5px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+.v35 .cn-poster-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v35 .cn-poster-rate {
   color: var(--text-2);
@@ -528,6 +702,7 @@
   bottom: 0;
 }
 .v35 .cn-wide-title {
+  text-align: right;
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
@@ -538,6 +713,26 @@
 .v35 .cn-wide-sub {
   font-size: 12px;
   color: var(--text-3);
+  /* سطر واحد يُقصّ بـ«…» داخل البطاقة، لا يفيض تحت البطاقة المجاورة */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* الاسم وبجانبه ⋮ (المفضلة، قائمتي، الحذف) */
+.v35 .cn-wide .cw-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.v35 .cn-wide .cw-name .cn-wide-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* ⋮ يلي الاسم مباشرة داخل حدود بطاقته، لا على حافتها قرب البطاقة المجاورة */
+.v35 .cn-wide .cw-name .cw-more {
+  margin: -4px 0 0;
 }
 
 /* قائمة IMDb: ثلاثة صفوف في كل عمود، تمرير أفقي */
@@ -563,14 +758,13 @@
 }
 .v35 .cn-chart-row {
   display: grid;
-  grid-template-columns: 34px 52px 1fr auto;
+  grid-template-columns: 34px 52px 1fr;
   align-items: center;
   gap: 12px;
   width: 100%;
   border: 0;
-  padding: 0 0 10px;
+  padding: 0;
   background: none;
-  border-bottom: 1px solid var(--line);
   text-align: start;
   font: inherit;
   color: inherit;
@@ -597,6 +791,7 @@
   min-width: 0;
 }
 .v35 .cn-chart-copy b {
+  text-align: right;
   font-size: 14px;
   color: var(--text);
   white-space: nowrap;
@@ -610,12 +805,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 .cn-chart-rate {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
 
 /* الأنواع: بلاطات نصية، العربي كبير والإنجليزي همس */
 .v35 .cn-genres {
@@ -625,32 +814,44 @@
   padding: 0 var(--cn-gutter);
 }
 .v35 .cn-genre {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 54px;
-  padding: 0 14px;
+  align-items: flex-end;
+  height: 84px;
+  padding: 0 12px 10px;
   border: 0;
   border-radius: var(--cn-r);
+  overflow: hidden;
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
   font: inherit;
+  text-align: start;
   cursor: pointer;
-  align-items: center;
+  isolation: isolate;
+  transition: transform 0.15s ease;
+}
+/* صورة العمل خلفية البلاطة، وتدرّج داكن من الأسفل يحمل الاسم فوق أي صورة */
+.v35 .cn-genre-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+.v35 .cn-genre-art .cn-img {
+  object-position: 50% 30%;
+}
+.v35 .cn-genre::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to top, rgba(8, 7, 12, 0.88) 0%, rgba(8, 7, 12, 0.45) 55%, rgba(8, 7, 12, 0.15) 100%);
 }
 .v35 .cn-genre b {
-  font-size: 15px;
-  color: var(--text);
-}
-.v35 .cn-genre span {
-  font-size: 10px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  color: var(--text-4);
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
 }
 .v35 .cn-genre:active {
-  background: var(--surface-2);
+  transform: scale(0.98);
 }
 
 /* ───────────── صفحة العمل ───────────── */
@@ -662,16 +863,102 @@
   position: relative;
 }
 .v35 .cn-detail-bar {
-  /* يبقى مع التمرير بلا أن يحجز مكانًا فوق الصورة */
+  /* يبقى مع التمرير بلا أن يحجز مكانًا فوق الصورة. ارتفاعه حقيقي (والهامش السالب يعيد
+     المكان): بارتفاع 0 كان الزر يطفح خارج طبقة بلا حدود، وWebView أندرويد يحسب مناطق
+     اللمس من حدود الطبقة فيذهب اللمس للصورة المتحركة تحته — زر الرجوع لا ينضغط */
+  --cn-bar-h: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
   position: sticky;
   top: 0;
-  height: 0;
+  height: var(--cn-bar-h);
+  margin-bottom: calc(-1 * var(--cn-bar-h));
   z-index: 5;
   padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px) 10px 0;
+  transform: translateZ(0);
+  pointer-events: none;
+}
+.v35 .cn-detail-bar > * {
+  pointer-events: auto;
 }
 .v35 .cn-detail-bar .icon-btn {
+  position: relative;
+  flex: none;
   background: rgba(10, 7, 7, 0.62);
   color: #fff;
+  transition: background-color 0.22s ease, color 0.22s ease;
+}
+/* انطوت الخلفية: ترويسة صلبة (لا شيء يظهر من خلفها) والشعار صغيرًا فيها */
+.v35 .cn-detail-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.v35 .cn-detail-bar::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--line);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed::before {
+  opacity: 1;
+}
+.v35 .cn-detail-bar.collapsed .icon-btn {
+  background: transparent;
+  color: var(--text);
+}
+.v35 .cn-bar-title {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: var(--tap);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+  transform-origin: right center;
+  transition: opacity 0.24s ease, transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed .cn-bar-title {
+  opacity: 1;
+  transform: none;
+}
+.v35 .cn-bar-logo {
+  display: block;
+  max-height: 28px;
+  max-width: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: right center;
+}
+.v35 .cn-bar-title:not(.has-logo) .cn-bar-logo,
+.v35 .cn-bar-title.has-logo .cn-bar-text {
+  display: none;
+}
+.v35 .cn-bar-text {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.v35 .cn-detail-art > .cn-img {
+  transform-origin: 50% 0;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-bar-title {
+    transition: none;
+  }
 }
 .v35 .cn-detail-art {
   position: relative;
@@ -931,6 +1218,62 @@
   overflow: hidden;
 }
 
+.v35 .cn-cast {
+  margin-top: 28px;
+}
+.v35 .cn-cast .cn-section-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.v35 .cn-cast-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  margin-inline: calc(var(--cn-gutter) * -1);
+  padding-inline: var(--cn-gutter);
+  scrollbar-width: none;
+}
+.v35 .cn-cast-strip::-webkit-scrollbar {
+  display: none;
+}
+.v35 .cn-person {
+  flex: 0 0 74px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 6px;
+  text-align: center;
+}
+.v35 .cn-face {
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 22px;
+  font-weight: 700;
+}
+.v35 .cn-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+.v35 .cn-person-name {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.3;
+  color: var(--text-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .v35 .cn-credits {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -986,20 +1329,30 @@
   --cn-r: 6px;
   --cn-gutter: 16px;
 }
+.v35 .cn-discover.page-body {
+  /* عناصر السينما تحمل هامشها (--cn-gutter): لا هامش مضاعف، والبحث بعرض الشبكة */
+  padding-inline: 0;
+}
+.v35 .cn-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px var(--cn-gutter) 8px;
+}
 .v35 .cn-search {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 4px var(--cn-gutter) 12px;
   padding: 0 14px;
   min-height: 46px;
   border-radius: var(--cn-r);
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--text-3);
 }
 .v35 .cn-search:focus-within {
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .v35 .cn-search input {
   flex: 1;
@@ -1011,6 +1364,33 @@
   font-size: 15px;
   color: var(--text);
 }
+.v35 .cn-filter-btn {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: var(--cn-r);
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+}
+.v35 .cn-filter-btn b {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
 .v35 .cn-filters[hidden] {
   display: none;
 }
@@ -1020,6 +1400,9 @@
   padding: 4px var(--cn-gutter) 14px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* يتلاشى عند الحافتين بدل أن تُقصّ الرقاقة */
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 var(--cn-gutter), #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, transparent, #000 var(--cn-gutter), #000 calc(100% - 28px), transparent);
 }
 .v35 .cn-chips::-webkit-scrollbar {
   display: none;
@@ -1031,7 +1414,6 @@
   border: 0;
   border-radius: var(--cn-r);
   background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
   font: inherit;
   font-size: 13px;
   color: var(--text-2);
@@ -1040,8 +1422,96 @@
 .v35 .cn-chip.active {
   background: var(--text);
   color: var(--bg);
-  box-shadow: none;
   font-weight: 700;
+}
+/* ما قبل الكتابة: بقطع بحث المانجا نفسها، بهامش السينما */
+.v35 .cn-discover-body > .search-head,
+.v35 .cn-discover-body > .search-recent,
+.v35 .cn-discover-body > .search-trend {
+  margin-inline: var(--cn-gutter);
+}
+.v35 .cn-discover-body > .search-head:first-child {
+  margin-top: 8px;
+}
+.v35 .cn-trend {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.v35 .cn-trend .search-trend-row {
+  padding-inline: 0;
+}
+.v35 .cn-trend .search-trend-row + .search-trend-row::before {
+  inset-inline: 76px 0;
+}
+.v35 .cn-discover-genres {
+  margin-bottom: 8px;
+}
+.v35 .cn-discover-body > .cn-rail-head {
+  margin-top: 28px;
+}
+.v35 .cn-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 var(--cn-gutter) 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.v35 .cn-list-head {
+  padding-top: 4px;
+}
+.v35 .cn-more {
+  height: 1px;
+}
+.v35 .cn-more.loading {
+  height: 56px;
+  background: radial-gradient(circle, var(--text-4) 2px, transparent 3px) center / 14px 14px no-repeat;
+}
+/* ورقة التصفية */
+.v35 .cn-fs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.v35 .cn-fs-head h3 {
+  margin: 0;
+}
+.v35 .cn-fs-group {
+  margin-top: 16px;
+}
+.v35 .cn-fs-group h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 .cn-fs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.v35 .cn-fs-years {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+}
+.v35 .cn-fs-select {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--cn-r);
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.v35 .cn-fs-apply {
+  width: 100%;
+  margin-top: 20px;
 }
 .v35 .cn-grid {
   display: grid;

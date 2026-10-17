@@ -98,6 +98,18 @@ class PriorityGate {
         return a.seq < b.seq
     }
 
+    /**
+     * Order for the per-model-call compute lock. The visible page and the [3] pages
+     * ahead come first whatever their stage, so a stream of cheap speculative Route
+     * tiles can never sit between the reader's own CTD/LaMa calls; inside a tier it is
+     * the same order as [better].
+     */
+    private fun computeKey(w: Waiter): Long {
+        val d = distance(w.page)
+        val tier = if (w.page == null || d <= 3) 0L else 1L
+        return (tier shl 56) or (priorityClass(w).toLong() shl 40) or (minOf(d, 0xFFFFFFF).toLong() shl 8) or w.rank.toLong()
+    }
+
     suspend fun <T> run(rank: Int, perf: Perf, page: Page? = null, block: () -> T): T {
         val started = System.nanoTime()
         val waiter = synchronized(this) {
@@ -122,9 +134,14 @@ class PriorityGate {
         }
         perf.add("queue", System.nanoTime() - started)
         val t = System.nanoTime()
+        // Model calls inside `block` contend on Ort's compute lock with this live rank.
+        val me = Waiter(rank, 0, page)
+        val previous = InferenceLanes.priority.get()
+        InferenceLanes.priority.set { computeKey(me) }
         try {
             return block()
         } finally {
+            InferenceLanes.priority.set(previous)
             synchronized(this) { busyNanos += System.nanoTime() - t }
             release()
         }

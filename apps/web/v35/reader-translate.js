@@ -6,8 +6,9 @@
  *   ويستمر للعمل إلى أن تخرج من بطاقته.
  * - أول تفعيل بلا نماذج على الجهاز: بطاقة «تحميل ملفات الترجمة» بالحجم، مرة
  *   واحدة، ثم تعمل محليًّا.
- * - ترتيب ثابت لا يتبع سرعتك (`createQueue`): من أول الصفحة للأمام. حتى ثلاث
- *   صفحات تكون في مراحل مختلفة معًا كي لا يبقى الجهاز عاطلًا أثناء Luna؛ أمّا
+ * - الترتيب يتبع موضع القراءة (`createQueue`، v3): الصفحة الظاهرة ثم `LEAD_PAGES`
+ *   بعدها، ثم بقية الفصل والفصل التالي. وزمن انتظار القارئ على صفحة لم تجهز يُسجَّل
+ *   (`createStallClock`) — هدفه صفر. عدة صفحات تكون في مراحل مختلفة معًا كي لا يبقى الجهاز عاطلًا أثناء Luna؛ أمّا
  *   Native الثقيل نفسه فمُسلسل عالميًّا ولا يتداخل. صفحة تفشل لسبب عابر تُعاد.
  * - «نجهّز الفصل بالعربي» حتى تجهز أول ثلاث صفحات، ثم تقرأ والباقي يكمل
  *   أمامك. «اقرأ الآن» يتخطى الانتظار.
@@ -22,6 +23,7 @@ import { readJobs } from '../lib/translate-jobs.js';
 import { downloadModels, focusPage, formatBytes, modelsStatus, nativeTranslationAvailable } from '../lib/translation-native.js';
 import { learnOnce } from '../lib/translate-learn.js';
 import { runtimeCapacity } from '../lib/runtime-capacity.js';
+import { recordPerf } from '../lib/translate-perf.js';
 
 /** أقل ما يجهز من الفصل قبل أن تبدأ: 30% (ويزيد إن كانت الترجمة أبطأ منك). */
 const ENTRY_PAGES = 3;
@@ -56,7 +58,42 @@ const store = {
 // Stage pipeline: prepare owns Route + Heavy Analyze, then releases that owner.
 // Run slots therefore cover Luna + Render only; a slow Luna response no longer
 // blocks CTD/BubbleSeg from preparing later pages. Caps stay finite for RAM/network.
-const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24, capacity: runtimeCapacity, lane: 'reader' });
+/**
+ * Reading lead (v3): the page on screen plus the next LEAD_PAGES outrank the rest
+ * of the chapter, which is prefetched behind them. The goal is that the reader
+ * never lands on a page that is still English (stall ≈ 0), whatever the page size.
+ */
+export const LEAD_PAGES = 6;
+const queue = createQueue({ concurrency: 12, prepareConcurrency: 8, maxPrepared: 24, bypassConcurrency: 8, maxInFlight: 24, capacity: runtimeCapacity, lane: 'reader', lead: LEAD_PAGES });
+export const translationReady = result => Boolean(result) && !result.error && !result.incomplete;
+
+/**
+ * Reader stall clock: time the reader spends on a page that needs translation
+ * while its translated image is not ready. Page-size independent success metric.
+ */
+export function createStallClock({ now = () => Date.now(), record = recordPerf } = {}) {
+  let open = null;
+  const close = (outcome) => {
+    if (!open) return;
+    const stallMs = Math.max(0, now() - open.since);
+    record({ at: now(), from: 'stall', runId: open.runId, chapterKey: open.chapterKey, pageIndex: open.pageIndex, stallMs, outcome });
+    open = null;
+  };
+  return {
+    /** The reader is now on this page; `ready` = its translation is already shown. */
+    view({ chapterKey, pageIndex, runId = null, ready }) {
+      if (open && open.chapterKey === chapterKey && open.pageIndex === pageIndex) return;
+      close('left');
+      if (!ready) open = { chapterKey, pageIndex, runId, since: now() };
+    },
+    /** A result (or a final failure) arrived for this page. */
+    settled({ chapterKey, pageIndex }, outcome = 'ready') {
+      if (open && open.chapterKey === chapterKey && open.pageIndex === pageIndex) close(outcome);
+    },
+    stop() { close('left'); },
+    pending: () => open,
+  };
+}
 
 export const needsTranslation = (row) => Boolean(row) && (row.lang === 'en' || isFiller(row.sourceId));
 
@@ -144,6 +181,7 @@ export function createReaderTranslation(deps) {
   let modelsCard = null;
   let currentSegs = [];
   let currentSeg = null;
+  const stall = createStallClock();
 
   // الـPWA بلا ترجمة مانجا: لا زرّ ولا ترجمة تلقائية مهما قال تخزين المتصفح
   const enabled = () => readTranslateSettings().enabled && supports('translation');
@@ -187,14 +225,14 @@ export function createReaderTranslation(deps) {
 
   /** صفحة واحدة في الطابور. تُعاد بعد فشل عابر، فلا تبقى صفحة إنجليزية لأنك مررت عليها بسرعة. */
   function enqueuePage(seg, index) {
-    if (!seg.tl || stopped || disabledReason || !isOn() || seg.tl.results.has(index)) return;
+    if (!seg.tl || stopped || disabledReason || !isOn() || translationReady(seg.tl.results.get(index))) return;
     const chapterKey = keyOf(seg.row);
     const meta = {seriesRef:ref,seriesTitle:title,sourceId:seg.row.sourceId,chapterKey,chapterNumber:Number.isFinite(seg.row.number) && seg.row.number>=0 ? seg.row.number:null,pageIndex:index,sourceLang:seg.row.lang ?? 'en',runId,...(speedOf(ref)==='fast'?{speed:'fast'}:{})};
-    const prepare=async({interactive=false,isInteractive}={})=> {
+    const prepare=async({interactive=false,isInteractive,schedulingPriority}={})=> {
       if(stopped || disabledReason || !isOn()) return null;
-      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive});
+      return prepareTranslation(await getImage(seg,index),meta,{preAnalyze:true,deferAnalyze:true,via:'reader',interactive,isInteractive,schedulingPriority});
     };
-    const run = async ({ waitedMs = 0,admissionWaitMs=0,continuationWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive } = {}) => {
+    const run = async ({ waitedMs = 0,admissionWaitMs=0,continuationWaitMs=0,preparedWaitMs=0,prepared,prepareMs=0,queuedAt=null,interactive = false,isInteractive,schedulingPriority,queueTrace } = {}) => {
       if (stopped || disabledReason || !isOn()) return null;
       const fetchStarted = Date.now();
       const src = prepared?.src ?? await getImage(seg, index);
@@ -204,8 +242,13 @@ export function createReaderTranslation(deps) {
         if (!seg.tl) return;
         seg.tl.results.set(index, better);
         paint(seg, index);
+        if (translationReady(better)) {
+          seg.tl.failed.delete(index);
+          stall.settled({ chapterKey, pageIndex: index });
+          updateGate();
+        }
       };
-      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,continuation:continuationWaitMs,prepared:preparedWaitMs}, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
+      return translatePage({ api, sync, onRepaired, waitMs: waitedMs, queueWait:{admission:admissionWaitMs,continuation:continuationWaitMs,prepared:preparedWaitMs}, queueTrace, schedulingPriority, fetchMs, via: 'reader',runId,prepareMs,prepared,route:prepared?.route,routeQueuedAt:queuedAt,interactive,isInteractive }, src, {
         seriesRef: ref,
         seriesTitle: title,
         sourceId: seg.row.sourceId,
@@ -225,6 +268,8 @@ export function createReaderTranslation(deps) {
         seg.tl.failed.delete(index);
         seg.tl.results.set(index, result);
         paint(seg, index);
+        if (translationReady(result)) stall.settled({ chapterKey, pageIndex: index });
+        else failed(seg, index, 'incomplete');
         updateGate();
       })
       .catch((error) => failed(seg, index, classifyTranslationError(error)));
@@ -250,10 +295,14 @@ export function createReaderTranslation(deps) {
       return;
     }
     seg.tl.failed.add(index);
+    stall.settled({ chapterKey: keyOf(seg.row), pageIndex: index }, 'failed');
     updateGate();
   }
 
-  /** موضعك لا يغيّر ترتيب صفحات الفصل: دائمًا 1 ثم 2 ثم 3... */
+  /**
+   * v3: موضعك يقود الأولوية — الصفحة الظاهرة ثم LEAD_PAGES بعدها، ثم بقية الفصل
+   * (والفصل التالي) تُجهَّز خلفها. هدف القارئ: لا ينتظر صفحة أبدًا.
+   */
   function focus(seg, index, segs) {
     currentSegs = segs;
     currentSeg = seg;
@@ -263,9 +312,11 @@ export function createReaderTranslation(deps) {
     if (segs[i - 1]) ranks[keyOf(segs[i - 1].row)] = 2;
     ranks[keyOf(seg.row)] = 0;
     // ثبّت focus native/JS على أول صفحة: ترتيب التنفيذ لا يقفز مع التمرير.
-    queue.focus(keyOf(seg.row), 0, ranks, { pageCount: seg.slots.length });
-    focusPage(keyOf(seg.row), 0, seg.slots.length);
-    if (!isOn()) return;
+    const at = Math.max(0, Math.min(seg.slots.length - 1, Number(index) || 0));
+    queue.focus(keyOf(seg.row), at, ranks, { pageCount: seg.slots.length });
+    focusPage(keyOf(seg.row), at, seg.slots.length);
+    if (!isOn()) { stall.stop(); return; }
+    if (seg.tl && !disabledReason) stall.view({ chapterKey: keyOf(seg.row), pageIndex: at, runId, ready: translationReady(seg.tl.results.get(at)) || seg.tl.failed.has(at) });
     if (!ensureModelsOrOffer()) return;
     startLesson();
     enqueue(seg);
@@ -357,7 +408,7 @@ export function createReaderTranslation(deps) {
   function readyAhead(seg, from) {
     let n = 0;
     for (let i = from; i < seg.slots.length; i++) {
-      if (!seg.tl.results.has(i) && !seg.tl.failed.has(i)) break;
+      if (!translationReady(seg.tl.results.get(i)) && !seg.tl.failed.has(i)) break;
       n += 1;
     }
     return n;
@@ -469,6 +520,7 @@ export function createReaderTranslation(deps) {
 
   function destroy() {
     stopped = true;
+    stall.stop();
     unsubscribe();
     closeGate();
     closeModels();

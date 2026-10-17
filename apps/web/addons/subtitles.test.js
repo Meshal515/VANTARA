@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { subtitleRequest, discoverSubtitles, toWebVtt } from "./subtitles.js";
+import { subtitleRequest, subtitleRequests, animeImdbAddresses, discoverSubtitles, toWebVtt } from "./subtitles.js";
 it("matches episode by explicit IMDb and season/episode, never title alone", () => {
   expect(
     subtitleRequest(
@@ -92,7 +92,9 @@ it('never sends one provider private video ID to another unrestricted subtitle p
     { key: 'origin', subtitles: async request => { calls.push(['origin', request.videoId]); return []; } },
     { key: 'other', subtitles: async request => { calls.push(['other', request.videoId]); return []; } },
   ] });
-  expect(calls).toEqual([['origin', 'private:episode'], ['other', 'tt123:2:3']]);
+  // المعرّف الخاص لإضافته وحدها (أولًا)، والأخرى لا تستلم إلا العنوان العام؛ الأصلية تجرّب العام بعد الخاص الفارغ
+  expect(calls.filter(([key]) => key === 'other')).toEqual([['other', 'tt123:2:3']]);
+  expect(calls.filter(([key]) => key === 'origin')).toEqual([['origin', 'private:episode'], ['origin', 'tt123:2:3']]);
 });
 it('does not query a different provider when only the origin private ID is known', async () => {
   const calls = [];
@@ -107,4 +109,26 @@ it('does not publish subtitle health after cancellation even if transport ignore
   controller.abort(); release([{ url: 'https://subs.test/a.srt', lang: 'ara' }]);
   await done; await Promise.resolve();
   expect(found).toEqual([]); expect(health).toEqual([]);
+});
+
+it('عنوان حلقة الأنمي في IMDb: موسم TVDB ثم المطلق، وحلقة لم تصل الخريطة تكمل من آخر معروفة', () => {
+  const map = { 1: [2, 13, 38], 2: [2, 14, 39] };
+  expect(animeImdbAddresses(map, 1)).toEqual([[2, 13], [1, 38]]);
+  expect(animeImdbAddresses(map, 5)).toEqual([[2, 17], [1, 42]]);
+  expect(animeImdbAddresses(map, 40)).toEqual([]);
+  expect(animeImdbAddresses({ 3: [1, 3, 3] }, 3)).toEqual([[1, 3]]);
+  expect(subtitleRequests({ kind: 'anime', externalIds: { kitsu: '12', imdb: 'tt0388629' }, imdbEpisodes: { 62: [5, 2, 62] }, episode: 62 }).map(r => r.videoId))
+    .toEqual(['kitsu:12:62', 'tt0388629:5:2', 'tt0388629:1:62']);
+});
+
+it('المزوّد يجرّب المعرّف التالي حين يرجع الأول فارغًا (One Piece مفهرس بالمطلق)', async () => {
+  const asked = [];
+  const found = [];
+  await discoverSubtitles({
+    identity: { kind: 'anime', externalIds: { imdb: 'tt0388629' }, imdbEpisodes: { 62: [5, 2, 62] }, episode: 62 },
+    providers: [{ key: 'os', subtitles: async (req) => { asked.push(req.videoId); return req.videoId === 'tt0388629:1:62' ? [{ url: 'https://subs.test/a.srt', lang: 'ara' }] : []; } }],
+    onResult: (t) => found.push(t),
+  });
+  expect(asked).toEqual(['tt0388629:5:2', 'tt0388629:1:62']);
+  expect(found.map(t => t.lang)).toEqual(['ar']);
 });

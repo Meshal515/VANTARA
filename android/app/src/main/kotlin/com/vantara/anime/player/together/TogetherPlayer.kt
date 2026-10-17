@@ -580,22 +580,33 @@ class TogetherPlayer(
         addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (v != 0L) addView(button("صفّر", primary = false) { setOffset(0) }.apply { setPadding(context.dp(12), context.dp(6), context.dp(12), context.dp(6)); textSize = 12.5f },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = context.dp(8) })
+        // − [القيمة] +: دائرتان بمقاس ثابت والرمز في مركزها تمامًا (بلا حشوة الخط التي كانت تزيحه)،
+        // والقيمة بعرض ثابت في الوسط فلا يتحرك شيء حين يتغير الرقم
         val step = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_LTR
-            background = rounded(0x12FFFFFF, context.dp(20).toFloat())
-            setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
-        }
-        fun stepBtn(label: String, delta: Long, desc: String) = context.label(label, 18f, Color.WHITE, bold = true).apply {
             gravity = Gravity.CENTER
-            background = rounded(0x1FFFFFFF, context.dp(16).toFloat())
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            background = rounded(0x12FFFFFF, context.dp(22).toFloat())
+            setPadding(context.dp(4), context.dp(4), context.dp(4), context.dp(4))
+        }
+        fun stepBtn(label: String, delta: Long, desc: String) = context.label(label, 20f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            includeFontPadding = false
+            setPadding(0, 0, 0, 0)
+            background = rounded(0x1FFFFFFF, context.dp(18).toFloat())
             contentDescription = desc
             setOnClickListener { setOffset(offsetMs + delta) }
         }
-        step.addView(stepBtn("−", -500, "أخّر فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(34), context.dp(34)))
-        step.addView(context.label(offsetText(v), 13.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER; minWidth = context.dp(64); textDirection = View.TEXT_DIRECTION_LTR; layoutDirection = View.LAYOUT_DIRECTION_LTR })
-        step.addView(stepBtn("+", 500, "قدّم فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(34), context.dp(34)))
+        step.addView(stepBtn("−", -500, "أخّر فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(36), context.dp(36)))
+        step.addView(context.label(offsetText(v), 14f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            includeFontPadding = false
+            maxLines = 1
+            textDirection = View.TEXT_DIRECTION_RTL
+        }, LinearLayout.LayoutParams(context.dp(72), context.dp(36)))
+        step.addView(stepBtn("+", 500, "قدّم فيديوك نصف ثانية"), LinearLayout.LayoutParams(context.dp(36), context.dp(36)))
         addView(step)
     }
 

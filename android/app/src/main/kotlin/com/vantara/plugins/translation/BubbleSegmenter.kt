@@ -12,18 +12,37 @@ data class Bubble(val box: Box, val score: Float, val mask: ByteMask)
  * [1, 32, mh, mw] بروتوتايبات القناع. القناع = sigmoid(coef · proto).
  */
 class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
-    private val session: OrtSession = Ort.open(file, engine = engine)
+    private val session: OrtSession = Ort.open(file, engine = engine ?: Ort.DYNAMIC)
     var conf = 0.35f
     var iouThr = 0.5f
     private val size = INPUT_SIZE
 
     companion object {
-        // Keep the validated model tensor unchanged; service-demand wins come
-        // from skipping/reusing inference, not from an unvalidated resize.
+        // Full-page/strip segmentation keeps the validated 1024² tensor. The ROI
+        // rescue path may use [roiInputSize] (see below; device A/B in engineBenchmark).
         const val INPUT_SIZE = 1024
+        const val MIN_ROI_INPUT = 512
+
+        /**
+         * v3: the ONNX graph is dynamic. A ROI crop no longer pays a 1024² pass when it is
+         * ~500 px: the letterboxed geometry (bubble share of the canvas) is identical, only
+         * the redundant upscale is skipped. Multiple of 32 (YOLO stride), floor 512 to keep
+         * proto-mask resolution ≥ the old upscaled path's at native scale for small crops.
+         */
+        @Volatile var nativeRoi: Boolean = true
+
+        fun roiInputSize(w: Int, h: Int): Int {
+            val edge = maxOf(w, h)
+            val rounded = ((edge + 31) / 32) * 32
+            return rounded.coerceIn(MIN_ROI_INPUT, INPUT_SIZE)
+        }
     }
 
-    private fun infer(img: RgbImage): List<Bubble> {
+    /** Tensor pixels of the last [segmentRoi] (telemetry). */
+    var lastInputPixels = 0L
+        private set
+
+    private fun infer(img: RgbImage, size: Int = this.size): List<Bubble> {
         val (chw, r) = img.toChwPadded(size, 114)
         val nw = Math.round(img.width * r)
         val nh = Math.round(img.height * r)
@@ -119,9 +138,12 @@ class BubbleSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
     /** Candidate ROI masks mapped back to original coordinates, measured against the validated path. */
     fun segmentRoi(img: RgbImage, crops: List<Box>): List<Bubble> {
         val out=ArrayList<Bubble>();var totalTiles=0
+        lastInputPixels=0
         for(box in crops) {
             val crop=img.crop(box.x1,box.y1,box.x2,box.y2)
-            val found=infer(crop)
+            val input=if(nativeRoi) roiInputSize(crop.width,crop.height) else size
+            lastInputPixels += input.toLong()*input
+            val found=infer(crop,input)
             totalTiles++
             for(b in found) {
                 val mask=ByteMask(img.width,img.height)

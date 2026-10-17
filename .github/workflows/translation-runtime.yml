@@ -1,8 +1,9 @@
 name: Android translation runtime
 
 on:
+  workflow_dispatch:
   push:
-    branches: [chatgpt/translation-three-anchor-integration, main]
+    branches: [chatgpt/translation-three-anchor-integration, codex/manga-translation-investigation-20261017, main]
     paths:
       - 'android/app/src/**/translation/**'
       - 'android/app/src/androidTest/assets/source-*'

@@ -225,3 +225,61 @@ describe('adaptive background Luna assembly',()=> {
     await vi.advanceTimersByTimeAsync(1000);expect((await second).status).toBe(429);expect(calls).toHaveLength(2);vi.useRealTimers();
   });
 });
+
+describe('v3 chapter chunking', () => {
+  it('holds an ahead page while more pages of the chapter are still in analysis', async () => {
+    vi.useFakeTimers();
+    const calls = [];
+    let expected = 1;
+    const batch = createTextBatcher(async (path, body) => { calls.push(body.pages?.length ?? 1); return body.pages ? batchReply(body) : { status: 200, body: { regions: body.regions } }; },
+      { waitMs: 40, chunkWaitMs: 2000, expectMore: () => expected });
+    const a = batch.enqueueTextPage(page(0));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls).toHaveLength(0);
+    expected = 0;
+    const b = batch.enqueueTextPage(page(1));
+    await vi.advanceTimersByTimeAsync(40);
+    await Promise.all([a, b]);
+    expect(calls).toEqual([2]);
+    expect((await a).lunaPerf.pagesPerBatch).toBe(2);
+    vi.useRealTimers();
+  });
+
+  it('never waits past the chunk deadline even if the hint is stale', async () => {
+    vi.useFakeTimers();
+    const calls = [];
+    const batch = createTextBatcher(async (path, body) => { calls.push(path); return { status: 200, body: { regions: body.regions } }; },
+      { waitMs: 40, chunkWaitMs: 1500, expectMore: () => 5 });
+    const a = batch.enqueueTextPage(page(0));
+    await vi.advanceTimersByTimeAsync(1400);
+    expect(calls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(150);
+    await a;
+    expect(calls).toEqual(['/v1/translate/text']);
+    vi.useRealTimers();
+  });
+
+  it('poke releases a held batch as soon as nothing more is expected', async () => {
+    vi.useFakeTimers();
+    const calls = [];
+    let expected = 2;
+    const batch = createTextBatcher(async (path, body) => { calls.push(path); return { status: 200, body: { regions: body.regions } }; },
+      { waitMs: 40, chunkWaitMs: 4000, expectMore: () => expected });
+    const a = batch.enqueueTextPage(page(0));
+    await vi.advanceTimersByTimeAsync(300);
+    expected = 0;
+    batch.poke();
+    await vi.advanceTimersByTimeAsync(0);
+    await a;
+    expect(calls).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it('visible pages ignore chunking entirely', async () => {
+    const calls = [];
+    const batch = createTextBatcher(async (path, body) => { calls.push(path); return { status: 200, body: { regions: body.regions } }; },
+      { chunkWaitMs: 4000, expectMore: () => 9 });
+    await batch.enqueueTextPage(page(0), { interactive: true });
+    expect(calls).toEqual(['/v1/translate/text']);
+  });
+});

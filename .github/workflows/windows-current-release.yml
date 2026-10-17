@@ -1,4 +1,4 @@
-name: Publish verified VANTARA Windows 0.3.1
+name: Publish verified VANTARA Windows 0.3.2
 on:
   push:
     branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3']
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.1'
-  TAG: 'windows-v0.3.1'
+  VERSION: '0.3.2'
+  TAG: 'windows-v0.3.2'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -138,7 +138,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.1
+    name: Publish verified Windows 0.3.2
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -165,7 +165,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.3.1: تورنت أسرع بنفس تحسينات الجوال المدعومة في rqbit: 12 متتبعًا عامًا، حفظ جدول DHT بين التشغيلات (مع رجوع تلقائي إن تعارض المنفذ)، فتح المنفذ عبر UPnP، ومنفذ استماع حر، وإعادة استعمال المشاركين المكتشفين أول مرة. اختُبر على rqbit حقيقي بسرب محلي وفي Windows CI. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "ويندوز 0.3.2: لحاق كامل بالتطبيق (حتى #231): تصميم السينما الجديد (بانر بعرض الشاشة، بحث وفلاتر، «الكل»، صور الممثلين)، قسم الأنمي الجديد ببانرات وشعارات لكل عمل تقريبًا، ورقة السيرفرات الجديدة بلوحتين على الكمبيوتر بخطوط أكبر، وترجمات الأنمي من الإضافات. اختبارات الويب 1575 واختبارات الويندوز 83 ناجحة. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash

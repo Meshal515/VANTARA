@@ -7,7 +7,7 @@ vi.mock('./chapter-store.js', () => ({
   writeKv: async (key, value) => void kv.set(key, { value, at: Date.now() }),
 }));
 
-const { PAGE_CACHE_TTL_MS, forgetPage, pageCacheKey, pageHashOf, translatePage } = await import('./translate.js');
+const { LOCAL_PIPELINE_VERSION, PAGE_CACHE_TTL_MS, forgetPage, pageCacheKey, pageHashOf, translatePage } = await import('./translate.js');
 
 const page = new Uint8Array([1, 2, 3, 4]);
 beforeEach(() => {
@@ -58,7 +58,7 @@ describe('pages saved before the cache rename come back without translating agai
 
   it('never exposes an incomplete cached rendering even after its retry budget is exhausted', async () => {
     const hash = await pageHashOf('file://p');
-    kv.set(`tl4:${hash}`, { value: { ...saved(), incomplete: true, at: 0, tries: 3 }, at: 1 });
+    kv.set(`tl4:${hash}`, { value: { ...saved(), incomplete: true, at: 0, tries: 3, repairVersion: LOCAL_PIPELINE_VERSION }, at: 1 });
     const res = await translatePage(noTranslate, 'file://p', {});
     expect(res).toMatchObject({ from:'device', translated:0, incomplete:true });
     expect(res.image).toBeNull();

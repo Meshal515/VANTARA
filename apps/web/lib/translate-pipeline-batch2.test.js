@@ -48,36 +48,25 @@ describe('batch 2 staged translation pipeline', () => {
     vi.useRealTimers();
   });
 
-  it('textless route waits for the active inference owner instead of contending with Heavy', async () => {
+  it('textless route finishes while another page holds Heavy (Native compute lock arbitrates per model call)', async () => {
     installDevice();
     globalThis.localStorage = memory();
     globalThis.fetch = async () => new Response(new Uint8Array([1, 2, 3]));
 
     let releaseHeavy;
     const heavyHold = new Promise(resolve => { releaseHeavy = resolve; });
-    const heavy = withNativeTranslationStage(() => heavyHold, { priority: 'analyze' });
+    const heavy = withNativeTranslationStage(() => heavyHold, { priority: 'aheadAnalyze', lane: 'analyze' });
     await tick();
-
-    let routed = false;
-    const original = globalThis.Capacitor.Plugins.Translation.routePage;
-    globalThis.Capacitor.Plugins.Translation.routePage = async args => {
-      routed = true;
-      return original(args);
-    };
-
-    const preparing = prepareTranslation(
-      'http://localhost/_capacitor_file_/cache/textless.jpg',
-      { seriesRef: 'ext:test', sourceId: 'src', chapterKey: 'c', pageIndex: 0, sourceLang: 'en' },
-    );
-    await tick();
-    await tick();
-
-    expect(routed).toBe(false);
-    releaseHeavy();
-    await heavy;
-    const prepared = await preparing;
-    expect(routed).toBe(true);
-    expect(prepared.bypass).toBe(true);
+    try {
+      const prepared = await prepareTranslation(
+        'http://localhost/_capacitor_file_/cache/textless.jpg',
+        { seriesRef: 'ext:test', sourceId: 'src', chapterKey: 'c', pageIndex: 0, sourceLang: 'en' },
+      );
+      expect(prepared.bypass).toBe(true);
+    } finally {
+      releaseHeavy();
+      await heavy;
+    }
   });
 
   it('ahead reader pages batch Luna instead of paying one direct model request each', async () => {
@@ -180,7 +169,7 @@ describe('batch 2 staged translation pipeline', () => {
 
     let waited = null;
     const second = withNativeTranslationStage(async () => 'done', {
-      priority: 'render',
+      priority: 'aheadAnalyze',
       onWait: ms => { waited = ms; },
     });
     await tick();

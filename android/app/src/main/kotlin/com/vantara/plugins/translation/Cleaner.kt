@@ -23,7 +23,27 @@ object Cleaner {
         var inpaintRegions: Int = 0,
         var noOpRegions: Int = 0,
         var scaledInpaintRegions: Int = 0,
+        var smoothMaskPixels: Int = 0,
+        var smoothChangedPixels: Int = 0,
+        var smoothRegions: Int = 0,
+        var smoothFailed: Int = 0,
     )
+
+    /** E2b switch (A/B on device; the report shows which tier each pixel took). */
+    @Volatile var smoothEnabled: Boolean = true
+
+    /** Try E2b; returns true and sets the region's mode when admitted. */
+    private fun trySmooth(img: RgbImage, region: Region, mask: ByteMask, allowed: ByteMask?, forbidden: ByteMask?): Boolean {
+        if (!smoothEnabled || !mask.any()) return false
+        val support = SmoothFill.support(mask, allowed, forbidden) ?: return false
+        val verdict = SmoothFill.admit(img, mask, support)
+        if (!verdict.admitted) { region.eraseNote = "smooth:${verdict.reason}"; return false }
+        region.eraseMask = mask
+        region.cleanMode = "smooth"
+        region.smooth = support
+        region.reconstruction = null
+        return true
+    }
 
     /**
      * E2 reconstruction model. Coordinates are normalized around the sampled holder so
@@ -258,6 +278,8 @@ object Cleaner {
     }
 
     fun planErase(img: RgbImage, region: Region, siblings: List<Region>?) {
+        region.smooth = null
+        region.eraseNote = null
         val gh = glyphHeight(region.glyph, region.box)
         val core = region.glyph.close(2)
         var others = ByteMask(img.width, img.height)
@@ -302,6 +324,7 @@ object Cleaner {
                 region.reconstruction = reconstruction
                 return
             }
+            if (trySmooth(img, region, localMask, inner, others.dilate(maxOf(3, grow / 2)))) return
             region.eraseMask = localMask
             region.cleanMode = "lama"
             region.reconstruction = null
@@ -311,7 +334,11 @@ object Cleaner {
         val allow = ByteMask(img.width, img.height)
         val m = grow + 4
         allow.fillRect(region.box.x1 - m, region.box.y1 - m, region.box.x2 + m, region.box.y2 + m)
-        region.eraseMask = core.dilate(grow).and(allow)
+        val freeMask = core.dilate(grow).and(allow)
+        // Free text over a smooth panel background (sky, gradient, soft light) does not
+        // need a 200MB generative model. Textured art still goes to LaMa.
+        if (trySmooth(img, region, freeMask, null, others.dilate(maxOf(3, grow / 2)))) return
+        region.eraseMask = freeMask
         region.cleanMode = "lama"
         region.reconstruction = null
     }
@@ -369,6 +396,29 @@ object Cleaner {
                     img.data[i + 2] = color[2].toByte()
                 }
                 if (regionChanged == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
+            } else if (r.cleanMode == "smooth") {
+                val support = r.smooth
+                val px = mask.count()
+                val changed = if (support == null) -1 else SmoothFill.apply(img, mask, support)
+                if (changed < 0) {
+                    // Never leave a half-cleaned region: fall back to LaMa when loaded, else keep source.
+                    stats.smoothFailed++
+                    if (inpainter != null) {
+                        val b = mask.bounds() ?: continue
+                        stats.inpaintRegions++
+                        val s = inpainter.inpaint(img, mask, Box(b[0], b[1], b[2], b[3]))
+                        stats.maskPixels += s.maskPixels; stats.inpaintMaskPixels += s.maskPixels
+                        stats.changedPixels += s.changedPixels; stats.inpaintChangedPixels += s.changedPixels
+                        if (s.changedPixels == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
+                    } else { r.status = "skipped:no_erase"; stats.noOpRegions++ }
+                    continue
+                }
+                stats.smoothRegions++
+                stats.maskPixels += px
+                stats.smoothMaskPixels += px
+                stats.changedPixels += changed
+                stats.smoothChangedPixels += changed
+                if (changed == 0) { stats.noOpRegions++; r.status = "skipped:no_erase" }
             } else if (r.cleanMode == "lama") {
                 val b = mask.bounds() ?: continue
                 stats.inpaintRegions++

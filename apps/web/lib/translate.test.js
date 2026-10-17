@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, publicationValue, repairAttemptValue, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan, withNativeTranslationStage } from './translate.js';
+import { LOCAL_PIPELINE_VERSION, MAX_UPLOAD_EDGE, MAX_UPLOAD_WIDTH, RETRY_INCOMPLETE_MS, TEXT_PROMPT_VERSION, classifyTranslationError, createQueue, publicationValue, repairAttemptValue, repairAttemptsOf, resultOf, staleEngine, staleLocalPipeline, unansweredIds, uploadPlan, withNativeTranslationStage } from './translate.js';
 
 describe('upload: the whole page goes to the worker, only shrunk when it is wider than useful', () => {
   it('a normal manga page is sent as is', () => {
@@ -199,6 +199,14 @@ describe('partial publication safety', () => {
 });
 
 describe('local translation cache revision', () => {
+  it('gives an old exhausted partial one bounded budget for the new OCR contract', () => {
+    const old={pipelineVersion:LOCAL_PIPELINE_VERSION-1,tries:3};
+    expect(repairAttemptsOf(old)).toBe(0);
+    const attempted=repairAttemptValue(old,1,99);
+    expect(repairAttemptsOf(attempted)).toBe(1);
+    expect(repairAttemptsOf({...attempted,tries:3})).toBe(3);
+    expect(attempted.pipelineVersion).toBe(LOCAL_PIPELINE_VERSION-1);
+  });
   it('refreshes outputs produced before the coverage/residual pipeline revision', () => {
     expect(staleLocalPipeline({ translated: 3 })).toBe(true);
     expect(staleLocalPipeline({ translated: 3, pipelineVersion: LOCAL_PIPELINE_VERSION - 1 })).toBe(true);

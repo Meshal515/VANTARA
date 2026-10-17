@@ -67,11 +67,23 @@ const reaches = (budget, limits) =>
  *   is reached (or adding the next compatible page would cross one);
  * - arrival of newer work never restarts the oldest page's deadline.
  */
+/**
+ * v3 chapter chunking: an ahead page may wait up to `chunkWaitMs` (instead of the
+ * 40ms window) while `expectMore(page)` reports more pages of the same chapter
+ * still inside native analysis. One provider call then carries several pages,
+ * amortising the fixed prompt/latency cost that dominates Luna (≈11s for 22
+ * tokens on device). Visible pages never wait; when the hint drops to zero the
+ * batch leaves on the next pump (`poke`).
+ */
+export const MAX_CHUNK_WAIT_MS = 4000;
+
 export function createTextBatcher(request, {
   waitMs = 40,
   maxInFlight = 2,
   adaptive = false,
   limits: configuredLimits = {},
+  chunkWaitMs = 0,
+  expectMore = null,
 } = {}) {
   const limits = {
     maxPages: finite(configuredLimits.maxPages, DEFAULT_TEXT_BATCH_LIMITS.maxPages),
@@ -81,6 +93,12 @@ export function createTextBatcher(request, {
     maxPayloadBytes: finite(configuredLimits.maxPayloadBytes, DEFAULT_TEXT_BATCH_LIMITS.maxPayloadBytes),
   };
   const assemblyMs = Math.max(0, Math.min(MAX_TEXT_BATCH_WAIT_MS, Number(waitMs) || 0));
+  const chunkMs = Math.max(0, Math.min(MAX_CHUNK_WAIT_MS, Number(chunkWaitMs) || 0));
+  const expecting = page => {
+    if (!chunkMs || typeof expectMore !== 'function') return 0;
+    try { return Math.max(0, Number(expectMore(page)) || 0); } catch { return 0; }
+  };
+  const deadlineOf = entry => expecting(entry.page) > 0 ? Math.max(assemblyMs, chunkMs) : assemblyMs;
   const pending = [];
   let active = 0;
   let directActive = 0;
@@ -254,7 +272,7 @@ export function createTextBatcher(request, {
       budget = combined;
       ready = reaches(budget, limits);
     }
-    if (!ready) ready = Date.now() - first.queuedAt >= assemblyMs;
+    if (!ready) ready = Date.now() - first.queuedAt >= deadlineOf(first);
     return { indexes, budget, ready };
   }
 
@@ -272,7 +290,7 @@ export function createTextBatcher(request, {
 
   function scheduleNext() {
     if (!pending.length || active >= window || timer) return;
-    const due = Math.min(...pending.map(entry => entry.queuedAt + assemblyMs));
+    const due = Math.min(...pending.map(entry => entry.queuedAt + deadlineOf(entry)));
     timer = setTimeout(() => {
       timer = null;
       pump();
@@ -302,6 +320,8 @@ export function createTextBatcher(request, {
   }
 
   return {
+    /** Re-evaluate chunk deadlines now (an expected page finished without Luna work). */
+    poke() { pump(); },
     enqueueTextPage(page, { interactive = false, signal } = {}) {
       if (signal?.aborted) return Promise.reject(abortError());
 

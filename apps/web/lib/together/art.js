@@ -42,22 +42,114 @@ function remember(key, data, now) {
 }
 
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
-async function aniZip(anilistId, fetchImpl, now) {
-  const key = `az-${anilistId}`;
+const inflight = new Map();
+export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0 } = {}) {
+  const key = `az3-${anilistId}`;
   const hit = cached(key, now);
-  if (hit) return hit;
+  if (hit) return Promise.resolve(hit);
+  // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
+  if (!inflight.has(key)) inflight.set(key, aniZip(anilistId, fetchImpl, now, depth).finally(() => inflight.delete(key)));
+  return inflight.get(key);
+}
+async function aniZip(anilistId, fetchImpl, now, depth) {
+  const key = `az3-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
-  if (!r.ok) return null;
-  const d = await r.json();
+  // 404: عمل جديد لم يصل ani.zip بعد — يبقى له Cinemeta والسلسلة أدناه
+  const d = r.ok ? await r.json() : null;
   const episodes = {};
   for (const [n, e] of Object.entries(d?.episodes ?? {})) {
     if (!/^\d+$/.test(n)) continue;
     const title = e?.title?.ar ?? e?.title?.en ?? e?.title?.['x-jat'] ?? null;
-    episodes[n] = { image: typeof e?.image === 'string' ? e.image : null, title };
+    // وصف الحلقة وتاريخها ومدتها وتقييمها لورقة السيرفرات (server-sheet.js)
+    const rating = Number.parseFloat(e?.rating);
+    episodes[n] = {
+      image: typeof e?.image === 'string' ? e.image : null,
+      title,
+      overview: typeof e?.overview === 'string' && e.overview.trim() ? e.overview.trim() : null,
+      airDate: e?.airDate ?? e?.airdate ?? null,
+      runtime: Number(e?.runtime ?? e?.length) || null,
+      rating: Number.isFinite(rating) && rating > 0 ? rating : null,
+    };
   }
-  const data = { imdb: d?.mappings?.imdb_id ?? null, episodes };
-  remember(key, data, now);
+  // خلفية TVDB الدعائية التي يرفقها ani.zip نفسه (حتى لعمل بلا IMDb). «Clearlogo» هناك لا
+  // يُعتمد: كثيرًا ما يكون أيقونة مربعة بخلفية لا شعارًا شفافًا — الشعار من metahub وحده
+  const image = (type) => (Array.isArray(d?.images) ? d.images : []).find((i) => i?.coverType === type && /^https:\/\//.test(i?.url ?? ''))?.url ?? null;
+  let imdb = /^tt\d+$/.test(d?.mappings?.imdb_id ?? '') ? d.mappings.imdb_id : null;
+  let fanart = image('Fanart');
+  // فشل عابر (429، انقطاع) في البحث عن IMDb لا يُحفظ 3 أيام: الفتح التالي يعيد المحاولة
+  let settled = true;
+  if (!imdb) {
+    // اسم العمل وسنته وعلاقاته من AniList (طلب واحد)، حتى لو لم يعرفه ani.zip
+    const info = await anilistInfo(anilistId, fetchImpl).catch(() => undefined);
+    if (info === undefined) settled = false;
+    // جديد بلا IMDb في ani.zip: Cinemeta (مصدر Stremio) يعرفه بالاسم والسنة
+    imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
+    // موسم/جزء/فيلم تكميلي («Gachiakuta Season 2»): فن السلسلة نفسها من الجزء السابق أو
+    // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم
+    if (!imdb && depth < 4 && info) {
+      for (const id of info.ups) {
+        const z = await aniZipArt(id, { fetchImpl, now, depth: depth + 1 }).catch(() => undefined);
+        if (z === undefined) settled = false;
+        if (!z?.imdb) continue;
+        imdb = z.imdb;
+        fanart ??= z.fanart ?? null;
+        break;
+      }
+    }
+  }
+  if (!d && !imdb) return null;
+  const data = { imdb, fanart, episodes };
+  if (settled) remember(key, data, now);
   return data;
+}
+
+/** اسم العمل وسنته ونوعه، وأجزاؤه الأعلى (العمل الأم ثم السابق) من AniList. */
+async function anilistInfo(anilistId, fetchImpl) {
+  const r = await fetchImpl('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      query: 'query($id:Int){Media(id:$id){title{english romaji} format seasonYear startDate{year} relations{edges{relationType node{id type}}}}}',
+      variables: { id: Number(anilistId) },
+    }),
+  });
+  // 429/5xx: عابر (undefined عند المستدعي)؛ 404 وما شابه: لا معلومات
+  if (r?.status === 429 || r?.status >= 500) throw new Error(`anilist ${r.status}`);
+  if (!r?.ok) return null;
+  const m = (await r.json())?.data?.Media;
+  if (!m) return null;
+  const edges = m.relations?.edges ?? [];
+  // ALTERNATIVE: نسخة أخرى من القصة نفسها (فيلم تجميعي لموسم مثلًا)
+  const ups = ['PARENT', 'PREQUEL', 'ALTERNATIVE'].flatMap((t) => edges.filter((e) => e?.relationType === t && e?.node?.type === 'ANIME').map((e) => e.node.id));
+  return { title: m.title ?? {}, format: m.format ?? null, year: m.startDate?.year ?? m.seasonYear ?? null, ups };
+}
+
+/** ما يُبحث به في Cinemeta: الأسماء (إنجليزي ثم روماجي) والسنة والنوع. */
+const searchSpec = (d, info) => ({
+  names: [...new Set([d?.titles?.en, info?.title?.english, d?.titles?.['x-jat'], info?.title?.romaji].filter((t) => typeof t === 'string' && t.trim()))],
+  year: info?.year ?? (Number.parseInt(String(d?.episodes?.['1']?.airDate ?? d?.episodes?.['1']?.airdate ?? ''), 10) || null),
+  movie: info?.format === 'MOVIE' || d?.episodeCount === 1,
+});
+
+const normTitle = (t) => String(t ?? '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * IMDb العمل من بحث Cinemeta: اسم مطابق حرفًا (بعد التطبيع) وسنة العرض ±1.
+ * لا تطابق صريح = لا شيء (لا أقرب نتيجة). الفيلم يُبحث في الأفلام أولًا.
+ */
+export async function imdbFromCinemeta({ names = [], year = null, movie = false } = {}, fetchImpl = globalThis.fetch) {
+  const types = movie ? ['movie', 'series'] : ['series', 'movie'];
+  for (const name of names) {
+    for (const type of types) {
+      const r = await fetchImpl(`https://v3-cinemeta.strem.io/catalog/${type}/top/search=${encodeURIComponent(name)}.json`);
+      if (!r?.ok) continue;
+      const metas = (await r.json())?.metas ?? [];
+      const exact = metas.filter((m) => /^tt\d+$/.test(m?.id ?? '') && normTitle(m.name) === normTitle(name));
+      const fits = year ? exact.filter((m) => Math.abs((Number.parseInt(m.releaseInfo, 10) || 0) - year) <= 1) : exact.length === 1 ? exact : [];
+      if (fits.length) return fits[0].id;
+    }
+  }
+  return null;
 }
 
 /**
@@ -73,7 +165,7 @@ export async function resolveArt(media, { fetchImpl = globalThis.fetch, now = Da
   try {
     const anilist = media?.kind === 'anime' ? Number(/^anime:(\d+)/.exec(media.seriesRef ?? '')?.[1]) : null;
     if (anilist > 0 && (!art.logo || !art.banner || !art.episodeTitle)) {
-      const z = await aniZip(anilist, fetchImpl, now);
+      const z = await aniZipArt(anilist, { fetchImpl, now });
       const e = z?.episodes?.[String(media.episode)];
       art.logo ??= logoOfImdb(z?.imdb);
       art.banner ??= e?.image ?? null;

@@ -8,9 +8,32 @@ import java.io.File
  * المدخل 1024×1024 ثابت؛ الصفحة تُقسَّم شرائح مربعة بعرضها، والمتوسط في التداخل.
  * الخرج خريطة احتمال [0,1] بحجم الصورة.
  */
-class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
+class GlyphSegmenter(file: File, private val engine: Ort.Engine? = null) : AutoCloseable {
+    /** بدائل القياس فقط؛ الإنتاج يبقى AUTO بشروطه الأصلية. */
+    enum class Mode { AUTO, ATLAS, STRIPES, TIGHT }
     private val session: OrtSession = Ort.open(file, engine = engine)
     private val size = 1024
+
+    /**
+     * Fixed 1024² canvases stay on the static session (XNNPACK). Small crops use the
+     * dynamic sibling ([CtdDynamicModel], CPU pool: see [Ort.DYNAMIC]), opened lazily
+     * only when a page actually picks [Mode.TIGHT].
+     */
+    private val dynamicFile: File? = CtdDynamicModel.ensure(file)
+    private var dynamicSession: OrtSession? = null
+    private var dynamicFailed = false
+    private fun dynamicSession(): OrtSession? {
+        dynamicSession?.let { return it }
+        val dyn = dynamicFile
+        if (dynamicFailed || dyn == null) return null
+        return runCatching { Ort.open(dyn, engine = engine ?: Ort.DYNAMIC) }
+            .onFailure { dynamicFailed = true }.getOrNull()?.also { dynamicSession = it }
+    }
+    val dynamic: Boolean get() = dynamicFile != null && !dynamicFailed
+
+    /** Tensor pixels actually pushed through CTD by the last mask call (telemetry). */
+    var lastTensorPixels = 0L
+        private set
 
     /** Actual model tensor demand per CTD forward pass. */
     val inputPixelsPerTile: Int
@@ -88,5 +111,80 @@ class GlyphSegmenter(file: File, engine: Ort.Engine? = null) : AutoCloseable {
         return RoiMaskComposer.threshold(img.width,img.height,crops,local,threshold)
     }
 
-    override fun close() = session.close()
+    /** Fraction of the last atlas tensors that carried crop pixels (telemetry). */
+    var lastOccupancy = 0f
+        private set
+    /** "atlas" or "stripes": which v3 path the last [maskAtlas] used. */
+    var lastMode = ""
+        private set
+
+    /**
+     * v3 production path. Crops are packed at the reference glyph scale
+     * ([RoiAtlas.referenceScale]) into as few 1024² canvases as possible — one CTD call
+     * per canvas instead of one per crop. A dense page whose text needs no more
+     * full-width stripes than canvases takes the stripes instead: same cost or less,
+     * and exactly the reference geometry. Same threshold/averaging downstream.
+     */
+    fun maskAtlas(img: RgbImage, crops: List<Box>, threshold: Float = .3f, mode: Mode = Mode.AUTO): ByteMask {
+        val scale = RoiAtlas.referenceScale(img.width, size)
+        val plan = RoiAtlas.plan(crops, size, scale = scale)
+        val spans = RoiAtlas.stripes(img.width, img.height, crops)
+        val tight = if (dynamic) RoiAtlas.tight(crops, scale, size) else emptyList()
+        val tightPixels = tight.sumOf { it.pixels }
+        val stripePixels = spans.size.toLong() * size * size
+        val chosen = when {
+            mode != Mode.AUTO -> if (mode == Mode.TIGHT && !dynamic) Mode.ATLAS else mode
+            // The CPU pool is slower per pixel than XNNPACK; take tight only with a clear margin.
+            dynamic && tight.isNotEmpty() && tightPixels * TIGHT_MARGIN < minOf(stripePixels, plan.atlases.toLong() * size * size) -> Mode.TIGHT
+            spans.size <= plan.atlases -> Mode.STRIPES
+            else -> Mode.ATLAS
+        }
+        val local = when (chosen) {
+            Mode.STRIPES -> {
+                lastMode = "stripes"
+                tiles = spans.size
+                lastOccupancy = 1f
+                lastTensorPixels = stripePixels
+                RoiAtlas.stripeProbabilities(img, crops, spans) { strip -> inferMapped(strip) }
+            }
+            Mode.TIGHT -> {
+                val dyn = dynamicSession()
+                    ?: return maskAtlas(img, crops, threshold, if (spans.size <= plan.atlases) Mode.STRIPES else Mode.ATLAS)
+                lastMode = "tight"
+                tiles = tight.size
+                lastTensorPixels = tightPixels
+                lastOccupancy = if (tightPixels == 0L) 0f else tight.sumOf { it.w.toLong() * it.h }.toFloat() / tightPixels
+                val out = arrayOfNulls<FloatArray>(crops.size)
+                for (t in tight) {
+                    val input = Ort.tensor(RoiAtlas.tightInput(img, t), 1, 3, t.canvasH.toLong(), t.canvasW.toLong())
+                    Ort.run(dyn, mapOf("images" to input)).use { res ->
+                        @Suppress("UNCHECKED_CAST")
+                        out[t.index] = RoiAtlas.tightExtract(t, (res.get("seg").get().value as Array<Array<Array<FloatArray>>>)[0][0])
+                    }
+                }
+                crops.indices.map { out[it] ?: FloatArray(maxOf(0, crops[it].area)) }
+            }
+            else -> {
+                lastMode = "atlas"
+                tiles = plan.atlases
+                lastOccupancy = plan.occupancy()
+                lastTensorPixels = plan.atlases.toLong() * size * size
+                RoiAtlas.probabilities(img, crops, plan) { chw ->
+                    val input = Ort.tensor(chw, 1, 3, size.toLong(), size.toLong())
+                    Ort.run(session, mapOf("images" to input)).use { res ->
+                        @Suppress("UNCHECKED_CAST")
+                        (res.get("seg").get().value as Array<Array<Array<FloatArray>>>)[0][0]
+                    }
+                }
+            }
+        }
+        return RoiMaskComposer.threshold(img.width, img.height, crops, local, threshold)
+    }
+
+    override fun close() { session.close(); dynamicSession?.close(); dynamicSession = null }
+
+    companion object {
+        /** Tight must save at least this factor of tensor pixels over atlas/stripes. */
+        const val TIGHT_MARGIN = 1.5
+    }
 }

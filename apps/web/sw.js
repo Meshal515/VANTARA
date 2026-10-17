@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '6b1d8403a76f0624fe34b5a0212934901dd801782a98441cc4d1083e92d1e14f';
+const SHELL_DIGEST = 'f71eae2f169e2e936354dc83277fd7f4fd3826af338979d61e1de2494a189342';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -203,7 +203,6 @@ const SHELL = [
   '/v35/together.css',
   '/lib/together/room.js',
   '/lib/together/sync.js',
-  '/lib/together/offset-controls.js',
   '/lib/together/art.js',
   '/lib/together/follow.js',
   '/v35/majlis.css',
@@ -215,6 +214,10 @@ const SHELL = [
   '/v35/manga.css',
   '/v35/anime.js',
   '/v35/cinema.js',
+  '/v35/watch-menu.js',
+  '/lib/together/offset-controls.js',
+  '/v35/collapse-hero.js',
+  '/v35/anime-discover.js',
   '/v35/anime-account.js',
   '/v35/rafiq.js',
   '/v35/rafiq.css',
@@ -229,6 +232,9 @@ const SHELL = [
   '/lib/anime-meta.js',
   '/lib/anime-engine.js',
   '/lib/anime-imdb.js',
+  '/lib/anime-art.js',
+  '/lib/anime-genre-art.js',
+  '/lib/recent-searches.js',
   '/lib/cinema-meta.js',
   '/lib/cinema-match.js',
   '/lib/cinema-fast.js',

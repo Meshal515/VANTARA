@@ -397,8 +397,12 @@ export function createAddonRuntime({
         healthy:
           registry.health.state(m.key, "subtitles", runtimeName).state ===
           "healthy",
+        // كل ما يقبله المزوّد بالترتيب (معرّفه الخاص إن كان منه، ثم Kitsu، ثم IMDb بموسم TVDB ثم المطلق)
+        requests(identity, stream) {
+          return subtitleRequests(identity, stream, m.key).filter(input => matchesStremioResource(m, "subtitles", input.type, input.videoId));
+        },
         request(identity, stream) {
-          return subtitleRequests(identity, stream, m.key).find(input => matchesStremioResource(m, "subtitles", input.type, input.videoId)) ?? null;
+          return this.requests(identity, stream)[0] ?? null;
         },
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));
