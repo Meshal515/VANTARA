@@ -1578,8 +1578,11 @@ export function createCinema(deps) {
       body.append(el('div', 'cn-skel cn-skel-btn'), el('div', 'cn-skel cn-skel-line'), el('div', 'cn-skel cn-skel-line short'));
     }
 
-    wrap.append(bar, art, body);
-    page.replaceChildren(wrap);
+    // Keep navigation OUTSIDE the animated artwork's stacking context.
+    // The sticky bar now belongs to the full page rather than the detail article,
+    // so scrolling and backdrop transforms cannot reroute taps to the artwork.
+    wrap.append(art, body);
+    page.replaceChildren(bar, wrap);
     unbindHero?.();
     unbindHero = bindCollapsingHero({ hero: art, bar, bg: backdrop, active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id });
     if (!partial) {
