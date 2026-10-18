@@ -38,11 +38,13 @@ const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
 /**
- * إذن الـPIN: بعد إدخال PIN صحيح، الخادم يعطي هذا الجهاز إذنًا يجدد به الجلسة بلا
- * إعادة السؤال. يُحفظ في sessionStorage لا localStorage عمدًا: يعيش ما دام
- * التطبيق مفتوحًا (وتحديث الصفحة)، ويُنسى بإغلاقه — فمن يفتح التطبيق يُسأل.
+ * PIN is a per-account login credential, not an app-start lock.
+ * Keep the server-issued, device-bound grant only for the currently signed-in
+ * account. Explicit sign-out/switch destroys it; closing the app does not.
+ * Never persist the PIN digits themselves.
  */
-const PIN_GRANT_KEY = 'vantara.pin.grant';
+const PIN_GRANT_KEY = 'vantara.pin.grant.v2';
+const LEGACY_PIN_GRANT_KEY = 'vantara.pin.grant';
 const TRANSLATION_TIMEOUT_MS = 240_000;
 const SYNC_TIMEOUT_MS = 30_000;
 
@@ -197,18 +199,28 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let deletingHere = false;
   let pinGrant = (() => {
     try {
-      return sessionStorage.getItem(PIN_GRANT_KEY) || null;
+      // Do not resurrect a grant after a logout, account switch or reset.
+      const saved = JSON.parse(localStorage.getItem(PIN_GRANT_KEY) || 'null');
+      return token && user?.userId && saved?.userId === user.userId && typeof saved.grant === 'string'
+        ? saved.grant
+        : null;
     } catch {
       return null;
     }
   })();
+  // A legacy browser-tab grant must not silently cross into persistent trust.
+  try { sessionStorage.removeItem(LEGACY_PIN_GRANT_KEY); } catch {}
   const keepGrant = (grant) => {
     pinGrant = grant || null;
     try {
-      if (pinGrant) sessionStorage.setItem(PIN_GRANT_KEY, pinGrant);
-      else sessionStorage.removeItem(PIN_GRANT_KEY);
+      if (pinGrant && user?.userId && token) {
+        localStorage.setItem(PIN_GRANT_KEY, JSON.stringify({ userId: user.userId, grant: pinGrant }));
+      } else {
+        localStorage.removeItem(PIN_GRANT_KEY);
+      }
+      sessionStorage.removeItem(LEGACY_PIN_GRANT_KEY);
     } catch {
-      // تخزين محجوب: الإذن يبقى في الذاكرة فقط
+      // Blocked storage: keep permission in memory for this run only.
     }
   };
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
@@ -439,9 +451,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function persistSession(payload) {
-    if (payload.pinGrant) keepGrant(payload.pinGrant);
     token = payload.token;
     user = accountWithIdentity(payload.user);
+    if (payload.pinGrant) keepGrant(payload.pinGrant);
     refreshOverlay();
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
@@ -454,12 +466,21 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       error.status = 401;
       throw error;
     }
+    const refreshUserId = user.userId;
+    const refreshGeneration = sessionGeneration;
     try {
-      const payload = await sessionPayload(user.userId);
+      const payload = await sessionPayload(refreshUserId);
+      // Never let an old refresh replace the credentials of a switched account.
+      if (sessionGeneration !== refreshGeneration || user?.userId !== refreshUserId) {
+        throw Object.assign(new Error('stale_session'), { stale: true });
+      }
       persistSession(payload);
       emit(['session']);
       return payload;
     } catch (error) {
+      if (error?.stale || sessionGeneration !== refreshGeneration || user?.userId !== refreshUserId) {
+        throw Object.assign(new Error('stale_session'), { stale: true });
+      }
       // انقطاع أو عطل خادم ليس إلغاء اعتماد. إبقاء التوكن يسمح للدورة التالية
       // بتجديده وإرسال نفس الكتابات بدل توقف pull/push عند !token إلى الأبد.
       if (classifyFailure(error?.status ?? 0) === 'retry') throw error;
@@ -480,8 +501,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!options.signal && (path === '/v1/ops' || path.startsWith('/v1/sync?'))) {
       return withSyncDeadline((signal) => request(path, { ...options, signal }, allowRefresh));
     }
+    // Tie every response to the account and session that initiated the request.
+    // A delayed 410 from a deleted account must never tombstone the next account
+    // if the user switched profiles while the fetch was in flight.
+    const requestUserId = user?.userId ?? null;
+    const requestToken = token;
+    const requestGeneration = sessionGeneration;
     const headers = { ...(options.headers ?? {}) };
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (requestToken) headers.authorization = `Bearer ${requestToken}`;
     if (options.body) headers['content-type'] = 'application/json';
     const response = await fetch(`${baseUrl}${path}`, {
       ...options,
@@ -490,6 +517,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     });
 
     if (response.status === 401) {
+      if (requestGeneration !== sessionGeneration || user?.userId !== requestUserId || token !== requestToken) {
+        throw Object.assign(new Error('stale_session'), { stale: true });
+      }
       if (allowRefresh && user?.userId) {
         try {
           await refreshSession();
@@ -509,11 +539,26 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       throw error;
     }
 
-    if (response.status === 410 && user?.userId && !deletingHere) {
-      // الخادم يقول: هذا الحساب حُذف نهائيًا (توكن قديم). المرآة تعرف، والتطبيق يخرج
-      mirror.accounts = { ...(mirror.accounts ?? {}), [user.userId]: { ...(mirror.accounts?.[user.userId] ?? { user_id: user.userId }), lifecycle: 'DELETED' } };
-      valuesCache = new Map();
-      emit(['accounts']);
+    if (response.status === 410 &&
+        requestUserId &&
+        user?.userId === requestUserId &&
+        token === requestToken &&
+        sessionGeneration === requestGeneration &&
+        !deletingHere) {
+      // 410 alone means "Gone", not necessarily "account deleted". Only a
+      // definitive tombstone for THIS unchanged session may log out its owner.
+      const body = await response.clone().json().catch(() => null);
+      if (body?.error === 'account_deleted' && body?.state === 'DELETED') {
+        mirror.accounts = {
+          ...(mirror.accounts ?? {}),
+          [requestUserId]: {
+            ...(mirror.accounts?.[requestUserId] ?? { user_id: requestUserId }),
+            lifecycle: 'DELETED',
+          },
+        };
+        valuesCache = new Map();
+        emit(['accounts']);
+      }
     }
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
