@@ -2,8 +2,8 @@
  * دورة حياة الحساب في عميل المزامنة: PIN، والإضافة، والحذف.
  *
  * الخادم يحرس القواعد (`accounts.integration.test.ts`). هنا ما يخص الجهاز:
- * إذن الـPIN يعيش في sessionStorage فقط فيُسأل من يفتح التطبيق من جديد، ولا
- * ينتقل لحساب آخر، والحساب المحذوف يختفي من كل شاشة.
+ * إذن الـPIN يعيش مع الحساب المفتوح بعد إعادة تشغيل التطبيق، لا ينتقل إلى غيره
+ * ويُمحى عند الخروج/التبديل. والحساب المحذوف يختفي من كل شاشة.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,16 +63,34 @@ describe('PIN', () => {
     await sync.signIn('u1', { pin: '2580' });
     expect(bodies[0].pin).toBe('2580');
     expect(sync.locked).toBe(false);
-    expect(session.getItem('vantara.pin.grant')).toBe('grant-0123456789abcdef');
-    // الإذن في sessionStorage وحده: إغلاق التطبيق ينساه
-    expect([...local.map.values()].join()).not.toContain('grant-0123456789abcdef');
+    expect(JSON.parse(local.getItem('vantara.pin.grant.v2'))).toEqual({ userId: 'u1', grant: 'grant-0123456789abcdef' });
+    expect(session.getItem('vantara.pin.grant')).toBeNull();
 
     await sync.refreshSession();
     expect(bodies[1].pin).toBeUndefined();
     expect(bodies[1].pinGrant).toBe('grant-0123456789abcdef');
   });
 
-  it('locks a reopened app: the session survives, the grant does not', async () => {
+  it('reopens without PIN while the same account has its device-bound grant', async () => {
+    local.setItem('vantara.token', 'old');
+    local.setItem('vantara.user', JSON.stringify({ ...ME, pinDigits: 6 }));
+    local.setItem('vantara.pin.grant.v2', JSON.stringify({ userId: ME.userId, grant: 'reopen-grant-0123456789abcdef' }));
+    const bodies = [];
+    const sync = await loadSync(vi.fn(async (url, options) => {
+      if (String(url).endsWith('/v1/session')) {
+        bodies.push(JSON.parse(options.body));
+        return jsonResponse({ token: 'renewed', user: { ...ME, pinDigits: 6 } });
+      }
+      return jsonResponse({});
+    }));
+    expect(sync.signedIn).toBe(true);
+    expect(sync.locked).toBe(false);
+    await sync.refreshSession();
+    expect(bodies[0].pin).toBeUndefined();
+    expect(bodies[0].pinGrant).toBe('reopen-grant-0123456789abcdef');
+  });
+
+  it('locks an app reopened without any valid saved grant', async () => {
     local.setItem('vantara.token', 'old');
     local.setItem('vantara.user', JSON.stringify({ ...ME, pinDigits: 6 }));
     const sync = await loadSync(vi.fn(async () => jsonResponse({})));
@@ -102,9 +120,9 @@ describe('PIN', () => {
   });
 
   it('never carries a grant into another account', async () => {
-    session.setItem('vantara.pin.grant', 'grant-of-u1-000000');
     local.setItem('vantara.token', 't');
     local.setItem('vantara.user', JSON.stringify({ ...ME, pinDigits: 4 }));
+    local.setItem('vantara.pin.grant.v2', JSON.stringify({ userId: ME.userId, grant: 'grant-of-u1-000000' }));
     const bodies = [];
     const sync = await loadSync(vi.fn(async (url, options) => {
       if (String(url).endsWith('/v1/session')) {
@@ -115,17 +133,25 @@ describe('PIN', () => {
     }));
     await sync.signIn('u2');
     expect(bodies[0].pinGrant).toBeUndefined();
-    expect(session.getItem('vantara.pin.grant')).toBeNull();
+    expect(local.getItem('vantara.pin.grant.v2')).toBeNull();
   });
 
   it('forgets the grant on sign out', async () => {
-    session.setItem('vantara.pin.grant', 'grant-of-u1-000000');
     local.setItem('vantara.token', 't');
     local.setItem('vantara.user', JSON.stringify({ ...ME, pinDigits: 4 }));
+    local.setItem('vantara.pin.grant.v2', JSON.stringify({ userId: ME.userId, grant: 'grant-of-u1-000000' }));
     const sync = await loadSync(vi.fn(async () => jsonResponse({})));
     expect(sync.locked).toBe(false);
     sync.signOut();
-    expect(session.getItem('vantara.pin.grant')).toBeNull();
+    expect(local.getItem('vantara.pin.grant.v2')).toBeNull();
+  });
+
+  it('ignores a grant saved for another account', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify({ ...ME, pinDigits: 4 }));
+    local.setItem('vantara.pin.grant.v2', JSON.stringify({ userId: 'another-account', grant: 'not-ours' }));
+    const sync = await loadSync(vi.fn(async () => jsonResponse({})));
+    expect(sync.locked).toBe(true);
   });
 });
 
@@ -211,6 +237,40 @@ describe('accounts', () => {
     await sync.pull();
     expect(sync.accountState).toBe('DELETED');
     expect(seen).toContain('accounts');
+  });
+
+  it('does not delete a newly selected account from a delayed 410 of the previous session', async () => {
+    local.setItem('vantara.token', 'old-account-token');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    let finishOldFetch;
+    const sync = await loadSync(vi.fn(async (url) => {
+      if (String(url).includes('/v1/sync?')) {
+        return new Promise((resolve) => { finishOldFetch = resolve; });
+      }
+      if (String(url).endsWith('/v1/session')) {
+        return jsonResponse({ token: 'new-account-token', user: {
+          userId: 'u2', username: 'sara', displayName: 'سارة', pinDigits: null,
+        } });
+      }
+      return jsonResponse({});
+    }));
+    const pending = sync.pull();
+    await vi.waitFor(() => expect(finishOldFetch).toBeTypeOf('function'));
+    await sync.signIn('u2');
+    finishOldFetch(jsonResponse({ error: 'account_deleted', state: 'DELETED' }, 410));
+    await pending;
+    expect(sync.user.userId).toBe('u2');
+    expect(sync.accountState).toBe('ACTIVE');
+    expect(local.getItem('vantara.token')).toBe('new-account-token');
+  });
+
+  it('does not mark an unrelated 410 as account deletion', async () => {
+    local.setItem('vantara.token', 't');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    const sync = await loadSync(vi.fn(async () => jsonResponse({ error: 'resource_gone' }, 410)));
+    await sync.pull();
+    expect(sync.user.userId).toBe(ME.userId);
+    expect(sync.accountState).toBe('ACTIVE');
   });
 
   it('waits for the server deadline before signing out', async () => {
