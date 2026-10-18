@@ -149,13 +149,24 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
   await services.close();await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
 });
+// Playback start acknowledges the process before mpv's asynchronous first-frame event.
+// Assert the real event with a bounded wait, not a race with the Node scheduler.
+async function hasReadyEvent(events,{timeoutMs=2000}={}){
+  const deadline=Date.now()+timeoutMs;
+  while(Date.now()<deadline){
+    if(events.some(e=>e.type==='playback/ready'))return true;
+    await new Promise(resolve=>setTimeout(resolve,20));
+  }
+  return events.some(e=>e.type==='playback/ready');
+}
+
 test('عطل metadata المؤقت يعالج تلقائيًا قبل بدء المشغل من دون تكرار إضافة التورنت',async t=>{
   const {dir,services,events}=await fixture(t,'transient-metadata');
   assert.deepEqual(await services.startPlayback({session:'metadata-recovered',candidate:{infoHash:hash,fileIdx:0}}),{started:true});
   const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(requests.filter(r=>r.url.includes('list_only=true')).length,2);
   assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1);
-  assert.ok(events.some(e=>e.type==='playback/ready'));
+  assert.ok(await hasReadyEvent(events),'mpv must report a decoded ready frame');
   assert.equal(events.some(e=>e.type==='playback/error'),false);
 });
 test('مشاركو list_only يصلون لإضافة التنزيل كـinitial_peers مفلترين',async t=>{
@@ -166,7 +177,7 @@ test('مشاركو list_only يصلون لإضافة التنزيل كـinitial_
   assert.equal(add.length,1);
   assert.equal(new URL(add[0].url,'http://x').searchParams.get('initial_peers'),'93.184.216.34:6881,[2a00:1450:4001::5]:51413');
   assert.ok(add[0].body.includes('tracker.opentrackr.org'),'magnet الإضافة يحمل المتتبّعات العامة');
-  assert.ok(events.some(e=>e.type==='playback/ready'));
+  assert.ok(await hasReadyEvent(events),'mpv must report a decoded ready frame');
 });
 test('رفض rqbit لـinitial_peers يعاد مرة واحدة بدونها ولا يُسقط التشغيل',async t=>{
   const {dir,services,events}=await fixture(t,'reject-peers');

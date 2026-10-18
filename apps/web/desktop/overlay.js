@@ -72,7 +72,12 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const titleEl = el('strong'), subEl = el('small');
   titleEl.dir = 'auto'; subEl.dir = 'auto'; // «الحلقة 3» لا تنقلب خلف عنوان إنجليزي
   titles.append(titleEl, subEl);
-  const fullTop = iconButton('full', 'ملء الشاشة (F)', () => cmd('fullscreen'));
+  let peopleKey = '';
+  const peopleButton = el('button', 'pp-people pp-desk');
+  peopleButton.type = 'button'; peopleButton.hidden = true;
+  peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
+  peopleButton.onclick = () => cmd('room');
+  const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
   top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
@@ -104,8 +109,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const right = el('div', 'pp-group');
   const qualityBtn = el('button', 'pp-quality', 'HD'); qualityBtn.type = 'button'; qualityBtn.setAttribute('aria-label', 'الجودة');
   qualityBtn.onclick = (e) => { e.stopPropagation(); showQuality(); };
-  const fullBottom = iconButton('full', 'ملء الشاشة (F)', () => cmd('fullscreen'), 'pp-desk');
-  right.append(qualityBtn, iconButton('subtitles', 'الترجمة (C)', () => showSubtitles(), 'pp-desk'), iconButton('speed', 'السرعة', () => showSpeed()), fullBottom);
+  const audioBtn = iconButton('volume', 'المسارات الصوتية', () => showAudio(), 'pp-desk'); audioBtn.hidden = true;
+  const fullBottom = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'), 'pp-desk');
+  right.append(qualityBtn, audioBtn, iconButton('subtitles', 'الترجمة (C)', () => showSubtitles(), 'pp-desk'), iconButton('speed', 'السرعة', () => showSpeed()), fullBottom);
   row.append(left, center, right);
   bottom.append(times, bar, row);
   controls.append(el('div', 'pp-shade pp-shade--top'), el('div', 'pp-shade pp-shade--bottom'), top, bottom);
@@ -115,7 +121,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const sheetScrim = el('div', 'pp-scrim'); sheetScrim.hidden = true;
   const sheet = el('div', 'pp-sheet'); sheet.dir = 'rtl'; sheet.hidden = true;
   sheetScrim.onclick = () => closeSheet();
-  root.append(retry,gestures, spinner, status, controls, skipBtn, sheetScrim, sheet);
+  // Like Android's pp-together strip: the participants stay visible even when
+  // playback controls fade after three seconds.
+  root.append(retry,gestures, spinner, status, controls, peopleButton, skipBtn, sheetScrim, sheet);
   doc.body.append(root);
 
   // ── الظهور والاختفاء ──
@@ -374,6 +382,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     subtitlesPaint = paint;
   }
   let subtitlesBody = null, subtitlesPaint = null, offsetOut = null;
+  function showAudio() {
+    openSheet('audio', 'الصوت', null, body => {
+      for(const t of state.audio??[]) {
+        body.append(sheetRow(t.label, t.lang && t.lang!=='und' ? t.lang : null,
+          {on:!!t.selected,onClick:()=>{closeSheet();cmd('audio-select',t.id);}}));
+      }
+    });
+  }
   function showSpeed() {
     openSheet('speed', 'السرعة', state.synced ? 'السرعة تتبع مزامنة الغرفة' : null, (body) => {
       for (const sp of SPEEDS) body.append(sheetRow(sp === 1 ? 'عادية' : `${sp}×`, null, { on: (state.speed ?? 1) === sp, onClick: state.synced ? null : () => { closeSheet(); cmd('speed', sp); } }));
@@ -383,6 +399,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     openSheet('more', 'المزيد', null, (body) => {
       body.append(sheetRow('ملء الصورة', state.fit === 'fill' ? 'مفعّل: تُقصّ الحواف' : 'الصورة كاملة بلا قص', { on: state.fit === 'fill', onClick: () => { closeSheet(); cmd('fit', state.fit === 'fill' ? 'fit' : 'fill'); } }));
       body.append(sheetRow('شاهد مع أصدقائك', 'ادعُ أصدقاءك لنفس الحلقة', { onClick: () => { closeSheet(); cmd('room'); } }));
+      body.append(sheetRow('الإعدادات المتقدمة', 'ترجمة خارجية، ضبط الصوت والصورة والاختصارات', { onClick: () => { closeSheet(); cmd('settings'); } }));
       if (state.together) {
         body.append(sectionLabel('مع أصدقائك'));
         const paintOffset = () => `${(state.videoOffsetMs ?? 0) > 0 ? '+' : (state.videoOffsetMs ?? 0) < 0 ? '−' : ''}${Math.abs((state.videoOffsetMs ?? 0) / 1000).toFixed(1)} ث`;
@@ -405,6 +422,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
 
   // ── لوحة المفاتيح: كلها تعود لـplayer.js (نفس اختصارات النافذة الرئيسية) ──
   doc.addEventListener('keydown', (e) => {
+    // F11 belongs to the focused transparent Electron child window, not the main renderer.
+    if (e.key === 'F11') { e.preventDefault(); showControls(); cmd('fullscreen'); return; }
     if (e.key === 'Escape' && !sheet.hidden) { e.preventDefault(); closeSheet(); return; }
     if (!sheet.hidden) {
       if (e.key === 'Tab') {
@@ -434,6 +453,26 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     root.classList.toggle('pp--loading', !state.ready);
     status.textContent = state.status?.text ?? '';
     status.dataset.error = String(!!state.status?.error);retry.hidden=!state.status?.error;
+    // Keep avatars visible in the native overlay: the main window is underneath mpv.
+    const people=(Array.isArray(state.people)?state.people:[])
+      .filter(p=>p&&p.userId).sort((a,b)=>Number(!!b.host)-Number(!!a.host));
+    peopleButton.hidden=people.length===0;
+    const faces=people.slice(0,3).map(p=>{
+      const face=el('span', 'pp-person'+(p.state==='failed'?' is-failed':p.state==='preparing'||p.state==='buffering'?' is-busy':' is-ready'));
+      face.title=`${p.name} · ${p.state==='ready'?'جاهز':p.state==='preparing'?'يجهّز':p.state==='buffering'?'ينتظر البيانات':p.state==='failed'?'تعذّر':p.state==='playing'?'يشاهد':'في الغرفة'}`;
+      const letter=el('span','pp-person__letter',Array.from(String(p.name||'؟'))[0]||'؟');
+      face.append(letter);
+      if(typeof p.avatarKey==='string' && /^(?:https?:\/\/|data:image\/)/i.test(p.avatarKey)){
+        const img=el('img','pp-person__img');img.alt='';img.loading='lazy';
+        img.onerror=()=>img.remove();img.src=p.avatarKey;face.append(img);
+      }
+      return face;
+    });
+    if(people.length>3)faces.push(el('span','pp-person-more',`+${people.length-3}`));
+    const key=JSON.stringify(people.map(p=>[p.userId,p.name,p.avatarKey,p.state,p.host]));
+    if(key!==peopleKey){peopleKey=key;peopleButton.replaceChildren(...faces);}
+    peopleButton.setAttribute('aria-label',`في الغرفة ${people.length} · عرض المشاركين`);
+    audioBtn.hidden=!(state.audio??[]).length||state.audio.length<2;
     nextBtn.hidden = state.movie || !(Number(state.total) > Number(state.episode));
     nextBtn.disabled = state.canChangeEpisode === false;
     qualityBtn.textContent = state.qualityLabel || badgeOf(state.quality);
