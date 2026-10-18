@@ -459,7 +459,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     // account. Repair that derived mirror without clearing unsent local edits.
     const cachedAccount = mirror.accounts?.[user?.userId];
     if (cachedAccount && (cachedAccount.lifecycle === 'DELETED' || cachedAccount.lifecycle === 'PENDING_DELETE' || cachedAccount.deleted_at)) {
-      resyncMirror();
+      // Keep the other social tables and their revision cursor intact.
+      // Clearing the entire mirror here made friends, Majlis and feed vanish
+      // immediately after a valid account session was issued.
+      mirror.accounts[user.userId] = { ...cachedAccount, lifecycle: 'ACTIVE', deleted_at: null };
+      persistMirror();
       queueMicrotask(() => void pull());
     }
     refreshOverlay();
@@ -683,7 +687,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       if (body.content.some((account) => account?.userId === checkedUserId)) {
         // The server says ACTIVE; throw away only the derived cached mirror.
         // Re-fetch it from revision zero while preserving the durable queue.
-        resyncMirror();
+        const cached = mirror.accounts?.[checkedUserId];
+        if (cached) {
+          mirror.accounts[checkedUserId] = { ...cached, lifecycle: 'ACTIVE', deleted_at: null };
+          persistMirror();
+        }
         emit(['accounts']);
         queueMicrotask(() => void pull());
         return 'active';
