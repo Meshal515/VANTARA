@@ -10,8 +10,8 @@
  */
 
 import engine from '../lib/extension-engine.js';
-import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titlesMatch } from '../lib/catalog.js';
-import { aliasMap, learnAliases, loadAliases, noteRefAlias, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
+import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
+import { aliasMap, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
@@ -58,7 +58,7 @@ function workIndex() {
   const list = index.list;
   index.list = () => {
     const works = list();
-    for (const w of works) for (const own of w.keys ?? []) if (own !== w.key) noteRefAlias(`ext:${own}`, `ext:${w.key}`);
+    noteRefAliases(works.flatMap((w) => (w.keys ?? []).map((own) => [`ext:${own}`, `ext:${w.key}`])));
     return works;
   };
   return index;
@@ -155,6 +155,7 @@ function sources() {
 /** قائمة المصادر تُعاد من المحرّك (بعد تثبيت إضافة أو إزالتها، وفي الاختبارات). */
 export function resetSources() {
   sourcesPromise = null;
+  discovered.clear();
 }
 
 export const available = () => engine.isAvailable();
@@ -528,6 +529,7 @@ export const isAdult = (work) => isBlockedKey(work?.key) || (work?.keys ?? []).s
  * المصدر الساقط لا يُسقط الصفحة (`gather` بـallSettled).
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
+  await loadAliases(); // The first page must use the shipped aliases.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
   const { ok } = await gather(list, (source) =>
@@ -581,6 +583,91 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
   return rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
 }
 
+
+/**
+ * Combine paginated manga listings using the same guarded canonical identity
+ * as each individual page. Deduplicating only by item.id leaves duplicate
+ * cards when an alternate title first appears on a later source page.
+ * Preserve the earliest card's position and every edition/source.
+ */
+export function mergeWorkPages(items) {
+  const index = workIndex();
+  const positions = new Map();
+  const editions = new Map();
+  const originals = new Map();
+  const unrelated = [];
+  for (const [position, item] of items.entries()) {
+    if (!item?._work?.editions?.length) {
+      if (item?.id) unrelated.push({ position, item });
+      continue;
+    }
+    for (const edition of item._work.editions) {
+      const identity = `${edition.sourceId}|${edition.manga?.url || normalizeTitle(edition.manga?.title)}`;
+      const prior = editions.get(identity);
+      // A later page can carry detail/alias evidence missing from its first
+      // appearance. Merge the same edition before building canonical identity.
+      editions.set(identity, prior ? { ...prior, ...edition, manga: {
+        ...prior.manga, ...edition.manga,
+        thumbnailUrl: edition.manga?.thumbnailUrl || prior.manga?.thumbnailUrl || null,
+        altNames: [...new Set([...(Array.isArray(prior.manga?.altNames) ? prior.manga.altNames : []), ...(Array.isArray(edition.manga?.altNames) ? edition.manga.altNames : [])])],
+      } } : edition);
+      positions.set(identity, Math.min(position, positions.get(identity) ?? Infinity));
+      if (!originals.has(identity)) originals.set(identity, []);
+      originals.get(identity).push(item);
+    }
+  }
+  const positionsByKey = new Map();
+  const originalsByKey = new Map();
+  for (const [identity, edition] of editions) {
+    const added = index.add(edition);
+    if (!added) continue;
+    positionsByKey.set(added.key, Math.min(positions.get(identity), positionsByKey.get(added.key) ?? Infinity));
+    const previous = originalsByKey.get(added.key) ?? new Set();
+    for (const item of originals.get(identity)) previous.add(item);
+    originalsByKey.set(added.key, previous);
+  }
+  const formerRefs = [];
+  const grouped = index.list().map((work) => {
+    work.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
+    work.title = work.editions[0]?.manga?.title ?? work.title;
+    work.thumbnailUrl = work.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? work.thumbnailUrl;
+    const before = [...new Set(work.keys.flatMap((key) => [...(originalsByKey.get(key) ?? [])]))];
+    const preserved = {};
+    for (const item of before) for (const [key, value] of Object.entries(item)) {
+      if (value != null && preserved[key] == null) preserved[key] = value;
+    }
+    const merged = { ...preserved, ...toV35Work(work) };
+    for (const key of ['description', 'chapters', 'volumes', 'status']) if (preserved[key] != null) merged[key] = preserved[key];
+    const detailed = before.flatMap((item) => item._editions ?? []);
+    if (detailed.length) {
+      const byEdition = new Map();
+      for (const edition of detailed) {
+        const identity = JSON.stringify([edition.sourceId, edition.manga?.url ?? '']);
+        const previous = byEdition.get(identity);
+        const chapters = new Map();
+        for (const chapter of [...(previous?.chapters ?? []), ...(edition.chapters ?? [])]) {
+          const key = chapter.url || JSON.stringify([chapter.chapterNumber, chapter.name]);
+          chapters.set(key, chapter);
+        }
+        byEdition.set(identity, { ...previous, ...edition, chapters: [...chapters.values()] });
+      }
+      merged._editions = [...byEdition.values()];
+      merged.chapters = countMainChapters(mergeChapters(merged._editions, { rank: sourceRank }));
+      merged._sources = sourceList(work.editions);
+    }
+    // Record actual former ids too: a saved card may already have survived a
+    // previous rename while its edition now uses another display title.
+    for (const item of before) if (String(item.id).startsWith('ext:')) formerRefs.push([String(item.id), merged.id]);
+    return { position: Math.min(...work.keys.map((key) => positionsByKey.get(key) ?? Infinity)), item: merged };
+  });
+  noteRefAliases(formerRefs);
+  const seenIds = new Set();
+  return [...grouped, ...unrelated]
+    .sort((a, b) => a.position - b.position)
+    .map(({ item }) => item)
+    .filter((item) => !seenIds.has(item.id) && seenIds.add(item.id));
+}
+
 /**
  * مثل `browse` لكن لا ينتظر أبطأ مصدر: `onUpdate` يُنادى مع كل مصدر يردّ
  * بالقائمة المدموجة حتى الآن. مصدرٌ ثانٍ عنده نفس العمل يُضاف إليه نسخةً، فلا
@@ -589,6 +676,7 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
 export async function browseLive({ kind = 'catalogue', page = 1, query = '', genre = null } = {}, onUpdate = () => {}, {
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
+  await loadAliases(); // Streaming first paint must resolve canonical names too.
   const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
   const index = workIndex();
   const positions = new Map();
@@ -984,7 +1072,7 @@ const withTimeout = (promise, ms) => {
 /** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
 function titleVariants(v35work) {
   // أسماؤه البديلة أيضًا: مصدر يسمّيه «Demonic Emperor» يُسأل بهذا الاسم لا بـ«Magic emperor»
-  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).map((e) => e.manga?.title), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])];
+  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).flatMap((e) => [e.manga?.title, ...(e.manga?.altNames ?? [])]), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])];
   const seen = new Set();
   return raw.filter((t) => {
     if (typeof t !== 'string' || !t.trim() || t.startsWith('ext:')) return false;
@@ -993,6 +1081,20 @@ function titleVariants(v35work) {
     seen.add(key);
     return true;
   });
+}
+
+/** Recover a saved link from search results using the listing identity rules.
+ * A similar title or an ambiguous set of results cannot supply its chapters. */
+export function matchingWork(items, saved) {
+  const exact = items.find((item) => item.id === saved.id);
+  if (exact) return exact;
+  const variants = titleVariants(saved);
+  if (!variants.length) return null;
+  const index = canonicalIndex({ aliases: aliasMap() });
+  const own = index.add({ sourceId: 'saved-work-reference', manga: { title: variants[0], altNames: variants.slice(1) } }).key;
+  const candidates = items.map((item) => ({ item, keys: (item._work?.editions ?? []).map((edition) => index.add(edition)?.key).filter(Boolean) }));
+  const matches = candidates.filter(({ keys }) => keys.some((key) => index.keyOf(key) === index.keyOf(own)));
+  return matches.length === 1 ? matches[0].item : null;
 }
 
 /**
@@ -1004,6 +1106,7 @@ export function discoverEditions(v35work) {
   const key = v35work.id;
   if (discovered.has(key)) return discovered.get(key);
   const promise = (async () => {
+    await loadAliases();
     const variants = titleVariants(v35work);
     if (!variants.length) return [];
     const known = new Set((v35work._work?.editions ?? []).map((e) => e.sourceId));
@@ -1012,12 +1115,25 @@ export function discoverEditions(v35work) {
     // ثم عنوان النسخة الثانية إن اختلف — ثلاثة أسئلة على الأكثر لكل مصدر
     const queries = [...new Set([variants[0].trim(), normalizeTitle(variants[0]), variants[1]?.trim()].filter(Boolean))].slice(0, 3);
     const { ok } = await gather(others, async (source) => {
+      const candidates = new Map();
       for (const query of queries) {
         const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
-        const hit = (page?.mangas ?? []).find((m) => variants.some((v) => titlesMatch(m.title, v)));
-        if (hit) return { sourceId: source.id, label: source.label, manga: hit };
+        for (const manga of page?.mangas ?? []) candidates.set(manga.url || normalizeTitle(manga.title), manga);
       }
-      return null;
+      const index = canonicalIndex({ aliases: aliasMap() });
+      const base = (v35work._work?.editions ?? []).map((e) => index.add(e)?.key).filter(Boolean);
+      if (!base.length) base.push(index.add({ sourceId: 'known-work', manga: { title: variants[0], altNames: variants.slice(1) } }).key);
+      const hits = [...candidates.values()].map((manga) => ({ manga, key: index.add({ sourceId: source.id, manga })?.key }));
+      const matches = hits.filter(({ manga, key }) => key && (
+        variants.some((v) => normalizeTitle(manga.title) === normalizeTitle(v) || titleTwins(manga.title, v))
+        || base.some((k) => index.keyOf(k) === index.keyOf(key))
+      ));
+      // Several distinct URLs claiming the same work are ambiguous; never
+      // silently select whichever result the source happened to return first.
+      if (matches.length !== 1) return null;
+      const hit = matches[0];
+      return base.some((k) => index.keyOf(k) === index.keyOf(hit.key))
+        ? { sourceId: source.id, label: source.label, manga: hit.manga } : null;
     });
     return ok.map((r) => r.value).filter(Boolean);
   })();
@@ -1108,7 +1224,7 @@ export function describe(v35work) {
       const title = work.title?.english ?? '';
       if (!title || title.startsWith('ext:')) return work;
       const { items } = await browse({ query: title, keepWestern: true });
-      work = items.find((x) => x.id === work.id) ?? items.find((x) => titlesMatch(x.title?.english, title)) ?? work;
+      work = matchingWork(items, work) ?? work;
     }
     const primary = work._work?.editions?.[0];
     if (!primary) return work;
