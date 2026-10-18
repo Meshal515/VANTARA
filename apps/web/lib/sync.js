@@ -1468,7 +1468,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     latestSnapshots: () => request('/v1/source-latest'),
     privacyCapability: () => request('/v1/privacy/capabilities'),
     claimLatest: (sourceId) => request('/v1/source-latest/claim', { method: 'POST', body: { sourceId } }),
-    publishLatest: (sourceId, value, leaseUntil) => request('/v1/source-latest', { method: 'POST', body: { sourceId, value, leaseUntil } }),
+    publishLatest: (sourceId, value, leaseUntil, leaseToken) => request('/v1/source-latest', { method: 'POST', body: { sourceId, value, leaseUntil, leaseToken } }),
     health,
     retryQuarantined,
     /**

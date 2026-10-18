@@ -1,7 +1,7 @@
-name: Publish verified VANTARA Windows 0.3.13
+name: Publish verified VANTARA Windows 0.3.14
 on:
   push:
-    branches: ['codex/windows-current-accounts-20261018', 'claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.13-integrated-20261018']
+    branches: ['codex/windows-manga-parity-20261018', 'codex/windows-current-accounts-20261018', 'claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.14-integrated-20261018']
     paths: ['.github/workflows/windows-current-release.yml']
   workflow_dispatch:
 permissions:
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.13'
-  TAG: 'windows-v0.3.13'
+  VERSION: '0.3.14'
+  TAG: 'windows-v0.3.14'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -141,7 +141,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.13
+    name: Publish verified Windows 0.3.14
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -168,7 +168,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "يضم إصلاحات مشغل 0.3.12 دون تغيير تصميمه. ينقل إصلاحات الحسابات المنشورة في APK 0.0.178 إلى ويندوز: إكمال إنشاء الحساب بعد اعتماد الجهاز، استمرار دخول الحساب المحمي عند إعادة فتح التطبيق، والتحقق من حالة الحساب قبل إظهار الحذف مع الحفاظ على بيانات المجلس والأصدقاء. نقل مباشر من main69a42573، مع فحوص الحساب والمشغل والتثبيت وتشغيل MPV و4K على ويندوز قبل النشر. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "يحافظ على تصميم مشغل 0.3.13 وإصلاحاته وفحوص MPV و4K والغرف. يصلح إرسال رمز حجز تحديثات مصادر المانجا إلى الخادم؛ كانت واجهة النقل تسقطه فتُرفض بعض عمليات النشر بصمت. يحتفظ بمنطق جمع الفصول والأسماء البديلة وتحديثات المصادر الموجود في فرع ويندوز، والذي نُقل كذلك إلى main لضمان تقارب المنصات. يتضمن إصلاحات الحسابات المنشورة في APK 0.0.178. لا يدّعي دعم إضافات أندرويد Java على ويندوز أو إصلاح MangaTek الحي على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
