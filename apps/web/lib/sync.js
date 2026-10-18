@@ -454,6 +454,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     token = payload.token;
     user = accountWithIdentity(payload.user);
     if (payload.pinGrant) keepGrant(payload.pinGrant);
+    // A successful, server-issued session proves this account is ACTIVE.
+    // Old revisions could cache an incorrect DELETED tombstone for another
+    // account. Repair that derived mirror without clearing unsent local edits.
+    const cachedAccount = mirror.accounts?.[user?.userId];
+    if (cachedAccount && (cachedAccount.lifecycle === 'DELETED' || cachedAccount.lifecycle === 'PENDING_DELETE' || cachedAccount.deleted_at)) {
+      resyncMirror();
+      queueMicrotask(() => void pull());
+    }
     refreshOverlay();
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
@@ -653,6 +661,46 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     const body = await response.json();
     accountsLimit = Number(body.limit) || 10;
     return (body.content ?? []).map(accountWithIdentity);
+  }
+
+  /**
+   * A cached tombstone is not proof of deletion. Check the active account list
+   * first, then require an explicit server DELETED response for this exact
+   * authenticated account before the UI signs out or tells the user it is gone.
+   * Network errors must never clear a session, offline queue or PIN grant.
+   */
+  async function verifyDeletedAccount() {
+    const checkedUserId = user?.userId;
+    const checkedToken = token;
+    const checkedGeneration = sessionGeneration;
+    if (!checkedUserId || !checkedToken) return 'unknown';
+    const stillCurrent = () => user?.userId === checkedUserId && token === checkedToken && sessionGeneration === checkedGeneration;
+    try {
+      const response = await fetch(`${baseUrl}/v1/accounts`, { cache: 'no-store' });
+      if (!response.ok) return 'unknown';
+      const body = await response.json();
+      if (!Array.isArray(body?.content) || !stillCurrent()) return 'unknown';
+      if (body.content.some((account) => account?.userId === checkedUserId)) {
+        // The server says ACTIVE; throw away only the derived cached mirror.
+        // Re-fetch it from revision zero while preserving the durable queue.
+        resyncMirror();
+        emit(['accounts']);
+        queueMicrotask(() => void pull());
+        return 'active';
+      }
+      // An absent account may also be PENDING_DELETE. The public list alone is
+      // insufficient to assert permanent deletion or discard local writes.
+      const probe = await fetch(`${baseUrl}/v1/pulse`, {
+        headers: { authorization: `Bearer ${checkedToken}` },
+        cache: 'no-store',
+      });
+      const result = await probe.json().catch(() => null);
+      return stillCurrent() && probe.status === 410 && result?.error === 'account_deleted' && result?.state === 'DELETED'
+        ? 'deleted'
+        : 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
@@ -1360,6 +1408,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       return queue.length;
     },
     accounts,
+    verifyDeletedAccount,
     get accountsLimit() {
       return accountsLimit;
     },
