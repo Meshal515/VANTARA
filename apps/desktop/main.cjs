@@ -227,7 +227,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');
     const fixtureOption=process.argv.find(x=>x.startsWith('--native-video-smoke-fixture='));
     if(!fixtureOption)throw new Error('إثبات الفيديو يحتاج fixture مؤلفًا');
-    await require('./video-smoke.cjs').runEmbeddedVideoSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-video-smoke-fixture='.length),reportPath:videoReportOption.slice('--native-video-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
+    await require('./video-smoke.cjs').runEmbeddedVideoSmoke({window,videoHost,playerOverlay:overlay,native,fixture:fixtureOption.slice('--native-video-smoke-fixture='.length),reportPath:videoReportOption.slice('--native-video-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
     app.quit();return;
   }
   await window.loadURL('vantara://app/index.html');

@@ -66,3 +66,74 @@ it('clamps quality popup near the left edge and sends selected source and speed'
   view.open.speed();[...sheet.querySelectorAll('button')].find(b=>b.textContent==='1.5×').click();expect(send).toHaveBeenLastCalledWith({name:'speed',value:1.5});
   view.open.subtitles();view.root.querySelector('.pp-scrim').click();expect(sheet.hidden).toBe(true);
 });
+
+it('F11 in the focused transparent Windows player routes fullscreen to the native host',()=>{
+  vi.useFakeTimers();
+  const {document}=parseHTML('<html><body></body></html>');
+  const send=vi.fn();
+  createOverlayView(document,send);
+  const event=new document.defaultView.Event('keydown',{cancelable:true});
+  Object.assign(event,{key:'F11'});
+  document.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(send).toHaveBeenCalledWith({name:'fullscreen'});
+});
+
+it('native Windows overlay keeps actual room avatars and preparation status visible above MPV',()=>{
+  const {view}=fixture();
+  const people=[
+    {userId:'host',name:'مشعل',avatarKey:'https://example.org/a.png',state:'ready',host:true},
+    {userId:'friend',name:'صديق',avatarKey:null,state:'preparing'},
+    {userId:'third',name:'ثالث',avatarKey:'file:///unsafe',state:'failed'},
+    {userId:'fourth',name:'رابع',avatarKey:null,state:'ready'},
+  ];
+  view.update({people,ready:true,paused:false});
+  const strip=view.root.querySelector('.pp-people');
+  expect(strip.hidden).toBe(false);
+  expect(strip.parentElement).toBe(view.root); // outside the auto-hiding pp-controls
+  expect(strip.getAttribute('aria-label')).toContain('4');
+  expect(strip.querySelectorAll('.pp-person')).toHaveLength(3);
+  expect(strip.querySelector('img')?.getAttribute('src')).toBe('https://example.org/a.png');
+  expect(strip.querySelector('.pp-person.is-busy')).not.toBeNull();
+  expect(strip.querySelector('.pp-person.is-failed')).not.toBeNull();
+  expect(strip.querySelector('.pp-person-more')?.textContent).toBe('+1');
+  const before=strip.querySelector('img');
+  view.update({position:15000,people:[...people]});
+  expect(strip.querySelector('img')).toBe(before);
+  view.update({people:[]});
+  expect(strip.hidden).toBe(true);
+});
+
+it('desktop provides audio track menu and advanced settings instead of hiding existing controls',()=>{
+  vi.useFakeTimers();
+  const {document}=parseHTML('<html><body></body></html>');
+  const send=vi.fn();
+  const view=createOverlayView(document,send);
+  view.update({audio:[{id:1,label:'العربية',lang:'ar'},{id:2,label:'الإنجليزية',lang:'en'}]});
+  const audio=view.root.querySelector('[data-action="volume"].pp-desk');
+  expect(audio).not.toBeNull();
+  expect(audio.hidden).toBe(false);
+  audio.click();
+  const sheet=view.root.querySelector('.pp-sheet');
+  expect(sheet.dataset.kind).toBe('audio');
+  [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإنجليزية')).click();
+  expect(send).toHaveBeenCalledWith({name:'audio-select',value:2});
+  view.open.more();
+  [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإعدادات المتقدمة')).click();
+  expect(send).toHaveBeenCalledWith({name:'settings'});
+});
+
+it('keeps server buttons mounted during cloned progress snapshots so scrolling and clicks survive',()=>{
+ const {view}=fixture();const routes=[{id:'r',state:'READY',sourceName:'Torrentio',quality:2160,candidates:['c']}];
+ view.update({ready:true,candidate:'other',routes,routesDone:true});view.open.servers();
+ const body=view.root.querySelector('.pp-sheet__body'),button=body.querySelector('.pp-route');body.scrollTop=320;
+ view.update({position:1000,routes:structuredClone(routes),candidate:'other',ready:true});
+ expect(body.querySelector('.pp-route')).toBe(button);expect(body.scrollTop).toBe(320);
+});
+it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
+ const {view}=fixture();const tracks=[{id:1,label:'العربية',selected:true}];view.update({subtitles:tracks,subtitleDelay:0});view.open.subtitles();
+ [...view.root.querySelectorAll('button')].find(b=>b.textContent==='الضبط').click();
+ const before=[...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5');
+ view.update({position:1000,subtitles:structuredClone(tracks),subtitleDelay:0});
+ expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
+});

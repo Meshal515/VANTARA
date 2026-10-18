@@ -125,3 +125,9 @@ it('uses the shared AniSkip intervals and seeks only when a matching opening is 
  expect(skipLoader).toHaveBeenCalledWith(expect.objectContaining({malId:21,episode:1,durationMs:1400000}));
  const skip=f.document.querySelector('[data-action=skip-segment]');expect(skip?.hidden).toBe(false);skip.click();await Promise.resolve();expect(f.commands).toContainEqual({session:'one',command:'seek',value:90000});f.player.dispose();
 });
+it('retains the player and its source controls after an error followed by native shutdown',async()=>{
+ const f=fixture();f.engine.retryPlayback=vi.fn(async()=>{});f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/error',session:'one',message:'لم يصل المقطع'});f.event({type:'playback/closed',session:'one'});
+ expect(f.document.querySelector('.desktop-player')).toBeTruthy();expect(f.document.querySelector('[data-action=servers]')).toBeTruthy();f.player.dispose();
+});
+
+it('keeps torrent phase and cache rebuild diagnostics out of the viewing surface',()=>{const f=fixture();f.event({type:'playback/preparing',session:'one'});for(const stage of ['metadata','first-frame','cache-selected'])f.event({type:'playback/stage',session:'one',stage,volume:'E:'});f.event({type:'playback/retrying',session:'one',message:'رجعت لجزء حُذف من الكاش'});const text=f.document.querySelector('.desktop-player-status').textContent;expect(text).not.toMatch(/إطار|مغناطيس|كاش|حذف/);f.player.dispose();});

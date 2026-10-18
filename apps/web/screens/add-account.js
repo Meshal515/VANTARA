@@ -75,6 +75,9 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
   let photo = null;
   let photoUrl = null;
   let busy = false;
+  let closed = false;
+  let approvalTimer = null;
+  let approvalVersion = 0;
 
   const root = el('div', 'vacct');
   root.setAttribute('role', 'dialog');
@@ -201,6 +204,9 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
   };
 
   function dismiss() {
+    closed = true;
+    approvalVersion += 1;
+    if (approvalTimer !== null) clearTimeout(approvalTimer);
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     root.classList.remove('vacct--in');
     setTimeout(() => root.remove(), 220);
@@ -210,15 +216,97 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
     onClose?.();
   };
 
-  panel.onsubmit = async (e) => {
-    e.preventDefault();
-    if (!validate() || busy) return;
-    busy = true;
+  // New-device approval uses the existing, device-bound one-time code protocol.
+  // No account row is created before an already signed-in member approves the
+  // requesting device; successful claim retries this same form automatically.
+  async function showDeviceApproval() {
+    approvalVersion += 1;
+    const version = approvalVersion;
+    if (approvalTimer !== null) clearTimeout(approvalTimer);
+
+    const old = panel.querySelector('.vacct__approval');
+    old?.remove();
+    const approval = el('div', 'vacct__approval');
+    approval.setAttribute('role', 'status');
+    const title = el('h3', 'vacct__title', 'اعتماد الجهاز الجديد');
+    const instructions = el('p', 'vacct__hint',
+      'من جهاز سبق اعتماده: افتح فانتارا ← الإعدادات ← اعتماد جوال جديد، وأدخل الرمز التالي.');
+    const codeEl = el('button', 'vacct__create', 'جارٍ تجهيز الرمز…');
+    codeEl.type = 'button';
+    codeEl.setAttribute('aria-label', 'انسخ رمز اعتماد الجهاز');
+    const status = el('p', 'vacct__hint', 'نطلب رمزًا لهذا الجهاز…');
+    const retry = el('button', 'vacct__create', 'طلب رمز جديد');
+    retry.type = 'button';
+    retry.hidden = true;
+    retry.onclick = () => void showDeviceApproval();
+    approval.append(title, instructions, codeEl, status, retry);
+    panel.insertBefore(approval, error);
+    create.textContent = 'ننتظر اعتماد الجهاز…';
+    create.disabled = true;
+    error.textContent = '';
+
+    let request;
+    try {
+      request = await sync.requestDevice();
+    } catch {
+      if (closed || version !== approvalVersion) return;
+      status.textContent = 'تعذّر تجهيز رمز الاعتماد. تأكد من الاتصال وحاول مجددًا.';
+      retry.hidden = false;
+      return;
+    }
+    if (closed || version !== approvalVersion) return;
+    const { code, expiresAt } = request;
+    codeEl.textContent = code;
+    codeEl.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        status.textContent = 'تم نسخ الرمز. بانتظار الاعتماد…';
+      } catch {
+        status.textContent = 'انسخ الرمز الظاهر وأدخله على جهاز معتمد.';
+      }
+    };
+    status.textContent = 'بانتظار اعتماد الجهاز…';
+    const poll = async () => {
+      if (closed || version !== approvalVersion || !approval.isConnected) return;
+      if (Date.now() >= expiresAt) {
+        status.textContent = 'انتهت صلاحية الرمز. اطلب رمزًا جديدًا.';
+        retry.hidden = false;
+        return;
+      }
+      try {
+        const { paired } = await sync.claimDevice();
+        if (closed || version !== approvalVersion) return;
+        if (paired) {
+          status.textContent = 'تم اعتماد الجهاز. نكمل إنشاء الحساب…';
+          approval.remove();
+          await submitCreate();
+          return;
+        }
+      } catch {
+        if (closed || version !== approvalVersion) return;
+        status.textContent = 'بانتظار الموافقة أو عودة الاتصال…';
+      }
+      approvalTimer = setTimeout(poll, 4000);
+    };
+    approvalTimer = setTimeout(poll, 4000);
+  }
+
+  async function submitCreate() {
     create.disabled = true;
     create.textContent = 'ننشئ الحساب…';
     error.textContent = '';
-    const out = await sync.createAccount({ username: username.value.trim().toLowerCase(), displayName: name.value.trim() }).catch(() => ({ ok: false, data: { error: 'network' } }));
+    const out = await sync.createAccount({
+      username: username.value.trim().toLowerCase(),
+      displayName: name.value.trim(),
+    }).catch(() => ({ ok: false, data: { error: 'network' } }));
+    if (closed) return;
     if (!out.ok) {
+      // Before login there is no session. The server correctly refuses a
+      // brand-new device until its approval code has been accepted.
+      if (out.status === 401 && out.data?.error === 'unauthorized' && sync.requestDevice && sync.claimDevice) {
+        await showDeviceApproval();
+        return;
+      }
       busy = false;
       create.textContent = 'إنشاء';
       validate();
@@ -228,29 +316,37 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
           : code === 'limit_reached' ? 'وصلتم للحد: عشرة حسابات.'
             : code === 'bad_username' ? 'اسم المستخدم غير صالح.'
               : code === 'network' ? 'ما فيه اتصال. حاول مرة ثانية.'
-                : code === 'unauthorized' ? 'هالجهاز غير معتمد بعد. ادخل حسابك أولًا.'
                 : 'تعذّر إنشاء الحساب. حاول مرة ثانية.';
       return;
     }
     try {
       create.textContent = 'ندخلك…';
       const user = await sync.signIn(out.data.account.userId);
-      // الصورة بعد الدخول (الرفع يحتاج جلسة). فشلها لا يمنع الحساب: يبقى الحرف
+      if (closed) return;
+      // Avatar upload needs the newly issued session; never block sign-in.
       try {
         const blob = photo ? await photoBlob(photo) : await presetBlob(PRESETS[preset], name.value);
         const url = (await sync.uploadMedia(blob)).url;
         sync.enqueue('profile.patch', { fields: { avatarKey: url } });
       } catch {
-        // بلا صورة الآن، تُضاف من الملف الشخصي
+        // A failed upload leaves the generated initial visible.
       }
       dismiss();
       await onCreated(user);
     } catch {
+      if (closed) return;
       busy = false;
       create.textContent = 'إنشاء';
       validate();
       error.textContent = 'أُنشئ الحساب لكن تعذّر الدخول. اختره من القائمة.';
     }
+  }
+
+  panel.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!validate() || busy) return;
+    busy = true;
+    await submitCreate();
   };
 
   paintFace();

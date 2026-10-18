@@ -530,3 +530,30 @@ it('waits for an in-flight time write before a second caller reads statistics', 
   expect(premature).toBe(false);
   expect(sync.pendingWrites).toBe(0);
 });
+
+describe('source latest publication', () => {
+  it('forwards the claimed lease token in the actual publication request', async () => {
+    let sent;
+    const sync = await loadSync({ storage, fetchImpl: async (url, options) => {
+      expect(String(url)).toBe('https://sync.test/v1/source-latest');
+      expect(options.method).toBe('POST');
+      sent = JSON.parse(options.body);
+      return jsonResponse({ ok: sent.leaseToken === 'claimed-token' });
+    } });
+    const value = { mangas: [{ title: 'Work', url: '/work' }], hasNextPage: false };
+    const result = await sync.publishLatest('source.ar', value, 145_000, 'claimed-token');
+    expect(result.ok).toBe(true);
+    expect(sent).toEqual({ sourceId: 'source.ar', value, leaseUntil: 145_000, leaseToken: 'claimed-token' });
+  });
+
+  it('preserves tokenless publication for an older server', async () => {
+    let sent;
+    const sync = await loadSync({ storage, fetchImpl: async (_url, options) => {
+      sent = JSON.parse(options.body);
+      return jsonResponse({ ok: true });
+    } });
+    const value = { mangas: [], hasNextPage: false };
+    expect((await sync.publishLatest('source.ar', value, 120_000)).ok).toBe(true);
+    expect(sent).toEqual({ sourceId: 'source.ar', value, leaseUntil: 120_000 });
+  });
+});
