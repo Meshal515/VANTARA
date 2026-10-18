@@ -15,10 +15,40 @@ const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
 const MAX_BATCH = 20;
 const MAX_BATCH_UNITS = 200;
+const STORAGE_KEY = 'vantara.update-reports.v1';
+const MAX_QUEUE_WORKS = 1000;
+const MAX_QUEUE_UNITS = 50_000;
+const MAX_STORAGE_BYTES = 2_000_000;
 
 let transport = null;
 const queue = new Map();
 let timer = null;
+let inFlight = null;
+let dropped = 0;
+let storageFailed = false;
+
+const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
+const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
+const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
+
+function persist() {
+  try {
+    const value = JSON.stringify([...queue.values()]);
+    if (value.length > MAX_STORAGE_BYTES) { storageFailed = true; return; }
+    globalThis.localStorage?.setItem(STORAGE_KEY, value);
+    storageFailed = !globalThis.localStorage;
+  } catch { storageFailed = true; }
+}
+try {
+  const rows = JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? '[]');
+  if (Array.isArray(rows)) for (const row of rows.slice(0, MAX_QUEUE_WORKS)) {
+    if (row?.work && row?.title && Array.isArray(row.units)) queue.set(keyOf(row), row);
+  }
+} catch { storageFailed = true; }
+
+export function updateReportStatus() {
+  return { pendingWorks: queue.size, pendingUnits: [...queue.values()].reduce((n, w) => n + w.units.length, 0), dropped, storageFailed, sending: Boolean(inFlight) };
+}
 
 /** `send(path, {method, body})` → `{status, body}` (نفس `sync.translation`). */
 export function connectUpdates(send) {
@@ -31,28 +61,42 @@ function schedule() {
 }
 
 export async function flush() {
+  if (inFlight) return inFlight;
   clearTimeout(timer);
   timer = null;
   if (!transport || !queue.size) return;
   const works = [];
   let units = 0;
   for (const work of queue.values()) {
-    const count = work.units?.length || 1;
+    const chunk = { ...work, units: work.units.slice(0, MAX_UNITS) };
+    const count = chunk.units.length || 1;
     if (works.length >= MAX_BATCH || (works.length && units + count > MAX_BATCH_UNITS)) break;
-    works.push(work); units += count;
+    works.push(chunk); units += count;
   }
-  for (const w of works) queue.delete(keyOf(w));
-  try {
-    await transport('/v1/updates/observe', { method: 'POST', body: { works } });
-  } catch {
-    // مجسّ لا يُفشل شيئًا: ما ضاع يُرى في المسح التالي
+  // Keep in-flight reports durable until acknowledgement. A reload may resend;
+  // server event IDs make that retry idempotent.
+  inFlight = (async () => {
+    let accepted = false;
+    try {
+      const res = await transport('/v1/updates/observe', { method: 'POST', body: { works } });
+      accepted = res?.status >= 200 && res?.status < 300;
+    } catch { /* Retry persisted observations. */ }
+    if (accepted) for (const work of works) {
+      const key = keyOf(work);
+      const current = queue.get(key);
+      if (!current) continue;
+      const sent = new Map(work.units.map(u => [unitKey(u), JSON.stringify(u)]));
+      const remaining = current.units.filter(u => sent.get(unitKey(u)) !== JSON.stringify(u));
+      if (remaining.length) queue.set(key, { ...current, units: remaining });
+      else queue.delete(key);
+    }
+    persist();
+  })();
+  try { await inFlight; } finally {
+    inFlight = null;
+    if (queue.size) schedule();
   }
-  if (queue.size) schedule();
 }
-
-const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
-const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
-const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
 
 /** يضيف تقريرًا (يدمج وحداته مع ما ينتظر للعمل نفسه من نفس المصدر). */
 export function report(r) {
@@ -61,8 +105,16 @@ export function report(r) {
   const prev = queue.get(key);
   const units = new Map((prev?.units ?? []).map((u) => [unitKey(u), u]));
   for (const u of r.units ?? []) units.set(unitKey(u), { ...units.get(unitKey(u)), ...u });
-  queue.set(key, { ...prev, ...r, units: [...units.values()].sort(order).slice(0, MAX_UNITS) });
+  const merged = { ...prev, ...r, units: [...units.values()].sort(order) };
+  const total = [...queue.values()].reduce((n, w) => n + w.units.length, 0) - (prev?.units.length ?? 0) + merged.units.length;
+  if ((!prev && queue.size >= MAX_QUEUE_WORKS) || total > MAX_QUEUE_UNITS || JSON.stringify([...queue.values()].filter(w => keyOf(w) !== key).concat(merged)).length > MAX_STORAGE_BYTES) {
+    dropped += r.units?.length ?? 1;
+    return false;
+  }
+  queue.set(key, merged);
+  persist();
   schedule();
+  return true;
 }
 
 /**
@@ -106,8 +158,7 @@ export function observeMangaChapters(sourceId, manga, chapters) {
     chapters
       .map((c) => ({ number: chapterNumberOf(c), ...(Number(c?.dateUpload) > 0 ? { publishedAt: Number(c.dateUpload) } : {}) }))
       .filter((u) => Number.isFinite(u.number) && u.number >= 0)
-      .sort(order)
-      .slice(0, MAX_UNITS),
+      .sort(order),
   );
   if (!units.length) return;
   report({

@@ -20,7 +20,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -1304,7 +1304,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
       try {
         const { items } = await browse({ query: titleOf(work), keepWestern: true });
-        const found = items.find((w) => w.id === work.id) ?? items.find((w) => titlesMatch(titleOf(w), titleOf(work)));
+        const found = matchingWork(items, work);
         if (found && state.current === work) {
           // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
           const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
@@ -3112,7 +3112,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (requested !== state.collection) return;
       state.collection.page = r.page;
       state.collection.hasNext = r.hasNextPage;
-      state.collection.items = uniqueById([...requested.items, ...r.items]);
+      state.collection.items = root.dataset.section === 'manga' && requested.kind !== 'globalPopular'
+        ? mergeWorkPages([...requested.items, ...r.items])
+        : uniqueById([...requested.items, ...r.items]);
       if (!state.collection.items.length) {
         emptyState(q('collectionGrid'), {
           icon: 'search',
@@ -3199,7 +3201,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const r = await browse({ kind: 'catalogue', page: state.catalogPage + 1 });
       state.catalogPage = r.page;
       state.catalogHasNext = r.hasNextPage;
-      state.catalog = uniqueById([...state.catalog, ...r.items]);
+      state.catalog = mergeWorkPages([...state.catalog, ...r.items]);
       if (!state.discoverQuery) renderGrid(q('discoverGrid'), state.catalog);
       btn.hidden = !state.catalogHasNext || !!state.discoverQuery;
     } catch {

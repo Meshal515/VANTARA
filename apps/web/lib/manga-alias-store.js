@@ -96,16 +96,35 @@ let refAliases = read(REFS_KEY);
 
 /** `ext:demonic emperor` صار جزءًا من `ext:magic emperor`. */
 export function noteRefAlias(aliasRef, canonicalRef) {
-  if (!aliasRef || !canonicalRef || aliasRef === canonicalRef) return;
-  const list = refAliases[canonicalRef] ?? [];
-  if (list.includes(aliasRef)) return;
-  refAliases[canonicalRef] = [...list, aliasRef].slice(-10);
-  write(REFS_KEY, refAliases);
+  noteRefAliases([[aliasRef, canonicalRef]]);
+}
+
+/** Persist one listing's new references once, rather than serializing the
+ * entire graph synchronously for every edition of thousands of works. */
+export function noteRefAliases(pairs) {
+  let changed = false;
+  for (const [aliasRef, canonicalRef] of pairs) {
+    if (!aliasRef || !canonicalRef || aliasRef === canonicalRef) continue;
+    const list = refAliases[canonicalRef] ?? [];
+    if (list.includes(aliasRef)) continue;
+    // These references own saved progress/library rows; dropping an old name
+    // would hide user data even though no server row was deleted.
+    refAliases[canonicalRef] = [...list, aliasRef];
+    changed = true;
+  }
+  if (changed) write(REFS_KEY, refAliases);
 }
 
 /** كل مراجع العمل: القانوني أولًا ثم أسماؤه القديمة. */
 export function refsOf(ref) {
-  return [ref, ...(refAliases[ref] ?? [])];
+  const refs = [ref];
+  const seen = new Set(refs);
+  for (let i = 0; i < refs.length; i++) {
+    for (const old of refAliases[refs[i]] ?? []) {
+      if (!seen.has(old)) { seen.add(old); refs.push(old); }
+    }
+  }
+  return refs;
 }
 
 /** للاختبار فقط. */
