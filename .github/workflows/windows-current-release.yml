@@ -32,6 +32,8 @@ jobs:
         run: pnpm test:safety
       - name: Windows desktop torrent and cache integration
         run: node --test --test-concurrency=1 --test-timeout=60000 apps/desktop/*.test.cjs apps/desktop/src/*.test.mjs tools/windows-icon-resources.test.mjs
+      - name: Build shared domain used by account transport tests
+        run: pnpm --filter @vantara/domain build
       - name: Renderer, video timing, and invitation regression tests
         run: pnpm exec vitest run apps/web/lib/sync*.test.js apps/web/screens/add-account.test.js apps/web/desktop apps/web/pwa/player apps/web/lib/together apps/web/v35/together*.test.js apps/web/v35/reader*.test.js
   video-host:
