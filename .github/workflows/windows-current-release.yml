@@ -1,7 +1,7 @@
 name: Publish verified VANTARA Windows 0.3.12
 on:
   push:
-    branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018']
+    branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.12-integrated-20261018']
     paths: ['.github/workflows/windows-current-release.yml']
   workflow_dispatch:
 permissions:
