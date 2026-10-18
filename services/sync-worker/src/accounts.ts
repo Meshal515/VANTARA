@@ -30,7 +30,8 @@ export const DELETE_GRACE_MS = 10_000;
  */
 export const DELETE_NETWORK_ALLOWANCE_MS = 2_000;
 export type Lifecycle = 'ACTIVE' | 'PENDING_DELETE' | 'DELETED';
-const USERNAME = /^[a-z0-9_.]{3,20}$/;
+// Keep in sync with apps/web/lib/account-username.js (APK ships web files only).
+const usernameCharacter = (c: string) => /^[a-z0-9_.]$/.test(c) || (/\p{Script_Extensions=Arabic}/u.test(c) && /[\p{L}\p{N}]/u.test(c));
 const PIN = /^(\d{4}|\d{6})$/;
 /** بعد كل 5 محاولات خاطئة: قفل يتصاعد. */
 const LOCKS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
@@ -60,8 +61,9 @@ const pepperOf = (env: Env) => env.VANTARA_DEVICE_PEPPER;
 
 export function normalizeUsername(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const u = value.trim().replace(/^@/, '').toLowerCase();
-  return USERNAME.test(u) ? u : null;
+  const u = value.normalize('NFKC').replace(/^@/, '').replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const length = [...u].length;
+  return length >= 3 && length <= 20 && [...u].every(usernameCharacter) ? u : null;
 }
 
 export function validPin(value: unknown): value is string {
@@ -129,31 +131,40 @@ export type CreateResult =
   | { ok: true; account: { userId: string; username: string; displayName: string; avatarKey: string | null } }
   | { ok: false; status: number; error: 'bad_username' | 'bad_name' | 'username_taken' | 'limit_reached' };
 
-export async function createAccount(env: Env, now: number, input: Record<string, unknown> | null): Promise<CreateResult> {
+export async function createAccount(env: Env, now: number, input: Record<string, unknown> | null, creationKey?: string): Promise<CreateResult> {
   const username = normalizeUsername(input?.['username']);
   if (!username) return { ok: false, status: 400, error: 'bad_username' };
   const displayName = typeof input?.['displayName'] === 'string' ? input['displayName'].trim().replace(/\s+/g, ' ') : '';
   if (!displayName || [...displayName].length > 32) return { ok: false, status: 400, error: 'bad_name' };
   const rawAvatar = input?.['avatarKey'];
   const avatarKey = typeof rawAvatar === 'string' && rawAvatar.length > 0 && rawAvatar.length <= 512 ? rawAvatar : null;
-  const userId = crypto.randomUUID();
+  // A random client request id is bound to the authenticated device by the gate.
+  // The same retry resolves the same UUID, including when the first response was lost.
+  const hash = creationKey ? await hmacHex(pepperOf(env), `account-create:${creationKey}`) : null;
+  const userId = hash ? `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}` : crypto.randomUUID();
+  const previous = await env.DB.prepare(
+    `SELECT a.user_id, a.username, a.lifecycle, p.display_name, p.avatar_key FROM accounts a LEFT JOIN profiles p USING (user_id) WHERE a.user_id = ?`,
+  ).bind(userId).first<{ user_id: string; username: string; lifecycle: string; display_name: string; avatar_key: string | null }>();
+  if (previous) return previous.lifecycle === 'ACTIVE' && previous.username === username && previous.display_name === displayName
+    ? { ok: true, account: { userId: previous.user_id, username: previous.username, displayName: previous.display_name, avatarKey: previous.avatar_key } }
+    : { ok: false, status: 409, error: 'username_taken' };
   const exists = 'EXISTS (SELECT 1 FROM accounts WHERE user_id = ?)';
 
   await commitAtNextRevision(env, now, [], (rev) => [
     // السقف والتفرّد داخل العبارة نفسها: D1 تنفّذ الدفعة معاملة واحدة متسلسلة،
     // فلا يستطيع طلبان متزامنان أن يتجاوزا العشرة معًا
     env.DB.prepare(
-      `INSERT INTO accounts (user_id, username, created_at, rev)
+      `INSERT OR IGNORE INTO accounts (user_id, username, created_at, rev)
        SELECT ?, ?, ?, ?
         WHERE (SELECT COUNT(*) FROM accounts WHERE lifecycle != 'DELETED') < ?
           AND NOT EXISTS (SELECT 1 FROM accounts WHERE username = ?)`,
     ).bind(userId, username, now, rev, MAX_ACCOUNTS, username),
     env.DB.prepare(
-      `INSERT INTO profiles (user_id, display_name, avatar_key, field_revs, rev)
+      `INSERT OR IGNORE INTO profiles (user_id, display_name, avatar_key, field_revs, rev)
        SELECT ?, ?, ?, '{}', ? WHERE ${exists}`,
     ).bind(userId, displayName, avatarKey, rev, userId),
-    env.DB.prepare(`INSERT INTO presence (user_id, status, beat_at) SELECT ?, 'OFFLINE', 0 WHERE ${exists}`).bind(userId, userId),
-    env.DB.prepare(`INSERT INTO settings (user_id, data, field_revs, rev) SELECT ?, '{}', '{}', ? WHERE ${exists}`).bind(userId, rev, userId),
+    env.DB.prepare(`INSERT OR IGNORE INTO presence (user_id, status, beat_at) SELECT ?, 'OFFLINE', 0 WHERE ${exists}`).bind(userId, userId),
+    env.DB.prepare(`INSERT OR IGNORE INTO settings (user_id, data, field_revs, rev) SELECT ?, '{}', '{}', ? WHERE ${exists}`).bind(userId, rev, userId),
     // نفس نموذج الاعتماد الحالي: الجهاز المعتمد يثق بكل حسابات المجموعة، فالحساب
     // الجديد يُفتح من كل جهاز معتمد الآن بلا اعتماد جديد
     env.DB.prepare(

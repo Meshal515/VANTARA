@@ -79,6 +79,23 @@ describe('add account', () => {
     expect((await call('/v1/accounts/create', { username: 'stranger', displayName: 's', deviceId: 'evil-device-01', deviceCredential: 'not-a-trusted-credential-000000' })).status).toBe(401);
   });
 
+  it('normalizes Arabic and English usernames and retries a creation without duplicates', async () => {
+    const { call, tokenFor, list } = await setup();
+    const token = await tokenFor(DAHMI);
+    const body = { username: 'سارة_Ａ1', displayName: 'سارة 🌙', requestId: 'create-retry-00000001' };
+    const first = await call('/v1/accounts/create', body, token);
+    expect(first.status).toBe(200);
+    const account = (await first.json() as any).account;
+    expect(account.username).toBe('سارة_a1');
+    expect((await (await call('/v1/accounts/create', body, token)).json() as any).account.userId).toBe(account.userId);
+    expect((await list()).content).toHaveLength(4);
+    expect((await call('/v1/accounts/create', { username: 'سارة_a1', displayName: 'x' }, token)).status).toBe(409);
+    for (const username of ['س', 'س'.repeat(21), 'foo bar', 'foo\u200f', 'foo漢', 'foo\n']) {
+      expect((await call('/v1/accounts/create', { username, displayName: 'x' }, token)).status).toBe(400);
+    }
+    expect((await call('/v1/accounts/create', { username: 'س'.repeat(20), displayName: '🌙'.repeat(32) }, token)).status).toBe(200);
+  });
+
   it('never exceeds ten, even with concurrent requests', async () => {
     const { call, tokenFor, list } = await setup();
     const token = await tokenFor(DAHMI);
@@ -90,6 +107,57 @@ describe('add account', () => {
     const extra = await call('/v1/accounts/create', { username: 'eleven', displayName: '11' }, token);
     expect(extra.status).toBe(409);
     expect(await extra.json()).toEqual({ error: 'limit_reached' });
+  });
+});
+
+describe('new account history boundary', () => {
+  it('keeps friends and static profiles, excludes old social rows even after updates and pagination, and rejects old targets', async () => {
+    const ctx = await setup();
+    const { db, call } = ctx;
+    const owner = await ctx.tokenFor(DAHMI);
+    const write = async (token: string, kind: string, payload: Record<string, unknown>, opId = crypto.randomUUID()) => {
+      const res = await call('/v1/ops', { ops: [{ kind, payload, opId }] }, token);
+      expect(res.status).toBe(200);
+      return opId;
+    };
+    const old = await write(owner, 'majlis.send', { kind: 'text', body: 'old secret' });
+    const rec = await write(owner, 'recommendation.send', { seriesRef: 's:old', seriesTitle: 'Old', message: 'old recommendation' });
+    const joinedAt = Date.now() + 100;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(joinedAt);
+    const { id, token } = await tempAccount(ctx, 'newcomer');
+    vi.setSystemTime(joinedAt + 100);
+    const fresh = await write(owner, 'majlis.send', { kind: 'text', body: 'welcome', replyTo: `msg:${old}` });
+    db.prepare("UPDATE majlis_messages SET ref = ?, meta_json = ? WHERE id = ?").run(`msg:${old}`, JSON.stringify({ quote: 'old secret', reply_to: old }), fresh);
+    // A later revision on old content must never turn it into new history.
+    db.prepare('UPDATE majlis_messages SET rev = 999 WHERE id = ?').run(old);
+    for (let i = 0; i < 505; i++) db.prepare("INSERT INTO majlis_messages (id, sender_id, kind, body, created_at, rev) VALUES (?, ?, 'text', 'past', ?, 999)").run(`old-${i}`, DAHMI, joinedAt - 1);
+    db.prepare('UPDATE sync_state SET rev = 999 WHERE id = 1').run();
+    const history = await pull(ctx, token);
+    expect(history.changes.accounts?.length).toBe(4);
+    expect(history.changes.profiles?.length).toBe(4);
+    expect(history.changes.majlis_messages?.map((r) => r.id)).toEqual([fresh]);
+    expect(history.changes.majlis_messages?.[0]?.reply_to).toBeNull();
+    expect(history.changes.majlis_messages?.[0]?.ref).toBeNull();
+    expect(history.changes.majlis_messages?.[0]?.meta_json).toBe('{}');
+    expect(history.changes.recommendations ?? []).toEqual([]);
+    expect(history.changes.activity ?? []).toEqual([]);
+    expect((await pull(ctx, token, history.cursor)).changes.majlis_messages ?? []).toEqual([]);
+    expect((await pull(ctx, owner)).changes.majlis_messages?.some((r) => r.id === old)).toBe(true);
+    const forbidden = [
+      ['majlis.send', { kind: 'text', body: 'probe', replyTo: `msg:${old}` }],
+      ['majlis.react', { targetKind: 'rec', targetId: rec, emoji: '❤️' }],
+      ['majlis.receipt', { targetKind: 'rec', targetId: rec, seen: true }],
+      ['majlis.delete', { target: `msg:${old}`, scope: 'me' }],
+      ['recommendation.respond', { recommendationId: rec, state: 'ACCEPTED' }],
+    ] as const;
+    for (const [kind, payload] of forbidden) await write(token, kind, payload);
+    await write(token, 'majlis.read', { at: Date.now() });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_messages WHERE sender_id = ?').get(id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_reactions WHERE user_id = ?').get(id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_receipts WHERE user_id = ?').get(id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM majlis_hidden WHERE user_id = ?').get(id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT message_id FROM majlis_message_receipts WHERE user_id = ?').all(id)).toEqual([{ message_id: fresh }]);
   });
 });
 

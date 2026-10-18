@@ -37,12 +37,9 @@ const MIRROR_KEY = 'vantara.mirror';
 const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
-/**
- * إذن الـPIN: بعد إدخال PIN صحيح، الخادم يعطي هذا الجهاز إذنًا يجدد به الجلسة بلا
- * إعادة السؤال. يُحفظ في sessionStorage لا localStorage عمدًا: يعيش ما دام
- * التطبيق مفتوحًا (وتحديث الصفحة)، ويُنسى بإغلاقه — فمن يفتح التطبيق يُسأل.
- */
+/** PIN grant persists only with its signed-in account and exact device proof. */
 const PIN_GRANT_KEY = 'vantara.pin.grant';
+const ACCOUNT_CREATION_KEY = 'vantara.account.creation';
 const TRANSLATION_TIMEOUT_MS = 240_000;
 const SYNC_TIMEOUT_MS = 30_000;
 
@@ -195,21 +192,18 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let user = accountWithIdentity(readJson(USER_KEY, null));
   let accountsLimit = 10;
   let deletingHere = false;
-  let pinGrant = (() => {
-    try {
-      return sessionStorage.getItem(PIN_GRANT_KEY) || null;
-    } catch {
-      return null;
-    }
-  })();
+  const savedGrant = readJson(PIN_GRANT_KEY, null);
+  let pinGrant = savedGrant?.userId === user?.userId && savedGrant?.deviceId === localStorage.getItem(DEVICE_ID_KEY)
+    && savedGrant?.deviceCredential === localStorage.getItem(DEVICE_CREDENTIAL_KEY) ? savedGrant.grant : null;
+  if (!pinGrant) localStorage.removeItem(PIN_GRANT_KEY);
   const keepGrant = (grant) => {
     pinGrant = grant || null;
-    try {
-      if (pinGrant) sessionStorage.setItem(PIN_GRANT_KEY, pinGrant);
-      else sessionStorage.removeItem(PIN_GRANT_KEY);
-    } catch {
-      // تخزين محجوب: الإذن يبقى في الذاكرة فقط
-    }
+    if (pinGrant && user?.userId) writeJson(PIN_GRANT_KEY, {
+      userId: user.userId, deviceId: localStorage.getItem(DEVICE_ID_KEY),
+      deviceCredential: localStorage.getItem(DEVICE_CREDENTIAL_KEY), grant: pinGrant,
+    });
+    else localStorage.removeItem(PIN_GRANT_KEY);
+    try { sessionStorage.removeItem(PIN_GRANT_KEY); } catch { /* legacy storage */ }
   };
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
@@ -439,9 +433,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function persistSession(payload) {
-    if (payload.pinGrant) keepGrant(payload.pinGrant);
     token = payload.token;
     user = accountWithIdentity(payload.user);
+    if (payload.pinGrant) keepGrant(payload.pinGrant);
     refreshOverlay();
     sessionGeneration += 1;
     localStorage.setItem(TOKEN_KEY, token);
@@ -463,6 +457,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // انقطاع أو عطل خادم ليس إلغاء اعتماد. إبقاء التوكن يسمح للدورة التالية
       // بتجديده وإرسال نفس الكتابات بدل توقف pull/push عند !token إلى الأبد.
       if (classifyFailure(error?.status ?? 0) === 'retry') throw error;
+      keepGrant(null);
       token = null;
       localStorage.removeItem(TOKEN_KEY);
       // PIN أُضيف من جهاز آخر أو الإذن انتهى: الحساب يُقفل بدل أن يُطرد
@@ -623,12 +618,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // ندوّر السر مرة واحدة؛ جهاز جديد فعليًا يبقى device_untrusted فتظهر
       // له شاشة الاعتماد الحالية بلا تغيير.
       if (error?.code !== 'device_untrusted') throw error;
+      keepGrant(null);
       const recovery = await recoverDevice().catch(() => ({ recovered: false }));
       if (!recovery?.recovered) throw error;
       payload = await sessionPayload(userId);
     }
     persistSession(payload);
-    if (previousId && previousId !== user.userId) resetAll();
+    if (readJson(ACCOUNT_CREATION_KEY, null)?.accountId === user.userId) localStorage.removeItem(ACCOUNT_CREATION_KEY);
+    if (previousId !== user.userId) resetAll();
     emit(['session']);
     return user;
   }
@@ -1116,8 +1113,51 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   /** حساب جديد: من داخل حساب (بالجلسة) أو من «من يتابع؟» (بإثبات الجهاز). */
+  let completingCreation = null;
   async function createAccount({ username, displayName, avatarKey = null }) {
-    return accountCall('/v1/accounts/create', { username, displayName, avatarKey }, { withDevice: !token });
+    const input = { username, displayName, avatarKey };
+    let attempt = readJson(ACCOUNT_CREATION_KEY, null);
+    if (!attempt || JSON.stringify(attempt.input) !== JSON.stringify(input)) {
+      attempt = { input, requestId: crypto.randomUUID() };
+      writeJson(ACCOUNT_CREATION_KEY, attempt);
+    }
+    const out = await accountCall('/v1/accounts/create', { ...input, requestId: attempt.requestId }, { withDevice: !token });
+    if (!out.ok && out.status === 401 && !token) {
+      if (!attempt.approval || attempt.approval.expiresAt <= Date.now()) {
+        attempt.approval = await requestDevice();
+        writeJson(ACCOUNT_CREATION_KEY, attempt);
+      }
+      return { ...out, pending: true, approval: attempt.approval };
+    }
+    if (out.ok) {
+      attempt.accountId = out.data?.account?.userId;
+      delete attempt.approval;
+      writeJson(ACCOUNT_CREATION_KEY, attempt);
+    }
+    // Retain the request id after success too: retrying after a lost session
+    // response must resolve the same account, never create a second one.
+    return out;
+  }
+
+  async function completePendingAccount() {
+    if (completingCreation) return completingCreation;
+    completingCreation = (async () => {
+      const attempt = readJson(ACCOUNT_CREATION_KEY, null);
+      if (!attempt?.approval) return { ok: false, pending: false, data: { error: 'approval_expired' } };
+      if (!attempt.approved) {
+        const claim = await claimDevice();
+        if (!claim.paired && claim.pending) return { ok: false, pending: true, approval: attempt.approval };
+        // If the one-use claim response was lost, trust may already be saved
+        // on the server. Creation still requires device proof; an expired
+        // unapproved request simply receives a new approval code.
+        if (claim.paired) {
+          attempt.approved = true;
+          writeJson(ACCOUNT_CREATION_KEY, attempt);
+        }
+      }
+      return createAccount(attempt.input);
+    })();
+    try { return await completingCreation; } finally { completingCreation = null; }
   }
 
   /** فتح حساب عليه PIN بعد أن أُغلق التطبيق (الجلسة موجودة والإذن لا). */
@@ -1319,6 +1359,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       return accountsLimit;
     },
     createAccount,
+    completePendingAccount,
+    get pendingAccountCreation() { return readJson(ACCOUNT_CREATION_KEY, null); },
     unlock,
     setPin,
     removePin,

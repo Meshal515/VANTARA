@@ -1,3 +1,4 @@
+import { ACCOUNT_JOINED_AT } from './account-history.ts';
 import { handleTranslateTextBatch } from './translation-batch.ts';
 /**
  * VANTARA sync worker.
@@ -282,12 +283,105 @@ async function handleAccounts(env: Env, now: number): Promise<Response> {
  * القيم بالترتيب: المشاهد، المشاهد، رمز إخفائه — لكل نوع.
  */
 const MAJLIS_VISIBLE_IDS: Record<'frame' | 'rec' | 'activity', string> = {
-  frame:
-    "SELECT id FROM frames WHERE from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0)",
-  rec:
-    "SELECT id FROM recommendations WHERE from_id = ? OR to_id = ? OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0)",
-  activity: 'SELECT id FROM activity WHERE actor_id = ? OR ((target_user_id IS NULL OR target_user_id = ?) AND social_at IS NULL)',
+  frame: `SELECT id FROM frames WHERE created_at >= ${ACCOUNT_JOINED_AT} AND (from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0))`,
+  rec: `SELECT id FROM recommendations WHERE created_at >= ${ACCOUNT_JOINED_AT} AND (from_id = ? OR to_id = ? OR ((to_id IS NULL OR audience = 'MAJLIS') AND instr(hidden_json, ?) = 0))`,
+  activity: `SELECT id FROM activity WHERE created_at >= ${ACCOUNT_JOINED_AT} AND (actor_id = ? OR ((target_user_id IS NULL OR target_user_id = ?) AND social_at IS NULL))`,
 };
+const socialTargetSql = (kind: string): string | null => kind === 'msg'
+  ? `SELECT id FROM majlis_messages WHERE created_at >= ${ACCOUNT_JOINED_AT}`
+  : MAJLIS_VISIBLE_IDS[kind as keyof typeof MAJLIS_VISIBLE_IDS] ?? null;
+const socialTargetValues = (kind: string, userId: string) => kind === 'msg' ? [userId] : majlisViewerValues(kind as 'frame' | 'rec' | 'activity', userId);
+
+/** History is based on immutable creation time, never the row's latest revision. */
+function historyScope(table: string, userId: string): { sql: string; values: Array<string | number> } {
+  if (['frames', 'recommendations', 'notifications', 'activity', 'together_invites', 'majlis_messages'].includes(table)) {
+    return { sql: ` AND created_at >= ${ACCOUNT_JOINED_AT}`, values: [userId] };
+  }
+  if (table === 'public_work_views') return { sql: ` AND viewed_at >= ${ACCOUNT_JOINED_AT}`, values: [userId] };
+  const parent: Record<string, [string, string, string]> = {
+    recommendation_recipients: ['recommendation_id', 'recommendations', 'id'],
+    activity_receipts: ['event_id', 'activity', 'id'],
+    majlis_message_receipts: ['message_id', 'majlis_messages', 'id'],
+  };
+  if (parent[table]) {
+    const [key, source, id] = parent[table];
+    return { sql: ` AND ${key} IN (SELECT ${id} FROM ${source} WHERE created_at >= ${ACCOUNT_JOINED_AT})`, values: [userId] };
+  }
+  if (table === 'majlis_reactions' || table === 'majlis_receipts') return {
+    sql: ` AND (target_kind, target_id) IN (SELECT 'frame', id FROM frames WHERE created_at >= ${ACCOUNT_JOINED_AT}` +
+      ` UNION ALL SELECT 'rec', id FROM recommendations WHERE created_at >= ${ACCOUNT_JOINED_AT}` +
+      ` UNION ALL SELECT 'activity', id FROM activity WHERE created_at >= ${ACCOUNT_JOINED_AT})`,
+    values: [userId, userId, userId],
+  };
+  if (table === 'majlis_reads') return { sql: ` AND read_at >= ${ACCOUNT_JOINED_AT}`, values: [userId] };
+  return { sql: '', values: [] };
+}
+
+/** Old references in a new message do not confer access to their targets. */
+async function redactMessageReferences(rows: Record<string, unknown>[], userId: string, env: Env) {
+  const references = new Map<string, boolean>();
+  for (const row of rows) for (const field of ['reply_to', 'ref']) {
+    if (typeof row[field] === 'string') references.set(row[field] as string, false);
+  }
+  const candidates = [...references.keys()].flatMap((ref) => {
+    const match = /^(msg|rec|frame|activity):(.+)$/.exec(ref);
+    const sql = match ? socialTargetSql(match[1]!) : null;
+    return sql && match ? [{ ref, statement: env.DB.prepare(`SELECT 1 AS ok WHERE ? IN (${sql})`).bind(match[2], ...socialTargetValues(match[1]!, userId)) }] : [];
+  });
+  for (let offset = 0; offset < candidates.length; offset += 80) {
+    const chunk = candidates.slice(offset, offset + 80);
+    const results = await env.DB.batch(chunk.map((entry) => entry.statement));
+    results.forEach((result, index) => references.set(chunk[index]!.ref, Boolean(result.results?.length)));
+  }
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const field of ['reply_to', 'ref']) if (next[field] && !references.get(String(next[field]))) next[field] = null;
+    // Only server-supported voice metadata is public. Never forward legacy
+    // embedded quotes, message snapshots or arbitrary reference metadata.
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(String(row['meta_json'] ?? '{}')); } catch { /* malformed legacy data */ }
+    next['meta_json'] = row['kind'] === 'voice' ? JSON.stringify({ durationMs: typeof meta?.['durationMs'] === 'number' ? meta['durationMs'] : 0, waveform: Array.isArray(meta?.['waveform']) ? (meta['waveform'] as unknown[]).filter((value) => typeof value === 'number').slice(0, 48) : [] }) : '{}';
+    return next;
+  });
+}
+
+/** All mutation paths use the same target visibility as sync. */
+async function invalidSocialTargets(ops: readonly IncomingOp[], userId: string, env: Env): Promise<Set<string>> {
+  const invalid = new Set<string>();
+  const cache = new Map<string, boolean>();
+  const pendingTargets = new Set<string>();
+  for (const op of ops) {
+    const p = op.payload;
+    let ref: string | null = null;
+    if (op.kind === 'majlis.send') ref = asString(p['replyTo'], 200);
+    if (op.kind === 'majlis.delete') ref = asString(p['target'], 200);
+    if (op.kind === 'majlis.react' || op.kind === 'majlis.receipt') ref = `${p['targetKind']}:${p['targetId']}`;
+    if (!ref) {
+      if (op.kind === 'majlis.send') pendingTargets.add(`msg:${op.opId}`);
+      if (op.kind === 'recommendation.send') pendingTargets.add(`rec:${op.opId}`);
+      if (op.kind === 'frame.send') pendingTargets.add(`frame:${op.opId}`);
+      continue;
+    }
+    if (pendingTargets.has(ref)) {
+      const [kind, ...parts] = ref.split(':');
+      const source = { msg: 'majlis_messages', rec: 'recommendations', frame: 'frames' }[kind as 'msg' | 'rec' | 'frame'];
+      const exists = source ? await env.DB.prepare(`SELECT 1 AS ok FROM ${source} WHERE id = ?`).bind(parts.join(':')).first() : true;
+      if (!exists) {
+        if (op.kind === 'majlis.send') pendingTargets.add(`msg:${op.opId}`);
+        continue;
+      }
+    }
+    if (!cache.has(ref)) {
+      const match = /^(msg|rec|frame|activity):(.+)$/.exec(ref);
+      const sql = match ? socialTargetSql(match[1]!) : null;
+      const visible = sql && match ? await env.DB.prepare(`SELECT 1 AS ok WHERE ? IN (${sql})`).bind(match[2], ...socialTargetValues(match[1]!, userId)).first() : null;
+      cache.set(ref, Boolean(visible));
+    }
+    if (!cache.get(ref)) invalid.add(op.opId);
+    else if (op.kind === 'majlis.send') pendingTargets.add(`msg:${op.opId}`);
+  }
+  return invalid;
+}
 /** أطول معرّف إشعار يُنشأ؛ وكل من يقرأ المعرّف أو يكتبه يلتزم به. */
 const NOTIFICATION_ID_MAX = 250;
 
@@ -298,7 +392,7 @@ const MAJLIS_OWNER: Record<'frame' | 'rec' | 'activity', string> = {
 };
 /** قيم شرط الرؤية بترتيب علامات `?` فيه. */
 const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) =>
-  kind === 'activity' ? [userId, userId] : [userId, userId, hiddenToken(userId)];
+  kind === 'activity' ? [userId, userId, userId] : [userId, userId, userId, hiddenToken(userId)];
 
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
@@ -439,7 +533,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   // الفروقات نفسها حدّ أمان، لا مجرد transport. الصف الذي لا يحتاجه
   // هذا الحساب لا يصل إلى مرآته المحلية أصلًا؛ إخفاؤه في الواجهة بعد التنزيل
   // يعني أن البيانات كُشفت بالفعل.
-  const deltaScope = (table: string, revision: number): { sql: string; values: Array<string | number> } => {
+  const audienceScope = (table: string, revision: number): { sql: string; values: Array<string | number> } => {
     switch (table) {
       // المكتبة والقوائم ليست هنا بقصد: ملف صديقك يعرض ما يقرؤه ويؤجله وأكمله
       // `chapter_reads` لصاحبه: لا واجهة تعرضه لغيره (أُلغي سجل القراءة)، وكان
@@ -543,6 +637,12 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
     }
   };
 
+  const deltaScope = (table: string, revision: number) => {
+    const audience = audienceScope(table, revision);
+    const history = historyScope(table, userId);
+    return { sql: audience.sql + history.sql, values: [...audience.values, ...history.values] };
+  };
+
   const statements = DELTA_TABLES.map(([table, columns]) => {
     const scope = deltaScope(table, cursor === 0 ? -1 : cursor);
     return env.DB.prepare(
@@ -597,6 +697,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
 
     // كيانات فحص الخادم (`verify.mjs` يكتب `__verify__…` في جداول مشتركة كـworks)
     // لا تصل أي جهاز. المؤشر يُحسب من الصفوف كلها فلا يتعطل السحب.
+    if (table === 'majlis_messages') rows = await redactMessageReferences(rows, userId, env);
     changes[table] = rows.filter((row) => !isInternalRef(row['series_ref']) && !isInternalRef(row['chapter_key']));
     let maxRev = cursor;
     for (const row of rows) {
@@ -1881,9 +1982,10 @@ export function statementsFor(
           `INSERT INTO majlis_message_receipts (message_id, user_id, seen_at, rev)
            SELECT id, ?, ?, ? FROM majlis_messages
             WHERE created_at >= COALESCE((SELECT read_at FROM majlis_reads WHERE user_id = ?), 0)
+              AND created_at >= ${ACCOUNT_JOINED_AT}
               AND created_at <= ? AND sender_id <> ? AND deleted = 0
            ON CONFLICT (message_id, user_id) DO NOTHING`,
-        ).bind(userId, now, rev, userId, at, userId),
+        ).bind(userId, now, rev, userId, userId, at, userId),
         db
           .prepare(
             `INSERT INTO majlis_reads (user_id, read_at, rev) VALUES (?, ?, ?)
@@ -2342,9 +2444,9 @@ export async function invalidRecommendationResponses(
          LEFT JOIN recommendation_recipients rr
            ON rr.recommendation_id = r.id
           AND rr.user_id = ?
-        WHERE r.id IN (${placeholders})`,
+        WHERE r.id IN (${placeholders}) AND r.created_at >= ${ACCOUNT_JOINED_AT}`,
     )
-      .bind(userId, ...chunk)
+      .bind(userId, ...chunk, userId)
       .all<{ id: string; recipient_user_id: string | null }>();
 
     for (const row of results) rows.set(row.id, row.recipient_user_id);
@@ -2546,7 +2648,8 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   const invalidRecommendations = await invalidRecommendationResponses(ops, userId, env);
   const acknowledged = await appliedOpIds(ops, env);
   const skipped = new Set<string>();
-  const unapplied = new Set<string>(invalidRecommendations);
+  const invalidTargets = await invalidSocialTargets(ops, userId, env);
+  const unapplied = new Set<string>([...invalidRecommendations, ...invalidTargets]);
 
   // field merges تحتاج revision مستقلًا لأن field_revs نفسها تستخدمه للمقارنة.
   for (const op of ops) {

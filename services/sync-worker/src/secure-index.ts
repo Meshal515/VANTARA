@@ -393,9 +393,12 @@ async function accountRoute(path: string, request: Request, env: Env, now: numbe
   if (request.method !== 'POST' || !routes.includes(path)) return null;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const claims = await requireIdentity(request, env, now);
+  const requestId = body?.['requestId'];
+  const creationKey = typeof requestId === 'string' && /^[A-Za-z0-9_-]{16,80}$/.test(requestId)
+    ? `${claims?.deviceId ?? body?.['deviceId']}:${requestId}` : undefined;
   // «+» في شاشة «من يتابع؟» قبل أي دخول: يكفي إثبات جهاز معتمد لحساب قائم
   if (!claims && path === '/v1/accounts/create' && (await trustedDevice(env, body))) {
-    const out = await createAccount(env, now, body);
+    const out = await createAccount(env, now, body, creationKey);
     return out.ok ? json({ account: out.account }) : json({ error: out.error }, { status: out.status });
   }
   if (!claims) return json({ error: 'unauthorized' }, { status: 401 });
@@ -407,7 +410,7 @@ async function accountRoute(path: string, request: Request, env: Env, now: numbe
   if (state.lifecycle !== 'ACTIVE' && !finishing) return json({ error: 'account_deleted', state: state.lifecycle }, { status: 410 });
 
   if (path === '/v1/accounts/create') {
-    const out = await createAccount(env, now, body);
+    const out = await createAccount(env, now, body, creationKey);
     return out.ok ? json({ account: out.account }) : json({ error: out.error }, { status: out.status });
   }
   if (path === '/v1/pin') {

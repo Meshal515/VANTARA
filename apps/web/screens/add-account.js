@@ -6,6 +6,7 @@
  * الجديد، فلا رفع بلا جلسة. الـPIN لا يُطلب هنا؛ يُضاف لاحقًا من الإعدادات.
  */
 
+import { normalizeUsername } from '../lib/account-username.js';
 import { encodeStatic, TARGETS } from '../v35/media-encode.js';
 
 const el = (tag, cls, text) => {
@@ -27,7 +28,6 @@ const PRESETS = [
   ['#22c55e', '#0d3d1f'],
 ];
 
-const USERNAME = /^[a-z0-9_.]{3,20}$/;
 
 /** صورة جاهزة: الحرف الأول على تدرّج، 512px webp. */
 async function presetBlob(colors, name) {
@@ -75,6 +75,8 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
   let photo = null;
   let photoUrl = null;
   let busy = false;
+  let closed = false;
+  let approvalTimer = null;
 
   const root = el('div', 'vacct');
   root.setAttribute('role', 'dialog');
@@ -128,20 +130,20 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
     return wrap;
   };
   const name = el('input', 'vacct__input');
-  name.maxLength = 32;
+  // Validate Unicode codepoints, since maxlength counts UTF-16 units.
   name.autocomplete = 'off';
   name.placeholder = 'الاسم اللي يظهر للكل';
   name.dir = 'auto';
   const userWrap = el('div', 'vacct__user');
   const username = el('input', 'vacct__input vacct__input--user');
-  username.maxLength = 20;
+
   username.autocomplete = 'off';
   username.autocapitalize = 'none';
   username.spellcheck = false;
-  username.dir = 'ltr';
+  username.dir = 'auto';
   username.placeholder = 'username';
   userWrap.append(el('span', 'vacct__at', '@'), username);
-  const userHint = el('small', 'vacct__hint', 'حروف إنجليزية صغيرة وأرقام و _ . — من 3 إلى 20');
+  const userHint = el('small', 'vacct__hint', 'حروف عربية أو إنجليزية وأرقام و _ . — من 3 إلى 20 حرفًا');
 
   const error = el('p', 'vacct__error');
   error.setAttribute('role', 'alert');
@@ -170,10 +172,10 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
   }
 
   function validate() {
-    const u = username.value.trim().toLowerCase();
-    const okName = name.value.trim().length > 0;
-    const okUser = USERNAME.test(u);
-    userHint.classList.toggle('vacct__hint--bad', Boolean(u) && !okUser);
+    const u = normalizeUsername(username.value);
+    const okName = [...name.value.trim()].length > 0 && [...name.value.trim()].length <= 32;
+    const okUser = Boolean(u);
+    userHint.classList.toggle('vacct__hint--bad', Boolean(username.value) && !okUser);
     create.disabled = busy || !okName || !okUser;
     return okName && okUser;
   }
@@ -194,13 +196,15 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
     validate();
   };
   username.oninput = () => {
-    const clean = username.value.toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_.]/g, '');
+    const clean = username.value.normalize('NFKC').replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/^@/, '');
     if (clean !== username.value) username.value = clean;
     error.textContent = '';
     validate();
   };
 
   function dismiss() {
+    closed = true;
+    clearTimeout(approvalTimer);
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     root.classList.remove('vacct--in');
     setTimeout(() => root.remove(), 220);
@@ -210,6 +214,28 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
     onClose?.();
   };
 
+  function showPending(out) {
+    create.textContent = 'الحساب بانتظار اعتماد الجهاز';
+    error.textContent = `لم يُنشأ الحساب بعد. أرسل رمز اعتماد الجهاز ${out.approval.code} للمالك. يكتمل الإنشاء والدخول بعد الموافقة.`;
+    name.disabled = username.disabled = true;
+    approvalTimer = setTimeout(checkApproval, 3000);
+  }
+
+  async function checkApproval() {
+    if (closed) return;
+    try {
+      const out = await sync.completePendingAccount();
+      if (closed) return;
+      if (out.pending) return showPending(out);
+      return finishCreation(out);
+    } catch {
+      if (!closed) {
+        error.textContent = 'الحساب بانتظار الاعتماد. تعذّر الاتصال؛ نعيد المحاولة…';
+        approvalTimer = setTimeout(checkApproval, 3000);
+      }
+    }
+  }
+
   panel.onsubmit = async (e) => {
     e.preventDefault();
     if (!validate() || busy) return;
@@ -217,9 +243,16 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
     create.disabled = true;
     create.textContent = 'ننشئ الحساب…';
     error.textContent = '';
-    const out = await sync.createAccount({ username: username.value.trim().toLowerCase(), displayName: name.value.trim() }).catch(() => ({ ok: false, data: { error: 'network' } }));
+    const out = await sync.createAccount({ username: normalizeUsername(username.value), displayName: name.value.trim() }).catch(() => ({ ok: false, data: { error: 'network' } }));
+    if (closed) return;
+    if (out.pending) return showPending(out);
+    return finishCreation(out);
+  };
+
+  async function finishCreation(out) {
     if (!out.ok) {
       busy = false;
+      name.disabled = username.disabled = false;
       create.textContent = 'إنشاء';
       validate();
       const code = out.data?.error;
@@ -228,7 +261,8 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
           : code === 'limit_reached' ? 'وصلتم للحد: عشرة حسابات.'
             : code === 'bad_username' ? 'اسم المستخدم غير صالح.'
               : code === 'network' ? 'ما فيه اتصال. حاول مرة ثانية.'
-                : code === 'unauthorized' ? 'هالجهاز غير معتمد بعد. ادخل حسابك أولًا.'
+                : code === 'approval_expired' ? 'انتهت مهلة الاعتماد. اضغط إنشاء لطلب رمز جديد.'
+                : code === 'unauthorized' ? 'تعذّر التحقق من اعتماد الجهاز. حاول مرة ثانية.'
                 : 'تعذّر إنشاء الحساب. حاول مرة ثانية.';
       return;
     }
@@ -247,12 +281,20 @@ export function openAddAccount({ sync, mount = document.body, onCreated, onClose
       await onCreated(user);
     } catch {
       busy = false;
+      name.disabled = username.disabled = false;
       create.textContent = 'إنشاء';
       validate();
       error.textContent = 'أُنشئ الحساب لكن تعذّر الدخول. اختره من القائمة.';
     }
-  };
+  }
 
+  const pending = sync.pendingAccountCreation;
+  if (pending?.approval && pending.approval.expiresAt > Date.now()) {
+    name.value = pending.input.displayName;
+    username.value = pending.input.username;
+    busy = true;
+    showPending({ approval: pending.approval });
+  }
   paintFace();
   validate();
   return { close: dismiss };

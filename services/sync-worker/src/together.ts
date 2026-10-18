@@ -1,3 +1,4 @@
+import { ACCOUNT_JOINED_AT } from './account-history.ts';
 /**
  * VANTARA Together على Cloudflare: غرفة واحدة = Durable Object واحد.
  *
@@ -84,6 +85,11 @@ export class TogetherRoom {
       this.core = RoomCore.create(createSettings(body.input, body.hostUserId, body.code, now, body.allowed), parseMedia(body.input?.['media']), now);
       await this.persist();
       return json({ ok: true });
+    }
+    if (this.core && (url.pathname === '/info' || url.pathname === '/ws')) {
+      const userId = request.headers.get('x-vantara-user');
+      const joinedAt = Number(request.headers.get('x-vantara-joined-at') ?? 'Infinity');
+      if (!userId || !this.core.invited(userId) || !Number.isFinite(joinedAt) || this.core.settings.createdAt < joinedAt) return json({ error: 'not_found' }, 404);
     }
     if (url.pathname === '/info') {
       if (!this.core) return json({ error: 'gone' }, 404);
@@ -207,7 +213,7 @@ export function togetherToken(request: Request): string | null {
   return bearer ? bearer.slice('bearer.'.length) || null : null;
 }
 
-interface Profile { username: string; display_name: string | null; avatar_key: string | null }
+interface Profile { username: string; display_name: string | null; avatar_key: string | null; joined_at: number }
 
 /** يُرجع Response إن كان المسار لـTogether، وإلا null. */
 export async function togetherRoute(path: string, request: Request, env: Env, now: number): Promise<Response | null> {
@@ -218,10 +224,10 @@ export async function togetherRoute(path: string, request: Request, env: Env, no
   const claims = token ? await verifyIdentityToken(token, env.VANTARA_IDENTITY_SECRET, now) : null;
   if (!claims) return json({ error: 'unauthorized' }, 401);
   const profile = await env.DB.prepare(
-    `SELECT a.username, p.display_name, p.avatar_key
+    `SELECT a.username, p.display_name, p.avatar_key, ${ACCOUNT_JOINED_AT} AS joined_at
        FROM accounts a LEFT JOIN profiles p USING (user_id)
       WHERE a.user_id = ? AND a.lifecycle = 'ACTIVE'`,
-  ).bind(claims.userId).first<Profile>();
+  ).bind(claims.userId, claims.userId).first<Profile>();
   if (!profile) return json({ error: 'account_deleted' }, 410);
 
   if (path === '/v1/together/rooms' && request.method === 'POST') {
@@ -246,10 +252,12 @@ export async function togetherRoute(path: string, request: Request, env: Env, no
   const code = normalizeCode(m?.[1]);
   if (!m || !code) return json({ error: 'not_found' }, 404);
   const stub = ns.get(ns.idFromName(code));
-  if (!m[2]) return stub.fetch(new Request('https://room/info'));
+  const memberHeaders = { 'x-vantara-user': claims.userId, 'x-vantara-joined-at': String(profile.joined_at) };
+  if (!m[2]) return stub.fetch(new Request('https://room/info', { headers: memberHeaders }));
   const headers = new Headers(request.headers);
   headers.delete('authorization');
   headers.set('x-vantara-user', claims.userId);
+  headers.set('x-vantara-joined-at', String(profile.joined_at));
   headers.set('x-vantara-name', encodeURIComponent(profile.display_name || profile.username));
   if (profile.avatar_key) headers.set('x-vantara-avatar', profile.avatar_key);
   return stub.fetch(new Request('https://room/ws', { headers }));

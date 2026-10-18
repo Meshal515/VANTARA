@@ -49,6 +49,25 @@ describe('approving a new phone by the code on its screen', () => {
     expect(((await (await post(env, '/v1/device/claim', phone)).json()) as { paired: boolean }).paired).toBe(false);
   });
 
+  it('creates no account before approval, then creates and signs in exactly once after claim', async () => {
+    const { env, db } = testEnv();
+    const draft = { ...phone, username: 'سارة_1', displayName: 'سارة', requestId: 'new-device-create-0001' };
+    expect((await post(env, '/v1/accounts/create', draft)).status).toBe(401);
+    const { code } = await (await post(env, '/v1/device/request', phone)).json() as { code: string };
+    expect((await post(env, '/v1/accounts/create', draft)).status).toBe(401);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM accounts').get()).toEqual({ n: 3 });
+    db.exec(buildApproveSql(codeHash(code, PEPPER)));
+    expect((await post(env, '/v1/accounts/create', draft)).status).toBe(401);
+    await post(env, '/v1/device/claim', phone);
+    const response = await post(env, '/v1/accounts/create', draft);
+    expect(response.status).toBe(200);
+    const { account } = await response.json() as { account: { userId: string } };
+    const retry = await post(env, '/v1/accounts/create', draft);
+    expect((await retry.json() as any).account.userId).toBe(account.userId);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM accounts').get()).toEqual({ n: 4 });
+    expect((await post(env, '/v1/session', { ...phone, userId: account.userId })).status).toBe(200);
+  });
+
   it('an approved code is useless to any other device, even with the same device id', async () => {
     const { env, db } = testEnv();
     const { code } = (await (await post(env, '/v1/device/request', phone)).json()) as { code: string };
