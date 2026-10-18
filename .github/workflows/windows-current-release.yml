@@ -1,7 +1,7 @@
-name: Publish verified VANTARA Windows 0.3.12
+name: Publish verified VANTARA Windows 0.3.13
 on:
   push:
-    branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.12-integrated-20261018']
+    branches: ['codex/windows-current-accounts-20261018', 'claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.13-integrated-20261018']
     paths: ['.github/workflows/windows-current-release.yml']
   workflow_dispatch:
 permissions:
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.12'
-  TAG: 'windows-v0.3.12'
+  VERSION: '0.3.13'
+  TAG: 'windows-v0.3.13'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -33,7 +33,7 @@ jobs:
       - name: Windows desktop torrent and cache integration
         run: node --test --test-concurrency=1 --test-timeout=60000 apps/desktop/*.test.cjs apps/desktop/src/*.test.mjs tools/windows-icon-resources.test.mjs
       - name: Renderer, video timing, and invitation regression tests
-        run: pnpm exec vitest run apps/web/desktop apps/web/pwa/player apps/web/lib/together apps/web/v35/together*.test.js apps/web/v35/reader*.test.js
+        run: pnpm exec vitest run apps/web/lib/sync*.test.js apps/web/screens/add-account.test.js apps/web/desktop apps/web/pwa/player apps/web/lib/together apps/web/v35/together*.test.js apps/web/v35/reader*.test.js
   video-host:
     name: Compile native Windows video host
     runs-on: windows-2022
@@ -139,7 +139,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.12
+    name: Publish verified Windows 0.3.13
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -166,7 +166,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "إصلاح المشغل دون تغيير تصميمه: ثبات قائمة السيرفرات وضغطات توقيت الترجمة أثناء تحديثات الفيديو، إخفاء مراحل التورنت التقنية من واجهة المشاهدة، تغطية الخلفية حتى أول إطار، ومهلة محدودة لإعادة تحميل المقطع بعد الترجيع. يحتفظ الخطأ بالمشغل والحلقة مع زر إعادة المحاولة. يتطلب النشر نجاح تشغيل MPV الحقيقي على ويندوز مع ترجمة عربية وتعديل توقيتها من طبقة الأدوات، ومقطع 4K HEVC 10-bit مؤلف للاختبار. لا يضمن ذلك توفر كل تورنت أو أداء كل جهاز. إصلاح F11، صور أعضاء الغرفة فوق MPV، اختيار المسارات الصوتية، وإعدادات المشغل المتقدمة. نسخة غير موقعة." \
+            --notes "يضم إصلاحات مشغل 0.3.12 دون تغيير تصميمه. ينقل إصلاحات الحسابات المنشورة في APK 0.0.178 إلى ويندوز: إكمال إنشاء الحساب بعد اعتماد الجهاز، استمرار دخول الحساب المحمي عند إعادة فتح التطبيق، والتحقق من حالة الحساب قبل إظهار الحذف مع الحفاظ على بيانات المجلس والأصدقاء. نقل مباشر من main69a42573، مع فحوص الحساب والمشغل والتثبيت وتشغيل MPV و4K على ويندوز قبل النشر. لم يختبر على جهاز المالك. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
@@ -178,7 +178,7 @@ jobs:
           python3 - <<'PYMANIFEST'
           import os,json,pathlib,hashlib
           version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
-          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إصلاح ضغطات الترجمة وقفز قائمة السيرفرات','الترجيع دون إغلاق المشغل مع مهلة إعادة تحميل محدودة','F11 وصور أعضاء الغرفة والصوت والإعدادات المتقدمة','فحص فعلي لمقطع 4K HEVC 10-bit على ويندوز']}
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إصلاحات الحسابات المنشورة في APK 0.0.178 على ويندوز','إكمال إنشاء الحساب والاعتماد وثبات دخول PIN','الحفاظ على بيانات المجلس والأصدقاء وإصلاحات مشغل 0.3.12']}
           pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
           PYMANIFEST
           if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
