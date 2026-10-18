@@ -170,10 +170,8 @@ const chapterId = (chapter) => {
   const number = chapterNumberOf(chapter);
   return number >= 0 ? `n:${number}` : `name:${normalizeTitle(chapter?.name) || chapter?.url || ''}`;
 };
-/** أقصى صفحات Latest للمصدر في المسح الواحد. مانجا ليك (قياس حي): 25 عملًا للصفحة، 100 تحديث في 12 ساعة، ودفعات بـ25 عملًا في الساعة. */
+/** Per-pass page budget; the next page is persisted rather than discarded. */
 const LATEST_PAGES = 4;
-/** رأس القائمة يُفحص دائمًا: عملٌ تحدّث وهو في القمة لا يتحرّك فيها. */
-const LATEST_HEAD = 3;
 const CURSOR_KEYS = 150;
 const listKey = (manga) => String(manga?.url ?? '') || normalizeTitle(manga?.title);
 
@@ -201,15 +199,10 @@ export function latestBoundary(keys, prev) {
 }
 
 /**
- * مسح «آخر التحديثات»: صفحات Latest لكل مصدر ثم فصول ما تحدّث فيها. الفصول
- * تمرّ على `Update Engine` (مجسّ محرك الإضافات) فيقرّر الخادم ما الجديد.
- *
- * كان يقرأ الصفحة الأولى وحدها ويجلب فصول كل أعمالها كل مرة، واحدًا واحدًا في
- * سكون الرئيسية، فلا يكتمل غالبًا: من 64 عملًا تحدّث في مانجا ليك يصل الخادمَ
- * بضعة فقط. الآن: مؤشر لكل مصدر (ترتيب قائمته في المسح السابق) فلا تُجلب إلا
- * فصول ما صعد منذها ورأس القائمة، والصفحات تُقرأ حتى يظهر الحدّ القديم (4 بحد
- * أقصى). وما صعد يُرسل بشهادة «تحدّث منذ المسح السابق» (`listed`) فلا يصير
- * خط أساس صامتًا إن كانت أول مشاهدة للعمل أو بلا تاريخ رفع.
+ * Audit every work on fetched pages, including stationary works. Continue beyond
+ * the page budget on the next pass. Chapter failures and cancellation retain the
+ * full work payload so a work removed from Latest can still be retried.
+ * Keep the existing listing-motion hint for the server publication rules.
  */
 export async function collectLatestChapters(list, page, {
   latest = (id, p) => engine.latest(id, p),
@@ -233,38 +226,69 @@ export async function collectLatestChapters(list, page, {
   };
   let hasNextPage = false;
 
-  /** صفحات المصدر حتى الحدّ القديم، وما يُجلب فصوله منها (الأقدم أولًا). */
+  const diagnostics = { pages: 0, chapterRequests: 0, failedPages: 0, failedChapters: 0, pendingSources: 0 };
+  // Four pages is a per-pass budget, not a coverage cap. Continue deeper pages
+  // next time while revisiting the head, and retain actual failed manga payloads.
   const plan = async (source) => {
     const prev = known.cursors?.[source.id] ?? null;
     const mangas = [];
     let more = false;
-    let stable = -1;
-    for (let p = page; p < page + (prev ? maxPages : 1) && shouldContinue(); p += 1) {
-      const value = await withTimeout(latest(source.id, p), LISTING_TIMEOUT_MS);
+    let nextPage = prev?.nextPage ?? page;
+    const pages = [page];
+    for (let p = Math.max(page + 1, nextPage); pages.length < maxPages; p++) pages.push(p);
+    let stopped = false;
+    for (const p of pages) {
+      if (!shouldContinue()) { stopped = true; break; }
+      let value;
+      try {
+        diagnostics.pages++;
+        value = await withTimeout(latest(source.id, p), LISTING_TIMEOUT_MS);
+      } catch {
+        diagnostics.failedPages++;
+        nextPage = p;
+        stopped = true;
+        break;
+      }
       more = Boolean(value?.hasNextPage);
       if (p === page) hasNextPage ||= more;
       const seen = new Set(mangas.map(listKey));
-      mangas.push(...(value?.mangas ?? []).filter((m) => listKey(m) && !seen.has(listKey(m))));
-      if (!prev) break;
-      stable = latestBoundary(mangas.map(listKey), prev.keys ?? []);
-      if (stable >= 0 || !more) break;
+      for (const manga of value?.mangas ?? []) {
+        const key = listKey(manga);
+        if (key && !seen.has(key)) { mangas.push(manga); seen.add(key); }
+      }
+      nextPage = p + 1;
+      if (!more) { nextPage = page; break; }
     }
-    if (!mangas.length) return null; // لم يُقرأ شيء: المؤشر القديم يبقى كما هو
     const keys = mangas.map(listKey);
-    // بلا مسح سابق: الصفحة الأولى كلها، بلا شهادة (لا نعرف متى تحدّثت)
-    const moved = !prev ? keys.length : stable >= 0 ? stable : keys.length;
-    const retry = prev?.retry ?? {};
-    const tasks = [];
+    const stable = prev ? latestBoundary(keys, prev.keys ?? []) : -1;
+    const moved = !prev ? 0 : stable >= 0 ? stable : keys.length;
+    const tasks = new Map();
+    // Retry even when the work disappeared from the next listing, retaining
+    // the original listing timestamp and the full manga request payload.
+    for (const [key, value] of Object.entries(prev?.retry ?? {})) {
+      if (value?.manga) tasks.set(key, { source, manga: value.manga, position: value.position ?? keys.length, key, since: value.since ?? null });
+    }
+    const retryKeys = new Set(tasks.keys());
     keys.forEach((key, position) => {
-      const since = prev && position < moved ? prev.at : retry[key] ?? null;
-      if (position < moved || position < LATEST_HEAD || retry[key]) tasks.push({ source, manga: mangas[position], position, key, since });
+      const oldRetry = prev?.retry?.[key];
+      const since = tasks.get(key)?.since ?? (typeof oldRetry === 'number' ? oldRetry : null) ?? (prev && position < moved ? prev.at : null);
+      // Every fetched page is audited: stationary works can publish chapters.
+      if (!tasks.has(key)) tasks.set(key, { source, manga: mangas[position], position, key, since });
     });
-    const tail = (prev?.keys ?? []).filter((k) => !keys.includes(k));
-    return { tasks: tasks.reverse(), cursor: { at: now, keys: [...keys, ...tail].slice(0, CURSOR_KEYS) } };
+    if (!tasks.size && !stopped) return null;
+    const tail = (prev?.keys ?? []).filter(k => !keys.includes(k));
+    const pending = nextPage !== page || stopped;
+    if (pending) diagnostics.pendingSources++;
+    return { tasks: [...tasks.values()].filter(t => retryKeys.has(t.key)).reverse().concat([...tasks.values()].filter(t => !retryKeys.has(t.key)).reverse()), cursor: {
+      at: pending ? prev?.at ?? now : now,
+      keys: [...keys, ...tail].slice(0, CURSOR_KEYS),
+      ...(pending ? { nextPage } : {}),
+    } };
   };
 
   const fetchChapters = async ({ source, manga, position, since }) => {
     if (since) listed(source.id, manga, since);
+    diagnostics.chapterRequests++;
     const rows = await withTimeout(chapters(source.id, manga), LISTING_TIMEOUT_MS);
     if (!rows.length) return;
     const id = normalizeTitle(manga.title);
@@ -296,12 +320,13 @@ export async function collectLatestChapters(list, page, {
       if (!planned) continue; // مصدر لا يرد لا يحبس المصادر الأسرع، ومؤشره القديم يبقى
       const retry = {};
       for (const task of planned.tasks) {
-        if (!shouldContinue()) { if (task.since) retry[task.key] = task.since; continue; }
+        if (!shouldContinue()) { retry[task.key] = { manga: task.manga, since: task.since, position: task.position }; continue; }
         try {
           await fetchChapters(task);
         } catch {
-          // عملٌ لم يُجلب يُعاد في المسح التالي ما دامت شهادته قائمة
-          if (task.since) retry[task.key] = task.since;
+          // Keep failed work for the next scan even if it leaves Latest.
+          diagnostics.failedChapters++;
+          retry[task.key] = { manga: task.manga, since: task.since, position: task.position };
         }
       }
       next.cursors[source.id] = { ...planned.cursor, ...(Object.keys(retry).length ? { retry } : {}) };
@@ -309,7 +334,8 @@ export async function collectLatestChapters(list, page, {
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, list.length)) }, worker));
   entries.sort((a, b) => b.observedAt - a.observedAt || a.position - b.position || sourceRank(a.source.id) - sourceRank(b.source.id));
-  return { entries, hasNextPage, known: next };
+  next.scan = { ...diagnostics, at: now };
+  return { entries, hasNextPage, known: next, diagnostics };
 }
 
 function recentWorks(entries) {
@@ -949,8 +975,11 @@ const SEARCH_TIMEOUT_MS = 15_000;
 const LISTING_TIMEOUT_MS = 20_000;
 const discovered = new Map();
 
-const withTimeout = (promise, ms) =>
-  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+const withTimeout = (promise, ms) => {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), ms); })])
+    .finally(() => clearTimeout(timer));
+};
 
 /** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
 function titleVariants(v35work) {
