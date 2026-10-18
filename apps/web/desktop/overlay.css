@@ -192,3 +192,8 @@ html.desktop-overlay .pwa-player .pp-sheet[hidden],
 html.desktop-overlay .pwa-player .pp-scrim[hidden] {
   display: none !important;
 }
+
+/* Until the first decoded frame, cover the previous application surface. */
+html.desktop-overlay .pwa-player.pp--loading{background:#000}
+
+html.desktop-overlay .pp-retry{position:absolute;left:50%;top:58%;transform:translateX(-50%);z-index:10;border-radius:24px;padding:12px 22px;background:var(--accent);color:white;font:inherit;cursor:pointer}html.desktop-overlay .pp-retry[hidden]{display:none}

@@ -61,6 +61,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   root.dir = 'ltr';
   const gestures = el('div', 'pp-gestures');
   const spinner = el('div', 'pp-spinner'); spinner.innerHTML = '<i></i>';
+  const retry = el('button','pp-retry','إعادة المحاولة');retry.type='button';retry.hidden=true;retry.onclick=()=>cmd('retry');
   const status = el('div', 'pp-status'); status.setAttribute('role', 'status');
 
   // ── الأعلى ──
@@ -114,7 +115,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const sheetScrim = el('div', 'pp-scrim'); sheetScrim.hidden = true;
   const sheet = el('div', 'pp-sheet'); sheet.dir = 'rtl'; sheet.hidden = true;
   sheetScrim.onclick = () => closeSheet();
-  root.append(gestures, spinner, status, controls, skipBtn, sheetScrim, sheet);
+  root.append(retry,gestures, spinner, status, controls, skipBtn, sheetScrim, sheet);
   doc.body.append(root);
 
   // ── الظهور والاختفاء ──
@@ -432,7 +433,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     spinner.hidden = !(state.buffering || !state.ready) || !!state.status?.error;
     root.classList.toggle('pp--loading', !state.ready);
     status.textContent = state.status?.text ?? '';
-    status.dataset.error = String(!!state.status?.error);
+    status.dataset.error = String(!!state.status?.error);retry.hidden=!state.status?.error;
     nextBtn.hidden = state.movie || !(Number(state.total) > Number(state.episode));
     nextBtn.disabled = state.canChangeEpisode === false;
     qualityBtn.textContent = state.qualityLabel || badgeOf(state.quality);
@@ -442,8 +443,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (state.skip) { skipBtn.hidden = false; skipBtn.textContent = state.skip; } else skipBtn.hidden = true;
     paintTime();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
-    if (openKind === 'servers') paintServers();
-    if (openKind === 'subtitles' && subtitlesBody && (previous.subtitles !== state.subtitles || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
+    if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
+    if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
     // بدأ التشغيل أو استؤنف: يبدأ عدّاد الإخفاء (كان لا يبدأ إلا بعد إيقاف ثم تشغيل)
     if (!state.ready || state.paused) { if (!root.classList.contains('pp--shown') || previous.ready !== state.ready || previous.paused !== state.paused) showControls(true); }
     else if (previous.paused || !previous.ready) showControls();

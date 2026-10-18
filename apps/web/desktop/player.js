@@ -12,7 +12,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const doc=g.document;
   let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
-  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,titleText='VANTARA';
+  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA';
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
   const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
@@ -56,6 +56,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const overlayCommand=message=>{
     const id=session,value=message.value;if(!id)return;
     switch(message.name){
+      case 'retry':void engine.retryPlayback?.({session:id}).catch(error=>tell(error.message,true));break;
       case 'pause':void command('pause',!!value);break;
       case 'seek':if(Number.isFinite(value))void command('seek',Math.max(0,value));break;
       case 'seek-by':if(Number.isFinite(value))void command('seek',Math.max(0,Math.min(duration||position+value,position+value)));break;
@@ -117,8 +118,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;tell('يجهز المصدر الجديد…');void sources();return;}
-    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
+    if(panel&&session===event.session){skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
+    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
@@ -156,7 +157,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const volumeLabel=node('label','الصوت'),volume=node('input',null,{type:'range',min:0,max:100,value:100,'aria-label':'مستوى الصوت'});volume.onchange=()=>void command('volume',Number(volume.value));volumeLabel.append(volume);tracks.append(volumeLabel);settings.append(tracks);
     const external=node('details'),summary=node('summary','تحميل ترجمة خارجية');external.append(summary);
     const form=node('form',null,{class:'desktop-player-url'}),url=node('input',null,{type:'url',required:'',placeholder:'https://…/subtitles.srt','aria-label':'رابط ترجمة HTTPS'}),submit=node('button','تحميل',{type:'submit'});form.append(url,submit);form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{await command('subtitle-load',{url:url.value,lang:'ar',label:'ترجمة خارجية',select:true});}finally{submit.disabled=false;}};external.append(form);external.ontoggle=()=>viewport();settings.append(external);
-    status=node('div','يبدأ المحرك ويجهز بيانات الفيديو…',{class:'desktop-player-status',role:'status','aria-live':'polite'});controls.append(status);
+    status=node('div','',{class:'desktop-player-status',role:'status','aria-live':'polite'});controls.append(status);
     panel.append(header,video,controls);
     const lobby=node('div',null,{class:'pp-lobby desktop-together-lobby'});lobby.hidden=true;panel.append(lobby);
     lobbyUi=createDesktopLobby({host:lobby,engine,session,chooseServer:()=>void showServers(),leave:()=>void close(),visibility:visible=>{panel.classList.toggle('pp--lobby',visible);viewport();}});
@@ -179,15 +180,15 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const off=bridge.onEvent(event=>{
     if(event.type==='playback/preparing')open(event);
     if(event.session!==session)return;
-    if(event.type==='playback/ready'){ready=true;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
+    if(event.type==='playback/ready'){ready=true;failed=false;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')void close();}
     if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;if(Number.isFinite(event.downloadSpeed)||Number.isFinite(event.peers))netInfo={kbps:Number.isFinite(event.downloadSpeed)?event.downloadSpeed/1024:netInfo?.kbps??null,peers:Number.isFinite(event.peers)?event.peers:netInfo?.peers??null};if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
-    if(event.type==='playback/stage'){const text={'engine-start':'يبدأ محرك التورنت…',metadata:'يجلب بيانات المغناطيس…','file-selected':'حدد ملف الفيديو المطلوب','downloading':'يتصل بالسرب وينزل الفيديو…','player-start':'يفتح المشغل داخل VANTARA…','first-frame':'يفك ترميز أول إطار…'}[event.stage];if(text)tell(text);if(event.stage==='cache-selected')tell('مكان كاش التورنت: '+String(event.volume??'قرص مناسب'));}
-    if(event.type==='playback/retrying')tell(event.message);
+    // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
+    if(event.type==='playback/stage'||event.type==='playback/retrying')return;
     if(event.type==='playback/subtitles'){subtitleTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(subtitles,event.tracks??[],true);if(event.message)tell(event.message,true);}
     if(event.type==='playback/audio'){audioTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(audio,event.tracks??[]);}
-    if(event.type==='playback/error'){ready=false;tell(event.message,true);viewport(true);update();}
-    if(event.type==='playback/closed'){viewport(true);if(roomState?.visible&&roomState.failed)return;dismiss();if(fullscreen){fullscreen=false;void bridge.playerFullscreen({enabled:false});}}
+    if(event.type==='playback/error'){ready=false;failed=true;tell(event.message,true);viewport();update();}
+    if(event.type==='playback/closed'){if(failed||roomState?.visible&&roomState.failed){viewport();return;}viewport(true);dismiss();if(fullscreen){fullscreen=false;void bridge.playerFullscreen({enabled:false});}}
   });
   const routeListener=engine.addListener?.('route',event=>{if(event?.session&&event.session!==session)return;void sources();void refreshServers();});
   const preparedListener=engine.addListener?.('prepared',event=>{if(event?.session===session){void sources();void refreshServers();}});

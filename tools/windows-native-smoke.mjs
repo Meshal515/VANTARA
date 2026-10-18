@@ -9,7 +9,7 @@ import {join} from 'node:path';
 import {createDesktopServices} from '../apps/desktop/src/services.mjs';
 
 const native=process.argv[2],reportPath=process.argv[3];
-const clip=await readFile(new URL('../android/app/src/androidTest/assets/addon-torrent-proof.mp4',import.meta.url));
+const clip=await readFile(process.argv[4]??new URL('../android/app/src/androidTest/assets/addon-torrent-proof.mp4',import.meta.url));
 const srt=Buffer.from('1\n00:00:00,000 --> 00:00:03,000\nترجمة عربية مؤلفة للتحقق\n');
 const server=http.createServer((req,res)=>{
   const body=req.url==='/owned.srt'?srt:clip;
@@ -39,8 +39,11 @@ try{
   await services.playbackCommand({session:'windows-proof',command:'pause',value:false});
   await services.playbackCommand({session:'windows-proof',command:'rate',value:1.02});
   assert(!events.some(e=>e.type==='playback/error'));
+  const decoded=await services.inspectPlayback({session:'windows-proof'});
+  if(process.argv[4])assert(decoded.video.w===3840&&decoded.video.h===2160,'Expected a decoded 4K frame');
+  assert.equal(decoded.subtitleDelay,.5);
   await services.stopPlayback({session:'windows-proof'});
   assert(events.some(e=>e.type==='playback/closed'));
-  const report={platform:process.platform,realMpv:true,realIPC:true,firstVideoFrame:true,arabicSubtitleSelected:true,pauseSeekRate:true,stopped:true,transport:'سيرفر فيديو وترجمة مملوك للاختبار'};
+  const report={decoded,platform:process.platform,realMpv:true,realIPC:true,firstVideoFrame:true,arabicSubtitleSelected:true,pauseSeekRate:true,stopped:true,transport:'سيرفر فيديو وترجمة مملوك للاختبار'};
   await writeFile(reportPath,JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(folder,{recursive:true,force:true});}

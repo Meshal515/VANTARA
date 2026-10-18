@@ -18,13 +18,15 @@ $exe=Join-Path $target 'VANTARA.exe'
 $native=Join-Path $target 'resources\app\native'
 node tools/windows-native-smoke.mjs "$native" (Join-Path $CandidateDir 'native-report.json')
 if($LASTEXITCODE -ne 0){throw 'Native MPV playback failed'}
+node tools/windows-native-smoke.mjs "$native" (Join-Path $CandidateDir 'native-4k-report.json') 'tools/fixtures/vantara-4k-hevc10.mp4'
+if($LASTEXITCODE -ne 0){throw 'Actual 4K HEVC10 MPV playback failed'}
 $embeddedReport=Join-Path $CandidateDir 'embedded-report.json'
 $fixture=(Resolve-Path 'android/app/src/androidTest/assets/addon-torrent-proof.mp4').Path
 $p=Start-Process $exe -ArgumentList @("--native-video-smoke-report=`"$embeddedReport`"","--native-video-smoke-fixture=`"$fixture`"") -PassThru
 if(-not $p.WaitForExit(180000)){$p.Kill();throw 'Embedded video timed out'}
 if($p.ExitCode -ne 0){throw "Embedded video exit $($p.ExitCode)"}
 $embedded=Get-Content $embeddedReport -Raw | ConvertFrom-Json
-foreach($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','rendererControls','arabicSubtitleSelected','cleanup')){
+foreach($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','cleanup')){
   if($embedded.$key -ne $true){throw "Embedded proof failed: $key"}
 }
 $bootReport=Join-Path $CandidateDir 'boot-report.json'

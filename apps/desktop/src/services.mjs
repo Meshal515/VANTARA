@@ -632,7 +632,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         const from=w.readPos!=null&&forwardCacheBytes!=null?Math.max(0,w.readPos-forwardCacheBytes):positionSeconds!=null&&durationSeconds>0?positionSeconds/durationSeconds*w.fileLength:null;
         contiguousEnd=contiguousEndFrom(bits,w,from);
       }catch{}
-      if(state.stopped||state.rebuilding)return;
+      if(state.stopped||state.rebuilding||state.seekTarget!=null)return;
       const plan=planWindow({fileLength:w.fileLength,fileOffset:w.fileOffset,pieceLength:w.pieceLength,durationSeconds,positionSeconds,
         readPos:w.readPos,forwardCacheBytes,contiguousEnd,evictedTo:w.evictedTo,freeBytes,paused:w.paused,buffering:state.mediaBuffering===true,limits:windowLimits});
       if(plan.evictTo!=null&&w.filePath&&await puncher.punch(w.filePath,0,plan.evictTo))w.evictedTo=Math.max(w.evictedTo,plan.evictTo);
@@ -680,9 +680,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(event.event==='client-message'&&['vantara-fullscreen','vantara-back'].includes(event.args?.[0]))emit(state,{type:'playback/action',action:event.args[0]==='vantara-fullscreen'?'fullscreen':'close'});
         if(event.event==='seek')state.seekRevision=(state.seekRevision??0)+1;
         if(event.event==='playback-restart'&&state.ready&&state.seekRevision!==state.publishedSeekRevision) {
-          const revision=state.seekRevision;state.publishedSeekRevision=revision;
+          const revision=state.seekRevision;state.publishedSeekRevision=revision;state.seekTarget=null;
           ipcCommand(state,['get_property','time-pos']).then(seconds=>{
-            if(Number.isFinite(seconds)&&seconds>=0&&state.seekRevision===revision)emit(state,{type:'playback/seek',position:Math.round(seconds*1000)});
+            if(Number.isFinite(seconds)&&seconds>=0&&state.seekRevision===revision){state.budget?.seekReady({position:Math.round(seconds*1000),paused:state.mediaPaused});emit(state,{type:'playback/seek',position:Math.round(seconds*1000)});}
           }).catch(()=>{});
         }
         if(event.event==='playback-restart'&&!state.ready) {
@@ -759,7 +759,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.budget=createPlaybackBudget({torrent:!!candidate.infoHash,onTimeout:reason=>{
       if(state.stopped||current!==state)return;
       emit(state,{type:'playback/recovery-needed',reason});
-      void fail(state,reason==='startup'?'انتهت مهلة بدء المصدر؛ نجرب مصدرًا آخر':'توقف تقدم الفيديو؛ نجرب مصدرًا آخر');
+      void fail(state,reason==='startup'?'انتهت مهلة بدء المصدر؛ اختر سيرفرًا آخر':reason==='seek'?'لم يصل المقطع المطلوب؛ أعد المحاولة أو اختر سيرفرًا آخر':'توقف تقدم الفيديو؛ اختر سيرفرًا آخر');
     }});
     try{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
@@ -831,7 +831,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function playbackCommand({session,command,value}={}) {
     const state=current;if(!state||state.session!==session||state.stopped)throw new Error('جلسة تشغيل قديمة');
     if(command==='pause'&&typeof value==='boolean')await ipcCommand(state,['set_property','pause',value]);
-    else if(command==='seek'&&Number.isFinite(value)&&value>=0)await ipcCommand(state,['seek',value/1000,'absolute']);
+    else if(command==='seek'&&Number.isFinite(value)&&value>=0){state.seekTarget=value;state.budget?.seek(value);await ipcCommand(state,['seek',value/1000,'absolute']);}
     else if(command==='rate'&&Number.isFinite(value)&&value>=0.95&&value<=1.05)await ipcCommand(state,['set_property','speed',value]);
     else if(command==='speed'&&Number.isFinite(value)&&value>=0.25&&value<=3)await ipcCommand(state,['set_property','speed',value]);
     else if(command==='video-fit'&&['fit','fill'].includes(value))await ipcCommand(state,['set_property','panscan',value==='fill'?1:0]);
@@ -850,8 +850,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     else if(command==='subtitle-size'&&Number.isFinite(value)&&value>=20&&value<=80)await ipcCommand(state,['set_property','sub-font-size',value]);
     else throw new Error('أمر مشغل غير مسموح');
   }
+  // Internal verification only: not registered on the renderer IPC bridge.
+  async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay};}
   async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));current=null;}
-  return {requestResource,startPlayback,stopPlayback,playbackCommand,close};
+  return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {

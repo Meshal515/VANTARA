@@ -1,7 +1,7 @@
-name: Publish verified VANTARA Windows 0.3.10
+name: Publish verified VANTARA Windows 0.3.11
 on:
   push:
-    branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3']
+    branches: ['claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018']
     paths: ['.github/workflows/windows-current-release.yml']
   workflow_dispatch:
 permissions:
@@ -10,8 +10,8 @@ concurrency:
   group: windows-current-release
   cancel-in-progress: false
 env:
-  VERSION: '0.3.10'
-  TAG: 'windows-v0.3.10'
+  VERSION: '0.3.11'
+  TAG: 'windows-v0.3.11'
 jobs:
   checks:
     name: Safety, torrent, rooms, and player tests
@@ -139,7 +139,7 @@ jobs:
             ${{ runner.temp }}/windows-current/*report.json.png
           if-no-files-found: warn
   publish:
-    name: Publish verified Windows 0.3.10
+    name: Publish verified Windows 0.3.11
     needs: [checks,video-host,package,verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -166,7 +166,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "ويندوز 0.3.10: أدوات المشغل تختفي بعد 3 ثوانٍ بلا حركة مثل Stremio (كانت تبقى للأبد)، والشريط العلوي عربي: السهم والعنوان يمينًا والأزرار يسارًا، وسطر «الحلقة N» كالجوال. مع كل ما في 0.3.9. لم يختبر على جهاز المالك. نسخة غير موقعة." \
+            --notes "إصلاح المشغل دون تغيير تصميمه: ثبات قائمة السيرفرات وضغطات توقيت الترجمة أثناء تحديثات الفيديو، إخفاء مراحل التورنت التقنية من واجهة المشاهدة، تغطية الخلفية حتى أول إطار، ومهلة محدودة لإعادة تحميل المقطع بعد الترجيع. يحتفظ الخطأ بالمشغل والحلقة مع زر إعادة المحاولة. يتطلب النشر نجاح تشغيل MPV الحقيقي على ويندوز مع ترجمة عربية وتعديل توقيتها من طبقة الأدوات، ومقطع 4K HEVC 10-bit مؤلف للاختبار. لا يضمن ذلك توفر كل تورنت أو أداء كل جهاز. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
@@ -178,7 +178,7 @@ jobs:
           python3 - <<'PYMANIFEST'
           import os,json,pathlib,hashlib
           version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
-          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إخفاء أدوات المشغل ولوحات صغيرة قرب الأزرار','ترتيب التورنت والتعافي عبر مصدر بديل مع حفظ الموضع','حدود انتظار البداية والتوقف مثل APK']}
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إصلاح ضغطات الترجمة وقفز قائمة السيرفرات','الترجيع دون إغلاق المشغل مع مهلة إعادة تحميل محدودة','فحص فعلي لمقطع 4K HEVC 10-bit على ويندوز']}
           pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
           PYMANIFEST
           if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

@@ -79,7 +79,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
           if(!current(s)||generation!==s.playGeneration)return;
           if(candidate)return engine.play({...s.playArgs,candidate:candidate.id,position});
           emit('playerError',{session:s.id,message:event.message ?? 'تعذّر التشغيل من كل السيرفرات المتاحة'});
-          if(s.together){s.nativeReady=false;s.recoverableError=true;}else await finish(s);
+          s.nativeReady=false;s.recoverableError=true;
         }).catch(()=>{}).finally(()=>{s.recovering=false;});
         return;
       }
@@ -91,7 +91,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         return;
       }
       emit('playerError', { session: s.id, message: event.message ?? 'تعذر تشغيل الفيديو' });
-      if(s.together){s.nativeReady=false;s.recoverableError=true;}else void finish(s);
+      s.nativeReady=false;s.recoverableError=true;
     } else if (event.type === 'playback/closed') void finish(s);
   });
   const sourceCall = (runtime, id, fn) => runtime.addons.sources.call
@@ -289,6 +289,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       }
       return transitionEpisode(s,episode);
     },
+    async retryPlayback({session}){const s=sessionOf(session);return engine.switchSource({session,candidate:s.playArgs.candidate,position:s.progress.position??s.playArgs.position??0});},
     async switchSource({session,candidate,position}){const s=sessionOf(session),c=s.candidates.get(candidate);if(c&&!live(c))throw new Error('انتهت صلاحية الرابط؛ افتح السيرفرات من جديد');if(c&&s.routes.get(c.route)?.state==='FAILED')routeUpdate(s,{...s.routes.get(c.route),state:'READY',reason:null});return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
     presentRoom(args){emit('desktopRoomEntry',args);return true;},
     leavePlayerRoom({session}){const t=sessions.get(session)?.playArgs?.together;if(t?.hub?.session===t?.session)t?.hub?.leave?.();},
@@ -392,7 +393,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
             return engine.play({...args,candidate:next.id});
           }
         }
-        if (current(s) && generation === s.playGeneration) { emit('playerError', { session: s.id, message: error.message ?? 'تعذر تشغيل الفيديو' }); await finish(s, { stop: true }); }
+        if (current(s) && generation === s.playGeneration) { emit('playerError', { session: s.id, message: error.message ?? 'تعذر تشغيل الفيديو' });s.nativeReady=false;s.recoverableError=true; }
         throw error;
       }
     },

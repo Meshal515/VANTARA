@@ -9,7 +9,7 @@ const path=require('node:path');
 const os=require('node:os');
 const {nativeWindowId}=require('./video-host.cjs');
 async function until(fn,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,80));}throw new Error('انتهت مهلة إثبات الفيديو المدمج');}
-async function runEmbeddedVideoSmoke({window,videoHost,native,fixture,reportPath,setServices,publish}) {
+async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixture,reportPath,setServices,publish}) {
   const report={platform:process.platform,realMpv:true,realElectron:true,realEmbeddedChild:false,resized:false,rendererControls:false,cleanup:false};
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vantara-embedded-proof-'));
   const clip=await fs.readFile(fixture),srt=Buffer.from('1\n00:00:00,000 --> 00:00:03,000\nترجمة عربية مؤلفة للتحقق\n');
@@ -39,6 +39,14 @@ async function runEmbeddedVideoSmoke({window,videoHost,native,fixture,reportPath
     await until(()=>events.some(e=>e.type==='playback/pause'&&e.paused===true));
     await services.playbackCommand({session:'embedded-proof',command:'subtitle-load',value:{url:'https://owned.example.com/owned.srt',lang:'ar',label:'العربية'}});
     await until(()=>events.some(e=>e.type==='playback/subtitles'&&e.tracks.some(t=>t.lang==='ar'&&t.selected)));
+    // Exercise the actual transparent overlay → main renderer → native MPV chain.
+    const overlayWindow=await until(()=>playerOverlay?.window());
+    await until(()=>overlayWindow.webContents.executeJavaScript('!!window.VantaraOverlayView'));
+    await overlayWindow.webContents.executeJavaScript(`window.VantaraOverlayView.open.subtitles();[...document.querySelectorAll('button')].find(b=>b.textContent==='الضبط').click();`);
+    await overlayWindow.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5').click()`);
+    await until(async()=>Math.abs((await services.inspectPlayback({session:'embedded-proof'})).subtitleDelay-.5)<.001);
+    report.overlaySubtitleDelay=true;
+    await overlayWindow.webContents.executeJavaScript('window.VantaraOverlayView.closeSheet()');
     const bounds=window.getBounds();window.setSize(bounds.width+160,bounds.height+100);
     proof=await until(async()=>{const s=await videoHost.inspect(),c=s.children.find(c=>/mpv/i.test(c.class));return s.width>report.initial.width&&s.height>report.initial.height&&c?.width===s.width&&c?.height===s.height?s:false;});
     report.resized=true;report.afterResize=proof;

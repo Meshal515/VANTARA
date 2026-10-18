@@ -66,3 +66,18 @@ it('clamps quality popup near the left edge and sends selected source and speed'
   view.open.speed();[...sheet.querySelectorAll('button')].find(b=>b.textContent==='1.5×').click();expect(send).toHaveBeenLastCalledWith({name:'speed',value:1.5});
   view.open.subtitles();view.root.querySelector('.pp-scrim').click();expect(sheet.hidden).toBe(true);
 });
+
+it('keeps server buttons mounted during cloned progress snapshots so scrolling and clicks survive',()=>{
+ const {view}=fixture();const routes=[{id:'r',state:'READY',sourceName:'Torrentio',quality:2160,candidates:['c']}];
+ view.update({ready:true,candidate:'other',routes,routesDone:true});view.open.servers();
+ const body=view.root.querySelector('.pp-sheet__body'),button=body.querySelector('.pp-route');body.scrollTop=320;
+ view.update({position:1000,routes:structuredClone(routes),candidate:'other',ready:true});
+ expect(body.querySelector('.pp-route')).toBe(button);expect(body.scrollTop).toBe(320);
+});
+it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
+ const {view}=fixture();const tracks=[{id:1,label:'العربية',selected:true}];view.update({subtitles:tracks,subtitleDelay:0});view.open.subtitles();
+ [...view.root.querySelectorAll('button')].find(b=>b.textContent==='الضبط').click();
+ const before=[...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5');
+ view.update({position:1000,subtitles:structuredClone(tracks),subtitleDelay:0});
+ expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
+});

@@ -60,7 +60,7 @@ it('يحاول كل مرشح مرة عند فشل الإقلاع ويبلغ ال
   f.source.streams=async()=>[f.stream,{...f.stream,infoHash:'b'.repeat(40)}];
   await prepared(f);const best=await f.engine.best({session:'s'});
   await expect(f.engine.play({session:'s',candidate:best.candidate,position:12000})).rejects.toThrow('فشل الإقلاع');
-  expect(f.starts).toHaveLength(2);expect(errors).toHaveLength(1);expect(f.release()).toBe(1);
+  expect(f.starts).toHaveLength(2);expect(errors).toHaveLength(1);expect(f.release()).toBe(0);await f.engine.closeSession({session:'s'});expect(f.release()).toBe(1);
 });
 it('يتجاهل المرشحين منتهية الصلاحية عند اختيار الأفضل', async () => {
   const f=fixture();f.source.streams=async()=>[{...f.stream,expiresAt:Date.now()-1},{...f.stream,infoHash:'b'.repeat(40),expiresAt:Date.now()+60000}];
@@ -137,7 +137,7 @@ it('يعرض خطأ native start في حدث واضح ويعيد الخطأ لل
   const best = await f.engine.best({ session: 's' });
   await expect(f.engine.play({ session: 's', candidate: best.candidate })).rejects.toThrow('تعذر إقلاع المشغل');
   expect(errors).toMatchObject([{ session: 's', message: 'تعذر إقلاع المشغل' }]);
-  await expect(f.engine.play({ session: 's', candidate: 'unknown' })).rejects.toThrow('الجلسة');
+  await expect(f.engine.play({ session: 's', candidate: 'unknown' })).rejects.toThrow('المرشح');await f.engine.closeSession({session:'s'});
 });
 it('يبقي تورنت خارج core Android ويستعيد registry من التخزين الدائم', async () => {
   const data = new Map(), urls = [];
@@ -381,4 +381,10 @@ it('reapplies local subtitle appearance and speed after changing source',async()
  await f.engine.playerCommand({session:'s',command:'subtitle-size',value:46});await f.engine.playerCommand({session:'s',command:'speed',value:1.5});commands.length=0;
  await f.engine.switchSource({session:'s',candidate:choice.candidate,position:5000});f.emit({type:'playback/ready',session:'s'});await Promise.resolve();
  expect(commands).toContainEqual({session:'s',command:'subtitle-size',value:46});expect(commands).toContainEqual({session:'s',command:'speed',value:1.5});await f.engine.closeSession({session:'s'});
+});
+it('keeps failed standalone playback in the player so a 4K source can be retried without losing the episode',async()=>{
+ const f=fixture();await prepared(f);const best=await f.engine.best({session:'s'});await f.engine.play({session:'s',candidate:best.candidate,episode:1,position:1800000});
+ f.emit({type:'playback/progress',session:'s',position:1810000,duration:7200000});f.emit({type:'playback/error',session:'s',message:'لم يصل المقطع'});f.emit({type:'playback/closed',session:'s'});await Promise.resolve();
+ expect((await f.engine.playerState({session:'s'})).position).toBe(1810000);expect(f.release()).toBe(0);
+ await f.engine.retryPlayback({session:'s'});expect(f.starts.at(-1).position).toBe(1810000);await f.engine.closeSession({session:'s'});
 });
