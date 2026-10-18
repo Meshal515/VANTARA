@@ -480,8 +480,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!options.signal && (path === '/v1/ops' || path.startsWith('/v1/sync?'))) {
       return withSyncDeadline((signal) => request(path, { ...options, signal }, allowRefresh));
     }
+    // Tie every response to the account and session that initiated the request.
+    // A delayed 410 from a deleted account must never tombstone the next account
+    // if the user switched profiles while the fetch was in flight.
+    const requestUserId = user?.userId ?? null;
+    const requestToken = token;
+    const requestGeneration = sessionGeneration;
     const headers = { ...(options.headers ?? {}) };
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (requestToken) headers.authorization = `Bearer ${requestToken}`;
     if (options.body) headers['content-type'] = 'application/json';
     const response = await fetch(`${baseUrl}${path}`, {
       ...options,
@@ -509,11 +515,26 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       throw error;
     }
 
-    if (response.status === 410 && user?.userId && !deletingHere) {
-      // الخادم يقول: هذا الحساب حُذف نهائيًا (توكن قديم). المرآة تعرف، والتطبيق يخرج
-      mirror.accounts = { ...(mirror.accounts ?? {}), [user.userId]: { ...(mirror.accounts?.[user.userId] ?? { user_id: user.userId }), lifecycle: 'DELETED' } };
-      valuesCache = new Map();
-      emit(['accounts']);
+    if (response.status === 410 &&
+        requestUserId &&
+        user?.userId === requestUserId &&
+        token === requestToken &&
+        sessionGeneration === requestGeneration &&
+        !deletingHere) {
+      // 410 alone means "Gone", not necessarily "account deleted". Only a
+      // definitive tombstone for THIS unchanged session may log out its owner.
+      const body = await response.clone().json().catch(() => null);
+      if (body?.error === 'account_deleted' && body?.state === 'DELETED') {
+        mirror.accounts = {
+          ...(mirror.accounts ?? {}),
+          [requestUserId]: {
+            ...(mirror.accounts?.[requestUserId] ?? { user_id: requestUserId }),
+            lifecycle: 'DELETED',
+          },
+        };
+        valuesCache = new Map();
+        emit(['accounts']);
+      }
     }
     if (!response.ok) {
       const error = new Error(`http_${response.status}`);
