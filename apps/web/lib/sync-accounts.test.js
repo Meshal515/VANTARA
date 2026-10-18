@@ -273,6 +273,58 @@ describe('accounts', () => {
     expect(sync.accountState).toBe('ACTIVE');
   });
 
+
+  it('does not sign out from an old DELETED mirror when the live account is ACTIVE', async () => {
+    local.setItem('vantara.token', 'valid-token');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.cursor', '12');
+    local.setItem('vantara.mirror', JSON.stringify({ accounts: { u1: { user_id: 'u1', lifecycle: 'DELETED' } } }));
+    local.setItem('vantara.queue', JSON.stringify([{ opId: 'pending-1', kind: 'progress.save', payload: {}, at: 1 }]));
+    const sync = await loadSync(vi.fn(async (url) => {
+      if (String(url).endsWith('/v1/accounts')) return jsonResponse({ content: [{ userId: 'u1', username: 'dahmi' }], limit: 10 });
+      return jsonResponse({ cursor: 0, more: false, changes: {} });
+    }));
+    expect(sync.accountState).toBe('DELETED');
+    expect(await sync.verifyDeletedAccount()).toBe('active');
+    expect(sync.signedIn).toBe(true);
+    expect(sync.accountState).toBe('ACTIVE');
+    expect(local.getItem('vantara.token')).toBe('valid-token');
+    expect(local.getItem('vantara.queue')).toContain('pending-1');
+  });
+
+  it('requires an explicit authenticated DELETED tombstone, not absence or an offline error', async () => {
+    local.setItem('vantara.token', 'valid-token');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.mirror', JSON.stringify({ accounts: { u1: { user_id: 'u1', lifecycle: 'DELETED' } } }));
+    let result = jsonResponse({ error: 'pin_required' }, 401);
+    const sync = await loadSync(vi.fn(async (url) => {
+      if (String(url).endsWith('/v1/accounts')) return jsonResponse({ content: [], limit: 10 });
+      return result;
+    }));
+    expect(await sync.verifyDeletedAccount()).toBe('unknown');
+    expect(sync.signedIn).toBe(true);
+    result = jsonResponse({ error: 'account_deleted', state: 'DELETED' }, 410);
+    expect(await sync.verifyDeletedAccount()).toBe('deleted');
+    expect(sync.signedIn).toBe(true); // Only the caller may initiate sign-out.
+  });
+
+  it('a successful sign-in overrides an old deletion tombstone without dropping pending writes', async () => {
+    local.setItem('vantara.token', 'expired-token');
+    local.setItem('vantara.user', JSON.stringify(ME));
+    local.setItem('vantara.mirror', JSON.stringify({ accounts: { u1: { user_id: 'u1', lifecycle: 'DELETED' } } }));
+    local.setItem('vantara.queue', JSON.stringify([{ opId: 'pending-2', kind: 'progress.save', payload: {}, at: 1 }]));
+    const sync = await loadSync(vi.fn(async (url) => {
+      if (String(url).endsWith('/v1/session')) {
+        return jsonResponse({ token: 'new-token', user: { ...ME, pinDigits: null } });
+      }
+      return jsonResponse({ cursor: 0, more: false, changes: {} });
+    }));
+    await sync.signIn('u1');
+    expect(sync.accountState).toBe('ACTIVE');
+    expect(sync.signedIn).toBe(true);
+    expect(local.getItem('vantara.queue')).toContain('pending-2');
+  });
+
   it('waits for the server deadline before signing out', async () => {
     local.setItem('vantara.token', 't');
     local.setItem('vantara.user', JSON.stringify(ME));
