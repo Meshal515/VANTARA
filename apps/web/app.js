@@ -22,6 +22,7 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
+import { canManageDangerZone } from './lib/identity.js';
 import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
@@ -1676,6 +1677,8 @@ async function screenSettings() {
   const body = el('div', 'page__body');
 
   const current = endpoints();
+  // The account-less first-run recovery screen still needs server setup.
+  const mayConfigureServer = () => canManageDangerZone(sync) || (!sync.user && !syncConfigured());
   const form = el('form', 'form');
 
   const rows = [
@@ -1702,12 +1705,13 @@ async function screenSettings() {
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (!mayConfigureServer()) return;
     setEndpoints({ sync: inputs.get('sync').value.trim(), api: inputs.get('api').value.trim() });
     note.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
     // العنوانان يُقرآن مرة عند الإقلاع، فالتغيير يحتاج إعادة تحميل
     setTimeout(() => window.location.reload(), 400);
   });
-  body.append(form);
+  if (mayConfigureServer()) body.append(form);
 
   const facts = el('div', 'list');
   const version = appVersion();
@@ -1734,10 +1738,11 @@ async function screenSettings() {
   }
   body.append(facts);
 
-  if (health.quarantined > 0) {
+  if (health.quarantined > 0 && canManageDangerZone(sync)) {
     const retry = el('button', 'btn btn--ghost', 'إعادة محاولة المعزولات');
     retry.type = 'button';
     retry.addEventListener('click', () => {
+      if (!canManageDangerZone(sync)) return;
       const count = sync.retryQuarantined();
       retry.disabled = true;
       retry.textContent = `أُعيدت ${count} عملية للطابور`;
@@ -1787,16 +1792,19 @@ async function screenSettings() {
   }
   body.append(notifications);
 
-  const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
-  rebuild.type = 'button';
-  rebuild.addEventListener('click', async () => {
-    rebuild.disabled = true;
-    rebuild.textContent = 'جارٍ إعادة البناء…';
-    // الطابور لا يُمسّ: الكتابات غير المرسلة ليست جزءًا من المرآة
-    await sync.resync();
-    await go({ name: 'settings' });
-  });
-  body.append(rebuild);
+  if (canManageDangerZone(sync)) {
+    const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
+    rebuild.type = 'button';
+    rebuild.addEventListener('click', async () => {
+      if (!canManageDangerZone(sync)) return;
+      rebuild.disabled = true;
+      rebuild.textContent = 'جارٍ إعادة البناء…';
+      // الطابور لا يُمسّ: الكتابات غير المرسلة ليست جزءًا من المرآة
+      await sync.resync();
+      await go({ name: 'settings' });
+    });
+    body.append(rebuild);
+  }
 
   const force = el('button', 'btn btn--ghost', 'مزامنة الآن');
   force.type = 'button';
