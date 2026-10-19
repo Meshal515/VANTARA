@@ -38,7 +38,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   }
   panel.append(top, stage, controls, end); overlay.append(panel); document.body.append(overlay);
   let destroyed = false, ended = false, sources = [], index = -1, current = null, hls = null, sourceLease = null, blobLease = null, loadVersion = 0, fallbackTimer = null, boundaryTimer = null, discovery = null;
-  let trimmed = moment.trimmed, saving = false, fallbackBlob = false;
+  let trimmed = moment.trimmed, saving = false, fallbackBlob = false, nativePlayback = false;
   const nativeTried = new Set(), prepared = new Map();
   const duration = (moment.endMs - moment.startMs) / 1000;
   const start = () => trimmed ? 0 : moment.startMs / 1000;
@@ -60,7 +60,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
       source = { ...source, ...await ready, prepare: undefined };
     }
     if (destroyed || version !== loadVersion) return;
-    current = source; trimmed = Boolean(source.clipped || source.trimmed || moment.mediaKey && source.ownedClip);
+    current = source; nativePlayback = false; trimmed = Boolean(source.clipped || source.trimmed || moment.mediaKey && source.ownedClip);
     const url = source.clipped && String(source.url).startsWith('blob:') ? source.url : safeMediaUrl(source.url);
     if (!url) throw new Error('Source needs native playback');
     if (Object.keys(source.headers ?? {}).length && !source.session) throw new Error('Source needs native request headers');
@@ -79,7 +79,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     const version = ++loadVersion;
     if (current && playNative && current.nativeCandidate && !nativeTried.has(current.candidate ?? current.url)) {
       nativeTried.add(current.candidate ?? current.url);
-      try { const result = await playNative({ row, source: current }); if (destroyed || version !== loadVersion) return; if (result !== false && result?.ok !== false) { say(''); complete(); return; } } catch {}
+      try { const result = await playNative({ row, source: current }); if (destroyed || version !== loadVersion) return; if (result !== false && result?.ok !== false) { nativePlayback = true; say(''); complete(); return; } } catch {}
     }
     if (destroyed || version !== loadVersion) return;
     index++;
@@ -118,7 +118,19 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   video.onseeked = armBoundary; video.onratechange = armBoundary; video.onpause = () => clearTimeout(boundaryTimer);
   toggle.onclick = () => { if (ended) replay(); else if (video.paused) void play(); else { video.pause(); toggle.textContent = 'تشغيل'; } };
   progress.oninput = () => { ended = false; end.hidden = true; video.currentTime = start() + Number(progress.value); paint(); };
-  function replay() { ended = false; end.hidden = true; video.currentTime = start(); if (hls) hls.startLoad(start()); void play(); }
+  async function replay() {
+    ended = false; end.hidden = true;
+    if (nativePlayback && playNative) {
+      const version = ++loadVersion; say('نجهّز اللقطة…');
+      try {
+        const result = await playNative({ row, source: current });
+        if (destroyed || version !== loadVersion) return;
+        say(result === false || result?.ok === false ? 'تعذّرت إعادة اللقطة. حاول مرة أخرى.' : ''); complete();
+      } catch { if (!destroyed && version === loadVersion) { say('تعذّرت إعادة اللقطة. حاول مرة أخرى.'); complete(); } }
+      return;
+    }
+    video.currentTime = start(); if (hls) hls.startLoad(start()); void play();
+  }
   actions.replay.onclick = replay;
   actions.episode.onclick = () => { destroy(); onEpisode?.(row); };
   actions.work.onclick = () => { destroy(); onWork?.(row); };
