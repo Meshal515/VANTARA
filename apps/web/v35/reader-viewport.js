@@ -39,9 +39,29 @@ export function buildViewportCapture({ viewport, scroll, toolbar, tray, pages, p
       dest: box(clipped.left - bounds.left, clipped.top - bounds.top, clipped.width, clipped.height),
     };
   });
+  // A complete single frame should be saved at its source resolution, not
+  // rendered to a phone-sized screenshot with black letterboxing. In contrast,
+  // a tall or zoomed/scroll-clipped manhwa must capture ONLY visible pixels.
+  // Do not try to allocate a very large native canvas in Android WebView.
+  if (draws.length === 1) {
+    const draw = draws[0], page = pages[draw.index], src = draw.source;
+    const tolerance = 0.5; // float-rounding between CSS and source pixels
+    const whole = Math.abs(src.left) <= tolerance &&
+      Math.abs(src.top) <= tolerance &&
+      Math.abs(src.right - page.naturalWidth) <= tolerance &&
+      Math.abs(src.bottom - page.naturalHeight) <= tolerance;
+    if (whole && page.naturalWidth * page.naturalHeight <= 24_000_000) {
+      const original = box(0, 0, page.naturalWidth, page.naturalHeight);
+      return {
+        mode: 'original', bounds: original,
+        width: page.naturalWidth, height: page.naturalHeight,
+        draws: [{ index: draw.index, source: original, dest: original }],
+      };
+    }
+  }
   // Bound memory on high-DPI tablets/desktops; never allocate the full manhwa height.
   const scale = Math.min(Math.max(1, Number(pixelRatio) || 1), 3, Math.sqrt(8_000_000 / (bounds.width * bounds.height)));
-  return { bounds, width: Math.max(1, Math.floor(bounds.width * scale)), height: Math.max(1, Math.floor(bounds.height * scale)), draws };
+  return { mode: 'viewport', bounds, width: Math.max(1, Math.floor(bounds.width * scale)), height: Math.max(1, Math.floor(bounds.height * scale)), draws };
 }
 
 /** Draw synchronously at the click's scroll position, before any async storage work. */
