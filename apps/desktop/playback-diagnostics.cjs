@@ -2,10 +2,10 @@
 // Only fixed stage names, numeric metrics and fixed classifications leave here.
 const numeric=new Set(['fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId']);
 const modes=new Set(['cold','replay-descriptor','cache','torrent','network','decoded','render-unmeasured']);
-const traceStages=new Set(['source-selected','http-range','http-first-byte','range-first-byte','first-useful-piece','engine-start','engine-ready','magnet-metadata-start','magnet-metadata-complete','file-selected','torrent-sample','peer-connected','player-start','player-ipc-ready','decoder-output','container-metadata-ready','stable-playback','replay-lookup']);
+const traceStages=new Set(['source-selected','http-range','http-headers','http-first-byte','range-first-byte','first-useful-piece','engine-start','engine-ready','magnet-metadata-start','magnet-metadata-complete','file-selected','torrent-sample','peer-connected','player-start','player-ipc-ready','decoder-output','container-metadata-ready','stable-playback','replay-lookup']);
 const lifecycle=new Set(['playback/preparing','playback/ready','playback/closed','playback/error','playback/retrying','playback/recovery-needed']);
 const stages=new Set(['engine-start','metadata','file-selected','downloading','player-start','first-frame']);
-const reasons=new Set(['startup','seek','stall']);
+const reasons=new Set(['startup','seek','stalled']);
 function errorClass(event){
  if(event.code==='START_FAILED')return 'start-failed';
  const message=typeof event.message==='string'?event.message.slice(0,2000):'';
@@ -20,16 +20,17 @@ function errorClass(event){
 }
 function createPlaybackDiagnostics({version,platform,clock=()=>performance.now()}={}){
  const metadata={format:'vantara-playback-diagnostics-v1',version:/^\d+\.\d+\.\d+$/.test(version)?version:'unknown',platform:['win32','linux','darwin'].includes(platform)?platform:'unknown'};
- let session=null,started=0,status='none',source=null,events=[];
+ let session=null,started=0,status='none',source=null,events=[],prepared=false;
  function begin(id,candidate={}){
   if(typeof id!=='string'||!id||id.length>200)return;
-  session=id;started=clock();status='starting';events=[];
+  session=id;started=clock();status='starting';events=[];prepared=false;
   const hash=typeof candidate.infoHash==='string'?candidate.infoHash.toLowerCase():'';
   source=/^[a-f0-9]{40}$/.test(hash)?{kind:'torrent',infoHash:hash,...(Number.isSafeInteger(candidate.fileIdx)&&candidate.fileIdx>=0?{fileIdx:candidate.fileIdx}:{})}:{kind:'direct'};
  }
  function capture(event){
   if(!event||!session||event.session!==session)return;
-  if((status==='closed'||status==='error')&&event.type!=='playback/closed')return;
+  const replacing=status==='closed'&&!prepared&&event.type==='playback/preparing';
+  if((status==='closed'||status==='error')&&event.type!=='playback/closed'&&!replacing)return;
   const row={type:event.type,elapsedMs:Math.max(0,Math.round(clock()-started))};
   if(event.type==='playback/diagnostic'){
    if(!traceStages.has(event.stage))return;
@@ -41,7 +42,12 @@ function createPlaybackDiagnostics({version,platform,clock=()=>performance.now()
    if(!stages.has(event.stage))return;
    row.stage=event.stage;
   }else if(!lifecycle.has(event.type))return;
-  if(event.type==='playback/preparing')status='preparing';
+  if(event.type==='playback/preparing'){
+   // Source replacement reuses the UI session: services closes the preceding
+   // source after source-selected but before this new preparing event.
+   if(replacing)events=events.filter(row=>row.type!=='playback/closed');
+   prepared=true;status='preparing';
+  }
   if(event.type==='playback/ready')status='ready';
   if(event.type==='playback/closed')status='closed';
   if(event.type==='playback/error'){status='error';row.errorClass=errorClass(event);}
