@@ -10,3 +10,17 @@ it('saves through the device registered candidate without sending URLs to the ex
  await opts.saveVideo({row,source:{session:'s',candidate:'c',url:'https://sensitive.example/?token=x'},startMs:10000,endMs:30000,filename:'clip.mp4'});
  expect(engine.exportMoment).toHaveBeenCalledWith({session:'s',candidate:'c',startMs:10000,endMs:30000,filename:'clip.mp4',action:'save'});
 });
+it('owns and releases device sessions resolved for an attached-source save',async()=>{
+ let opts;const engine={findWork:vi.fn(async()=>({copies:[{}]})),prepare:vi.fn(async()=>({session:'owned'})),best:vi.fn(async()=>({candidate:'c'})),momentCandidates:vi.fn(async()=>[{id:'c',url:'https://own.example/video.mp4'}]),closeSession:vi.fn(async()=>{}),exportMoment:vi.fn(async()=>({saved:true}))};
+ const c=createMomentController({engine,native:()=>true,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ await opts.saveVideo({row,source:{url:'https://sender.example/video.mp4'},startMs:10000,endMs:30000,filename:'clip.mp4'});
+ c.destroy();await Promise.resolve();expect(engine.closeSession).toHaveBeenCalledWith('owned');
+});
+it('cancels a late local-source lookup when its viewer has been destroyed',async()=>{
+ let opts,ready;const engine={findWork:vi.fn(async()=>({copies:[{}]})),prepare:vi.fn(()=>new Promise(resolve=>{ready=resolve;})),best:vi.fn(async()=>({candidate:'c'})),momentCandidates:vi.fn(async()=>[{id:'c',url:'https://own.example/video.mp4'}]),closeSession:vi.fn(async()=>{}),exportMoment:vi.fn(async()=>({saved:true}))};
+ const c=createMomentController({engine,native:()=>true,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ const save=opts.saveVideo({row,source:{url:'https://sender.example/video.mp4'},startMs:10000,endMs:30000,filename:'clip.mp4'}).catch(e=>e.name);
+ for(let i=0;i<10&&!ready;i++)await Promise.resolve();c.destroy();ready({session:'late'});
+ expect(await save).toBe('AbortError');for(let i=0;i<10;i++)await Promise.resolve();
+ expect(engine.exportMoment).not.toHaveBeenCalled();expect(engine.closeSession).toHaveBeenCalledWith('late');
+});
