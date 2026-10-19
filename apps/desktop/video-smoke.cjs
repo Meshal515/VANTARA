@@ -78,17 +78,21 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     report.stage='overlay-escape';await key(overlayWindow,'Escape');await until(()=>!window.isFullScreen());await until(aligned);report.overlayEscapeRestores=true;
     report.stage='main-f11';await key(window,'F11');await until(()=>window.isFullScreen());await until(aligned);report.mainF11=true;
     report.stage='overlay-f11';await key(overlayWindow,'F11');await until(()=>!window.isFullScreen());await until(aligned);report.overlayF11=true;
-    // Deliver Win32 key messages to the real mpv child, which must use input.conf
-    // and return through the production IPC/renderer fullscreen action.
-    const nativeKey=(hwnd,key)=>{
-      assert(/^\d{1,20}$/.test(hwnd));
-      const script=`Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class VantaraProofInput{[DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);}'
-$h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMessage($h,256,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1};if(-not [VantaraProofInput]::PostMessage($h,257,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1}`;
-      require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:10000});
-    };
-    const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
-    report.stage='native-f11';nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
-    report.stage='native-escape';nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
+    // Exercise mpv's own input.conf through its real IPC socket. Windows CI
+    // synthetic OS injection could not focus the child HWND deterministically;
+    // do NOT present this as a physical keyboard/hardware focus test.
+    const actionsBefore=events.filter(e=>e.type==='playback/action').length;
+    report.stage='mpv-binding-f11';
+    await services.smokeMpvBinding({session:'embedded-proof',key:'F11'});
+    await until(()=>events.some(e=>e.type==='playback/action'&&e.action==='fullscreen'));
+    await until(()=>window.isFullScreen());await until(aligned);
+    report.mpvMappedF11=true;
+    report.stage='mpv-binding-escape';
+    await services.smokeMpvBinding({session:'embedded-proof',key:'ESC'});
+    await until(()=>events.filter(e=>e.type==='playback/action').length>=actionsBefore+2);
+    await until(()=>!window.isFullScreen());await until(aligned);
+    report.mpvMappedEscape=true;
+    report.physicalNativeKeyboardVerified=false;
     assert(await window.webContents.executeJavaScript('!!document.querySelector(".desktop-player")'));
     report.rendererControls=true;report.arabicSubtitleSelected=true;
     // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
@@ -114,7 +118,7 @@ $h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMess
     assert(!events.some(e=>e.type==='playback/error'));
     report.stage='complete';report.transport='owned MP4/subtitle fixture; real HWND/video/renderer/IPC';
   }catch(error){report.error=error.message;throw error;}
-  finally{report.playbackEvents=events.filter(e=>!['playback/progress','playback/state'].includes(e.type)).slice(-80).map(({type,stage,message,embedded})=>({type,stage,message,embedded}));await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
+  finally{report.nativeHost=videoHost.snapshot();report.playbackEvents=events.filter(e=>!['playback/progress','playback/state'].includes(e.type)).slice(-80).map(({type,stage,message,embedded})=>({type,stage,message,embedded}));await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
   return report;
 }
 module.exports={runEmbeddedVideoSmoke};

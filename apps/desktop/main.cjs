@@ -61,6 +61,20 @@ const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
+  // MPV's native HWND cannot dispatch Electron renderer keyboard shortcuts.
+  // Route its verified input.conf script messages to the real main-window
+  // fullscreen controller and native-player lifecycle.
+  if(event.type==='playback/action' && event.session===playbackSession){
+    if(event.action==='fullscreen')fullscreenController?.toggle();
+    else if(event.action==='close'){
+      // Escape exits fullscreen first; outside fullscreen it closes playback.
+      // Closing on the first Escape would destroy the live native video HWND
+      // while the overlay and renderer still expect a valid session.
+      if(window?.isFullScreen())fullscreenController?.set(false);
+      else void services?.stopPlayback({session:event.session}).catch(()=>{});
+    }
+    return;
+  }
   if(event.type==='playback/preparing')playbackSession=event.session;
   if(['playback/closed','playback/error'].includes(event.type)&&event.session===playbackSession)playbackSession=null;
   if (window && !window.isDestroyed()) window.webContents.send('vantara:event', event);

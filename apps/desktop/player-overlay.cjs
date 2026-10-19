@@ -48,7 +48,7 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     const parent = parentAlive();
     if (!overlay || overlay.isDestroyed() || !parent) return;
     const bounds = !viewport || viewport.hidden || parent.isMinimized?.() ? null : overlayBounds(viewport, parent.getContentBounds());
-    if (!bounds) { if (overlay.isVisible()) overlay.hide(); return; }
+    if (!bounds) { onFullscreen(false, overlay); if (overlay.isVisible()) overlay.hide(); return; }
     // Transparent Electron windows only emulate fullscreen with SetBounds.
     // Mark this owned HWND through the Windows shell so the taskbar follows it.
     onFullscreen(parent.isFullScreen?.() === true, overlay);
