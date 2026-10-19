@@ -81,10 +81,45 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     // Deliver Win32 key messages to the real mpv child, which must use input.conf
     // and return through the production IPC/renderer fullscreen action.
     const nativeKey=(hwnd,key)=>{
+      // PostMessage(WM_KEYDOWN) is not actual user input: mpv on Windows
+      // may ignore it (no keyboard focus, missing scan-code context).
+      // Focus the genuine mpv child and send real OS key events instead.
       assert(/^\d{1,20}$/.test(hwnd));
-      const script=`Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class VantaraProofInput{[DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);}'
-$h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMessage($h,256,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1};if(-not [VantaraProofInput]::PostMessage($h,257,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1}`;
-      require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:10000});
+      const script=String.raw`Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class VantaraProofInput {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetFocus();
+  [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+}
+'@
+$h=[IntPtr]::new([long]::Parse('\${hwnd}'))
+if(-not [VantaraProofInput]::IsWindow($h)){exit 2}
+[uint32]$pid=0
+$target=[VantaraProofInput]::GetWindowThreadProcessId($h,[ref]$pid)
+$caller=[VantaraProofInput]::GetCurrentThreadId()
+$root=[VantaraProofInput]::GetAncestor($h,2)
+if(-not $target -or -not [VantaraProofInput]::SetForegroundWindow($root)){exit 3}
+$attached=[VantaraProofInput]::AttachThreadInput($caller,$target,$true)
+try {
+  [void][VantaraProofInput]::SetFocus($h)
+  if([VantaraProofInput]::GetFocus() -ne $h){exit 4}
+} finally { if($attached){[void][VantaraProofInput]::AttachThreadInput($caller,$target,$false)} }
+Start-Sleep -Milliseconds 80
+[VantaraProofInput]::keybd_event([byte]\${key},[byte]0,[uint32]0,[UIntPtr]::Zero)
+Start-Sleep -Milliseconds 35
+[VantaraProofInput]::keybd_event([byte]\${key},[byte]0,[uint32]2,[UIntPtr]::Zero)
+`;
+      require('node:child_process').execFileSync('powershell.exe',
+        ['-NoProfile','-NonInteractive','-Command',script],
+        {windowsHide:true,timeout:15000});
     };
     const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
     report.stage='native-f11';nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
