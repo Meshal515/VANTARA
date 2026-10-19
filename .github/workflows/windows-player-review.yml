@@ -2,7 +2,7 @@ name: Review Windows player startup and fullscreen
 on:
   push:
     branches: ['codex/windows-torrent-startup-20261019', 'codex/windows-player-fullscreen-20261019', 'chatgpt/windows-torrent-f11-integrated-20261019']
-    paths: ['apps/desktop/**', 'apps/web/desktop/**', 'tools/build-video-host.ps1', '.github/workflows/windows-player-review.yml']
+    paths: ['apps/desktop/**', 'apps/web/desktop/**', 'tools/build-video-host.ps1', '.github/workflows/windows-player-review.yml', '.github/workflows/windows-torrent-benchmark-integration.yml']
   workflow_dispatch:
 permissions:
   contents: read
