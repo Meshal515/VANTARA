@@ -324,9 +324,9 @@ class PlayerActivity : Activity() {
         scope.launch {
             // الملف كله عندنا: نعرضه بأنفسنا، فلا يُعاد تحضير الفيديو (كان يعيد تحميله، والتورنت يعيد الاتصال)
             val cues = withContext(Dispatchers.IO) {
-                runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-${track.id}")) }.getOrNull()
+                runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-$selection", fallbackCharset = if (track.lang == "ar") "windows-1256" else null)) }.getOrNull()
             }
-            if (cues.isNullOrEmpty()) { if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
+            if (cues.isNullOrEmpty()) { if (addonSubtitles.current(generation, selection) && current?.id == c.id) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
             if (!addonSubtitles.current(generation, selection) || current?.id != c.id) return@launch
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
             main.removeCallbacksAndMessages(embeddedCues)
