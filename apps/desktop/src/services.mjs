@@ -22,6 +22,9 @@ const systemLookup = host => dns.lookup(host, { all: true, verbatim: true });
 const fragmentHosts = new Set();
 
 const secret = () => randomBytes(24).toString('hex');
+// Local diagnostic classifications; never retain MPV's arbitrary file_error text.
+const playerEndReasons = new Map([['eof',1],['stop',2],['quit',3],['error',4],['redirect',5]]);
+const playerFileErrors = new Map([['loading failed',1],['unrecognized file format',2],['audio output initialization failed',3],['video output initialization failed',4],['not supported',5]]);
 export function validateResourceRequest({url,method='GET',body=null,headers={},binary=false,follow=true}={}) {
   const checked=publicURL(url);
   if(!['GET','POST'].includes(method)||body!=null&&(typeof body!=='string'||Buffer.byteLength(body)>65536)||method==='GET'&&body!=null)throw new Error('طلب المصدر غير صالح');
@@ -543,6 +546,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function engine(state,candidate) {
     state.trace.record('engine-start');
     emit(state,{type:'playback/stage',stage:'engine-start'});
+    const cacheSelectionAt=performance.now();state.trace.record('cache-selection-start');
     // An owned replay descriptor already identifies the previous usable volume.
     // Check its current headroom first; avoid a PowerShell drive enumeration on
     // every replay or app restart. A removed/full volume still uses normal selection.
@@ -551,6 +555,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       try{const root=state.replayEntry.descriptor.root,available=await cacheFreeBytes(root);if(available>=512n*1024n*1024n)chosen={root,available};}catch{}
     }
     chosen??=await selectTorrentCacheRoot({userData,platform});assertSession(state);
+    state.trace.record('cache-selection-complete',{waitMs:performance.now()-cacheSelectionAt});
     state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
     const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
@@ -651,7 +656,17 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
    */
   async function addTorrent(state,options,extra) {
     const w=state.win,base=`/torrents?only_files=${w.index}${extra}`;
-    const request=peers=>localJSON(state.api,peers.length?`${base}&initial_peers=${encodeURIComponent(peers.join(','))}`:base,{...options,body:w.magnet,timeout:120000});
+    const request=async peers=>{
+      const at=performance.now();state.trace.record('managed-add-start',{fileIdx:w.index});
+      try{
+        const added=await localJSON(state.api,peers.length?`${base}&initial_peers=${encodeURIComponent(peers.join(','))}`:base,{...options,body:w.magnet,timeout:120000});
+        state.trace.record('managed-add-complete',{waitMs:performance.now()-at});return added;
+      }catch(error){
+        // 1 timeout, 2 refused, 3 reset/broken pipe, 4 cancelled, 5 HTTP, 6 other.
+        const errorCode=options.signal?.aborted?4:error?.code==='ETIMEDOUT'||error?.message==='انتهت مهلة بيانات التورنت'?1:error?.code==='ECONNREFUSED'?2:['ECONNRESET','EPIPE'].includes(error?.code)?3:Number(error?.status)>=400?5:6;
+        state.trace.record('managed-add-error',{waitMs:performance.now()-at,errorCode,...(Number.isInteger(error?.status)?{statusCode:error.status}:{})});throw error;
+      }
+    };
     if(!w.peers.length)return request([]);
     try{return await request(w.peers);}
     catch(error){if(error?.status!==400)throw error;assertSession(state);w.peers=[];return request([]);}
@@ -771,7 +786,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured'});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
+    const ready=params=>{if(state.ready)return;state.ready=true;state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured',decoderWidth:params.w,decoderHeight:params.h});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
@@ -790,10 +805,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           state.restarted=true;
           ipcCommand(state,['get_property','video-out-params']).then(params=>{
             if(state.stopped)return;
-            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0)ready();
+            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0)ready(params);
             else fail(state,'المصدر لا يوفر إطار فيديو قابلًا للتشغيل؛ قد يكون صوتًا فقط');
           }).catch(()=>{if(!state.stopped)fail(state,'تعذر التحقق من إطار الفيديو في المشغل');});
         }
+        if(event.event==='end-file')state.trace.record('player-end-file',{reasonCode:playerEndReasons.get(event.reason)??0,errorCode:event.file_error==null?0:playerFileErrors.get(event.file_error)??6});
         if(event.event==='end-file'&&event.reason==='eof') {
           emit(state,{type:'playback/closed',...state.progress});cleanup(state).then(()=>{if(current===state)current=null;});
         }
