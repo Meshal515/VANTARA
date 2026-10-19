@@ -91,7 +91,7 @@ export function createAddonRuntime({
           ),
           cacheKey = `${key}@${c.manifest.version}@${c.cacheEpoch}`;
         const signal = args.find(arg => arg && typeof arg === "object" && arg.signal)?.signal;
-        const checkCancelled = () => { if (signal?.aborted) throw new DOMException("ألغي طلب الإضافة", "AbortError"); };
+        const checkCancelled = () => { if (signal?.aborted || registry.list().find(addon => addon.key === key)?.cacheEpoch !== c.cacheEpoch) throw new DOMException("ألغي طلب الإضافة", "AbortError"); };
         const started = Date.now();
         try {
           checkCancelled();
@@ -151,6 +151,8 @@ export function createAddonRuntime({
               .catch(() => {});
           return result;
         } catch (error) {
+          // A pre-reinstall request cannot recreate stale health or cooldown.
+          if (registry.list().find(addon => addon.key === key)?.cacheEpoch !== c.cacheEpoch) throw error;
           if (error.code === "CONFIG_REQUIRED")
             registry.health.configuration(key, cap, runtimeName, Date.now() - started, { version: c.manifest.version, cacheEpoch: c.cacheEpoch });
           else if (error.name === "AbortError" || ["UNSUPPORTED_RESOURCE", "REQUIRED_EXTRA", "INVALID_EXTRA"].includes(error.code))
