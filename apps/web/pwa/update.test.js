@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as update from './update.js';
 const { justUpdated, watchForUpdates } = update;
 import { runMigrations } from '../lib/migrations.js';
@@ -32,14 +32,33 @@ function fakeRegistration() {
 const doc = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} };
 
 describe('PWA update', () => {
-  it('announces a downloaded version once and applies it only when asked', () => {
-    globalThis.localStorage = memoryStorage();
+  afterEach(() => vi.useRealTimers());
+  it('boot watching never checks or announces background workers, even after time and resume', async () => {
+    vi.useFakeTimers();
     const reg = fakeRegistration();
     const ready = [];
+    const visible = [];
+    const doc = { visibilityState: 'visible', addEventListener: (_, fn) => visible.push(fn), removeEventListener() {} };
+    const worker = fakeWorker('installed');
+    reg.waiting = worker;
     const stop = watchForUpdates(reg, { onReady: (apply) => ready.push(apply), nav: { serviceWorker: { controller: {} } }, doc });
-    const worker = fakeWorker('installing');
     reg.found(worker);
-    expect(ready).toHaveLength(0);
+    worker.become('installed');
+    visible.forEach(fn => fn());
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
+    expect(reg.updates).toBe(0);
+    expect(ready).toEqual([]);
+    expect(worker.sent).toEqual([]);
+    stop();
+  });
+
+  it('a manual download announces completion once and applies only on confirmation', async () => {
+    globalThis.localStorage = memoryStorage();
+    const reg = fakeRegistration();
+    const worker = fakeWorker('installing');
+    reg.installing = worker;
+    const ready = [];
+    expect(await update.checkForUpdates(reg, { onReady: apply => ready.push(apply) })).toBe('installing');
     worker.become('installed');
     worker.become('installed');
     expect(ready).toHaveLength(1);
@@ -48,14 +67,6 @@ describe('PWA update', () => {
     expect(worker.sent).toEqual(['skip-waiting']);
     expect(justUpdated(globalThis.localStorage)).toBe(true);
     expect(justUpdated(globalThis.localStorage)).toBe(false);
-    stop();
-  });
-
-  it('checks for a new worker as soon as an existing app starts watching', () => {
-    const reg = fakeRegistration();
-    const stop = watchForUpdates(reg, { onReady() {}, nav: { serviceWorker: { controller: {} } }, doc });
-    expect(reg.updates).toBe(1);
-    stop();
   });
 
   it('manual checking reports a waiting update without activating it', async () => {
@@ -88,17 +99,17 @@ describe('PWA update', () => {
     await expect(update.checkForUpdates(null)).rejects.toThrow('تعذّر الوصول');
   });
 
-  it('notices a changed build after an automatic update on the next launch', () => {
+  it('never announces a changed build without a manual update', () => {
     const storage = memoryStorage();
     expect(justUpdated(storage, 'pwa-old')).toBe(false);
-    expect(justUpdated(storage, 'pwa-new')).toBe(true);
+    expect(justUpdated(storage, 'pwa-new')).toBe(false);
     expect(justUpdated(storage, 'pwa-new')).toBe(false);
   });
 
-  it('shows notes once after upgrading an older installed app that did not record its build', () => {
+  it('does not announce an older installed app upgrade without a manual request', () => {
     const storage = memoryStorage();
     const installed = { nav: { serviceWorker: { controller: {} } } };
-    expect(justUpdated(storage, 'pwa-new', installed)).toBe(true);
+    expect(justUpdated(storage, 'pwa-new', installed)).toBe(false);
     expect(justUpdated(storage, 'pwa-new', installed)).toBe(false);
   });
 
