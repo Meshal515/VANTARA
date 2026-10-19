@@ -11,7 +11,7 @@ test('Windows clipboard contains an actual CF_HDROP file usable by external apps
  const dir=await fs.mkdtemp(join(tmpdir(),'vantara-share-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const file=join(dir,'لحظة owned.mp4');await fs.writeFile(file,'owned clipboard test');
  await run(binary,['--copy-file',file],{windowsHide:true,shell:false});
- const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; @(Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }) | ConvertTo-Json -Compress"],{windowsHide:true,shell:false});
+ const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; @(Get-Clipboard -Format FileDropList | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.FullName } }) | ConvertTo-Json -Compress"],{windowsHide:true,shell:false});
  const value=JSON.parse(stdout.replace(/^\uFEFF/,''));assert.deepEqual(Array.isArray(value)?value:[value],[file]);
 });
 test('bundled Windows MPV encodes the selected owned fixture without a separate ffmpeg executable',{skip:process.platform!=='win32'||!process.env.VANTARA_MPV_BINARY,timeout:30000},async t=>{

@@ -20,13 +20,18 @@ node tools/windows-native-smoke.mjs "$native" (Join-Path $CandidateDir 'native-r
 if($LASTEXITCODE -ne 0){throw 'Native MPV playback failed'}
 node tools/windows-native-smoke.mjs "$native" (Join-Path $CandidateDir 'native-4k-report.json') 'tools/fixtures/vantara-4k-hevc10.mp4'
 if($LASTEXITCODE -ne 0){throw 'Actual 4K HEVC10 MPV playback failed'}
+$env:VANTARA_MPV_BINARY=Join-Path $native 'mpv.exe'
+$env:VANTARA_VIDEO_HOST_BINARY=Join-Path $native 'vantara-video-host.exe'
+node --test apps/desktop/moment-share.test.cjs
+if($LASTEXITCODE -ne 0){throw 'Actual bundled MPV moment encoding or CF_HDROP sharing failed'}
+@{realBundledMpvExport=$true;realFileClipboard=$true;version=$Version} | ConvertTo-Json | Set-Content (Join-Path $CandidateDir 'moment-export-report.json')
 $embeddedReport=Join-Path $CandidateDir 'embedded-report.json'
 $fixture=(Resolve-Path 'android/app/src/androidTest/assets/addon-torrent-proof.mp4').Path
 $p=Start-Process $exe -ArgumentList @("--native-video-smoke-report=`"$embeddedReport`"","--native-video-smoke-fixture=`"$fixture`"") -PassThru
 if(-not $p.WaitForExit(180000)){$p.Kill();throw 'Embedded video timed out'}
 if($p.ExitCode -ne 0){throw "Embedded video exit $($p.ExitCode)"}
 $embedded=Get-Content $embeddedReport -Raw | ConvertFrom-Json
-foreach($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','cleanup')){
+foreach($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','momentComposer','momentHidesNativeVideo','momentLocalExport','momentClipboardShare','momentRestoresNativeVideo','cleanup')){
   if($embedded.$key -ne $true){throw "Embedded proof failed: $key"}
 }
 $bootReport=Join-Path $CandidateDir 'boot-report.json'

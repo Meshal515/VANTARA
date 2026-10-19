@@ -17,7 +17,8 @@ const emit=(name,event)=>{for(const fn of listeners.get(name)||[])fn(event)};
 const engine={
  playerCommand:args=>args.command==='pause'&&coordinator?coordinator.playPause(!args.value):args.command==='seek'&&coordinator?coordinator.seek(args.value):bridge.playbackCommand(args),
  closeSession:args=>{coordinator?.close();return bridge.stopPlayback(args)},roomHub:()=>coordinator?hub:null,
- playerState:async()=>({title:media.title,section:'cinema',media,candidate:'owned',sources:[{id:'owned',label:'فيديو مؤلف للتحقق'}],server:{code:'VANTARA',quality:1080},together:!!coordinator,videoOffsetMs:coordinator?.getVideoOffset()||0}),
+ sendMoment:async()=>true,
+ playerState:async()=>({moment:{work:{ref:'cinema:owned',title:media.title,cover:media.cover},episode:null,friends:[],sourceHints:[]},title:media.title,section:'cinema',media,candidate:'owned',sources:[{id:'owned',label:'فيديو مؤلف للتحقق'}],server:{code:'VANTARA',quality:1080},together:!!coordinator,videoOffsetMs:coordinator?.getVideoOffset()||0}),
  routes:async()=>({done:true,routes:[{id:'owned',state:'READY',sourceId:'owned',sourceName:'VANTARA',server:'فيديو مؤلف',quality:1080,label:'فيديو مؤلف',candidates:[{id:'owned'}]}]}),
  pick:async()=>({candidate:'owned'}),best:async()=>({candidate:'owned'}),switchSource:async()=>{},
  setVideoOffset:({ms})=>coordinator.setVideoOffset(ms),

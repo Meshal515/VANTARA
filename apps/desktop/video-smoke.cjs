@@ -23,7 +23,7 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
   dns.lookup=async(host,opts)=>host==='owned.example.com'?[{address:'93.184.216.34',family:4}]:previousDNS(host,opts);
   https.request=(url,opts,callback)=>new URL(url).hostname==='owned.example.com'?http.request(`http://127.0.0.1:${server.address().port}${new URL(url).pathname}`,{method:opts.method,headers:opts.headers,signal:opts.signal},callback):previousRequest(url,opts,callback);
   const {createDesktopServices}=await import('./src/services.mjs'),events=[];
-  const services=createDesktopServices({userData:dir,binaries:{mpv:path.join(native,'mpv.exe'),rqbit:path.join(native,'rqbit.exe')},videoHost,inputConf:path.join(__dirname,'native-host/input.conf'),onEvent:event=>{events.push(event);publish(event);}});
+  const services=createDesktopServices({userData:dir,binaries:{mpv:path.join(native,'mpv.exe'),rqbit:path.join(native,'rqbit.exe')},videosDir:path.join(dir,'Videos'),shareFile:file=>new Promise((resolve,reject)=>require('node:child_process').execFile(path.join(native,'vantara-video-host.exe'),['--copy-file',file],{windowsHide:true,shell:false,timeout:10000},error=>error?reject(error):resolve())),videoHost,inputConf:path.join(__dirname,'native-host/input.conf'),onEvent:event=>{events.push(event);publish(event);}});
   await setServices(services);
   try{
     await window.loadURL('vantara://app/desktop/video-smoke.html');window.show();window.focus();
@@ -47,6 +47,16 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     await until(async()=>Math.abs((await services.inspectPlayback({session:'embedded-proof'})).subtitleDelay-.5)<.001);
     report.overlaySubtitleDelay=true;
     await overlayWindow.webContents.executeJavaScript('window.VantaraOverlayView.closeSheet()');
+    await overlayWindow.webContents.executeJavaScript('document.querySelector("[data-action=camera]").click()');
+    await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".moment-compose")'));
+    await until(async()=>!(await videoHost.inspect()).visible);report.momentComposer=true;report.momentHidesNativeVideo=true;
+    await window.webContents.executeJavaScript('for(const [bound,value] of [["start",1250],["end",3750]]){const input=document.querySelector(`[data-bound=${bound}]`);input.value=String(value);input.dispatchEvent(new Event("input"));}document.querySelector("[data-compose-action=save]").click();');
+    await until(()=>window.webContents.executeJavaScript('document.querySelector(".mco-status")?.textContent.includes("حُفظ")'));
+    const saved=await services.readMoment({session:'embedded-proof'});assert.equal(saved.mimeType,'video/mp4');assert(Buffer.from(saved.base64,'base64').length>32);report.momentLocalExport=true;
+    await window.webContents.executeJavaScript('document.querySelector("[data-compose-action=share]").click()');
+    await until(()=>window.webContents.executeJavaScript('document.querySelector(".mco-status")?.textContent==="حُفظ ونسخ الملف للمشاركة"'));report.momentClipboardShare=true;
+    await window.webContents.executeJavaScript('document.querySelector(".mco-close").click()');
+    await until(async()=>!await window.webContents.executeJavaScript('!!document.querySelector(".moment-compose")')&&(await videoHost.inspect()).visible);report.momentRestoresNativeVideo=true;
     const bounds=window.getBounds();window.setSize(bounds.width+160,bounds.height+100);
     proof=await until(async()=>{const s=await videoHost.inspect(),c=s.children.find(c=>/mpv/i.test(c.class));return s.width>report.initial.width&&s.height>report.initial.height&&c?.width===s.width&&c?.height===s.height?s:false;});
     report.resized=true;report.afterResize=proof;
