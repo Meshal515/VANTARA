@@ -100,22 +100,23 @@ public static class VantaraProofInput {
   [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
 }
 '@
-$h=[IntPtr]::new([long]::Parse('\${hwnd}'))
+$h=[IntPtr]::new([long]::Parse('${hwnd}'))
 if(-not [VantaraProofInput]::IsWindow($h)){exit 2}
 [uint32]$pid=0
 $target=[VantaraProofInput]::GetWindowThreadProcessId($h,[ref]$pid)
 $caller=[VantaraProofInput]::GetCurrentThreadId()
 $root=[VantaraProofInput]::GetAncestor($h,2)
-if(-not $target -or -not [VantaraProofInput]::SetForegroundWindow($root)){exit 3}
+if(-not $target){exit 3}
 $attached=[VantaraProofInput]::AttachThreadInput($caller,$target,$true)
 try {
+  [void][VantaraProofInput]::SetForegroundWindow($root)
   [void][VantaraProofInput]::SetFocus($h)
   if([VantaraProofInput]::GetFocus() -ne $h){exit 4}
 } finally { if($attached){[void][VantaraProofInput]::AttachThreadInput($caller,$target,$false)} }
 Start-Sleep -Milliseconds 80
-[VantaraProofInput]::keybd_event([byte]\${key},[byte]0,[uint32]0,[UIntPtr]::Zero)
+[VantaraProofInput]::keybd_event([byte]${key},[byte]0,[uint32]0,[UIntPtr]::Zero)
 Start-Sleep -Milliseconds 35
-[VantaraProofInput]::keybd_event([byte]\${key},[byte]0,[uint32]2,[UIntPtr]::Zero)
+[VantaraProofInput]::keybd_event([byte]${key},[byte]0,[uint32]2,[UIntPtr]::Zero)
 `;
       require('node:child_process').execFileSync('powershell.exe',
         ['-NoProfile','-NonInteractive','-Command',script],
