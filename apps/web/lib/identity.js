@@ -32,6 +32,20 @@ const IDENTITIES = [
   },
 ];
 
+/**
+ * Danger Zone is a local-device maintenance tool, not a server admin API.
+ * Limit it to the single configured owner identity AND the owner badge issued
+ * by the sync worker. Fail closed if the owner row has not been hydrated yet.
+ * Names and editable profile fields never grant this permission.
+ */
+export function canManageDangerZone(sync) {
+  const ownerId = IDENTITIES[0].userId;
+  if (sync?.user?.userId !== ownerId || sync.locked || typeof sync.rows !== 'function') return false;
+  return sync.rows('accounts', (row) =>
+    row.user_id === ownerId && row.badge === 'owner' &&
+    row.lifecycle !== 'DELETED' && row.lifecycle !== 'PENDING_DELETE').length === 1;
+}
+
 export const DEFAULT_AVATARS = IDENTITIES.map((i) => i.avatar);
 
 export function identityFor(userId, username) {

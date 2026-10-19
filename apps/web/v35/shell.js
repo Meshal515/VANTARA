@@ -58,6 +58,7 @@ import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
+import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
@@ -4682,17 +4683,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
     }
 
-    group(
-      'منطقة الخطر',
-      [
-        row('server', 'عنوان الخادم', 'غلط فيه يفصل التطبيق عن حساباتكم', { value: hostOf(api.endpoints().sync), danger: true, run: () => confirmDanger('serverUrl') }),
-        row('layers', 'أعد بناء البيانات المحلية', 'يمسح ما على الجهاز ويجيبه من الخادم من جديد', { danger: true, run: () => confirmDanger('rebuild') }),
-        health.quarantined
-          ? row('alert', 'عمليات رفضها الخادم', null, { value: String(health.quarantined), danger: true, run: () => confirmDanger('retry') })
-          : null,
-      ],
-      { cls: 'danger-zone', note: 'لا تلمس شي هنا إلا إذا طُلب منك. كل خيار يسألك قبل ما يسوي شي.' },
-    );
+    // Not a general account setting: hide ALL dangerous actions for friends.
+    if (canManageDangerZone(sync)) {
+      group(
+        'منطقة الخطر',
+        [
+          row('server', 'عنوان الخادم', 'غلط فيه يفصل التطبيق عن حساباتكم', { value: hostOf(api.endpoints().sync), danger: true, run: () => confirmDanger('serverUrl') }),
+          row('layers', 'أعد بناء البيانات المحلية', 'يمسح ما على الجهاز ويجيبه من الخادم من جديد', { danger: true, run: () => confirmDanger('rebuild') }),
+          health.quarantined
+            ? row('alert', 'عمليات رفضها الخادم', null, { value: String(health.quarantined), danger: true, run: () => confirmDanger('retry') })
+            : null,
+        ],
+        { cls: 'danger-zone', note: 'متاحة لحساب المالك فقط. كل إجراء يسألك قبل ما يسوي شي.' },
+      );
+    }
   }
 
   /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
@@ -4787,6 +4791,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** كل ما في منطقة الخطر يمرّ بسؤال واحد واضح قبل أن يفعل شيئًا. */
   function confirmDanger(what) {
+    // Recheck even for stale buttons/sheets after switching accounts.
+    if (!canManageDangerZone(sync)) return;
     const api = deps.settings;
     const copy = {
       serverUrl: ['تغيّر عنوان الخادم؟', 'لو كتبت عنوانًا غلط ينفصل التطبيق عن حساباتكم ومزامنتكم. غيّره بس إذا طُلب منك.', 'أبغى أغيّره', () => openServerSheet()],
@@ -4802,6 +4808,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         renderSettings();
       }],
     }[what];
+    if (!copy) return;
     const [title, text, label, run] = copy;
     openSheet((body) => {
       body.append(el('h3', null, title), el('p', null, text));
@@ -4813,6 +4820,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       go.type = 'button';
       go.onclick = () => {
         closeSheet();
+        if (!canManageDangerZone(sync)) return;
         void run();
       };
       actions.append(cancel, go);
@@ -4829,6 +4837,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openServerSheet() {
+    if (!canManageDangerZone(sync)) return;
     const api = deps.settings;
     const ep = api.endpoints();
     openSheet((body) => {
@@ -4853,6 +4862,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       save.type = 'button';
       const status = el('p', 'settings-note');
       save.onclick = async () => {
+        if (!canManageDangerZone(sync)) return;
         const valid = (v) => !v || /^https:\/\/[^\s]+$/i.test(v);
         const next = { sync: syncInput.value.trim().replace(/\/+$/, ''), api: apiInput.value.trim().replace(/\/+$/, '') };
         if (!next.sync) return void (status.textContent = 'عنوان خادم المزامنة مطلوب.');
@@ -4877,6 +4887,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           status.textContent = !syncOk ? 'خادم المزامنة ما ردّ. ما حفظنا شي، والعنوان القديم باقي.' : 'خادم المحتوى ما ردّ. ما حفظنا شي.';
           return;
         }
+        if (!canManageDangerZone(sync)) return;
         api.setEndpoints(next);
         save.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
         setTimeout(() => window.location.reload(), 400);
