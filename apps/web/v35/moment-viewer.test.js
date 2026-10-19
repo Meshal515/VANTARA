@@ -61,4 +61,13 @@ describe('moment miniplayer', () => {
     await tick();
     expect(document.querySelector('video').src).toBe('https://source.example/attached.mp4');
   });
+  it('replays through the native clip route when browser decoding required native fallback', async () => {
+    const playNative = vi.fn(async () => ({ ok: true }));
+    viewer = openMomentViewer({ row, resolveSources: async () => [{ url: 'https://source.example/movie.mkv', candidate: 'native', nativeCandidate: true }], playNative });
+    await tick(); document.querySelector('video').dispatchEvent(new window.Event('error')); await tick();
+    expect(playNative).toHaveBeenCalledTimes(1);
+    document.querySelector('[data-action="replay"]').click(); await tick();
+    expect(playNative).toHaveBeenCalledTimes(2);
+    expect(playNative.mock.calls[1][0].source.candidate).toBe('native');
+  });
 });
