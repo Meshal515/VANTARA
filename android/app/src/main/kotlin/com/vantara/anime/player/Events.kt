@@ -63,7 +63,7 @@ object Outbox {
         return mine
     }
 
-    /** Call only after upload and the server recommendation row are durable. */
+    /** Call only after the server recommendation row is durable. */
     @Synchronized
     fun acknowledge(context: Context, userId: String, id: String) {
         require(userId.isNotBlank())
@@ -75,8 +75,7 @@ object Outbox {
             if (item.optString("userId") == userId && item.optString("id") == id) matched = item else keep.put(item)
         }
         if (matched == null) return
-        // Commit first: if it fails the retry must retain its attachment.
+        // Commit first: if it fails the pending recommendation must remain.
         save(context, keep)
-
     }
 }
