@@ -5,6 +5,51 @@ const rect = (left, top, width, height) => ({ left, top, width, height, right: l
 const page = (box, width = 1000, height = 10000, clip = box) => ({ rect: box, clip, naturalWidth: width, naturalHeight: height });
 
 describe('reader viewport capture geometry', () => {
+  it('saves an entire small manga frame at ORIGINAL source resolution without phone bars or upscaling', () => {
+    const original = page(rect(0, 185, 400, 400), 3000, 3000);
+    const plan = buildViewportCapture({
+      viewport: rect(0, 0, 400, 900), scroll: rect(0, 0, 400, 900),
+      toolbar: rect(0, 0, 400, 65), tray: rect(0, 790, 400, 110),
+      pages: [original], pixelRatio: 3,
+    });
+    expect(plan.mode).toBe('original');
+    expect([plan.width, plan.height]).toEqual([3000, 3000]);
+    expect(plan.bounds).toEqual(rect(0, 0, 3000, 3000));
+    expect(plan.draws[0].source).toEqual(rect(0, 0, 3000, 3000));
+    expect(plan.draws[0].dest).toEqual(rect(0, 0, 3000, 3000));
+  });
+
+  it('saves a whole letterboxed manga image, not the dark letterbox canvas', () => {
+    const image = containImageRect(rect(0, 0, 400, 800), 1800, 1800);
+    const plan = buildViewportCapture({
+      viewport: rect(0, 0, 400, 900), scroll: rect(0, 0, 400, 900),
+      toolbar: rect(0, 0, 400, 55), tray: rect(0, 840, 400, 60),
+      pages: [page(image, 1800, 1800, rect(0, 0, 400, 800))], pixelRatio: 2,
+    });
+    expect(plan.mode).toBe('original');
+    expect([plan.width, plan.height]).toEqual([1800, 1800]);
+  });
+
+  it('crops zoomed or horizontally clipped content instead of exporting a hidden frame', () => {
+    const plan = buildViewportCapture({
+      viewport: rect(0, 0, 412, 900), scroll: rect(0, 0, 412, 900),
+      toolbar: rect(0, 0, 412, 64), tray: rect(0, 770, 412, 130),
+      pages: [page(rect(-180, 0, 820, 900), 3200, 3512, rect(0, 0, 412, 900))],
+      pixelRatio: 2,
+    });
+    expect(plan.mode).toBe('viewport');
+    expect(plan.draws[0].source.left).toBeGreaterThan(0);
+    expect(plan.draws[0].source.width).toBeLessThan(3200);
+  });
+
+  it('limits giant images instead of allocating a 100MB+ native canvas', () => {
+    const plan = buildViewportCapture({
+      viewport: rect(0, 0, 400, 900), scroll: rect(0, 0, 400, 900),
+      pages: [page(rect(0, 0, 400, 800), 8000, 16000)], pixelRatio: 3,
+    });
+    expect(plan.mode).toBe('viewport');
+    expect(plan.width * plan.height).toBeLessThanOrEqual(8_000_000);
+  });
   it('crops a huge manhwa page to the reader content between the toolbar and tray', () => {
     const plan = buildViewportCapture({
       viewport: rect(0, 0, 412, 900), scroll: rect(0, 0, 412, 900),
