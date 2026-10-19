@@ -1469,6 +1469,7 @@ function screenV35(page) {
             // ضغطة المستخدم تتجاوز التراجع الأُسّي: هو يعرف أن الشبكة عادت
             await sync.push({ force: true });
             await sync.pull();
+            await sync.retryRecovery();
             await refreshPresence();
           },
           resync: () => sync.resync(),

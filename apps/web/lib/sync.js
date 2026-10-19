@@ -299,6 +299,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let backlog = false;
   let lastError = null;
   let auditingMirror = false;
+  let auditCompletion = null;
+  let completeAudit = null;
   let auditFailure = null;
   let nextAuditAttemptAt = 0;
   /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
@@ -327,8 +329,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return result;
   };
   const persistMirror = () => writeJson(MIRROR_KEY, mirror);
-  let lastAuditedAt = readJson(MIRROR_AUDIT_KEY, null)?.at ?? null;
-  const commitMirror = async (snapshot, nextCursor, auditedAt = lastAuditedAt) => {
+  let lastAudit = readJson(MIRROR_AUDIT_KEY, null);
+  const commitMirror = async (snapshot, nextCursor, auditedAt = lastAudit?.userId === user?.userId ? lastAudit.at : null) => {
     const localSaved = writeJson(MIRROR_KEY, snapshot);
     const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt });
     return localSaved || independentSaved;
@@ -344,8 +346,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       mirror = saved.mirror;
       cursor = saved.cursor;
       if (saved.auditedAt) {
-        lastAuditedAt = saved.auditedAt;
-        writeJson(MIRROR_AUDIT_KEY, { userId: recoveryOwner, at: saved.auditedAt });
+        lastAudit = { userId: recoveryOwner, at: saved.auditedAt };
+        writeJson(MIRROR_AUDIT_KEY, lastAudit);
       }
     }
     if (Array.isArray(pending?.ops)) {
@@ -861,15 +863,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * Never overwrite a working offline copy with an empty or partial response.
    */
   async function auditMirror({ force = false } = {}) {
+    if (auditingMirror) return auditCompletion;
     const ownerId = user?.userId;
     if (!token || !ownerId || disposed || auditingMirror || Date.now() < nextAuditAttemptAt) return;
-    const savedAudit = readJson(MIRROR_AUDIT_KEY, null);
+    const savedAudit = lastAudit;
     const missingOwner = cursor > 0 && !mirror.accounts?.[ownerId];
     const due = missingOwner || savedAudit?.userId !== ownerId ||
       !Number.isFinite(Number(savedAudit?.at)) ||
       Date.now() - Number(savedAudit.at) >= MIRROR_AUDIT_INTERVAL_MS;
     if (!due && !force) return;
     auditingMirror = true;
+    auditCompletion = new Promise((resolve) => { completeAudit = resolve; });
     emit(['sync']);
     const generation = sessionGeneration;
     const tokenAtStart = token;
@@ -928,8 +932,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       landing = landing.filter((item) => item.rev > cursor);
       refreshOverlay(); // Unsynced local edits remain visible over the restored snapshot.
       writeJson(CURSOR_KEY, cursor);
-      lastAuditedAt = Date.now();
-      writeJson(MIRROR_AUDIT_KEY, { userId: ownerId, at: lastAuditedAt });
+      lastAudit = { userId: ownerId, at: Date.now() };
+      writeJson(MIRROR_AUDIT_KEY, lastAudit);
       lastSyncAt = Date.now();
       writeJson('vantara.lastSync', lastSyncAt);
       lastError = null;
@@ -945,6 +949,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       emit(['sync']); // Never claim complete synchronization after a failed audit.
     } finally {
       auditingMirror = false;
+      completeAudit?.();
+      auditCompletion = null;
+      completeAudit = null;
       emit(['sync']);
     }
   }
@@ -1630,17 +1637,18 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     publishLatest: (sourceId, value, leaseUntil, leaseToken) => request('/v1/source-latest', { method: 'POST', body: { sourceId, value, leaseUntil, leaseToken } }),
     health,
     retryQuarantined,
-    /**
-     * إعادة بناء المرآة من الخادم.
-     *
-     * مخرج صريح حين تبدو البيانات المحلية غريبة: يمسح المرآة والـcursor ولا
-     * يمسّ الطابور. بلا مسار كهذا كان الحل الوحيد تسجيل خروج ودخول — وذلك
-     * يمسح كتابات غير مرسلة.
-     */
+    // Explicit recovery retries storage immediately, keeping the old offline
+    // mirror until the complete server snapshot has a durable replacement.
     async resync() {
-      resyncMirror();
-      emit(['sync']);
-      await pull();
+      await recovered;
+      nextAuditAttemptAt = 0;
+      await auditMirror({ force: true });
+    },
+    async retryRecovery() {
+      await recovered;
+      if (!auditFailure && !auditingMirror) return;
+      nextAuditAttemptAt = 0;
+      await auditMirror({ force: true });
     },
     get quarantined() {
       return quarantine.length;

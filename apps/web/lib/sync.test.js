@@ -157,12 +157,15 @@ describe('queue durability', () => {
   });
 
   it('preserves the mirror and old durable queue when saving a new write exceeds quota', async () => {
-    // المرآة مشتقة من الخادم وتُسحب من جديد. الكتابة غير المرسلة لا يملكها
-    // غيرنا، فهي آخر ما يُفقد لا أوّله.
+    // A quota failure must retain BOTH the previous mirror and already saved
+    // pending writes; the new unsaved operation stays in memory as degraded.
+    let queueStorageFull = false;
     const full = fakeStorage({
-      failOn: (key) => key === 'vantara.queue' && !full.map.has('__freed__'),
+      failOn: (key) => queueStorageFull && key === 'vantara.queue' && !full.map.has('__freed__'),
     });
     full.setItem('vantara.token', 'token-1');
+    full.setItem('vantara.queue', JSON.stringify([{ opId: 'saved-one', kind: 'view.add', payload: { seriesRef: 'saved' }, at: 1 }]));
+    queueStorageFull = true;
     full.setItem('vantara.mirror', JSON.stringify({ library: { a: { series_ref: 'a' } } }));
     const originalRemove = full.removeItem;
     full.removeItem = (key) => {
@@ -176,12 +179,12 @@ describe('queue durability', () => {
 
     expect(full.getItem('vantara.mirror')).toContain('series_ref');
     expect(sync.rows('library')).toHaveLength(1);
-    expect(full.getItem('vantara.queue')).toBeNull();
-    expect(sync.pendingWrites).toBe(1);
+    expect(JSON.parse(full.getItem('vantara.queue')).map((op) => op.opId)).toEqual(['saved-one']);
+    expect(sync.pendingWrites).toBe(2);
     expect(sync.health().state).toBe('degraded');
   });
 
-  it('reports degraded storage when even an empty mirror does not help', async () => {
+  it('reports degraded storage when a queued write has no durable copy', async () => {
     const full = fakeStorage({ failOn: (key) => key === 'vantara.queue' });
     full.setItem('vantara.token', 'token-1');
     const fetchImpl = vi.fn(async () => jsonResponse({ error: 'down' }, 500));
@@ -797,5 +800,53 @@ it('discards delayed backup hydration after sign-out instead of replaying anothe
   expect(sync.pendingWrites).toBe(0);
   expect(sync.rows('library')).toEqual([]);
   expect(storage.getItem('vantara.cursor')).toBe('0');
+  vi.unstubAllGlobals();
+});
+
+it('retries a quota-blocked recovery on request while preserving the old offline copy', async () => {
+  let rejectWrites = false;
+  const limited = fakeStorage({ failOn: (key) => rejectWrites && key === 'vantara.mirror' });
+  for (const [key, value] of storage.map) limited.setItem(key, value);
+  limited.setItem('vantara.cursor', '40');
+  limited.setItem('vantara.mirror', JSON.stringify({
+    accounts: { u1: { user_id: 'u1', lifecycle: 'ACTIVE' } },
+    library: { 'u1/keep': { user_id: 'u1', series_ref: 'keep' } },
+  }));
+  const sync = await loadSync({ storage: limited, fetchImpl: async () => jsonResponse({ cursor: 41, more: false, changes: {
+    accounts: [{ user_id: 'u1', lifecycle: 'ACTIVE' }],
+    library: [{ user_id: 'u1', series_ref: 'keep' }, { user_id: 'u1', series_ref: 'restored' }],
+  } }) });
+  rejectWrites = true;
+  await sync.resync();
+  expect(sync.rows('library').map((row) => row.series_ref)).toEqual(['keep']);
+  expect(limited.getItem('vantara.mirror')).toContain('keep');
+  expect(limited.getItem('vantara.cursor')).toBe('40');
+  rejectWrites = false;
+  await sync.resync();
+  expect(sync.rows('library')).toHaveLength(2);
+  expect(sync.health().state).toBe('ok');
+});
+
+it('never labels a new account delta snapshot with the previous account full-audit proof', async () => {
+  storage.setItem('vantara.mirror.audit.v1', JSON.stringify({ userId: 'u1', at: Date.now() }));
+  const snapshots = [];
+  vi.stubGlobal('Capacitor', { Plugins: { AccountBackup: {
+    async read() { return {}; },
+    async write({ userId, kind, value }) { if (kind === 'snapshot') snapshots.push(JSON.parse(value)); },
+  } } });
+  let syncCalls = 0;
+  const sync = await loadSync({ storage, fetchImpl: async (url) => {
+    if (String(url).includes('/v1/session')) return jsonResponse({ token: 'token-b', user: { userId: 'u2', username: 'other' } });
+    syncCalls += 1;
+    if (syncCalls > 1) throw new Error('offline during full audit');
+    return jsonResponse({ cursor: 7, more: false, changes: {
+      accounts: [{ user_id: 'u2', lifecycle: 'ACTIVE' }],
+      library: [{ user_id: 'u2', series_ref: 'delta-only' }],
+    } });
+  } });
+  await sync.signIn('u2');
+  await sync.pull();
+  expect(snapshots.find((row) => row.userId === 'u2')).toMatchObject({ userId: 'u2', auditedAt: null, cursor: 7 });
+  expect(JSON.parse(storage.getItem('vantara.mirror.audit.v1')).userId).toBe('u1');
   vi.unstubAllGlobals();
 });
