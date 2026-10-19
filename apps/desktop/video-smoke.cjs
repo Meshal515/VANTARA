@@ -81,41 +81,34 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     // Deliver Win32 key messages to the real mpv child, which must use input.conf
     // and return through the production IPC/renderer fullscreen action.
     const nativeKey=async(hwnd,key)=>{
-      // PostMessage(WM_KEYDOWN) is not actual user input: mpv on Windows
-      // may ignore it (no keyboard focus, missing scan-code context).
-      // Focus the genuine mpv child and send real OS key events instead.
+      // Genuine OS mouse/keyboard injection: clicking the native child first
+      // gives it real input focus. PostMessage alone is not a keyboard event,
+      // and cross-process SetFocus is unreliable on hosted Windows desktops.
       assert(/^\d{1,20}$/.test(hwnd));
       const script=String.raw`Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class VantaraProofInput {
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left, top, right, bottom; }
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
-  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
-  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
-  [DllImport("user32.dll")] public static extern IntPtr GetFocus();
-  [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
 }
 '@
 $h=[IntPtr]::new([long]::Parse('${hwnd}'))
 if(-not [VantaraProofInput]::IsWindow($h)){exit 2}
-[uint32]$windowProcessId=0
-$target=[VantaraProofInput]::GetWindowThreadProcessId($h,[ref]$windowProcessId)
-$caller=[VantaraProofInput]::GetCurrentThreadId()
-$root=[VantaraProofInput]::GetAncestor($h,2)
-if(-not $target){exit 3}
-$attached=[VantaraProofInput]::AttachThreadInput($caller,$target,$true)
-try {
-  [void][VantaraProofInput]::SetForegroundWindow($root)
-  [void][VantaraProofInput]::SetFocus($h)
-  if([VantaraProofInput]::GetFocus() -ne $h){exit 4}
-} finally { if($attached){[void][VantaraProofInput]::AttachThreadInput($caller,$target,$false)} }
-Start-Sleep -Milliseconds 80
+$rect=New-Object VantaraProofInput+Rect
+if(-not [VantaraProofInput]::GetWindowRect($h,[ref]$rect)){exit 3}
+$x=[int](($rect.left+$rect.right)/2);$y=[int](($rect.top+$rect.bottom)/2)
+if(-not [VantaraProofInput]::SetCursorPos($x,$y)){exit 4}
+[VantaraProofInput]::mouse_event([uint32]2,0,0,0,[UIntPtr]::Zero)
+Start-Sleep -Milliseconds 50
+[VantaraProofInput]::mouse_event([uint32]4,0,0,0,[UIntPtr]::Zero)
+Start-Sleep -Milliseconds 100
 [VantaraProofInput]::keybd_event([byte]${key},[byte]0,[uint32]0,[UIntPtr]::Zero)
-Start-Sleep -Milliseconds 35
+Start-Sleep -Milliseconds 45
 [VantaraProofInput]::keybd_event([byte]${key},[byte]0,[uint32]2,[UIntPtr]::Zero)
 `;
       await new Promise((resolve,reject)=>require('node:child_process').execFile('powershell.exe',
@@ -123,8 +116,8 @@ Start-Sleep -Milliseconds 35
         {windowsHide:true,timeout:15000},error=>error?reject(error):resolve()));
     };
     const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
-    report.stage='native-f11';await nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
-    report.stage='native-escape';await nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
+    report.stage='native-f11';overlayWindow.hide();await until(()=>!overlayWindow.isVisible());await nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
+    report.stage='native-escape';await nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;overlayWindow.showInactive();
     assert(await window.webContents.executeJavaScript('!!document.querySelector(".desktop-player")'));
     report.rendererControls=true;report.arabicSubtitleSelected=true;
     // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
