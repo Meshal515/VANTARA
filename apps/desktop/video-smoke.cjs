@@ -59,8 +59,8 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
       const display=screen.getDisplayMatching(window.getBounds()),scale=display.scaleFactor;
       const child=host.children.find(c=>/mpv/i.test(c.class));
       const same=(a,b)=>Math.abs(a-b)<=1;
-      report.lastBounds={host,content,overlay,fullscreen:window.isFullScreen(),menuBarVisible:window.isMenuBarVisible()};
-      return same(overlay.x,content.x)&&same(overlay.y,content.y)&&same(overlay.width,content.width)&&same(overlay.height,content.height)
+      report.lastBounds={host,content,overlay,fullscreen:window.isFullScreen(),overlayFullscreen:overlayWindow.isFullScreen(),menuBarVisible:window.isMenuBarVisible()};
+      return overlayWindow.isFullScreen()===window.isFullScreen()&&same(overlay.x,content.x)&&same(overlay.y,content.y)&&same(overlay.width,content.width)&&same(overlay.height,content.height)
         &&host.x===0&&host.y===0&&host.width===host.parentWidth&&host.height===host.parentHeight&&same(host.width,content.width*scale)&&same(host.height,content.height*scale)&&same(child?.width,host.width)&&same(child?.height,host.height)
         ?{host,content,overlay,display:display.bounds}:false;
     };
