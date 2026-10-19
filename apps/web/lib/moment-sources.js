@@ -9,7 +9,7 @@ function publicUrl(value) {
   } catch { return null; }
 }
 /** Resolve on the RECEIVING device; shared records never contain local proxy URLs or headers. */
-export function createMomentSourceResolver({ engine, desktop = globalThis.VantaraDesktop }) {
+export function createMomentSourceResolver({ engine, desktop = globalThis.VantaraDesktop, native = () => Boolean(globalThis.Capacitor?.isNativePlatform?.()) }) {
   return async function resolve(row) {
     const moment=parse(row.moment_json); const ref=String(row.series_ref ?? '');
     const range=momentRange(row.chapter_label) ?? (Number.isFinite(moment.startMs) && moment.endMs>moment.startMs ? moment : null);
@@ -46,7 +46,12 @@ export function createMomentSourceResolver({ engine, desktop = globalThis.Vantar
             if(released){await desktop.releaseMoment({session,exportHandle:ready.exportHandle});throw new Error('moment_session_closed');}
             return {...ready,headers:{},candidate:c.id,nativeCandidate:true,release};
           };
-        } else if(!publicUrl(c.url)) continue;
+        } else if(!publicUrl(c.url)) {
+          // These descriptors came from this device's registered session, never from shared hints.
+          // Native torrent/addon data sources are intentionally not HTML video URLs.
+          if(!native()) continue;
+          source.url = undefined;
+        }
         own.push(source);
       }
       if(!own.length)await release();

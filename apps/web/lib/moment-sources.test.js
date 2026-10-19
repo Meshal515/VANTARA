@@ -12,3 +12,12 @@ it('uses recipient desktop proxy for torrent without sending the original device
  const r=await createMomentSourceResolver({engine,desktop})({series_ref:'cinema:tt123456:1',series_title:'show',chapter_number:2,chapter_label:'الحلقة 2 · 0:10–0:30'});
  expect(desktop.prepareMoment).not.toHaveBeenCalled();expect(await r[0].prepare()).toMatchObject({url:'http://127.0.0.1:4000/own-token',exportHandle:'handle',candidate:'torrent'});await r[0].release();expect(desktop.releaseMoment).toHaveBeenCalledWith({session:'s',exportHandle:'handle'});
 });
+
+it('retains native registered torrent candidates without exposing their scoped URL to HTML', async () => {
+ const engine={findWork:async()=>null,prepare:async()=>({session:'native-s'}),best:async()=>({candidate:'torrent'}),momentCandidates:async()=>[{id:'torrent',url:'vantara-torrent://local/stream',infoHash:'a'.repeat(40)}],closeSession:vi.fn()};
+ const row={series_ref:'cinema:tt123456',series_title:'movie',chapter_label:'· 0:10–0:30'};
+ const sources=await createMomentSourceResolver({engine,native:()=>true})(row);
+ expect(sources).toHaveLength(1);expect(sources[0]).toMatchObject({session:'native-s',candidate:'torrent',nativeCandidate:true});expect(sources[0].url).toBeUndefined();
+ await sources[0].release();expect(engine.closeSession).toHaveBeenCalledWith('native-s');
+ expect(await createMomentSourceResolver({engine,native:()=>false})(row)).toEqual([]);
+});
