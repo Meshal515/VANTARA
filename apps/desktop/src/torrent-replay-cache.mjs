@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, join, parse, resolve } from 'node:path';
+import { hostname, userInfo } from 'node:os';
 import { cacheNamespace, cacheFreeBytes, TORRENT_FREE_RESERVE } from './torrent-cache.mjs';
 
 const MiB = 1024 * 1024;
@@ -62,18 +63,22 @@ async function atomicWrite(directory, name, bytes) {
  * Await writes for backpressure. A bounded queue declines excess work rather than retaining it.
  */
 export function createTorrentReplayCache({
-  userData, maxBytes = 512 * MiB, maxEntryBytes = 256 * MiB, maxAgeMs = 24 * 60 * 60 * 1000,
+  userData, ownerId = 'guest', maxBytes = 512 * MiB, maxEntryBytes = 256 * MiB, maxAgeMs = 24 * 60 * 60 * 1000,
   maxExtentBytes = 4 * MiB, maxExtents = 256, maxEntryExtents = 64,
   freeBytes = cacheFreeBytes, reserveBytes = TORRENT_FREE_RESERVE, now = Date.now,
 } = {}) {
   if (typeof userData !== 'string' || !isAbsolute(userData)) throw new Error('Invalid userData');
+  if (typeof ownerId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(ownerId)) throw new Error('Invalid ownerId');
   for (const value of [maxBytes, maxEntryBytes, maxAgeMs, maxExtentBytes, maxExtents, maxEntryExtents])
     if (!integer(value) || value === 0) throw new Error('Invalid cache limit');
   maxExtentBytes = Math.min(maxExtentBytes, 4 * MiB);
   maxExtents = Math.min(maxExtents, 256); maxEntryExtents = Math.min(maxEntryExtents, 64);
-  const profile = resolve(userData), namespace = cacheNamespace(profile) + '-replay-v1';
-  const pointer = 'torrent-replay-root-v1.json', ownerToken = randomUUID();
-  let directory, root, loaded = false, closed = false, lockOwned = false, queuedBytes = 0;
+  const ownerHash = digest(ownerId).slice(0, 16);
+  const profile = resolve(userData), namespace = cacheNamespace(profile) + '-replay-v1-' + ownerHash;
+  const account = userInfo();
+  const principal = digest(`${hostname()}\0${account.username}\0${account.homedir}`);
+  const pointer = `torrent-replay-root-v1-${ownerHash}.json`, ownerToken = randomUUID();
+  let directory, root, loaded = false, closed = false, lockOwned = false, readOnly = false, queuedBytes = 0;
   let entries = [], chain = Promise.resolve();
   const serial = operation => { const work = chain.then(operation); chain = work.catch(() => {}); return work; };
   const unlink = async file => {
@@ -81,6 +86,7 @@ export function createTorrentReplayCache({
   };
   async function lock() {
     if (lockOwned) return true;
+    if (readOnly) return false;
     const file = join(directory, 'writer.lock');
     try {
       const handle = await fs.open(file, 'wx', 0o600);
@@ -91,7 +97,7 @@ export function createTorrentReplayCache({
       try {
         const old = await readJson(file, 1024);
         if (!integer(old.pid) || old.pid === 0 || typeof old.token !== 'string') return false;
-        try { process.kill(old.pid, 0); return false; } catch (e) { if (e.code !== 'ESRCH') return false; }
+        try { process.kill(old.pid, 0); readOnly = true; return false; } catch (e) { if (e.code !== 'ESRCH') return false; }
         // Only a dead process's unchanged lock may be removed.
         if ((await readJson(file, 1024)).token !== old.token) return false;
         await fs.unlink(file);
@@ -107,10 +113,12 @@ export function createTorrentReplayCache({
     let fresh = false;
     if (create) { try { await fs.mkdir(target, { mode: 0o700 }); fresh = true; } catch (e) { if (e.code !== 'EEXIST') throw e; } }
     await safeDirectory(target);
-    if (fresh) await atomicWrite(target, 'owner.json', JSON.stringify({ version: 1, namespace }));
+    if (fresh) await atomicWrite(target, 'owner.json', JSON.stringify({ version: 1, namespace, principal, ownerHash }));
     const owner = await readJson(join(target, 'owner.json'), 1024);
-    if (owner.version !== 1 || owner.namespace !== namespace) throw new Error('Unowned cache');
+    if (owner.version !== 1 || owner.namespace !== namespace || owner.principal !== principal || owner.ownerHash !== ownerHash) throw new Error('Unowned cache');
     root = checkedRoot; directory = target;
+    // Own the writer lock before taking an index snapshot; contended readers remain read-only.
+    await lock();
     let index;
     try { index = await readJson(join(target, 'index.json')); } catch { return; }
     if (index.version !== 1 || !Array.isArray(index.entries) || index.entries.length > 256) return;
@@ -161,7 +169,11 @@ export function createTorrentReplayCache({
       await remove(entry, extent); bytes -= extent.length; count--;
     }
     // Bound descriptors as well as byte extents; prefer descriptors with live bytes.
-    if (entries.length > 256) entries = [...entries].sort((a, b) => Number(b.extents.length > 0) - Number(a.extents.length > 0)).slice(0, 256);
+    while (entries.length > 256) {
+      const disposable = entries.find(x => !x.extents.length) ?? entries[0];
+      for (const extent of [...disposable.extents]) await remove(disposable, extent);
+      entries = entries.filter(x => x !== disposable);
+    }
   }
   async function checkedBytes(entry, extent) {
     try {
@@ -183,6 +195,7 @@ export function createTorrentReplayCache({
       read(start, length) {
         if (closed || !integer(start) || !integer(length) || !length) return Promise.resolve(null);
         return serial(async () => {
+          if (!entries.includes(record)) return null;
           const pieces = []; let position = start, remaining = Math.min(length, maxExtentBytes);
           for (const extent of [...record.extents].sort((a, b) => a.start - b.start)) {
             if (extent.start + extent.length <= position) continue;
@@ -200,7 +213,7 @@ export function createTorrentReplayCache({
         if (closed || signal?.aborted || !integer(start) || !Buffer.isBuffer(bytes) || !bytes.length || bytes.length > maxExtentBytes || start + bytes.length > record.descriptor.fileLength || queuedBytes + bytes.length > 2 * maxExtentBytes) return Promise.resolve(false);
         const copy = Buffer.from(bytes); queuedBytes += copy.length;
         return serial(async () => {
-          if (signal?.aborted || !(await lock())) return false;
+          if (!entries.includes(record) || signal?.aborted || !(await lock())) return false;
           await safeDirectory(directory);
           const available = BigInt(await freeBytes(root));
           if (available < BigInt(reserveBytes) + BigInt(copy.length + maxExtentBytes + 65536)) return false;
@@ -272,6 +285,7 @@ export function createTorrentReplayCache({
         if (record && record.descriptor.fileLength !== value.fileLength) return null;
         if (!record) { record = { descriptor: { ...id, fileLength: value.fileLength }, extents: [] }; entries.push(record); }
         await trim(); await save();
+        if (!entries.includes(record)) return null;
         await atomicWrite(profile, pointer, JSON.stringify({ version: 1, namespace, root }));
         return handle(record);
       }).catch(() => null);
@@ -283,7 +297,7 @@ export function createTorrentReplayCache({
         await trim(); await save();
         const live = new Set(allExtents().map(x => x.extent.file));
         // Only generated files in the marker-owned namespace are disposable.
-        for (const file of await fs.readdir(directory)) if (extentName.test(file) && !live.has(file)) await unlink(file);
+        for (const file of await fs.readdir(directory)) if ((extentName.test(file) && !live.has(file)) || /^pending-[a-f0-9-]{36}\.tmp$/.test(file)) await unlink(file);
       }).catch(() => {});
     },
     close() {
