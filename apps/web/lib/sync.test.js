@@ -600,7 +600,7 @@ describe('server-authoritative mirror recovery after APK 177', () => {
     });
     const sync = await loadSync({ storage, fetchImpl });
     await sync.pull();
-    await vi.waitFor(() => expect(sync.rows('work_views', (r) => r.user_id === 'u1')).toHaveLength(61));
+    await vi.waitFor(() => expect(sync.rows('work_views', (r) => r.user_id === 'u1' && r.series_ref !== 'offline-work')).toHaveLength(61));
     expect(sync.rows('accounts')).toHaveLength(3);
     expect(sync.rows('library')).toHaveLength(1);
     expect(sync.rows('majlis_messages')).toHaveLength(1);
