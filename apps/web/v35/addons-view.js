@@ -309,6 +309,13 @@ export function renderAddonDetails({
         await registry.enable(addon.key, !addon.enabled);
         onBack();
       });
+    if (registry.reinstall)
+      action("إعادة تثبيت الإضافة", async () => {
+        checkController?.abort();
+        checkController = new AbortController();
+        await registry.reinstall(addon.key, { signal: checkController.signal });
+        if (!closed) onBack();
+      });
     if (registry.stage)
       action("فحص تحديث الإضافة", async () => {
         const result = await registry.stage(addon.key);
@@ -387,6 +394,16 @@ export function renderAddonDetails({
   return root;
 }
 const recommendations = [
+  {
+    id: "com.stremio.torrentio.addon",
+    name: "Torrentio",
+    description: "إضافة لمصادر التورنت للأفلام والمسلسلات والأنمي. تحتاج إعدادًا وربطًا يدويًا بمصدر الخدمة.",
+    configurationUrl: "https://torrentio.strem.fun/configure",
+    website: "https://torrentio.strem.fun",
+    capabilities: ["streams"],
+    contentTypes: ["movie", "series", "anime"],
+    configuration: { required: true, configurable: true, configured: false },
+  },
   {
     name: "OpenSubtitles v3",
     description: "ترجمات للأفلام والمسلسلات من خدمة OpenSubtitles.",
@@ -693,7 +710,13 @@ export function renderAddons({
     for (const b of states.children) b.hidden = b.dataset.state !== "installed" && !stateCount[b.dataset.state] && stateFilter !== b.dataset.state;
     states.hidden = explore || [...states.children].every((b) => b.hidden || b.dataset.state === "installed");
     paintSummary();
-    let entries = explore ? recommendations : registry.list();
+    const installed = registry.list();
+    let entries = explore
+      ? recommendations.map(a => {
+          const match = installed.find(m => !m.bundled && m.id === a.id);
+          return match ? { ...a, installedKey: match.key } : a;
+        })
+      : installed;
     entries = entries.filter(
       (a) =>
         matches(a) &&
@@ -737,8 +760,11 @@ export function renderAddons({
       );
       const actions = node("div", "addon-actions");
       if (explore) {
-        const config = configureLink(a, registry, a.configurationUrl);
-        if (config) actions.append(config);
+        const existing = a.installedKey ? installed.find(m => m.key === a.installedKey) : null;
+        const config = existing ? null : configureLink(a, registry, a.configurationUrl);
+        if (existing)
+          actions.append(button("مثبتة · إدارة", () => showDetails(existing), "addon-button addon-button-quiet"));
+        else if (config) actions.append(config);
         else
           actions.append(
             button(
