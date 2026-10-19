@@ -42,3 +42,25 @@ test('empty export is usable before any playback and snapshots cannot mutate ret
  d.begin('one',{});d.capture({type:'playback/preparing',session:'one'});
  const report=JSON.parse(d.export());report.events[0].type='private';assert.equal(JSON.parse(d.export()).events[0].type,'playback/preparing');
 });
+test('source replacement with the same UI session survives the preceding source closing',()=>{
+ const {diagnostics:d}=fixture();d.begin('same',{infoHash:hash});d.capture({type:'playback/preparing',session:'same'});
+ d.begin('same',{infoHash:'b'.repeat(40)});
+ d.capture({type:'playback/diagnostic',session:'same',stage:'source-selected'});
+ // services publishes source-selected for the new attempt, then closes the old
+ // source, then announces preparing. UI source switching reuses this session.
+ d.capture({type:'playback/closed',session:'same'});
+ d.capture({type:'playback/preparing',session:'same'});
+ d.capture({type:'playback/diagnostic',session:'same',stage:'engine-start'});
+ let report=JSON.parse(d.export());assert.equal(report.status,'preparing');
+ assert.deepEqual(report.events.map(e=>e.stage??e.type),['source-selected','playback/preparing','engine-start']);
+ d.capture({type:'playback/recovery-needed',session:'same',reason:'stalled'});
+ assert.equal(JSON.parse(d.export()).events.at(-1).reason,'stalled');
+ d.capture({type:'playback/closed',session:'same'});d.capture({type:'playback/preparing',session:'same'});
+ report=JSON.parse(d.export());assert.equal(report.status,'closed');
+});
+test('retains the header arrival milestone without response headers or URLs',()=>{
+ const {diagnostics:d}=fixture();d.begin('one',{});
+ d.capture({type:'playback/diagnostic',session:'one',stage:'http-headers',elapsedMs:25,requestId:1,rangeStart:0,rangeEnd:50,waitMs:20,headers:{Authorization:'private-token'},url:'https://private/token'});
+ assert.deepEqual(JSON.parse(d.export()).events[0],{type:'playback/diagnostic',elapsedMs:0,traceElapsedMs:25,stage:'http-headers',rangeStart:0,rangeEnd:50,waitMs:20,requestId:1});
+ assert.doesNotMatch(d.export(),/private|Authorization/);
+});
