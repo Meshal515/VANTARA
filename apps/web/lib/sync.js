@@ -298,6 +298,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let backlog = false;
   let lastError = null;
   let auditingMirror = false;
+  let auditFailure = null;
   let nextAuditAttemptAt = 0;
   /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
   let durable = true;
@@ -893,12 +894,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       localStorage.setItem('vantara.lastSync', String(lastSyncAt));
       lastError = null;
       nextAuditAttemptAt = 0;
+      auditFailure = null;
       emit([...Object.keys(KEYS), 'sync']); // Refresh library, friends, profile and Majlis.
       // Changes committed after the snapshot are fetched by the ordinary delta.
       queueMicrotask(() => void pull());
     } catch (error) {
       nextAuditAttemptAt = Date.now() + MIRROR_AUDIT_RETRY_MS;
-      lastError = { status: 0, at: Date.now(), code: error?.message ?? 'mirror_audit_failed' };
+      auditFailure = error?.message ?? 'mirror_audit_failed';
+      lastError = { status: 0, at: Date.now(), code: auditFailure };
       emit(['sync']); // Never claim complete synchronization after a failed audit.
     } finally {
       auditingMirror = false;
@@ -995,7 +998,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // and immediately whenever even the owner's account row is missing.
       if (!backlog) void auditMirror();
     } catch (error) {
-      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
+      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null, code: error?.message === 'mirror_storage_full' ? 'mirror_storage_full' : null };
+      if (error?.message === 'mirror_storage_full') auditFailure = 'mirror_storage_full';
       emit(['sync']);
     } finally {
       pulling = false;
@@ -1199,7 +1203,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function health() {
-    return syncHealth({
+    const result = syncHealth({
       lastSyncAt,
       backlog: backlog || auditingMirror || (cursor > 0 && !mirror.accounts?.[user?.userId]),
       pending: queue.length,
@@ -1211,6 +1215,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       overflowing,
       now: Date.now(),
     });
+    return auditFailure
+      ? { ...result, state: 'degraded', message: 'لم يكتمل استرجاع بيانات الحساب؛ ستُعاد المحاولة', lastError: lastError ?? { code: auditFailure } }
+      : result;
   }
 
   // ───────────────────────── الحضور ─────────────────────────
