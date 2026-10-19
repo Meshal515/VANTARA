@@ -65,12 +65,22 @@ class AnimeEnginePlugin : Plugin() {
         com.vantara.anime.player.PlaybackEvents.events = { name, data -> notifyListeners(name, JSObject(data.toString())) }
     }
 
-    /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
+    /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يبقى حتى تأكيد التسليم. */
     @PluginMethod
     fun outbox(call: PluginCall) {
         val userId = call.getString("userId")?.takeIf { it.isNotBlank() }
             ?: return call.reject("userId مطلوب")
         call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context, userId).toString())))
+    }
+
+    @PluginMethod
+    fun acknowledgeOutbox(call: PluginCall) {
+        val userId = call.getString("userId")?.takeIf { it.isNotBlank() } ?: return call.reject("userId مطلوب")
+        val id = call.getString("id") ?: return call.reject("id مطلوب")
+        scope.launch {
+            runCatching { com.vantara.anime.player.Outbox.acknowledge(context, userId, id) }
+                .onSuccess { call.resolve() }.onFailure { call.reject(it.message ?: "تعذّر تأكيد الإرسال") }
+        }
     }
 
     /**
