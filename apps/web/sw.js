@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'a2b10f268ecd0b6c348c435d56f04be33dacf5a74f214ea23376a67a01a7939e';
+const SHELL_DIGEST = '42dcbc5aecc207175a9d03464f0c9dcf2e15a971560d25975350cdb462bebd3f';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -67,6 +67,19 @@ const KEEP = [IMAGE_CACHE, PWA_CONFIG_CACHE];
 // `tools/repository-safety.test.mjs` يفشل إن استورد `app.js` وحدةً ناقصة من
 // هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
 const SHELL = [
+  '/lib/moment-export.js',
+  '/lib/moment-outbox.js',
+  '/lib/moment-sources.js',
+  '/v35/moment-compose.css',
+  '/v35/moment-compose.js',
+  '/v35/moment-controller.js',
+  '/v35/moment-media.js',
+  '/v35/moment-viewer.css',
+  '/v35/moment-viewer.js',
+  '/v35/reader-viewport.js',
+  '/v35/recipient.css',
+  '/v35/recipient.js',
+
   '/v35/reader-scroll.js',
   '/pwa/player/together-player.js',
   '/pwa/player/together-lobby.js',

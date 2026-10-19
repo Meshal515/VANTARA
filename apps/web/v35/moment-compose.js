@@ -124,7 +124,7 @@ export function openMomentComposer({ positionMs, durationMs, work = {}, episode 
       if (closed) return;
       if (result === false || result?.ok === false) throw new Error('failed');
       if (action === 'send') { destroy(); return; }
-      status.textContent = action === 'save' ? 'حُفظت اللقطة' : action === 'share' ? 'تمت مشاركة اللقطة' : '';
+      status.textContent = typeof result?.message === 'string' ? result.message : action === 'save' ? 'حُفظت اللقطة' : action === 'share' ? 'تمت مشاركة اللقطة' : '';
     } catch (error) {
       if (!closed && error?.name !== 'AbortError') status.textContent = action === 'send' ? 'تعذّر إرسال اللقطة. حاول مرة أخرى.' : action === 'preview' ? 'تعذّرت المعاينة من هذا المصدر. جرّب مصدرًا آخر.' : 'تعذّر تجهيز اللقطة على هذا الجهاز. جرّب مصدرًا يدعم الحفظ أو التطبيق.';
     } finally {

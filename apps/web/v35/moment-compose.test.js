@@ -39,3 +39,9 @@ describe('shared moment composer', () => {
     expect(onSend.mock.calls[0][0].moment.episode).toBeNull();
   });
 });
+
+it('reports the actual Windows clipboard file handoff status', async () => {
+  composer = openMomentComposer({ ...options, onShare: async () => ({message:'حُفظ ونسخ الملف للمشاركة'}) });
+  document.querySelector('[data-compose-action="share"]').click(); await Promise.resolve(); await Promise.resolve();
+  expect(document.querySelector('.mco-status').textContent).toBe('حُفظ ونسخ الملف للمشاركة');
+});
