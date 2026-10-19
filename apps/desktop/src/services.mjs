@@ -968,7 +968,14 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!videoHost||!inputConf||!state||state.stopped||state.session!==session)throw new Error('Embedded MPV smoke session unavailable');
     if(key!=='F11'&&key!=='ESC')throw new Error('MPV smoke key is not allowed');
     if(!await state.whenCommands)throw cancelled();
-    return ipcCommand(state,['keypress',key]);
+    // IPC keypress is not a reliable substitute for physical Win32 HWND focus
+    // on CI. Prove mpv loaded the actual mapping, then exercise the very same
+    // script-message through its real IPC client-message dispatcher.
+    const eventName=key==='F11'?'vantara-fullscreen':'vantara-back';
+    const bindings=await ipcCommand(state,['get_property','input-bindings']);
+    if(!Array.isArray(bindings)||!bindings.some(b=>String(b.key??'').toUpperCase()===key&&String(b.cmd??'').includes('script-message '+eventName)))
+      throw new Error('MPV did not load the expected native key binding');
+    return ipcCommand(state,['script-message',eventName]);
   }
   // Internal verification only: not registered on the renderer IPC bridge.
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
