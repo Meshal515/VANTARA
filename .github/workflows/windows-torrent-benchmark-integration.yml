@@ -47,6 +47,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'MPV archive failed' }
           $mpv=Get-ChildItem $out -Recurse -File -Filter 'mpv.exe' | Select-Object -First 1
           if (-not $mpv) { throw 'MPV binary missing' }
+          # Match the bundled native runtime used by the real Electron/MPV
+          # integration smoke. Its Vulkan loader is not guaranteed on CI hosts.
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $electronDir=Join-Path $dir 'electron'
+          Expand-Archive $electron -DestinationPath $electronDir
+          $vulkan=Join-Path $electronDir 'vulkan-1.dll'
+          if (-not (Test-Path $vulkan)) { throw 'Pinned Electron Vulkan loader is missing' }
+          Copy-Item $vulkan (Join-Path $mpv.DirectoryName 'vulkan-1.dll') -Force
           Write-Output "MPV executable: $($mpv.FullName)"
           Write-Output "MPV sibling DLLs:"
           Get-ChildItem $mpv.DirectoryName -Filter '*.dll' -File | Select-Object -First 50 -ExpandProperty Name | Write-Output
