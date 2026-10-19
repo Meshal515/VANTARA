@@ -50,19 +50,24 @@ jobs:
           "TORRENT_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
           "TORRENT_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
           "TORRENT_PROOF=$dir" | Out-File -Append $env:GITHUB_ENV
-      - name: Ensure video fixture encoder is available
+      - name: Fetch checksum-verified FFmpeg encoder and screenshot verifier
         shell: pwsh
         run: |
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg -y --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'FFmpeg fixture encoder unavailable' }
-          }
-          ffmpeg -version | Select-Object -First 1
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:TORRENT_PROOF 'ffmpeg.zip'
+          Invoke-WebRequest 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip' -OutFile $zip
+          $expected='46e480b5509ce50061158621cac3d1930836475fadf60c72da9aca15fd830620'
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'FFmpeg asset changed; update verified digest before testing' }
+          $out=Join-Path $env:TORRENT_PROOF 'ffmpeg'
+          Expand-Archive $zip -DestinationPath $out
+          $binary=Get-ChildItem $out -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $binary) { throw 'FFmpeg binary missing' }
+          "TORRENT_FFMPEG=$($binary.FullName)" | Out-File -Append $env:GITHUB_ENV
       - name: Measure actual visible frame in cold/warm/restart/partial/new-source scenarios
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit "$env:TORRENT_RQBIT" --mpv "$env:TORRENT_MPV" --ffmpeg ffmpeg --output "$env:TORRENT_PROOF/runs" --runs 2 --kinds mp4,mkv --modes cold,warm,restart,partial,newsource,nocache --stable-seconds 2 --timeout-ms 45000
+          node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit "$env:TORRENT_RQBIT" --mpv "$env:TORRENT_MPV" --ffmpeg "$env:TORRENT_FFMPEG" --output "$env:TORRENT_PROOF/runs" --runs 2 --kinds mp4,mkv --modes cold,warm,restart,partial,newsource,nocache --stable-seconds 2 --timeout-ms 45000
           if ($LASTEXITCODE -ne 0) { throw 'Real first-frame benchmark failed; inspect report' }
       - name: Summarize measured first-frame latency (not a public-swarm claim)
         if: always()
