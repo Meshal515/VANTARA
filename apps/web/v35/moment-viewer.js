@@ -156,7 +156,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
         const lease = await momentMediaCache.acquire(mediaUrl(moment.mediaKey), { signal: controller.signal });
         const a = node('a'); a.href = lease.url; a.download = filename; document.body.append(a); a.click(); a.remove(); lease.release(); toast('تم تنزيل اللقطة');
       } else toast('حفظ اللقطة يحتاج تصدير الفيديو على هذا الجهاز');
-    } catch { toast('تعذّر حفظ اللقطة. جرّب مصدرًا آخر.'); }
+    } catch (error) { if (!destroyed && error?.name !== 'AbortError') toast('تعذّر حفظ اللقطة. جرّب مصدرًا آخر.'); }
     finally { saving = false; if (!destroyed) actions.save.disabled = false; }
   };
   if (!saveVideo && !moment.mediaKey) { actions.save.disabled = true; actions.save.title = 'الحفظ غير متاح على هذا الجهاز'; }
