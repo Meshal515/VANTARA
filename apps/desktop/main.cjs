@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell, screen, clipboard } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -7,6 +7,7 @@ const { firstPartyRequest } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
+const { createPlaybackDiagnostics } = require('./playback-diagnostics.cjs');
 const updater = require('./updater.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
@@ -30,6 +31,7 @@ let quitting = false;
 // تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
 let pendingUpdate = null;
 const appVersion = require('./package.json').version;
+const playbackDiagnostics = createPlaybackDiagnostics({version:appVersion,platform:process.platform});
 const updatesDir = () => path.join(app.getPath('userData'), 'updates');
 const attemptFile = () => path.join(updatesDir(), 'attempt.json');
 function readAttempt() {
@@ -61,6 +63,7 @@ const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
+  playbackDiagnostics.capture(event);
   // MPV's native HWND cannot dispatch Electron renderer keyboard shortcuts.
   // Route its verified input.conf script messages to the real main-window
   // fullscreen controller and native-player lifecycle.
@@ -131,7 +134,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       return result;
     } catch { return new Response('الملف غير موجود', { status: 404 }); }
   });
-  const { createDesktopServices } = await import('./src/services.mjs');
+  const { createDesktopServices, validateCandidate } = await import('./src/services.mjs');
   if(process.platform==='win32')videoHost=createVideoHost({
     getWindow:()=>window,
     executable:process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),
@@ -153,7 +156,24 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
   });
-  for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
+  register('start-playback', async args => {
+    // Start capture before source-selected is synchronously emitted. Only the
+    // validated candidate's public hash/index are retained; never its URL.
+    let candidate;
+    try { candidate=validateCandidate(args?.candidate); }
+    catch(error){
+      playbackDiagnostics.begin(args?.session);
+      playbackDiagnostics.capture({type:'playback/error',session:args?.session,code:'START_FAILED'});
+      throw error;
+    }
+    playbackDiagnostics.begin(args?.session,candidate);
+    try { return await services.startPlayback(args); }
+    catch(error){
+      playbackDiagnostics.capture({type:'playback/error',session:args?.session,code:'START_FAILED'});
+      throw error;
+    }
+  });
+  for (const [name, method] of [['request-resource', 'requestResource'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     let parsed;
@@ -237,6 +257,9 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       { type: 'separator' }, { label: 'خروج', role: 'quit' },
     ] },
     { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
+    { label: 'مساعدة', role: 'help', submenu: [
+      { label: 'نسخ تشخيص تشغيل الفيديو', accelerator: 'CmdOrCtrl+Shift+D', click: () => clipboard.writeText(playbackDiagnostics.export()) },
+    ] },
   ]));
   if(videoReportOption){
     if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');
