@@ -1,13 +1,14 @@
 import {expect,it,vi} from 'vitest';
 import {parseHTML} from 'linkedom';
 import {installDesktopPlayer} from './player.js';
-function fixture({skipLoader}={}){
+function fixture({skipLoader,overlay=false}={}){
  const {document}=parseHTML('<html><body><button id="previous">عمل</button></body></html>');const callbacks=[],commands=[],listeners=new Map();
  const bridge={playerViewport:vi.fn(async()=>true),playerFullscreen:vi.fn(async()=>true),playbackCommand:vi.fn(async arg=>commands.push(arg)),stopPlayback:vi.fn(async()=>{}),onEvent:fn=>{callbacks.push(fn);return()=>{};}};
+ let overlayCommand;if(overlay){bridge.playerOverlay=vi.fn(async()=>true);bridge.onOverlayCommand=fn=>{overlayCommand=fn;return()=>{};};}
  const engine={addListener:(name,fn)=>{listeners.set(name,fn);return{remove(){}};},playerState:async()=>({title:'فيلم',candidate:'source-1',sources:[{id:'source-1',label:'مصدر · 1080p'}]}),switchSource:vi.fn(async()=>{}),closeSession:vi.fn(async()=>{})};
  document.defaultView.HTMLElement.prototype.getBoundingClientRect=function(){return{x:0,y:64,width:1000,height:600};};
  const g={document,innerWidth:1000,innerHeight:800,addEventListener:vi.fn(),removeEventListener:vi.fn()};const player=installDesktopPlayer({g,bridge,engine,skipLoader});
- return{document,bridge,engine,commands,player,event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
+ return{document,bridge,engine,commands,player,overlay:message=>overlayCommand?.(message),event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
 }
 it('opens an in-app native viewport with controls outside it and sends pause/seek safely',async()=>{
  const f=fixture();f.event({type:'playback/preparing',session:'one',title:'فيلم'});await Promise.resolve();
@@ -178,4 +179,22 @@ it('keeps genuine current command failures visible',async()=>{
  f.document.querySelector('[data-action=pause]').click();await Promise.resolve();await Promise.resolve();
  expect(f.document.querySelector('.desktop-player-status').textContent).toBe('native command failed');
  expect(f.document.querySelector('.desktop-player-status').dataset.error).toBe('true');f.player.dispose();
+});
+
+it('keeps an obsolete native viewport failure out of the replacement source',async()=>{
+ const f=fixture();let reject;
+ f.bridge.playerViewport.mockImplementationOnce(()=>new Promise((_,no)=>reject=no));
+ f.event({type:'playback/preparing',session:'one'});
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});
+ reject(new Error('old viewport closed'));await Promise.resolve();await Promise.resolve();
+ expect(f.document.querySelector('.desktop-player-status').textContent).toBe('');f.player.dispose();
+});
+it('discards a delayed overlay source choice after a newer source was chosen',async()=>{
+ const f=fixture({overlay:true});f.event({type:'playback/preparing',session:'one'});await Promise.resolve();await Promise.resolve();
+ let oldPick;f.engine.pick=()=>new Promise(resolve=>oldPick=resolve);
+ f.overlay({session:'one',name:'pick',value:'slow-route'});
+ f.overlay({session:'one',name:'source',value:'new-source'});await Promise.resolve();
+ oldPick({candidate:'old-source'});await Promise.resolve();await Promise.resolve();
+ expect(f.engine.switchSource).toHaveBeenCalledTimes(1);
+ expect(f.engine.switchSource).toHaveBeenCalledWith(expect.objectContaining({candidate:'new-source'}));f.player.dispose();
 });

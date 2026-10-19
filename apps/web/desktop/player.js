@@ -10,7 +10,7 @@ const clock=ms=>{const s=Math.max(0,Math.floor((ms??0)/1000));return `${Math.flo
 export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engine,skipLoader=loadSkipTimes}={}) {
   if(!g.document?.body||typeof bridge?.playerViewport!=='function')return null;
   const doc=g.document;
-  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
+  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,sourceRevision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
   let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA';
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
@@ -65,7 +65,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
       skip:skipLabel,net:netInfo,people:overlayPeople(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
-  const switchTo=async(id,find)=>{try{const selected=await find();if(session===id&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id)tell(error.message,true);}};
+  const switchTo=async(id,find)=>{const rev=revision,choice=++sourceRevision;try{const selected=await find();if(session===id&&revision===rev&&sourceRevision===choice&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id&&revision===rev&&sourceRevision===choice)tell(error.message,true);}};
   const overlayCommand=message=>{
     const id=session,value=message.value;if(!id)return;
     switch(message.name){

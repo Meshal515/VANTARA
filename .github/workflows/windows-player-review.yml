@@ -46,7 +46,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'MPV extraction failed' }
           Copy-Item $rqbit 'apps/desktop/native/rqbit.exe'
           Copy-Item (Join-Path $runtime 'electron/vulkan-1.dll') 'apps/desktop/native/vulkan-1.dll'
-          Copy-Item 'apps/web' 'apps/desktop/web' -Recurse
+          node -e "require('node:fs').cpSync('apps/web','apps/desktop/web',{recursive:true,filter:p=>!p.includes('node_modules')})"
+          if ($LASTEXITCODE -ne 0) { throw 'Web fixture staging failed' }
       - name: Prove first frame, all fullscreen inputs and matching native bounds
         shell: pwsh
         run: |
