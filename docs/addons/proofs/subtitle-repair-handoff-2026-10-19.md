@@ -1,0 +1,39 @@
+# Subtitle repair handoff — 2026-10-19
+
+## Scope and state
+
+User symptom: selecting Arabic subtitles from the provider described as Subscene/SubSource/Substance fails while video continues; OpenSubtitles v3 sometimes works after another tap. The earlier public investigation identified **SubSense** (`com.subsense.nepiraw`, 2.4.1). No exact failing title, installed provider configuration, or handset/Windows failure log was supplied. Do not equate the reported provider name with a proven exact installation.
+
+Working branch: `codex/subtitle-addon-failures-20261019`, worktree `/workspace/VANTARA-subtitle-failures-20261019`. All authored checkpoints are pushed. No merge, release, or deployment is authorized by this handoff. The untracked `node_modules` is an existing link to `/workspace/VANTARA/node_modules`; do not commit it or remove the shared target.
+
+The root integration tree at `8292dc09828c7c4876298326e089c278b91fbb1e` and Windows 0.3.14 release source `23850a566dcc561953a78b565317f88ca44bc1a5` lack these fixes. Windows 0.3.15 work at `511404dd` includes the prior subtitle fixes plus native decoding, but its release/publication status was not queried in this task. A workflow name or commit does not establish that a version was published.
+
+## Proven defects and narrowly scoped commits
+
+Apply these individual commits rather than copying complete files from older trees:
+
+| Commit | Purpose and integration notes |
+| --- | --- |
+| `b9c41916b6714d1434608309b311d788ad578863` | Android uses a unique selection counter in each subtitle download request ID and suppresses stale failure messages. Web shares pending downloads and prevents duplicate track nodes for repeated taps. Touches `PlayerActivity.kt`, browser subtitle session and test. |
+| `11377f619cb9321b02c393ab3a360003dcd16d9b` | Arabic downloads try strict UTF-8 before Windows-1256 fallback. BOM and declared charset take precedence. Web transport/session, Android client/call site, byte-fixture tests. Preserve the root branch's additional `cache` option when resolving `transport.js`. Preserve the root branch's player/moment changes when resolving Android context. |
+| `83dd3b4296c10a2bb4cc9d8f264e341838edd6f7` | Browser ignores a failed download belonging to an obsolete selection (e.g. user has chosen Off), so the UI cannot report an old download as the current failure. Active selection errors still propagate. Depends on the selection counter from `b9c41916`. Browser subtitle session/test only. |
+| `619bfa0ac4e783e2645cc36e03da0e1511e00a9d` | **Necessary for native Windows playback.** Native downloader previously decoded bytes as UTF-8 and then rejected replacement characters. Adds a decoder callback to `readResponse` and chooses charset only at the subtitle download call. Includes local HTTP fixture tests. This commit exists on the Windows moments branch, not this subtitle branch. Integrator owns `services.mjs`; do not replace the root services file. |
+| `2309f3d8c8daf0b45cc7c966ee6d99db21875a08` | Sanitized original public SubSense observations, useful as investigation evidence. Documentation only. |
+
+The native Windows decoder is essential: the browser transport fix alone cannot fix `services.mjs` downloads. Native validation explicitly rejects `\uFFFD`; the same Windows-1256 bytes that merely render incorrectly in a browser are rejected on Windows before MPV sees a file. The existing native decoder commit is only 24 insertions/6 deletions across service and test despite larger branch-to-branch diffs caused by unrelated moment work.
+
+## Verification completed in this resumed task
+
+- New stale-download test first failed with `expected 'failed' to be 'ignored'`; after adding the selection/generation guard it passed.
+- `node /workspace/VANTARA/node_modules/vitest/vitest.mjs run apps/web/addons/transport.test.js apps/web/pwa/player/subtitles.test.js apps/web/addons/subtitles.test.js`: **24/24 passed**.
+- On `/workspace/VANTARA-windows-moments-20261019` at `511404dd`, `node --test --test-name-pattern='Arabic subtitle downloads|subtitle-load|ملف ترجمة' apps/desktop/src/services.test.mjs`: **4/4 passed**. The tests exercise the real local HTTP body, persisted UTF-8 subtitle content and MPV command fixture, including Windows-1256, declared encoding, UTF-16 BOM, and non-Arabic rejection. This is not real Windows/MPV playback proof.
+- `pnpm test` could not start suites because the installed pnpm refuses the pre-existing modules symlink with `ERR_PNPM_UNSAFE_MODULES_DIR`. A direct repository-wide Vitest run was started as the equivalent suite runner; its final result is recorded in the follow-up checkpoint below.
+- Synthetic MicroDVD `{frame}{frame}text` input, including a frame-rate declaration, is rejected by `toWebVtt`. Native Windows `validateSubtitleText` accepts SRT/VTT/ASS only. Android `SubtitleText.parse` accepts SRT/VTT only. The public sample previously observed lacked a frame-rate declaration. No frame rate was guessed and no silent timing conversion was added.
+
+## Limits and next validation
+
+The original [sanitized public investigation](subsense-subtitle-investigation-2026-10-19.md) documents 119 Arabic tracks: 61 direct OpenSubtitles downloads and 58 provider/YIFY downloads; three `.sub` tracks were MicroDVD. Two direct SRT files used Windows-1256 and decoded correctly after the repair. A YIFY proxy already returned extracted plain SRT. No archive extraction or blanket retry was justified by those observations.
+
+The failure of an arbitrary first OpenSubtitles tap has not been reproduced from the user's exact installation. Request-ID reuse, repeated-selection races, legacy decoding, and stale error display are proven app defects; they are not proof that every provider failure is fixed. Retrying cannot repair unsupported MicroDVD or a persistent HTML/auth/provider response.
+
+After integration: rerun the focused web tests and native Windows fixture test, run combined Android compilation/tests on the integrating branch, then verify a real Arabic SubSense SRT and OpenSubtitles selection on the target device. For remaining failures, gather only provider name/ID, title ID, language, response status, charset, body-format classification, and byte/cue counts. Never print or commit configured provider URLs, tokens, account identifiers, downloaded subtitle text, or user secrets. Unsupported MicroDVD should direct the user to another SRT/VTT track until timing metadata is available; video must continue.
