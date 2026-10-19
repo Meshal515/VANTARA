@@ -51,3 +51,13 @@ it('snapshots a public route without invoking the desktop proxy prepare callback
   expect(prepare).not.toHaveBeenCalled(); expect(videos).toHaveLength(1);
   expect(videos[0].src).toBe('https://source.example/movie.mp4');
 });
+it('does not let an aborted offscreen request cancel the replacement visible request', async () => {
+  let ready;
+  const resolveSources = () => new Promise((resolve) => { ready = resolve; });
+  previews = createMomentPreviews({ resolveSources }); const shot = document.querySelector('#shot'); previews.mount(shot, row);
+  observer.callback([{ target: shot, isIntersecting: true }]); await Promise.resolve();
+  observer.callback([{ target: shot, isIntersecting: false }]);
+  observer.callback([{ target: shot, isIntersecting: true }]);
+  ready([{ url: 'https://source.example/movie.mp4' }]); await tick();
+  expect(videos).toHaveLength(1); expect(videos[0].src).toBe('https://source.example/movie.mp4');
+});

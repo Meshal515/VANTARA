@@ -76,4 +76,13 @@ describe('shared moment media', () => {
     expect(release).not.toHaveBeenCalled(); lease.release();
     await Promise.resolve(); expect(release).toHaveBeenCalledTimes(1);
   });
+  it('does not let a cleared resolver failure erase the replacement cache entry', async () => {
+    let fail; const resolver = vi.fn().mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; })).mockResolvedValue([{ url: 'https://source.example/new.mp4' }]);
+    const cache = createMomentSourceCache(resolver); const old = cache.acquire({ id: 'same' }).catch(() => {});
+    await Promise.resolve(); cache.clear();
+    const replacement = await cache.acquire({ id: 'same' }); replacement.release();
+    fail(new Error('old session failed')); await old; await Promise.resolve(); await Promise.resolve();
+    const again = await cache.acquire({ id: 'same' }); again.release();
+    expect(resolver).toHaveBeenCalledTimes(2); cache.clear();
+  });
 });

@@ -24,3 +24,11 @@ it('cancels a late local-source lookup when its viewer has been destroyed',async
  expect(await save).toBe('AbortError');for(let i=0;i<10;i++)await Promise.resolve();
  expect(engine.exportMoment).not.toHaveBeenCalled();expect(engine.closeSession).toHaveBeenCalledWith('late');
 });
+it('does not create an orphaned blob when desktop read finishes after close',async()=>{
+ let opts,ready;const createUrl=vi.spyOn(URL,'createObjectURL');
+ const desktop={exportMoment:vi.fn(async()=>({saved:true})),readMoment:vi.fn(()=>new Promise(resolve=>{ready=resolve;}))};
+ const c=createMomentController({engine:{},desktop,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ const save=opts.saveVideo({row,source:{session:'s',candidate:'c',exportHandle:'handle'},startMs:10000,endMs:30000,filename:'clip.mp4'}).catch(e=>e.name);
+ for(let i=0;i<10&&!ready;i++)await Promise.resolve();c.destroy();ready({base64:'AAAA'});
+ expect(await save).toBe('AbortError');expect(createUrl).not.toHaveBeenCalled();createUrl.mockRestore();
+});

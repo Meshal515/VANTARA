@@ -81,4 +81,22 @@ describe('moment miniplayer', () => {
     document.querySelector('[data-action="replay"]').click(); await tick();
     expect(video.src).toBe('https://source.example/first.mp4');
   });
+  it('does not announce a late export failure after its viewer closes', async () => {
+    let reject; const toast = vi.fn();
+    viewer = openMomentViewer({ row, toast, resolveSources: async () => [{ url: 'https://source.example/movie.mp4' }], saveVideo: () => new Promise((_, fail) => { reject = fail; }) });
+    await tick(); document.querySelector('video').dispatchEvent(new window.Event('error')); await tick();
+    document.querySelector('[data-action="save"]').click(); viewer.destroy(); reject(new DOMException('Closed', 'AbortError')); await tick();
+    expect(toast).not.toHaveBeenCalled();
+  });
+  it('waits for media time rather than ending a clip while playback is buffering', async () => {
+    viewer = openMomentViewer({ row, resolveSources: async () => [{ url: 'https://source.example/movie.mp4' }] });
+    await tick(); const video = document.querySelector('video'); video.currentTime = 10; video.paused = false;
+    vi.useFakeTimers();
+    try {
+      video.dispatchEvent(new window.Event('playing')); vi.advanceTimersByTime(20000);
+      expect(document.querySelector('.mv-end').hidden).toBe(true);
+      video.currentTime = 30; video.dispatchEvent(new window.Event('timeupdate'));
+      expect(document.querySelector('.mv-end').hidden).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
 });
