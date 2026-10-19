@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { cacheNamespace } from './torrent-cache.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
@@ -14,7 +15,7 @@ async function setup(t, options = {}) {
   const opts = { userData, freeBytes: async () => 2n ** 40n, ...options };
   const cache = createTorrentReplayCache(opts);
   t.after(async () => { await cache.close(); await fs.rm(base, { recursive: true, force: true }); });
-  return { base, userData, root, opts, cache, dir: path.join(root, cacheNamespace(userData) + '-replay-v1') };
+  return { base, userData, root, opts, cache, dir: path.join(root, cacheNamespace(userData) + '-replay-v1-' + createHash('sha256').update(options.ownerId ?? 'guest').digest('hex').slice(0, 16)) };
 }
 async function remember(s, extra = {}) {
   return s.cache.remember({ root: s.root, infoHash: hash, fileIdx: 2, fileLength: 100, filename: 'film.mp4', ...extra });
@@ -150,4 +151,64 @@ test('unwritable root, overlarge write, expired restart and queued cancellation 
   assert.equal(await entry.read(0, 4), null);
   const errors = await setup(t, { freeBytes: async () => { throw new Error('disk unavailable'); } });
   assert.equal(await (await remember(errors)).write(0, Buffer.from('aaaa')), false);
+});
+
+test('a namespace marker from another account is rejected even with the same profile path', async t => {
+  const s = await setup(t), entry = await remember(s); await entry.write(0, Buffer.from('aaaa')); await s.cache.close();
+  const ownerPath = path.join(s.dir, 'owner.json');
+  const owner = JSON.parse(await fs.readFile(ownerPath, 'utf8')); owner.principal = 'another-account';
+  await fs.writeFile(ownerPath, JSON.stringify(owner));
+  const next = createTorrentReplayCache(s.opts); t.after(() => next.close());
+  assert.equal(await next.lookup({ infoHash: hash, fileIdx: 2 }), null);
+  assert.equal(await next.remember({ root: s.root, infoHash: hash, fileIdx: 2, fileLength: 100 }), null);
+});
+
+test('non-cache files survive cleanup and an interrupted write artifact never becomes a readable extent', async t => {
+  const s = await setup(t), entry = await remember(s);
+  await fs.writeFile(path.join(s.dir, 'owner-notes.txt'), 'keep');
+  await fs.writeFile(path.join(s.dir, 'pending-unknown.tmp'), 'incomplete');
+  const interrupted = path.join(s.dir, 'pending-12345678-1234-1234-1234-123456789abc.tmp');
+  await fs.writeFile(interrupted, 'incomplete');
+  await fs.writeFile(path.join(s.dir, 'extent-12345678-1234-1234-1234-123456789abc.bin'), 'uncommitted');
+  await s.cache.cleanup();
+  assert.equal(await entry.read(0, 4), null);
+  assert.equal(await fs.readFile(path.join(s.dir, 'owner-notes.txt'), 'utf8'), 'keep');
+  assert.equal(await fs.readFile(path.join(s.dir, 'pending-unknown.tmp'), 'utf8'), 'incomplete');
+  await assert.rejects(fs.stat(interrupted), { code: 'ENOENT' });
+});
+
+test('descriptor overflow never returns an orphan entry capable of writing outside global accounting', async t => {
+  const s = await setup(t);
+  const old = await remember(s, { fileIdx: 0 });
+  for (let fileIdx = 1; fileIdx < 256; fileIdx++) assert.ok(await remember(s, { fileIdx }));
+  const latest = await remember(s, { fileIdx: 256 });
+  assert.ok(latest);
+  assert.equal(await old.write(0, Buffer.from('aaaa')), false);
+  assert.equal(await s.cache.lookup({ infoHash: hash, fileIdx: 0 }), null);
+  assert.equal(await latest.write(0, Buffer.from('bbbb')), true);
+});
+
+test('an instance that observed a competing writer stays read-only instead of publishing a stale index', async t => {
+  const s = await setup(t), entry = await remember(s); await entry.write(0, Buffer.from('aaaa'));
+  const competing = createTorrentReplayCache(s.opts); t.after(() => competing.close());
+  const stale = await competing.lookup({ infoHash: hash, fileIdx: 2 });
+  await entry.write(10, Buffer.from('bbbb')); await s.cache.close();
+  assert.equal(await stale.write(20, Buffer.from('cccc')), false);
+  const fresh = createTorrentReplayCache(s.opts); t.after(() => fresh.close());
+  assert.equal((await (await fresh.lookup({ infoHash: hash, fileIdx: 2 })).read(10, 4)).toString(), 'bbbb');
+});
+
+test('VANTARA accounts within the same Windows profile use isolated pointers and cache namespaces', async t => {
+  const s = await setup(t, { ownerId: 'account-a' });
+  const a = await remember(s); await a.write(0, Buffer.from('aaaa'));
+  const second = createTorrentReplayCache({ ...s.opts, ownerId: 'account-b' }); t.after(() => second.close());
+  assert.equal(await second.lookup({ infoHash: hash, fileIdx: 2 }), null);
+  const b = await second.remember({ root: s.root, infoHash: hash, fileIdx: 2, fileLength: 100 });
+  await b.write(0, Buffer.from('bbbb'));
+  assert.equal((await a.read(0, 4)).toString(), 'aaaa');
+  assert.equal((await b.read(0, 4)).toString(), 'bbbb');
+  const pointers = (await fs.readdir(s.userData)).filter(x => x.startsWith('torrent-replay-root-'));
+  assert.equal(pointers.length, 2);
+  for (const file of pointers) assert.doesNotMatch(await fs.readFile(path.join(s.userData, file), 'utf8'), /account-[ab]/);
+  assert.throws(() => createTorrentReplayCache({ ...s.opts, ownerId: '../bad' }), /ownerId/);
 });
