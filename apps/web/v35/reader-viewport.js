@@ -25,10 +25,13 @@ export function buildViewportCapture({ viewport, scroll, toolbar, tray, pages, p
   const visible = pages.map((page, index) => ({ ...page, index, visible: intersect(intersect(page.rect, page.clip), bounds) }))
     .filter(page => nonempty(page.visible));
   if (!visible.length) throw new Error('No visible manga content');
-  // Vertical pages have an 820px maximum width on desktop. Exclude the side gutters.
-  const left = Math.min(...visible.map(p => Math.max(bounds.left, p.clip.left)));
-  const right = Math.max(...visible.map(p => Math.min(bounds.right, p.clip.right)));
-  bounds = intersect(bounds, box(left, bounds.top, right - left, bounds.height));
+  // Bound the export by ACTUAL visible manga pixels, not reader/zoom black
+  // letterboxing or desktop gutters. Keep real gaps between adjacent pages.
+  const left = Math.min(...visible.map(p => p.visible.left));
+  const right = Math.max(...visible.map(p => p.visible.right));
+  const top = Math.min(...visible.map(p => p.visible.top));
+  const bottom = Math.max(...visible.map(p => p.visible.bottom));
+  bounds = intersect(bounds, box(left, top, right - left, bottom - top));
   const draws = visible.map(page => {
     const clipped = intersect(page.visible, bounds);
     return {
