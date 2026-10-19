@@ -1,0 +1,32 @@
+[
+  {
+    "name": "authored-mp4.mp4",
+    "kind": "mp4",
+    "bytes": 7622078,
+    "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+    "fileIdx": 0,
+    "pieceLength": 262144,
+    "syntheticPaddingBytes": 0,
+    "sha256": "f2da7bc2a0541317b9f157038635847cbbac3f6391747d1b5ebb023732cc82e4"
+  },
+  {
+    "name": "authored-late-moov.mp4",
+    "kind": "late-moov",
+    "bytes": 41176510,
+    "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+    "fileIdx": 0,
+    "pieceLength": 262144,
+    "syntheticPaddingBytes": 33554432,
+    "sha256": "a9c9fc6308227c3db3c575b4b921e5aef9bf6b82a67a815967711bbea05aaca8"
+  },
+  {
+    "name": "authored-mkv.mkv",
+    "kind": "mkv",
+    "bytes": 7624981,
+    "infoHash": "7218b77c93e262ee9aa441fe3e7d14c776d0481a",
+    "fileIdx": 0,
+    "pieceLength": 262144,
+    "syntheticPaddingBytes": 0,
+    "sha256": "ac4e2cbe9db73cb30ca92781d0382667d9f6adc2c4b718243968d88d58a5969e"
+  }
+]
