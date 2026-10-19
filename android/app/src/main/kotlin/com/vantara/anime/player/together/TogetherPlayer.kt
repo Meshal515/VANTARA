@@ -58,6 +58,27 @@ data class Invitee(val userId: String, val displayName: String = "صديق", val
 internal fun roomAvatarKey(userId: String, avatarKey: String?, invitees: List<Invitee>): String? =
     avatarKey?.takeIf { it.isNotBlank() } ?: invitees.firstOrNull { it.userId == userId }?.avatarKey
 
+/** Local editor ownership of the shared player; no room side effect may escape it. */
+internal class LocalClipPreview {
+    enum class Resume { ROOM, LOCAL, ABANDON }
+    var active = false
+        private set
+    private var episode = -1
+    private var invalidated = false
+    fun begin(episode: Int) { check(!active); this.episode = episode; invalidated = false; active = true }
+    fun invalidate() { if (active) invalidated = true }
+    fun shared(effect: () -> Unit) { if (!active) effect() }
+    fun end(currentEpisode: Int, synced: Boolean): Resume {
+        if (!active) return Resume.ABANDON
+        active = false
+        return when {
+            invalidated || currentEpisode != episode -> Resume.ABANDON
+            synced -> Resume.ROOM
+            else -> Resume.LOCAL
+        }
+    }
+}
+
 /**
  * Together داخل المشغّل الأصلي:
  *  - غرفة الانتظار قبل البداية (المتزامن): أفاتاراتكم جنب بعض و«جاري التجهيز… جاهز»، والمضيف يضغط «ابدأ».
@@ -89,6 +110,8 @@ class TogetherPlayer(
         fun leaveRoom() {}
         /** «غيّر» في شاشة الغرفة: ورقة السيرفرات. */
         fun openServers() {}
+        /** Dispose the local editor before the room replaces its episode/player source. */
+        fun closeLocalPreview() {}
         /** «OKRU · 1080p» للسيرفر الحالي. */
         fun serverLabel(): String? = sourceName()
     }
@@ -97,6 +120,42 @@ class TogetherPlayer(
     val client = TogetherClient(http, launch.baseUrl, launch.code, launch.token, { hooks.freshToken() }, this)
     private val ctl = DriftController()
     private var applying = false
+    private var destroyed = false
+    private val preview = LocalClipPreview()
+    val localPreviewActive: Boolean get() = preview.active
+
+    fun beginLocalPreview() {
+        preview.begin(hooks.episode())
+        hideLobby()
+        seekIssuedAt = 0L
+        withApplying { hooks.player.setPlaybackSpeed(1f) }
+    }
+
+    /** true means the Activity must not restore its pre-editor position. */
+    fun endLocalPreview(): Boolean {
+        if (destroyed) return true
+        when (preview.end(hooks.episode(), synced)) {
+            LocalClipPreview.Resume.LOCAL -> return false
+            LocalClipPreview.Resume.ABANDON -> return true
+            LocalClipPreview.Resume.ROOM -> {
+                val t = client.timeline
+                withApplying { hooks.player.setPlaybackSpeed(1f) }
+                if (ready && t != null && episodeOf(t.mediaKey) == hooks.episode()) {
+                    if (t.started) jumpToRoom(t, force = true)
+                    else withApplying { hooks.player.pause(); hooks.player.seekTo(max(0L, offsetMs)) }
+                } else withApplying { hooks.player.pause() }
+                report(stateNow(), force = true)
+                return true
+            }
+        }
+    }
+
+    private fun discardLocalPreview() {
+        if (!preview.active) return
+        preview.invalidate()
+        hooks.closeLocalPreview()
+    }
+
     private var lastReported = ""
     private var lastReportAt = 0L
     private var preparedEpisode = -1
@@ -137,7 +196,7 @@ class TogetherPlayer(
         val v = ((ms.coerceIn(-OFFSET_LIMIT_MS, OFFSET_LIMIT_MS)) / 100) * 100
         prefs.edit().apply { if (v == 0L) remove(offsetKey()) else putLong(offsetKey(), v) }.apply()
         val t = client.timeline
-        if (ready && synced && t != null) {
+        if (!preview.active && ready && synced && t != null) {
             if (t.started) jumpToRoom(t, force = true)
             else withApplying { hooks.player.seekTo(max(0L, v)) }
         }
@@ -165,6 +224,8 @@ class TogetherPlayer(
     }
 
     fun destroy() {
+        destroyed = true
+        preview.invalidate()
         main.removeCallbacksAndMessages(null)
         report("paused", force = true)
         client.close()
@@ -192,6 +253,7 @@ class TogetherPlayer(
     // ───────────── أحداث المشغّل ─────────────
 
     fun onPreparing() {
+        discardLocalPreview()
         ready = false
         failedSource = null
         if (synced && client.timeline?.started != true) { mute(true); showLobby() }
@@ -200,6 +262,7 @@ class TogetherPlayer(
     }
 
     fun onReady() {
+        if (preview.active) return
         val t = client.timeline
         if (!ready) {
             ready = true
@@ -228,6 +291,7 @@ class TogetherPlayer(
 
     /** انتهت الحلقة: المضيف ينقل الغرفة للتالية، والبقية ينتظرونه. يعيد true إن تولّى Together الأمر. */
     fun onEnded(): Boolean {
+        if (preview.active) return true
         if (!client.isHost) {
             if (synced) hooks.message("بانتظار المضيف للحلقة التالية…")
             return synced
@@ -241,7 +305,7 @@ class TogetherPlayer(
 
     /** المستخدم ضغط تشغيل/إيقاف. المضيف يأمر الغرفة؛ غيره في المتزامن لا يحرّكها. */
     fun onUserPlayPause(playing: Boolean): Boolean {
-        if (applying) return false
+        if (preview.active || applying) return false
         val t = client.timeline ?: return false
         if (!synced) return false
         if (client.canControl) {
@@ -255,7 +319,7 @@ class TogetherPlayer(
 
     /** المستخدم قدّم/رجّع. */
     fun onUserSeek(toMs: Long) {
-        if (applying || !synced) return
+        if (preview.active || applying || !synced) return
         if (client.canControl) client.command("seek", roomPos(toMs))
         else hooks.message("المضيف يتحكم بالتشغيل — نرجّعك معهم")
     }
@@ -263,6 +327,8 @@ class TogetherPlayer(
     // ───────────── أحداث الغرفة ─────────────
 
     override fun onWelcome() {
+        if (destroyed) return
+        if (preview.active) { paintStrip(); return }
         // A fast local source can become ready before the WebSocket welcome.
         // Reconcile that first frame with the room instead of playing behind the lobby.
         val t = client.timeline
@@ -277,12 +343,14 @@ class TogetherPlayer(
     }
 
     override fun onState(timeline: Timeline, by: String?) {
+        if (destroyed) return
         val ep = episodeOf(timeline.mediaKey)
         // الحلقة التالية (أو أي حلقة اختارها المضيف): كل واحد يجهّزها بسيرفره
         if (ep != null && ep != hooks.episode()) {
-            if (synced || by == client.hostUserId) { ready = false; hooks.switchToEpisode(ep) }
+            if (synced || by == client.hostUserId) { discardLocalPreview(); ready = false; hooks.switchToEpisode(ep) }
             return
         }
+        if (preview.active) return
         if (counting(timeline)) { mute(false); startCountdown(timeline.at) }
         else if (timeline.started) { hideLobby(); mute(false) } else if (synced && ready) showLobby()
         if (synced && timeline.started && ready && by != client.me) jumpToRoom(timeline)
@@ -291,6 +359,7 @@ class TogetherPlayer(
 
     override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
     override fun onMode(mode: String) {
+        if (destroyed) return
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
         if (mode != "sync") { hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
     }
@@ -307,6 +376,8 @@ class TogetherPlayer(
     override fun onLeft(name: String) = hooks.message("$name طلع")
     override fun onHost(userId: String) { if (userId == client.me) hooks.message("صرت المضيف"); paintLobby() }
     override fun onClosed(reason: String) {
+        if (destroyed) return
+        discardLocalPreview()
         hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; else -> "انقطعت الغرفة" })
         hideLobby()
         withApplying { hooks.player.setPlaybackSpeed(1f) }
@@ -322,6 +393,7 @@ class TogetherPlayer(
     }
 
     private fun step() {
+        if (destroyed || preview.active) return
         val p = hooks.player
         val t = client.timeline
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
@@ -350,6 +422,7 @@ class TogetherPlayer(
     }
 
     private fun jumpToRoom(t: Timeline, force: Boolean = false) {
+        if (destroyed || preview.active) return
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
         if (at < t.at) {
             // Apply the scheduled command at the shared instant, not on receipt.
@@ -379,9 +452,9 @@ class TogetherPlayer(
         }
     }
 
-    private fun report(state: String, force: Boolean = false) {
+    private fun report(state: String, force: Boolean = false) = preview.shared {
         val now = SystemClock.elapsedRealtime()
-        if (!force && state == lastReported && now - lastReportAt < 1000) return
+        if (!force && state == lastReported && now - lastReportAt < 1000) return@shared
         lastReported = state
         lastReportAt = now
         val (_, p95) = ctl.stats()
