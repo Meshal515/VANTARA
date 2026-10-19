@@ -509,7 +509,16 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(!torrent&&/dash\+xml/i.test(contentType))throw new Error('DASH غير مدعوم');
           const responseHeaders={'content-type':contentType,'cache-control':'no-store'};
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
-          if(!res.headersSent)res.writeHead(upstream.statusCode,responseHeaders);
+          if(!res.headersSent){
+            res.writeHead(upstream.statusCode,responseHeaders);
+            if(torrent){
+              // rqbit can describe a Range before its first piece is ready.
+              // Node otherwise buffers these headers until the first body byte.
+              res.flushHeaders();
+              const end=/^bytes \d+-(\d+)\//.exec(String(upstream.headers['content-range']??''));
+              state.trace.record('http-headers',{requestId:reader.requestId,rangeStart:start,...(end?{rangeEnd:Number(end[1])}:{}),waitMs:performance.now()-reader.at});
+            }
+          }
           if(req.method==='HEAD'){upstream.destroy();res.end();}else {
             if(torrent&&state.win){let sent=0;upstream.on('data',c=>{sent+=c.length;demandBytes(c.length,start+sent);});}
             if(torrent&&state.replayEntry&&[200,206].includes(upstream.statusCode)){
