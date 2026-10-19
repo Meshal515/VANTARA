@@ -1216,7 +1216,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       now: Date.now(),
     });
     return auditFailure
-      ? { ...result, state: 'degraded', message: 'لم يكتمل استرجاع بيانات الحساب؛ ستُعاد المحاولة', lastError: lastError ?? { code: auditFailure } }
+      ? {
+          ...result, state: 'degraded',
+          message: 'لم يكتمل استرجاع بيانات الحساب؛ ستُعاد المحاولة',
+          // A later successful delta poll clears lastError, but must never hide
+          // the real full-history restoration failure.
+          lastError: { ...(result.lastError ?? {}), code: auditFailure },
+        }
       : result;
   }
 
