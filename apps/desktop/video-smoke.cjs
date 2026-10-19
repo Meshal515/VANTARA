@@ -102,8 +102,8 @@ public static class VantaraProofInput {
 '@
 $h=[IntPtr]::new([long]::Parse('${hwnd}'))
 if(-not [VantaraProofInput]::IsWindow($h)){exit 2}
-[uint32]$pid=0
-$target=[VantaraProofInput]::GetWindowThreadProcessId($h,[ref]$pid)
+[uint32]$windowProcessId=0
+$target=[VantaraProofInput]::GetWindowThreadProcessId($h,[ref]$windowProcessId)
 $caller=[VantaraProofInput]::GetCurrentThreadId()
 $root=[VantaraProofInput]::GetAncestor($h,2)
 if(-not $target){exit 3}
