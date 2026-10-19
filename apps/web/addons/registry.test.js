@@ -289,3 +289,89 @@ it('opens the setup page beside the manifest on its own path, like Stremio, with
  // كان يفتح https://host.test/configure (جذر الموقع) فيعيد 404 لكل إضافة على مسار فرعي
  expect(r.configurationUrl(one.key)).toBe('https://host.test/addons/subs/configure');
 });
+
+it('reinstalls identical data with a fresh epoch, original configured URL/state and addon-scoped health', async () => {
+  const store = createStore({ indexedDB: null }), calls = [];
+  const transport = { json: async (url, options) => { calls.push({ url, options }); return raw(); } };
+  const r = createAddonRegistry({ store, transport });
+  await r.ready;
+  const url = 'https://addon.test/config-private/manifest.json?key=private';
+  const one = await r.install(await r.inspect(url));
+  await r.enable(one.key, false); await r.pin(one.key, true);
+  r.health.failure(one.key, 'streams', 'pwa', 'TIMEOUT');
+  r.health.failure('other-addon', 'streams', 'pwa', 'TIMEOUT');
+  await store.set('state', 'account-preferences', { language: 'ar' });
+  const next = await r.reinstall(one.key);
+  expect(next.cacheEpoch).not.toBe(one.cacheEpoch);
+  expect(next).toMatchObject({ enabled: false, pinned: true, installedAt: one.installedAt, stagedVersion: null });
+  expect(calls.at(-1)).toMatchObject({ url, options: { cache: 'no-store' } });
+  expect(next.health.streams.state).toBe('unknown');
+  expect(r.health.state('other-addon', 'streams', 'pwa').state).toBe('failed');
+  expect((await store.get('state', 'account-preferences')).value).toEqual({ language: 'ar' });
+  expect(JSON.stringify(next)).not.toContain('config-private');
+  const restored = createAddonRegistry({ store, transport }); await restored.ready;
+  expect(restored.list()).toHaveLength(1);
+  expect(restored.list()[0].cacheEpoch).toBe(next.cacheEpoch);
+  expect(restored.list()[0].health.streams.state).toBe('unknown');
+  await restored.enable(next.key, true);
+  expect(restored.connection(next.key).manifestUrl).toBe(url);
+});
+
+it.each(['network', 'timeout', 'invalid', 'identity', 'configuration', 'storage', 'abort'])('preserves the entire installed record on reinstall %s failure', async (mode) => {
+  const store = createStore({ indexedDB: null }); let replacing = false;
+  const controller = new AbortController();
+  const r = createAddonRegistry({ store: { get: store.get, set: (...args) => replacing && mode === 'storage' && args[1] === 'addons.v1' ? false : store.set(...args) }, transport: { json: async () => {
+    if (!replacing) return raw();
+    if (mode === 'network') throw new Error('offline');
+    if (mode === 'timeout') throw new DOMException('timeout', 'TimeoutError');
+    if (mode === 'invalid') return { wrong: true };
+    if (mode === 'identity') return { ...raw(), id: 'another-addon' };
+    if (mode === 'configuration') return { ...raw(), behaviorHints: { configurationRequired: true } };
+    if (mode === 'abort') controller.abort();
+    return raw('2.0.0');
+  } } });
+  await r.ready;
+  const one = await r.install(await r.inspect('https://addon.test/private/manifest.json'));
+  r.health.failure(one.key, 'streams', 'pwa', 'TIMEOUT'); await r.flushHealth();
+  const before = r.list(), persisted = await store.get('state', 'addons.v1');
+  replacing = true;
+  await expect(r.reinstall(one.key, { signal: controller.signal })).rejects.toThrow();
+  expect(r.list()).toEqual(before);
+  expect(await store.get('state', 'addons.v1')).toEqual(persisted);
+});
+
+it('does not expose replacement in memory while persistence is pending or reset health before success', async () => {
+  const store = createStore({ indexedDB: null }); let hold = false, release;
+  const r = createAddonRegistry({ store: { get: store.get, set: async (...args) => {
+    if (hold && args[1] === 'addons.v1') await new Promise(resolve => { release = resolve; });
+    return store.set(...args);
+  } }, transport: { json: async () => raw() } });
+  await r.ready; const one = await r.install(await r.inspect('https://addon.test/manifest.json'));
+  r.health.failure(one.key, 'streams', 'pwa', 'TIMEOUT'); await r.flushHealth();
+  hold = true; const pending = r.reinstall(one.key);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(r.list()[0].cacheEpoch).toBe(one.cacheEpoch);
+  expect(r.list()[0].health.streams.state).toBe('failed');
+  release(); await pending;
+  expect(r.list()[0].cacheEpoch).not.toBe(one.cacheEpoch);
+});
+
+it('blocks reinstall during active sessions and never reinstalls a removed addon', async () => {
+  const { registry: r } = setup(); await r.ready;
+  const one = await r.install(await r.inspect('https://addon.test/manifest.json'));
+  const session = r.snapshot();
+  await expect(r.reinstall(one.key)).rejects.toThrow('انتهاء الجلسة');
+  expect(r.list()[0].cacheEpoch).toBe(one.cacheEpoch); session.release();
+  await r.remove(one.key);
+  await expect(r.reinstall(one.key)).rejects.toThrow('غير مثبتة');
+  expect(r.list()).toEqual([]);
+});
+
+it.each(['baseUrl', 'networkHosts'])('rejects a changed remote %s during reinstall without replacing source permissions', async change => {
+  let manifest = { id: 'org.remote', name: 'Remote', version: '1.0.0', protocolVersion: 1, minVantaraVersion: '0.1.0', runtime: 'remote', contentTypes: ['manga'], capabilities: ['search'], baseUrl: 'https://addon.test/api/', resources: { search: '/search?query={query}' }, permissions: { networkHosts: ['addon.test'], verification: false } };
+  const r = createAddonRegistry({ store: createStore({ indexedDB: null }), transport: { json: async () => manifest } });
+  await r.ready; const one = await r.install(await r.inspect('https://addon.test/manifest.json'));
+  manifest = change === 'baseUrl' ? { ...manifest, baseUrl: 'https://addon.test/other/' } : { ...manifest, permissions: { ...manifest.permissions, networkHosts: ['addon.test', 'another.test'] } };
+  await expect(r.reinstall(one.key)).rejects.toThrow('مصدر الإضافة');
+  expect(r.list()[0].cacheEpoch).toBe(one.cacheEpoch);
+});

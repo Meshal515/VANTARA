@@ -639,3 +639,70 @@ it("on the phone, Install inside the configure page installs the configured addo
   expect(registry.install).not.toHaveBeenCalled();
   expect(link.textContent).toBe("إعداد الإضافة");
 });
+
+it('offers Torrentio as a configuration-only source provider without fetching or installing', () => {
+  setup(); const inspect = vi.fn(), install = vi.fn();
+  const view = renderAddons({ registry: { list: () => [], inspect, install } });
+  click(view, 'استكشاف');
+  const card = [...view.querySelectorAll('.addon-card')].find(el => el.textContent.includes('Torrentio'));
+  expect(card.textContent).toContain('مزود روابط تورنت');
+  expect(card.querySelector('[data-configure]').href).toBe('https://torrentio.strem.fun/configure');
+  expect(card.textContent).toContain('يحتاج إعداد');
+  expect([...card.querySelectorAll('button')].map(b => b.textContent)).not.toContain('تثبيت');
+  expect(inspect).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled();
+});
+
+it.each([
+  [{}, 'مثبتة · لم تُختبر بعد'],
+  [{ enabled: false }, 'معطلة'],
+  [{ configuration: { required: true, configured: false } }, 'يحتاج إعداد'],
+  [{ assessment: { level: 'broken', label: 'تواجه مشكلة', detail: 'فشل الاتصال' } }, 'تواجه مشكلة'],
+])('shows the real existing Torrentio state in Explore and manages the existing entry', (extra, label) => {
+  setup(); const addon = row('Torrentio', { id: 'com.stremio.torrentio.addon', key: 'https://torrentio.strem.fun|com.stremio.torrentio.addon', bundled: false, capabilities: ['streams'], contentTypes: ['movie'], ...extra });
+  const view = renderAddons({ registry: { list: () => [addon] } });
+  click(view, 'استكشاف');
+  const cards = [...view.querySelectorAll('.addon-card')].filter(el => el.textContent.includes('Torrentio'));
+  expect(cards).toHaveLength(1); expect(cards[0].textContent).toContain(label);
+  expect(cards[0].querySelector('[data-configure]')).toBeNull();
+  click(cards[0], 'إدارة الإضافة المثبتة');
+  expect(view.querySelector('.addon-details').textContent).toContain('Torrentio');
+});
+
+it('keeps retry, update and actual reinstall distinct and prevents duplicate reinstall clicks', async () => {
+  setup(); let release; const reinstall = vi.fn(() => new Promise(resolve => { release = resolve; }));
+  const stage = vi.fn(), reset = vi.fn(), onCheck = vi.fn(async () => ({ checks: [] })), onBack = vi.fn();
+  const addon = row('External', { bundled: false });
+  const view = renderAddonDetails({ addon, registry: { reinstall, stage, health: { reset } }, onCheck, onBack });
+  click(view, 'إعادة المحاولة'); await tick();
+  expect(reset).toHaveBeenCalledWith(addon.key); expect(onCheck).toHaveBeenCalledOnce(); expect(reinstall).not.toHaveBeenCalled();
+  click(view, 'فحص تحديث الإضافة'); await tick(); expect(stage).toHaveBeenCalledWith(addon.key);
+  onBack.mockClear();
+  click(view, 'إعادة تثبيت الإضافة'); click(view, 'إعادة تثبيت الإضافة');
+  expect(reinstall).toHaveBeenCalledOnce(); expect(onBack).not.toHaveBeenCalled();
+  expect(reinstall.mock.calls[0][0]).toBe(addon.key);
+  release(); await tick(); expect(onBack).toHaveBeenCalledOnce();
+});
+
+it('keeps the installed detail visible and sanitizes a failed reinstall endpoint', async () => {
+  setup(); const onBack = vi.fn();
+  const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: async () => { throw new Error('failed https://addon.test/private-config/manifest.json?token=private'); } }, onBack });
+  click(view, 'إعادة تثبيت الإضافة'); await tick();
+  expect(onBack).not.toHaveBeenCalled();
+  expect(view.textContent).toContain('[رابط الخدمة]');
+  expect(view.textContent).not.toContain('private-config');
+  expect([...view.querySelectorAll('button')].find(b => b.textContent === 'إعادة تثبيت الإضافة').disabled).toBe(false);
+});
+
+it('cancels a pending reinstall when details close and ignores late navigation', async () => {
+  setup(); let release, signal; const onBack = vi.fn();
+  const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: (_key, options) => { signal = options.signal; return new Promise(resolve => { release = resolve; }); } }, onBack });
+  click(view, 'إعادة تثبيت الإضافة'); view.close();
+  expect(signal.aborted).toBe(true); release(); await tick();
+  expect(onBack).not.toHaveBeenCalled();
+});
+
+it('shows disabled before configuration when both apply to an installed addon', () => {
+  setup();
+  const view = renderAddonDetails({ addon: row('Disabled', { bundled: false, enabled: false, configuration: { required: true, configured: false } }), registry: {} });
+  expect(view.querySelector('.addon-health').textContent).toBe('معطلة');
+});

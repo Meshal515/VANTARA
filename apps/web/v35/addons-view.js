@@ -47,17 +47,13 @@ const canOpen = (a, registry) =>
   !needsConfiguration(a) &&
   supportedCapabilities(a, registry.runtimeName ?? "pwa").some((c) => ["catalog", "search", "home"].includes(c));
 const health = (a) => {
+  if (a.enabled === false)
+    return { level: "disabled", label: "معطلة", detail: "يمكنك تفعيل الإضافة من التفاصيل." };
   if (needsConfiguration(a))
     return {
       level: "configuration",
       label: "يحتاج إعداد",
       detail: "أكمل إعداد الخدمة ثم استورد الرابط الذي تمنحك إياه.",
-    };
-  if (a.enabled === false)
-    return {
-      level: "disabled",
-      label: "معطلة",
-      detail: "يمكنك تفعيل الإضافة من التفاصيل.",
     };
   return (
     a.assessment ?? {
@@ -387,6 +383,13 @@ export function renderAddonDetails({
         await registry.enable(addon.key, !addon.enabled);
         onBack();
       });
+    if (registry.reinstall)
+      action("إعادة تثبيت الإضافة", async () => {
+        checkController?.abort();
+        checkController = new AbortController();
+        await registry.reinstall(addon.key, { signal: checkController.signal });
+        if (!closed) onBack();
+      });
     if (registry.stage)
       action("فحص تحديث الإضافة", async () => {
         const result = await registry.stage(addon.key);
@@ -460,12 +463,29 @@ export function renderAddonDetails({
     node("p", "addon-muted", `نوع الإضافة: ${addon.protocol ?? "مصدر أصلي"}`),
   );
   if (!addon.bundled && registry.health?.reset)
-    action("إعادة المحاولة", () => registry.health.reset(addon.key), advanced);
+    action("إعادة المحاولة", async () => {
+      registry.health.reset(addon.key);
+      if (!onCheck) return;
+      checkController?.abort();
+      checkController = new AbortController();
+      return onCheck(addon, { signal: checkController.signal });
+    }, advanced);
   root.append(advanced);
   return root;
 }
 const recommendations = [
   {
+    id: "com.stremio.torrentio.addon",
+    name: "Torrentio",
+    description: "مزود روابط تورنت للأفلام والمسلسلات والأنمي. أكمل إعداد الخدمة واستورد رابطها؛ تشغيل التورنت يعتمد على دعم المنصة.",
+    configurationUrl: "https://torrentio.strem.fun/configure",
+    website: "https://torrentio.strem.fun",
+    capabilities: ["streams"],
+    contentTypes: ["movie", "series", "anime"],
+    configuration: { required: true, configurable: true, configured: false },
+  },
+  {
+    id: "org.stremio.opensubtitlesv3",
     name: "OpenSubtitles v3",
     description: "ترجمات للأفلام والمسلسلات من خدمة OpenSubtitles.",
     url: "https://opensubtitles-v3.strem.io/manifest.json",
@@ -475,6 +495,7 @@ const recommendations = [
     languages: ["متعددة"],
   },
   {
+    id: "com.linvo.cinemeta",
     name: "Cinemeta",
     description: "كتالوج وبيانات للأفلام والمسلسلات. لا يوفر سيرفرات تشغيل.",
     url: "https://v3-cinemeta.strem.io/manifest.json",
@@ -483,6 +504,7 @@ const recommendations = [
     contentTypes: ["movie", "series"],
   },
   {
+    id: "community.subdl.subtitles",
     name: "SubDL",
     description:
       "ترجمات من SubDL. تحتاج إعداد الخدمة ومفتاح API قبل الاستخدام.",
@@ -493,6 +515,7 @@ const recommendations = [
     configuration: { required: true, configurable: true, configured: false },
   },
   {
+    id: "community.subsource.subtitles",
     name: "SubSource",
     description:
       "ترجمات من SubSource. أكمل إعداد الخدمة للحصول على رابط الإضافة.",
@@ -783,7 +806,13 @@ export function renderAddons({
     for (const b of states.children) b.hidden = b.dataset.state !== "installed" && !stateCount[b.dataset.state] && stateFilter !== b.dataset.state;
     states.hidden = explore || [...states.children].every((b) => b.hidden || b.dataset.state === "installed");
     paintSummary();
-    let entries = explore ? recommendations : registry.list();
+    let entries = explore ? recommendations.map(recommendation => {
+      const installed = registry.list().find(addon => !addon.bundled && addon.id === recommendation.id);
+      return installed ? { ...recommendation, ...installed, installedAddon: installed,
+        configuration: installed.configuration ?? {},
+        description: recommendation.description, configurationUrl: recommendation.configurationUrl,
+        website: recommendation.website } : recommendation;
+    }) : registry.list();
     entries = entries.filter(
       (a) =>
         matches(a) &&
@@ -820,16 +849,20 @@ export function renderAddons({
         ),
         chips(a),
       );
-      const h = health(a),
+      const h = a.installedAddon && health(a).level === "candidate"
+          ? { ...health(a), label: "مثبتة · لم تُختبر بعد" } : health(a),
         foot = node("div", "addon-card-footer");
       foot.append(
         node("span", `addon-health addon-health-${h.level}`, h.label),
       );
       const actions = node("div", "addon-actions");
       if (explore) {
-        const config = configureLink(a, registry, a.configurationUrl);
+        if (a.installedAddon) {
+          actions.append(button("إدارة الإضافة المثبتة", () => showDetails(a.installedAddon), "addon-button addon-button-primary"));
+        }
+        const config = a.installedAddon ? null : configureLink(a, registry, a.configurationUrl);
         if (config) actions.append(config);
-        else
+        else if (!a.installedAddon)
           actions.append(
             button(
               "تثبيت",

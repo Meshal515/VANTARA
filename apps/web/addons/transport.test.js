@@ -89,3 +89,13 @@ it("distinguishes a resolver timeout from user cancellation so health can cool d
     vi.useRealTimers();
   }
 });
+
+it('bypasses the browser response cache for an explicit reinstall fetch', async () => {
+  let options;
+  const t = createTransport({ fetchImpl: async (_url, value) => {
+    options = value;
+    return new Response('{}', { headers: { 'content-type': 'application/json' } });
+  } });
+  await t.json('https://addon.test/manifest.json', { cache: 'no-store' });
+  expect(options.cache).toBe('no-store');
+});

@@ -455,3 +455,43 @@ it('routes an old saved addon source reference through its reviewed replacement 
  const again=make();await again.ready;const results=await again.sources.source(`addon|${original.key}`).search('Movie');
  expect(results[0].id).toBe('tt123');expect(urls.at(-1)).toContain('https://other.test/catalog/');expect(again.sources.list()).toHaveLength(1);
 });
+
+it.each(['pwa', 'apk', 'desktop'])('reinstall refreshes only its own catalog cache and preserves platform capabilities on %s', async runtimeName => {
+  let generation = 1; const requests = [];
+  const manifest = { id: 'org.catalog', name: 'Catalog', version: '1.0.0', types: ['movie'], resources: ['catalog', 'stream', 'subtitles'], catalogs: [{ type: 'movie', id: 'top' }] };
+  const store = createStore({ indexedDB: null });
+  const a = createAddonRuntime({ runtime: { ready: Promise.resolve(), store, runtimeName, native: runtimeName === 'apk', addonStreams: true, registry: { list: () => [] } }, transport: { json: async url => {
+    requests.push(url); return url.includes('/manifest.json') ? manifest : { metas: [{ id: 'tt1', name: `Generation ${generation}` }] };
+  } } });
+  await a.ready;
+  const one = await a.registry.install(await a.registry.inspect('stremio://addon.test/private/manifest.json?token=private'));
+  const other = await a.registry.install(await a.registry.inspect('https://other.test/manifest.json'));
+  const request = { type: 'movie', id: 'top' };
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 1');
+  await a.adapter(other.key).catalog(request);
+  generation = 2;
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 1');
+  const updated = await a.registry.reinstall(one.key);
+  expect(updated.compatibility).toMatchObject({ pwa: true, apk: true, desktop: true, apkCapabilities: ['catalog', 'streams', 'subtitles'] });
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 2');
+  expect((await a.adapter(other.key).catalog(request))[0].name).toBe('Generation 1');
+  expect(requests.filter(url => url.includes('other.test/catalog/'))).toHaveLength(1);
+  expect(a.registry.connection(one.key).manifestUrl).toBe('https://addon.test/private/manifest.json?token=private');
+});
+
+it.each(['success', 'failure'])('ignores late pre-reinstall resource %s when updating health', async result => {
+  let release, hold = true;
+  const manifest = { id: 'org.subs', name: 'Subs', version: '1.0.0', types: ['movie'], resources: ['subtitles'], catalogs: [] };
+  const store = createStore({ indexedDB: null });
+  const a = createAddonRuntime({ runtime: { ready: Promise.resolve(), store, registry: { list: () => [] } }, transport: { json: async url => {
+    if (url.endsWith('/manifest.json')) return manifest;
+    if (hold) return new Promise((resolve, reject) => { release = () => result === 'success' ? resolve({ subtitles: [{ id: 'one', url: 'https://subs.test/a.srt', lang: 'ara' }] }) : reject(new Error('offline')); });
+    return { subtitles: [] };
+  } } });
+  await a.ready; const one = await a.registry.install(await a.registry.inspect('https://subs.test/manifest.json'));
+  const pending = a.adapter(one.key).subtitles({ type: 'movie', videoId: 'tt123' });
+  while (!release) await Promise.resolve();
+  await a.registry.reinstall(one.key); hold = false;
+  release(); await expect(pending).rejects.toThrow();
+  expect(a.registry.list()[0].health.subtitles.state).toBe('unknown');
+});
