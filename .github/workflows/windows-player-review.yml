@@ -48,7 +48,7 @@ jobs:
           Copy-Item (Join-Path $runtime 'electron/vulkan-1.dll') 'apps/desktop/native/vulkan-1.dll'
           node -e "require('node:fs').cpSync('apps/web','apps/desktop/web',{recursive:true,filter:p=>!p.includes('node_modules')})"
           if ($LASTEXITCODE -ne 0) { throw 'Web fixture staging failed' }
-      - name: Prove first frame, all fullscreen inputs and matching native bounds
+      - name: Prove real MPV binding, Electron fullscreen and matching native bounds
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -62,7 +62,7 @@ jobs:
           if (-not $proc.WaitForExit(180000)) { $proc.Kill(); throw 'Embedded player proof timed out' }
           if ($proc.ExitCode -ne 0) { Get-Content $stderr; throw "Embedded player proof exited $($proc.ExitCode)" }
           $proof=Get-Content $report -Raw | ConvertFrom-Json
-          foreach ($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','mainF11','overlayF11','nativeF11','overlayEscapeRestores','nativeEscapeRestores','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','cleanup')) {
+          foreach ($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','mainF11','overlayF11','mpvMappedF11','overlayEscapeRestores','mpvMappedEscape','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','cleanup')) {
             if ($proof.$key -ne $true) { throw "Missing runtime proof: $key" }
           }
           if (-not $proof.fullscreenBounds -or -not (Test-Path "$report.fullscreen.png")) { throw 'Missing actual fullscreen bounds or screen capture' }
