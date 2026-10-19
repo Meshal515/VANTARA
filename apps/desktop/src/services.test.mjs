@@ -230,7 +230,7 @@ test('خروج rqbit مبكرًا مع حفظ DHT يعيد التشغيل مرة
   assert.ok(!attempts[0].includes('--disable-dht-persistence'));assert.ok(attempts[1].includes('--disable-dht-persistence'));
   const api=a=>a[a.indexOf('--http-api-listen-addr')+1];
   assert.notEqual(api(attempts[0]),api(attempts[1]));
-  assert.ok(events.some(e=>e.type==='playback/ready'));
+  assert.ok(await hasReadyEvent(events),'mpv must report a decoded ready frame');
   assert.equal(events.some(e=>e.type==='playback/error'),false);
 });
 test('عند تعليق أول إطار يعيد فتح proxy مرة واحدة دون إعادة إضافة التورنت',async t=>{
