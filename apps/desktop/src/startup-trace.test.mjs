@@ -12,3 +12,11 @@ test('long-running telemetry has a bounded local history',()=>{
   const trace=createStartupTrace(()=>{});for(let i=0;i<1000;i++)trace.record('torrent-sample',{checkedBytes:i});
   const events=trace.snapshot();assert.equal(events.length,256);events[0].stage='changed';assert.equal(trace.snapshot()[0].stage,'torrent-sample');
 });
+
+test('numeric phase classifications and decoder dimensions survive the trace whitelist',()=>{
+  const trace=createStartupTrace(()=>{});
+  trace.record('player-end-file',{reasonCode:4,errorCode:2,statusCode:400,waitMs:12.5,decoderWidth:3840,decoderHeight:2160});
+  assert.deepEqual(Object.fromEntries(Object.entries(trace.snapshot()[0]).filter(([key])=>!['type','stage','elapsedMs'].includes(key))),{reasonCode:4,errorCode:2,statusCode:400,waitMs:12.5,decoderWidth:3840,decoderHeight:2160});
+  trace.record('managed-add-error',{errorCode:'timeout',statusCode:-1,decoderWidth:NaN,rawError:'discard'});
+  assert.deepEqual(Object.keys(trace.snapshot()[1]).sort(),['elapsedMs','stage','type']);
+});
