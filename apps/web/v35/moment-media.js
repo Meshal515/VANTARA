@@ -121,7 +121,13 @@ export const momentMediaCache = createMomentMediaCache();
 /** Resolver descriptors are bounded separately from optional small trimmed MP4 artifacts. */
 export function createMomentSourceCache(resolveSources, { maxEntries = 6, concurrency = 2 } = {}) {
   const entries = new Map(), queue = []; let active = 0;
-  const dispose = (entry) => { for (const source of entry.sources ?? []) { try { source.release?.(); } catch {} } };
+  const dispose = (entry) => {
+    if (entry.disposed || !entry.sources || entry.users) return;
+    entry.disposed = true;
+    const releases = new Set(entry.sources.map((source) => source.release).filter((release) => typeof release === 'function'));
+    for (const release of releases) { try { Promise.resolve(release()).catch(() => {}); } catch {} }
+  };
+  const remove = (entry) => { if (entries.get(entry.key) === entry) entries.delete(entry.key); };
   const evict = () => {
     for (const [key, entry] of entries) {
       if (entries.size <= maxEntries) break;
@@ -131,12 +137,13 @@ export function createMomentSourceCache(resolveSources, { maxEntries = 6, concur
   const pump = () => {
     while (active < concurrency && queue.length) {
       const entry = queue.shift();
-      if (!entry.users) { entries.delete(entry.key); entry.reject(abortError()); continue; }
+      if (entry.retired || !entry.users) { remove(entry); entry.pending = false; entry.reject(abortError()); continue; }
       active++;
       Promise.resolve().then(() => resolveSources(entry.row)).then((sources) => {
-        entry.sources = Array.isArray(sources) ? sources : [];
+        entry.sources = Array.isArray(sources) ? sources : []; entry.pending = false;
+        if (entry.retired) { dispose(entry); return; }
         entry.resolve(entry.sources); evict();
-      }, (error) => { entries.delete(entry.key); entry.reject(error); }).finally(() => { active--; pump(); });
+      }, (error) => { remove(entry); entry.pending = false; entry.reject(error); }).finally(() => { active--; pump(); });
     }
   };
   return {
@@ -145,12 +152,12 @@ export function createMomentSourceCache(resolveSources, { maxEntries = 6, concur
       const key = `${row.id ?? row.series_ref}/${row.moment_json ?? row.chapter_label}`;
       let entry = entries.get(key);
       if (!entry) {
-        entry = { key, row, users: 0, sources: null };
+        entry = { key, row, users: 0, sources: null, pending: true, retired: false, disposed: false };
         entry.promise = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
         entries.set(key, entry); queue.push(entry);
       } else { entries.delete(key); entries.set(key, entry); }
       entry.users++; let released = false;
-      const release = () => { if (!released) { released = true; entry.users--; evict(); } };
+      const release = () => { if (!released) { released = true; entry.users--; if (entry.retired) dispose(entry); else evict(); } };
       const promise = new Promise((resolve, reject) => {
         const abort = () => { release(); reject(abortError()); };
         signal?.addEventListener('abort', abort, { once: true });
@@ -158,7 +165,10 @@ export function createMomentSourceCache(resolveSources, { maxEntries = 6, concur
       });
       pump(); return promise;
     },
-    clear() { for (const entry of entries.values()) dispose(entry); entries.clear(); },
+    clear() {
+      for (const entry of entries.values()) { entry.retired = true; if (entry.pending) entry.reject(abortError()); dispose(entry); }
+      entries.clear();
+    },
   };
 }
 const sourceCaches = new WeakMap();
@@ -167,6 +177,8 @@ export function acquireMomentSources(row, resolveSources, options) {
   if (!cache) { cache = createMomentSourceCache(resolveSources); sourceCaches.set(resolveSources, cache); }
   return cache.acquire(row, options);
 }
+
+export function clearMomentSources(resolveSources) { sourceCaches.get(resolveSources)?.clear(); }
 
 /** No autoplay and no full-source blob fetch. A visible source gets metadata and one frame. */
 export function createMomentPreviews({ mediaUrl, resolveSources, cache = momentMediaCache, root = null } = {}) {
@@ -187,7 +199,8 @@ export function createMomentPreviews({ mediaUrl, resolveSources, cache = momentM
         item.lease = await cache.acquire(url, { signal: controller.signal }); url = item.lease.url;
       } else if (resolveSources) {
         item.lease = await acquireMomentSources(item.row, resolveSources, { signal: controller.signal });
-        const source = item.lease.sources.find((s) => safeMediaUrl(s.url) && !s.prepare && !Object.keys(s.headers ?? {}).length);
+        // Snapshot a public URL directly. Background preparation could replace Windows' active proxy.
+        const source = item.lease.sources.find((s) => safeMediaUrl(s.url) && !Object.keys(s.headers ?? {}).length);
         url = source && safeMediaUrl(source.url);
       }
       if (destroyed || controller.signal.aborted) { stop(item); return; }

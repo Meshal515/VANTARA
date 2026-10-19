@@ -43,3 +43,11 @@ it('honors data saver and leaves lazy source preparation for an explicit play', 
   observer.callback([{ target: shot, isIntersecting: true }]); await tick();
   expect(resolveSources).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
 });
+it('snapshots a public route without invoking the desktop proxy prepare callback', async () => {
+  const prepare = vi.fn(async () => ({ url: 'http://127.0.0.1/playback-proxy' }));
+  const resolveSources = vi.fn(async () => [{ url: 'https://source.example/movie.mp4', prepare }]);
+  previews = createMomentPreviews({ resolveSources }); const shot = document.querySelector('#shot'); previews.mount(shot, row);
+  observer.callback([{ target: shot, isIntersecting: true }]); await tick();
+  expect(prepare).not.toHaveBeenCalled(); expect(videos).toHaveLength(1);
+  expect(videos[0].src).toBe('https://source.example/movie.mp4');
+});

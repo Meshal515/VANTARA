@@ -12,7 +12,7 @@ const node = (tag, cls, text) => { const n = document.createElement(tag); if (cl
 const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
 /** Compact source-backed clip player; the original movie is never fetched as a download. */
-export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, saveVideo, onEpisode, onWork, toast = () => {} }) {
+export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, saveVideo, onEpisode, onWork, onClose, toast = () => {} }) {
   const moment = momentOf(row);
   if (!moment) { toast('تعذّر قراءة مدى اللقطة'); return { destroy() {}, handleBack: () => false }; }
   ensureMomentStyles();
@@ -38,7 +38,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   }
   panel.append(top, stage, controls, end); overlay.append(panel); document.body.append(overlay);
   let destroyed = false, ended = false, sources = [], index = -1, current = null, hls = null, sourceLease = null, blobLease = null, loadVersion = 0, fallbackTimer = null, boundaryTimer = null, discovery = null;
-  let trimmed = moment.trimmed, saving = false, fallbackBlob = false, nativePlayback = false;
+  let trimmed = moment.trimmed, saving = false, fallbackBlob = false, nativePlayback = false, sourceExhausted = false;
   const nativeTried = new Set(), prepared = new Map();
   const duration = (moment.endMs - moment.startMs) / 1000;
   const start = () => trimmed ? 0 : moment.startMs / 1000;
@@ -47,7 +47,9 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   const complete = () => { if (ended || destroyed) return; ended = true; clearTimeout(boundaryTimer); video.pause(); if (video.currentTime > start() + duration) video.currentTime = start() + duration; if (hls) hls.stopLoad(); end.hidden = false; toggle.textContent = 'إعادة'; paint(); };
   const armBoundary = () => {
     clearTimeout(boundaryTimer);
-    if (!destroyed && !ended && !video.paused) boundaryTimer = setTimeout(complete, Math.max(0, (start() + duration - video.currentTime) / (video.playbackRate || 1) * 1000));
+    if (!destroyed && !ended && !video.paused) boundaryTimer = setTimeout(() => {
+      if (video.currentTime >= start() + duration - .01) complete(); else armBoundary();
+    }, Math.max(20, (start() + duration - video.currentTime) / (video.playbackRate || 1) * 1000));
   };
   async function play() {
     try { await video.play(); if (!destroyed) { toggle.textContent = 'إيقاف'; say(''); } }
@@ -60,7 +62,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
       source = { ...source, ...await ready, prepare: undefined };
     }
     if (destroyed || version !== loadVersion) return;
-    current = source; nativePlayback = false; trimmed = Boolean(source.clipped || source.trimmed || moment.mediaKey && source.ownedClip);
+    current = source; nativePlayback = false; sourceExhausted = false; progress.disabled = false; trimmed = Boolean(source.clipped || source.trimmed || moment.mediaKey && source.ownedClip);
     const url = source.clipped && String(source.url).startsWith('blob:') ? source.url : safeMediaUrl(source.url);
     if (!url) throw new Error('Source needs native playback');
     if (Object.keys(source.headers ?? {}).length && !source.session) throw new Error('Source needs native request headers');
@@ -70,16 +72,16 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
       const Hls = await loadHls(); if (destroyed || version !== loadVersion) return;
       if (!Hls?.isSupported?.()) throw new Error('HLS unavailable');
       hls = new Hls({ maxBufferLength: Math.min(30, duration + 2), maxMaxBufferLength: Math.min(60, duration + 4), backBufferLength: 0, startPosition: start(), maxBufferSize: 16 * 1024 * 1024 });
-      hls.on(Hls.Events.ERROR, (_, error) => { if (error.fatal) void advance(); }); hls.loadSource(url); hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_, error) => { if (error.fatal && !destroyed && version === loadVersion) void advance(); }); hls.loadSource(url); hls.attachMedia(video);
     } else { video.src = url; video.load?.(); }
     fallbackTimer = setTimeout(() => { if (!destroyed && !video.videoWidth && !ended) void advance(); }, 15000);
   }
   async function advance() {
-    clearTimeout(fallbackTimer); clearTimeout(boundaryTimer); video.pause();
+    clearTimeout(fallbackTimer); clearTimeout(boundaryTimer); video.pause(); hls?.stopLoad();
     const version = ++loadVersion;
     if (current && playNative && current.nativeCandidate && !nativeTried.has(current.candidate ?? current.url)) {
       nativeTried.add(current.candidate ?? current.url);
-      try { const result = await playNative({ row, source: current }); if (destroyed || version !== loadVersion) return; if (result !== false && result?.ok !== false) { nativePlayback = true; say(''); complete(); return; } } catch {}
+      try { const result = await playNative({ row, source: current }); if (destroyed || version !== loadVersion) return; if (result !== false && result?.ok !== false) { nativePlayback = true; progress.disabled = true; say(''); complete(); return; } } catch {}
     }
     if (destroyed || version !== loadVersion) return;
     index++;
@@ -99,7 +101,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
         } catch {}
       }
       say(saveVideo ? 'تعذّر تشغيل هذا المصدر هنا. جرّب حفظ اللقطة لتشغيل نسخة محلية.' : 'تعذّر تشغيل اللقطة بهذا المتصفح. جرّب مصدرًا آخر أو افتح الحلقة.');
-      end.hidden = false; toggle.textContent = 'إعادة'; return;
+      sourceExhausted = true; progress.disabled = true; end.hidden = false; toggle.textContent = 'إعادة'; return;
     }
     current = sources[index]; ended = false; end.hidden = true; say('نجهّز اللقطة…');
     try { await setSource(current, version); } catch { if (!destroyed && version === loadVersion) void advance(); }
@@ -116,10 +118,15 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   video.onended = complete; video.onerror = () => { if (!destroyed) void advance(); };
   video.onplaying = () => { clearTimeout(fallbackTimer); say(''); toggle.textContent = 'إيقاف'; armBoundary(); };
   video.onseeked = armBoundary; video.onratechange = armBoundary; video.onpause = () => clearTimeout(boundaryTimer);
-  toggle.onclick = () => { if (ended) replay(); else if (video.paused) void play(); else { video.pause(); toggle.textContent = 'تشغيل'; } };
+  video.onwaiting = () => clearTimeout(boundaryTimer);
+  toggle.onclick = () => { if (ended || sourceExhausted) void replay(); else if (video.paused) void play(); else { video.pause(); toggle.textContent = 'تشغيل'; } };
   progress.oninput = () => { ended = false; end.hidden = true; video.currentTime = start() + Number(progress.value); paint(); };
   async function replay() {
     ended = false; end.hidden = true;
+    if (sourceExhausted) {
+      sourceExhausted = false; index = -1; current = null; nativeTried.clear(); prepared.clear();
+      await advance(); return;
+    }
     if (nativePlayback && playNative) {
       const version = ++loadVersion; say('نجهّز اللقطة…');
       try {
@@ -164,8 +171,8 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
   };
   function destroy() {
     if (destroyed) return; destroyed = true; loadVersion++; controller.abort(); clearTimeout(fallbackTimer); clearTimeout(boundaryTimer);
-    document.removeEventListener('keydown', keyboard); video.onloadedmetadata = video.ontimeupdate = video.onerror = video.onended = video.onplaying = video.onseeked = video.onratechange = video.onpause = null;
-    video.pause(); video.removeAttribute('src'); video.load?.(); hls?.destroy(); sourceLease?.release(); blobLease?.release(); overlay.remove(); previousFocus?.focus?.();
+    document.removeEventListener('keydown', keyboard); video.onloadedmetadata = video.ontimeupdate = video.onerror = video.onended = video.onplaying = video.onseeked = video.onratechange = video.onpause = video.onwaiting = null;
+    video.pause(); video.removeAttribute('src'); video.load?.(); hls?.destroy(); sourceLease?.release(); blobLease?.release(); overlay.remove(); previousFocus?.focus?.(); onClose?.();
   }
   document.addEventListener('keydown', keyboard); close.onclick = destroy; overlay.onclick = (event) => { if (event.target === overlay) destroy(); }; close.focus(); paint();
   void (async () => {
