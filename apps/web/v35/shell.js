@@ -1,3 +1,4 @@
+import { recipientFace } from './recipient.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -2683,17 +2684,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   function avatarNode(person, size = 44) {
-    if (person.avatarKey) {
-      const img = el('img');
-      img.src = person.avatarKey;
-      img.alt = '';
-      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-      return img;
-    }
-    const s = el('span', 'avatar-letter', initialOf(person.displayName));
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
+    return recipientFace(person, { size, mediaUrl });
   }
+
   function latestChapter(rows) {
     return rows.reduce((best, row) => {
       if (!best) return row;
@@ -5355,6 +5348,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'anime' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),
@@ -5364,6 +5358,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
+    friends: () => deps.friends?.() ?? [],
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
@@ -5373,6 +5368,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'cinema' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),

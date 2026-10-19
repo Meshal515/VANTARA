@@ -22,23 +22,32 @@ export function createMomentSourceResolver({ engine, desktop = globalThis.Vantar
     const identity={canonicalId:ref,kind:anime?'anime':parts[2]?'series':'movie',externalIds:anime?{anilist:Number(id)}:{imdb:id},episode,...(!anime?{season:Number(parts[2])||null}:{})};
     let session;
     try {
-      const work=await engine.findWork([row.series_title]).catch(()=>null);
+      const locator = engine.findWork([row.series_title]).catch(()=>null);
+      const extras = engine.withAddonCopies?.([], identity).catch(()=>[]) ?? Promise.resolve([]);
+      const work = engine.firstAvailableCopies ? await engine.firstAvailableCopies(locator, extras) : await locator;
       const copies=work?.copies ?? [];
-      const out=await engine.prepare({copies,identity,episode:!anime&&!parts[2]?-1:episode,quality:1080,preferredSourceId:hints[0]?.sourceId,preferredServer:hints[0]?.server});
+      const out=await engine.prepare({copies,identity,episode:!anime&&!parts[2]?-1:episode,quality:1080,probe:true,preferredSourceId:hints[0]?.sourceId,preferredServer:hints[0]?.server});
       session=out?.session;
       if (!session) return attached;
+      void locator.then(found => found?.copies?.length && engine.extend?.(session, found.copies)).catch(()=>{});
       const best=await engine.best(session,null,30000);
       const list=await engine.momentCandidates(session) ?? [];
       const ranked=[...list].sort((a,b)=>Number(b.id===best?.candidate)-Number(a.id===best?.candidate));
       const own=[];const handles=[];let released=false;
       const release=async()=>{if(released)return;released=true;for(const handle of handles)await Promise.resolve(desktop?.releaseMoment?.({session,exportHandle:handle})).catch(()=>{});await engine.closeSession(session);};
       for(const c of ranked.slice(0,12)) {
-        let url=c.url,exportHandle;
+        const source = {...c,session,candidate:c.id,nativeCandidate:true,release,
+          type:c.type??c.mimeType??(c.container==='HLS'?'application/vnd.apple.mpegurl':c.container==='DASH'?'application/dash+xml':undefined)};
         if(desktop?.prepareMoment) {
-          try { const ready=await desktop.prepareMoment({session,candidate:c});url=ready.url;exportHandle=ready.exportHandle;if(exportHandle)handles.push(exportHandle); } catch { continue; }
-        }
-        if(!url || (!desktop && !publicUrl(url))) continue;
-        own.push({...c,url,session,candidate:c.id,exportHandle,nativeCandidate:true,release,type:c.type??c.mimeType??(c.container==='HLS'?'application/vnd.apple.mpegurl':c.container==='DASH'?'application/dash+xml':undefined)});
+          source.prepare = async () => {
+            if(released)throw new Error('moment_session_closed');
+            const ready = await desktop.prepareMoment({session,candidate:c});
+            if(ready.exportHandle)handles.push(ready.exportHandle);
+            if(released){await desktop.releaseMoment({session,exportHandle:ready.exportHandle});throw new Error('moment_session_closed');}
+            return {...ready,headers:{},candidate:c.id,nativeCandidate:true,release};
+          };
+        } else if(!publicUrl(c.url)) continue;
+        own.push(source);
       }
       if(!own.length)await release();
       return [...attached,...own];

@@ -10,5 +10,5 @@ it('uses recipient desktop proxy for torrent without sending the original device
  const engine={findWork:async()=>null,prepare:async()=>({session:'s'}),best:async()=>({candidate:'torrent'}),momentCandidates:async()=>[{id:'torrent',url:'magnet:?xt=abc',infoHash:'a'.repeat(40)}],closeSession:vi.fn()};
  const desktop={prepareMoment:vi.fn(async()=>({url:'http://127.0.0.1:4000/own-token',exportHandle:'handle'})),releaseMoment:vi.fn()};
  const r=await createMomentSourceResolver({engine,desktop})({series_ref:'cinema:tt123456:1',series_title:'show',chapter_number:2,chapter_label:'الحلقة 2 · 0:10–0:30'});
- expect(r[0]).toMatchObject({url:'http://127.0.0.1:4000/own-token',exportHandle:'handle',candidate:'torrent'});await r[0].release();expect(desktop.releaseMoment).toHaveBeenCalledWith({session:'s',exportHandle:'handle'});
+ expect(desktop.prepareMoment).not.toHaveBeenCalled();expect(await r[0].prepare()).toMatchObject({url:'http://127.0.0.1:4000/own-token',exportHandle:'handle',candidate:'torrent'});await r[0].release();expect(desktop.releaseMoment).toHaveBeenCalledWith({session:'s',exportHandle:'handle'});
 });

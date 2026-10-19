@@ -1,3 +1,4 @@
+import { recipientFace } from './recipient.js';
 import { nativeFollowTime, setReaderTime, flushFollowTime, listenFollowForeground } from '../lib/follow-time.js';
 /**
  * القارئ الذكي.
@@ -1354,22 +1355,7 @@ export function openSmartReader(deps, ctx) {
     openSheet(pick);
   }
   function avatar(person, size) {
-    if (person.everyone) {
-      const s = el('span', 'avatar-letter rd-everyone');
-      s.innerHTML = glyph('users', { size: 20 });
-      s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-      return s;
-    }
-    if (person.avatarKey) {
-      const img = el('img');
-      img.src = person.avatarKey;
-      img.alt = '';
-      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-      return img;
-    }
-    const s = el('span', 'avatar-letter', [...String(person.displayName || '؟')][0]);
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
+    return recipientFace(person, { size, friends: deps.friends?.() ?? [] });
   }
   function personRow(person, run) {
     const b = el('button', 'sheet-item');
