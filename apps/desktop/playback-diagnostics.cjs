@@ -1,8 +1,8 @@
 // Main-process boundary: do not trust even the upstream diagnostic sanitizer.
 // Only fixed stage names, numeric metrics and fixed classifications leave here.
-const numeric=new Set(['fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId']);
+const numeric=new Set(['fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId','statusCode','errorCode','reasonCode','decoderWidth','decoderHeight']);
 const modes=new Set(['cold','replay-descriptor','cache','torrent','network','decoded','render-unmeasured']);
-const traceStages=new Set(['source-selected','http-range','http-headers','http-first-byte','range-first-byte','first-useful-piece','engine-start','engine-ready','magnet-metadata-start','magnet-metadata-complete','file-selected','torrent-sample','peer-connected','player-start','player-ipc-ready','decoder-output','container-metadata-ready','stable-playback','replay-lookup']);
+const traceStages=new Set(['source-selected','http-range','http-headers','http-first-byte','range-first-byte','first-useful-piece','engine-start','engine-ready','magnet-metadata-start','magnet-metadata-complete','file-selected','torrent-sample','peer-connected','player-start','player-ipc-ready','decoder-output','container-metadata-ready','stable-playback','replay-lookup','cache-selection-start','cache-selection-complete','managed-add-start','managed-add-complete','managed-add-error','player-end-file']);
 const lifecycle=new Set(['playback/preparing','playback/ready','playback/closed','playback/error','playback/retrying','playback/recovery-needed']);
 const stages=new Set(['engine-start','metadata','file-selected','downloading','player-start','first-frame']);
 const reasons=new Set(['startup','seek','stalled']);

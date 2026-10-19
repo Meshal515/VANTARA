@@ -64,3 +64,11 @@ test('retains the header arrival milestone without response headers or URLs',()=
  assert.deepEqual(JSON.parse(d.export()).events[0],{type:'playback/diagnostic',elapsedMs:0,traceElapsedMs:25,stage:'http-headers',rangeStart:0,rangeEnd:50,waitMs:20,requestId:1});
  assert.doesNotMatch(d.export(),/private|Authorization/);
 });
+
+
+test('exports classified startup boundaries without upstream error strings',()=>{
+ const report=createPlaybackDiagnostics({version:'0.3.16',platform:'win32'});report.begin('one');
+ report.capture({type:'playback/diagnostic',session:'one',stage:'managed-add-error',waitMs:1300,errorCode:5,statusCode:503,message:'https://provider.test/private/key'});
+ report.capture({type:'playback/diagnostic',session:'one',stage:'player-end-file',reasonCode:4,errorCode:2});
+ const data=JSON.parse(report.export());assert.equal(data.events[0].statusCode,503);assert.equal(data.events[1].reasonCode,4);assert.ok(!report.export().includes('provider.test'));
+});
