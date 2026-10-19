@@ -37,3 +37,15 @@ The original [sanitized public investigation](subsense-subtitle-investigation-20
 The failure of an arbitrary first OpenSubtitles tap has not been reproduced from the user's exact installation. Request-ID reuse, repeated-selection races, legacy decoding, and stale error display are proven app defects; they are not proof that every provider failure is fixed. Retrying cannot repair unsupported MicroDVD or a persistent HTML/auth/provider response.
 
 After integration: rerun the focused web tests and native Windows fixture test, run combined Android compilation/tests on the integrating branch, then verify a real Arabic SubSense SRT and OpenSubtitles selection on the target device. For remaining failures, gather only provider name/ID, title ID, language, response status, charset, body-format classification, and byte/cue counts. Never print or commit configured provider URLs, tokens, account identifiers, downloaded subtitle text, or user secrets. Unsupported MicroDVD should direct the user to another SRT/VTT track until timing metadata is available; video must continue.
+
+## Repository-wide runner result
+
+Direct `node /workspace/VANTARA/node_modules/vitest/vitest.mjs run` completed with **208 files passed, 43 suites failed to import, 1,864 tests passed**. Failures are unresolved workspace/external packages in this linked-dependencies worktree (`@vantara/domain`, `@vantara/db`, `@vantara/uchiyomi`, `@fastify/cookie`, `pg`, `zod`), not assertion failures. This is not a green full suite. No shared dependencies were removed or rewritten.
+
+Failed suites, relative to their group directories:
+
+- `apps/api/src/`: `admin-authorization.test.ts`, `app.logging.test.ts`, `app.test.ts`, `auth-logout-all.test.ts`, `cors.test.ts`, `discovery.test.ts`, `failure.test.ts`, `media.test.ts`, `route-surface.test.ts`, `routes/source-contract.test.ts`, `lib/chapter-fallback.test.ts`, `lib/context.identity.test.ts`, `lib/context.relink.test.ts`, `lib/sessions.atomic.test.ts`.
+- `apps/web/lib/`: `sync-transport.integration.test.js`.
+- `packages/db/src/`: `index.test.ts`.
+- `services/web-fetcher/src/`: `index.test.ts`.
+- `services/sync-worker/src/`: `accounts.integration.test.ts`, `activity-integrity.integration.test.ts`, `atomic-sync.integration.test.ts`, `authorization.test.ts`, `context.test.ts`, `d1-read-paths.test.ts`, `delta-pagination.integration.test.ts`, `device-approval.integration.test.ts`, `field-merge.integration.test.ts`, `insights.integration.test.ts`, `legacy-session-retirement.test.ts`, `majlis-chat.integration.test.ts`, `majlis-reactions.integration.test.ts`, `majlis-receipts.integration.test.ts`, `media.integration.test.ts`, `ops-ack.test.ts`, `ops.test.ts`, `pairing-tool.test.ts`, `privacy.integration.test.ts`, `secure-index.test.ts`, `source-latest.integration.test.ts`, `sync-privacy.integration.test.ts`, `together-invite.integration.test.ts`, `verify.integration.test.ts`, `work-editions.integration.test.ts`, `work-views.integration.test.ts`.
