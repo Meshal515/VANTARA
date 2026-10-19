@@ -201,7 +201,7 @@ export function createSubtitleSession({
     if (!n) {
       let download = downloads.get(t.id);
       if (!download) {
-        download = transport.text(t.url, { signal: controller.signal }).then(toWebVtt);
+        download = transport.text(t.url, { signal: controller.signal, fallbackCharset: t.lang === "ar" ? "windows-1256" : null }).then(toWebVtt);
         downloads.set(t.id, download);
       }
       let vtt;
