@@ -16,7 +16,7 @@ function viewportBounds(value,contentSize,scale) {
   return {x:Math.round(x*factorX),y:Math.round(y*factorY),width:Math.round(Math.min(value.width,value.viewportWidth-x)*factorX),height:Math.round(Math.min(value.height,value.viewportHeight-y)*factorY)};
 }
 function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProcess,onFailure=()=>{}}) {
-  let active=null,viewport=null;
+  let active=null,viewport=null,shellFullscreen=null;
   const write=(state,line)=>{if(state.child&&!state.closed&&!state.child.stdin.destroyed)state.child.stdin.write(line+'\n');};
   function resize() {
     const window=getWindow();if(!active?.windowId||!window||window.isDestroyed()||viewport?.session!==active.session)return;
@@ -52,6 +52,7 @@ function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProc
           signal?.addEventListener('abort',abort,{once:true});
         });
         if(signal?.aborted||active!==state)throw new Error('ألغيت جلسة الفيديو');
+        if(shellFullscreen)write(state,`fullscreen ${shellFullscreen.windowId} ${shellFullscreen.enabled?1:0}`);
         resize();return {windowId:state.windowId,close:()=>release(state)};
       }catch(error){await release(state);throw error;}
     },
@@ -62,6 +63,13 @@ function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProc
       viewport={...value,hidden:value.hidden===true};resize();return true;
     },
     resize,
+    fullscreen(enabled,handle){
+      if(typeof enabled!=='boolean')throw new Error('طلب ملء الشاشة غير صالح');
+      const windowId=nativeWindowId(handle);
+      if(shellFullscreen?.windowId===windowId&&shellFullscreen.enabled===enabled)return;
+      shellFullscreen={windowId,enabled};
+      if(active?.windowId)write(active,`fullscreen ${windowId} ${enabled?1:0}`);
+    },
     hide(){if(active)write(active,'hide');},
     show(){resize();},
     close:()=>active?release(active):Promise.resolve(),
