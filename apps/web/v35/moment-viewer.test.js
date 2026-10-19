@@ -70,4 +70,15 @@ describe('moment miniplayer', () => {
     expect(playNative).toHaveBeenCalledTimes(2);
     expect(playNative.mock.calls[1][0].source.candidate).toBe('native');
   });
+  it('notifies its owner exactly once when the inline viewer closes', () => {
+    const onClose = vi.fn(); viewer = openMomentViewer({ row, onClose });
+    viewer.destroy(); viewer.destroy(); expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it('retries the source list when replay is pressed after all browser routes failed', async () => {
+    viewer = openMomentViewer({ row, resolveSources: async () => [{ url: 'https://source.example/first.mp4' }, { url: 'https://source.example/second.mp4' }] });
+    await tick(); const video = document.querySelector('video');
+    video.dispatchEvent(new window.Event('error')); await tick(); video.dispatchEvent(new window.Event('error')); await tick();
+    document.querySelector('[data-action="replay"]').click(); await tick();
+    expect(video.src).toBe('https://source.example/first.mp4');
+  });
 });

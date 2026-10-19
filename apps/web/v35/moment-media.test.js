@@ -61,4 +61,19 @@ describe('shared moment media', () => {
     expect(release).toHaveBeenCalledTimes(1);
     cache.clear(); expect(release).toHaveBeenCalledTimes(2);
   });
+  it('releases source sessions that arrive after the cache is cleared', async () => {
+    let ready; const release = vi.fn();
+    const cache = createMomentSourceCache(() => new Promise((resolve) => { ready = resolve; }));
+    const request = cache.acquire({ id: 'late' }).catch((error) => error.name);
+    await Promise.resolve(); cache.clear();
+    ready([{ url: 'https://source.example/late.mp4', release }]);
+    await Promise.resolve(); await Promise.resolve();
+    expect(await request).toBe('AbortError'); expect(release).toHaveBeenCalledTimes(1);
+  });
+  it('keeps leased sessions alive until release when clearing ready cache entries', async () => {
+    const release = vi.fn(); const cache = createMomentSourceCache(async () => [{ release }, { release }]);
+    const lease = await cache.acquire({ id: 'playing' }); cache.clear();
+    expect(release).not.toHaveBeenCalled(); lease.release();
+    await Promise.resolve(); expect(release).toHaveBeenCalledTimes(1);
+  });
 });
