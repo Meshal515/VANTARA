@@ -16,7 +16,7 @@ function viewportBounds(value,contentSize,scale) {
   return {x:Math.round(x*factorX),y:Math.round(y*factorY),width:Math.round(Math.min(value.width,value.viewportWidth-x)*factorX),height:Math.round(Math.min(value.height,value.viewportHeight-y)*factorY)};
 }
 function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProcess,onFailure=()=>{}}) {
-  let active=null,viewport=null,shellFullscreen=null;
+  let active=null,viewport=null,shellFullscreen=null,lastFailure=null;
   const write=(state,line)=>{if(state.child&&!state.closed&&!state.child.stdin.destroyed)state.child.stdin.write(line+'\n');};
   function resize() {
     const window=getWindow();if(!active?.windowId||!window||window.isDestroyed()||viewport?.session!==active.session)return;
@@ -41,14 +41,15 @@ function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProc
       if(signal?.aborted)throw new Error('ألغيت جلسة الفيديو');
       const window=getWindow();if(!window||window.isDestroyed())throw new Error('نافذة الفيديو غير متاحة');
       const state={session,windowId:null,closed:false,exited:false};active=state;
-      const child=state.child=spawn(executable,[nativeWindowId(window.getNativeWindowHandle()),String(process.pid)],{stdio:['pipe','pipe','ignore'],windowsHide:true,shell:false});
+      const child=state.child=spawn(executable,[nativeWindowId(window.getNativeWindowHandle()),String(process.pid)],{stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+      let diagnostic='';child.stderr?.on('data',chunk=>{diagnostic=(diagnostic+chunk.toString('utf8')).slice(-1024);});
       try {
         state.windowId=await new Promise((resolve,reject)=>{
           let data='';const timeout=setTimeout(()=>done(new Error('انتهت مهلة نافذة الفيديو المدمجة')),10000);
           const abort=()=>done(new Error('ألغيت جلسة الفيديو'));
           function done(error,id){clearTimeout(timeout);signal?.removeEventListener('abort',abort);child.stdout.removeListener('data',receive);error?reject(error):resolve(id);}
           function receive(chunk){data+=chunk.toString('ascii');if(data.length>128)return done(new Error('استجابة نافذة الفيديو غير صالحة'));if(data.includes('\n')){const id=data.split('\n')[0].trim();/^\d{1,20}$/.test(id)&&BigInt(id)>0n?done(null,id):done(new Error('استجابة نافذة الفيديو غير صالحة'));}}
-          child.stdout.on('data',receive);child.once('error',()=>done(new Error('تعذر تشغيل نافذة الفيديو المرفقة')));child.once('exit',()=>{state.exited=true;done(new Error('أغلقت نافذة الفيديو المدمجة'));if(!state.closed)onFailure(session);});
+          child.stdout.on('data',receive);child.once('error',()=>done(new Error('تعذر تشغيل نافذة الفيديو المرفقة')));child.once('exit',code=>{state.exited=true;done(new Error('أغلقت نافذة الفيديو المدمجة'));if(!state.closed){lastFailure={session,code,message:diagnostic.trim()};onFailure(session);}});
           signal?.addEventListener('abort',abort,{once:true});
         });
         if(signal?.aborted||active!==state)throw new Error('ألغيت جلسة الفيديو');
@@ -73,7 +74,7 @@ function createVideoHost({getWindow,executable,scaleFactor=()=>1,spawn=spawnProc
     hide(){if(active)write(active,'hide');},
     show(){resize();},
     close:()=>active?release(active):Promise.resolve(),
-    snapshot:()=>({session:active?.session??null,windowId:active?.windowId??null,embedded:!!active?.windowId}),
+    snapshot:()=>({session:active?.session??null,windowId:active?.windowId??null,embedded:!!active?.windowId,...(lastFailure?{failure:lastFailure}:{})}),
     inspect(){
       const state=active;if(!state?.windowId)return Promise.reject(new Error('نافذة الفيديو غير متاحة'));
       return new Promise((resolve,reject)=>{

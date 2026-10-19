@@ -114,7 +114,7 @@ $h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMess
     assert(!events.some(e=>e.type==='playback/error'));
     report.stage='complete';report.transport='owned MP4/subtitle fixture; real HWND/video/renderer/IPC';
   }catch(error){report.error=error.message;throw error;}
-  finally{report.playbackEvents=events.filter(e=>!['playback/progress','playback/state'].includes(e.type)).slice(-80).map(({type,stage,message,embedded})=>({type,stage,message,embedded}));await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
+  finally{report.nativeHost=videoHost.snapshot();report.playbackEvents=events.filter(e=>!['playback/progress','playback/state'].includes(e.type)).slice(-80).map(({type,stage,message,embedded})=>({type,stage,message,embedded}));await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
   return report;
 }
 module.exports={runEmbeddedVideoSmoke};
