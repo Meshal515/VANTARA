@@ -4647,13 +4647,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const health = api.health();
     const bad = health.state !== 'ok' && health.state !== 'syncing';
+    // This code contains no account details. Make a failed recovery actionable:
+    // the previous screen only said "recovery incomplete" for every cause.
+    const recoveryCode = health.lastError?.code
+      || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
     group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
+      ...(bad ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
         run: async () => {
           toast('جارٍ المزامنة…');
           await api.syncNow().catch(() => {});
-          toast('تمّت المزامنة');
+          // Settled writes are not the same as a verified complete local mirror.
+          const after = api.health();
+          toast(after.state === 'ok' ? 'اكتملت المزامنة' : after.message);
           renderSettings();
         },
       }),
