@@ -69,7 +69,7 @@ net.createServer(c=>{conn=c;let buf='';c.on('data',b=>{buf+=b;while(buf.includes
 
   const events = [], userData = join(dir, 'client'); await mkdir(userData);
   const limits = { behindSeconds: 5, minBehindBytes: 256 * 1024, minEvictBytes: 256 * 1024, pauseBelowFree: 1, resumeAboveFree: 2, hardFloorFree: 0, starvingAheadSeconds: 1 };
-  const services = createDesktopServices({ userData, binaries: { rqbit: wrapper, mpv: player }, onEvent: (e) => events.push(e), windowTickMs: 300, windowLimits: limits });
+  const services = createDesktopServices({ userData, binaries: { rqbit: wrapper, mpv: player }, onEvent: (e) => events.push(e), windowTickMs: 300, windowLimits: limits, replayCache:false });
   t.after(() => services.close());
   assert.deepEqual(await services.startPlayback({ session: 'window', candidate: { infoHash: hash }, title: 'نافذة' }), { started: true });
 

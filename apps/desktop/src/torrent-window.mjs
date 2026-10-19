@@ -62,6 +62,17 @@ export function alignDownToPiece(fileRelative, fileOffset, pieceLength) {
   return Math.max(0, Math.floor(absolute / pieceLength) * pieceLength - fileOffset);
 }
 
+/** rqbit has no public piece-invalidation API. Never punch under an existing
+ * reader: its completion bits would still allow that reader to consume holes. */
+export function safeEvictionEnd(proposed, readers, pieceLength, fileOffset = 0) {
+  let end = proposed;
+  for (const reader of readers) {
+    if (!Number.isSafeInteger(reader.cursor) || reader.cursor < 0) return 0;
+    end = Math.min(end, reader.cursor);
+  }
+  return alignDownToPiece(end, fileOffset, pieceLength);
+}
+
 /**
  * القرار الواحد لكل نبضة.
  * @returns {{evictTo: number|null, action: 'pause'|'resume'|null, fail: string|null, aheadSeconds: number|null}}

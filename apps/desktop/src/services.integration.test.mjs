@@ -58,7 +58,7 @@ net.createServer(c=>{let buf='';c.on('data',b=>{buf+=b;while(buf.includes('\\n')
   assert.equal(await readFile(join(dir,'range-status'),'utf8'),'206');
   assert.deepEqual(await readFile(join(dir,'range-body')),owned.subarray(0,128));
   const paths=(await readFile(join(dir,'requests'),'utf8')).split('\n');
-  assert.ok(paths.some(p=>p.includes('list_only=true')));assert.ok(paths.some(p=>p.includes('only_files=0')));
+  assert.ok(!paths.some(p=>p.includes('list_only=true')),'known file index must not resolve metadata twice');assert.ok(paths.some(p=>p.includes('only_files=0')));
   assert.ok(events.some(e=>e.type==='playback/ready'));
   await services.stopPlayback({session:'owned'});
   const pid=Number(await readFile(join(dir,'backend-pid'),'utf8'));assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});

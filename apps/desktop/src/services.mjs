@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { createPlaybackBudget } from './playback-budget.mjs';
+import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
 import https from 'node:https';
@@ -11,7 +12,7 @@ import fs, { mkdir, rm } from 'node:fs/promises';
 import { join, basename, resolve, sep } from 'node:path';
 import { tmpdir, freemem } from 'node:os';
 import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom } from './torrent-cache.mjs';
-import { planWindow, readNeedsRebuild, rangeStart, createHolePuncher } from './torrent-window.mjs';
+import { planWindow, readNeedsRebuild, rangeStart, createHolePuncher, safeEvictionEnd } from './torrent-window.mjs';
 import { createUnblockingLookup, FragmentingAgent, looksLikeSniReset, describeNetError } from './net-unblock.mjs';
 
 // DoH أولًا ثم DNS النظام، مثل الـAPK (AnimeDns): حجب DNS عند المزوّد لا يُسقط المصادر ولا الإضافات.
@@ -361,7 +362,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   const replayCaches=new Map();
   const replayFor=ownerId=>{
     if(!replayCache)return null;
-    if(!replayCaches.has(ownerId))replayCaches.set(ownerId,createTorrentReplayCache({userData,ownerId}));
+    if(!replayCaches.has(ownerId)){
+      const cache=createTorrentReplayCache({userData,ownerId});replayCaches.set(ownerId,cache);
+      void cache.cleanup();
+    }
     return replayCaches.get(ownerId);
   };
   // Electron owns the single-instance lock before constructing services.
@@ -377,7 +381,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.resolveCommands?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
+    state.trace?.stop();state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.resolveCommands?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -446,19 +450,35 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       // التورنت: الرابط الحالي للمحرك (يتغيّر بعد إعادة البناء). قراءة من منطقة فُرّغت من القرص
       // تنتظر إعادة بناء التورنت من تلك النقطة، فلا تصل للمشغّل أصفار أبدًا.
       let start=rangeStart(req.headers.range),replay;
+      const reader=torrent?{cursor:start,requestId:++state.rangeSequence,at:performance.now()}:null;
+      if(reader)state.trace.record('http-range',{requestId:reader.requestId,rangeStart:start});
+      if(reader){state.torrentReaders.set(reader,reader);state.latestDemand=reader;}
       const abort=new AbortController();req.once('close',()=>{if(!req.complete)abort.abort();});res.once('close',()=>abort.abort());
+      if(reader)res.once('close',()=>{state.torrentReaders.delete(reader);if(state.latestDemand===reader)state.latestDemand=[...state.torrentReaders.values()].at(-1);});
+      const demandBytes=(size,cursor)=>{
+        if(!reader)return;reader.cursor=cursor;
+        const mode=reader.source??'torrent';
+        state.trace.once('http-first-byte',{bytes:size,waitMs:performance.now()-reader.at,mode});
+        if(!reader.firstByte){reader.firstByte=true;const waitMs=performance.now()-reader.at;state.rangeWaitMs=(state.rangeWaitMs??0)+waitMs;state.trace.record('range-first-byte',{requestId:reader.requestId,cursor,waitMs,mode});}
+        if(mode==='cache')state.cacheBytesRead=(state.cacheBytesRead??0)+size;
+        else state.trace.once('first-useful-piece',{requestedPiece:Math.floor(((state.win?.fileOffset??0)+cursor-size)/(state.win?.pieceLength||1))});
+        if(state.latestDemand===reader){state.demandFlowAt=Date.now();if(state.win)state.win.readPos=cursor;}
+      };
       const parentAbort=()=>abort.abort();state.controller.signal.addEventListener('abort',parentAbort,{once:true});
       try {
         if(torrent){
           if(state.replayEntry){
-            replay=await sendReplayPrefix({entry:state.replayEntry,req,res,signal:abort.signal,onBytes:()=>{state.demandFlowAt=Date.now();}});
+            reader.source='cache';
+            replay=await sendReplayPrefix({entry:state.replayEntry,req,res,signal:abort.signal,onBytes:demandBytes});
             if(replay.complete)return;
-            if(replay.sent)start=replay.cursor;
+            start=replay.cursor;reader.cursor=start;
           }
           await state.engineTask;
           assertSession(state);
+          if(state.evictionBarrier)await state.evictionBarrier;
           if(readNeedsRebuild(start,state.win?.evictedTo??0))await rebuild(state);
           url=state.streamUrl;
+          reader.source='torrent';
         }
         let requestHeaders={};
         if(req.headers.range&&/^bytes=\d*-\d*(?:,\d*-\d*)*$/.test(req.headers.range))requestHeaders.Range=req.headers.range;
@@ -491,7 +511,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
           if(!res.headersSent)res.writeHead(upstream.statusCode,responseHeaders);
           if(req.method==='HEAD'){upstream.destroy();res.end();}else {
-            if(torrent&&state.win){const token={};state.win.reader=token;let sent=0;upstream.on('data',c=>{sent+=c.length;if(state.win.reader===token){state.demandFlowAt=Date.now();state.win.readPos=start+sent;}});}
+            if(torrent&&state.win){let sent=0;upstream.on('data',c=>{sent+=c.length;demandBytes(c.length,start+sent);});}
             if(torrent&&state.replayEntry&&[200,206].includes(upstream.statusCode)){
               const actual=upstream.statusCode===206?Number(/^bytes (\d+)-/.exec(String(upstream.headers['content-range']??''))?.[1]):0;
               if(Number.isSafeInteger(actual)&&actual===start){
@@ -512,8 +532,16 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     assertSession(state);return mapped(target);
   }
   async function engine(state,candidate) {
+    state.trace.record('engine-start');
     emit(state,{type:'playback/stage',stage:'engine-start'});
-    const chosen=await selectTorrentCacheRoot({userData,platform});assertSession(state);
+    // An owned replay descriptor already identifies the previous usable volume.
+    // Check its current headroom first; avoid a PowerShell drive enumeration on
+    // every replay or app restart. A removed/full volume still uses normal selection.
+    let chosen;
+    if(state.replayEntry){
+      try{const root=state.replayEntry.descriptor.root,available=await cacheFreeBytes(root);if(available>=512n*1024n*1024n)chosen={root,available};}catch{}
+    }
+    chosen??=await selectTorrentCacheRoot({userData,platform});assertSession(state);
     state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
     const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
@@ -525,8 +553,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(platform!=='win32')env.XDG_CACHE_HOME=join(userData,'engine-state');
     const options={auth:state.auth,signal:state.controller.signal};
     await launchEngine(state,dir,env,options);
+    state.trace.record('engine-ready');
 
     emit(state,{type:'playback/stage',stage:'metadata'});
+    state.trace.record('magnet-metadata-start');
     // rqbit validates only_files against the resolved metadata BEFORE opening
     // storage. A known index can therefore use one managed add: resolving a
     // list_only magnet first would throw away its metadata peer receiver.
@@ -541,8 +571,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         ms=>sleep(ms,state.controller.signal),()=>assertSession(state));
     }
     assertSession(state);
+    state.trace.record('magnet-metadata-complete');
     if(metadata.details?.info_hash?.toLowerCase()!==candidate.infoHash)throw new Error('هوية التورنت لا تطابق النتيجة');
     const index=selectTorrentFile(metadata.details.files,candidate);
+    state.trace.record('file-selected',{fileIdx:index,fileBytes:Number(metadata.details.files[index]?.length)});
     emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
     let storage;
     try { storage=await fs.statfs(dir,{bigint:true}); }
@@ -572,6 +604,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
       try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
+        const snapshot=stats.live?.snapshot,range=state.latestDemand;
+        state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
+        if(peers>0)state.trace.once('peer-connected');
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
       }catch{}finally{state.statsPending=false;}
     },1000);
@@ -681,7 +716,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       if(state.stopped||state.rebuilding||state.seekTarget!=null)return;
       const plan=planWindow({fileLength:w.fileLength,fileOffset:w.fileOffset,pieceLength:w.pieceLength,durationSeconds,positionSeconds,
         readPos:w.readPos,forwardCacheBytes,contiguousEnd,evictedTo:w.evictedTo,freeBytes,paused:w.paused,buffering:state.mediaBuffering===true,limits:windowLimits});
-      if(plan.evictTo!=null&&w.filePath&&await puncher.punch(w.filePath,0,plan.evictTo))w.evictedTo=Math.max(w.evictedTo,plan.evictTo);
+      if(plan.evictTo!=null&&w.filePath){
+        // Publish the barrier before awaiting disk I/O. A new Range must see
+        // the committed eviction boundary before using rqbit's old have bits.
+        let finish;state.evictionBarrier=new Promise(resolve=>finish=resolve);
+        try{
+          const end=safeEvictionEnd(plan.evictTo,state.torrentReaders.values(),w.pieceLength,w.fileOffset);
+          if(end>w.evictedTo&&await puncher.punch(w.filePath,0,end))w.evictedTo=end;
+        }finally{finish();state.evictionBarrier=null;}
+      }
       if(plan.action==='pause'&&!w.paused){await localJSON(state.api,`/torrents/${state.torrentId}/pause`,{...options,body:'',timeout:5000});w.paused=true;}
       else if(plan.action==='resume'&&w.paused){await localJSON(state.api,`/torrents/${state.torrentId}/start`,{...options,body:'',timeout:5000});w.paused=false;}
       if(plan.fail)return void fail(state,plan.fail);
@@ -700,6 +743,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     });
   }
   async function player(state,url,title,position,pause) {
+    state.trace.record('player-start');
     if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
     if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
@@ -714,17 +758,19 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
     child(state,binaries.mpv,args,cleanEnv(),(message,code)=>{if(message==='أغلق البرنامج المرفق'&&code===0&&state.ready){emit(state,{type:'playback/closed',...state.progress});cleanup(state).then(()=>{if(current===state)current=null;});}else fail(state,message);});
     state.socket=await connectIPC(state,state.ipc);assertSession(state);
+    state.trace.record('player-ipc-ready');
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
+    const ready=()=>{if(state.ready)return;state.ready=true;state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured'});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
         const end=buffer.indexOf('\n'),line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line);}catch{continue;}
         if(event.request_id!=null){const pending=state.pending.get(event.request_id);if(pending){state.pending.delete(event.request_id);clearTimeout(pending.timer);event.error==='success'?pending.resolve(event.data):pending.reject(new Error('رفض المشغل الأمر'));}}
         if(event.event==='client-message'&&['vantara-fullscreen','vantara-back'].includes(event.args?.[0]))emit(state,{type:'playback/action',action:event.args[0]==='vantara-fullscreen'?'fullscreen':'close'});
-        if(event.event==='seek')state.seekRevision=(state.seekRevision??0)+1;
+        if(event.event==='seek'){state.seekRevision=(state.seekRevision??0)+1;state.stableSince=performance.now();}
+        if(event.event==='file-loaded')state.trace.once('container-metadata-ready');
         if(event.event==='playback-restart'&&state.ready&&state.seekRevision!==state.publishedSeekRevision) {
           const revision=state.seekRevision;state.publishedSeekRevision=revision;state.seekTarget=null;
           ipcCommand(state,['get_property','time-pos']).then(seconds=>{
@@ -757,9 +803,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             state.lastSubtitleSelection=selectedId;
             emit(state,{type:'playback/subtitles',tracks:state.subtitleTracks});
           }
-          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
-          if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
-          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;emitPlaybackState(state);}
+          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
+          if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
+          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);}
 
         }
       }
@@ -802,10 +848,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     candidate=validateCandidate(candidate);
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
-    state.cacheRecorders=new Set();state.replayStore=candidate.infoHash?replayFor(ownerId):null;
+    state.cacheRecorders=new Set();state.torrentReaders=new Map();state.replayStore=candidate.infoHash?replayFor(ownerId):null;
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     state.whenCommands=new Promise(resolve=>state.resolveCommands=resolve);
     current=state;states.add(state);
+    state.rangeSequence=0;state.trace=createStartupTrace(event=>emit(state,event));state.trace.record('source-selected',{fileIdx:candidate.fileIdx,mode:'cold'});
     state.budget=createPlaybackBudget({torrent:!!candidate.infoHash,onTimeout:reason=>{
       if(state.stopped||current!==state)return;
       emit(state,{type:'playback/recovery-needed',reason});
@@ -818,6 +865,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       let url;
       if(candidate.infoHash){
         state.replayEntry=await state.replayStore?.lookup({infoHash:candidate.infoHash,...(candidate.fileIdx!=null?{fileIdx:candidate.fileIdx}:{}),...(candidate.fileIdx==null&&candidate.filename?{filename:basename(String(candidate.filename).replaceAll('\\','/'))}:{})});
+        state.trace.record('replay-lookup',{mode:state.replayEntry?'replay-descriptor':'cold'});
         assertSession(state);
         state.engineTask=engine(state,candidate);
         // The independent verified replay copy can supply container headers and
@@ -913,7 +961,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     else throw new Error('أمر مشغل غير مسموح');
   }
   // Internal verification only: not registered on the renderer IPC bridge.
-  async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay};}
+  async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
   async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
   return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,close};
 }

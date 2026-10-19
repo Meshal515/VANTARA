@@ -1,5 +1,12 @@
 import test from 'node:test';
+import { safeEvictionEnd } from './torrent-window.mjs';
 import assert from 'node:assert/strict';
+
+test('eviction never punches bytes still needed by any active HTTP reader',()=>{
+  assert.equal(safeEvictionEnd(8192,[{cursor:6145},{cursor:12288}],1024,0),6144);
+  assert.equal(safeEvictionEnd(8192,[{cursor:0}],1024,0),0);
+  assert.equal(safeEvictionEnd(8192,[],1024,0),8192);
+});
 import { mkdtemp, writeFile, stat, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
