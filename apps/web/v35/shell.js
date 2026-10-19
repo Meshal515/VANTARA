@@ -1,3 +1,7 @@
+import { createMomentController } from './moment-controller.js';
+import * as momentEngine from '../lib/anime-engine.js';
+import { momentOf } from './moment-media.js';
+import { recipientFace } from './recipient.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -13,6 +17,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { getAddonRuntime } from '../addons/runtime.js';
@@ -226,28 +231,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     t._x = setTimeout(() => t.classList.remove('show'), ms);
   }
 
-  let sheetClose = null;
-  /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
-  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. `full`: صفحة كاملة لا ورقة. */
-  function openSheet(build, { tone = null, full = false } = {}) {
-    closeSheet();
-    const body = q('sheetBody');
-    body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
-    body.className = 'sheet';
-    if (tone) q('sheet').dataset.tone = tone;
-    // صفحة كاملة (اختيار السيرفر والجودة): نفس الطبقة وزر الرجوع يغلقها
-    q('sheet').classList.toggle('sheet-backdrop--full', full);
-    sheetClose = build(body) ?? null;
-    q('sheet').classList.add('show');
-  }
-  function closeSheet() {
-    if (!q('sheet').classList.contains('show')) return false;
-    q('sheet').classList.remove('show');
-    delete q('sheet').dataset.tone;
-    sheetClose?.();
-    sheetClose = null;
-    return true;
-  }
+  // ورقة واحدة مشتركة: الإغلاق يُعطّل شجرة اللمس كاملة، لا خلفيتها فقط.
+  const sheetController = createSheetController(q('sheet'), q('sheetBody'));
+  const openSheet = sheetController.open;
+  const closeSheet = sheetController.close;
   function sheetItem(icon, label, run, { pressed, danger } = {}) {
     const b = el('button', `sheet-item${danger ? ' sheet-item--danger' : ''}`);
     b.type = 'button';
@@ -2702,17 +2689,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   function avatarNode(person, size = 44) {
-    if (person.avatarKey) {
-      const img = el('img');
-      img.src = person.avatarKey;
-      img.alt = '';
-      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-      return img;
-    }
-    const s = el('span', 'avatar-letter', initialOf(person.displayName));
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
+    return recipientFace(person, { size, mediaUrl });
   }
+
   function latestChapter(rows) {
     return rows.reduce((best, row) => {
       if (!best) return row;
@@ -4666,13 +4645,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const health = api.health();
     const bad = health.state !== 'ok' && health.state !== 'syncing';
+    // This code contains no account details. Make a failed recovery actionable:
+    // the previous screen only said "recovery incomplete" for every cause.
+    const recoveryCode = health.lastError?.code
+      || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
     group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
+      ...(bad ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
         run: async () => {
           toast('جارٍ المزامنة…');
           await api.syncNow().catch(() => {});
-          toast('تمّت المزامنة');
+          // Settled writes are not the same as a verified complete local mirror.
+          const after = api.health();
+          toast(after.state === 'ok' ? 'اكتملت المزامنة' : after.message);
           renderSettings();
         },
       }),
@@ -4947,22 +4933,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
-  // «VANTARA MANGA ⌄»: قائمة الأقسام. الأنمي والسينما قريبًا.
+  // ألغِ فتحًا مؤجَّلًا عند الإغلاق كي لا تعود طبقة كاملة لابتلاع اللمس.
+  let sectionOpenFrame = 0;
   function setSectionsOpen(open) {
     const menu = q('sectionMenu');
     const scrim = q('sectionScrim');
     const button = q('brandSwitch');
     if (!menu || !button) return;
+    if (sectionOpenFrame) {
+      cancelAnimationFrame(sectionOpenFrame);
+      sectionOpenFrame = 0;
+    }
     button.setAttribute('aria-expanded', String(open));
     if (open) {
+      menu.style.removeProperty('pointer-events');
+      scrim.style.removeProperty('pointer-events');
       for (const layer of [menu, scrim]) layer.hidden = false;
-      requestAnimationFrame(() => {
+      sectionOpenFrame = requestAnimationFrame(() => {
+        sectionOpenFrame = 0;
+        if (!sectionsOpen()) return;
         menu.classList.add('open');
         scrim.classList.add('open');
         menuIn(menu, [...menu.querySelectorAll('.section-item')]);
       });
       return;
     }
+    // تعتيم الطبقة لا يعطّل hit testing: أوقف اللمس فورًا لا بعد 240ms.
+    menu.style.pointerEvents = 'none';
+    scrim.style.pointerEvents = 'none';
     scrim.classList.remove('open');
     setTimeout(() => {
       if (!scrim.classList.contains('open')) scrim.hidden = true;
@@ -5125,6 +5123,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
+    if (moments.handleBack()) return true;
     if (editor?.open) return editor.handleBack();
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
@@ -5159,6 +5158,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
 
+  function openMomentTarget(row, play) {
+    const ref = String(row.series_ref ?? '');
+    const moment = momentOf(row);
+    const episode = moment?.episode ?? row.chapter_number ?? 1;
+    if (ref.startsWith('anime:')) openAnimeRef(ref, { title: row.series_title, cover: row.cover_url,
+      ...(play ? { chapter: { number: episode, label: `الحلقة ${episode}` }, play: true } : {}) });
+    else if (ref.startsWith('cinema:')) openCinemaRef(ref, { title: row.series_title, cover: row.cover_url,
+      ...(play ? { playAt: { season: Number(ref.split(':')[2]) || null, episode } } : {}) });
+  }
+  const moments = createMomentController({ engine: momentEngine, mediaUrl,
+    friends: () => deps.friends?.() ?? [], toast,
+    onEpisode: row => openMomentTarget(row, true), onWork: row => openMomentTarget(row, false) });
+  const nativeMomentTarget = (event, play) => {
+    const ref = event.seriesRef || `anime:${event.animeId}`;
+    openMomentTarget({series_ref:ref,chapter_number:event.episode},play);
+  };
+
   const friendsHost = q('friendsBody');
   friendsHost.classList.add('fr-host');
   const friends = createFriends({
@@ -5170,6 +5186,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountImage,
     workFromRef,
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
     openRoom: (focus) => room.open(focus),
@@ -5188,6 +5206,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountImage,
     workFromRef,
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
     openSheet,
@@ -5232,6 +5252,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const majlis = createMajlis({
     sync,
+    mediaUrl,
     host: q('majlisBody'),
     // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
     section: () => root.dataset.section ?? 'manga',
@@ -5241,6 +5262,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     workFromRef,
     openWork: (w) => void openWork(w),
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openAnime: (ref, opts) => openAnimeRef(ref, opts),
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
@@ -5346,6 +5369,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
+    openMomentWork: event => nativeMomentTarget(event, false),
+    openMomentEpisode: event => nativeMomentTarget(event, true),
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     openUpdates: (section) => openUpdates(section),
     sync,
@@ -5362,6 +5387,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'anime' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),
@@ -5371,6 +5397,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
+    friends: () => deps.friends?.() ?? [],
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
@@ -5380,6 +5407,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'cinema' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),
@@ -5541,6 +5569,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      moments.destroy();
       addonViewGeneration++;closeAddonSource();
       detailDock.destroy();
       followTimeClosed = true;
@@ -5548,6 +5577,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       majlis.hide();
       clearInterval(state.heroTimer);
       clearInterval(chapterRefreshTimer);
+      sheetController.destroy();
       document.removeEventListener('visibilitychange', refreshChapters);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);

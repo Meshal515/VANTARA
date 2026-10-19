@@ -1,3 +1,4 @@
+import { resolveRecipientAvatar } from './recipient.js';
 /**
  * VANTARA CINEMA — أفلام ومسلسلات عالمية مترجمة.
  *
@@ -1907,7 +1908,7 @@ export function createCinema(deps) {
         total: m.type === 'series' ? eps.length : 1,
         position,
         poster: m.poster ?? null,
-        friends: [],
+        friends: (deps.friends?.() ?? []).map(f => ({userId:f.userId,displayName:f.displayName,avatarKey:resolveRecipientAvatar(f),avatarUrl:resolveRecipientAvatar(f)})),
         copies: sheet.warm?.copies ?? sheet.found.copies,
         resume,
         presenceEndpoint: presence?.endpoint ?? null,

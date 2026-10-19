@@ -26,6 +26,9 @@ import { connectionLabel } from '../../v35/together.js';
 import { renderLobby, pendingInvitees } from './together-lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
 import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
+import { openMomentComposer } from '../../v35/moment-compose.js';
+import { openMomentViewer } from '../../v35/moment-viewer.js';
+import { exportBrowserMoment } from '../../lib/moment-export.js';
 
 const START_TIMEOUT_MS = 15_000;
 const REPORT_EVERY_MS = 5_000;
@@ -117,6 +120,17 @@ export function clock(seconds) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
 }
 
+/** Account attribution travels with the event so a later account switch cannot redirect it. */
+export function momentSendPayload(args, selection) {
+  return {
+    userId: args.usageUserId ?? args.presenceUserId ?? null,
+    seriesRef: selection.work.ref, seriesTitle: selection.work.title, coverUrl: selection.work.cover ?? null,
+    chapterLabel: `${selection.episode == null ? 'الفيلم' : `الحلقة ${selection.episode}`} · ${clock(selection.startMs / 1000)}–${clock(selection.endMs / 1000)}`,
+    chapterNumber: selection.episode, moment: selection.moment, toIds: selection.toIds,
+    broadcast: selection.broadcast, ...(selection.message ? { message: selection.message } : {}),
+  };
+}
+
 /**
  * حكم على ما يعرضه الفيديو الآن: هل هو تشغيل حقيقي؟
  * @returns {null|'placeholder'|'no_picture'}
@@ -133,6 +147,7 @@ const svg = (body, { fill = false } = {}) =>
   `<svg viewBox="0 0 24 24" width="24" height="24" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
   back: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+  camera: svg('<path d="M8 6.5 9.5 4h5L16 6.5h3A2 2 0 0 1 21 8.5v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-10a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/>'),
   play: svg('<path d="M8 5.5 19 12 8 18.5Z"/>', { fill: true }),
   pause: svg('<rect x="6.5" y="5" width="3.5" height="14" rx="1.2"/><rect x="14" y="5" width="3.5" height="14" rx="1.2"/>', { fill: true }),
   rewind: svg('<path d="M12 3.5a8.5 8.5 0 1 1-7.4 4.3"/><path d="M8 2.2 7.1 5.2l3.1.7"/><text x="12" y="14.7" font-size="7.6" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui">10</text>'),
@@ -184,6 +199,7 @@ export function openPlayer(args) {
   const together = args.together?.session ? args.together : null;
   let tg = null;
   let releaseTogether = () => {};
+  let momentComposer = null, momentPreview = null;
   // للاختبار فقط: مقطع تجربة قصير يُقبل
   const minDuration = Number(args.minRealDuration) || MIN_REAL_DURATION_S;
   const movie = args.section === 'cinema' && (Number(args.episode) < 0 || Number(args.total) <= 1);
@@ -255,7 +271,41 @@ export function openPlayer(args) {
   titles.append(titleEl, subEl);
   const fitBtn = iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => toggleFill());
   const fullBtn = iconButton('full', 'ملء الشاشة (F)', () => toggleFullscreen(), 'pp-desk');
-  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, fitBtn, fullBtn, iconButton('more', 'المزيد', () => showMore()));
+  const cameraBtn = iconButton('camera', 'شارك لحظة', () => void composeMoment());
+  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, cameraBtn, fitBtn, fullBtn, iconButton('more', 'المزيد', () => showMore()));
+
+  async function composeMoment() {
+    if (momentComposer || state.closed) return;
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return message('انتظر حتى يجهز الفيديو');
+    // A document modal must leave native fullscreen to remain visible on mobile Safari.
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    if (state.closed) return;
+    const resume = !video.paused; video.pause();
+    const candidate = state.current ?? {};
+    const rawSource = { url: candidate.url, type: candidate.type, mimeType: candidate.mimeType, sourceId: candidate.sourceId, server: candidate.server, quality: candidate.quality };
+    const currentUrl = video.currentSrc || video.src;
+    const playbackSource = { ...rawSource, url: currentUrl && !currentUrl.startsWith('blob:') ? currentUrl : candidate.url };
+    const ref = args.work?.ref ?? args.seriesRef ?? args.subtitleIdentity?.canonicalId ?? `${args.section === 'cinema' ? 'cinema' : 'anime'}:${args.animeId}`;
+    const work = { ref, title: args.title || '', cover: args.poster ?? null };
+    const filename = `VANTARA-moment-${Date.now()}.mp4`;
+    const save = async (selection, externalShare = false) => {
+      const result = await exportBrowserMoment({ source: playbackSource, startMs: selection.startMs, endMs: selection.endMs, filename, signal: selection.signal, externalShare });
+      if (result?.url?.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(result.url), 30000);
+      return result;
+    };
+    momentComposer = openMomentComposer({
+      positionMs: Math.round((video.currentTime || 0) * 1000), durationMs: Math.floor(video.duration * 1000),
+      work, episode: movie ? null : state.episode, friends: args.friends ?? [], sourceHints: [rawSource],
+      onSend: (selection) => emit('momentSend', momentSendPayload(args, selection)),
+      onSave: (selection) => save(selection), onShare: (selection) => save(selection, true),
+      onPreview: (selection) => {
+        momentPreview?.destroy();
+        const row = { id: 'moment-draft', series_ref: ref, series_title: work.title, cover_url: work.cover, moment_json: JSON.stringify({ ...selection.moment, sources: [] }) };
+        momentPreview = openMomentViewer({ row, resolveSources: async () => [playbackSource], toast: message });
+      },
+      onClose: () => { momentPreview?.destroy(); momentPreview = null; momentComposer = null; if (!state.closed && resume) void video.play().catch(() => showControls(true)); },
+    });
+  }
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -1558,6 +1608,7 @@ export function openPlayer(args) {
     if (state.closed) return;
     if (notify) report(true);
     state.closed = true;
+    momentComposer?.destroy(); momentPreview?.destroy(); momentComposer = null; momentPreview = null;
     releaseTogether();
     clearInterval(countdown);
     clearInterval(watchdog);
@@ -1587,6 +1638,7 @@ export function openPlayer(args) {
 
   // الحروف بـe.code لا e.key: تعمل والكيبورد على العربي
   const onKey = (e) => {
+    if (momentComposer) return;
     if (e.key === 'Escape') {
       if (!sheet.hidden) return closeSheet();
       if (document.fullscreenElement) return;

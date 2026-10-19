@@ -13,6 +13,7 @@
  */
 
 import { glyph } from './icons.js';
+import { createMomentPreviews, momentOf } from './moment-media.js';
 import { REACTIONS } from './majlis.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { clockTime, dayLabel, el, motion, nameNode, parse, people, presenceState, pressable, roomInitial } from './social-kit.js';
@@ -93,6 +94,7 @@ export function actionPosition(anchor, viewport, menu) {
  *   sync: any, mount: HTMLElement,
  *   avatarNode: Function, mountImage: Function, workFromRef: Function,
  *   preview: (work: object, opts?: object) => void, openFrame: (id: string) => void, openProfile: (id: string) => void,
+ *   playMoment?: (row: object) => void, resolveMomentSources?: (row: object) => Promise<object[]>,
  *   openSheet: Function, closeSheet: Function, toast: (t: string) => void,
  *   presence: () => Promise<any[]>, mediaUrl: (key: string) => string,
  *   pageImage?: Function | null, markSeen: (kind: string, id: string) => void,
@@ -101,6 +103,7 @@ export function actionPosition(anchor, viewport, menu) {
  * }} ctx
  */
 export function createRoom(ctx) {
+  const momentPreviews = createMomentPreviews({ mediaUrl: ctx.mediaUrl, resolveSources: ctx.resolveMomentSources });
   const { sync } = ctx;
   const kit = people(sync);
   const me = kit.me;
@@ -377,17 +380,22 @@ export function createRoom(ctx) {
 
   function recCard(r) {
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
-    const card = el('button', 'mc-work');
+    const moment = momentOf(r);
+    const card = el('button', moment ? 'mc-work mv-card' : 'mc-work');
     card.type = 'button';
     const cover = el('span', 'mc-work-cover');
-    void ctx.mountImage(cover, work);
+    if (moment) momentPreviews.mount(cover, r);
+    else void ctx.mountImage(cover, work);
     const text = el('span', 'mc-work-text');
-    text.append(el('span', 'mc-work-kicker', isAnime(r.series_ref) ? 'ترشيح أنمي' : 'ترشيح'));
+    text.append(el('span', 'mc-work-kicker', moment ? 'لحظة' : isAnime(r.series_ref) ? 'ترشيح أنمي' : 'ترشيح'));
     text.append(el('bdi', 'mc-work-title', displayTitle(work.id, work.title?.english) || r.series_title || 'عمل'));
     if (r.chapter_label) text.append(el('span', 'mc-work-meta', r.chapter_label));
-    text.append(el('span', 'mc-work-cta', isAnime(r.series_ref) ? 'افتح الأنمي' : 'افتح العمل'));
+    text.append(el('span', 'mc-work-cta', moment ? 'شاهد اللقطة' : isAnime(r.series_ref) ? 'افتح الأنمي' : 'افتح العمل'));
     card.append(cover, text);
-    card.onclick = () => openWork(work, r.chapter_label ? { chapter: { label: r.chapter_label, number: r.chapter_number ?? null } } : {});
+    card.onclick = () => {
+      if (moment) { ctx.markSeen('rec', r.id); ctx.playMoment?.(r); }
+      else openWork(work, r.chapter_label ? { chapter: { label: r.chapter_label, number: r.chapter_number ?? null } } : {});
+    };
     const wrap = el('div', 'mc-card');
     wrap.append(card);
     if (r.message) {
@@ -738,6 +746,7 @@ export function createRoom(ctx) {
 
   function renderList() {
     if (!list) return;
+    momentPreviews.reset();
     if (actionsLayer) closeActions();
     const fromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const items = timeline(sync, me());
@@ -1104,6 +1113,7 @@ export function createRoom(ctx) {
   function close() {
     if (!node) return false;
     if (actionsLayer) return closeActions();
+    momentPreviews.reset();
     clearTimeout(actionsTimer);
     actionsTimer = null;
     recording?.cancel();

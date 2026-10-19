@@ -19,3 +19,4 @@ export * from './correlation.ts';
 export * from './frames.ts';
 export * from './majlis.ts';
 export * from './media.ts';
+export * from './moments.ts';

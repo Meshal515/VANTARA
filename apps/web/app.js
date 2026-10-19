@@ -2223,6 +2223,7 @@ setInterval(() => void sync.push(), 15_000);
  * وتختفي وحدها إن تراجع، وبعد المسح النهائي خروج إلى «من يتابع؟».
  */
 let pendingNotice = null;
+let verifyingDeletion = false;
 function followAccountState() {
   if (!sync.user || sync.deletingHere || state.screen === 'GATE') return;
   const accountState = sync.accountState;
@@ -2231,10 +2232,20 @@ function followAccountState() {
     pendingNotice = null;
   }
   if (accountState === 'DELETED') {
-    dropV35();
-    sync.signOut();
-    void go({ name: 'gate' });
-    showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    if (verifyingDeletion) return;
+    verifyingDeletion = true;
+    const affectedUserId = sync.user.userId;
+    // The local mirror can contain a stale tombstone from a previously deleted
+    // account. Never sign out or destroy unsent edits on that evidence alone.
+    void sync.verifyDeletedAccount().then((result) => {
+      if (result !== 'deleted' || sync.user?.userId !== affectedUserId || sync.deletingHere || sync.accountState !== 'DELETED') return;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+      showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    }).catch(() => {
+      // Offline is not deletion. Preserve the session and queued edits.
+    }).finally(() => { verifyingDeletion = false; });
     return;
   }
   if (accountState === 'PENDING_DELETE' && !pendingNotice) {
@@ -2260,7 +2271,7 @@ function followAccountState() {
 
 /**
  * قفل الحساب: عليه PIN وما أُدخل منذ فُتح التطبيق. الرمز قبل أي شاشة، وإذن
- * الجلسة يعيش ما دام التطبيق مفتوحًا فقط (sessionStorage). «تبديل الحساب»
+ * الجلسة يبقى على الجهاز حتى يبدّل الحساب أو يسجل الخروج. «تبديل الحساب»
  * مخرج دائم: لا أحد يُحبس خلف رمز لا يعرفه.
  */
 let lockOpen = false;

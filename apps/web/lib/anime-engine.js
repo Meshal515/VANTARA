@@ -414,6 +414,13 @@ export function retrySeconds(retryAt, now = Date.now()) {
   return Number.isFinite(retryAt) ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 }
 
+/** Resolved streams belong to this device/session; never attach their headers to a shared moment. */
+export async function momentCandidates(session) {
+  return (await call('momentCandidates', { session }))?.candidates ?? [];
+}
+export const exportMoment = args => call('exportMoment', args);
+export const acknowledgeOutbox = args => call('acknowledgeOutbox', args);
+
 export async function routes(session) {
   return (await call('routes', { session })) ?? null;
 }

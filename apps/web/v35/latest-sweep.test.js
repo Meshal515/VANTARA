@@ -2,12 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectLatestChapters, latestBoundary } from './works.js';
 import { connectUpdates, flush, noteListed, observeMangaChapters } from '../lib/update-engine.js';
 
-/**
- * «آخر التحديثات» ناقصة: مانجا ليك يرفع 64 عملًا في قائمته، وVANTARA يُظهر بضعة.
- * المسح كان يقرأ الصفحة الأولى وحدها (25 عملًا) واحدًا واحدًا في سكون الرئيسية،
- * وما لم يُجلب فصله لا يصل الخادم أبدًا. هنا: كل ما صعد منذ المسح السابق يُجلب
- * فصله (حتى 4 صفحات)، وما لم يتحرك لا يُطلب ثانية.
- */
+/** Latest scans audit stationary works, resume deeper pages, and retry failed
+ * chapter payloads without depending on the work staying in the listing. */
 const NOW = Date.UTC(2026, 9, 9, 18);
 const MIN = 60_000;
 const SOURCE = { id: 'eu.kanade.tachiyomi.extension.ar.mangalek', label: 'Mangalek' };

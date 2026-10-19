@@ -1,3 +1,4 @@
+import { recipientFace } from './recipient.js';
 import { nativeFollowTime, setReaderTime, flushFollowTime, listenFollowForeground } from '../lib/follow-time.js';
 /**
  * القارئ الذكي.
@@ -42,6 +43,7 @@ import { createFollower } from '../lib/together/follow.js';
 import { readingPosition, readingTop } from './reader-scroll.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
+import { captureReaderViewport, saveViewportImage } from './reader-viewport.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -149,6 +151,7 @@ export function openSmartReader(deps, ctx) {
     <header class="rd-top rd-top--frame" id="rdFrameTop" hidden>
       ${iconButton('close', 'إلغاء الفريم', { act: 'frameCancel' })}
       <div class="rd-titles"><strong>فريم</strong><span id="rdFrameCount"></span></div>
+      ${iconButton('download', 'حفظ الجزء الظاهر', { act: 'frameSave', cls: 'icon-btn rd-frame-save' })}
       <button class="btn btn-primary rd-frame-next" type="button" data-act="frameNext" id="rdFrameNext">التالي</button>
     </header>
     <footer class="rd-bottom" id="rdBottom">
@@ -1277,6 +1280,30 @@ export function openSmartReader(deps, ctx) {
     );
   }
 
+  let savingFrame = false;
+  async function saveVisibleFrame() {
+    if (!state.frameMode || savingFrame) return;
+    const button = root.querySelector('[data-act="frameSave"]');
+    savingFrame = true;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      const canvas = captureReaderViewport(root);
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(value => value ? resolve(value) : reject(new Error('تعذّر تجهيز الصورة للحفظ')), 'image/png');
+      });
+      const filename = `VANTARA-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+      const saved = await saveViewportImage(blob, filename);
+      toast(saved === 'gallery' ? 'تم الحفظ في المعرض' : saved === 'download' ? 'بدأ تنزيل الصورة' : 'تمت مشاركة الصورة');
+    } catch (error) {
+      if (error?.name !== 'AbortError') toast(error?.name === 'SecurityError' ? 'المصدر يمنع حفظ الصورة في المتصفح' : error?.message ?? 'تعذّر حفظ الصورة');
+    } finally {
+      savingFrame = false;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+
   /** الإرسال خطوتان: لمن، ثم (لشخص) مَن يُخفى عنه في المجلس. */
   function openFrameSend() {
     if (!state.frame.size || !deps.sendFrame) return;
@@ -1363,22 +1390,7 @@ export function openSmartReader(deps, ctx) {
     openSheet(pick);
   }
   function avatar(person, size) {
-    if (person.everyone) {
-      const s = el('span', 'avatar-letter rd-everyone');
-      s.innerHTML = glyph('users', { size: 20 });
-      s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-      return s;
-    }
-    if (person.avatarKey) {
-      const img = el('img');
-      img.src = person.avatarKey;
-      img.alt = '';
-      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-      return img;
-    }
-    const s = el('span', 'avatar-letter', [...String(person.displayName || '؟')][0]);
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
+    return recipientFace(person, { size, friends: deps.friends?.() ?? [] });
   }
   function personRow(person, run) {
     const b = el('button', 'sheet-item');
@@ -1615,6 +1627,7 @@ export function openSmartReader(deps, ctx) {
     frame: () => enterFrameMode(),
     frameCancel: () => exitFrameMode(),
     frameNext: () => openFrameSend(),
+    frameSave: () => void saveVisibleFrame(),
     menu: () => openMenu(),
     translate: () => openTranslateChoice(),
     prevChapter: () => {

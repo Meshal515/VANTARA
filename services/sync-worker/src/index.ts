@@ -53,6 +53,7 @@ import {
   correlationIdFrom,
   frameLinkFor,
   normalizeFramePages,
+  normalizeMoment,
 } from '@vantara/domain';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
@@ -323,7 +324,7 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed, moment_json'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
   // سجلّ المالك خاص. النسخة الاجتماعية في جدول مستقل وقابلة للسحب.
@@ -429,6 +430,11 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   await ensureOwnerBadge(env, now);
   const since = Number(url.searchParams.get('since') ?? '0');
   const cursor = Number.isFinite(since) && since > 0 ? Math.floor(since) : 0;
+  // The initial full pull includes migrated rev=0 records. If that page is
+  // truncated at rev=0, its next page must be able to ask for rev>0 without
+  // replaying rev=0 forever. This opt-in flag does not change old clients.
+  const afterZero = cursor === 0 && url.searchParams.get('afterZero') === '1';
+  const lowerRev = cursor === 0 && !afterZero ? -1 : cursor;
   const serverRev = await currentRev(env);
 
   // D1 مُستعادة من نسخة احتياطية: بلا هذا الفحص لا يرى العميل جديدًا أبدًا
@@ -544,13 +550,13 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   };
 
   const statements = DELTA_TABLES.map(([table, columns]) => {
-    const scope = deltaScope(table, cursor === 0 ? -1 : cursor);
+    const scope = deltaScope(table, lowerRev);
     return env.DB.prepare(
       `SELECT ${columns} FROM ${table} WHERE rev > ?${scope.sql} ORDER BY rev LIMIT ${PAGE_SIZE}`,
     // سحبٌ كامل يبدأ من تحت الصفر: الحسابات الثلاثة وملفاتها زرعتها الهجرة
     // بـrev = 0، و`rev > 0` كان يُسقطها من كل جهاز — فتظهر «صديق» مكان الاسم
     // ويخلو المجلس من الوجوه حتى يعدّل صاحب الحساب ملفه
-    ).bind(cursor === 0 ? -1 : cursor, ...scope.values);
+    ).bind(lowerRev, ...scope.values);
   });
   const results = await env.DB.batch<Record<string, unknown>>(statements);
 
@@ -1544,6 +1550,8 @@ export function statementsFor(
     }
 
     case 'recommendation.send': {
+      const moment = p['moment'] == null ? null : normalizeMoment(p['moment']);
+      if (p['moment'] != null && !moment) return null;
       const seriesRef = asString(p['seriesRef'], 200);
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
@@ -1563,8 +1571,8 @@ export function statementsFor(
           .prepare(
             `INSERT INTO recommendations
                (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev,
-                audience, hidden_json, chapter_label, chapter_number)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?)
+                audience, hidden_json, chapter_label, chapter_number, moment_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
@@ -1581,6 +1589,7 @@ export function statementsFor(
             // ترشيح فصلٍ بعينه («اقرأ الفصل 110»)، أو العمل كله إن غابا
             asString(p['chapterLabel'], 120),
             asNumber(p['chapterNumber']),
+            moment ? JSON.stringify(moment) : null,
           ),
       ];
 
@@ -2551,6 +2560,17 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   const acknowledged = await appliedOpIds(ops, env);
   const skipped = new Set<string>();
   const unapplied = new Set<string>(invalidRecommendations);
+  // Validate attached posters before creating any recommendation/activity effects.
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.send' || op.payload['moment'] == null || acknowledged.has(op.opId)) continue;
+    const moment = normalizeMoment(op.payload['moment']);
+    if (!moment) { unapplied.add(op.opId); continue; }
+    if (moment.posterKey) {
+      const poster = await env.DB.prepare("SELECT hash FROM media WHERE hash = ? AND owner_id = ? AND mime LIKE 'image/%' AND length(data) > 0")
+        .bind(moment.posterKey, userId).first();
+      if (!poster) unapplied.add(op.opId);
+    }
+  }
 
   // field merges تحتاج revision مستقلًا لأن field_revs نفسها تستخدمه للمقارنة.
   for (const op of ops) {
