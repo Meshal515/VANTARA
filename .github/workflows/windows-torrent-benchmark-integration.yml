@@ -63,7 +63,7 @@ jobs:
           $binary=Get-ChildItem $out -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
           if (-not $binary) { throw 'FFmpeg binary missing' }
           "TORRENT_FFMPEG=$($binary.FullName)" | Out-File -Append $env:GITHUB_ENV
-      - name: Fast gate: actual rendered cold and warm MP4; full matrix remains available via script
+      - name: 'Fast gate: actual rendered cold and warm MP4; full matrix remains available via script'
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
