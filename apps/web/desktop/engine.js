@@ -376,7 +376,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         if(args.together?.session?.room)s.bindTogether(args.together);
         const synced=args.together?.session?.room&&(args.together.session.room.info?.mode??args.together.session.mode)==='sync';
         s.starting = generation;
-        const out = await bridge.startPlayback({ session: s.id, candidate: c, title: args.title ?? 'VANTARA', position: args.position ?? 0,...(synced?{pause:true}:{}) });
+        const out = await bridge.startPlayback({ session: s.id, candidate: c, title: args.title ?? 'VANTARA', position: args.position ?? 0,ownerId:args.usageUserId??args.presenceUserId??'guest',...(synced?{pause:true}:{}) });
         if (s.starting === generation) s.starting = null;
         if (!out?.started) throw new Error('لم يبدأ المشغل');
         if (!current(s) || generation !== s.playGeneration) throw new Error('انتهى تشغيل الجلسة');

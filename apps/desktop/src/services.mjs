@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { createPlaybackBudget } from './playback-budget.mjs';
+import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
+import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
@@ -349,13 +351,19 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='demand'}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='demand',replayCache=true}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
   const lookup=dnsOverHttps?unblockingLookup:systemLookup;
   const puncher=holePuncher??createHolePuncher(platform);
   const states=new Set(), resourceControllers=new Set();
+  const replayCaches=new Map();
+  const replayFor=ownerId=>{
+    if(!replayCache)return null;
+    if(!replayCaches.has(ownerId))replayCaches.set(ownerId,createTorrentReplayCache({userData,ownerId}));
+    return replayCaches.get(ownerId);
+  };
   // Electron owns the single-instance lock before constructing services.
   // This directory contains only disposable session downloads.
   const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
@@ -374,7 +382,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.socket?.destroy();
     state.cleanup=(async()=>{
       if(state.proxy){state.proxy.closeAllConnections();await new Promise(resolve=>state.proxy.close(resolve));}
+      await state.engineTask?.catch(()=>{});
       await Promise.all([...state.children].map(kill));
+      await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
@@ -435,19 +445,28 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       let url=mapping.get(match[1]), upstream;
       // التورنت: الرابط الحالي للمحرك (يتغيّر بعد إعادة البناء). قراءة من منطقة فُرّغت من القرص
       // تنتظر إعادة بناء التورنت من تلك النقطة، فلا تصل للمشغّل أصفار أبدًا.
-      const start=rangeStart(req.headers.range);
-      if(torrent){
-        if(readNeedsRebuild(start,state.win?.evictedTo??0)){try{await rebuild(state);}catch{if(!res.headersSent)res.writeHead(503);return res.end();}}
-        url=state.streamUrl;
-      }
+      let start=rangeStart(req.headers.range),replay;
       const abort=new AbortController();req.once('close',()=>{if(!req.complete)abort.abort();});res.once('close',()=>abort.abort());
       const parentAbort=()=>abort.abort();state.controller.signal.addEventListener('abort',parentAbort,{once:true});
       try {
+        if(torrent){
+          if(state.replayEntry){
+            replay=await sendReplayPrefix({entry:state.replayEntry,req,res,signal:abort.signal,onBytes:()=>{state.demandFlowAt=Date.now();}});
+            if(replay.complete)return;
+            if(replay.sent)start=replay.cursor;
+          }
+          await state.engineTask;
+          assertSession(state);
+          if(readNeedsRebuild(start,state.win?.evictedTo??0))await rebuild(state);
+          url=state.streamUrl;
+        }
         let requestHeaders={};
         if(req.headers.range&&/^bytes=\d*-\d*(?:,\d*-\d*)*$/.test(req.headers.range))requestHeaders.Range=req.headers.range;
         if(torrent){
+          if(replay?.sent)requestHeaders.Range=`bytes=${start}-${replay.range.end}`;
           requestHeaders.Authorization=`Basic ${Buffer.from(state.auth).toString('base64')}`;
           upstream=await new Promise((resolve,reject)=>{const r=http.get(url,{headers:requestHeaders,signal:abort.signal},resolve);r.on('error',reject);r.setTimeout(120000,()=>r.destroy(new Error('مهلة الفيديو')));});
+          if(replay?.sent&&(upstream.statusCode!==206||!String(upstream.headers['content-range']??'').startsWith(`bytes ${start}-`)))throw new Error('Invalid torrent continuation');
         } else {
           for(let redirects=0;;redirects++){
             const u=new URL(url);requestHeaders={...(u.origin===origin?headers:{}),...requestHeaders,'Accept-Encoding':'identity'};
@@ -470,13 +489,22 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(!torrent&&/dash\+xml/i.test(contentType))throw new Error('DASH غير مدعوم');
           const responseHeaders={'content-type':contentType,'cache-control':'no-store'};
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
-          res.writeHead(upstream.statusCode,responseHeaders);
+          if(!res.headersSent)res.writeHead(upstream.statusCode,responseHeaders);
           if(req.method==='HEAD'){upstream.destroy();res.end();}else {
             if(torrent&&state.win){const token={};state.win.reader=token;let sent=0;upstream.on('data',c=>{sent+=c.length;if(state.win.reader===token){state.demandFlowAt=Date.now();state.win.readPos=start+sent;}});}
+            if(torrent&&state.replayEntry&&[200,206].includes(upstream.statusCode)){
+              const actual=upstream.statusCode===206?Number(/^bytes (\d+)-/.exec(String(upstream.headers['content-range']??''))?.[1]):0;
+              if(Number.isSafeInteger(actual)&&actual===start){
+                const recorder=createReplayRecorder(state.replayEntry,actual);state.cacheRecorders.add(recorder);
+                upstream.on('data',bytes=>recorder.append(bytes));
+                const finish=()=>{void recorder.finish().finally(()=>state.cacheRecorders.delete(recorder));};
+                upstream.once('end',finish);upstream.once('close',finish);res.once('close',finish);
+              }
+            }
             upstream.once('error',()=>res.destroy());upstream.once('aborted',()=>res.destroy());upstream.pipe(res);
           }
         }
-      }catch{upstream?.destroy();if(!res.headersSent)res.writeHead(502);res.end();}
+      }catch{upstream?.destroy();if(!res.headersSent){res.writeHead(502);res.end();}else res.destroy();}
       finally{state.controller.signal.removeEventListener('abort',parentAbort);}
     });
     state.proxy=server;
@@ -532,6 +560,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!added)added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
+    if(state.replayStore){
+      state.replayEntry??=await state.replayStore.remember({root:chosen.root,infoHash:candidate.infoHash,fileIdx:index,fileLength:Number(files[index].length),filename:basename(String(files[index].name).replaceAll('\\','/'))});
+      assertSession(state);
+    }
     // Every rqbit HTTP reader contributes a 32 MiB priority window. Let mpv's
     // actual container Range requests drive demand rather than competing with
     // speculative head/tail readers. Retain the old strategy for measured A/B.
@@ -544,7 +576,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
-    return makeProxy(state,state.streamUrl,{},true);
+    return state.streamUrl;
   }
   /**
    * يشغّل rqbit وينتظر واجهته. المحاولة الأولى بجدول DHT المحفوظ؛ إن خرج rqbit قبل أن يجيب (منفذ DHT
@@ -763,12 +795,14 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       state.firstFrameWatchdog=setTimeout(waitWhileFlowing,firstFrameRecoveryMs);
     }
   }
-  async function startPlayback({session,candidate,title,position=0,pause=false}={}) {
+  async function startPlayback({session,candidate,title,position=0,pause=false,ownerId='guest'}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
     if(typeof session!=='string'||!session||session.length>200||!Number.isFinite(position)||position<0||typeof pause!=='boolean')throw new Error('جلسة أو موضع تشغيل غير صالح');
+    if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
     candidate=validateCandidate(candidate);
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
+    state.cacheRecorders=new Set();state.replayStore=candidate.infoHash?replayFor(ownerId):null;
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     state.whenCommands=new Promise(resolve=>state.resolveCommands=resolve);
     current=state;states.add(state);
@@ -781,7 +815,17 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
       emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
-      const url=candidate.infoHash?await engine(state,candidate):await makeProxy(state,candidate.url,candidate.headers);
+      let url;
+      if(candidate.infoHash){
+        state.replayEntry=await state.replayStore?.lookup({infoHash:candidate.infoHash,...(candidate.fileIdx!=null?{fileIdx:candidate.fileIdx}:{}),...(candidate.fileIdx==null&&candidate.filename?{filename:basename(String(candidate.filename).replaceAll('\\','/'))}:{})});
+        assertSession(state);
+        state.engineTask=engine(state,candidate);
+        // The independent verified replay copy can supply container headers and
+        // first frames while normal, fully checked rqbit discovery runs behind it.
+        if(state.replayEntry)void state.engineTask.catch(error=>{if(!state.stopped)void fail(state,error.message);});
+        else await state.engineTask;
+        assertSession(state);url=await makeProxy(state,null,{},true);
+      }else url=await makeProxy(state,candidate.url,candidate.headers);
       assertSession(state);await player(state,url,title,position,pause);assertSession(state);
       const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
       for(const subtitle of embedded)void loadSubtitle(state,subtitle).catch(()=>{});
@@ -870,7 +914,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   // Internal verification only: not registered on the renderer IPC bridge.
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay};}
-  async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));current=null;}
+  async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
   return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,close};
 }
 
