@@ -17,6 +17,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ExtensionEnginePlugin.class);
         registerPlugin(SystemUiPlugin.class);
         registerPlugin(MediaLibraryPlugin.class);
+        registerPlugin(com.vantara.plugins.AccountBackupPlugin.class);
         registerPlugin(com.vantara.addons.AddonEnginePlugin.class);
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(TranslationPlugin.class);
