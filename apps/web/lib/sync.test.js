@@ -340,7 +340,10 @@ describe('push', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].payload).toMatchObject({ page: 30, ratio: 0.9 });
     expect(sync.pendingWrites).toBe(0);
-    expect(sync.health().state).toBe('ok');
+    // The write queue is clear, but this fixture has no local account mirror.
+    // Reporting fully synced here would recreate the owner's false-green APK.
+    expect(sync.health().state).not.toBe('ok');
+    expect(sync.health().backlog).toBe(true);
   });
 
   it('records the last successful sync', async () => {
@@ -555,5 +558,169 @@ describe('source latest publication', () => {
     const value = { mangas: [], hasNextPage: false };
     expect((await sync.publishLatest('source.ar', value, 120_000)).ok).toBe(true);
     expect(sent).toEqual({ sourceId: 'source.ar', value, leaseUntil: 120_000 });
+  });
+});
+
+
+describe('server-authoritative mirror recovery after APK 177', () => {
+  it('restores 61 historical views, library, friends and Majlis from a complete staged snapshot while keeping the offline queue', async () => {
+    const historic = Array.from({ length: 61 }, (_, i) => ({
+      user_id: 'u1', series_ref: `work-${i}`, series_title: `Work ${i}`,
+      viewed_at: 100 + i, removed: 0, rev: 100,
+    }));
+    storage.setItem('vantara.cursor', '700');
+    storage.setItem('vantara.resync.accounts', '1'); // old one-shot guard was exhausted
+    storage.setItem('vantara.mirror', JSON.stringify({
+      work_views: { 'u1/work-0': historic[0] },
+    }));
+    storage.setItem('vantara.queue', JSON.stringify([
+      { opId: 'offline-one', kind: 'view.add', payload: { seriesRef: 'offline-work' }, at: 1 },
+    ]));
+    const accounts = ['u1', 'u2', 'u3'].map((user_id) => ({
+      user_id, username: user_id, lifecycle: 'ACTIVE', rev: 0,
+    }));
+    const fetchImpl = vi.fn(async (url) => {
+      const since = new URL(url).searchParams.get('since');
+      if (since === '700') return jsonResponse({
+        reset: false, cursor: 701, more: false,
+        changes: { work_views: [historic[60]] },
+      });
+      if (since === '0') return jsonResponse({
+        reset: false, cursor: 200, more: true,
+        changes: {
+          accounts,
+          library: [{ user_id: 'u1', series_ref: 'work-0', added_at: 10, removed: 0, rev: 10 }],
+          majlis_meta: [{ id: 'main', name: 'المجلس', rev: 12 }],
+          majlis_messages: [{ id: 'msg1', sender_id: 'u2', body: 'hello', rev: 20 }],
+          work_views: historic.slice(0, 30),
+        },
+      });
+      if (since === '200') return jsonResponse({
+        reset: false, cursor: 701, more: false,
+        changes: { work_views: historic.slice(30) },
+      });
+      return jsonResponse({ reset: false, cursor: 701, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    await sync.pull();
+    await vi.waitFor(() => expect(sync.rows('work_views', (r) => r.user_id === 'u1' && r.series_ref !== 'offline-work')).toHaveLength(61));
+    expect(sync.rows('accounts')).toHaveLength(3);
+    expect(sync.rows('library')).toHaveLength(1);
+    expect(sync.rows('majlis_messages')).toHaveLength(1);
+    expect(sync.rows('majlis_meta')).toHaveLength(1);
+    expect(storage.getItem('vantara.cursor')).toBe('701');
+    expect(storage.getItem('vantara.queue')).toContain('offline-one');
+    expect(JSON.parse(storage.getItem('vantara.mirror.audit.v1')).userId).toBe('u1');
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('since=0'))).toBe(true);
+  });
+
+  it('keeps the old offline mirror when a full server snapshot is unexpectedly smaller', async () => {
+    storage.setItem('vantara.cursor', '40');
+    storage.setItem('vantara.mirror', JSON.stringify({
+      accounts: { u1: { user_id: 'u1', username: 'dahmi', lifecycle: 'ACTIVE' } },
+      work_views: { 'u1/keep': { user_id: 'u1', series_ref: 'keep', rev: 10 } },
+    }));
+    const fetchImpl = vi.fn(async (url) => {
+      const since = new URL(url).searchParams.get('since');
+      if (since === '0') return jsonResponse({
+        reset: false, cursor: 40, more: false,
+        changes: { accounts: [{ user_id: 'u1', username: 'dahmi', lifecycle: 'ACTIVE', rev: 0 }] },
+      });
+      return jsonResponse({ reset: false, cursor: 40, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    await sync.pull();
+    await vi.waitFor(() => expect(sync.health().lastError?.code).toBe('mirror_audit_shrank_work_views'));
+    expect(sync.rows('work_views')).toHaveLength(1);
+    expect(storage.getItem('vantara.cursor')).toBe('40');
+    expect(storage.getItem('vantara.mirror')).toContain('keep');
+    expect(storage.getItem('vantara.mirror.audit.v1')).toBeNull();
+  });
+
+  it('never advances a persisted cursor when writing the mirror fails', async () => {
+    let outOfSpace = false;
+    const limited = fakeStorage({ failOn: (key) => outOfSpace && key === 'vantara.mirror' });
+    limited.setItem('vantara.token', 't1');
+    limited.setItem('vantara.user', JSON.stringify(SIGNED_IN));
+    limited.setItem('vantara.cursor', '33');
+    limited.setItem('vantara.public-views.v1', '1');
+    const sync = await loadSync({
+      storage: limited,
+      fetchImpl: vi.fn(async () => jsonResponse({
+        reset: false, cursor: 99,
+        changes: { work_views: [{ user_id: 'u1', series_ref: 'new', rev: 99 }] },
+      })),
+    });
+    outOfSpace = true;
+    await sync.pull();
+    expect(limited.getItem('vantara.cursor')).toBe('33');
+    expect(sync.health().lastError).toBeTruthy();
+  });
+});
+
+
+describe('real recovery diagnosis remains visible', () => {
+  it('retains the snapshot failure code after a successful incremental poll', async () => {
+    storage.setItem('vantara.cursor', '30');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: {
+      'u1/a': { user_id: 'u1', series_ref: 'a', rev: 29 },
+    } }));
+    const requests = vi.fn(async (url) => {
+      const since = new URL(String(url)).searchParams.get('since');
+      if (since === '0') return jsonResponse({
+        reset: false, cursor: 30, more: false, changes: {},
+      });
+      return jsonResponse({ reset: false, cursor: 30, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl: requests });
+    await sync.pull();
+    await vi.waitFor(() => {
+      expect(sync.health().lastError?.code).toBe('mirror_audit_missing_active_owner');
+    });
+    // A fresh incremental request may succeed. It must not hide the previously
+    // observed failure to restore the authoritative history.
+    await sync.pull();
+    expect(sync.health()).toMatchObject({
+      state: 'degraded',
+      lastError: { code: 'mirror_audit_missing_active_owner' },
+    });
+    expect(sync.rows('work_views')).toHaveLength(1);
+  });
+});
+
+
+describe('migrated revision-zero snapshot continuation', () => {
+  it('restores the older accounts and new work views without replaying rev zero forever', async () => {
+    storage.setItem('vantara.cursor', '80');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: {} }));
+    const legacyAccounts = ['u1', 'u2', 'u3'].map((id) => ({
+      user_id: id, username: id, lifecycle: 'ACTIVE', rev: 0,
+    }));
+    const readings = Array.from({ length: 61 }, (_, i) => ({
+      user_id: 'u1', series_ref: `work-${i}`, rev: i + 1, removed: 0,
+    }));
+    const fetchImpl = vi.fn(async (url) => {
+      const query = new URL(String(url)).searchParams;
+      if (query.get('since') === '80') return jsonResponse({
+        cursor: 80, more: false, changes: {},
+      });
+      if (query.get('since') === '0' && query.get('afterZero') === '1') {
+        return jsonResponse({
+          cursor: 80, more: false,
+          changes: { work_views: readings },
+        });
+      }
+      if (query.get('since') === '0') return jsonResponse({
+        cursor: 0, more: true,
+        changes: { accounts: legacyAccounts },
+      });
+      return jsonResponse({ cursor: 80, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    await sync.pull();
+    await vi.waitFor(() => expect(sync.rows('work_views')).toHaveLength(61));
+    expect(sync.rows('accounts')).toHaveLength(3);
+    expect(sync.health().state).toBe('ok');
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('afterZero=1'))).toBe(true);
   });
 });

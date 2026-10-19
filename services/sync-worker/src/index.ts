@@ -430,6 +430,11 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   await ensureOwnerBadge(env, now);
   const since = Number(url.searchParams.get('since') ?? '0');
   const cursor = Number.isFinite(since) && since > 0 ? Math.floor(since) : 0;
+  // The initial full pull includes migrated rev=0 records. If that page is
+  // truncated at rev=0, its next page must be able to ask for rev>0 without
+  // replaying rev=0 forever. This opt-in flag does not change old clients.
+  const afterZero = cursor === 0 && url.searchParams.get('afterZero') === '1';
+  const lowerRev = cursor === 0 && !afterZero ? -1 : cursor;
   const serverRev = await currentRev(env);
 
   // D1 مُستعادة من نسخة احتياطية: بلا هذا الفحص لا يرى العميل جديدًا أبدًا
@@ -545,13 +550,13 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
   };
 
   const statements = DELTA_TABLES.map(([table, columns]) => {
-    const scope = deltaScope(table, cursor === 0 ? -1 : cursor);
+    const scope = deltaScope(table, lowerRev);
     return env.DB.prepare(
       `SELECT ${columns} FROM ${table} WHERE rev > ?${scope.sql} ORDER BY rev LIMIT ${PAGE_SIZE}`,
     // سحبٌ كامل يبدأ من تحت الصفر: الحسابات الثلاثة وملفاتها زرعتها الهجرة
     // بـrev = 0، و`rev > 0` كان يُسقطها من كل جهاز — فتظهر «صديق» مكان الاسم
     // ويخلو المجلس من الوجوه حتى يعدّل صاحب الحساب ملفه
-    ).bind(cursor === 0 ? -1 : cursor, ...scope.values);
+    ).bind(lowerRev, ...scope.values);
   });
   const results = await env.DB.batch<Record<string, unknown>>(statements);
 
