@@ -115,3 +115,21 @@ it('بث أنمي يحمل Kitsu وحده لا يمحو IMDb الذي رُبطت
  const s=createSubtitleSession({video,identity:{kind:'anime',externalIds:{anilist:166873,imdb:'tt13293588'},imdbEpisodes:{1:[2,13,38]},season:2,episode:1},providers:[{key:'os',requests:id=>[id.externalIds.kitsu?{type:'series',videoId:`kitsu:${id.externalIds.kitsu}:1`,extra:{}}:null,{type:'series',videoId:`${id.externalIds.imdb}:2:13`,extra:{}}],subtitles:async req=>{asked.push(req.videoId);return [];}}]});
  s.setStream({identity:{kind:'anime',externalIds:{kitsu:'47694'},episode:1}});await new Promise(r=>setTimeout(r,5));expect(asked).toEqual(['kitsu:47694:1','tt13293588:2:13']);s.close();
 });
+
+it("shares an in-flight file when the same subtitle is tapped again", async () => {
+  const { document } = parseHTML("<html><body></body></html>");
+  globalThis.document = document;
+  const video = document.createElement("video");
+  video.textTracks = [];
+  let release, downloads = 0;
+  const text = new Promise(resolve => { release = resolve; });
+  const s = createSubtitleSession({video, transport: {text: () => { downloads++; return text; }}});
+  s.setStream({subtitles: [{url: "https://subs.test/ar.srt", lang: "ar"}]});
+  const id = s.tracks()[0].id;
+  const first = s.select(id), second = s.select(id);
+  release("1\n00:00:01,000 --> 00:00:02,000\nمرحبا");
+  await Promise.all([first, second]);
+  expect(downloads).toBe(1);
+  expect(video.querySelectorAll("track").length).toBe(1);
+  s.close();
+});
