@@ -55,4 +55,10 @@ describe('moment miniplayer', () => {
     expect(document.querySelector('.mv-viewer')).toBeNull(); expect(video.pause).toHaveBeenCalled();
     expect(viewer.handleBack()).toBe(false);
   });
+  it('still plays attached public sources when device provider discovery fails', async () => {
+    const attached = { ...row, moment_json: JSON.stringify({ version: 1, startMs: 10000, endMs: 30000, sources: [{ url: 'https://source.example/attached.mp4' }] }) };
+    viewer = openMomentViewer({ row: attached, resolveSources: async () => { throw new Error('Device offline'); } });
+    await tick();
+    expect(document.querySelector('video').src).toBe('https://source.example/attached.mp4');
+  });
 });

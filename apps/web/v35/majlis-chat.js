@@ -94,6 +94,7 @@ export function actionPosition(anchor, viewport, menu) {
  *   sync: any, mount: HTMLElement,
  *   avatarNode: Function, mountImage: Function, workFromRef: Function,
  *   preview: (work: object, opts?: object) => void, openFrame: (id: string) => void, openProfile: (id: string) => void,
+ *   playMoment?: (row: object) => void, resolveMomentSources?: (row: object) => Promise<object[]>,
  *   openSheet: Function, closeSheet: Function, toast: (t: string) => void,
  *   presence: () => Promise<any[]>, mediaUrl: (key: string) => string,
  *   pageImage?: Function | null, markSeen: (kind: string, id: string) => void,

@@ -4,9 +4,8 @@ export function momentOf(row) {
   let value = row.moment_json;
   try { if (typeof value === 'string') value = JSON.parse(value); } catch { value = null; }
   if (value?.version === 1 && Number.isFinite(value.startMs) && Number.isFinite(value.endMs) && value.startMs >= 0 && value.endMs > value.startMs) {
-    return { ...value, trimmed: Boolean(value.mediaKey) };
+    return { ...value, trimmed: typeof value.mediaKey === 'string' && Boolean(value.mediaKey) };
   }
-  if (row.moment_json) return null;
   const label = String(row.chapter_label ?? '').replace(/[٠-٩]/g, (n) => String(n.charCodeAt(0) - 1632));
   const match = label.match(/(?:الحلقة\s*(\d+(?:\.\d+)?))?\s*·\s*((?:\d+:)?\d+:\d{2})\s*[–—-]\s*((?:\d+:)?\d+:\d{2})/);
   if (!match) return null;
