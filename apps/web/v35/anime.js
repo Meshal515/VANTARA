@@ -1,3 +1,5 @@
+import { createMomentOutbox } from '../lib/moment-outbox.js';
+import { resolveRecipientAvatar } from './recipient.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
@@ -1754,44 +1756,21 @@ export function createAnime(deps) {
    * أصلي فلا تضيع إن كانت الواجهة نائمة خلفه؛ هنا تُسحب وتدخل طابور المزامنة
    * (الذي يعيد المحاولة وحده حتى تصل).
    */
-  const outboxInFlight = new Set();
+  const drainMoments = createMomentOutbox({ native: engine, sync: deps.sync, currentUser,
+    onError: () => {} });
   async function flushOutbox() {
-    if (!engine.available() || !deps.sync) return;
-    const userId = currentUser();
-    if (!userId || outboxInFlight.has(userId)) return;
-    outboxInFlight.add(userId);
-    try {
-      const key = `vantara.anime.native-outbox.v1.${encodeURIComponent(userId)}`;
-      let items = [];
-      try {
-        items = await engine.outbox(userId);
-      } catch {
-        // Still deliver items that made it to the account-bound web handoff.
-      }
-      // Persist the native handoff for its original owner before touching the active session.
-      const pending = [...readJson(key, []), ...items.filter((it) => it.userId === userId)];
-      const unique = [...new Map(pending.map((it) => [it.id, it])).values()];
-      writeJson(key, unique);
-      if (currentUser() !== userId) return;
-      for (const it of unique) {
-        const ep = Number(it.episode) || 1;
-        const label = it.type === 'moment' ? engine.momentLabel(ep, it.startMs, it.endMs) : `الحلقة ${ep}`;
-        deps.sync.enqueue('recommendation.send', {
-          toId: it.toId ?? null,
-          seriesRef: `anime:${it.animeId}`,
-          seriesTitle: it.title || 'أنمي',
-          coverUrl: it.poster ?? null,
-          message: null,
-          hiddenFrom: [],
-          chapterLabel: label,
-          chapterNumber: ep,
-        });
-      }
-      writeJson(key, []);
-    } finally {
-      outboxInFlight.delete(userId);
-    }
+    if (engine.available() && deps.sync) await drainMoments();
   }
+  let momentRetryAt = 0;
+  deps.sync?.onChange?.((tables) => {
+    if (Date.now() - momentRetryAt < 2000) return;
+    if (tables?.includes?.('recommendations') || tables?.includes?.('sync')) {
+      momentRetryAt = Date.now();
+      void flushOutbox();
+    }
+  });
+  engine.on('momentWork', (e) => deps.openMomentWork?.(e));
+  engine.on('momentEpisode', (e) => deps.openMomentEpisode?.(e));
   engine.on('outbox', () => void flushOutbox());
   // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
   engine.on('playstat', (e) => reportSource(e));
@@ -2078,7 +2057,7 @@ export function createAnime(deps) {
         position: startAt,
         ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
         poster: m.posterSmall ?? m.poster ?? null,
-        friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
+        friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName, avatarKey: resolveRecipientAvatar(f), avatarUrl: resolveRecipientAvatar(f) })),
         copies: sheet.copies ?? sheet.work.copies,
         malId: m.idMal ?? null,
         resume,

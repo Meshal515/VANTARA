@@ -256,6 +256,7 @@ export const PROJECTIONS = {
           message: p.message ?? null,
           chapter_label: p.chapterLabel ?? null,
           chapter_number: p.chapterNumber ?? null,
+          moment_json: p.moment ? JSON.stringify(p.moment) : null,
           hidden_json: JSON.stringify(p.hiddenFrom ?? []),
           audience: 'MAJLIS',
           state: 'SENT',
