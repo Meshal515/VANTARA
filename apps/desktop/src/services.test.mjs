@@ -441,10 +441,10 @@ test('ملف ترجمة مقبول SRT/VTT/ASS فقط، محدود دون HTML �
   assert.equal(validateSubtitleText('[Script Info]\nTitle: Owned\n[Events]\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,مرحبا').extension,'ass');
   for(const text of ['<html>not subtitles</html>','#EXTM3U\nhttps://private.local','PK\u0003\u0004bytes','random text','x'.repeat(2*1024*1024+1),'1\n00:00:00,000 --> 00:00:02,000\nhi\u0000'])assert.throws(()=>validateSubtitleText(text),/ترجمة|الحد/);
 });
-async function subtitleSource(t,{slow=false,invalid=false,oversize=false,redirect=false}={}){
+async function subtitleSource(t,{slow=false,invalid=false,oversize=false,redirect=false,legacyArabic=false,utf16=false,declaredCharset=null}={}){
   const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
-  const body=oversize?'x'.repeat(2*1024*1024+1):invalid?'<html>upstream failed</html>':'1\n00:00:00,000 --> 00:00:02,000\nترجمة مؤلفة\n';
-  const source=http.createServer((req,res)=>{if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
+  const body=utf16?Buffer.concat([Buffer.from([255,254]),Buffer.from('1\n00:00:00,000 --> 00:00:02,000\nمرحبا\n','utf16le')]):legacyArabic?Buffer.concat([Buffer.from('1\n00:00:00,000 --> 00:00:02,000\n'),Buffer.from([0xe3,0xd1,0xcd,0xc8,0xc7])]):oversize?'x'.repeat(2*1024*1024+1):invalid?'<html>upstream failed</html>':'1\n00:00:00,000 --> 00:00:02,000\nترجمة مؤلفة\n';
+  const source=http.createServer((req,res)=>{if(declaredCharset)res.setHeader('content-type','text/plain; charset='+declaredCharset);if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
   t.after(()=>new Promise(r=>source.close(r)));t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
   t.mock.method(https,'request',(url,options,cb)=>http.request(`http://127.0.0.1:${source.address().port}${url.pathname}`,{...options,lookup:undefined},cb));return body;
 }
@@ -525,3 +525,16 @@ test('manual speed, fit and subtitle position are constrained MPV properties',as
  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).map(m=>m.command);
  for(const expected of [['set_property','speed',1.5],['set_property','panscan',1],['set_property','sub-pos',85]])assert.ok(commands.some(c=>JSON.stringify(c)===JSON.stringify(expected)));
 });
+
+test('Arabic subtitle downloads decode legacy1256 and honor UTF16 BOM without changing non-Arabic validation',async t=>{
+ const {dir,services}=await fixture(t);await services.startPlayback({session:'arabic-encoding',candidate:{url:'https://video.example.com/owned.mp4'}});
+ await subtitleSource(t,{legacyArabic:true});
+ await assert.rejects(services.playbackCommand({session:'arabic-encoding',command:'subtitle-load',value:{url:'https://subs.example.com/non-arabic.srt',lang:'en'}}),/UTF-8/);
+ await services.playbackCommand({session:'arabic-encoding',command:'subtitle-load',value:{url:'https://subs.example.com/arabic.srt',lang:'ar'}});
+ await subtitleSource(t,{legacyArabic:true,declaredCharset:'windows-1256'});
+ await services.playbackCommand({session:'arabic-encoding',command:'subtitle-load',value:{url:'https://subs.example.com/declared.srt',lang:'en'}});
+ await subtitleSource(t,{utf16:true,declaredCharset:'windows-1256'});
+ await services.playbackCommand({session:'arabic-encoding',command:'subtitle-load',value:{url:'https://subs.example.com/utf16.srt',lang:'ar'}});
+ const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);const subs=commands.filter(x=>x.command[0]==='sub-add');assert.equal(subs.length,3);for(const sub of subs){const text=await readFile(sub.command[1],'utf8');assert.match(text,/مرحبا/);assert.ok(!text.includes('\uFFFD'));}
+});
+
