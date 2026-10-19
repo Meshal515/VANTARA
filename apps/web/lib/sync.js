@@ -848,10 +848,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     const tokenAtStart = token;
     const snapshot = {};
     let snapshotCursor = 0;
+    let skippedInitialZero = false;
     try {
       let completed = false;
       for (let page = 0; page < MAX_MIRROR_AUDIT_PAGES; page += 1) {
-        const payload = await request(`/v1/sync?since=${snapshotCursor}`);
+        const continuation = snapshotCursor === 0 && skippedInitialZero ? '&afterZero=1' : '';
+        const payload = await request(`/v1/sync?since=${snapshotCursor}${continuation}`);
         if (disposed || user?.userId !== ownerId ||
             sessionGeneration !== generation || token !== tokenAtStart) return;
         if (!payload || payload.reset || !payload.changes || typeof payload.changes !== 'object') {
@@ -864,9 +866,18 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           for (const row of rows) bucket[keyOf(row)] = row;
         }
         const next = Number(payload.cursor);
-        if (!Number.isSafeInteger(next) || next < snapshotCursor ||
-            (payload.more && next === snapshotCursor)) throw new Error('mirror_audit_stalled');
-        snapshotCursor = next;
+        if (!Number.isSafeInteger(next) || next < snapshotCursor) throw new Error('mirror_audit_stalled');
+        // A migrated dataset can contain 500+ rows at rev=0. The first page
+        // supplies all rev=0 rows (the server expands the revision boundary),
+        // and the follow-up opts into rev>0. Without this opt-in, since=0
+        // would repeat the migrated rows and leave the snapshot incomplete.
+        if (payload.more && next === snapshotCursor) {
+          if (next !== 0 || skippedInitialZero) throw new Error('mirror_audit_stalled');
+          skippedInitialZero = true;
+        } else {
+          snapshotCursor = next;
+          skippedInitialZero = false;
+        }
         if (!payload.more) { completed = true; break; }
       }
       if (!completed) throw new Error('mirror_audit_page_limit');
@@ -926,11 +937,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     pulling = true;
     const generation = sessionGeneration;
     const pullUserId = user?.userId ?? null;
+    let skippedInitialZero = false;
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
-        const payload = await request(`/v1/sync?since=${cursor}`);
+        const continuation = cursor === 0 && skippedInitialZero ? '&afterZero=1' : '';
+        const payload = await request(`/v1/sync?since=${cursor}${continuation}`);
         if (!payload) break;
 
         // رد بدأ تحت حساب/جلسة أقدم لا يملك حق لمس مرآة الحساب الحالي.
@@ -971,7 +984,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
 
         if (!persistMirror()) throw new Error('mirror_storage_full');
-        cursor = Number(payload.cursor ?? cursor) || cursor;
+        const nextCursor = Number(payload.cursor ?? cursor) || cursor;
+        if (payload.more && nextCursor === 0) {
+          if (skippedInitialZero) throw new Error('mirror_delta_stalled_zero');
+          skippedInitialZero = true;
+        } else {
+          skippedInitialZero = false;
+        }
+        cursor = nextCursor;
         // ما لم يُرسل بعد، وما أُقرّ ولم يصل بعد، يبقى ظاهرًا فوق ما وصل:
         // سحبٌ أسبق من الكتابة لا يُرجع القلب ولا نقطة الإشعار
         if (landing.length) landing = landing.filter((l) => l.rev > cursor);
