@@ -8,16 +8,32 @@ export function momentComposeRange(positionMs, durationMs) {
 
 /** Only reusable source hints travel to friends; local sessions and request credentials stay here. */
 export function publicMomentHints(hints = []) {
-  return (Array.isArray(hints) ? hints : []).slice(0, 12).flatMap((hint) => {
+  const publicUrl = (value) => {
+    try {
+      const url = new URL(value), host = url.hostname.toLowerCase();
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash || url.href.length > 2000 || !host.includes('.') || /\.(localhost|local|internal|test|invalid)$/.test(host) || host.includes(':')) return null;
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        const [a, b] = host.split('.').map(Number);
+        if (a === 0 || a === 10 || a === 127 || a >= 224 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127 || a === 198 && [18, 19].includes(b)) return null;
+      }
+      for (const key of url.searchParams.keys()) if (/^(password|passwd|secret|cookie|authorization|credential|api[_-]?key)$/i.test(key)) return null;
+      return url.href;
+    } catch { return null; }
+  };
+  return (Array.isArray(hints) ? hints : []).slice(0, 8).flatMap((hint) => {
     if (!hint || typeof hint !== 'object') return [];
     const result = {};
-    for (const field of ['sourceId', 'server', 'title', 'mimeType', 'type']) if (typeof hint[field] === 'string' && hint[field]) result[field] = hint[field].slice(0, 300);
-    if (Number.isFinite(hint.quality)) result.quality = hint.quality;
-    try {
-      const url = new URL(hint.url), host = url.hostname.toLowerCase();
-      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && host.includes('.') && !host.endsWith('.local') && !host.endsWith('.localhost') && !/^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) && !host.includes(':')) result.url = url.href;
-    } catch {}
-    return Object.keys(result).length ? [result] : [];
+    for (const field of ['sourceId', 'server', 'title', 'mimeType']) {
+      const value = field === 'mimeType' ? hint.mimeType ?? hint.type : hint[field];
+      if (typeof value !== 'string' || !value.trim()) continue;
+      const text = value.trim().slice(0, field === 'sourceId' ? 300 : field === 'server' ? 160 : 200);
+      const embedded = text.slice(text.lastIndexOf('|') + 1);
+      if (/^https?:\/\//i.test(embedded) && !publicUrl(embedded)) continue;
+      result[field] = text;
+    }
+    if (hint.quality != null) result.quality = String(hint.quality).slice(0, 200);
+    const url = publicUrl(hint.url); if (url) result.url = url;
+    return result.url || result.sourceId || result.server ? [result] : [];
   });
 }
 
