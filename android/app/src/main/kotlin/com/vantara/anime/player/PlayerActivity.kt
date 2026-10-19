@@ -557,6 +557,7 @@ class PlayerActivity : Activity() {
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
             override fun leaveRoom() = finish()
             override fun openServers() = showServers()
+            override fun closeLocalPreview() { clip?.close() }
             override fun serverLabel() = current?.let { c ->
                 val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality)?.let { "${bucket(it)}p" }
                 listOfNotNull(codeOf(c) ?: c.server, q).joinToString(" · ")
@@ -652,7 +653,7 @@ class PlayerActivity : Activity() {
                 watchStall()
             }
             loadCoverage()
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) together?.onUserSeek(newPosition.positionMs)
+            if (reason == Player.DISCONTINUITY_REASON_SEEK && together?.localPreviewActive != true) together?.onUserSeek(newPosition.positionMs)
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
                 coverage.seek(oldPosition.positionMs, newPosition.positionMs, player.isPlaying && usageForeground)
             } else {
@@ -667,7 +668,7 @@ class PlayerActivity : Activity() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) together?.onUserPlayPause(playWhenReady)
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST && together?.localPreviewActive != true) together?.onUserPlayPause(playWhenReady)
             playButton.setImageDrawable(Glyph(if (playWhenReady) Glyph.Kind.PAUSE else Glyph.Kind.PLAY, Color.WHITE))
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
@@ -1868,6 +1869,7 @@ class PlayerActivity : Activity() {
     // ───────────── المقطع ─────────────
 
     private fun openClip() {
+        if (clip != null) return
         val c = current
         val d = player.duration
         if (c == null || !reportedStart || d <= 0) return message("انتظر حتى يبدأ التشغيل")
@@ -1875,6 +1877,10 @@ class PlayerActivity : Activity() {
         cancelCountdown()
         val moment = position()
         val wasPlaying = player.playWhenReady
+        val editorEpisode = episodeInt()
+        val room = together
+        // ClipEditor seeks/plays inside its constructor, before `clip` is assigned.
+        room?.beginLocalPreview()
         controls.visibility = View.GONE
         // لا إيقاف: المحرّر يُبقي المشغّل يعمل ويدوّره داخل المدى
         clip = ClipEditor(
@@ -1883,10 +1889,13 @@ class PlayerActivity : Activity() {
             keyframeAt = ::segmentStartAt,
         ) {
             clip = null
-            // اللحظة الأصلية لا تضيع: نعود إليها كما كنا (من الذاكرة، بلا إعادة تحميل)
             player.setSeekParameters(SeekParameters.EXACT)
-            player.seekTo(moment)
-            player.playWhenReady = wasPlaying
+            // Together catches the current room clock with this source's personal offset.
+            // A remote episode change abandons the old editor without restoring its seek.
+            if (room?.endLocalPreview() != true && episodeInt() == editorEpisode) {
+                player.seekTo(moment)
+                player.playWhenReady = wasPlaying
+            }
             setControls(true)
         }
     }
