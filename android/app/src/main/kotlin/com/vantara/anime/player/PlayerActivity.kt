@@ -1689,15 +1689,37 @@ class PlayerActivity : Activity() {
         }
         card.addView(label("انتهت اللقطة", 18f, Tone.TEXT, bold = true))
         card.addView(label("${ClipMath.clock(range.first)} – ${ClipMath.clock(range.last)}", 13f, Tone.TEXT_3).apply { setPadding(0, dp(4), 0, dp(14)); textDirection = View.TEXT_DIRECTION_LTR })
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val close = { clipEndCard?.let(root::removeView); clipEndCard = null }
-        buttons.addView(pillButton("إعادة اللقطة", primary = true) { close(); player.seekTo(range.first); clipLast = range.first; player.play() })
-        buttons.addView(pillButton("أكمل من هنا", primary = false) { close(); endClipMode(); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-        buttons.addView(pillButton("الحلقة من البداية", primary = false) { close(); endClipMode(); player.seekTo(0); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-        card.addView(buttons)
+        card.addView(pillButton("شاهد الحلقة", primary = true) { close(); endClipMode(); player.seekTo(0); player.play() })
+        card.addView(pillButton("انتقل إلى العمل", primary = false) {
+            PlaybackEvents.emit("momentWork", JSONObject().put("animeId", launch.animeId).put("seriesRef", launch.ref()).put("episode", episode.toDouble()))
+            finish()
+        })
+        card.addView(pillButton("أعد تشغيل اللقطة", primary = false) { close(); player.seekTo(range.first); clipLast = range.first; player.play() })
+        card.addView(pillButton("حفظ في الصور", primary = false) { saveWatchedMoment(range) })
         root.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         clipEndCard = card
         setControls(false)
+    }
+
+    private var momentSave: ClipExporter? = null
+
+    private fun saveWatchedMoment(range: LongRange) {
+        val candidate = current ?: return message("انتظر حتى يبدأ التشغيل")
+        if (momentSave?.busy == true) return
+        val exporter = ClipExporter(this, network.client).also { momentSave = it }
+        val selected = ClipRange(range.first, range.last, (range.first + range.last) / 2)
+        message("نجهّز اللقطة للحفظ")
+        exporter.export(candidate, selected, null, {}, { result ->
+            when (result) {
+                is ClipExporter.Result.Done -> scope.launch {
+                    val saved = withContext(Dispatchers.IO) { exporter.saveToGallery(result.file, clipName(selected)) }
+                    exporter.purge()
+                    message(if (saved != null) "حُفظ المقطع في الصور" else "تعذّر حفظ المقطع")
+                }
+                is ClipExporter.Result.Failed -> message(result.message, long = true)
+            }
+        })
     }
 
     private fun endClipMode() {
@@ -1763,46 +1785,60 @@ class PlayerActivity : Activity() {
 
     // ───────────── الأصدقاء واللحظات ─────────────
 
-    data class Friend(val id: String, val name: String)
+    data class Friend(val id: String, val name: String, val avatarUrl: String? = null, val avatarKey: String? = null)
 
     fun friends(): List<Friend> = runCatching {
         val arr = JSONArray(launch.friends ?: "[]")
-        (0 until arr.length()).map { arr.getJSONObject(it) }.map { Friend(it.optString("userId"), it.optString("displayName")) }.filter { it.id.isNotEmpty() }
+        (0 until arr.length()).map { arr.getJSONObject(it) }.map { Friend(it.optString("userId"), it.optString("displayName"), it.optString("avatarUrl").takeIf { v -> v.isNotBlank() && v != "null" }, it.optString("avatarKey").takeIf { v -> v.isNotBlank() && v != "null" }) }.filter { it.id.isNotEmpty() }
     }.getOrDefault(emptyList())
 
     /** «الجميع» (المجلس) أولًا، ثم الأصدقاء. [onPick] يستلم (المعرّف أو null للجميع، الاسم). */
     fun pickFriend(title: String, onPick: (String?, String) -> Unit) {
         open(SheetKind.FRIENDS, title, "يظهر لهم في المجلس") { body ->
-            body.addView(sheetRow("الجميع", "كل أصدقائك في المجلس", leading = avatar("✦")) { sheet.close(); onPick(null, "الجميع") })
             val list = friends()
+            body.addView(sheetRow("الجميع", "كل أصدقائك في المجلس", leading = everyoneAvatar(list)) { sheet.close(); onPick(null, "الجميع") })
             if (list.isEmpty()) body.addView(label("ما عندك أصدقاء بعد — أضفهم من المجلس", 13f, Tone.TEXT_3).apply { setPadding(dp(4), dp(8), dp(4), dp(4)) })
-            for (f in list) body.addView(sheetRow(f.name, null, leading = avatar(f.name.take(1))) { sheet.close(); onPick(f.id, f.name) })
+            for (f in list) body.addView(sheetRow(f.name, null, leading = friendAvatar(f)) { sheet.close(); onPick(f.id, f.name) })
         }
     }
 
-    private fun avatar(letter: String) = label(letter, 15f, Color.WHITE, bold = true).apply {
-        gravity = Gravity.CENTER
-        textAlignment = View.TEXT_ALIGNMENT_CENTER
-        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Tone.SURFACE_3) }
+    private fun friendAvatar(friend: Friend) = FriendAvatar(this, network.client, friend.avatarUrl ?: friend.avatarKey, friend.name).apply {
         layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
     }
 
-    /**
-     * اللحظة تُرسل كترشيح في المجلس (عنوان الحلقة ومداها)، وصديقك يفتحها
-     * عنده من نفس الثانية. ملف الفيديو نفسه لا يُرفع: لا خادم ملفات لدينا،
-     * و«مشاركة» تعطيك الملف لأي تطبيق.
-     */
+    private fun everyoneAvatar(friends: List<Friend>): View {
+        if (friends.isEmpty()) return friendAvatar(Friend("", "✦"))
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            for (friend in MomentRecipients.faces(friends)) addView(friendAvatar(friend), LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(3) })
+            val remaining = MomentRecipients.remaining(friends.size)
+            if (remaining > 0) addView(label("+$remaining", 11f, Tone.TEXT, bold = true).apply {
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Tone.SURFACE_3) }
+            }, LinearLayout.LayoutParams(dp(28), dp(28)))
+        }
+    }
+
+    /** Sends a source-backed interval. MP4 generation is reserved for save/share. */
     fun queueMoment(to: String?, name: String, range: ClipRange?) {
+        if (launch.presenceUserId.isNullOrBlank()) return message("سجّل الدخول قبل الإرسال")
         val item = JSONObject()
             .put("type", if (range != null) "moment" else "episode")
+            .put("seriesRef", launch.ref())
             .put("animeId", launch.animeId)
             .put("title", launch.title)
             .put("poster", launch.poster)
             .put("episode", episode.toDouble())
             .put("toId", to ?: JSONObject.NULL)
             .put("userId", launch.presenceUserId ?: "")
-        if (range != null) item.put("startMs", range.startMs).put("endMs", range.endMs).put("atMs", range.momentMs)
-        Outbox.push(this, item)
+        if (range != null) {
+            item.put("startMs", range.startMs).put("endMs", range.endMs).put("atMs", range.momentMs).put("durationMs", range.durationMs)
+            current?.let { c -> item.put("sources", JSONArray().put(JSONObject()
+                .put("sourceId", c.sourceId).put("server", c.server)
+                .put("quality", c.quality).put("container", c.container.name.lowercase()))) }
+        }
+        if (runCatching { Outbox.push(this, item) }.isFailure) return message("تعذّر حفظ الإرسال — حاول مرة أخرى")
         message(if (to == null) "انرسلت للمجلس" else "انرسلت لـ $name")
     }
 
@@ -1838,16 +1874,9 @@ class PlayerActivity : Activity() {
         return ClipMath.snapDown(m.mediaPlaylist.segments.map { it.relativeStartTimeUs / 1000 }, ms)
     }
 
-    fun shareClip(file: java.io.File, range: ClipRange) {
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "video/mp4"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "${launch.title} — الحلقة ${fmtEpisode(episode)} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(send, "شارك المقطع"))
-    }
+    fun shareClip(file: java.io.File, range: ClipRange) = ClipShares.share(
+        this, file, "${launch.title} — الحلقة ${fmtEpisode(episode)} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})",
+    )
 
     fun clipName(range: ClipRange) = "${launch.title} - الحلقة ${fmtEpisode(episode)} - ${ClipMath.clock(range.momentMs).replace(':', '.')}"
 
@@ -2058,6 +2087,7 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         clip?.release()
+        momentSave?.cancel()
         attemptAbandon()
         together?.destroy()
         unlisten?.invoke()
