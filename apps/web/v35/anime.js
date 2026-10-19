@@ -1771,6 +1771,15 @@ export function createAnime(deps) {
   });
   engine.on('momentWork', (e) => deps.openMomentWork?.(e));
   engine.on('momentEpisode', (e) => deps.openMomentEpisode?.(e));
+  engine.on('momentSend', item => {
+    const userId = currentUser();
+    if (!userId || item.userId && item.userId !== userId || !deps.sync) return;
+    const recipients = item.broadcast ? [null] : item.toIds?.length ? item.toIds : [null];
+    for (const toId of recipients) deps.sync.enqueue('recommendation.send', {
+      toId,seriesRef:item.seriesRef,seriesTitle:item.seriesTitle,coverUrl:item.coverUrl,
+      chapterLabel:item.chapterLabel,chapterNumber:item.chapterNumber,moment:item.moment,hiddenFrom:[],
+    },{requireDurable:true});
+  });
   engine.on('outbox', () => void flushOutbox());
   // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
   engine.on('playstat', (e) => reportSource(e));

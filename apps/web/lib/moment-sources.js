@@ -22,7 +22,7 @@ export function createMomentSourceResolver({ engine, desktop = globalThis.Vantar
     const identity={canonicalId:ref,kind:anime?'anime':parts[2]?'series':'movie',externalIds:anime?{anilist:Number(id)}:{imdb:id},episode,...(!anime?{season:Number(parts[2])||null}:{})};
     let session;
     try {
-      const locator = engine.findWork([row.series_title]).catch(()=>null);
+      const locator = (!anime && engine.search ? engine.search(row.series_title, 'cinema').then(works => engine.pickWork?.(works, [row.series_title]) ?? works?.[0] ?? null) : engine.findWork([row.series_title])).catch(()=>null);
       const extras = engine.withAddonCopies?.([], identity).catch(()=>[]) ?? Promise.resolve([]);
       const work = engine.firstAvailableCopies ? await engine.firstAvailableCopies(locator, extras) : await locator;
       const copies=work?.copies ?? [];
