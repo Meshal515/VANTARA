@@ -138,6 +138,7 @@ class PlayerActivity : Activity() {
         /** «شاهد اللقطة»: يشغّل المدى وحده ثم يعرض إعادة/أكمل/من البداية. -1 = حلقة كاملة. */
         val clipStartMs: Long = -1,
         val clipEndMs: Long = -1,
+        val momentMini: Boolean = false,
         /** VANTARA Together (JSON: TogetherLaunch): المشغّل داخل غرفة مع الأصدقاء. */
         val together: String? = null,
     ) {
@@ -452,7 +453,7 @@ class PlayerActivity : Activity() {
             maybeLoadSkips()
             if (::skipButton.isInitialized) {
                 val segment = IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())
-                val visible = segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
+                val visible = clipWatch == null && segment != null && current != null && reportedStart && !locked && clip == null && openSheet == null
                 skipButton.visibility = if (visible) View.VISIBLE else View.GONE
                 if (visible) {
                     val label = if (segment!!.opening) "تخطي المقدمة" else "تخطي النهاية"
@@ -465,17 +466,18 @@ class PlayerActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.attributes = window.attributes.apply {
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
-        immersive()
-
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
+        if (launch.momentMini) setTheme(android.R.style.Theme_Material_Dialog_NoActionBar)
+        super.onCreate(savedInstanceState)
+        requestedOrientation = if (launch.momentMini) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (!launch.momentMini) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
+            immersive()
+        }
+
         Tone.use(launch.section)
         sessionId = launch.session
         presenceAuthorization = launch.presenceAuthorization
@@ -497,6 +499,15 @@ class PlayerActivity : Activity() {
             .build()
         player.addListener(listener)
         buildUi()
+        if (launch.momentMini) {
+            val metrics = resources.displayMetrics
+            val width = minOf((metrics.widthPixels * 0.94).toInt(), dp(860))
+            val height = minOf((width * 9f / 16).toInt() + dp(68), (metrics.heightPixels * 0.84).toInt())
+            window.setLayout(width, height)
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            window.attributes = window.attributes.apply { dimAmount = 0.65f; gravity = Gravity.CENTER }
+            setFinishOnTouchOutside(true)
+        }
         attach(sessionId)
 
         val prep = prep
@@ -615,7 +626,8 @@ class PlayerActivity : Activity() {
             if (state == Player.STATE_ENDED) {
                 report(final = false)
                 // في الغرفة: المضيف ينقل الجميع للتالية، والبقية ينتظرونه
-                if (together?.onEnded() != true) onEnded()
+                if (clipWatch != null) { player.pause(); if (clipEndCard == null) showClipEnd() }
+                else if (together?.onEnded() != true) onEnded()
             }
             bar.durationMs = player.duration.takeIf { it > 0 } ?: 0
         }
@@ -1092,10 +1104,10 @@ class PlayerActivity : Activity() {
             addView(titleView)
             addView(episodeView)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
+        if (!launch.momentMini) top.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
         fitButton = iconButton(if (fill) Glyph.Kind.FIT else Glyph.Kind.FILL, desc = "ملء الشاشة / ملاءمة") { toggleFit() }
-        top.addView(fitButton)
-        top.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
+        if (!launch.momentMini) top.addView(fitButton)
+        if (!launch.momentMini) top.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
         controls.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
     }
 
@@ -1117,7 +1129,10 @@ class PlayerActivity : Activity() {
         bar = TimeBar(this).apply {
             onDragState = { dragging -> if (dragging) main.removeCallbacks(hideControls) else scheduleHide() }
             onScrub = { ms -> timeNow.text = ClipMath.clock(ms) }
-            onSeek = { ms -> player.seekTo(ms) }
+            onSeek = { ms ->
+                val range = clipWatch?.takeIf { launch.momentMini }
+                player.seekTo(if (range != null) (range.first + ms).coerceIn(range.first, range.last - 1) else ms)
+            }
         }
         col.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -1128,7 +1143,7 @@ class PlayerActivity : Activity() {
         left.addView(nextButton)
         left.addView(iconButton(Glyph.Kind.EPISODES, desc = "الحلقات") { showEpisodes() })
         left.addView(iconButton(Glyph.Kind.SERVERS, desc = "السيرفرات") { showServers() })
-        row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
+        if (!launch.momentMini) row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 28, boxDp = 52, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
@@ -1158,7 +1173,7 @@ class PlayerActivity : Activity() {
         right.addView(iconButton(Glyph.Kind.SUBTITLES, desc = "الترجمة") { showSubtitles() })
         right.addView(iconButton(Glyph.Kind.SPEED, desc = "السرعة") { showSpeed() })
         right.addView(iconButton(Glyph.Kind.UNLOCK, desc = "قفل الشاشة") { setLocked(true) })
-        row.addView(right, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT or Gravity.CENTER_VERTICAL))
+        if (!launch.momentMini) row.addView(right, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT or Gravity.CENTER_VERTICAL))
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
         controls.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
     }
@@ -1184,11 +1199,13 @@ class PlayerActivity : Activity() {
 
     private fun updateTime() {
         if (!::bar.isInitialized) return
-        val d = player.duration.takeIf { it > 0 } ?: 0
+        val range = clipWatch?.takeIf { launch.momentMini }
+        val d = range?.let { it.last - it.first } ?: (player.duration.takeIf { it > 0 } ?: 0)
+        val offset = range?.first ?: 0L
         bar.durationMs = d
-        bar.positionMs = position()
-        bar.bufferedMs = player.bufferedPosition
-        timeNow.text = ClipMath.clock(position())
+        bar.positionMs = (position() - offset).coerceIn(0, d)
+        bar.bufferedMs = (player.bufferedPosition - offset).coerceIn(0, d)
+        timeNow.text = ClipMath.clock((position() - offset).coerceAtLeast(0))
         timeTotal.text = if (d > 0) ClipMath.clock(d) else "--:--"
         clip?.tick(position())
     }
@@ -1289,7 +1306,8 @@ class PlayerActivity : Activity() {
 
     private fun seekBy(dir: Int) {
         val d = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-        player.seekTo((position() + dir * SEEK_MS).coerceIn(0, d))
+        val range = clipWatch?.takeIf { launch.momentMini }
+        player.seekTo((position() + dir * SEEK_MS).coerceIn(range?.first ?: 0, range?.let { it.last - 1 } ?: d))
         updateTime()
         if (controlsShown()) scheduleHide()
     }
@@ -1690,7 +1708,12 @@ class PlayerActivity : Activity() {
         card.addView(label("انتهت اللقطة", 18f, Tone.TEXT, bold = true))
         card.addView(label("${ClipMath.clock(range.first)} – ${ClipMath.clock(range.last)}", 13f, Tone.TEXT_3).apply { setPadding(0, dp(4), 0, dp(14)); textDirection = View.TEXT_DIRECTION_LTR })
         val close = { clipEndCard?.let(root::removeView); clipEndCard = null }
-        card.addView(pillButton("شاهد الحلقة", primary = true) { close(); endClipMode(); player.seekTo(0); player.play() })
+        card.addView(pillButton("شاهد الحلقة", primary = true) {
+            if (launch.momentMini) {
+                PlaybackEvents.emit("momentEpisode", JSONObject().put("animeId", launch.animeId).put("seriesRef", launch.ref()).put("episode", episode.toDouble()))
+                finish()
+            } else { close(); endClipMode(); player.seekTo(0); player.play() }
+        })
         card.addView(pillButton("انتقل إلى العمل", primary = false) {
             PlaybackEvents.emit("momentWork", JSONObject().put("animeId", launch.animeId).put("seriesRef", launch.ref()).put("episode", episode.toDouble()))
             finish()
@@ -1802,7 +1825,7 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun friendAvatar(friend: Friend) = FriendAvatar(this, network.client, friend.avatarUrl ?: friend.avatarKey, friend.name).apply {
+    private fun friendAvatar(friend: Friend) = FriendAvatar(this, network.client, friend.avatarKey?.takeIf { it.startsWith("/avatars/") } ?: friend.avatarUrl ?: friend.avatarKey, friend.name).apply {
         layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
     }
 
@@ -2042,6 +2065,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun immersive() {
+        if (::launch.isInitialized && launch.momentMini) return
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
