@@ -156,7 +156,7 @@ describe('queue durability', () => {
     expect(saved.some((op) => op.payload.chapterKey === 'precious')).toBe(true);
   });
 
-  it('frees the mirror to save a write when local storage is full', async () => {
+  it('preserves the mirror and old durable queue when saving a new write exceeds quota', async () => {
     // المرآة مشتقة من الخادم وتُسحب من جديد. الكتابة غير المرسلة لا يملكها
     // غيرنا، فهي آخر ما يُفقد لا أوّله.
     const full = fakeStorage({
@@ -174,9 +174,11 @@ describe('queue durability', () => {
     const sync = await loadSync({ storage: full, fetchImpl });
     sync.enqueue('usage.add', { activeMs: 60_000, day: '2026-09-17' });
 
-    expect(full.map.has('vantara.mirror')).toBe(false);
-    expect(JSON.parse(full.getItem('vantara.queue'))).toHaveLength(1);
-    expect(sync.health().state).not.toBe('degraded');
+    expect(full.getItem('vantara.mirror')).toContain('series_ref');
+    expect(sync.rows('library')).toHaveLength(1);
+    expect(full.getItem('vantara.queue')).toBeNull();
+    expect(sync.pendingWrites).toBe(1);
+    expect(sync.health().state).toBe('degraded');
   });
 
   it('reports degraded storage when even an empty mirror does not help', async () => {
