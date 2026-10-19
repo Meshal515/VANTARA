@@ -37,14 +37,18 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     const button = node('button', '', label); button.type = 'button'; button.dataset.action = key; actions[key] = button; end.append(button);
   }
   panel.append(top, stage, controls, end); overlay.append(panel); document.body.append(overlay);
-  let destroyed = false, ended = false, sources = [], index = -1, current = null, hls = null, sourceLease = null, blobLease = null, loadVersion = 0, fallbackTimer = null;
+  let destroyed = false, ended = false, sources = [], index = -1, current = null, hls = null, sourceLease = null, blobLease = null, loadVersion = 0, fallbackTimer = null, boundaryTimer = null, discovery = null;
   let trimmed = moment.trimmed, saving = false, fallbackBlob = false;
   const nativeTried = new Set(), prepared = new Map();
   const duration = (moment.endMs - moment.startMs) / 1000;
   const start = () => trimmed ? 0 : moment.startMs / 1000;
   const say = (message) => { status.textContent = message; status.hidden = !message; };
-  const paint = () => { const seconds = Math.min(duration, Math.max(0, (video.currentTime || 0) - start())); progress.value = String(seconds); time.textContent = `${clock(seconds)} / ${clock(duration)}`; };
-  const complete = () => { if (ended || destroyed) return; ended = true; video.pause(); if (hls) hls.stopLoad(); end.hidden = false; toggle.textContent = 'إعادة'; paint(); };
+  const paint = () => { const seconds = ended ? duration : Math.min(duration, Math.max(0, (video.currentTime || 0) - start())); progress.value = String(seconds); time.textContent = `${clock(seconds)} / ${clock(duration)}`; };
+  const complete = () => { if (ended || destroyed) return; ended = true; clearTimeout(boundaryTimer); video.pause(); if (video.currentTime > start() + duration) video.currentTime = start() + duration; if (hls) hls.stopLoad(); end.hidden = false; toggle.textContent = 'إعادة'; paint(); };
+  const armBoundary = () => {
+    clearTimeout(boundaryTimer);
+    if (!destroyed && !ended && !video.paused) boundaryTimer = setTimeout(complete, Math.max(0, (start() + duration - video.currentTime) / (video.playbackRate || 1) * 1000));
+  };
   async function play() {
     try { await video.play(); if (!destroyed) { toggle.textContent = 'إيقاف'; say(''); } }
     catch (error) { if (!destroyed && error?.name !== 'AbortError') { toggle.textContent = 'تشغيل'; say('اضغط تشغيل لبدء اللقطة'); } }
@@ -53,7 +57,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     if (source.prepare) {
       let ready = prepared.get(source);
       if (!ready) { ready = Promise.resolve().then(() => source.prepare()); prepared.set(source, ready); }
-      source = { ...source, ...await ready };
+      source = { ...source, ...await ready, prepare: undefined };
     }
     if (destroyed || version !== loadVersion) return;
     current = source; trimmed = Boolean(source.clipped || source.trimmed || moment.mediaKey && source.ownedClip);
@@ -71,7 +75,7 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     fallbackTimer = setTimeout(() => { if (!destroyed && !video.videoWidth && !ended) void advance(); }, 15000);
   }
   async function advance() {
-    clearTimeout(fallbackTimer);
+    clearTimeout(fallbackTimer); clearTimeout(boundaryTimer); video.pause();
     const version = ++loadVersion;
     if (current && playNative && current.nativeCandidate && !nativeTried.has(current.candidate ?? current.url)) {
       nativeTried.add(current.candidate ?? current.url);
@@ -79,6 +83,11 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     }
     if (destroyed || version !== loadVersion) return;
     index++;
+    if (index >= sources.length && discovery) {
+      say('نبحث عن مصدر آخر على جهازك…');
+      await discovery; discovery = null;
+      if (destroyed || version !== loadVersion) return;
+    }
     if (index >= sources.length) {
       // Only a verified small, trimmed artifact may use the downloaded-blob fallback.
       if (moment.mediaKey && mediaUrl && !fallbackBlob) {
@@ -96,14 +105,17 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     try { await setSource(current, version); } catch { if (!destroyed && version === loadVersion) void advance(); }
   }
   video.onloadedmetadata = () => {
-    clearTimeout(fallbackTimer);
     if (destroyed) return;
-    if (video.videoWidth && video.videoHeight) stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    if (video.videoWidth && video.videoHeight) {
+      stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      stage.style.width = `min(100%, ${61 * video.videoWidth / video.videoHeight}dvh)`;
+    }
     video.currentTime = start(); paint(); void play();
   };
-  video.ontimeupdate = () => { paint(); if (video.currentTime >= start() + duration - .04) complete(); };
+  video.ontimeupdate = () => { paint(); if (video.currentTime >= start() + duration - .01) complete(); else armBoundary(); };
   video.onended = complete; video.onerror = () => { if (!destroyed) void advance(); };
-  video.onplaying = () => { say(''); toggle.textContent = 'إيقاف'; };
+  video.onplaying = () => { clearTimeout(fallbackTimer); say(''); toggle.textContent = 'إيقاف'; armBoundary(); };
+  video.onseeked = armBoundary; video.onratechange = armBoundary; video.onpause = () => clearTimeout(boundaryTimer);
   toggle.onclick = () => { if (ended) replay(); else if (video.paused) void play(); else { video.pause(); toggle.textContent = 'تشغيل'; } };
   progress.oninput = () => { ended = false; end.hidden = true; video.currentTime = start() + Number(progress.value); paint(); };
   function replay() { ended = false; end.hidden = true; video.currentTime = start(); if (hls) hls.startLoad(start()); void play(); }
@@ -139,8 +151,8 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
     }
   };
   function destroy() {
-    if (destroyed) return; destroyed = true; loadVersion++; controller.abort(); clearTimeout(fallbackTimer);
-    document.removeEventListener('keydown', keyboard); video.onloadedmetadata = video.ontimeupdate = video.onerror = video.onended = video.onplaying = null;
+    if (destroyed) return; destroyed = true; loadVersion++; controller.abort(); clearTimeout(fallbackTimer); clearTimeout(boundaryTimer);
+    document.removeEventListener('keydown', keyboard); video.onloadedmetadata = video.ontimeupdate = video.onerror = video.onended = video.onplaying = video.onseeked = video.onratechange = video.onpause = null;
     video.pause(); video.removeAttribute('src'); video.load?.(); hls?.destroy(); sourceLease?.release(); blobLease?.release(); overlay.remove(); previousFocus?.focus?.();
   }
   document.addEventListener('keydown', keyboard); close.onclick = destroy; overlay.onclick = (event) => { if (event.target === overlay) destroy(); }; close.focus(); paint();
@@ -149,11 +161,14 @@ export function openMomentViewer({ row, mediaUrl, resolveSources, playNative, sa
       const hints = Array.isArray(moment.sources) ? moment.sources.filter((s) => typeof s === 'object' && safeMediaUrl(s.url)).map((s) => ({ ...s })) : [];
       sources = moment.mediaKey && mediaUrl ? [{ url: mediaUrl(moment.mediaKey), ownedClip: true }, ...hints] : hints;
       if (resolveSources) {
-        sourceLease = await acquireMomentSources(row, resolveSources, { signal: controller.signal });
-        if (destroyed) { sourceLease.release(); return; }
-        sources.push(...sourceLease.sources);
+        discovery = acquireMomentSources(row, resolveSources, { signal: controller.signal }).then((lease) => {
+          if (destroyed) { lease.release(); return; }
+          sourceLease = lease;
+          const seen = new Set(sources.map((s) => s.candidate ?? s.url));
+          for (const source of lease.sources) { const key = source.candidate ?? source.url; if (key && seen.has(key)) continue; if (key) seen.add(key); sources.push(source); }
+        }).catch(() => {});
+        if (!sources.length) { await discovery; discovery = null; }
       }
-      const seen = new Set(); sources = sources.filter((s) => { const key = s.candidate ?? s.url; if (!key) return Boolean(s.prepare); if (seen.has(key)) return false; seen.add(key); return true; });
       await advance();
     } catch { if (!destroyed) { say('تعذّر تجهيز المصدر. افتح الحلقة أو حاول مرة أخرى.'); end.hidden = false; } }
   })();

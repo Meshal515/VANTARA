@@ -72,6 +72,8 @@ const parse = (text, fallback) => {
  *   openProfile: (userId: string) => void,
  *   openShare: () => void,
  *   preview: (work: object, opts?: { chapter?: { label: string, number: number|null } }) => void,
+ *   playMoment?: (row: object) => void, resolveMomentSources?: (row: object) => Promise<object[]>,
+ *   mediaUrl?: (key: string) => string,
  *   pageImage?: ((sourceId: string, page: object) => Promise<string>) | null,
  * }} ctx
  */
@@ -561,7 +563,7 @@ export function createMajlis(ctx) {
     // لحظة من المشغّل: «الحلقة 12 · 12:10–12:20»
     const moment = momentOf(r);
     const verb = moment ? 'شارك لحظة من' : 'رشّح';
-    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : cinema ? 'رشّح فيلمًا أو مسلسلًا' : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
+    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : moment ? 'شارك لحظة' : cinema ? 'رشّح فيلمًا أو مسلسلًا' : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
     const b = el('button', moment ? 'mj-work mv-card' : 'mj-work');
     b.type = 'button';
