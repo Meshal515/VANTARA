@@ -67,8 +67,11 @@ function publish(event) {
   if(event.type==='playback/action' && event.session===playbackSession){
     if(event.action==='fullscreen')fullscreenController?.toggle();
     else if(event.action==='close'){
-      fullscreenController?.set(false);
-      void services?.stopPlayback({session:event.session}).catch(()=>{});
+      // Escape exits fullscreen first; outside fullscreen it closes playback.
+      // Closing on the first Escape would destroy the live native video HWND
+      // while the overlay and renderer still expect a valid session.
+      if(window?.isFullScreen())fullscreenController?.set(false);
+      else void services?.stopPlayback({session:event.session}).catch(()=>{});
     }
     return;
   }
