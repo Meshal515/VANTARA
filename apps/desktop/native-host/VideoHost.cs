@@ -66,7 +66,10 @@ public static class VideoHost {
             if(mark.Length!=3||!UInt64.TryParse(mark[1],out target)||target==0||(mark[2]!="0"&&mark[2]!="1"))return 7;
             IntPtr controls=new IntPtr(unchecked((long)target));uint owner;
             GetWindowThreadProcessId(controls,out owner);
-            if(!IsWindow(controls)||owner!=expected||GetParent(controls)!=parent){Console.Error.WriteLine("Invalid controls owner: hwnd="+target+" pid="+owner+" expected="+expected+" parent="+GetParent(controls)+" expectedParent="+parent);return 7;}
+            // Electron transparent controls are native unowned popups on Windows. Their
+            // handle comes only from main; require the same Electron PID and reject foreign owners.
+            IntPtr controlsOwner=GetParent(controls);
+            if(!IsWindow(controls)||owner!=expected||(controlsOwner!=IntPtr.Zero&&controlsOwner!=parent)){Console.Error.WriteLine("Invalid controls owner: hwnd="+target+" pid="+owner+" expected="+expected+" parent="+GetParent(controls)+" expectedParent="+parent);return 7;}
             if(mark[2]=="0"){clearShell();continue;}
             if(shellWindow!=controls)clearShell();
             try{
