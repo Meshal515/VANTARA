@@ -181,7 +181,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   register('player-fullscreen',({enabled}={})=>fullscreenController.set(enabled));
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
-    backgroundColor: '#08080a', show: false, icon: windowIcon,
+    backgroundColor: '#08080a', show: false, icon: windowIcon, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--vantara-version=${require('./package.json').version}`], sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
   window.on?.('resize',()=>{videoHost?.resize();overlay?.place();});
