@@ -127,7 +127,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
   if(videoHost){
     const {createPlayerOverlay}=require('./player-overlay.cjs');
-    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>fullscreenController?.bindInput(win),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>fullscreenController?.bindInput(win),onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }

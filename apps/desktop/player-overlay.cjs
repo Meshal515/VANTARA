@@ -25,7 +25,7 @@ function checkedMessage(value) {
   return JSON.parse(text);
 }
 
-function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand = () => {}, onWindow = () => {} }) {
+function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand = () => {}, onWindow = () => {}, onFullscreen = () => {} }) {
   let overlay = null, viewport = null, session = null, loaded = null;
   const parentAlive = () => { const w = getWindow(); return w && !w.isDestroyed() ? w : null; };
   function ensure() {
@@ -33,7 +33,7 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     const parent = parentAlive(); if (!parent) return null;
     overlay = new BrowserWindow({
       parent, show: false, frame: false, transparent: true, backgroundColor: '#00000000', resizable: false, movable: false,
-      minimizable: false, maximizable: false, fullscreenable: true, skipTaskbar: true, hasShadow: false, focusable: true, thickFrame: false,
+      minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, focusable: true, thickFrame: false,
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false },
     });
     overlay.setMenu?.(null);
@@ -49,10 +49,9 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     if (!overlay || overlay.isDestroyed() || !parent) return;
     const bounds = !viewport || viewport.hidden || parent.isMinimized?.() ? null : overlayBounds(viewport, parent.getContentBounds());
     if (!bounds) { if (overlay.isVisible()) overlay.hide(); return; }
-    // Windows keeps the taskbar above a focused nonfullscreen controls window.
-    // Its native fullscreen state must follow the owner as well as its rectangle.
-    const fullscreen = parent.isFullScreen?.() === true;
-    if (overlay.isFullScreen?.() !== fullscreen) overlay.setFullScreen?.(fullscreen);
+    // Transparent Electron windows only emulate fullscreen with SetBounds.
+    // Mark this owned HWND through the Windows shell so the taskbar follows it.
+    onFullscreen(parent.isFullScreen?.() === true, overlay);
     overlay.setBounds(bounds);
     if (!overlay.isVisible()) overlay.showInactive();
   }
@@ -77,9 +76,9 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
       win.webContents.send('vantara:overlay', message);
       return true;
     },
-    close(value) { if (value?.session && value.session !== session) return false; session = null; viewport = null; if (overlay && !overlay.isDestroyed()) overlay.hide(); return true; },
+    close(value) { if (value?.session && value.session !== session) return false; session = null; viewport = null; if (overlay && !overlay.isDestroyed()) { onFullscreen(false, overlay); overlay.hide(); } return true; },
     place,
-    destroy() { session = null; viewport = null; if (overlay && !overlay.isDestroyed()) overlay.destroy(); overlay = null; },
+    destroy() { session = null; viewport = null; if (overlay && !overlay.isDestroyed()) { onFullscreen(false, overlay); overlay.destroy(); } overlay = null; },
     /** أمر من الطبقة: يُقبل فقط من نافذتها ويُمرَّر للنافذة الرئيسية. */
     command(event, value) {
       if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) throw new Error('هذا الطلب ليس من طبقة المشغل');

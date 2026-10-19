@@ -18,9 +18,11 @@ test('host is acquired once, resized in the main client area, and closed per ses
   const handle=Buffer.alloc(8);handle.writeBigUInt64LE(123n);let spawned;
   const win={getNativeWindowHandle:()=>handle,getContentSize:()=>[900,700],getBounds:()=>({}),webContents:{getZoomFactor:()=>1},isDestroyed:()=>false};
   const host=createVideoHost({getWindow:()=>win,executable:'owned-host.exe',scaleFactor:()=>1,spawn:(exe,args,opts)=>{spawned={exe,args,opts};queueMicrotask(()=>child.stdout.write('456\n'));return child;}});
+  host.fullscreen(true,handle);
   host.viewport({session:'one',x:0,y:60,width:900,height:430,viewportWidth:900,viewportHeight:700});
   const surface=await host.acquire('one');assert.equal(surface.windowId,'456');assert.equal(spawned.args[0],'123');assert.equal(spawned.opts.shell,false);
-  assert.match(writes,/bounds 0 60 900 430/);
+  assert.match(writes,/bounds 0 60 900 430/);assert.match(writes,/fullscreen 123 1/);
+  host.fullscreen(false,handle);assert.match(writes,/fullscreen 123 0/);
   assert.throws(()=>host.viewport({session:'old',x:0,y:0,width:10,height:10,viewportWidth:900,viewportHeight:700}),/جلسة/);
   await surface.close();assert.match(writes,/close/);assert.equal(host.snapshot().windowId,null);
 });

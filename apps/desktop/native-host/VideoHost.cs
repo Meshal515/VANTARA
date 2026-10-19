@@ -8,6 +8,14 @@ using System.Text;
 using System.Collections.Generic;
 public static class VideoHost {
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateWindowEx(uint ex,string cls,string title,uint style,int x,int y,int w,int h,IntPtr parent,IntPtr menu,IntPtr instance,IntPtr param);
+  [ComImport,Guid("56FDF344-FD6D-11d0-958A-006097C9A090")] class TaskbarList {}
+  [ComImport,Guid("602D4995-B13A-429b-A66E-1935E44F4317"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] interface ITaskbarList2 {
+    void HrInit();void AddTab(IntPtr hwnd);void DeleteTab(IntPtr hwnd);void ActivateTab(IntPtr hwnd);void SetActiveAlt(IntPtr hwnd);
+    void MarkFullscreenWindow(IntPtr hwnd,[MarshalAs(UnmanagedType.Bool)] bool fullscreen);
+  }
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr hwnd,string name);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr RemoveProp(IntPtr hwnd,string name);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool SetProp(IntPtr hwnd,string name,IntPtr value);
   [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
@@ -29,7 +37,7 @@ public static class VideoHost {
   [StructLayout(LayoutKind.Sequential)] struct POINT { public int x,y; }
   [StructLayout(LayoutKind.Sequential)] struct RECT {public int left,top,right,bottom;}
   [StructLayout(LayoutKind.Sequential)] struct MSG {public IntPtr hwnd;public uint message;public UIntPtr wParam;public IntPtr lParam;public uint time;public POINT point;public uint reserved;}
-  public static int Main(string[] args) {
+  [STAThread] public static int Main(string[] args) {
     ulong raw;uint expected,pid;
     if(args.Length!=2||!UInt64.TryParse(args[0],out raw)||raw==0||!UInt32.TryParse(args[1],out expected))return 2;
     IntPtr parent=new IntPtr(unchecked((long)raw));
@@ -41,18 +49,38 @@ public static class VideoHost {
     Console.WriteLine(unchecked((ulong)host.ToInt64()));Console.Out.Flush();
     var lines=new ConcurrentQueue<string>();
     var reader=new Thread(()=>{try{string line;while((line=Console.ReadLine())!=null){if(line.Length<=160)lines.Enqueue(line);else break;}}catch{}finally{lines.Enqueue("close");}});reader.IsBackground=true;reader.Start();
+    ITaskbarList2 taskbar=null;IntPtr shellWindow=IntPtr.Zero,nonRude=IntPtr.Zero;bool shellFullscreen=false;
+    Action clearShell=()=>{
+      if(taskbar!=null){try{if(IsWindow(shellWindow))taskbar.MarkFullscreenWindow(shellWindow,false);if(IsWindow(parent))taskbar.MarkFullscreenWindow(parent,false);}catch(COMException){}}
+      if(IsWindow(shellWindow)&&nonRude!=IntPtr.Zero)SetProp(shellWindow,"NonRudeHWND",nonRude);
+      shellWindow=IntPtr.Zero;nonRude=IntPtr.Zero;shellFullscreen=false;
+    };
     try{
       while(IsWindow(parent)&&IsWindow(host)&&GetWindowThreadProcessId(parent,out pid)!=0&&pid==expected){
         string line;
         while(lines.TryDequeue(out line)){
           if(line=="close")return 0;
           if(line=="hide"){ShowWindow(host,0);continue;}
+          if(line.StartsWith("fullscreen ")){
+            string[] mark=line.Split(' ');ulong target;
+            if(mark.Length!=3||!UInt64.TryParse(mark[1],out target)||target==0||(mark[2]!="0"&&mark[2]!="1"))return 7;
+            IntPtr controls=new IntPtr(unchecked((long)target));uint owner;
+            if(!IsWindow(controls)||GetWindowThreadProcessId(controls,out owner)==0||owner!=expected||GetParent(controls)!=parent)return 7;
+            if(mark[2]=="0"){clearShell();continue;}
+            if(shellWindow!=controls)clearShell();
+            try{
+              if(taskbar==null){taskbar=(ITaskbarList2)new TaskbarList();taskbar.HrInit();}
+              if(shellWindow!=controls){shellWindow=controls;nonRude=GetProp(controls,"NonRudeHWND");RemoveProp(controls,"NonRudeHWND");}
+              taskbar.MarkFullscreenWindow(parent,true);taskbar.MarkFullscreenWindow(controls,true);shellFullscreen=true;
+            }catch(COMException){clearShell();}
+            continue;
+          }
           if(line=="inspect"){
             RECT rect,parentRect,screenRect;GetClientRect(host,out rect);GetClientRect(parent,out parentRect);GetWindowRect(host,out screenRect);
             var origin=new POINT{x=screenRect.left,y=screenRect.top};MapWindowPoints(IntPtr.Zero,parent,ref origin,1);var children=new List<string>();
             EnumChildWindows(host,(hwnd,param)=>{var cls=new StringBuilder(128);GetClassName(hwnd,cls,128);RECT childRect;GetClientRect(hwnd,out childRect);
               children.Add(String.Format("{{\"hwnd\":\"{0}\",\"parent\":\"{1}\",\"class\":\"{2}\",\"child\":{3},\"width\":{4},\"height\":{5}}}",unchecked((ulong)hwnd.ToInt64()),unchecked((ulong)GetParent(hwnd).ToInt64()),cls.ToString().Replace("\\","\\\\").Replace("\"","\\\""),(GetWindowLongPtr(hwnd,-16).ToInt64()&0x40000000)!=0?"true":"false",childRect.right,childRect.bottom));return children.Count<32;},IntPtr.Zero);
-            Console.WriteLine(String.Format("{{\"event\":\"inspect\",\"host\":\"{0}\",\"parent\":\"{1}\",\"width\":{2},\"height\":{3},\"visible\":{5},\"x\":{6},\"y\":{7},\"parentWidth\":{8},\"parentHeight\":{9},\"children\":[{4}]}}",unchecked((ulong)host.ToInt64()),unchecked((ulong)GetParent(host).ToInt64()),rect.right,rect.bottom,String.Join(",",children),IsWindowVisible(host)?"true":"false",origin.x,origin.y,parentRect.right,parentRect.bottom));Console.Out.Flush();continue;
+            Console.WriteLine(String.Format("{{\"event\":\"inspect\",\"host\":\"{0}\",\"parent\":\"{1}\",\"width\":{2},\"height\":{3},\"visible\":{5},\"x\":{6},\"y\":{7},\"parentWidth\":{8},\"parentHeight\":{9},\"shellFullscreen\":{10},\"children\":[{4}]}}",unchecked((ulong)host.ToInt64()),unchecked((ulong)GetParent(host).ToInt64()),rect.right,rect.bottom,String.Join(",",children),IsWindowVisible(host)?"true":"false",origin.x,origin.y,parentRect.right,parentRect.bottom,shellFullscreen?"true":"false"));Console.Out.Flush();continue;
           }
           string[] fields=line.Split(' ');int x,y,w,h;
           if(fields.Length!=5||fields[0]!="bounds"||!Int32.TryParse(fields[1],out x)||!Int32.TryParse(fields[2],out y)||!Int32.TryParse(fields[3],out w)||!Int32.TryParse(fields[4],out h)||x<0||y<0||w<0||h<0||x>524288||y>524288||w>524288||h>524288)return 5;
@@ -71,6 +99,6 @@ public static class VideoHost {
         Thread.Sleep(10);
       }
       return 0;
-    }finally{if(IsWindow(host))DestroyWindow(host);}
+    }finally{clearShell();if(taskbar!=null)Marshal.FinalReleaseComObject(taskbar);if(IsWindow(host))DestroyWindow(host);}
   }
 }
