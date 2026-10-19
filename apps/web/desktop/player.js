@@ -112,7 +112,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     try{
       const state=await engine.playerState({session:id});if(!owned())return;
       const context=state?.moment;if(!context)throw new Error('اللقطة غير متاحة لهذا التشغيل');
-      if(resume){if(engine.playerCommand)await engine.playerCommand({session:id,command:'pause',value:true});else await bridge.playbackCommand({session:id,command:'pause',value:true});pausedForMoment=true;}
+      // A private draft must never change the shared room timeline.
+      if(resume&&!state.together){if(engine.playerCommand)await engine.playerCommand({session:id,command:'pause',value:true});else await bridge.playbackCommand({session:id,command:'pause',value:true});pausedForMoment=true;}
       if(!owned())return;
       const filename=`VANTARA-moment-${Date.now()}.mp4`;
       const exported=async(selection,action)=>{

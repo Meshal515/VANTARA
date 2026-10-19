@@ -186,3 +186,14 @@ it('does not mount a preview after the composer closes while native export is pe
  const f=momentFixture();let exported;f.bridge.exportMoment=vi.fn(()=>new Promise(resolve=>{exported=resolve;}));f.bridge.readMoment=vi.fn();await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
  f.document.querySelector('[data-compose-action="preview"]').click();f.document.querySelector('.mco-close').click();exported({saved:true});await settle();expect(f.bridge.readMoment).not.toHaveBeenCalled();expect(f.document.querySelector('.mv-viewer')).toBeNull();f.player.dispose();vi.unstubAllGlobals();
 });
+it('keeps room playback running while a private moment editor is open without coordinated pause or resume',async()=>{
+ const f=momentFixture(),state=f.engine.playerState;
+ f.engine.playerState=async args=>({...await state(args),together:true,synced:true});
+ f.engine.playerCommand=vi.fn(async arg=>f.commands.push(arg));
+ await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ expect(f.document.querySelector('.moment-compose')).toBeTruthy();expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:true}));
+ expect(f.engine.playerCommand).not.toHaveBeenCalled();expect(f.commands.some(c=>c.command==='pause')).toBe(false);
+ f.document.querySelector('.mco-close').click();await settle();
+ expect(f.engine.playerCommand).not.toHaveBeenCalled();expect(f.commands.some(c=>c.command==='pause')).toBe(false);expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:false}));
+ f.player.dispose();vi.unstubAllGlobals();
+});
