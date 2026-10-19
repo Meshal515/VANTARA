@@ -33,7 +33,7 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     const parent = parentAlive(); if (!parent) return null;
     overlay = new BrowserWindow({
       parent, show: false, frame: false, transparent: true, backgroundColor: '#00000000', resizable: false, movable: false,
-      minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, focusable: true, thickFrame: false,
+      minimizable: false, maximizable: false, fullscreenable: true, skipTaskbar: true, hasShadow: false, focusable: true, thickFrame: false,
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false },
     });
     overlay.setMenu?.(null);
@@ -49,6 +49,10 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     if (!overlay || overlay.isDestroyed() || !parent) return;
     const bounds = !viewport || viewport.hidden || parent.isMinimized?.() ? null : overlayBounds(viewport, parent.getContentBounds());
     if (!bounds) { if (overlay.isVisible()) overlay.hide(); return; }
+    // Windows keeps the taskbar above a focused nonfullscreen controls window.
+    // Its native fullscreen state must follow the owner as well as its rectangle.
+    const fullscreen = parent.isFullScreen?.() === true;
+    if (overlay.isFullScreen?.() !== fullscreen) overlay.setFullScreen?.(fullscreen);
     overlay.setBounds(bounds);
     if (!overlay.isVisible()) overlay.showInactive();
   }

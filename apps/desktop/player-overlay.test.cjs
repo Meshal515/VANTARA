@@ -29,6 +29,8 @@ function fakeElectron() {
     showInactive() { this.visible = true; }
     hide() { this.visible = false; }
     setBounds(b) { this.bounds = b; }
+    isFullScreen() { return this.fullscreen === true; }
+    setFullScreen(value) { this.fullscreen = value; }
     destroy() { this.destroyed = true; }
   }
   const parent = { isDestroyed: () => false, isMinimized: () => false, getContentBounds: () => ({ x: 10, y: 20, width: 1000, height: 600 }), focus() { this.focused = true; } };
@@ -67,4 +69,14 @@ test('obsolete overlay state and close cannot replace or hide a newer player',as
  loaded();assert.equal(await pending,false);assert.deepEqual(made[0].sent,[]);
  assert.equal(overlay.close({session:'old'}),false);assert.equal(made[0].visible,true);
  overlay.close({session:'new'});assert.equal(made[0].visible,false);
+});
+
+test('controls follow the parent native fullscreen state and restore it with the viewport',()=>{
+ const {BrowserWindow,parent,made}=fakeElectron();let full=false;parent.isFullScreen=()=>full;
+ const overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>parent,preload:'p.cjs',url:'vantara://app/desktop/overlay.html'});
+ overlay.open({session:'one'});overlay.viewport({session:'one',x:0,y:0,width:1000,height:600,viewportWidth:1000,viewportHeight:600});
+ const win=made[0];assert.equal(win.isFullScreen(),false);
+ full=true;overlay.place();assert.equal(win.isFullScreen(),true);
+ full=false;overlay.place();assert.equal(win.isFullScreen(),false);
+ assert.deepEqual(win.bounds,parent.getContentBounds());
 });
