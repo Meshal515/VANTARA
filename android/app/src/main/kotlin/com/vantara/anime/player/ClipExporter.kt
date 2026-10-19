@@ -14,8 +14,16 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.transformer.Codec
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.VideoEncoderSettings
+import androidx.media3.transformer.AudioEncoderSettings
+import androidx.media3.transformer.Effects
+import androidx.media3.effect.Presentation
+import android.media.MediaMetadataRetriever
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultAssetLoaderFactory
 import androidx.media3.transformer.DefaultDecoderFactory
@@ -29,25 +37,11 @@ import com.vantara.anime.stream.Container
 import okhttp3.OkHttpClient
 import java.io.File
 
-/**
- * يصنع ملف MP4 من جزء الحلقة المختار فقط — عند «حفظ» أو «مشاركة» فقط.
- *
- * قصّ مباشر (remux) بلا إعادة ترميز: عينات الفيديو والصوت تُنقل كما هي من
- * حاوية المصدر (HLS/TS أو MP4) إلى MP4. البايتات تُقرأ من [MediaCache] — نفس
- * ما نزل أثناء المشاهدة — فالجزء الذي شاهدته لا يُنزَّل من جديد.
- *
- * القصّ بلا ترميز يبدأ من إطار مفتاحي:
- *  - HLS: كل مقطع يبدأ بإطار مفتاحي، فالبداية تُقرَّب لبداية المقطع الذي
- *    يحويها ([keyframeStartMs]) — قد يبدأ الملف قبل اختيارك بثوانٍ قليلة.
- *  - MP4: Transformer يقصّ مباشرة ويعيد ترميز أول مجموعة صور فقط حتى أول
- *    إطار مفتاحي (أقل من ثانيتين عادةً)، ثم نقل مباشر لكل الباقي.
- *
- * الناتج فيديو الحلقة وحده: لا واجهة المشغّل ولا ترجمات منفصلة (الترجمة
- * المحروقة في الصورة تبقى لأنها جزء منها).
- */
+/** Exports exactly the selected interval as a portable MP4. Only export is encoded;
+ * playback retains its original quality. HLS segment boundaries never extend the range. */
 @OptIn(UnstableApi::class)
 class ClipExporter(private val context: Context, private val client: OkHttpClient) {
-    /** بداية الملف الفعلية بعد التقريب لإطار مفتاحي (للعرض). */
+    /** بداية المدى المختار دون تقريب إلى مقطع سابق. */
     var lastStartMs: Long? = null
         private set
 
@@ -57,6 +51,8 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
         data class Failed(val message: String, val unsupported: Boolean) : Result
     }
 
+    private val workDir = File(context.cacheDir, "clips/${java.util.UUID.randomUUID()}")
+    private var activeFile: File? = null
     private var transformer: Transformer? = null
     private val main = Handler(Looper.getMainLooper())
     private var poll: Runnable? = null
@@ -75,21 +71,23 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
      * على الخيط الرئيسي (شرط Transformer). [onProgress] بين 0 و100.
      * [keyframeStartMs]: بداية مقطع HLS الذي يحوي بداية الاختيار (إن عُرفت).
      */
-    fun export(c: Candidate, r: ClipRange, keyframeStartMs: Long?, onProgress: (Int) -> Unit, onResult: (Result) -> Unit) {
+    fun export(c: Candidate, r: ClipRange, @Suppress("UNUSED_PARAMETER") keyframeStartMs: Long?, onProgress: (Int) -> Unit, onResult: (Result) -> Unit) {
         cached(c, r)?.let { return onResult(Result.Done(it)) }
-        if (c.url.startsWith("blob:") || !c.url.startsWith("http")) {
+        if (!ClipExportBounds.supportsSource(c.url)) {
             return onResult(Result.Failed("هذا السيرفر لا يسمح بقصّ المقاطع", unsupported = true))
         }
         cancel()
-        val dir = File(context.cacheDir, "clips").apply { mkdirs() }
+        val dir = workDir.apply { mkdirs() }
         // مقطع واحد مؤقت يكفي: القديم يُحذف، والمحفوظ في المعرض نسخة مستقلة
         dir.listFiles()?.forEach { it.delete() }
-        val out = File(dir, "vantara-clip-${System.currentTimeMillis()}.mp4")
+        val out = File(dir, "vantara-clip-${System.currentTimeMillis()}.mp4").also { activeFile = it }
 
-        val hls = c.container == Container.HLS
-        val startMs = if (hls && keyframeStartMs != null) keyframeStartMs.coerceIn(0, r.startMs) else r.startMs
+        val selection = ClipExportBounds.selection(r, keyframeStartMs)
+        val startMs = selection.startMs
         lastStartMs = startMs
-        val http = MediaCache.factory(context, client, c.headers)
+        val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(client, c.url, c.headers) else client
+        val delegate = DefaultDataSource.Factory(context, MediaCache.factory(context, transport, c.headers))
+        val http = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(context).dataSourceFactory(delegate) else delegate
         val loader = DefaultAssetLoaderFactory(
             context,
             DefaultDecoderFactory(context),
@@ -110,29 +108,47 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(startMs)
                     .setEndPositionMs(r.endMs)
-                    // HLS: البداية بداية مقطع = إطار مفتاحي، فلا حاجة لأي ترميز
-                    .setStartsAtKeyFrame(hls && keyframeStartMs != null)
+                    .setStartsAtKeyFrame(false)
                     .build(),
             )
             .build()
-        // بلا تأثيرات ولا صيغة مفروضة: الترميز الأصلي يُنقل كما هو (remux)
-        val edited = EditedMediaItem.Builder(item).build()
+        val edited = EditedMediaItem.Builder(item)
+            .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(720))))
+            .build()
+        val encoder = DefaultEncoderFactory.Builder(context)
+            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(1_200_000).build())
+            .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(96_000).build())
+            .setEnableFallback(true).build()
+        // Force decoding at the exact start for every container, even AVC/AAC inputs.
+        val exactEncoder = object : Codec.EncoderFactory by encoder {
+            override fun videoNeedsEncoding() = true
+            override fun audioNeedsEncoding() = true
+        }
 
         val t = Transformer.Builder(context)
             .setAssetLoaderFactory(loader)
-            // MP4: نقل مباشر، ويُرمَّز أول GOP فقط إن لم تبدأ البداية بإطار مفتاحي
-            .experimentalSetTrimOptimizationEnabled(c.container == Container.MP4)
+            .experimentalSetTrimOptimizationEnabled(false)
+            .setEncoderFactory(exactEncoder)
+            .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setAudioMimeType(MimeTypes.AUDIO_AAC)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     stopPolling()
                     transformer = null
-                    last = key(c, r) to out
-                    onResult(Result.Done(out))
+                    activeFile = null
+                    if (!ClipExportBounds.accepts(r.durationMs, exportResult.durationMs, out.length())) {
+                        out.delete()
+                        onResult(Result.Failed("تعذّر صنع المدى المحدد بدقة — جرّب سيرفرًا آخر", unsupported = false))
+                    } else {
+                        last = key(c, r) to out
+                        onResult(Result.Done(out))
+                    }
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                     stopPolling()
                     transformer = null
+                    activeFile = null
                     out.delete()
                     onResult(describe(exportException))
                 }
@@ -140,7 +156,12 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
             .build()
         transformer = t
         onProgress(0)
-        t.start(edited, out.absolutePath)
+        try { t.start(edited, out.absolutePath) } catch (e: Exception) {
+            transformer = null
+            out.delete()
+            onResult(Result.Failed("تعذّر بدء صنع المقطع", unsupported = false))
+            return
+        }
         val holder = ProgressHolder()
         poll = object : Runnable {
             override fun run() {
@@ -154,13 +175,15 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
     /** يحذف ملفات المقاطع المؤقتة (بعد الحفظ، وعند إغلاق المحرّر). */
     fun purge() {
         last = null
-        MediaCache.purgeClips(context)
+        workDir.deleteRecursively()
     }
 
     fun cancel() {
         stopPolling()
         transformer?.cancel()
         transformer = null
+        activeFile?.delete()
+        activeFile = null
     }
 
     private fun stopPolling() {
@@ -193,7 +216,7 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
             val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
             runCatching {
                 resolver.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } } ?: error("no stream")
-                resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                check(resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null) > 0)
                 uri
             }.getOrElse {
                 resolver.delete(uri, null, null)
@@ -202,7 +225,7 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
         } else {
             // قبل أندرويد 10: مجلد التطبيق في الذاكرة الخارجية (لا يحتاج إذنًا)، والماسح يضيفه للمعرض
             val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VANTARA").apply { mkdirs() }
-            val dest = File(dir, name)
+            val dest = File(dir, "${System.currentTimeMillis()}-$name")
             runCatching {
                 file.copyTo(dest, overwrite = true)
                 MediaScannerConnection.scanFile(context, arrayOf(dest.absolutePath), arrayOf("video/mp4"), null)

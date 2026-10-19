@@ -221,7 +221,7 @@ class ClipEditor(
     fun tick(@Suppress("UNUSED_PARAMETER") pos: Long) = Unit
 
     private fun run(what: String, then: (java.io.File) -> Unit) {
-        if (unsupported) return activity.message("هذا السيرفر لا يسمح بقصّ المقاطع — بدّل السيرفر أو أرسل اللحظة")
+        if (unsupported) return activity.message("هذا السيرفر لا يسمح بقصّ المقاطع — بدّل السيرفر")
         if (exporter.busy) return
         stopPreview()
         actions.visibility = View.GONE
@@ -240,8 +240,6 @@ class ClipEditor(
                 actions.visibility = View.VISIBLE
                 when (r) {
                     is ClipExporter.Result.Done -> {
-                        val from = exporter.lastStartMs
-                        if (from != null && from < range.startMs - 500) activity.message("القصّ المباشر يبدأ من أقرب نقطة قطع: ${ClipMath.clock(from)}")
                         then(r.file)
                     }
                     is ClipExporter.Result.Failed -> {
@@ -255,7 +253,7 @@ class ClipEditor(
                 }
             },
         )
-        activity.message("$what: قصّ مباشر لـ${ClipMath.length(range.durationMs)} فقط، بلا إعادة ترميز")
+        activity.message("$what: نجهّز ${ClipMath.length(range.durationMs)} من المدى المختار")
     }
 
     private fun save() = run("حفظ") { file ->
