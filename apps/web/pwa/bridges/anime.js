@@ -421,6 +421,11 @@ export const AnimeEngine = {
     return s ? snapshot(s) : { routes: [], done: true, retryAt: 0 };
   },
 
+  async momentCandidates({ session }) {
+    const s = sessions.get(session);
+    return { candidates: s ? readyCandidates(s, null).map(c => ({ ...c })) : [] };
+  },
+
   async best({ session, prefer = null, waitMs = 45_000 }) {
     const s = sessions.get(session);
     if (!s) throw new Error('الجلسة انتهت');

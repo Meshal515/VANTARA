@@ -53,6 +53,7 @@ import {
   correlationIdFrom,
   frameLinkFor,
   normalizeFramePages,
+  normalizeMoment,
 } from '@vantara/domain';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
@@ -323,7 +324,7 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed, moment_json'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
   // سجلّ المالك خاص. النسخة الاجتماعية في جدول مستقل وقابلة للسحب.
@@ -1545,6 +1546,8 @@ export function statementsFor(
     }
 
     case 'recommendation.send': {
+      const moment = p['moment'] == null ? null : normalizeMoment(p['moment']);
+      if (p['moment'] != null && !moment) return null;
       const seriesRef = asString(p['seriesRef'], 200);
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
@@ -1564,8 +1567,8 @@ export function statementsFor(
           .prepare(
             `INSERT INTO recommendations
                (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev,
-                audience, hidden_json, chapter_label, chapter_number)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?)
+                audience, hidden_json, chapter_label, chapter_number, moment_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
@@ -1582,6 +1585,7 @@ export function statementsFor(
             // ترشيح فصلٍ بعينه («اقرأ الفصل 110»)، أو العمل كله إن غابا
             asString(p['chapterLabel'], 120),
             asNumber(p['chapterNumber']),
+            moment ? JSON.stringify(moment) : null,
           ),
       ];
 
@@ -2552,6 +2556,17 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   const acknowledged = await appliedOpIds(ops, env);
   const skipped = new Set<string>();
   const unapplied = new Set<string>(invalidRecommendations);
+  // Validate attached posters before creating any recommendation/activity effects.
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.send' || op.payload['moment'] == null || acknowledged.has(op.opId)) continue;
+    const moment = normalizeMoment(op.payload['moment']);
+    if (!moment) { unapplied.add(op.opId); continue; }
+    if (moment.posterKey) {
+      const poster = await env.DB.prepare("SELECT hash FROM media WHERE hash = ? AND owner_id = ? AND mime LIKE 'image/%' AND length(data) > 0")
+        .bind(moment.posterKey, userId).first();
+      if (!poster) unapplied.add(op.opId);
+    }
+  }
 
   // field merges تحتاج revision مستقلًا لأن field_revs نفسها تستخدمه للمقارنة.
   for (const op of ops) {

@@ -1,0 +1,34 @@
+import {it,expect,vi} from 'vitest';
+import {createMomentController} from './moment-controller.js';
+const row={id:'r',series_ref:'anime:42',series_title:'work',chapter_number:3,moment_json:JSON.stringify({version:1,startMs:10000,endMs:30000,episode:3})};
+it('opens the mini viewer rather than navigating to server selection and hands native playback its range',async()=>{
+ let opts;const engine={open:vi.fn(async()=>true),findWork:vi.fn()};const viewer=vi.fn(o=>{opts=o;return{destroy:vi.fn(),handleBack:()=>true};});
+ const c=createMomentController({engine,viewer,native:()=>true});c.open(row);expect(viewer).toHaveBeenCalledOnce();await opts.playNative({row,source:{session:'local',candidate:'ready'}});expect(engine.open.mock.calls[0][0]).toMatchObject({session:'local',candidate:'ready',clipStart:10000,clipEnd:30000,position:10000,momentMini:true});expect(c.handleBack()).toBe(true);
+});
+it('saves through the device registered candidate without sending URLs to the export bridge',async()=>{
+ let opts;const engine={exportMoment:vi.fn(async()=>({saved:true}))};const c=createMomentController({engine,native:()=>true,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ await opts.saveVideo({row,source:{session:'s',candidate:'c',url:'https://sensitive.example/?token=x'},startMs:10000,endMs:30000,filename:'clip.mp4'});
+ expect(engine.exportMoment).toHaveBeenCalledWith({session:'s',candidate:'c',startMs:10000,endMs:30000,filename:'clip.mp4',action:'save'});
+});
+it('owns and releases device sessions resolved for an attached-source save',async()=>{
+ let opts;const engine={findWork:vi.fn(async()=>({copies:[{}]})),prepare:vi.fn(async()=>({session:'owned'})),best:vi.fn(async()=>({candidate:'c'})),momentCandidates:vi.fn(async()=>[{id:'c',url:'https://own.example/video.mp4'}]),closeSession:vi.fn(async()=>{}),exportMoment:vi.fn(async()=>({saved:true}))};
+ const c=createMomentController({engine,native:()=>true,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ await opts.saveVideo({row,source:{url:'https://sender.example/video.mp4'},startMs:10000,endMs:30000,filename:'clip.mp4'});
+ c.destroy();await Promise.resolve();expect(engine.closeSession).toHaveBeenCalledWith('owned');
+});
+it('cancels a late local-source lookup when its viewer has been destroyed',async()=>{
+ let opts,ready;const engine={findWork:vi.fn(async()=>({copies:[{}]})),prepare:vi.fn(()=>new Promise(resolve=>{ready=resolve;})),best:vi.fn(async()=>({candidate:'c'})),momentCandidates:vi.fn(async()=>[{id:'c',url:'https://own.example/video.mp4'}]),closeSession:vi.fn(async()=>{}),exportMoment:vi.fn(async()=>({saved:true}))};
+ const c=createMomentController({engine,native:()=>true,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ const save=opts.saveVideo({row,source:{url:'https://sender.example/video.mp4'},startMs:10000,endMs:30000,filename:'clip.mp4'}).catch(e=>e.name);
+ for(let i=0;i<10&&!ready;i++)await Promise.resolve();c.destroy();ready({session:'late'});
+ expect(await save).toBe('AbortError');for(let i=0;i<10;i++)await Promise.resolve();
+ expect(engine.exportMoment).not.toHaveBeenCalled();expect(engine.closeSession).toHaveBeenCalledWith('late');
+});
+it('does not create an orphaned blob when desktop read finishes after close',async()=>{
+ let opts,ready;const createUrl=vi.spyOn(URL,'createObjectURL');
+ const desktop={exportMoment:vi.fn(async()=>({saved:true})),readMoment:vi.fn(()=>new Promise(resolve=>{ready=resolve;}))};
+ const c=createMomentController({engine:{},desktop,viewer:o=>{opts=o;return{destroy(){}};}});c.open(row);
+ const save=opts.saveVideo({row,source:{session:'s',candidate:'c',exportHandle:'handle'},startMs:10000,endMs:30000,filename:'clip.mp4'}).catch(e=>e.name);
+ for(let i=0;i<10&&!ready;i++)await Promise.resolve();c.destroy();ready({base64:'AAAA'});
+ expect(await save).toBe('AbortError');expect(createUrl).not.toHaveBeenCalled();createUrl.mockRestore();
+});

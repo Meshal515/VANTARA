@@ -1,3 +1,7 @@
+import { createMomentController } from './moment-controller.js';
+import * as momentEngine from '../lib/anime-engine.js';
+import { momentOf } from './moment-media.js';
+import { recipientFace } from './recipient.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -2683,17 +2687,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   function avatarNode(person, size = 44) {
-    if (person.avatarKey) {
-      const img = el('img');
-      img.src = person.avatarKey;
-      img.alt = '';
-      img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-      return img;
-    }
-    const s = el('span', 'avatar-letter', initialOf(person.displayName));
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
+    return recipientFace(person, { size, mediaUrl });
   }
+
   function latestChapter(rows) {
     return rows.reduce((best, row) => {
       if (!best) return row;
@@ -5125,6 +5121,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
+    if (moments.handleBack()) return true;
     if (editor?.open) return editor.handleBack();
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
@@ -5159,6 +5156,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
 
+  function openMomentTarget(row, play) {
+    const ref = String(row.series_ref ?? '');
+    const moment = momentOf(row);
+    const episode = moment?.episode ?? row.chapter_number ?? 1;
+    if (ref.startsWith('anime:')) openAnimeRef(ref, { title: row.series_title, cover: row.cover_url,
+      ...(play ? { chapter: { number: episode, label: `الحلقة ${episode}` }, play: true } : {}) });
+    else if (ref.startsWith('cinema:')) openCinemaRef(ref, { title: row.series_title, cover: row.cover_url,
+      ...(play ? { playAt: { season: Number(ref.split(':')[2]) || null, episode } } : {}) });
+  }
+  const moments = createMomentController({ engine: momentEngine, mediaUrl,
+    friends: () => deps.friends?.() ?? [], toast,
+    onEpisode: row => openMomentTarget(row, true), onWork: row => openMomentTarget(row, false) });
+  const nativeMomentTarget = (event, play) => {
+    const ref = event.seriesRef || `anime:${event.animeId}`;
+    openMomentTarget({series_ref:ref,chapter_number:event.episode},play);
+  };
+
   const friendsHost = q('friendsBody');
   friendsHost.classList.add('fr-host');
   const friends = createFriends({
@@ -5170,6 +5184,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountImage,
     workFromRef,
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
     openRoom: (focus) => room.open(focus),
@@ -5188,6 +5204,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mountImage,
     workFromRef,
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
     openSheet,
@@ -5232,6 +5250,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const majlis = createMajlis({
     sync,
+    mediaUrl,
     host: q('majlisBody'),
     // مجلسان منفصلان: الأنمي في قسمه والمانجا في قسمها
     section: () => root.dataset.section ?? 'manga',
@@ -5241,6 +5260,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     workFromRef,
     openWork: (w) => void openWork(w),
     preview: (w, opts) => previewWork(w, opts),
+    playMoment: row => moments.open(row),
+    resolveMomentSources: moments.resolveSources,
     openAnime: (ref, opts) => openAnimeRef(ref, opts),
     openFrame: (id) => void deps.go({ name: 'frame', id }),
     openProfile: (userId) => openProfile(userId),
@@ -5346,6 +5367,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
+    openMomentWork: event => nativeMomentTarget(event, false),
+    openMomentEpisode: event => nativeMomentTarget(event, true),
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     openUpdates: (section) => openUpdates(section),
     sync,
@@ -5362,6 +5385,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'anime' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),
@@ -5371,6 +5395,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
+    friends: () => deps.friends?.() ?? [],
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
@@ -5380,6 +5405,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       openShareSheet({
         sync,
         friends: deps.friends?.() ?? [],
+        mediaUrl,
         openSheet: (build) => openSheet(build, { tone: 'cinema' }),
         closeSheet,
         sheetBody: () => q('sheetBody'),
@@ -5541,6 +5567,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      moments.destroy();
       addonViewGeneration++;closeAddonSource();
       detailDock.destroy();
       followTimeClosed = true;

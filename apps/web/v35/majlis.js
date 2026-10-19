@@ -14,6 +14,7 @@
  */
 
 import { glyph } from './icons.js';
+import { createMomentPreviews, momentOf } from './moment-media.js';
 import { countLabel } from './plural.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { EMOJI_GROUPS } from './emoji.js';
@@ -71,11 +72,14 @@ const parse = (text, fallback) => {
  *   openProfile: (userId: string) => void,
  *   openShare: () => void,
  *   preview: (work: object, opts?: { chapter?: { label: string, number: number|null } }) => void,
+ *   playMoment?: (row: object) => void, resolveMomentSources?: (row: object) => Promise<object[]>,
+ *   mediaUrl?: (key: string) => string,
  *   pageImage?: ((sourceId: string, page: object) => Promise<string>) | null,
  * }} ctx
  */
 export function createMajlis(ctx) {
   const { sync, host } = ctx;
+  const momentPreviews = createMomentPreviews({ mediaUrl: ctx.mediaUrl, resolveSources: ctx.resolveMomentSources });
   const me = () => sync.user?.userId;
   let filter = 'all';
   let presence = [];
@@ -557,14 +561,15 @@ export function createMajlis(ctx) {
     card.dataset.tone = toneOf(r.series_ref);
     const chapter = r.chapter_label ? { label: r.chapter_label, number: r.chapter_number ?? null } : null;
     // لحظة من المشغّل: «الحلقة 12 · 12:10–12:20»
-    const moment = anime && chapter?.label.includes('·');
+    const moment = momentOf(r);
     const verb = moment ? 'شارك لحظة من' : 'رشّح';
-    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : cinema ? 'رشّح فيلمًا أو مسلسلًا' : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
+    card.append(headline(e.actor, chapter ? `${verb} ${chapter.label.split(' · ')[0]}` : moment ? 'شارك لحظة' : cinema ? 'رشّح فيلمًا أو مسلسلًا' : anime ? 'رشّح أنمي' : 'رشّح عملًا', targetLabel(r.to_id, !r.to_id)));
     const work = workOf(r.series_ref, r.series_title, r.cover_url);
-    const b = el('button', 'mj-work');
+    const b = el('button', moment ? 'mj-work mv-card' : 'mj-work');
     b.type = 'button';
     const cover = el('span', 'mj-work-cover');
-    void ctx.mountImage(cover, work);
+    if (moment) momentPreviews.mount(cover, r);
+    else void ctx.mountImage(cover, work);
     const copy = el('span', 'mj-work-copy');
     copy.append(el('bdi', 'mj-work-title', r.series_title || work.title?.english || 'عمل'));
     if (chapter) {
@@ -586,7 +591,8 @@ export function createMajlis(ctx) {
     b.append(cover, copy);
     b.onclick = () => {
       acknowledge('rec', r.id, true);
-      ctx.preview(work, chapter ? { chapter } : {});
+      if (moment) ctx.playMoment?.(r);
+      else ctx.preview(work, chapter ? { chapter } : {});
     };
     card.append(b);
     // لحظة: زر صريح يشغّل مداها وحده عند صديقك، ثم «إعادة» أو «الحلقة كاملة»
@@ -597,7 +603,7 @@ export function createMajlis(ctx) {
       watch.append(el('span', null, 'شاهد اللقطة'));
       watch.onclick = () => {
         acknowledge('rec', r.id, true);
-        ctx.preview(work, { chapter });
+        ctx.playMoment?.(r);
       };
       card.append(watch);
     }
@@ -655,6 +661,7 @@ export function createMajlis(ctx) {
   // ── الرسم ──
 
   function render() {
+    momentPreviews.reset();
     seenObserver?.disconnect();
     for (const t of seenTimers.values()) clearTimeout(t);
     seenTimers.clear();
@@ -760,6 +767,7 @@ export function createMajlis(ctx) {
       timer = setInterval(() => void refreshPresence(), 25_000);
     },
     hide() {
+      momentPreviews.reset();
       clearInterval(timer);
       timer = null;
       closeBar();

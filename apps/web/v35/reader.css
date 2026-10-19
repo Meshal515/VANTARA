@@ -368,6 +368,18 @@
   margin-inline-end: 6px;
   font-size: var(--fs-meta);
 }
+.v35 .rd-frame-save {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+.v35 .rd-frame-save:disabled {
+  opacity: 0.55;
+}
 .v35.rd--frame .rd-page {
   cursor: pointer;
 }

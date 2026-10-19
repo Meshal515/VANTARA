@@ -89,3 +89,19 @@ it("distinguishes a resolver timeout from user cancellation so health can cool d
     vi.useRealTimers();
   }
 });
+
+it("decodes legacy Arabic subtitle downloads without corrupting UTF8 or declared encodings", async () => {
+  const arabic = "مرحبا بالعالم";
+  const legacy = new Uint8Array([227, 209, 205, 200, 199, 32, 200, 199, 225, 218, 199, 225, 227]);
+  for (const [bytes, type, expected] of [
+    [legacy, "application/force-download", arabic],
+    [new TextEncoder().encode(arabic), "text/plain", arabic],
+    [new Uint8Array([239,187,191,...new TextEncoder().encode(arabic)]), "text/plain; charset=windows-1256", arabic],
+    [new Uint8Array([233]), "text/plain; charset=windows-1252", "é"],
+    [new Uint8Array([255,254,69,6,49,6,45,6,40,6,39,6]), "text/plain", "مرحبا"],
+    [new Uint8Array([254,255,6,69,6,49,6,45,6,40,6,39]), "text/plain", "مرحبا"],
+  ]) {
+    const t = createTransport({fetchImpl: async () => new Response(bytes, {headers: {"content-type": type}})});
+    expect(await t.text("https://subs.test/ar.srt", {fallbackCharset: "windows-1256"})).toBe(expected);
+  }
+});
