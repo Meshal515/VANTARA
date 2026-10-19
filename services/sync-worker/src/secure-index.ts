@@ -51,8 +51,8 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
   if (!origin || !allowed.includes(origin)) return {};
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'authorization, content-type',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type, range',
+    'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
     'access-control-max-age': '86400',
     vary: 'origin',
   };
@@ -587,7 +587,7 @@ export default {
       if (
         path === '/health' ||
         (path === '/v1/accounts' && request.method === 'GET') ||
-        (path.startsWith('/v1/media/') && request.method === 'GET')
+        (path.startsWith('/v1/media/') && (request.method === 'GET' || request.method === 'HEAD'))
       ) {
         return legacyWorker.fetch(request, env, ctx);
       }

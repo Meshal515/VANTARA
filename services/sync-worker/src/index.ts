@@ -32,11 +32,7 @@ import {
   hiddenToken,
   isMajlisReaction,
   isMajlisTarget,
-  sniffImageType,
-  sniffAudioType,
   isMediaHash,
-  MAX_MEDIA_BYTES,
-  MAX_MEDIA_BYTES_PER_USER,
   isRecommendationState,
   isRecommendationIntent,
   socialLinkFor,
@@ -53,7 +49,10 @@ import {
   correlationIdFrom,
   frameLinkFor,
   normalizeFramePages,
+  normalizeMoment,
 } from '@vantara/domain';
+
+import { handleMediaGet, handleMediaUpload } from './media.ts';
 
 import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 
@@ -85,8 +84,8 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
   if (!origin || !allowed.includes(origin)) return {};
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'authorization, content-type',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type, range',
+    'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
     'access-control-max-age': '86400',
     vary: 'origin',
   };
@@ -323,7 +322,7 @@ const DELTA_TABLES = [
   ['ratings', 'user_id, series_ref, score, updated_at, rev'],
   ['comments', 'id, author_id, series_ref, chapter_ref, parent_id, body, spoiler, created_at, deleted, rev'],
   ['reactions', 'comment_id, user_id, emoji, active, rev'],
-  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed'],
+  ['recommendations', 'id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev, audience, hidden_json, chapter_label, chapter_number, removed, moment_json'],
   ['majlis_reactions', 'target_kind, target_id, user_id, emoji, updated_at, rev'],
   ['majlis_receipts', 'target_kind, target_id, user_id, delivered_at, seen_at, rev'],
   // سجلّ المالك خاص. النسخة الاجتماعية في جدول مستقل وقابلة للسحب.
@@ -1540,6 +1539,8 @@ export function statementsFor(
     }
 
     case 'recommendation.send': {
+      const moment = p['moment'] == null ? null : normalizeMoment(p['moment']);
+      if (p['moment'] != null && !moment) return null;
       const seriesRef = asString(p['seriesRef'], 200);
       const toId = asString(p['toId'], 80);
       if (!seriesRef) return null;
@@ -1559,8 +1560,8 @@ export function statementsFor(
           .prepare(
             `INSERT INTO recommendations
                (id, from_id, to_id, series_ref, series_title, cover_url, message, state, created_at, rev,
-                audience, hidden_json, chapter_label, chapter_number)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?)
+                audience, hidden_json, chapter_label, chapter_number, moment_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'SENT', ?, ?, 'MAJLIS', ?, ?, ?, ?)
              ON CONFLICT (id) DO NOTHING`,
           )
           .bind(
@@ -1577,6 +1578,7 @@ export function statementsFor(
             // ترشيح فصلٍ بعينه («اقرأ الفصل 110»)، أو العمل كله إن غابا
             asString(p['chapterLabel'], 120),
             asNumber(p['chapterNumber']),
+            moment ? JSON.stringify(moment) : null,
           ),
       ];
 
@@ -2547,6 +2549,21 @@ async function handleOps(request: Request, env: Env, userId: string, now: number
   const acknowledged = await appliedOpIds(ops, env);
   const skipped = new Set<string>();
   const unapplied = new Set<string>(invalidRecommendations);
+  for (const op of ops) {
+    if (op.kind !== 'recommendation.send' || op.payload['moment'] == null || acknowledged.has(op.opId)) continue;
+    const moment = normalizeMoment(op.payload['moment']);
+    if (!moment) { unapplied.add(op.opId); continue; }
+    const video = await env.DB.prepare(`SELECT duration_ms FROM media WHERE hash = ? AND owner_id = ? AND mime = 'video/mp4'
+      AND size = (SELECT COALESCE(SUM(size), 0) FROM media_chunks WHERE hash = media.hash)`)
+      .bind(moment.mediaKey, userId).first<{ duration_ms: number }>();
+    if (!video || Math.abs(video.duration_ms - (moment.endMs - moment.startMs)) > 250 || moment.durationMs !== undefined && Math.abs(video.duration_ms - moment.durationMs) > 250) {
+      unapplied.add(op.opId); continue;
+    }
+    if (moment.posterKey) {
+      const poster = await env.DB.prepare("SELECT hash FROM media WHERE hash = ? AND owner_id = ? AND mime LIKE 'image/%' AND length(data) > 0").bind(moment.posterKey, userId).first();
+      if (!poster) unapplied.add(op.opId);
+    }
+  }
 
   // field merges تحتاج revision مستقلًا لأن field_revs نفسها تستخدمه للمقارنة.
   for (const op of ops) {
@@ -3040,80 +3057,6 @@ async function handleStats(env: Env, viewerId: string, targetId: string, now: nu
   return json({ userId: targetId, ...stats, followedWorks, anime: { followed: followedAnime, watchedEpisodes, watchedAnime }, cinema: { followed: followedCinema }, usage: { todayMs, weekMs, totalMs }, time });
 }
 
-// ───────────────────────────── الصور ─────────────────────────────
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
-function fromBase64(text: string): Uint8Array {
-  const binary = atob(text);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-/**
- * رفع صورة ملف شخصي. يرجع رابطها الدائم.
- *
- * النوع من بايتات الملف لا من ترويسته، والحجم محدود للصورة وللحساب. والرابط
- * بعنوان المحتوى: الرفع المكرّر لنفس الصورة لا ينشئ صفًّا ثانيًا.
- */
-async function handleMediaUpload(request: Request, env: Env, userId: string, url: URL, now: number): Promise<Response> {
-  const declared = Number(request.headers.get('content-length') ?? '0');
-  if (declared > MAX_MEDIA_BYTES) return json({ error: 'too_large', max: MAX_MEDIA_BYTES }, { status: 413 });
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.length === 0) return json({ error: 'empty' }, { status: 400 });
-  if (bytes.length > MAX_MEDIA_BYTES) return json({ error: 'too_large', max: MAX_MEDIA_BYTES }, { status: 413 });
-  // صورة، أو رسالة صوتية للمجلس — النوع من البايتات لا من الترويسة
-  const mime = sniffImageType(bytes) ?? sniffAudioType(bytes);
-  if (!mime) return json({ error: 'not_an_image' }, { status: 415 });
-
-  const used = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM media WHERE owner_id = ?')
-    .bind(userId)
-    .first<{ total: number }>();
-  if (Number(used?.total ?? 0) + bytes.length > MAX_MEDIA_BYTES_PER_USER) {
-    return json({ error: 'quota' }, { status: 413 });
-  }
-
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  const hash = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.DB.prepare(
-    `INSERT INTO media (hash, owner_id, mime, size, data, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (hash) DO NOTHING`,
-  )
-    .bind(hash, userId, mime, bytes.length, toBase64(bytes), now)
-    .run();
-  return json({ hash, mime, size: bytes.length, url: `${url.origin}/v1/media/${hash}` });
-}
-
-/**
- * الصورة نفسها، بلا جلسة: `<img>` لا يرسل ترويسة هوية، وشاشة «من يتابع؟»
- * تعرضها قبل الدخول. المعرّف بصمة محتوى لا تُخمَّن، والصورة لا تتغيّر أبدًا
- * تحت رابطها فتُخزَّن سنة. و`nosniff` مع سياسة محتوى فارغة: حتى لو التبس
- * نوعٌ على متصفح لا يُنفَّذ شيء.
- */
-async function handleMediaGet(env: Env, hash: string): Promise<Response> {
-  if (!isMediaHash(hash)) return new Response('not found', { status: 404 });
-  const row = await env.DB.prepare('SELECT mime, data FROM media WHERE hash = ?')
-    .bind(hash)
-    .first<{ mime: string; data: string }>();
-  if (!row) return new Response('not found', { status: 404 });
-  return new Response(fromBase64(row.data).buffer as ArrayBuffer, {
-    headers: {
-      'content-type': row.mime,
-      'cache-control': 'public, max-age=31536000, immutable',
-      'x-content-type-options': 'nosniff',
-      'content-security-policy': "default-src 'none'",
-      // لون الخلفية الحريرية يُستخرج من الصورة في canvas: يحتاج CORS
-      'access-control-allow-origin': '*',
-      'cross-origin-resource-policy': 'cross-origin',
-    },
-  });
-}
-
 // ───────────────────────────── التوجيه ─────────────────────────────
 
 export default {
@@ -3135,8 +3078,8 @@ export default {
         return json({ ok: true, protocol: SYNC_PROTOCOL, rev: await currentRev(env) }, {}, cors);
       }
 
-      if (path.startsWith('/v1/media/') && request.method === 'GET') {
-        return await handleMediaGet(env, path.slice('/v1/media/'.length));
+      if (path.startsWith('/v1/media/') && (request.method === 'GET' || request.method === 'HEAD')) {
+        return await handleMediaGet(request, env, path.slice('/v1/media/'.length));
       }
 
       // بلا جلسة: ما تحتاجه شاشة اختيار الحساب فقط
