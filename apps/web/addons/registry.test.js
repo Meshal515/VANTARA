@@ -231,3 +231,47 @@ it('opens the setup page beside the manifest on its own path, like Stremio, with
  // كان يفتح https://host.test/configure (جذر الموقع) فيعيد 404 لكل إضافة على مسار فرعي
  expect(r.configurationUrl(one.key)).toBe('https://host.test/addons/subs/configure');
 });
+
+it("reinstalls the exact configured endpoint, invalidates cached results, and preserves credentials", async () => {
+  const store = createStore({ indexedDB: null });
+  let version = "1.0.0", requested = [];
+  const registry = createAddonRegistry({
+    store,
+    transport: { json: async (url, options) => { requested.push({url, options}); return raw(version); } },
+  });
+  await registry.ready;
+  const url = "https://addon.test/private/manifest.json?token=hidden";
+  const preview = await registry.inspect(url);
+  await registry.install(preview);
+  const oldEpoch = registry.connection(preview.manifest.key).cacheEpoch;
+  version = "2.0.0";
+  const refreshed = await registry.reinstall(preview.manifest.key);
+  expect(refreshed.version).toBe("2.0.0");
+  expect(registry.connection(preview.manifest.key).manifestUrl).toBe(url);
+  expect(registry.connection(preview.manifest.key).cacheEpoch).not.toBe(oldEpoch);
+  expect(requested.at(-1).url).toBe(url);
+  expect(requested.at(-1).options.cache).toBe("no-store");
+  expect(JSON.stringify(registry.list())).not.toContain("hidden");
+});
+it("failed reinstallation and active sessions preserve the installed version", async () => {
+  const store = createStore({ indexedDB: null });
+  let next = raw("1.0.0"), breakFetch = false;
+  const registry = createAddonRegistry({ store, transport: { json: async () => {
+    if (breakFetch) throw new Error("network lost");
+    return next;
+  } } });
+  await registry.ready;
+  const key = (await registry.install(await registry.inspect("https://addon.test/manifest.json"))).key;
+  const session = registry.snapshot();
+  await expect(registry.reinstall(key)).rejects.toThrow("الجلسة");
+  session.release();
+  breakFetch = true;
+  await expect(registry.reinstall(key)).rejects.toThrow("network lost");
+  breakFetch = false;
+  next = { ...raw("2.0.0"), id: "another.addon" };
+  await expect(registry.reinstall(key)).rejects.toThrow("هوية");
+  expect(registry.list()[0].version).toBe("1.0.0");
+  const restored = createAddonRegistry({ store, transport: { json: async () => raw() } });
+  await restored.ready;
+  expect(restored.list()[0].version).toBe("1.0.0");
+});
