@@ -7,6 +7,7 @@
  */
 
 import { glyph } from './icons.js';
+import { recipientFace } from './recipient.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -15,29 +16,11 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-function face(person, size) {
-  if (person.everyone) {
-    const s = el('span', 'avatar-letter share-everyone');
-    s.innerHTML = glyph('users', { size: Math.round(size * 0.42) });
-    s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-    return s;
-  }
-  if (person.avatarKey) {
-    const img = el('img');
-    img.src = person.avatarKey;
-    img.alt = '';
-    img.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;object-fit:cover;flex:none`;
-    return img;
-  }
-  const s = el('span', 'avatar-letter', [...String(person.displayName || '؟')][0]);
-  s.style.cssText = `width:${size}px;height:${size}px;border-radius:99px;flex:none`;
-  return s;
-}
-
 /**
  * @param {{
  *   sync: any,
  *   friends: Array<{userId: string, displayName: string, avatarKey: string|null}>,
+ *   mediaUrl?: (hash: string) => string,
  *   openSheet: (build: (body: HTMLElement) => void) => void,
  *   closeSheet: () => void,
  *   sheetBody: () => HTMLElement,
@@ -48,6 +31,7 @@ function face(person, size) {
  */
 export function openShareSheet(ctx) {
   const { work, chapter, friends } = ctx;
+  const face = (person, size) => recipientFace(person, { friends, size, mediaUrl: ctx.mediaUrl });
   const draft = { message: '' };
   const what = chapter ? `${chapter.label} من ${work.title}` : work.title;
 
