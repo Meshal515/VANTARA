@@ -64,9 +64,21 @@ export function buildViewportCapture({ viewport, scroll, toolbar, tray, pages, p
   return { mode: 'viewport', bounds, width: Math.max(1, Math.floor(bounds.width * scale)), height: Math.max(1, Math.floor(bounds.height * scale)), draws };
 }
 
+/** A zoom overlay uses CSS-transformed coordinates and its own clipping frame.
+ * The regular reader is beneath it and MUST NOT be captured while zoom is open. */
+export function buildZoomCapture({ viewport, imageRect, naturalWidth, naturalHeight, pixelRatio = 1 }) {
+  return buildViewportCapture({
+    viewport, scroll: viewport,
+    pages: [{ rect: imageRect, clip: viewport, naturalWidth, naturalHeight }],
+    pixelRatio,
+  });
+}
+
 /** Draw synchronously at the click's scroll position, before any async storage work. */
 export function captureReaderViewport(root) {
   const doc = root.ownerDocument, win = doc.defaultView;
+  const zoom = root.querySelector('#rdZoom');
+  if (zoom && !zoom.hidden) return captureReaderZoom(root, zoom, doc, win);
   const scroll = root.querySelector('#rdScroll');
   const vv = win.visualViewport;
   const viewport = vv ? box(vv.offsetLeft, vv.offsetTop, vv.width, vv.height) : box(0, 0, win.innerWidth, win.innerHeight);
@@ -83,6 +95,29 @@ export function captureReaderViewport(root) {
     pages.push({ image, clip, rect: containImageRect(image.getBoundingClientRect(), image.naturalWidth, image.naturalHeight), naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight });
   }
   const plan = buildViewportCapture({ viewport: content, scroll: content, toolbar, tray, pages, pixelRatio: win.devicePixelRatio });
+  return drawCaptureCanvas(doc, plan, pages);
+}
+
+/** The transformed zoomed image rect has already been scaled/panned by CSS. */
+function captureReaderZoom(root, zoom, doc, win) {
+  const image = zoom.querySelector('#rdZoomImg');
+  if (!image?.complete || !image.naturalWidth || !image.naturalHeight) {
+    throw new Error('انتظر تحميل الصورة المكبرة ثم جرّب الحفظ');
+  }
+  const vv = win.visualViewport;
+  const viewport = vv ? box(vv.offsetLeft, vv.offsetTop, vv.width, vv.height)
+    : box(0, 0, win.innerWidth, win.innerHeight);
+  const bounds = intersect(intersect(viewport, root.getBoundingClientRect()), zoom.getBoundingClientRect());
+  const actual = containImageRect(image.getBoundingClientRect(), image.naturalWidth, image.naturalHeight);
+  const plan = buildZoomCapture({
+    viewport: bounds, imageRect: actual,
+    naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+    pixelRatio: win.devicePixelRatio,
+  });
+  return drawCaptureCanvas(doc, plan, [{ image }]);
+}
+
+function drawCaptureCanvas(doc, plan, pages) {
   const canvas = doc.createElement('canvas');
   canvas.width = plan.width;
   canvas.height = plan.height;
