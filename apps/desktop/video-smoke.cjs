@@ -28,27 +28,27 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
   await setServices(services);
   try{
     await window.loadURL('vantara://app/desktop/video-smoke.html');window.show();window.focus();
-    await until(()=>window.webContents.executeJavaScript('window.VantaraVideoSmokeReady===true'));
-    await services.startPlayback({session:'embedded-proof',candidate:{url:'https://owned.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',pause:true});
-    await until(()=>events.some(e=>e.type==='playback/ready'&&e.embedded));
-    const parent=nativeWindowId(window.getNativeWindowHandle());
+    report.stage='renderer-ready';await until(()=>window.webContents.executeJavaScript('window.VantaraVideoSmokeReady===true'));
+    report.stage='start-playback';await services.startPlayback({session:'embedded-proof',candidate:{url:'https://owned.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',pause:true});
+    report.stage='first-frame';await until(()=>events.some(e=>e.type==='playback/ready'&&e.embedded));
+    report.stage='native-child';const parent=nativeWindowId(window.getNativeWindowHandle());
     let proof=await until(async()=>{const s=await videoHost.inspect();return s.children.some(c=>c.child&&c.parent===s.host&&/mpv/i.test(c.class))&&s.width>200&&s.height>100?s:false;});
     assert.equal(proof.parent,parent);report.realEmbeddedChild=true;report.initial=proof;
-    await window.webContents.executeJavaScript("document.querySelector('[data-action=\"pause\"]').click()");
+    report.stage='pause-controls';await window.webContents.executeJavaScript("document.querySelector('[data-action=\"pause\"]').click()");
     await until(()=>events.some(e=>e.type==='playback/pause'&&e.paused===false));
-    await window.webContents.executeJavaScript("document.querySelector('[data-action=\"pause\"]').click()");
+    report.stage='pause-controls';await window.webContents.executeJavaScript("document.querySelector('[data-action=\"pause\"]').click()");
     await until(()=>events.some(e=>e.type==='playback/pause'&&e.paused===true));
     await services.playbackCommand({session:'embedded-proof',command:'subtitle-load',value:{url:'https://owned.example.com/owned.srt',lang:'ar',label:'العربية'}});
     await until(()=>events.some(e=>e.type==='playback/subtitles'&&e.tracks.some(t=>t.lang==='ar'&&t.selected)));
     // Exercise the actual transparent overlay → main renderer → native MPV chain.
-    const overlayWindow=await until(()=>playerOverlay?.window());
+    report.stage='overlay-subtitles';const overlayWindow=await until(()=>playerOverlay?.window());
     await until(()=>overlayWindow.webContents.executeJavaScript('!!window.VantaraOverlayView'));
     await overlayWindow.webContents.executeJavaScript(`window.VantaraOverlayView.open.subtitles();[...document.querySelectorAll('button')].find(b=>b.textContent==='الضبط').click();`);
     await overlayWindow.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5').click()`);
     await until(async()=>Math.abs((await services.inspectPlayback({session:'embedded-proof'})).subtitleDelay-.5)<.001);
     report.overlaySubtitleDelay=true;
     await overlayWindow.webContents.executeJavaScript('window.VantaraOverlayView.closeSheet()');
-    const bounds=window.getBounds();window.setSize(bounds.width+160,bounds.height+100);
+    report.stage='resize';const bounds=window.getBounds();window.setSize(bounds.width+160,bounds.height+100);
     proof=await until(async()=>{const s=await videoHost.inspect(),c=s.children.find(c=>/mpv/i.test(c.class));return s.width>report.initial.width&&s.height>report.initial.height&&c?.width===s.width&&c?.height===s.height?s:false;});
     report.resized=true;report.afterResize=proof;
     await window.webContents.executeJavaScript("const s=document.querySelector('[data-control=\"seek\"]');s.value='500';s.dispatchEvent(new Event('change'));document.querySelector('[data-action=\"fullscreen\"]').click()");
@@ -63,7 +63,7 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
         &&host.x===0&&host.y===0&&host.width===host.parentWidth&&host.height===host.parentHeight&&same(host.width,content.width*scale)&&same(host.height,content.height*scale)&&same(child?.width,host.width)&&same(child?.height,host.height)
         ?{host,content,overlay,display:display.bounds}:false;
     };
-    report.fullscreenBounds=await until(async()=>{
+    report.stage='fullscreen-bounds';report.fullscreenBounds=await until(async()=>{
       const value=await aligned();if(!value)return false;
       return ['x','y','width','height'].every(key=>Math.abs(value.content[key]-value.display[key])<=1)?value:false;
     });
@@ -73,9 +73,9 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     assert(capture&&!capture.thumbnail.isEmpty(),'Fullscreen desktop capture unavailable');
     await fs.writeFile(reportPath+'.fullscreen.png',capture.thumbnail.toPNG());
     const key=async(target,keyCode)=>{target.focus();await until(()=>target.isFocused());target.webContents.sendInputEvent({type:'keyDown',keyCode});target.webContents.sendInputEvent({type:'keyUp',keyCode});};
-    await key(overlayWindow,'Escape');await until(()=>!window.isFullScreen());await until(aligned);report.overlayEscapeRestores=true;
-    await key(window,'F11');await until(()=>window.isFullScreen());await until(aligned);report.mainF11=true;
-    await key(overlayWindow,'F11');await until(()=>!window.isFullScreen());await until(aligned);report.overlayF11=true;
+    report.stage='overlay-escape';await key(overlayWindow,'Escape');await until(()=>!window.isFullScreen());await until(aligned);report.overlayEscapeRestores=true;
+    report.stage='main-f11';await key(window,'F11');await until(()=>window.isFullScreen());await until(aligned);report.mainF11=true;
+    report.stage='overlay-f11';await key(overlayWindow,'F11');await until(()=>!window.isFullScreen());await until(aligned);report.overlayF11=true;
     // Deliver Win32 key messages to the real mpv child, which must use input.conf
     // and return through the production IPC/renderer fullscreen action.
     const nativeKey=(hwnd,key)=>{
@@ -85,12 +85,12 @@ $h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMess
       require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:10000});
     };
     const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
-    nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
-    nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
+    report.stage='native-f11';nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
+    report.stage='native-escape';nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
     assert(await window.webContents.executeJavaScript('!!document.querySelector(".desktop-player")'));
     report.rendererControls=true;report.arabicSubtitleSelected=true;
     // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
-    await window.webContents.executeJavaScript('window.VantaraVideoSmoke.enterRoom()');
+    report.stage='room';await window.webContents.executeJavaScript('window.VantaraVideoSmoke.enterRoom()');
     await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".pp-lobby .pl-choose-server")'));
     await until(async()=>!(await videoHost.inspect()).visible);report.sharedRoomRenderer=true;report.roomHidesNativeVideo=true;
     await fs.writeFile(reportPath+'.room.png',(await window.webContents.capturePage()).toPNG());
@@ -110,9 +110,9 @@ $h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMess
     await window.webContents.executeJavaScript("document.querySelector('[data-action=\"close\"]').click()");
     await until(()=>!videoHost.snapshot().embedded&&events.some(e=>e.type==='playback/closed'));report.cleanup=true;
     assert(!events.some(e=>e.type==='playback/error'));
-    report.transport='owned MP4/subtitle fixture; real HWND/video/renderer/IPC';
+    report.stage='complete';report.transport='owned MP4/subtitle fixture; real HWND/video/renderer/IPC';
   }catch(error){report.error=error.message;throw error;}
-  finally{await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
+  finally{report.playbackEvents=events.filter(e=>!['playback/progress','playback/state'].includes(e.type)).slice(-80).map(({type,stage,message,embedded})=>({type,stage,message,embedded}));await services.close();https.request=previousRequest;dns.lookup=previousDNS;server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true});await fs.writeFile(reportPath,JSON.stringify(report,null,2));}
   return report;
 }
 module.exports={runEmbeddedVideoSmoke};
