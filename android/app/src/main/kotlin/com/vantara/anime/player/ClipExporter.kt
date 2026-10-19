@@ -14,6 +14,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.transformer.Codec
@@ -40,7 +41,7 @@ import java.io.File
  * playback retains its original quality. HLS segment boundaries never extend the range. */
 @OptIn(UnstableApi::class)
 class ClipExporter(private val context: Context, private val client: OkHttpClient) {
-    /** بداية الملف الفعلية بعد التقريب لإطار مفتاحي (للعرض). */
+    /** بداية المدى المختار دون تقريب إلى مقطع سابق. */
     var lastStartMs: Long? = null
         private set
 
@@ -72,7 +73,7 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
      */
     fun export(c: Candidate, r: ClipRange, @Suppress("UNUSED_PARAMETER") keyframeStartMs: Long?, onProgress: (Int) -> Unit, onResult: (Result) -> Unit) {
         cached(c, r)?.let { return onResult(Result.Done(it)) }
-        if (c.url.startsWith("blob:") || !c.url.startsWith("http")) {
+        if (!ClipExportBounds.supportsSource(c.url)) {
             return onResult(Result.Failed("هذا السيرفر لا يسمح بقصّ المقاطع", unsupported = true))
         }
         cancel()
@@ -84,7 +85,9 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
         val selection = ClipExportBounds.selection(r, keyframeStartMs)
         val startMs = selection.startMs
         lastStartMs = startMs
-        val http = MediaCache.factory(context, client, c.headers)
+        val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(client, c.url, c.headers) else client
+        val delegate = DefaultDataSource.Factory(context, MediaCache.factory(context, transport, c.headers))
+        val http = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(context).dataSourceFactory(delegate) else delegate
         val loader = DefaultAssetLoaderFactory(
             context,
             DefaultDecoderFactory(context),
@@ -105,12 +108,10 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(startMs)
                     .setEndPositionMs(r.endMs)
-                    // HLS: البداية بداية مقطع = إطار مفتاحي، فلا حاجة لأي ترميز
                     .setStartsAtKeyFrame(false)
                     .build(),
             )
             .build()
-        // بلا تأثيرات ولا صيغة مفروضة: الترميز الأصلي يُنقل كما هو (remux)
         val edited = EditedMediaItem.Builder(item)
             .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(720))))
             .build()
@@ -126,7 +127,6 @@ class ClipExporter(private val context: Context, private val client: OkHttpClien
 
         val t = Transformer.Builder(context)
             .setAssetLoaderFactory(loader)
-            // MP4: نقل مباشر، ويُرمَّز أول GOP فقط إن لم تبدأ البداية بإطار مفتاحي
             .experimentalSetTrimOptimizationEnabled(false)
             .setEncoderFactory(exactEncoder)
             .setVideoMimeType(MimeTypes.VIDEO_H264)
