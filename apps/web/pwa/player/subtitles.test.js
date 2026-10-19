@@ -133,3 +133,21 @@ it("shares an in-flight file when the same subtitle is tapped again", async () =
   expect(video.querySelectorAll("track").length).toBe(1);
   s.close();
 });
+
+it("ignores a failed subtitle download after the user chooses Off", async () => {
+  const { document } = parseHTML("<html><body></body></html>");
+  globalThis.document = document;
+  const video = document.createElement("video");
+  video.textTracks = [];
+  let fail;
+  const s = createSubtitleSession({ video, transport: { text: () => new Promise((_resolve, reject) => { fail = reject; }) } });
+  s.setStream({ subtitles: [{ url: "https://subs.test/ar.srt", lang: "ar" }] });
+  const selecting = s.select(s.tracks()[0].id);
+  const settled = selecting.then(() => "ignored", () => "failed");
+  await s.select(null);
+  fail(new Error("download failed"));
+  expect(await settled).toBe("ignored");
+  expect(s.selected()).toBeNull();
+  expect(video.querySelectorAll("track").length).toBe(0);
+  s.close();
+});
