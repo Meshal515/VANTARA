@@ -160,7 +160,7 @@ export function openSmartReader(deps, ctx) {
       ${iconButton('skipNext', 'الفصل التالي', { act: 'nextChapter', cls: 'icon-btn rd-next' })}
     </footer>
     <div class="rd-tray" id="rdTray" hidden><div class="rd-tray-strip" id="rdTrayStrip"></div><p id="rdTrayHint">المس الصفحات لتضيفها أو تشيلها</p></div>
-    <div class="rd-zoom" id="rdZoom" hidden><img alt="" id="rdZoomImg"></div>
+    <div class="rd-zoom" id="rdZoom" hidden><img alt="" id="rdZoomImg"><button type="button" class="rd-zoom-save" id="rdZoomSave" aria-label="حفظ الجزء الظاهر من الصورة المكبرة">حفظ الصورة الظاهرة</button></div>
     <div class="sheet-backdrop" id="rdSheet" data-act="sheetBackdrop"><div class="sheet" role="dialog" aria-modal="true" id="rdSheetBody"></div></div>
     <div class="toast rd-toast" id="rdToast" role="status" aria-live="polite"></div>`;
   deps.mount(root);
@@ -1143,9 +1143,11 @@ export function openSmartReader(deps, ctx) {
     if (e.touches.length < 2) pinch = null;
   }, { passive: true });
   const zoomEl = q('rdZoom');
+  q('rdZoomSave').addEventListener('click', (e) => { e.stopPropagation(); void saveVisibleFrame(); });
   zoomEl.addEventListener(
     'touchstart',
     (e) => {
+      if (e.target.closest('#rdZoomSave')) return;
       if (e.touches.length === 2) zoom.start = { d: dist(e.touches), scale: zoom.scale };
       else if (e.touches.length === 1) zoom.pan = { x: e.touches[0].clientX - zoom.x, y: e.touches[0].clientY - zoom.y };
     },
@@ -1247,8 +1249,9 @@ export function openSmartReader(deps, ctx) {
 
   let savingFrame = false;
   async function saveVisibleFrame() {
-    if (!state.frameMode || savingFrame) return;
-    const button = root.querySelector('[data-act="frameSave"]');
+    const zoomOpen = !q('rdZoom').hidden;
+    if ((!state.frameMode && !zoomOpen) || savingFrame) return;
+    const button = zoomOpen ? q('rdZoomSave') : root.querySelector('[data-act="frameSave"]');
     savingFrame = true;
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');

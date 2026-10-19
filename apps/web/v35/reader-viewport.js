@@ -25,10 +25,13 @@ export function buildViewportCapture({ viewport, scroll, toolbar, tray, pages, p
   const visible = pages.map((page, index) => ({ ...page, index, visible: intersect(intersect(page.rect, page.clip), bounds) }))
     .filter(page => nonempty(page.visible));
   if (!visible.length) throw new Error('No visible manga content');
-  // Vertical pages have an 820px maximum width on desktop. Exclude the side gutters.
-  const left = Math.min(...visible.map(p => Math.max(bounds.left, p.clip.left)));
-  const right = Math.max(...visible.map(p => Math.min(bounds.right, p.clip.right)));
-  bounds = intersect(bounds, box(left, bounds.top, right - left, bounds.height));
+  // Bound the export by ACTUAL visible manga pixels, not reader/zoom black
+  // letterboxing or desktop gutters. Keep real gaps between adjacent pages.
+  const left = Math.min(...visible.map(p => p.visible.left));
+  const right = Math.max(...visible.map(p => p.visible.right));
+  const top = Math.min(...visible.map(p => p.visible.top));
+  const bottom = Math.max(...visible.map(p => p.visible.bottom));
+  bounds = intersect(bounds, box(left, top, right - left, bottom - top));
   const draws = visible.map(page => {
     const clipped = intersect(page.visible, bounds);
     return {
@@ -39,14 +42,46 @@ export function buildViewportCapture({ viewport, scroll, toolbar, tray, pages, p
       dest: box(clipped.left - bounds.left, clipped.top - bounds.top, clipped.width, clipped.height),
     };
   });
+  // A complete single frame should be saved at its source resolution, not
+  // rendered to a phone-sized screenshot with black letterboxing. In contrast,
+  // a tall or zoomed/scroll-clipped manhwa must capture ONLY visible pixels.
+  // Do not try to allocate a very large native canvas in Android WebView.
+  if (draws.length === 1) {
+    const draw = draws[0], page = pages[draw.index], src = draw.source;
+    const tolerance = 0.5; // float-rounding between CSS and source pixels
+    const whole = Math.abs(src.left) <= tolerance &&
+      Math.abs(src.top) <= tolerance &&
+      Math.abs(src.right - page.naturalWidth) <= tolerance &&
+      Math.abs(src.bottom - page.naturalHeight) <= tolerance;
+    if (whole && page.naturalWidth * page.naturalHeight <= 24_000_000) {
+      const original = box(0, 0, page.naturalWidth, page.naturalHeight);
+      return {
+        mode: 'original', bounds: original,
+        width: page.naturalWidth, height: page.naturalHeight,
+        draws: [{ index: draw.index, source: original, dest: original }],
+      };
+    }
+  }
   // Bound memory on high-DPI tablets/desktops; never allocate the full manhwa height.
   const scale = Math.min(Math.max(1, Number(pixelRatio) || 1), 3, Math.sqrt(8_000_000 / (bounds.width * bounds.height)));
-  return { bounds, width: Math.max(1, Math.floor(bounds.width * scale)), height: Math.max(1, Math.floor(bounds.height * scale)), draws };
+  return { mode: 'viewport', bounds, width: Math.max(1, Math.floor(bounds.width * scale)), height: Math.max(1, Math.floor(bounds.height * scale)), draws };
+}
+
+/** A zoom overlay uses CSS-transformed coordinates and its own clipping frame.
+ * The regular reader is beneath it and MUST NOT be captured while zoom is open. */
+export function buildZoomCapture({ viewport, imageRect, naturalWidth, naturalHeight, pixelRatio = 1 }) {
+  return buildViewportCapture({
+    viewport, scroll: viewport,
+    pages: [{ rect: imageRect, clip: viewport, naturalWidth, naturalHeight }],
+    pixelRatio,
+  });
 }
 
 /** Draw synchronously at the click's scroll position, before any async storage work. */
 export function captureReaderViewport(root) {
   const doc = root.ownerDocument, win = doc.defaultView;
+  const zoom = root.querySelector('#rdZoom');
+  if (zoom && !zoom.hidden) return captureReaderZoom(root, zoom, doc, win);
   const scroll = root.querySelector('#rdScroll');
   const vv = win.visualViewport;
   const viewport = vv ? box(vv.offsetLeft, vv.offsetTop, vv.width, vv.height) : box(0, 0, win.innerWidth, win.innerHeight);
@@ -63,6 +98,29 @@ export function captureReaderViewport(root) {
     pages.push({ image, clip, rect: containImageRect(image.getBoundingClientRect(), image.naturalWidth, image.naturalHeight), naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight });
   }
   const plan = buildViewportCapture({ viewport: content, scroll: content, toolbar, tray, pages, pixelRatio: win.devicePixelRatio });
+  return drawCaptureCanvas(doc, plan, pages);
+}
+
+/** The transformed zoomed image rect has already been scaled/panned by CSS. */
+function captureReaderZoom(root, zoom, doc, win) {
+  const image = zoom.querySelector('#rdZoomImg');
+  if (!image?.complete || !image.naturalWidth || !image.naturalHeight) {
+    throw new Error('انتظر تحميل الصورة المكبرة ثم جرّب الحفظ');
+  }
+  const vv = win.visualViewport;
+  const viewport = vv ? box(vv.offsetLeft, vv.offsetTop, vv.width, vv.height)
+    : box(0, 0, win.innerWidth, win.innerHeight);
+  const bounds = intersect(intersect(viewport, root.getBoundingClientRect()), zoom.getBoundingClientRect());
+  const actual = containImageRect(image.getBoundingClientRect(), image.naturalWidth, image.naturalHeight);
+  const plan = buildZoomCapture({
+    viewport: bounds, imageRect: actual,
+    naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+    pixelRatio: win.devicePixelRatio,
+  });
+  return drawCaptureCanvas(doc, plan, [{ image }]);
+}
+
+function drawCaptureCanvas(doc, plan, pages) {
   const canvas = doc.createElement('canvas');
   canvas.width = plan.width;
   canvas.height = plan.height;

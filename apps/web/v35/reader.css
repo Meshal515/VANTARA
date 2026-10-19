@@ -532,6 +532,20 @@
   transform-origin: center;
   will-change: transform;
 }
+.v35 .rd-zoom-save {
+  position: absolute;
+  inset-inline-end: max(12px, env(safe-area-inset-right));
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 2;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  touch-action: manipulation;
+}
+.v35 .rd-zoom-save:disabled { opacity: .55; }
 
 .v35 .rd-toast {
   bottom: calc(24px + var(--safe-bottom));
