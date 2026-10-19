@@ -657,3 +657,33 @@ describe('server-authoritative mirror recovery after APK 177', () => {
     expect(sync.health().lastError).toBeTruthy();
   });
 });
+
+
+describe('real recovery diagnosis remains visible', () => {
+  it('retains the snapshot failure code after a successful incremental poll', async () => {
+    storage.setItem('vantara.cursor', '30');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: {
+      'u1/a': { user_id: 'u1', series_ref: 'a', rev: 29 },
+    } }));
+    const requests = vi.fn(async (url) => {
+      const since = new URL(String(url)).searchParams.get('since');
+      if (since === '0') return jsonResponse({
+        reset: false, cursor: 30, more: false, changes: {},
+      });
+      return jsonResponse({ reset: false, cursor: 30, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl: requests });
+    await sync.pull();
+    await vi.waitFor(() => {
+      expect(sync.health().lastError?.code).toBe('mirror_audit_missing_active_owner');
+    });
+    // A fresh incremental request may succeed. It must not hide the previously
+    // observed failure to restore the authoritative history.
+    await sync.pull();
+    expect(sync.health()).toMatchObject({
+      state: 'degraded',
+      lastError: { code: 'mirror_audit_missing_active_owner' },
+    });
+    expect(sync.rows('work_views')).toHaveLength(1);
+  });
+});
