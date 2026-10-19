@@ -15,13 +15,14 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA';
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
-  const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
+  const command=async(name,value)=>{if(!session)return;if(!ready){if(!failed)tell('انتظر بدء الفيديو…');return;}const id=session,rev=revision;try{if(engine.playerCommand)await engine.playerCommand({session:id,command:name,value});else await bridge.playbackCommand({session:id,command:name,value});}catch(error){if(session===id&&revision===rev)tell(error.message,true);}};
   const viewport=(hidden=false)=>{
     if(!video||!session)return;
     const rect=video.getBoundingClientRect?.();if(!rect)return;
     const width=g.innerWidth??doc.documentElement.clientWidth,height=g.innerHeight??doc.documentElement.clientHeight;
     if(!Number.isFinite(width)||!width||!Number.isFinite(height)||!height)return;
-    void bridge.playerViewport({session,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>tell(error.message,true));
+    const id=session,rev=revision;
+    void bridge.playerViewport({session:id,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>{if(session===id&&revision===rev)tell(error.message,true);});
   };
   const refreshSkip=()=>{
     const segment=activeSegment(skipResult?.timings,position);
@@ -131,12 +132,12 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
+    if(panel&&session===event.session){revision++;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
     dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
-    header.append(iconButton('شاهد مع أصدقائك','room','users',()=>engine.openPlayerRoom?.({session})),iconButton('ملء الشاشة','fullscreen','sidebar',async()=>{fullscreen=!fullscreen;try{await bridge.playerFullscreen({enabled:fullscreen});viewport();}catch(error){tell(error.message,true);}link?.push(true);}));
+    header.append(iconButton('شاهد مع أصدقائك','room','users',()=>engine.openPlayerRoom?.({session})),iconButton('ملء الشاشة','fullscreen','sidebar',async()=>{const enabled=!fullscreen,id=session;try{await bridge.playerFullscreen({enabled});fullscreen=enabled;viewport();}catch(error){if(session===id)tell(error.message,true);}link?.push(true);}));
     header.append(iconButton('خيارات المشغل','menu','more',showSettings));
     video=node('div',null,{class:'desktop-player-video','aria-label':'الفيديو'});video.append(node('div','يجهز الفيديو…',{class:'desktop-player-placeholder'}));
     const controls=node('div',null,{class:'desktop-player-controls'}),row=node('div',null,{class:'desktop-player-row'});
@@ -191,10 +192,11 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   }
   const tracks=(select,items,off=false)=>{if(!select)return;select.replaceChildren();if(off)select.append(node('option','إيقاف الترجمة',{value:'off'}));for(const track of items){const option=node('option',`${track.label}${track.lang&&track.lang!=='und'?` · ${track.lang}`:''}`,{value:track.id});if(track.selected)option.setAttribute('selected','');select.append(option);}select.disabled=!items.length;};
   const off=bridge.onEvent(event=>{
+    if(event.type==='window/fullscreen'){fullscreen=event.enabled===true;viewport();g.requestAnimationFrame?.(()=>viewport());link?.push(true);return;}
     if(event.type==='playback/preparing')open(event);
     if(event.session!==session)return;
     if(event.type==='playback/ready'){ready=true;failed=false;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
-    if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')void close();}
+    if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')keyboard({key:'Escape',target:{},preventDefault(){}});}
     if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;if(Number.isFinite(event.downloadSpeed)||Number.isFinite(event.peers))netInfo={kbps:Number.isFinite(event.downloadSpeed)?event.downloadSpeed/1024:netInfo?.kbps??null,peers:Number.isFinite(event.peers)?event.peers:netInfo?.peers??null};if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
     // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
     if(event.type==='playback/stage'||event.type==='playback/retrying')return;

@@ -57,3 +57,14 @@ test('الطبقة: شفافة يملكها البرنامج، تتبع الفي
   overlay.command({ sender: win.webContents }, { name: 'focus-app' }); assert.equal(parent.focused, true);
   overlay.close(); assert.equal(win.visible, false);
 });
+
+test('obsolete overlay state and close cannot replace or hide a newer player',async()=>{
+ const {BrowserWindow,parent,made}=fakeElectron();let loaded;
+ BrowserWindow.prototype.loadURL=()=>new Promise(resolve=>loaded=resolve);
+ const overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>parent,preload:'p.cjs',url:'vantara://app/desktop/overlay.html'});
+ overlay.open({session:'old'});const pending=overlay.state({session:'old',title:'old source'});
+ overlay.open({session:'new'});overlay.viewport({session:'new',x:0,y:0,width:1000,height:500,viewportWidth:1000,viewportHeight:600});
+ loaded();assert.equal(await pending,false);assert.deepEqual(made[0].sent,[]);
+ assert.equal(overlay.close({session:'old'}),false);assert.equal(made[0].visible,true);
+ overlay.close({session:'new'});assert.equal(made[0].visible,false);
+});

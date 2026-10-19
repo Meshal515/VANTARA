@@ -110,7 +110,7 @@ it('opens the shared server sheet and keeps settings out of the video until requ
 
 it('offers episode navigation, speed, fit and subtitle appearance without raw MPV commands',async()=>{
  const f=fixture();f.engine.playerState=async()=>({title:'أنمي',episode:1,total:2,section:'anime',sources:[],together:false});f.engine.changeEpisode=vi.fn(async()=>{});
- f.event({type:'playback/preparing',session:'one'});await new Promise(r=>setTimeout(r,0));
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});await new Promise(r=>setTimeout(r,0));
  const next=f.document.querySelector('[data-action=next-episode]');expect(next).toBeTruthy();expect(next.disabled).toBe(false);next.click();await Promise.resolve();expect(f.engine.changeEpisode).toHaveBeenCalledWith({session:'one',episode:2});
  f.document.querySelector('[data-action=settings]').click();
  for(const [key,value,name] of [['speed','1.5','speed'],['fit','fill','video-fit'],['subtitle-size','46','subtitle-size'],['subtitle-position','85','subtitle-position']]){
@@ -121,7 +121,7 @@ it('offers episode navigation, speed, fit and subtitle appearance without raw MP
 it('uses the shared AniSkip intervals and seeks only when a matching opening is active',async()=>{
  const skipLoader=vi.fn(async()=>({status:'READY',timings:{opening:{startMs:10000,endMs:90000},ending:null}}));
  const f=fixture({skipLoader});f.engine.playerState=async()=>({title:'أنمي',episode:1,total:2,malId:21,section:'anime',sources:[]});
- f.event({type:'playback/preparing',session:'one'});await new Promise(r=>setTimeout(r,0));f.event({type:'playback/progress',session:'one',position:15000,duration:1400000});await new Promise(r=>setTimeout(r,0));
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});await new Promise(r=>setTimeout(r,0));f.event({type:'playback/progress',session:'one',position:15000,duration:1400000});await new Promise(r=>setTimeout(r,0));
  expect(skipLoader).toHaveBeenCalledWith(expect.objectContaining({malId:21,episode:1,durationMs:1400000}));
  const skip=f.document.querySelector('[data-action=skip-segment]');expect(skip?.hidden).toBe(false);skip.click();await Promise.resolve();expect(f.commands).toContainEqual({session:'one',command:'seek',value:90000});f.player.dispose();
 });
@@ -131,3 +131,51 @@ it('retains the player and its source controls after an error followed by native
 });
 
 it('keeps torrent phase and cache rebuild diagnostics out of the viewing surface',()=>{const f=fixture();f.event({type:'playback/preparing',session:'one'});for(const stage of ['metadata','first-frame','cache-selected'])f.event({type:'playback/stage',session:'one',stage,volume:'E:'});f.event({type:'playback/retrying',session:'one',message:'رجعت لجزء حُذف من الكاش'});const text=f.document.querySelector('.desktop-player-status').textContent;expect(text).not.toMatch(/إطار|مغناطيس|كاش|حذف/);f.player.dispose();});
+
+it('keeps startup controls away from an unconnected player without presenting a playback failure',async()=>{
+ const f=fixture();f.event({type:'playback/preparing',session:'one'});
+ f.document.querySelector('[data-action=pause]').click();await Promise.resolve();
+ expect(f.bridge.playbackCommand).not.toHaveBeenCalled();
+ expect(f.document.querySelector('.desktop-player-status').dataset.error).not.toBe('true');
+ f.event({type:'playback/ready',session:'one'});
+ f.document.querySelector('[data-action=pause]').click();await Promise.resolve();
+ expect(f.bridge.playbackCommand).toHaveBeenCalledWith({session:'one',command:'pause',value:true});f.player.dispose();
+});
+it('ignores an obsolete same-session command rejection after switching sources',async()=>{
+ const f=fixture();let reject;
+ f.bridge.playbackCommand=vi.fn(()=>new Promise((_,no)=>reject=no));
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});
+ f.document.querySelector('[data-action=pause]').click();
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});
+ reject(new Error('old player disconnected'));await Promise.resolve();await Promise.resolve();
+ expect(f.document.querySelector('.desktop-player-status').textContent).toBe('');
+ f.player.dispose();
+});
+it('does not apply a player state response from a previous source in the same session',async()=>{
+ const f=fixture();let resolve;
+ f.engine.playerState=()=>new Promise(yes=>resolve=yes);
+ f.event({type:'playback/preparing',session:'one'});const old=resolve;
+ f.engine.playerState=async()=>({title:'new source',sources:[]});
+ f.event({type:'playback/preparing',session:'one'});await Promise.resolve();
+ old({title:'old source',sources:[]});await Promise.resolve();
+ expect(f.document.querySelector('.desktop-player header h2').textContent).toBe('new source');f.player.dispose();
+});
+it('uses native fullscreen state for Escape and restores the state when a request fails',async()=>{
+ const f=fixture();f.event({type:'playback/preparing',session:'one'});
+ f.event({type:'window/fullscreen',enabled:true});
+ f.event({type:'playback/action',session:'one',action:'close'});await Promise.resolve();
+ expect(f.bridge.playerFullscreen).toHaveBeenCalledWith({enabled:false});
+ expect(f.bridge.stopPlayback).not.toHaveBeenCalled();
+ f.bridge.playerFullscreen.mockRejectedValueOnce(new Error('fullscreen failed'));
+ f.document.querySelector('[data-action=fullscreen]').click();await Promise.resolve();
+ f.document.querySelector('[data-action=fullscreen]').click();await Promise.resolve();
+ expect(f.bridge.playerFullscreen).toHaveBeenLastCalledWith({enabled:true});f.player.dispose();
+});
+
+it('keeps genuine current command failures visible',async()=>{
+ const f=fixture();f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});
+ f.bridge.playbackCommand.mockRejectedValueOnce(new Error('native command failed'));
+ f.document.querySelector('[data-action=pause]').click();await Promise.resolve();await Promise.resolve();
+ expect(f.document.querySelector('.desktop-player-status').textContent).toBe('native command failed');
+ expect(f.document.querySelector('.desktop-player-status').dataset.error).toBe('true');f.player.dispose();
+});

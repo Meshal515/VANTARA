@@ -15,6 +15,7 @@ export function createOverlayLink({ bridge, session, snapshot, onCommand, timers
   return {
     async open() {
       try { active = (await bridge.playerOverlay({ open: true, session })) === true; } catch { active = false; }
+      if (active && closed) { void bridge.playerOverlay({ close: true, session }).catch(() => {}); active = false; }
       if (active && !closed) flush();
       return active && !closed;
     },

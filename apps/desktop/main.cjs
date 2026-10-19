@@ -6,6 +6,7 @@ const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
 const { firstPartyRequest } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
+const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
@@ -23,6 +24,7 @@ let window;
 let services;
 let videoHost;
 let overlay=null;
+let fullscreenController;
 let playbackSession=null;
 let quitting = false;
 // تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
@@ -125,7 +127,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
   if(videoHost){
     const {createPlayerOverlay}=require('./player-overlay.cjs');
-    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>fullscreenController?.bindInput(win),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }
@@ -173,10 +175,10 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   register('player-overlay',args=>{
     if(!overlay)return false;
     if(args?.open===true)return overlay.open(args);
-    if(args?.close===true){overlay.close();return true;}
+    if(args?.close===true)return overlay.close(args);
     return overlay.state(args);
   });
-  register('player-fullscreen',({enabled}={})=>{if(typeof enabled!=='boolean')throw new Error('طلب ملء الشاشة غير صالح');window.setFullScreen(enabled);return true;});
+  register('player-fullscreen',({enabled}={})=>fullscreenController.set(enabled));
   window = new BrowserWindow({
     title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: windowIcon,
@@ -186,8 +188,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   window.on?.('move',()=>{videoHost?.resize();overlay?.place();});
   window.on?.('minimize',()=>{videoHost?.hide();overlay?.place();});
   window.on?.('restore',()=>{videoHost?.show();overlay?.place();});
-  window.on?.('enter-full-screen',()=>overlay?.place());
-  window.on?.('leave-full-screen',()=>overlay?.place());
+  fullscreenController=createWindowFullscreen({window,layout:()=>{videoHost?.resize();overlay?.place();},onState:enabled=>publish({type:'window/fullscreen',enabled})});
   window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{
     if(isMainFrame){videoHost?.hide();overlay?.close();if(playbackSession)void services.stopPlayback({session:playbackSession});}
   });
@@ -221,7 +222,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       { label: 'الواجهة الرئيسية', click: () => void window.loadURL('vantara://app/index.html') },
       { type: 'separator' }, { label: 'خروج', role: 'quit' },
     ] },
-    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', role: 'togglefullscreen' }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
+    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
   ]));
   if(videoReportOption){
     if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');
