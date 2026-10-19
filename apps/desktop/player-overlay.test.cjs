@@ -78,6 +78,7 @@ test('controls report owner fullscreen to the native shell and clear it on close
  const win=made[0];assert.equal(marks.at(-1).enabled,false);
  full=true;overlay.place();assert.deepEqual(marks.at(-1),{enabled:true,win});
  full=false;overlay.place();assert.equal(marks.at(-1).enabled,false);
- full=true;overlay.place();overlay.close();assert.equal(marks.at(-1).enabled,false);
+ full=true;overlay.place();overlay.viewport({session:'one',x:0,y:0,width:1000,height:600,viewportWidth:1000,viewportHeight:600,hidden:true});assert.equal(marks.at(-1).enabled,false);
+ overlay.viewport({session:'one',x:0,y:0,width:1000,height:600,viewportWidth:1000,viewportHeight:600});overlay.close();assert.equal(marks.at(-1).enabled,false);
  assert.deepEqual(win.bounds,parent.getContentBounds());
 });
