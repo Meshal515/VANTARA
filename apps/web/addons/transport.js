@@ -7,7 +7,7 @@ export function createTransport({
 } = {}) {
   async function text(
     url,
-    { signal, limit = LIMITS.resource, timeout = timeoutMs, json = false, cache } = {},
+    { signal, limit = LIMITS.resource, timeout = timeoutMs, json = false, cache, fallbackCharset = null } = {},
   ) {
     const u = publicUrl(url);
     const controller = new AbortController();
@@ -60,6 +60,15 @@ export function createTransport({
       for (const chunk of chunks) {
         data.set(chunk, at);
         at += chunk.length;
+      }
+      const bom = data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf ? "utf-8"
+        : data[0] === 0xff && data[1] === 0xfe ? "utf-16le"
+        : data[0] === 0xfe && data[1] === 0xff ? "utf-16be" : null;
+      const declared = !json && /charset\s*=\s*["']?([^;\s"']+)/i.exec(res.headers.get("content-type") ?? "")?.[1];
+      if (bom || declared) return new TextDecoder(bom || declared).decode(data);
+      if (fallbackCharset) {
+        try { return new TextDecoder("utf-8", { fatal: true }).decode(data); }
+        catch { return new TextDecoder(fallbackCharset).decode(data); }
       }
       return new TextDecoder().decode(data);
     } catch (e) {
