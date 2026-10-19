@@ -27,6 +27,7 @@ let videoHost;
 let overlay=null;
 let fullscreenController;
 let playbackSession=null;
+let playbackStartRequest=0;
 let quitting = false;
 // تحديث نُزّل وتحقق: يُثبَّت بإعادة التشغيل الآن، أو بصمت عند الإغلاق إن أُجّل
 let pendingUpdate = null;
@@ -157,6 +158,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     onEvent: publish,
   });
   register('start-playback', async args => {
+    const request=++playbackStartRequest;
     // Start capture before source-selected is synchronously emitted. Only the
     // validated candidate's public hash/index are retained; never its URL.
     let candidate;
@@ -169,7 +171,9 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     playbackDiagnostics.begin(args?.session,candidate);
     try { return await services.startPlayback(args); }
     catch(error){
-      playbackDiagnostics.capture({type:'playback/error',session:args?.session,code:'START_FAILED'});
+      // Source switching reuses the UI session ID. A canceled older request
+      // must not overwrite the newer source's diagnostic state.
+      if(request===playbackStartRequest)playbackDiagnostics.capture({type:'playback/error',session:args?.session,code:'START_FAILED'});
       throw error;
     }
   });
