@@ -67,6 +67,13 @@ jobs:
           }
           if (-not $proof.fullscreenBounds -or -not (Test-Path "$report.fullscreen.png")) { throw 'Missing actual fullscreen bounds or screen capture' }
           @{sourceSha=$env:GITHUB_SHA;ref=$env:GITHUB_REF;publish=$false} | ConvertTo-Json | Set-Content (Join-Path $runtime 'review-source.json')
+      - name: Read proof diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $runtime=Join-Path $env:RUNNER_TEMP 'vantara-player-review'
+          Get-ChildItem $runtime -Filter '*report.json' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName }
+          Get-ChildItem $runtime -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 80 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
