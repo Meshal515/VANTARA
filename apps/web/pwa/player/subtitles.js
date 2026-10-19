@@ -206,6 +206,10 @@ export function createSubtitleSession({
       }
       let vtt;
       try { vtt = await download; }
+      catch (error) {
+        if (run !== generation || closed || choice !== selection) return;
+        throw error;
+      }
       finally { if (downloads.get(t.id) === download) downloads.delete(t.id); }
       if (run !== generation || closed || choice !== selection) return;
       const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
