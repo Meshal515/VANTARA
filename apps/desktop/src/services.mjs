@@ -960,10 +960,20 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     else if(command==='subtitle-size'&&Number.isFinite(value)&&value>=20&&value<=80)await ipcCommand(state,['set_property','sub-font-size',value]);
     else throw new Error('أمر مشغل غير مسموح');
   }
+  // Explicit native-embedding smoke hook: not registered on the renderer IPC bridge.
+  // It verifies mpv's real input.conf mapping and client-message dispatch, NOT
+  // whether a CI runner can focus a separate Win32 child with physical hardware.
+  async function smokeMpvBinding({session,key}={}) {
+    const state=current;
+    if(!videoHost||!inputConf||!state||state.stopped||state.session!==session)throw new Error('Embedded MPV smoke session unavailable');
+    if(key!=='F11'&&key!=='ESC')throw new Error('MPV smoke key is not allowed');
+    if(!await state.whenCommands)throw cancelled();
+    return ipcCommand(state,['keypress',key]);
+  }
   // Internal verification only: not registered on the renderer IPC bridge.
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
   async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
-  return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,close};
+  return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,smokeMpvBinding,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {
