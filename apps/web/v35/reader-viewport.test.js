@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildViewportCapture, buildZoomCapture, containImageRect, saveViewportImage } from './reader-viewport.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildViewportCapture, buildZoomCapture, captureReaderViewport, containImageRect, saveViewportImage } from './reader-viewport.js';
 
 const rect = (left, top, width, height) => ({ left, top, width, height, right: left + width, bottom: top + height });
 const page = (box, width = 1000, height = 10000, clip = box) => ({ rect: box, clip, naturalWidth: width, naturalHeight: height });
@@ -135,6 +135,75 @@ describe('zoomed manga image capture (exactly what is visible)', () => {
     expect(result.draws[0].source.left).toBeCloseTo(0);
     expect(result.bounds).toEqual(rect(110, 200, 302, 600));
     expect(result.draws[0].dest).toEqual(rect(0, 0, 302, 600));
+  });
+});
+
+describe('the actual reader save click path', () => {
+  it('draws the transformed zoom image, never the hidden underlying manga image', () => {
+    const image = {
+      complete: true, naturalWidth: 2000, naturalHeight: 4000,
+      getBoundingClientRect: () => rect(-200, -350, 800, 1600),
+    };
+    const draws = vi.fn();
+    const doc = {
+      defaultView: {innerWidth:400,innerHeight:800,devicePixelRatio:2},
+      createElement: vi.fn((name) => {
+        expect(name).toBe('canvas');
+        return {width:0,height:0,getContext:()=>({
+          fillRect:vi.fn(),scale:vi.fn(),drawImage:draws,
+        })};
+      }),
+    };
+    const zoom = {
+      hidden:false,
+      querySelector: (selector) => selector === '#rdZoomImg' ? image : null,
+      getBoundingClientRect: () => rect(0,0,400,800),
+    };
+    const root = {
+      ownerDocument:doc,
+      getBoundingClientRect:()=>rect(0,0,400,800),
+      querySelector: (selector) => selector === '#rdZoom' ? zoom
+        : (() => { throw new Error('must not read underlying page'); })(),
+    };
+    const canvas = captureReaderViewport(root);
+    expect([canvas.width,canvas.height]).toEqual([800,1600]);
+    expect(draws).toHaveBeenCalledOnce();
+    expect(draws.mock.calls[0][0]).toBe(image);
+    expect(draws.mock.calls[0].slice(1)).toEqual([500,875,1000,2000,0,0,400,800]);
+  });
+
+  it('draws the original 3000×3000 frame from a small fully visible image', () => {
+    const image={
+      complete:true,naturalWidth:3000,naturalHeight:3000,
+      getBoundingClientRect:()=>rect(0,185,400,400),
+    };
+    const frame={getBoundingClientRect:()=>rect(0,185,400,400),
+      querySelector:(q)=>q===':scope > img'?image:null};
+    const scroll={
+      getBoundingClientRect:()=>rect(0,0,400,900),
+      querySelectorAll:(q)=>q==='.rd-page'?[frame]:[],
+    };
+    const elements={
+      '#rdZoom':{hidden:true},
+      '#rdScroll':scroll,
+      '#rdFrameTop':{getBoundingClientRect:()=>rect(0,0,400,65)},
+      '#rdTray':{getBoundingClientRect:()=>rect(0,790,400,110)},
+    };
+    const draws=vi.fn();
+    const doc={
+      defaultView:{innerWidth:400,innerHeight:900,devicePixelRatio:3},
+      createElement:()=>({width:0,height:0,getContext:()=>({
+        fillRect:vi.fn(),scale:vi.fn(),drawImage:draws,
+      })}),
+    };
+    const root={
+      ownerDocument:doc,
+      getBoundingClientRect:()=>rect(0,0,400,900),
+      querySelector:(selector)=>elements[selector]??null,
+    };
+    const canvas=captureReaderViewport(root);
+    expect([canvas.width,canvas.height]).toEqual([3000,3000]);
+    expect(draws.mock.calls[0]).toEqual([image,0,0,3000,3000,0,0,3000,3000]);
   });
 });
 
