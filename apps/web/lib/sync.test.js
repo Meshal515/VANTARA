@@ -687,3 +687,40 @@ describe('real recovery diagnosis remains visible', () => {
     expect(sync.rows('work_views')).toHaveLength(1);
   });
 });
+
+
+describe('migrated revision-zero snapshot continuation', () => {
+  it('restores the older accounts and new work views without replaying rev zero forever', async () => {
+    storage.setItem('vantara.cursor', '80');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: {} }));
+    const legacyAccounts = ['u1', 'u2', 'u3'].map((id) => ({
+      user_id: id, username: id, lifecycle: 'ACTIVE', rev: 0,
+    }));
+    const readings = Array.from({ length: 61 }, (_, i) => ({
+      user_id: 'u1', series_ref: `work-${i}`, rev: i + 1, removed: 0,
+    }));
+    const fetchImpl = vi.fn(async (url) => {
+      const query = new URL(String(url)).searchParams;
+      if (query.get('since') === '80') return jsonResponse({
+        cursor: 80, more: false, changes: {},
+      });
+      if (query.get('since') === '0' && query.get('afterZero') === '1') {
+        return jsonResponse({
+          cursor: 80, more: false,
+          changes: { work_views: readings },
+        });
+      }
+      if (query.get('since') === '0') return jsonResponse({
+        cursor: 0, more: true,
+        changes: { accounts: legacyAccounts },
+      });
+      return jsonResponse({ cursor: 80, more: false, changes: {} });
+    });
+    const sync = await loadSync({ storage, fetchImpl });
+    await sync.pull();
+    await vi.waitFor(() => expect(sync.rows('work_views')).toHaveLength(61));
+    expect(sync.rows('accounts')).toHaveLength(3);
+    expect(sync.health().state).toBe('ok');
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('afterZero=1'))).toBe(true);
+  });
+});
