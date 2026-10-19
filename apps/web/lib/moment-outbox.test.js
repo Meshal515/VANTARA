@@ -20,6 +20,11 @@ describe('durable source-backed moment native handoff',()=>{
  it('retries one stable operation id after a failed push and preserves pending files',async()=>{
   const t=base();t.sync.push.mockRejectedValueOnce(new Error('offline'));await t.drain();await t.drain();expect(t.sync.enqueue.mock.calls.every(c=>c[2].opId==='clip-1')).toBe(true);expect(t.native.acknowledgeOutbox).not.toHaveBeenCalled();
  });
+ it('delivers native durable metadata when WebView string storage is full',async()=>{
+  const t=base();const full=createMomentOutbox({native:t.native,sync:t.sync,currentUser:()=> 'a',storage:{getItem:()=>null,setItem:()=>{throw new DOMException('full','QuotaExceededError');}}});
+  await full();expect(t.sync.enqueue).toHaveBeenCalledOnce();expect(t.native.acknowledgeOutbox).not.toHaveBeenCalled();
+  t.confirm();await full();expect(t.native.acknowledgeOutbox).toHaveBeenCalledWith({userId:'a',id:'clip-1'});
+ });
  it('normalizes the native movie sentinel to nullable episode before server delivery',async()=>{
   const t=base();t.item.episode=-1;t.item.seriesRef='cinema:tt123456';await t.drain();
   expect(t.sync.enqueue.mock.calls[0][1]).toMatchObject({seriesRef:'cinema:tt123456',chapterNumber:null,moment:{episode:null}});

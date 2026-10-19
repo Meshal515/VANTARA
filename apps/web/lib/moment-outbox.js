@@ -19,7 +19,9 @@ export function createMomentOutbox({ native, sync, currentUser, storage = global
       const entries = new Map(existing.map(row => [row.item?.id ?? row.id, row.item ? row : { item: row }]));
       for (const item of items) if (item.userId === userId && item.id && !entries.has(item.id)) entries.set(item.id, { item });
       pending = [...entries.values()].filter(row => row.item?.userId === userId);
-      const persist = () => storage.setItem(key, JSON.stringify(pending));
+      // Native outbox remains authoritative until the server confirms this stable ID.
+      // A full WebView string quota must not prevent its durable handoff.
+      const persist = () => { try { storage.setItem(key, JSON.stringify(pending)); } catch {} };
       persist();
       for (const entry of [...pending]) {
         if (!active()) return;
