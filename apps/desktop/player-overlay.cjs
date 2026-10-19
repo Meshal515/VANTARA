@@ -25,7 +25,7 @@ function checkedMessage(value) {
   return JSON.parse(text);
 }
 
-function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand = () => {} }) {
+function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand = () => {}, onWindow = () => {} }) {
   let overlay = null, viewport = null, session = null, loaded = null;
   const parentAlive = () => { const w = getWindow(); return w && !w.isDestroyed() ? w : null; };
   function ensure() {
@@ -37,6 +37,7 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false },
     });
     overlay.setMenu?.(null);
+    onWindow(overlay);
     overlay.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }));
     overlay.webContents.on('will-navigate', event => event.preventDefault());
     overlay.on('closed', () => { overlay = null; loaded = null; });
@@ -68,10 +69,11 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
       if (message.session !== session) return false;
       const win = ensure(); if (!win) return false;
       await loaded;
-      if (!win.isDestroyed()) win.webContents.send('vantara:overlay', message);
+      if (message.session !== session || win !== overlay || win.isDestroyed()) return false;
+      win.webContents.send('vantara:overlay', message);
       return true;
     },
-    close() { session = null; viewport = null; if (overlay && !overlay.isDestroyed()) overlay.hide(); },
+    close(value) { if (value?.session && value.session !== session) return false; session = null; viewport = null; if (overlay && !overlay.isDestroyed()) overlay.hide(); return true; },
     place,
     destroy() { session = null; viewport = null; if (overlay && !overlay.isDestroyed()) overlay.destroy(); overlay = null; },
     /** أمر من الطبقة: يُقبل فقط من نافذتها ويُمرَّر للنافذة الرئيسية. */
