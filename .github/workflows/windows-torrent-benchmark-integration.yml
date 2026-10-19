@@ -47,6 +47,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'MPV archive failed' }
           $mpv=Get-ChildItem $out -Recurse -File -Filter 'mpv.exe' | Select-Object -First 1
           if (-not $mpv) { throw 'MPV binary missing' }
+          Write-Output "MPV executable: $($mpv.FullName)"
+          Write-Output "MPV sibling DLLs:"
+          Get-ChildItem $mpv.DirectoryName -Filter '*.dll' -File | Select-Object -First 50 -ExpandProperty Name | Write-Output
+          & $mpv.FullName --version
+          $mpvVersionExit=$LASTEXITCODE
+          Write-Output "MPV standalone version exit code: $mpvVersionExit (hex: 0x$([Convert]::ToString([int64]$mpvVersionExit -band 0xffffffffL,16)))"
+          if ($mpvVersionExit -ne 0) { throw 'MPV executable cannot start even without a video; investigate Windows DLL dependencies before torrent performance' }
           "TORRENT_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
           "TORRENT_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
           "TORRENT_PROOF=$dir" | Out-File -Append $env:GITHUB_ENV
